@@ -8,11 +8,11 @@
 
 import type { PipelineContext, Middleware } from '../middleware.js';
 import type { ToolModule } from '../../tools/interface.js';
-import type { MCPGateway } from '../../gateway/gateway.js';
+import type { ToolsGateway } from '../../gateway/gateway.js';
 import { scoreRelevance } from '../../gateway/semantic-scorer.js';
 
 export function semanticToolInjectionMiddleware(
-  gateway: MCPGateway,
+  gateway: ToolsGateway,
   topK: number = 3,
 ): Middleware {
   return async (ctx: PipelineContext, next: () => Promise<void>) => {

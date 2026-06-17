@@ -2,7 +2,7 @@
  * Zoe CLI — /gateway slash command
  *
  * Full management commands for the gateway subsystem.
- * Receives the MCPGateway instance from the REPL when gateway is enabled.
+ * Receives the ToolsGateway instance from the REPL when gateway is enabled.
  */
 
 import chalk from 'chalk';

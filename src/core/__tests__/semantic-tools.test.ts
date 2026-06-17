@@ -2,12 +2,12 @@ import { describe, it, expect, vi } from 'vitest';
 import { semanticToolInjectionMiddleware } from '../middleware/semantic-tools.js';
 import type { PipelineContext, Middleware } from '../middleware.js';
 import type { ToolModule } from '../../tools/interface.js';
-import type { MCPGateway } from '../../gateway/gateway.js';
+import type { ToolsGateway } from '../../gateway/gateway.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
-function createMockGateway(tools: ToolModule[]): MCPGateway {
-  return { getInjectableTools: () => tools } as unknown as MCPGateway;
+function createMockGateway(tools: ToolModule[]): ToolsGateway {
+  return { getInjectableTools: () => tools } as unknown as ToolsGateway;
 }
 
 function makeContext(messages: PipelineContext['messages'], toolDefs: ToolModule['definition'][] = []): PipelineContext {

@@ -8,10 +8,17 @@ import type { Middleware } from "../../core/middleware.js";
 
 /**
  * Server-side generateText using core agent loop directly.
+ *
+ * Callers may seed `options.messages` with prior conversation history (loaded
+ * from the session) so multi-turn context threads like CLI/SDK — fixing the
+ * Server history bug (spec 002 §3.1). When omitted, the turn starts fresh
+ * (backward compatible with single-turn callers).
  */
 export async function serverGenerateText(
   options: {
     message: string;
+    /** Prior conversation history. When provided, the new user turn is appended to it. */
+    messages?: Message[];
     model?: string;
     provider?: ProviderType;
     tools?: string[];
@@ -30,8 +37,9 @@ export async function serverGenerateText(
   // Hooks
   const hooks = createHookExecutor();
 
-  // Build message list
-  const messages: Message[] = [];
+  // Build message list — seed with prior history if provided (parity with
+  // CLI `Agent` and SDK `SdkAgent`, which own messages[] across turns).
+  const messages: Message[] = options.messages ? [...options.messages] : [];
   messages.push({
     id: generateId(),
     role: "user",
@@ -74,6 +82,8 @@ export async function serverGenerateText(
 export async function serverStreamText(
   opts: {
     message: string;
+    /** Prior conversation history. When provided, the new user turn is appended to it. */
+    messages?: Message[];
     model?: string;
     provider?: ProviderType;
     tools?: string[];
@@ -103,8 +113,9 @@ export async function serverStreamText(
     // Hooks
     const hooks = createHookExecutor();
 
-    // Build message list
-    const messages: Message[] = [];
+    // Build message list — seed with prior history if provided (parity with
+    // CLI `Agent` and SDK `SdkAgent`, which own messages[] across turns).
+    const messages: Message[] = opts.messages ? [...opts.messages] : [];
     messages.push({
       id: generateId(),
       role: "user",

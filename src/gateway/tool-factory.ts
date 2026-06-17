@@ -2,13 +2,13 @@
  * Zoe Gateway — Proxy tool factory
  *
  * Creates 10 gateway tools registered in the static tool registry.
- * Each tool delegates to MCPGateway methods.
+ * Each tool delegates to ToolsGateway methods.
  */
 
-import type { MCPGateway } from './gateway.js';
+import type { ToolsGateway } from './gateway.js';
 import type { ToolModule } from '../tools/interface.js';
 
-export function createGatewayTools(gateway: MCPGateway): ToolModule[] {
+export function createGatewayTools(gateway: ToolsGateway): ToolModule[] {
   return [
     // 1. gateway_route
     {

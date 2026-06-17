@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createGatewayRestHandler } from '../rest-gateway.js';
-import type { MCPGateway } from '../../../gateway/gateway.js';
+import type { ToolsGateway } from '../../../gateway/gateway.js';
 import type { GatewaySettingsAdapter } from '../../../gateway/settings-adapter.js';
 import type { Target } from '../../../gateway/types.js';
 import type { IncomingMessage, ServerResponse } from 'http';
@@ -16,7 +16,7 @@ import { authMiddleware, hasScope } from '../auth.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
-function createMockGateway(): MCPGateway {
+function createMockGateway(): ToolsGateway {
   const targets: Record<string, Target> = {};
   const routes: Array<{ pattern: string; target: string; priority: number }> = [];
 
@@ -31,7 +31,7 @@ function createMockGateway(): MCPGateway {
       routes.push({ pattern, target, priority });
     }),
     getRoutes: () => routes,
-  } as unknown as MCPGateway;
+  } as unknown as ToolsGateway;
 }
 
 function createMockSettings(): GatewaySettingsAdapter {

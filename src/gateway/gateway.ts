@@ -1,8 +1,9 @@
 /**
- * Zoe Gateway — MCPGateway engine
+ * Zoe Gateway — ToolsGateway engine
  *
  * Core engine that manages MCP and REST targets, routes requests,
- * and exposes injectable tools for the agent loop.
+ * and exposes injectable tools for the agent loop. Named ToolsGateway
+ * because it gateways to external *tool* servers (MCP + REST).
  */
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -24,7 +25,7 @@ import type {
 
 type Route = { pattern: string; target: string; priority: number };
 
-export class MCPGateway {
+export class ToolsGateway {
   private targets = new Map<string, Target>();
   private mcpClients = new Map<string, Client>();
   private auditLogs: AuditRecord[] = [];

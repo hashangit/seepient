@@ -194,7 +194,7 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
 
   // Initialize gateway (if enabled)
   let gatewayHandler: ((req: any, res: any, path: string, method: string) => Promise<void>) | undefined;
-  let gatewayMiddleware: import("../../core/middleware.js").Middleware[] | undefined;
+  let semanticToolMiddleware: import("../../core/middleware.js").Middleware[] | undefined;
   try {
     const gwEnabled = settingsManager.get("gateway.enabled").value as boolean;
     if (gwEnabled) {
@@ -220,7 +220,7 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
 
         // Wire semantic injection middleware
         const { semanticToolInjectionMiddleware } = await import("../../core/middleware/semantic-tools.js");
-        gatewayMiddleware = [semanticToolInjectionMiddleware(gatewayInstance, gatewayConfig.semanticTopK)];
+        semanticToolMiddleware = [semanticToolInjectionMiddleware(gatewayInstance, gatewayConfig.semanticTopK)];
       }
     }
   } catch (e) {
@@ -232,7 +232,7 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
     version,
     startTime,
     sessionManager,
-    generateText: (opts) => serverGenerateText(opts, serverPermissionLevel, gatewayMiddleware),
+    generateText: (opts) => serverGenerateText(opts, serverPermissionLevel, semanticToolMiddleware),
     listModels,
     listSkills,
     settingsHandlerContext,
@@ -264,7 +264,7 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
   const wsCtx: WebSocketHandlerContext = {
     sessionManager,
     streamText: (opts) => {
-      serverStreamText(opts, serverPermissionLevel, gatewayMiddleware).catch((err) => {
+      serverStreamText(opts, serverPermissionLevel, semanticToolMiddleware).catch((err) => {
         opts.onError({
           code: "STREAM_ERROR",
           message: err instanceof Error ? err.message : "Stream failed",

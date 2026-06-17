@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { importOpenApiSpec } from '../openapi-importer.js';
-import type { MCPGateway } from '../gateway.js';
+import type { ToolsGateway } from '../gateway.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
-function createMockGateway(): MCPGateway {
+function createMockGateway(): ToolsGateway {
   return {
     registerTarget: vi.fn(async () => {}),
-  } as unknown as MCPGateway;
+  } as unknown as ToolsGateway;
 }
 
 function openApiJson(overrides?: { servers?: any[]; paths?: Record<string, any>; info?: any }): string {
@@ -49,7 +49,7 @@ paths:
 // ── Tests ─────────────────────────────────────────────────────────────
 
 describe('importOpenApiSpec', () => {
-  let gateway: MCPGateway;
+  let gateway: ToolsGateway;
 
   beforeEach(() => {
     gateway = createMockGateway();

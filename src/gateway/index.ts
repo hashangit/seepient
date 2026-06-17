@@ -4,7 +4,7 @@
  * Barrel export for the gateway subsystem.
  */
 
-export { MCPGateway } from './gateway.js';
+export { ToolsGateway } from './gateway.js';
 export { createGatewayTools } from './tool-factory.js';
 export { importOpenApiSpec } from './openapi-importer.js';
 export { GatewaySettingsAdapter } from './settings-adapter.js';
@@ -20,7 +20,7 @@ export type {
   GatewayConfig,
 } from './types.js';
 
-import { MCPGateway } from './gateway.js';
+import { ToolsGateway } from './gateway.js';
 import { GatewaySettingsAdapter } from './settings-adapter.js';
 import { createGatewayTools } from './tool-factory.js';
 import { registerTool } from '../core/tool-executor.js';
@@ -36,10 +36,10 @@ export async function createGateway(
   config: GatewayConfig,
   settingsAdapter: GatewaySettingsAdapter,
   hooks?: GatewayHooks,
-): Promise<MCPGateway | null> {
+): Promise<ToolsGateway | null> {
   if (!config.enabled) return null;
 
-  const gateway = new MCPGateway(settingsAdapter, config, hooks);
+  const gateway = new ToolsGateway(settingsAdapter, config, hooks);
   await gateway.initialize();
 
   // Register proxy tools in static registry

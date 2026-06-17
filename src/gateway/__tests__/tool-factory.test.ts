@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { createGatewayTools } from '../tool-factory.js';
-import { MCPGateway } from '../gateway.js';
+import { ToolsGateway } from '../gateway.js';
 import { GatewaySettingsAdapter } from '../settings-adapter.js';
 
-function createMockGateway(): MCPGateway {
+function createMockGateway(): ToolsGateway {
   const adapter = new GatewaySettingsAdapter('/tmp/zoe-test-' + process.pid);
-  return new MCPGateway(adapter, {
+  return new ToolsGateway(adapter, {
     enabled: true,
     semanticTopK: 3,
     defaultRateLimitPerMin: 60,

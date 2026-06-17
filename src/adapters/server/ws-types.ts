@@ -325,6 +325,8 @@ export interface WebSocketHandlerContext {
   sessionManager: import("./session-store.js").ServerSessionManager;
   streamText: (options: {
     message: string;
+    /** Prior conversation history (loaded from the session) — threads multi-turn context. */
+    messages?: import("../../core/types.js").Message[];
     model?: string;
     provider?: ProviderType;
     tools?: string[];

@@ -496,15 +496,5 @@ Keep `CONTEXT.md` under 20 lines total. Do NOT summarize the full conversation �
 
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current plan:
-- **ACTIVE PLAN**: `specs/006-inline-diff-viewer/plan.md` — T051 inline diff
-  viewer + safe atomic `write_file` (diff via the `diff` pkg, learned from Pi;
-  safe-write zoe-original). Phase artifacts ready; run `/speckit-tasks` next.
-- `specs/003-tui-input-and-logo/` — ✅ IMPLEMENTED. Bordered persistent input +
-  Zoe Agent figlet logo, on the `<Static>` + `ink-reset` foundation (native
-  terminal scroll; no full-screen / mouse capture).
-- `specs/005-fullscreen-tui/` — ⚠️ SUPERSEDED (reverted). Decision record only;
-  do not implement.
-- Next (separate sessions): `specs/002-channels-integration/` (2-way messaging).
-  (The Zoe → Zoe Agent rename refactor is now complete.)
+shell commands, and other important information, read the current plan
 <!-- SPECKIT END -->

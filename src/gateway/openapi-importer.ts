@@ -6,11 +6,11 @@
  */
 
 import * as yaml from 'js-yaml';
-import type { MCPGateway } from './gateway.js';
+import type { ToolsGateway } from './gateway.js';
 import type { RestTarget } from './types.js';
 
 export async function importOpenApiSpec(
-  gateway: MCPGateway,
+  gateway: ToolsGateway,
   name: string,
   specUrl: string,
   options?: { baseUrl?: string; tagFilter?: string[]; isAdmin?: boolean },

@@ -132,7 +132,7 @@ export function handleConnection(
 
     switch (msg.type) {
       case "chat":
-        handleChat(ws, msg, state, ctx);
+        void handleChat(ws, msg, state, ctx);
         break;
       case "abort":
         handleAbort(ws, msg, state);
@@ -216,12 +216,12 @@ export function handleConnection(
 
 // ── Chat handler ─────────────────────────────────────────────────────
 
-function handleChat(
+async function handleChat(
   ws: WebSocket,
   msg: ChatMessage,
   state: ConnectionState,
   ctx: WebSocketHandlerContext,
-): void {
+): Promise<void> {
   const serverMsgId = crypto.randomUUID();
 
   // Acknowledge
@@ -257,10 +257,36 @@ function handleChat(
     }
   }
 
+  // Load conversation history so multi-turn context threads like CLI/SDK
+  // (fixes the Server history bug — spec 002 §3.1). We persist the new user
+  // turn before the loop runs so a follow-up turn sees it, then seed the
+  // loop with the full history. The assistant reply is appended in onDone.
+  let priorHistory: import("../../core/types.js").Message[] | undefined;
+  if (state.sessionId) {
+    try {
+      const session = await ctx.sessionManager.getSession(state.sessionId, state.apiKeyHash);
+      if (session) {
+        const userMsg: import("../../core/types.js").Message = {
+          id: serverMsgId,
+          role: "user",
+          content: msg.message,
+          timestamp: Date.now(),
+        };
+        ctx.sessionManager.addMessage(state.sessionId, userMsg);
+        // addMessage mutates the in-memory session; reload to capture it.
+        const updated = await ctx.sessionManager.getSession(state.sessionId, state.apiKeyHash);
+        priorHistory = updated?.messages;
+      }
+    } catch {
+      // Non-fatal — fall back to fresh-context behaviour.
+    }
+  }
+
   // Stream text
   try {
     ctx.streamText({
       message: msg.message,
+      messages: priorHistory,
       model,
       provider,
       tools: msg.options?.tools,

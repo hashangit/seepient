@@ -8,7 +8,7 @@
 import type { IncomingMessage, ServerResponse } from "http";
 import { authMiddleware, hasScope } from "./auth.js";
 
-import type { MCPGateway } from "../../gateway/gateway.js";
+import type { ToolsGateway } from "../../gateway/gateway.js";
 import type { GatewaySettingsAdapter } from "../../gateway/settings-adapter.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -126,7 +126,7 @@ function matchGatewayRoute(
 // ── Main handler factory ───────────────────────────────────────────────
 
 export function createGatewayRestHandler(ctx: {
-  gateway: MCPGateway;
+  gateway: ToolsGateway;
   settingsAdapter: GatewaySettingsAdapter;
 }): (req: IncomingMessage, res: ServerResponse, path: string, method: string) => Promise<void> {
   const { gateway, settingsAdapter } = ctx;

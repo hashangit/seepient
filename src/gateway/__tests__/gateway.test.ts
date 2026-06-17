@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { MCPGateway } from '../gateway.js';
+import { ToolsGateway } from '../gateway.js';
 import { GatewayError } from '../../core/errors.js';
 import type { GatewaySettingsAdapter } from '../settings-adapter.js';
 import type { Target, GatewayConfig } from '../types.js';
@@ -70,15 +70,15 @@ function mcpTarget(overrides?: Partial<Target>): Target {
 
 // ── Tests ─────────────────────────────────────────────────────────────
 
-describe('MCPGateway', () => {
+describe('ToolsGateway', () => {
   let settings: GatewaySettingsAdapter;
   let config: GatewayConfig;
-  let gw: MCPGateway;
+  let gw: ToolsGateway;
 
   beforeEach(() => {
     settings = createMockSettings();
     config = defaultConfig();
-    gw = new MCPGateway(settings, config);
+    gw = new ToolsGateway(settings, config);
   });
 
   // ── Target CRUD ───────────────────────────────────────────────────
@@ -212,7 +212,7 @@ describe('MCPGateway', () => {
       const settingsWithCred = createMockSettings({
         getCredential: (key: string) => key === 'api_key' ? 'sk_test_123' : undefined,
       });
-      const gw2 = new MCPGateway(settingsWithCred, config);
+      const gw2 = new ToolsGateway(settingsWithCred, config);
       const target = restTarget({
         auth: { type: 'bearer', credentialRef: 'api_key' },
       });
@@ -236,7 +236,7 @@ describe('MCPGateway', () => {
       const settingsWithCred = createMockSettings({
         getCredential: (key: string) => key === 'api_key' ? 'secret123' : undefined,
       });
-      const gw2 = new MCPGateway(settingsWithCred, config);
+      const gw2 = new ToolsGateway(settingsWithCred, config);
       await gw2.registerTarget('api', restTarget({
         auth: { type: 'header', name: 'X-Custom-Key', credentialRef: 'api_key' },
       }), true); // admin — credential injection requires admin
@@ -259,7 +259,7 @@ describe('MCPGateway', () => {
       const settingsWithCred = createMockSettings({
         getCredential: (key: string) => key === 'api_key' ? 'qsecret' : undefined,
       });
-      const gw2 = new MCPGateway(settingsWithCred, config);
+      const gw2 = new ToolsGateway(settingsWithCred, config);
       await gw2.registerTarget('api', restTarget({
         auth: { type: 'query', name: 'token', credentialRef: 'api_key' },
       }), true); // admin — credential injection requires admin
@@ -278,7 +278,7 @@ describe('MCPGateway', () => {
       const settingsWithCred = createMockSettings({
         getCredential: (key: string) => key === 'basic_cred' ? 'user:pass' : undefined,
       });
-      const gw2 = new MCPGateway(settingsWithCred, config);
+      const gw2 = new ToolsGateway(settingsWithCred, config);
       await gw2.registerTarget('api', restTarget({
         auth: { type: 'basic', credentialRef: 'basic_cred' },
       }), true); // admin — credential injection requires admin
@@ -382,7 +382,7 @@ describe('MCPGateway', () => {
         getCredential: (key: string) => key === 'secret' ? 'resolved_secret' : undefined,
         getAdminTargets: () => new Set(['trusted']),
       });
-      const gw2 = new MCPGateway(settingsWithCred, config);
+      const gw2 = new ToolsGateway(settingsWithCred, config);
       const target = mcpTarget({
         transport: 'stdio',
         command: 'echo',
@@ -402,7 +402,7 @@ describe('MCPGateway', () => {
       const settingsWithCred = createMockSettings({
         getCredential: (key: string) => key === 'secret' ? 'resolved_secret' : undefined,
       });
-      const gw2 = new MCPGateway(settingsWithCred, config);
+      const gw2 = new ToolsGateway(settingsWithCred, config);
       const target = mcpTarget({
         transport: 'stdio',
         command: 'echo',
