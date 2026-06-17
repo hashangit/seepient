@@ -15,6 +15,7 @@ import type {
   ChannelHandlers,
   ConversationRef,
   DeliveryReceipt,
+  InboundMessage,
   OutboundPayload,
 } from "../types.js";
 import { normalizeUpdate } from "./normalize.js";
@@ -56,6 +57,14 @@ export class TelegramChannelAdapter implements ChannelAdapter {
       const update = ctx.update as unknown as Parameters<typeof normalizeUpdate>[0];
       const inbound = await normalizeUpdate(update);
       if (inbound && this.handlers) {
+        // Resolve media file_ids to downloadable URLs (and fetch voice bytes so
+        // transcription can run). Failures here are non-fatal — the gateway
+        // still receives the text/caption.
+        try {
+          await this.resolveMedia(inbound);
+        } catch {
+          // best-effort — media enrichment must not drop the message
+        }
         // Fire-and-forget into the gateway; errors surface via the gateway's
         // own delivery path, not the grammY handler.
         this.handlers.onInbound(inbound).catch(() => {});
@@ -116,6 +125,39 @@ export class TelegramChannelAdapter implements ChannelAdapter {
   async deliver(conv: ConversationRef, payload: OutboundPayload): Promise<DeliveryReceipt> {
     if (!this.bot) throw new Error("Telegram adapter not started");
     return deliverToTelegram(this.bot, conv, payload);
+  }
+
+  /**
+   * Resolve media file_ids to downloadable URLs and fetch voice bytes so the
+   * gateway can transcribe. Images keep their file download URL (vision wiring
+   * is a future provider capability). Errors are caught by the caller.
+   */
+  private async resolveMedia(inbound: InboundMessage): Promise<void> {
+    if (!this.bot || !inbound.media) return;
+    for (const attachment of inbound.media) {
+      const fileId = attachment.url;
+      if (!fileId) continue;
+      try {
+        const file = await this.bot.api.getFile(fileId);
+        // grammY exposes the bot's download URL path; the file_path is relative
+        // to the Telegram file base. We set the resolved URL for images and
+        // fetch bytes for voice (transcription needs the buffer).
+        if (attachment.type === "voice" && file.file_path) {
+          const url = `https://api.telegram.org/file/bot${this.token}/${file.file_path}`;
+          const res = await fetch(url);
+          if (res.ok) {
+            attachment.data = Buffer.from(await res.arrayBuffer());
+            attachment.url = url;
+          }
+        } else {
+          attachment.url = file.file_path
+            ? `https://api.telegram.org/file/bot${this.token}/${file.file_path}`
+            : attachment.url;
+        }
+      } catch {
+        // Leave the file_id in place — downstream stays best-effort.
+      }
+    }
   }
 
   /** In-place edit for incremental streaming (exposed for the gateway). */

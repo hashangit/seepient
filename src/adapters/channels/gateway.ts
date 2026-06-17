@@ -27,6 +27,7 @@ import type { LLMProvider } from "../../providers/types.js";
 import type { IdentityResolver } from "../../core/identity-resolver.js";
 import type { SessionRegistry } from "../../core/session-registry.js";
 import { formatForPlatform } from "./formatter.js";
+import { transcribeVoice } from "./transcribe.js";
 import { createChannelsTools } from "./tools.js";
 import type { ChannelsToolContext } from "./tools.js";
 import type {
@@ -151,6 +152,11 @@ export class ChannelGateway {
     adapter: ChannelAdapter,
     msg: InboundMessage,
   ): Promise<void> {
+    // 0. Inbound media normalization (spec 002 §9.2): transcribe voice and
+    //    fold it into the text; note images as content references. Runs before
+    //    identity resolution so an unauthorized sender's media isn't processed.
+    msg = await this.normalizeInboundMedia(msg);
+
     // 1. Identity resolution + allowlist.
     const identity = await this.resolver.resolve({
       platform: adapter.platform,
@@ -197,6 +203,30 @@ export class ChannelGateway {
     })();
     state.inFlight = run.catch(() => { /* errors surface via adapter.deliver */ });
     await state.inFlight;
+  }
+
+  /**
+   * Normalize inbound media into text content (spec 002 §9.2):
+   *  - voice → transcribe and append to (or replace) the text
+   *  - image → attach a content-reference note so the model knows one was sent
+   *    (no core multimodal today; vision wiring is a future provider capability)
+   */
+  private async normalizeInboundMedia(msg: InboundMessage): Promise<InboundMessage> {
+    if (!msg.media || msg.media.length === 0) return msg;
+
+    let text = msg.text;
+    for (const attachment of msg.media) {
+      if (attachment.type === "voice") {
+        const transcript = await transcribeVoice(attachment);
+        if (transcript) {
+          text = text ? `${text}\n[voice] ${transcript}` : transcript;
+        }
+      } else if (attachment.type === "image") {
+        const note = `[image attached: ${attachment.caption ?? attachment.mimeType ?? "image"}]`;
+        text = text ? `${text}\n${note}` : note;
+      }
+    }
+    return { ...msg, text };
   }
 
   private getOrCreateState(
@@ -292,6 +322,39 @@ export class ChannelGateway {
         .find((m) => m.role === "assistant" && m.content);
       if (lastAssistant?.content) {
         await this.deliverChunked(adapter, state.conversation, lastAssistant.content);
+      }
+
+      // 5b. Deliver images produced by generate_image / take_screenshot this
+      // turn as platform media (spec §9.2 outbound media).
+      await this.deliverImageResults(adapter, state.conversation, result.steps);
+    }
+  }
+
+  /**
+   * Scan a turn's tool-call steps for image/screenshot results and push them
+   * as outbound media. The reference tools return a file path in their result
+   * text; we read it into bytes and attach as a photo. Failures are best-effort
+   * (a missing/unreadable path is skipped, not fatal).
+   */
+  private async deliverImageResults(
+    adapter: ChannelAdapter,
+    conv: ConversationRef,
+    steps: { type: string; toolCall?: { name: string; result: string } }[],
+  ): Promise<void> {
+    const IMAGE_TOOLS = new Set(["generate_image", "take_screenshot"]);
+    for (const step of steps) {
+      if (step.type !== "tool_call" || !step.toolCall) continue;
+      if (!IMAGE_TOOLS.has(step.toolCall.name)) continue;
+      const filePath = extractFilePath(step.toolCall.result);
+      if (!filePath) continue;
+      try {
+        const { readFile } = await import("node:fs/promises");
+        const data = await readFile(filePath);
+        await adapter.deliver(conv, {
+          media: [{ type: "image", data, mimeType: "image/png", caption: step.toolCall.name }],
+        });
+      } catch {
+        // best-effort — unreadable or missing file is skipped
       }
     }
   }
@@ -407,4 +470,14 @@ export class ChannelGateway {
 
 function timeoutDeny(ms: number): Promise<boolean> {
   return new Promise((resolve) => setTimeout(() => resolve(false), ms));
+}
+
+/**
+ * Extract a file path from a tool result string. The reference image tools
+ * embed the saved path in their output (e.g. "Image saved to /path/x.png").
+ * Returns the first quoted or bare path ending in an image extension, or null.
+ */
+function extractFilePath(result: string): string | null {
+  const match = result.match(/([\w./~\-]+\.(?:png|jpe?g|webp|gif))/i);
+  return match ? match[1] : null;
 }
