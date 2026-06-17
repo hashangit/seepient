@@ -91,4 +91,21 @@ describe("zoe-channels binary bootstrap (T032)", () => {
       /start is not a function|not a function|TypeError/,
     );
   });
+
+  it("surfaces a clear error when no LLM provider is configured", async () => {
+    // Override the mocked getProvider to throw, simulating a missing API key.
+    const { getProvider } = await import("../../../core/provider-resolver.js");
+    (getProvider as any).mockImplementationOnce(async () => {
+      throw new Error("No provider is configured");
+    });
+    const config = {
+      channels: {
+        enabled: "telegram",
+        telegram: { token: "t", allowlist: ["1"] },
+      },
+    };
+    await expect(startChannelsBinary({ config, healthPort: null })).rejects.toThrow(
+      /could not resolve an LLM provider/,
+    );
+  });
 });

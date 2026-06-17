@@ -75,7 +75,18 @@ export async function startChannelsBinary(options: ChannelsBinaryOptions = {}): 
   // Resolve the LLM provider/model (reuse the existing resolver).
   const providerType = ((merged as any).provider ?? (merged as any).llmProvider) as string | undefined;
   const modelOverride = (merged as any).model as string | undefined;
-  const { provider, model } = await getProvider(providerType as any, modelOverride);
+  let provider: Awaited<ReturnType<typeof getProvider>>["provider"];
+  let model: string;
+  try {
+    ({ provider, model } = await getProvider(providerType as any, modelOverride));
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `zoe-channels could not resolve an LLM provider: ${detail}\n` +
+        `Configure one before starting channels (set OPENAI_API_KEY / ANTHROPIC_API_KEY / GLM_API_KEY, ` +
+        `or set "providers.*" in ~/.zoe/setting.json).`,
+    );
+  }
 
   // Shared infrastructure — one each per process.
   const backend = options.backend ?? createPersistenceBackend({ type: "file" });
