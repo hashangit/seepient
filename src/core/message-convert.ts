@@ -1,6 +1,6 @@
 /** Zoe Core — Message conversion helpers */
 
-import type { Message, ToolCall } from "./types.js";
+import type { Message, ToolCall, ConversationType } from "./types.js";
 import { ZoeError, ProviderError, ToolError } from "./errors.js";
 import type { ProviderMessage, ProviderResponse, ProviderToolCall } from "../providers/types.js";
 
@@ -44,9 +44,29 @@ export function toZoeError(err: unknown, code: string): ZoeError {
 
 /**
  * Convert an SDK Message to ProviderMessage format.
+ *
+ * When `conversationType` is `"group"` or `"channel"` AND the message carries
+ * a resolved `authorId`, the author's display name is prefixed to the content
+ * so the model can tell speakers apart (spec 002 §4.5). The prefix is
+ * suppressed in DMs (single speaker — noise) and for legacy messages that
+ * carry no author identity. `conversationType` is passed in by the caller
+ * (the loop) rather than read from global state.
  */
-export function messageToProviderMessage(msg: Message): ProviderMessage {
-  const pm: ProviderMessage = { role: msg.role, content: msg.content };
+export function messageToProviderMessage(
+  msg: Message,
+  conversationType?: ConversationType,
+): ProviderMessage {
+  let content = msg.content;
+  if (
+    conversationType &&
+    conversationType !== "dm" &&
+    msg.authorId &&
+    msg.authorName &&
+    msg.role === "user"
+  ) {
+    content = `[${msg.authorName}]: ${msg.content}`;
+  }
+  const pm: ProviderMessage = { role: msg.role, content };
   if (msg.toolCalls && msg.toolCalls.length > 0) {
     pm.tool_calls = msg.toolCalls.map((tc) => ({
       id: tc.id,

@@ -1,6 +1,6 @@
 /** Zoe Core — THE Agent Loop (single implementation) */
 
-import type { Message, StepResult, ToolCall, Usage, ZoeError, ApproveToolFn, PermissionLevel, ToolRiskCategory } from "./types.js";
+import type { Message, StepResult, ToolCall, Usage, ZoeError, ApproveToolFn, PermissionLevel, ToolRiskCategory, ConversationType } from "./types.js";
 import type { LLMProvider, ProviderMessage, ProviderToolCall, ProviderResponse } from "../providers/types.js";
 import type { ToolDefinition } from "../tools/interface.js";
 import { generateId, now, toZoeError, messageToProviderMessage, providerToolCallToToolCall } from "./message-convert.js";
@@ -39,6 +39,9 @@ export interface AgentLoopOptions {
   approveTool?: ApproveToolFn;
   permissionLevel?: PermissionLevel;
   autoConfirm?: boolean;
+  /** Conversation type — enables author-aware rendering in group/channel
+   *  chats (spec 002 §4.5). Omitted by CLI/SDK/Server (legacy, unaffected). */
+  conversationType?: ConversationType;
 }
 
 export interface AgentLoopError {
@@ -202,6 +205,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
   const approveTool = options.approveTool;
   const permissionLevel = options.permissionLevel;
   const autoConfirm = options.autoConfirm;
+  const conversationType = options.conversationType;
 
   // Prepend system prompt if provided and messages[0] is not already a system message
   if (systemPrompt && messages.length > 0 && messages[0].role !== "system") {
@@ -268,7 +272,9 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     }
 
     // Convert messages to provider format
-    const providerMessages: ProviderMessage[] = messages.map(messageToProviderMessage);
+    const providerMessages: ProviderMessage[] = messages.map(
+      (m) => messageToProviderMessage(m, conversationType),
+    );
 
     // Call provider (stream if available, else chat). Streaming emits
     // text_delta steps as tokens arrive; non-streaming emits one complete

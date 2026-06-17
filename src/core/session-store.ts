@@ -76,6 +76,11 @@ export class FilePersistenceBackend implements PersistenceBackend {
           provider: data.provider ?? existing.provider,
           model: data.model ?? existing.model,
           metadata: data.metadata ?? existing.metadata,
+          platform: data.platform ?? existing.platform,
+          conversationId: data.conversationId ?? existing.conversationId,
+          conversationType: data.conversationType ?? existing.conversationType,
+          botId: data.botId ?? existing.botId,
+          userId: data.userId ?? existing.userId,
         }
       : {
           id,
@@ -85,6 +90,11 @@ export class FilePersistenceBackend implements PersistenceBackend {
           provider: data.provider,
           model: data.model,
           metadata: data.metadata,
+          ...(data.platform ? { platform: data.platform } : {}),
+          ...(data.conversationId ? { conversationId: data.conversationId } : {}),
+          ...(data.conversationType ? { conversationType: data.conversationType } : {}),
+          ...(data.botId ? { botId: data.botId } : {}),
+          ...(data.userId ? { userId: data.userId } : {}),
         };
 
     const filePath = this.filePath(id);
@@ -153,6 +163,11 @@ export class MemoryPersistenceBackend implements PersistenceBackend {
       provider: data.provider ?? existing?.provider,
       model: data.model ?? existing?.model,
       metadata: data.metadata ?? existing?.metadata,
+      ...(data.platform ?? existing?.platform ? { platform: data.platform ?? existing?.platform } : {}),
+      ...(data.conversationId ?? existing?.conversationId ? { conversationId: data.conversationId ?? existing?.conversationId } : {}),
+      ...(data.conversationType ?? existing?.conversationType ? { conversationType: data.conversationType ?? existing?.conversationType } : {}),
+      ...(data.botId ?? existing?.botId ? { botId: data.botId ?? existing?.botId } : {}),
+      ...(data.userId ?? existing?.userId ? { userId: data.userId ?? existing?.userId } : {}),
     });
   }
 

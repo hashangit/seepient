@@ -100,6 +100,70 @@ describe("messageToProviderMessage", () => {
     const pm = messageToProviderMessage(msg);
     expect(pm.tool_calls).toBeUndefined();
   });
+
+  // ── Author-aware rendering (spec 002 §4.5) ──────────────────────────
+
+  it("prefixes author name in group chats when authorId is present", () => {
+    const msg = {
+      id: "5",
+      role: "user" as const,
+      content: "what's the deploy command?",
+      timestamp: 1000,
+      authorId: "tg:111",
+      authorName: "Alice",
+    };
+    const pm = messageToProviderMessage(msg, "group");
+    expect(pm.content).toBe("[Alice]: what's the deploy command?");
+  });
+
+  it("prefixes author name in channel conversations too", () => {
+    const msg = {
+      id: "6",
+      role: "user" as const,
+      content: "deploying now",
+      timestamp: 1000,
+      authorId: "tg:222",
+      authorName: "Bob",
+    };
+    const pm = messageToProviderMessage(msg, "channel");
+    expect(pm.content).toBe("[Bob]: deploying now");
+  });
+
+  it("suppresses the prefix in DMs (single speaker = noise)", () => {
+    const msg = {
+      id: "7",
+      role: "user" as const,
+      content: "hello",
+      timestamp: 1000,
+      authorId: "tg:333",
+      authorName: "Carol",
+    };
+    const pm = messageToProviderMessage(msg, "dm");
+    expect(pm.content).toBe("hello");
+  });
+
+  it("leaves legacy messages (no authorId) unchanged regardless of type", () => {
+    const msg = {
+      id: "8",
+      role: "user" as const,
+      content: "plain",
+      timestamp: 1000,
+    };
+    expect(messageToProviderMessage(msg, "group").content).toBe("plain");
+    expect(messageToProviderMessage(msg).content).toBe("plain");
+  });
+
+  it("does not prefix assistant/tool/system messages", () => {
+    const assistant = {
+      id: "9",
+      role: "assistant" as const,
+      content: "sure",
+      timestamp: 1000,
+      authorId: "bot",
+      authorName: "Bot",
+    };
+    expect(messageToProviderMessage(assistant, "group").content).toBe("sure");
+  });
 });
 
 describe("providerToolCallToToolCall", () => {

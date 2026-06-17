@@ -25,6 +25,29 @@ export interface MultiProviderConfig {
 export type ToolRiskCategory = "safe" | "edit" | "communications" | "destructive";
 export type PermissionLevel = "strict" | "moderate" | "permissive";
 
+// ── Identity (Track 2 — Channels foundation, spec 002 §4.4) ────────────
+// Single source of truth for channel/conversation identity types. Additive;
+// existing CLI/SDK/Server sessions have no conversation identity and remain
+// valid (all fields on Message/SessionData are optional). These are the
+// memory layer's join keys (spec §4.2) — do not redefine elsewhere.
+
+/** Author role within a conversation. Drives tool-approval gating + prompt context. */
+export type AuthorRole = "admin" | "member" | "guest";
+
+/** The platform a conversation lives on. Includes the existing runtime adapters. */
+export type ChannelPlatform =
+  | "telegram"
+  | "whatsapp"
+  | "slack"
+  | "discord"
+  | "teams"
+  | "cli"
+  | "sdk"
+  | "server";
+
+/** Conversation shape — affects author-prefix rendering and approval UX. */
+export type ConversationType = "dm" | "group" | "channel";
+
 // ── Messages ──────────────────────────────────────────────────────────
 
 export interface Message {
@@ -34,6 +57,14 @@ export interface Message {
   toolCalls?: ToolCall[];
   toolCallId?: string;
   timestamp: number;
+  // Track 2 identity (spec 002 §4.4). Optional: omitted on legacy messages
+  // and on system/tool roles. `authorId` is the resolved canonical userId
+  // (the memory-layer join key); `platformSenderId` is the raw platform id
+  // kept for audit/debug.
+  authorId?: string;
+  authorName?: string;
+  authorRole?: AuthorRole;
+  platformSenderId?: string;
 }
 
 export interface ToolCall {
@@ -274,6 +305,17 @@ export interface SessionData {
   model?: string;
   /** Arbitrary metadata for backends or consumers (e.g., TTL, apiKeyHash). */
   metadata?: Record<string, unknown>;
+  // Track 2 conversation identity (spec 002 §4.4). Optional on legacy
+  // sessions — existing UUID sessions keep working unchanged. The composite
+  // identity lives in these typed fields, NOT encoded in the id string
+  // (spec §4.3 — avoids collisions, respects the /^[a-zA-Z0-9-]+$/ id
+  // regex, requires no backend changes).
+  platform?: ChannelPlatform;
+  conversationId?: string;
+  conversationType?: ConversationType;
+  botId?: string;
+  /** Resolved canonical user — the memory-layer join key (spec §4.2). */
+  userId?: string;
 }
 
 // ── Skills ────────────────────────────────────────────────────────────
