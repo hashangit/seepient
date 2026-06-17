@@ -32,6 +32,13 @@ export default defineConfig({
             { text: 'Quick Start', link: '/getting-started/quick-start' },
             { text: 'Configuration', link: '/getting-started/configuration' }
           ]
+        },
+        {
+          text: 'Channels',
+          items: [
+            { text: 'Overview', link: '/channels/overview' },
+            { text: 'Telegram', link: '/channels/telegram' }
+          ]
         }
       ],
       '/sdk/': [

@@ -1,6 +1,6 @@
 # Zoe Agent Architecture
 
-Headless AI agent framework with CLI, SDK, and Server adapters. Multi-provider LLM support, skill plugin system, and Docker-native deployment.
+Headless AI agent framework with CLI, SDK, Server, and Channels adapters. Multi-provider LLM support, skill plugin system, 2-way messaging, and Docker-native deployment.
 
 ## Layered Architecture
 
@@ -28,7 +28,7 @@ Headless AI agent framework with CLI, SDK, and Server adapters. Multi-provider L
 │  │  (4 LLMs)  │  │ (22 tools) │  │ (Plugin system)  │  │
 │  └────────────┘  └────────────┘  └──────────────────┘  │
 │  ┌──────────────────────────────────────────────────┐   │
-│  │                  Gateway                         │   │
+│  │               Tools Gateway                      │   │
 │  │  (MCP client · REST proxy · OpenAPI · Semantic)  │   │
 │  └──────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────┘
@@ -69,9 +69,9 @@ src/
 │   ├── factory.ts           # Provider creation (dynamic imports)
 │   ├── openai.ts            # OpenAI + OpenAI-compatible
 │   └── anthropic.ts         # Anthropic + GLM (via Anthropic SDK)
-├── gateway/                  # MCP gateway, REST proxy, OpenAPI adapter
+├── gateway/                  # Tools Gateway — MCP + REST tool server engine
 │   ├── types.ts             # Target, AuditRecord, GatewayConfig, GatewayHooks
-│   ├── gateway.ts           # MCPGateway class (engine)
+│   ├── gateway.ts           # ToolsGateway class (the engine — renamed from MCPGateway)
 │   ├── semantic-scorer.ts   # Keyword-based tool relevance scoring
 │   ├── tool-factory.ts      # 10 proxy tools + getInjectableTools()
 │   ├── openapi-importer.ts  # OpenAPI spec fetch + parse + register
@@ -360,6 +360,26 @@ Standalone HTTP + WebSocket server. Delegates directly to `runAgentLoop` in core
 - **Sessions**: TTL-based expiration, per-key concurrency limits
 - **Deployment**: `zoe-server` binary, Docker image, or `docker-compose`
 
+### Channels Adapter
+
+A fourth runtime adapter family (`src/adapters/channels/`) bringing 2-way messaging to Telegram, Discord, Slack, WhatsApp, and Teams — including proactive (agent-initiated) outbound. One `zoe-channels` process runs all enabled platforms concurrently, sharing a `SessionRegistry`, `IdentityResolver`, `PersistenceBackend`, and proactive outbox.
+
+```
+Runtime Adapters (CLI / SDK / Server / Channels)
+        │ *initiate* the loop — call runAgentLoop
+        ▼
+   runAgentLoop(options) ── options.middleware ──► semanticToolMiddleware
+                                                        ▲
+                                                        │ *feeds* the middleware
+                                                 ToolsGateway (engine)
+```
+
+- **`ChannelAdapter` interface** (`channels/types.ts`) — the contract every platform implements (start/stop/deliver + optional `createApprovalInteraction` + `systemPromptOverride`). Telegram (grammY) and Discord (discord.js) ship today; the same interface generalizes to the rest.
+- **`ChannelGateway`** (`channels/gateway.ts`) — the shared runtime: inbound pipeline (identity resolution → allowlist → session → `runAgentLoop` → outbound delivery), per-conversation state + concurrency, role→permission mapping, 30s tool-approval timeout, injected `send_message`/`schedule_message` tools. Delegates to the single `runAgentLoop` — no loop logic reimplemented (constitution I).
+- **Identity** — `IdentityResolver` (`core/identity-resolver.ts`) maps platform-scoped senders → canonical `userId` + role; `AllowlistIdentityResolver` is the built-in (config-driven allowlist/admins). `SessionRegistry` (`core/session-registry.ts`) indexes sessions by `(platform, conversationId)` and `userId`, emits `sessionSaved`/`messageAppended` events for the future memory layer.
+- **Proactive outbound** — `Outbox` (`channels/outbox.ts`) with a `setTimeout` scheduler + per-conversation rate limiting (defense-in-depth against agent spam).
+- **Deployment**: `zoe-channels` binary. Platform SDKs are dynamic-imported, so they never leak into headless/server builds (CI-asserted).
+
 ## Skills System
 
 Plugin architecture for domain-specific extensions.
@@ -489,16 +509,16 @@ GitHub Actions: tag-triggered NPM publish + GitHub release, plus docs deployment
 
 VitePress site in `docs/` with sections: getting-started, guides, SDK reference, server, examples, superpowers (design specs).
 
-## Gateway System
+## Tools Gateway System
 
-The Gateway is an Infrastructure-layer subsystem (alongside Providers, Tools, Skills) that acts as a universal API hub — MCP client, secure REST proxy, and OpenAPI auto-adapter.
+The Tools Gateway is an Infrastructure-layer subsystem (alongside Providers, Tools, Skills) that acts as a universal API hub — MCP client, secure REST proxy, and OpenAPI auto-adapter. The engine class is `ToolsGateway` (named for what it gateways: external *tool* servers). The middleware variable it feeds is `semanticToolMiddleware`.
 
 ### Architecture
 
 ```
 src/gateway/
 ├── types.ts             # Target, AuditRecord, GatewayConfig, GatewayHooks
-├── gateway.ts           # MCPGateway class — engine
+├── gateway.ts           # ToolsGateway class — engine
 ├── semantic-scorer.ts   # Keyword-based tool relevance scoring
 ├── tool-factory.ts      # 10 proxy tools + getInjectableTools()
 ├── openapi-importer.ts  # OpenAPI spec fetch + parse + register
@@ -522,9 +542,9 @@ src/gateway/
 | `AuditRecord` | Audit trail entry (timestamp, agent, target, operation, status, duration) |
 | `GatewayHooks` | Extension points: `onAudit`, `onSamplingRequest` |
 
-### MCPGateway Engine
+### ToolsGateway Engine
 
-The `MCPGateway` class manages the full lifecycle:
+The `ToolsGateway` class manages the full lifecycle:
 
 - **Target management:** Register/unregister/toggle MCP and REST targets
 - **MCP client connections:** Auto-connect on first use, cache by target name, lazy reconnection on failure

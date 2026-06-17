@@ -67,10 +67,10 @@ Full architectural reference: `ARCHITECTURE.md` in the project root.
 ## Layers
 
 ```
-Adapters (CLI, SDK, Server) → Core (agent-loop) → Infrastructure (Providers, Tools, Skills)
+Adapters (CLI, SDK, Server, Channels) → Core (agent-loop) → Infrastructure (Providers, Tools, Skills, Tools Gateway)
 ```
 
-All three adapters delegate to a single `runAgentLoop` in `src/core/agent-loop.ts`.
+All four runtime adapters delegate to a single `runAgentLoop` in `src/core/agent-loop.ts`.
 
 ## Key Files
 
@@ -146,7 +146,11 @@ Programmatic library. Exports `generateText()`, `streamText()`, `createAgent()`.
 
 ### Server (`src/adapters/server/`)
 
-HTTP + WebSocket standalone server. REST endpoints for generate/stream/agent. API key auth with scopes. Sessions with TTL and concurrency limits.
+HTTP + WebSocket standalone server. REST endpoints for generate/stream/agent. API key auth with scopes. Sessions with TTL and concurrency limits. History now threads across turns (load session messages into the loop, parity with CLI/SDK).
+
+### Channels (`src/adapters/channels/`)
+
+A fourth runtime adapter family for 2-way messaging (Telegram, Discord, Slack, WhatsApp, Teams) including proactive outbound. The `ChannelAdapter` interface (`types.ts`) is the contract every platform implements; the `ChannelGateway` (`gateway.ts`) owns the shared inbound pipeline and delegates to `runAgentLoop` (no loop reimplementation). `SessionRegistry` (`src/core/session-registry.ts`) indexes sessions by `(platform, conversationId)` + `userId` and emits events; `IdentityResolver` (`src/core/identity-resolver.ts`) maps platform senders → canonical `userId` + role. Deployed via the `zoe-channels` binary; platform SDKs (grammy, discord.js) are dynamic-imported so they never leak into headless/server builds.
 
 ## Configuration
 

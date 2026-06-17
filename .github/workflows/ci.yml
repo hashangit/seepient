@@ -51,3 +51,21 @@ jobs:
             exit 1
           fi
           echo "OK: no jsx-runtime in headless outputs"
+
+      # T047 (spec 002): channels platform SDKs (grammy, discord.js) must stay
+      # out of headless/server builds when channels are disabled. They are only
+      # imported via dynamic import() inside the channels adapter + binary, so
+      # the CLI/SDK/Server/core outputs must never statically reference them.
+      - name: Assert no channels SDKs in headless/server outputs
+        run: |
+          set -e
+          if grep -rlE "from ['\"](grammy|discord\\.js)['\"]|require\\(['\"](grammy|discord\\.js)['\"]\\)" \
+              dist/adapters/cli \
+              dist/adapters/server \
+              dist/adapters/sdk \
+              dist/core 2>/dev/null; then
+            echo "::error::A channels platform SDK (grammy/discord.js) leaked into a headless/server build output"
+            exit 1
+          fi
+          echo "OK: no channels SDKs in headless/server outputs"
+

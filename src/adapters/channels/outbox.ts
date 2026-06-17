@@ -42,6 +42,10 @@ export interface OutboxOptions {
   storage: OutboxStorage;
   /** How often (ms) to scan for due entries in the polling fallback. */
   pollIntervalMs?: number;
+  /** Max proactive deliveries per conversation per minute (default 10). */
+  maxPerConversationPerMin?: number;
+  /** Optional observer for every outbox fire (observability — spec §12). */
+  onFire?: (entry: OutboxEntry) => void;
 }
 
 /**
@@ -61,15 +65,21 @@ export class MemoryOutboxStorage implements OutboxStorage {
 export class Outbox {
   private storage: OutboxStorage;
   private pollIntervalMs: number;
+  private maxPerConversationPerMin: number;
+  private onFire?: (entry: OutboxEntry) => void;
   private entries: OutboxEntry[] = [];
   private timers = new Map<string, ReturnType<typeof setTimeout>>();
   private deliver: OutboxDeliverFn | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private started = false;
+  /** Per-conversation send timestamps (last minute) for the rate limiter. */
+  private sendTimes = new Map<string, number[]>();
 
   constructor(options: OutboxOptions) {
     this.storage = options.storage;
     this.pollIntervalMs = options.pollIntervalMs ?? 5_000;
+    this.maxPerConversationPerMin = options.maxPerConversationPerMin ?? 10;
+    this.onFire = options.onFire;
   }
 
   /** Provide the delivery function (the gateway wires this to adapter.deliver). */
@@ -167,13 +177,33 @@ export class Outbox {
 
   private async deliverEntry(entry: OutboxEntry): Promise<void> {
     if (entry.delivered || !this.deliver) return;
+    // Per-conversation rate limit (defense-in-depth against agent-initiated
+    // spam, spec §12). When exhausted, defer to the next poll tick.
+    if (!this.allowSend(entry.conversation.conversationId)) return;
     try {
+      this.onFire?.(entry);
       await this.deliver(entry.platform, entry.conversation, entry.payload);
+      this.recordSend(entry.conversation.conversationId);
     } catch {
       // Delivery failed — leave it undelivered so a later poll can retry.
       return;
     }
     await this.markDelivered(entry.id);
+  }
+
+  /** Token-bucket check: at most `maxPerConversationPerMin` sends per minute. */
+  private allowSend(conversationId: string): boolean {
+    const now = Date.now();
+    const cutoff = now - 60_000;
+    const times = (this.sendTimes.get(conversationId) ?? []).filter((t) => t > cutoff);
+    this.sendTimes.set(conversationId, times);
+    return times.length < this.maxPerConversationPerMin;
+  }
+
+  private recordSend(conversationId: string): void {
+    const times = this.sendTimes.get(conversationId) ?? [];
+    times.push(Date.now());
+    this.sendTimes.set(conversationId, times);
   }
 
   private async persist(): Promise<void> {
