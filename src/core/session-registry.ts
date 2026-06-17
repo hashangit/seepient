@@ -45,6 +45,9 @@ export interface SessionRegistry {
   resolveSession(identity: ConversationIdentity): Promise<SessionData>;
   /** Lookup by canonical user (memory layer, admin tools). */
   sessionsForUser(userId: string): Promise<SessionData[]>;
+  /** Enumerate all sessions (admin tools, the CLI session selector). Loads
+   *  each via the backend — O(N) — so callers should page for large stores. */
+  listAll(): Promise<SessionData[]>;
   /** Mutation — emits `sessionSaved` after a successful backend write. */
   save(session: SessionData): Promise<void>;
   /** Append a message to a session and persist — emits `messageAppended`. */
@@ -221,6 +224,16 @@ class SessionRegistryImpl implements SessionRegistry {
     await this.ensureIndexes();
     const ids = this.indexes.user.get(userId);
     if (!ids || ids.size === 0) return [];
+    const sessions: SessionData[] = [];
+    for (const id of ids) {
+      const data = await this.backend.load(id);
+      if (data) sessions.push(data);
+    }
+    return sessions;
+  }
+
+  async listAll(): Promise<SessionData[]> {
+    const ids = await this.backend.list();
     const sessions: SessionData[] = [];
     for (const id of ids) {
       const data = await this.backend.load(id);

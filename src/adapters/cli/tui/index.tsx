@@ -26,6 +26,7 @@ import type { ModelOption } from './overlays/model-selector.js';
 import type { SettingItem } from './overlays/settings-overlay.js';
 import { SettingsManager } from '../../../core/settings-manager.js';
 import { SETTINGS_MAP, SETTINGS_SCHEMA } from '../../../core/settings-schema.js';
+import { createSessionRegistry } from '../../../core/session-registry.js';
 import { loadMergedConfig, loadJsonConfig, getConfigPaths, applyEnvOverrides } from '../config-loader.js';
 
 export interface StartTuiArgs {
@@ -108,17 +109,15 @@ export async function startTui({ queryParts, options }: StartTuiArgs): Promise<v
   };
 
   // ── Sessions ────────────────────────────────────────────────────────────
-  // list() returns bare ids; load() each to get metadata for the selector.
-  // N+1 I/O is fine for O(10s) of local sessions. Derive a preview from the
-  // first user message (SessionData has no title field). Forward-compatible:
-  // swap this closure for registry.sessionsForUser() once 002 lands (see
-  // specs/002-channels-integration migration note).
+  // The session selector lists all local sessions. We go through the
+  // SessionRegistry (spec 002 T014b) over the same backend so the index/event
+  // layer is the single query surface — `sessionsForUser(userId)` is available
+  // for a future user-scoped view, and `listAll()` covers the unscoped CLI case.
   const PREVIEW_LEN = 80;
+  const sessionRegistry = createSessionRegistry(persistence);
   const listSessions = async (): Promise<SessionListItem[]> => {
-    const ids = await persistence.list();
-    const loaded = await Promise.all(ids.map((id) => persistence.load(id)));
-    return loaded
-      .filter((s): s is NonNullable<typeof s> => s != null)
+    const sessions = await sessionRegistry.listAll();
+    return sessions
       .map((s) => {
         const firstUser = s.messages.find((m) => m.role === 'user');
         const preview = (firstUser?.content ?? s.id).split('\n')[0].trim();

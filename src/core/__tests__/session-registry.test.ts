@@ -157,4 +157,13 @@ describe("SessionRegistry", () => {
     await registry.appendMessage(session.id, userMsg("ignored"));
     expect(calls).toEqual([]);
   });
+
+  it("listAll returns every persisted session (unscoped CLI selector use case)", async () => {
+    const registry = createSessionRegistry(new MemoryPersistenceBackend());
+    const a = await registry.resolveSession({ platform: "telegram", conversationId: "c1" });
+    const b = await registry.resolveSession({ platform: "discord", conversationId: "c2" });
+
+    const all = await registry.listAll();
+    expect(all.map((s) => s.id).sort()).toEqual([a.id, b.id].sort());
+  });
 });
