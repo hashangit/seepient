@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { createServer } from "node:http";
 import type { ChannelPlatform } from "../../core/types.js";
 import { getProvider } from "../../core/provider-resolver.js";
+import { loadProviderConfig, configureProviders } from "../../core/provider-config.js";
 import { loadMergedConfig } from "../cli/config-loader.js";
 import { createPersistenceBackend } from "../../core/session-store.js";
 import { createSessionRegistry } from "../../core/session-registry.js";
@@ -72,9 +73,16 @@ export async function startChannelsBinary(options: ChannelsBinaryOptions = {}): 
     );
   }
 
-  // Resolve the LLM provider/model (reuse the existing resolver).
+  // Resolve the LLM provider/model (reuse the existing resolver). Mirrors the
+  // CLI/Server bootstrap: load the multi-provider config, register it in the
+  // singleton, then resolve. Skipping configureProviders() is a latent bug
+  // (getProvider throws "No provider is configured") — fixed here.
   const providerType = ((merged as any).provider ?? (merged as any).llmProvider) as string | undefined;
   const modelOverride = (merged as any).model as string | undefined;
+  const multiConfig = loadProviderConfig(merged as any, providerType ?? undefined);
+  if (multiConfig) {
+    configureProviders(multiConfig);
+  }
   let provider: Awaited<ReturnType<typeof getProvider>>["provider"];
   let model: string;
   try {
