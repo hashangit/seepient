@@ -16,7 +16,8 @@ export type SettingsCategory =
   | 'notifications'
   | 'skills'
   | 'gateway'
-  | 'sessions';
+  | 'sessions'
+  | 'channels';
 
 export interface SettingsMapEntry {
   dotKey: string;
@@ -78,6 +79,11 @@ export const SETTINGS_CATEGORIES: {
     label: 'Sessions',
     description: 'Session persistence and cleanup settings',
   },
+  {
+    key: 'channels',
+    label: 'Channels',
+    description: '2-way messaging adapters (Telegram, Discord, Slack, WhatsApp, Teams)',
+  },
 ];
 
 // ── Settings Map ───────────────────────────────────────────────────────
@@ -134,6 +140,18 @@ const entries: [string, SettingsMapEntry][] = [
 
   // Sessions
   ['sessions.maxAgeDays', { dotKey: 'sessions.maxAgeDays', configPath: ['sessions', 'maxAgeDays'], category: 'sessions', label: 'Max Session Age (days)' }],
+
+  // Channels — top-level + Telegram (spec 002 §8.3)
+  ['channels.enabled', { dotKey: 'channels.enabled', configPath: ['channels', 'enabled'], category: 'channels', label: 'Enabled Channels' }],
+  ['channels.telegram.token', { dotKey: 'channels.telegram.token', configPath: ['channels', 'telegram', 'token'], category: 'channels', label: 'Telegram Bot Token' }],
+  ['channels.telegram.webhookUrl', { dotKey: 'channels.telegram.webhookUrl', configPath: ['channels', 'telegram', 'webhookUrl'], category: 'channels', label: 'Telegram Webhook URL' }],
+  ['channels.telegram.allowlist', { dotKey: 'channels.telegram.allowlist', configPath: ['channels', 'telegram', 'allowlist'], category: 'channels', label: 'Telegram Allowed Sender IDs' }],
+  ['channels.telegram.admins', { dotKey: 'channels.telegram.admins', configPath: ['channels', 'telegram', 'admins'], category: 'channels', label: 'Telegram Admin Sender IDs' }],
+  ['channels.telegram.systemPromptOverride', { dotKey: 'channels.telegram.systemPromptOverride', configPath: ['channels', 'telegram', 'systemPromptOverride'], category: 'channels', label: 'Telegram System Prompt Override' }],
+
+  // Channels — proactive outbound (spec 002 §7)
+  ['channels.outbox.enabled', { dotKey: 'channels.outbox.enabled', configPath: ['channels', 'outbox', 'enabled'], category: 'channels', label: 'Proactive Outbox Enabled' }],
+  ['channels.outbox.pollIntervalMs', { dotKey: 'channels.outbox.pollIntervalMs', configPath: ['channels', 'outbox', 'pollIntervalMs'], category: 'channels', label: 'Outbox Poll Interval (ms)' }],
 ];
 
 export const SETTINGS_MAP: Map<string, SettingsMapEntry> = new Map(entries);
@@ -198,6 +216,17 @@ const schemaEntries: [string, SettingsSchemaEntry][] = [
 
   // Sessions
   ['sessions.maxAgeDays', { type: 'number', secret: false, default: 30, min: 0, restartRequired: false }],
+
+  // Channels (spec 002 §8.3) — additive; the 'channels' configPath subtree
+  // is new, so these keys live alongside existing config without conflict.
+  ['channels.enabled', { type: 'string', secret: false, default: '', restartRequired: true, envVar: 'ZOE_CHANNELS_ENABLED' }],
+  ['channels.telegram.token', { type: 'string', secret: true, default: '', restartRequired: true, envVar: 'TELEGRAM_BOT_TOKEN' }],
+  ['channels.telegram.webhookUrl', { type: 'string', secret: false, default: '', restartRequired: true }],
+  ['channels.telegram.allowlist', { type: 'string', secret: false, default: '', restartRequired: false }],
+  ['channels.telegram.admins', { type: 'string', secret: false, default: '', restartRequired: false }],
+  ['channels.telegram.systemPromptOverride', { type: 'string', secret: false, default: '', restartRequired: false }],
+  ['channels.outbox.enabled', { type: 'boolean', secret: false, default: true, restartRequired: false }],
+  ['channels.outbox.pollIntervalMs', { type: 'number', secret: false, default: 5000, min: 500, max: 60000, restartRequired: false }],
 ];
 
 export const SETTINGS_SCHEMA: Map<string, SettingsSchemaEntry> = new Map(schemaEntries);

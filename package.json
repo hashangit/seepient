@@ -16,7 +16,8 @@
   "types": "./dist/adapters/sdk/index.d.ts",
   "bin": {
     "zoe": "dist/adapters/cli/index.js",
-    "zoe-server": "dist/adapters/server/standalone.js"
+    "zoe-server": "dist/adapters/server/standalone.js",
+    "zoe-channels": "dist/adapters/channels/standalone.js"
   },
   "scripts": {
     "build": "tsc",
@@ -24,6 +25,8 @@
     "server": "node dist/adapters/server/standalone.js",
     "dev": "tsx src/adapters/cli/index.ts",
     "dev:server": "tsx src/adapters/server/standalone.ts",
+    "dev:channels": "tsx src/adapters/channels/standalone.ts",
+    "channels": "node dist/adapters/channels/standalone.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -85,6 +88,7 @@
     "dotenv": "^16.4.7",
     "figlet": "^1.11.0",
     "get-east-asian-width": "^1.6.0",
+    "grammy": "^1.44.0",
     "ink": "6.6.0",
     "ink-select-input": "^6.2.0",
     "ink-spinner": "^5.0.0",
