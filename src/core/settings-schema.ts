@@ -149,6 +149,12 @@ const entries: [string, SettingsMapEntry][] = [
   ['channels.telegram.admins', { dotKey: 'channels.telegram.admins', configPath: ['channels', 'telegram', 'admins'], category: 'channels', label: 'Telegram Admin Sender IDs' }],
   ['channels.telegram.systemPromptOverride', { dotKey: 'channels.telegram.systemPromptOverride', configPath: ['channels', 'telegram', 'systemPromptOverride'], category: 'channels', label: 'Telegram System Prompt Override' }],
 
+  // Channels — Discord (spec 002 §10)
+  ['channels.discord.token', { dotKey: 'channels.discord.token', configPath: ['channels', 'discord', 'token'], category: 'channels', label: 'Discord Bot Token' }],
+  ['channels.discord.allowlist', { dotKey: 'channels.discord.allowlist', configPath: ['channels', 'discord', 'allowlist'], category: 'channels', label: 'Discord Allowed User IDs' }],
+  ['channels.discord.admins', { dotKey: 'channels.discord.admins', configPath: ['channels', 'discord', 'admins'], category: 'channels', label: 'Discord Admin User IDs' }],
+  ['channels.discord.systemPromptOverride', { dotKey: 'channels.discord.systemPromptOverride', configPath: ['channels', 'discord', 'systemPromptOverride'], category: 'channels', label: 'Discord System Prompt Override' }],
+
   // Channels — proactive outbound (spec 002 §7)
   ['channels.outbox.enabled', { dotKey: 'channels.outbox.enabled', configPath: ['channels', 'outbox', 'enabled'], category: 'channels', label: 'Proactive Outbox Enabled' }],
   ['channels.outbox.pollIntervalMs', { dotKey: 'channels.outbox.pollIntervalMs', configPath: ['channels', 'outbox', 'pollIntervalMs'], category: 'channels', label: 'Outbox Poll Interval (ms)' }],
@@ -225,6 +231,10 @@ const schemaEntries: [string, SettingsSchemaEntry][] = [
   ['channels.telegram.allowlist', { type: 'string', secret: false, default: '', restartRequired: false }],
   ['channels.telegram.admins', { type: 'string', secret: false, default: '', restartRequired: false }],
   ['channels.telegram.systemPromptOverride', { type: 'string', secret: false, default: '', restartRequired: false }],
+  ['channels.discord.token', { type: 'string', secret: true, default: '', restartRequired: true, envVar: 'DISCORD_BOT_TOKEN' }],
+  ['channels.discord.allowlist', { type: 'string', secret: false, default: '', restartRequired: false }],
+  ['channels.discord.admins', { type: 'string', secret: false, default: '', restartRequired: false }],
+  ['channels.discord.systemPromptOverride', { type: 'string', secret: false, default: '', restartRequired: false }],
   ['channels.outbox.enabled', { type: 'boolean', secret: false, default: true, restartRequired: false }],
   ['channels.outbox.pollIntervalMs', { type: 'number', secret: false, default: 5000, min: 500, max: 60000, restartRequired: false }],
 ];

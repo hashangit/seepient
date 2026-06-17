@@ -156,6 +156,15 @@ export async function runChannelsBinary(): Promise<void> {
     }),
   );
 
+  // Register the built-in Discord adapter.
+  const { DiscordChannelAdapter } = await import("./discord/adapter.js");
+  registerPlatformBinary("discord", (cfg) =>
+    new DiscordChannelAdapter({
+      token: cfg.token!,
+      ...(cfg.systemPromptOverride ? { systemPromptOverride: cfg.systemPromptOverride } : {}),
+    }),
+  );
+
   const { stop } = await startChannelsBinary();
 
   // Graceful shutdown on SIGINT/SIGTERM.
