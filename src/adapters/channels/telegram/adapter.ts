@@ -27,6 +27,8 @@ export interface TelegramAdapterOptions {
   webhookUrl?: string | null;
   /** Per-channel persona override. */
   systemPromptOverride?: string;
+  /** Inject a pre-built Bot (testing). When omitted, the adapter constructs one. */
+  bot?: Bot;
 }
 
 export class TelegramChannelAdapter implements ChannelAdapter {
@@ -35,7 +37,8 @@ export class TelegramChannelAdapter implements ChannelAdapter {
 
   private token: string;
   private webhookUrl?: string | null;
-  private bot: Bot | null = null;
+  private bot: Bot | null;
+  private started = false;
   private handlers: ChannelHandlers | null = null;
   /** Pending approvals keyed by callback data, so a tap resolves the decision. */
   private pendingApprovals = new Map<string, { resolve: (v: boolean) => void }>();
@@ -44,12 +47,14 @@ export class TelegramChannelAdapter implements ChannelAdapter {
     this.token = opts.token;
     this.webhookUrl = opts.webhookUrl ?? null;
     this.systemPromptOverride = opts.systemPromptOverride;
+    this.bot = opts.bot ?? null;
   }
 
   async start(handlers: ChannelHandlers): Promise<void> {
-    if (this.bot) return; // idempotent
+    if (this.started) return; // idempotent
+    this.started = true;
     this.handlers = handlers;
-    const bot = new Bot(this.token);
+    const bot = this.bot ?? new Bot(this.token);
     this.bot = bot;
 
     // Inbound: normalize every message update and hand to the gateway.
