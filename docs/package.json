@@ -1,7 +1,7 @@
 {
-  "name": "zoe-docs",
+  "name": "seepient-docs",
   "version": "1.0.0",
-  "description": "Documentation for Zoe Agent - Headless AI agent framework",
+  "description": "Documentation for Seepient Agent - Headless AI agent framework",
   "private": true,
   "type": "module",
   "scripts": {

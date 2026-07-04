@@ -1,5 +1,5 @@
 /**
- * Zoe Core — Tool executor
+ * Seepient Core — Tool executor
  *
  * Tool registry, resolution, factory, and execution logic.
  * Transport-agnostic: no chalk, no HTTP, no CLI concerns.

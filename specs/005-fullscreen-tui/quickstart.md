@@ -44,12 +44,12 @@ pnpm test -- src/adapters/cli/tui/fullscreen/
 ```bash
 pnpm dev            # tsx
 # or in a real terminal:
-zoe
+seepient
 ```
 
 ### S1 — Full-screen, bottom-pinned input + footer
 
-1. Run `zoe` on a fresh session.
+1. Run `seepient` on a fresh session.
 2. **Expect**: the app fills the terminal; the input + footer sit on the **bottom
    rows** (not floating mid-screen). Empty space is above them, in the feed region.
 3. Send a short message → the exchange appears above; input/footer stay pinned.
@@ -92,9 +92,9 @@ zoe
 ### S7 — Non-interactive paths unchanged (regression)
 
 ```bash
-echo "hi" | zoe
-zoe -n "hi"
-zoe --docker …
+echo "hi" | seepient
+seepient -n "hi"
+seepient --docker …
 ```
 - **Expect**: byte-identical to before; no alt buffer, no React import.
 
@@ -107,6 +107,6 @@ pnpm test           # full suite passes (≈ baseline + new fullscreen unit test
 ## Out of scope (do not validate here)
 
 - Rounded input border + dim-during-run → 003 US1.
-- Zoe Agent logo → 003 US2.
+- Seepient Agent logo → 003 US2.
 - Persistent header/wordmark → deferred.
 - Mouse-wheel scroll (best-effort; may defer to keyboard-only v1).

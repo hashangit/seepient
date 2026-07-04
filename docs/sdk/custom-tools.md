@@ -5,12 +5,12 @@ description: Build and register custom tools using the tool() factory, Zod schem
 
 # Custom Tools
 
-Zoe Agent ships with 12 built-in tools, but you can create your own using the `tool()` factory. Custom tools are first-class citizens -- they work identically to built-in tools in `generateText()`, `streamText()`, and `createAgent()`.
+Seepient Agent ships with 12 built-in tools, but you can create your own using the `tool()` factory. Custom tools are first-class citizens -- they work identically to built-in tools in `generateText()`, `streamText()`, and `createAgent()`.
 
 ## `tool()` factory
 
 ```typescript
-import { tool } from "zoe-agent";
+import { tool } from "seepient";
 
 function tool(definition: UserToolDefinition): ToolModule
 ```
@@ -65,7 +65,7 @@ interface ToolResult {
 ## Basic tool
 
 ```typescript
-import { generateText, tool } from "zoe-agent";
+import { generateText, tool } from "seepient";
 
 const greeter = tool({
   name: "greet",
@@ -73,7 +73,7 @@ const greeter = tool({
   parameters: z.object({
     name: z.string().describe("The person's name"),
   }),
-  execute: async ({ name }) => `Hello, ${name}! Welcome to Zoe Agent.`,
+  execute: async ({ name }) => `Hello, ${name}! Welcome to Seepient Agent.`,
 });
 
 const result = await generateText("Greet Alice", {
@@ -81,7 +81,7 @@ const result = await generateText("Greet Alice", {
 });
 
 console.log(result.text);
-// => "Hello, Alice! Welcome to Zoe Agent."
+// => "Hello, Alice! Welcome to Seepient Agent."
 ```
 
 ## Tool with Zod parameters
@@ -89,7 +89,7 @@ console.log(result.text);
 Zod schemas are automatically converted to JSON Schema for the LLM. Use `.describe()` to give the LLM hints about each parameter:
 
 ```typescript
-import { generateText, tool } from "zoe-agent";
+import { generateText, tool } from "seepient";
 import { z } from "zod";
 
 const dbQuery = tool({
@@ -128,7 +128,7 @@ Always use `.describe()` on your Zod fields. The descriptions are sent to the LL
 Long-running tools can report progress via `context.onUpdate`:
 
 ```typescript
-import { generateText, tool } from "zoe-agent";
+import { generateText, tool } from "seepient";
 import { z } from "zod";
 
 const batchProcessor = tool({
@@ -167,7 +167,7 @@ const batchProcessor = tool({
 Custom tools can be mixed with built-in tool names or group names:
 
 ```typescript
-import { generateText, tool } from "zoe-agent";
+import { generateText, tool } from "seepient";
 import { z } from "zod";
 
 const lookupTool = tool({
@@ -193,7 +193,7 @@ const result = await generateText(
 
 ## Tool groups
 
-Zoe Agent organizes its 12 built-in tools into groups. You can reference groups by name:
+Seepient Agent organizes its 12 built-in tools into groups. You can reference groups by name:
 
 | Group         | Constant          | Tools                                                              |
 | ------------- | ----------------- | ------------------------------------------------------------------ |
@@ -205,7 +205,7 @@ Zoe Agent organizes its 12 built-in tools into groups. You can reference groups 
 ### Using group constants
 
 ```typescript
-import { generateText, CORE_TOOLS, COMM_TOOLS, ALL_TOOLS } from "zoe-agent";
+import { generateText, CORE_TOOLS, COMM_TOOLS, ALL_TOOLS } from "seepient";
 
 // By string name
 await generateText("Read ./package.json", { tools: ["core"] });
@@ -224,7 +224,7 @@ await generateText("Research and notify", {
 Use `resolveTools()` to expand groups and names into concrete definitions:
 
 ```typescript
-import { resolveTools, ALL_TOOLS } from "zoe-agent";
+import { resolveTools, ALL_TOOLS } from "seepient";
 
 // Expand "all" into individual tool definitions
 const definitions = resolveTools(["core", "web_search"]);
@@ -237,7 +237,7 @@ const definitions = resolveTools(["core", "web_search"]);
 Register a custom tool so it is available everywhere without passing it explicitly:
 
 ```typescript
-import { registerTool, tool } from "zoe-agent";
+import { registerTool, tool } from "seepient";
 
 const myTool = tool({
   name: "my_api",

@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
   estimateTokens,
-  toZoeError,
+  toSeepientError,
   messageToProviderMessage,
   providerToolCallToToolCall,
 } from "../message-convert.js";
-import { ZoeError, ProviderError, ToolError } from "../errors.js";
+import { SeepientError, ProviderError, ToolError } from "../errors.js";
 
 describe("estimateTokens", () => {
   it("returns ceil(length/4)", () => {
@@ -17,30 +17,30 @@ describe("estimateTokens", () => {
   });
 });
 
-describe("toZoeError", () => {
+describe("toSeepientError", () => {
   it("creates ProviderError for PROVIDER_ERROR code", () => {
-    const err = toZoeError(new Error("timeout"), "PROVIDER_ERROR");
+    const err = toSeepientError(new Error("timeout"), "PROVIDER_ERROR");
     expect(err).toBeInstanceOf(ProviderError);
     expect(err.message).toBe("timeout");
   });
 
   it("creates ToolError for TOOL_FAILED code", () => {
-    const err = toZoeError("something bad", "TOOL_FAILED");
+    const err = toSeepientError("something bad", "TOOL_FAILED");
     expect(err).toBeInstanceOf(ToolError);
     expect(err.message).toBe("something bad");
   });
 
-  it("creates ZoeError for unknown codes", () => {
-    const err = toZoeError("oops", "UNKNOWN");
-    expect(err).toBeInstanceOf(ZoeError);
+  it("creates SeepientError for unknown codes", () => {
+    const err = toSeepientError("oops", "UNKNOWN");
+    expect(err).toBeInstanceOf(SeepientError);
     expect(err.code).toBe("UNKNOWN");
   });
 
   it("sets retryable=true for PROVIDER_ERROR on default path", () => {
-    const err = toZoeError("x", "PROVIDER_ERROR");
+    const err = toSeepientError("x", "PROVIDER_ERROR");
     // The switch case creates a ProviderError, but the default path is covered
     // by testing a code that falls through:
-    const generic = toZoeError("x", "PROVIDER_ERROR");
+    const generic = toSeepientError("x", "PROVIDER_ERROR");
     expect(generic.retryable).toBe(true);
   });
 });

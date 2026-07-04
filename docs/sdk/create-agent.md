@@ -20,7 +20,7 @@ function createAgent(options?: AgentCreateOptions): Promise<SdkAgent>
 ## Quick example
 
 ```typescript
-import { createAgent } from "zoe-agent";
+import { createAgent } from "seepient";
 
 const agent = await createAgent({
   model: "gpt-5.4",
@@ -106,7 +106,7 @@ interface CumulativeUsage {
 ### Basic multi-turn conversation
 
 ```typescript
-import { createAgent } from "zoe-agent";
+import { createAgent } from "seepient";
 
 const agent = await createAgent({
   systemPrompt: "You are a helpful travel advisor.",
@@ -168,7 +168,7 @@ console.log(r2.text);
 Persist conversation history so the agent can resume across process restarts:
 
 ```typescript
-import { createAgent } from "zoe-agent";
+import { createAgent } from "seepient";
 
 // Option 1: File-based persistence (backward compatible — just pass a path)
 const agent = await createAgent({
@@ -198,7 +198,7 @@ await agent.chat("I'm working on a React project");
 Register custom backends (Redis, SQLite, encrypted storage, etc.) with `registerBackend`:
 
 ```typescript
-import { registerBackend, createAgent, type PersistenceBackend, type SessionData } from "zoe-agent";
+import { registerBackend, createAgent, type PersistenceBackend, type SessionData } from "seepient";
 
 class RedisBackend implements PersistenceBackend {
   constructor(private url: string) { /* connect */ }
@@ -345,7 +345,7 @@ import {
   loggingMiddleware,
   rateLimitMiddleware,
   authMiddleware,
-} from "zoe-agent";
+} from "seepient";
 
 const agent = await createAgent({
   middleware: [
@@ -370,7 +370,7 @@ const agent = await createAgent({
 ### Custom middleware
 
 ```typescript
-import type { Middleware } from "zoe-agent";
+import type { Middleware } from "seepient";
 
 const auditLog: Middleware = async (ctx, next) => {
   console.log(`[audit] request ${ctx.requestId} started`);

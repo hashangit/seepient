@@ -1,4 +1,4 @@
-# Zoe TUI Upgrade PRD
+# Seepient TUI Upgrade PRD
 
 ## Technology Decision: Ink/React (npm dependency)
 
@@ -8,15 +8,15 @@
 |--------|-------------------|-------------------|
 | **Platform** | Pure JS — macOS, Linux, Docker, Windows, CI | Contains compiled C native addon (`darwin-modifiers.node`), **no Linux prebuilds** |
 | **Build integration** | `pnpm add ink react` — done | Requires native prebuild shipping, build step beyond `tsc` |
-| **Zoe "Docker-native"** | Identical everywhere | macOS-only native modifier; Linux silently degrades |
+| **Seepient "Docker-native"** | Identical everywhere | macOS-only native modifier; Linux silently degrades |
 | **Dependency surface** | React 19, Ink 6.6.0, 3 Ink plugins, ~10 TUI utility packages | 2 npm deps (`marked`, `get-east-asian-width`) + per-platform native binaries |
 | **Component model** | JSX, React hooks — well-known hiring pool | Custom `Component` interface: `render(width): string[]` |
 | **Existing reference** | Command Code v0.37.2 (1.5MB bundle) installed on dev machine — proven component patterns | Pi agent's interactive mode |
 | **Maintenance** | React/Ink are stable, well-maintained, widely used | Maintaining vendor fork + native build pipeline |
 
-We evaluated using Pi TUI via its published npm package (`@earendil-works/pi-tui` v0.79.3) — the simpler alternative to vendoring. Rejected because: (1) it ships a compiled C native addon with no Linux prebuilds, which is incompatible with Zoe's Docker-native identity; (2) it requires build infrastructure beyond `tsc` to ship prebuilds; (3) the native modifier module is macOS-only, silently returning `undefined` on Linux/Docker.
+We evaluated using Pi TUI via its published npm package (`@earendil-works/pi-tui` v0.79.3) — the simpler alternative to vendoring. Rejected because: (1) it ships a compiled C native addon with no Linux prebuilds, which is incompatible with Seepient's Docker-native identity; (2) it requires build infrastructure beyond `tsc` to ship prebuilds; (3) the native modifier module is macOS-only, silently returning `undefined` on Linux/Docker.
 
-**Chosen approach:** Add Ink 6.6.0 + React 19 as npm dependencies. Build our own TUI component library (`src/adapters/cli/tui/`) using the same technology stack as Command Code but with Zoe-specific architecture and Tokyo Night Moon theming. Lazy-load the TUI module only in interactive mode — headless/CI/Docker modes never import React.
+**Chosen approach:** Add Ink 6.6.0 + React 19 as npm dependencies. Build our own TUI component library (`src/adapters/cli/tui/`) using the same technology stack as Command Code but with Seepient-specific architecture and Tokyo Night Moon theming. Lazy-load the TUI module only in interactive mode — headless/CI/Docker modes never import React.
 
 **Streaming architecture decision:**
 
@@ -35,7 +35,7 @@ The chosen pattern ships today in `src/adapters/sdk/agent.ts::chatStream()`. The
 Command Code v0.37.2 (installed at `/opt/homebrew/lib/node_modules/command-code/`) provides a proven reference architecture. From analysis of the 1.5MB bundled `dist/index.mjs`, the component hierarchy is:
 
 ### Message Components (feed entries)
-| Component | Purpose | Zoe equivalent needed? |
+| Component | Purpose | Seepient equivalent needed? |
 |-----------|---------|-------------------------|
 | `UserMessage` | User chat messages | Yes |
 | `AssistantMessage` | LLM response (text + tool calls) | Yes |
@@ -54,7 +54,7 @@ Command Code v0.37.2 (installed at `/opt/homebrew/lib/node_modules/command-code/
 | `SystemMessage` | System-level messages | Yes |
 
 ### Overlay Components
-| Component | Purpose | Zoe equivalent needed? |
+| Component | Purpose | Seepient equivalent needed? |
 |-----------|---------|-------------------------|
 | Model selector | Provider/model picker overlay | Yes |
 | Provider selector | Auth/provider connection dialog | Yes |
@@ -68,13 +68,13 @@ Command Code v0.37.2 (installed at `/opt/homebrew/lib/node_modules/command-code/
 | Diff viewer | Inline diff display | P2 |
 
 ### Layout Components
-| Component | Purpose | Zoe equivalent needed? |
+| Component | Purpose | Seepient equivalent needed? |
 |-----------|---------|-------------------------|
 | Feed | Scrollable message list | Yes — `MessageArea` |
 | Live entries | Streaming/active entries | Yes — merged into `MessageArea` |
 | Prompt/input | Multi-line editor with autocomplete | Yes — `PromptArea` |
 | Footer | Status bar | Yes |
-| Learning feed toggle | Taste learning sidebar | Not applicable (Zoe has no taste system) |
+| Learning feed toggle | Taste learning sidebar | Not applicable (Seepient has no taste system) |
 
 ### Render Utilities
 | Utility | Purpose |
@@ -104,20 +104,20 @@ Command Code v0.37.2 (installed at `/opt/homebrew/lib/node_modules/command-code/
 
 ---
 
-## Zoe Architecture Integration
+## Seepient Architecture Integration
 
 The TUI lives entirely within the **CLI adapter layer** in Phase 1. Phase 2 is an additive, backward-compatible enhancement to the shared engine (new optional `chatStream()` + `text_delta` step type), consistent with the `runAgentLoop` invariant.
 
 ### Launch Behavior
 
-**One binary, auto-detected mode.** No separate `zoe-tui` command. No `--tui` flag.
+**One binary, auto-detected mode.** No separate `seepient-tui` command. No `--tui` flag.
 
 | Condition | Launches | Stack loaded |
 |-----------|----------|-------------|
-| `zoe` in a TTY terminal (default) | Ink/React TUI | React 19 + Ink 6.6.0 (via dynamic import) |
-| `zoe -n` / `--no-interactive` | Readline REPL | `chalk` + `readline` + `inquirer` (existing) |
-| `zoe` with piped stdin | Readline REPL | `chalk` + `readline` + `inquirer` (existing) |
-| `zoe --docker` | Readline REPL | `chalk` + `readline` + `inquirer` (existing) |
+| `seepient` in a TTY terminal (default) | Ink/React TUI | React 19 + Ink 6.6.0 (via dynamic import) |
+| `seepient -n` / `--no-interactive` | Readline REPL | `chalk` + `readline` + `inquirer` (existing) |
+| `seepient` with piped stdin | Readline REPL | `chalk` + `readline` + `inquirer` (existing) |
+| `seepient --docker` | Readline REPL | `chalk` + `readline` + `inquirer` (existing) |
 | `pnpm dev` (interactive) | Ink/React TUI | React 19 + Ink 6.6.0 (via dynamic import) |
 
 **`--headless` semantics:** `--headless` means "auto-approve all tools" (bypass the permission matrix) — it is not a non-interactive flag. `--no-interactive` / `-n` is the non-interactive flag. The TUI must still render tool blocks without prompts when `--headless`/`--yolo` is active; it's a permission behavior, not a UI choice.
@@ -180,7 +180,7 @@ src/adapters/cli/
 
 **Phase 1 delivers 7 components + 2 hooks** (`app.tsx`, `message-area.tsx`, `user-message.tsx`, `assistant-message.tsx`, `tool-call-block.tsx`, `prompt-area.tsx`, `permission-prompt.tsx`, `error-message.tsx` + `use-agent.ts`, `use-feed.ts`). Theme starts as inline hex values (no hook). Footer, info-message, bash-output, and autocomplete gate to Phase 2.
 
-**Scope justification.** Zoe's product identity is headless-first/Docker-native, but the interactive CLI is the primary developer touchpoint — onboarding, debugging, skill authoring, and ad-hoc exploration all happen there. The TUI is not a "pretty REPL" — streaming tool blocks, inline permission prompts, and autocomplete are productivity features that the chalk+inquirer REPL structurally cannot deliver. The architecture keeps headless mode identical (no React loaded, no engine changes) while investing in the interactive path. Later phases add features opportunistically; Phase 1 targets the minimum viable interactive experience.
+**Scope justification.** Seepient's product identity is headless-first/Docker-native, but the interactive CLI is the primary developer touchpoint — onboarding, debugging, skill authoring, and ad-hoc exploration all happen there. The TUI is not a "pretty REPL" — streaming tool blocks, inline permission prompts, and autocomplete are productivity features that the chalk+inquirer REPL structurally cannot deliver. The architecture keeps headless mode identical (no React loaded, no engine changes) while investing in the interactive path. Later phases add features opportunistically; Phase 1 targets the minimum viable interactive experience.
 
 **Lazy loading pattern (in `index.ts`):**
 
@@ -191,7 +191,7 @@ const { options, queryParts } = parseArgs();
 if (resolveLaunchMode(options) === 'interactive') {
   // Dynamic import — React/Ink not loaded in headless/CI/Docker mode.
   // resolveLaunchMode composes TTY + --no-interactive + piped stdin + --docker +
-  // ZOE_NO_INTERACTIVE — the SAME predicate that selects the system prompt,
+  // SEEPIENT_NO_INTERACTIVE — the SAME predicate that selects the system prompt,
   // so launch mode and UI mode can never diverge.
   const { startTui } = await import('./tui/index.js');
   await startTui({ queryParts, options, config, agent, ... });
@@ -201,7 +201,7 @@ if (resolveLaunchMode(options) === 'interactive') {
 }
 ```
 
-This satisfies the Zoe convention of **dynamic provider imports** (unused modules stay out of memory) — the entire TUI module (~15 components + React + Ink) is only loaded when the user explicitly runs in interactive mode.
+This satisfies the Seepient convention of **dynamic provider imports** (unused modules stay out of memory) — the entire TUI module (~15 components + React + Ink) is only loaded when the user explicitly runs in interactive mode.
 
 **Input ownership: TUI vs. readline.** The current REPL owns stdin via `stdin.setRawMode(true)` and listens for ESC to abort (repl.ts:67-88). Ink's `useInput` hook also takes raw stdin. Two raw-mode listeners on one stdin cause dropped/duplicated keypresses and broken Ctrl+C. In TUI mode, `setupInterrupt()` must not be called — its stdin listener and `InterruptHandle` exist only for the readline fallback. The TUI maps ESC/Ctrl+C → `agent.abort()` via `use-keybindings.ts`, calling the existing `abortController` directly. The `InterruptHandle.suspend/resume` mechanism (for freeing stdin during `inquirer` prompts) disappears — `approveTool` in TUI mode calls the TUI's `<PermissionPrompt>` component, which uses Ink's input handling. `setupInterrupt` stays untouched in `repl.ts` for the readline fallback path.
 
@@ -213,7 +213,7 @@ This satisfies the Zoe convention of **dynamic provider imports** (unused module
 | Non-interactive (headless, piped, `--no-interactive`, `--docker`) | `buildSystemPrompt()` — the original Docker-native prompt, **byte-identical to before**. |
 | SDK / Server | Unchanged. SDK defaults to a generic string or the caller-supplied `systemPrompt`; Server supplies none. |
 
-Mode detection (`resolveLaunchMode(options)`) composes the CLI's two existing signals rather than introducing a new one: `interactive ⟺ options.interactive !== false && !isNonInteractive()`. This matches every launch path — plain `zoe` in a TTY → interactive; `--no-interactive`, piped stdin, `--docker`, `ZOE_NO_INTERACTIVE` → non-interactive. `repl.ts` calls `selectSystemPrompt(resolveLaunchMode(options))` and passes the result as a new optional 4th argument to `new Agent(provider, model, config, systemPrompt)`. The `Agent` defaults to the headless prompt when none is passed, and `clearConversation()` restores whatever prompt it was constructed with. Core's `runAgentLoop` is untouched — it only receives the selected string, so launch mode never leaks below the CLI adapter layer. `/compact` preserves the agent's current system message (its `buildSystemPrompt` fallback was repointed to the new file; behavior unchanged).
+Mode detection (`resolveLaunchMode(options)`) composes the CLI's two existing signals rather than introducing a new one: `interactive ⟺ options.interactive !== false && !isNonInteractive()`. This matches every launch path — plain `seepient` in a TTY → interactive; `--no-interactive`, piped stdin, `--docker`, `SEEPIENT_NO_INTERACTIVE` → non-interactive. `repl.ts` calls `selectSystemPrompt(resolveLaunchMode(options))` and passes the result as a new optional 4th argument to `new Agent(provider, model, config, systemPrompt)`. The `Agent` defaults to the headless prompt when none is passed, and `clearConversation()` restores whatever prompt it was constructed with. Core's `runAgentLoop` is untouched — it only receives the selected string, so launch mode never leaks below the CLI adapter layer. `/compact` preserves the agent's current system message (its `buildSystemPrompt` fallback was repointed to the new file; behavior unchanged).
 
 ---
 
@@ -232,7 +232,7 @@ pnpm add ink@6.6.0 react@^19.1.7 \
 | Option | How | Risk |
 |--------|-----|------|
 | Downgrade to `marked@^15` | `pnpm add marked@^15 marked-terminal@^7.3.0` | Loses `marked@^18` (currently unused — no import in `src/`). Straightforward. |
-| Custom ANSI renderer | Write a small `markdown.tsx` that handles inline code, bold, lists, links directly | No dep risk. Under 100 lines for the subset Zoe needs. |
+| Custom ANSI renderer | Write a small `markdown.tsx` that handles inline code, bold, lists, links directly | No dep risk. Under 100 lines for the subset Seepient needs. |
 | Wait for `marked-terminal` v8 | Track `mikaelbr/marked-terminal#375` (open for marked 16/17/18 support) | Unknown timeline. |
 
 **Phase-0 gate:** `pnpm install` produces zero peer warnings. No marked/marked-terminal version added until resolved.
@@ -318,7 +318,7 @@ This follows the pattern of `src/adapters/sdk/agent.ts::chatStream()`, which wra
 
 #### 3. Slash Command Autocomplete
 **Current:** No TAB completion. Discovery via `/help`.
-**Target:** Type `/` in prompt → dropdown above input showing fuzzy-filtered commands with descriptions. Uses Ink's `useInput` hook. Sources: the built-in command registry + skill names (a `.zoe/commands/` custom-command loader is added only if that mechanism is introduced).
+**Target:** Type `/` in prompt → dropdown above input showing fuzzy-filtered commands with descriptions. Uses Ink's `useInput` hook. Sources: the built-in command registry + skill names (a `.seepient/commands/` custom-command loader is added only if that mechanism is introduced).
 
 #### 4. @mention / File Autocomplete
 **Current:** Regex substitution in raw input. No discovery.
@@ -405,7 +405,7 @@ Before any Phase 1 code:
 4. Wire `render()` call with basic layout: `<MessageArea>` + `<PromptArea>`
 5. Connect user input → `Agent.chat({ onStep, approveTool, signal })` → render response in message area. **No new engine API:** the loop's existing `onStep` callback drives step-at-a-time rendering (see §Feature Gap #2). `@path` resolution is consolidated to the caller here.
 6. TUI consumes `onStep`: text steps render as `AssistantMessage`, tool steps render as `ToolCallBlock`; `approveTool` is bridged to the inline `<PermissionPrompt>` via a `PromiseWithResolvers`.
-7. **Verify:** Compile succeeds. `zoe -n` / `--docker` still use readline. `zoe` (interactive) shows the Ink TUI with input → response flow **including tool execution**: a shell-command prompt renders the tool block with output, a custom-model skill switches providers and runs, a `--moderate` destructive tool prompts for approval inline. `pnpm dev` (tsx) resolves the lazy `.tsx` import. `pnpm test` passes.
+7. **Verify:** Compile succeeds. `seepient -n` / `--docker` still use readline. `seepient` (interactive) shows the Ink TUI with input → response flow **including tool execution**: a shell-command prompt renders the tool block with output, a custom-model skill switches providers and runs, a `--moderate` destructive tool prompts for approval inline. `pnpm dev` (tsx) resolves the lazy `.tsx` import. `pnpm test` passes.
 
 **`approveTool` async bridge spec.** In TUI mode, the `approveTool` callback runs inside a detached `runAgentLoop` promise; it must pause and wait for the user to press y/n in a React component. Pattern: `use-agent.ts` creates a `PromiseWithResolvers<boolean>`, sets React state to render `<PermissionPrompt>`, and the pending promise is passed as the `approveTool` to `runAgentLoop`. `<PermissionPrompt>` calls `resolve(true/false)` on keypress. The **caller** (`use-agent.ts`) owns this bridge — it creates the promise and GCs stale resolvers on abort — regardless of whether the underlying call is `Agent.chat()` (Phase 1) or `Agent.chatStream()` (Phase 2).
 
@@ -447,9 +447,9 @@ Before any Phase 1 code:
 
 4. **Terminal compatibility** — Ink renders using ANSI escape sequences. Works in all modern terminals (iTerm2, Terminal.app, Windows Terminal, VS Code terminal, tmux). Docker containers with `-it` flag work. CI/headless never loads the TUI.
 
-5. **Zoe architecture constraints** — Phase 1 is contained to the CLI adapter; the TUI drives the existing `agent.chat({ onStep })` path, never reaches into provider or core internals. The existing `agent.chat()` path is also used by headless mode. Phase 2 is an additive, backward-compatible enhancement to the shared engine (new optional `provider.chatStream()` + `Agent.chatStream()` + `text_delta` step type, plus provider implementations), consistent with the single-`runAgentLoop` invariant rather than a bypass.
+5. **Seepient architecture constraints** — Phase 1 is contained to the CLI adapter; the TUI drives the existing `agent.chat({ onStep })` path, never reaches into provider or core internals. The existing `agent.chat()` path is also used by headless mode. Phase 2 is an additive, backward-compatible enhancement to the shared engine (new optional `provider.chatStream()` + `Agent.chatStream()` + `text_delta` step type, plus provider implementations), consistent with the single-`runAgentLoop` invariant rather than a bypass.
 
-6. **Build configuration** — Requires `"jsx": "react-jsx"` in `tsconfig.json` (1 line). `tsc` supports JSX compilation natively since TypeScript 4.1. No bundler needed — same `tsc` build as today. React is kept out of headless because `index.ts` uses a dynamic `import('./tui/index.js')` guarded by `resolveLaunchMode(options) === 'interactive'` (composes TTY + `--no-interactive` + piped stdin + `--docker` + `ZOE_NO_INTERACTIVE` — the same predicate that selects the system prompt). No static import chain from `index.ts` or `repl.ts` reaches any `.tsx` file. Guard: CI should assert `grep -L jsx-runtime dist/adapters/cli/repl.js` (fails if React leaks into headless) — enforced from the first TUI commit, not deferred. **Dev-mode caveat:** under `pnpm dev` (tsx) the lazy `.js` specifier must resolve the `.tsx` source; verify on the first US1 commit or the interactive dev loop breaks.
+6. **Build configuration** — Requires `"jsx": "react-jsx"` in `tsconfig.json` (1 line). `tsc` supports JSX compilation natively since TypeScript 4.1. No bundler needed — same `tsc` build as today. React is kept out of headless because `index.ts` uses a dynamic `import('./tui/index.js')` guarded by `resolveLaunchMode(options) === 'interactive'` (composes TTY + `--no-interactive` + piped stdin + `--docker` + `SEEPIENT_NO_INTERACTIVE` — the same predicate that selects the system prompt). No static import chain from `index.ts` or `repl.ts` reaches any `.tsx` file. Guard: CI should assert `grep -L jsx-runtime dist/adapters/cli/repl.js` (fails if React leaks into headless) — enforced from the first TUI commit, not deferred. **Dev-mode caveat:** under `pnpm dev` (tsx) the lazy `.js` specifier must resolve the `.tsx` source; verify on the first US1 commit or the interactive dev loop breaks.
 
 ---
 

@@ -5,12 +5,12 @@ description: Persist and restore agent conversation history with built-in and cu
 
 # Session Persistence
 
-Zoe Agent agents can persist conversation history across process restarts using session stores. Pass a `persist` option to `createAgent()` and the agent automatically saves and loads messages.
+Seepient Agent agents can persist conversation history across process restarts using session stores. Pass a `persist` option to `createAgent()` and the agent automatically saves and loads messages.
 
 ## Quick example
 
 ```typescript
-import { createAgent } from "zoe-agent";
+import { createAgent } from "seepient";
 
 // File-based persistence -- sessions stored as JSON files
 const agent = await createAgent({
@@ -54,16 +54,16 @@ Third-party `PersistenceBackend` implementations must now include `readonly __pe
 
 ## Built-in stores
 
-Zoe Agent ships with two session store implementations.
+Seepient Agent ships with two session store implementations.
 
 ### FilePersistenceBackend
 
 File-backed storage. Each session is a JSON file in a directory. Writes are **atomic** — data is written to a temporary file first, then renamed into place, so a crash mid-write never leaves a corrupt session file.
 
 ```typescript
-import { createPersistenceBackend } from "zoe-agent";
+import { createPersistenceBackend } from "seepient";
 
-// Default: stores in ~/.zoe/sessions/
+// Default: stores in ~/.seepient/sessions/
 const store = createPersistenceBackend({ type: "file" });
 
 // Custom directory
@@ -73,7 +73,7 @@ const customStore = createPersistenceBackend({ type: "file", path: "./data/my-se
 | Property         | Value                                      |
 |------------------|--------------------------------------------|
 | Storage          | JSON files, one per session                |
-| Default path     | `~/.zoe/sessions/`                       |
+| Default path     | `~/.seepient/sessions/`                       |
 | File naming      | `{sessionId}.json`                         |
 | Auto-creates dir | Yes                                        |
 | Write safety     | Atomic (tmp + rename)                      |
@@ -101,7 +101,7 @@ Session IDs must contain only alphanumeric characters and dashes (`[a-zA-Z0-9-]+
 In-memory storage backed by a `Map`. Sessions are lost when the process exits.
 
 ```typescript
-import { createPersistenceBackend } from "zoe-agent";
+import { createPersistenceBackend } from "seepient";
 
 const store = createPersistenceBackend({ type: "memory" });
 
@@ -130,7 +130,7 @@ const agent = await createAgent({
 
 ### File path (string)
 
-Pass a directory path as a string. Zoe Agent creates a `FilePersistenceBackend` automatically:
+Pass a directory path as a string. Seepient Agent creates a `FilePersistenceBackend` automatically:
 
 ```typescript
 const agent = await createAgent({
@@ -143,7 +143,7 @@ const agent = await createAgent({
 Pass any `PersistenceBackend` implementation:
 
 ```typescript
-import { createPersistenceBackend } from "zoe-agent";
+import { createPersistenceBackend } from "seepient";
 
 const store = createPersistenceBackend({ type: "file", path: "./data/sessions" });
 
@@ -154,7 +154,7 @@ const agent = await createAgent({
 
 ### Auto-generated session IDs
 
-When you use `createAgent()` with a `persist` option, Zoe Agent auto-generates a session ID. Each agent instance gets its own session file:
+When you use `createAgent()` with a `persist` option, Seepient Agent auto-generates a session ID. Each agent instance gets its own session file:
 
 ```typescript
 // Each creates a separate session file
@@ -210,7 +210,7 @@ agent.clear();
 
 ## Session limits and cleanup
 
-Zoe Agent enforces the following session limits to prevent resource exhaustion:
+Seepient Agent enforces the following session limits to prevent resource exhaustion:
 
 | Limit                  | Value      | Description                                        |
 |------------------------|------------|----------------------------------------------------|
@@ -226,7 +226,7 @@ These limits apply to the Server adapter's `ServerSessionManager`, which manages
 ### Manual cleanup
 
 ```typescript
-import { createPersistenceBackend } from "zoe-agent";
+import { createPersistenceBackend } from "seepient";
 
 const store = createPersistenceBackend({ type: "file", path: "./sessions" });
 
@@ -253,7 +253,7 @@ Implement the `PersistenceBackend` interface to use any backend.
 ### Redis session store
 
 ```typescript
-import { createAgent, type PersistenceBackend, type SessionData } from "zoe-agent";
+import { createAgent, type PersistenceBackend, type SessionData } from "seepient";
 import { createClient } from "redis";
 
 const redis = createClient({ url: "redis://localhost:6379" });
@@ -263,25 +263,25 @@ const redisStore: PersistenceBackend = {
   readonly __persistenceBackend: true as const,
 
   async save(sessionId: string, data: SessionData): Promise<void> {
-    const key = `zoe:session:${sessionId}`;
+    const key = `seepient:session:${sessionId}`;
     await redis.set(key, JSON.stringify(data), {
       EX: 86400, // 24-hour TTL
     });
   },
 
   async load(sessionId: string): Promise<SessionData | null> {
-    const raw = await redis.get(`zoe:session:${sessionId}`);
+    const raw = await redis.get(`seepient:session:${sessionId}`);
     if (!raw) return null;
     return JSON.parse(raw);
   },
 
   async delete(sessionId: string): Promise<void> {
-    await redis.del(`zoe:session:${sessionId}`);
+    await redis.del(`seepient:session:${sessionId}`);
   },
 
   async list(): Promise<string[]> {
-    const keys = await redis.keys("zoe:session:*");
-    return keys.map((k) => k.replace("zoe:session:", ""));
+    const keys = await redis.keys("seepient:session:*");
+    return keys.map((k) => k.replace("seepient:session:", ""));
   },
 };
 
@@ -291,7 +291,7 @@ const agent = await createAgent({ persist: redisStore });
 ### Database session store
 
 ```typescript
-import { createAgent, type PersistenceBackend, type SessionData } from "zoe-agent";
+import { createAgent, type PersistenceBackend, type SessionData } from "seepient";
 
 // Example with a generic database client
 const dbStore: PersistenceBackend = {
@@ -342,7 +342,7 @@ For custom stores, implement TTL cleanup in your backend (Redis EX, database cro
 | `createMemoryStore()`          | `() => PersistenceBackend`                       | `MemoryPersistenceBackend` (legacy, deprecated) |
 
 ```typescript
-import { createPersistenceBackend } from "zoe-agent";
+import { createPersistenceBackend } from "seepient";
 
 // Production: file-based
 const fileStore = createPersistenceBackend({ type: "file", path: "./data/sessions" });

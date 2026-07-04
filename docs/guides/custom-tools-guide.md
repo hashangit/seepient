@@ -1,11 +1,11 @@
 ---
 title: Custom Tools Guide
-description: Create, register, and use custom tools with Zoe Agent's tool framework.
+description: Create, register, and use custom tools with Seepient Agent's tool framework.
 ---
 
 # Custom Tools Guide
 
-Tools are the building blocks that give Zoe Agent agents the ability to take action. This guide covers creating custom tools using the `tool()` factory, registering them, and mixing them with built-in tools.
+Tools are the building blocks that give Seepient Agent agents the ability to take action. This guide covers creating custom tools using the `tool()` factory, registering them, and mixing them with built-in tools.
 
 ## What Are Tools?
 
@@ -15,14 +15,14 @@ A tool is a function that an LLM can invoke during generation. Each tool has:
 - A **parameter schema** (Zod or JSON Schema) that defines the inputs
 - An **execute function** that runs when the LLM calls the tool
 
-Zoe Agent ships with 12 built-in tools (see [Tools Reference](/tools/reference)). Custom tools use the same interface, so they work identically in `generateText`, `streamText`, and `createAgent`.
+Seepient Agent ships with 12 built-in tools (see [Tools Reference](/tools/reference)). Custom tools use the same interface, so they work identically in `generateText`, `streamText`, and `createAgent`.
 
 ## Step 1: Define a Tool with Zod Schema
 
 Use the `tool()` factory to create a tool from a Zod schema:
 
 ```typescript
-import { tool } from "zoe-agent";
+import { tool } from "seepient";
 import { z } from "zod";
 
 const weatherTool = tool({
@@ -178,7 +178,7 @@ setTimeout(() => controller.abort(), 30_000);
 Pass custom tools directly in the `tools` array:
 
 ```typescript
-import { generateText, tool } from "zoe-agent";
+import { generateText, tool } from "seepient";
 import { z } from "zod";
 
 const myTool = tool({
@@ -200,7 +200,7 @@ console.log(result.toolCalls); // Array of tool invocations
 Register a tool globally so it is available in all calls:
 
 ```typescript
-import { registerTool, tool } from "zoe-agent";
+import { registerTool, tool } from "seepient";
 
 registerTool(
   tool({
@@ -265,7 +265,7 @@ const result = await generateText("Deploy and verify the service", {
 Tools can call other tools internally:
 
 ```typescript
-import { executeTool } from "zoe-agent";
+import { executeTool } from "seepient";
 
 const deployAndVerify = tool({
   name: "deploy_and_verify",
@@ -321,7 +321,7 @@ Custom tool names must not collide with built-in tool names. Use a namespace pre
 :::
 
 ::: warning Zod schema limits
-Zoe converts Zod schemas to JSON Schema using `zod-to-json-schema`. Complex schemas with refinements or transforms may not convert cleanly. For advanced schemas, use plain JSON Schema directly.
+Seepient converts Zod schemas to JSON Schema using `zod-to-json-schema`. Complex schemas with refinements or transforms may not convert cleanly. For advanced schemas, use plain JSON Schema directly.
 :::
 
 ::: warning Execute function must return a string

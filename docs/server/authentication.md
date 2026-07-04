@@ -1,27 +1,27 @@
 ---
 title: Authentication
-description: Zoe Agent Server API key format, generation, scopes, and auth methods.
+description: Seepient Agent Server API key format, generation, scopes, and auth methods.
 ---
 
 # Authentication
 
-Zoe Agent Server uses API keys for authentication. Every request (except the health check) must include a valid key with appropriate permissions.
+Seepient Agent Server uses API keys for authentication. Every request (except the health check) must include a valid key with appropriate permissions.
 
 ## API key format
 
 Keys follow the format:
 
 ```
-sk_zoe_{64-character-hex}
+sk_seepient_{64-character-hex}
 ```
 
 Example:
 
 ```
-sk_zoe_a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd
+sk_seepient_a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd
 ```
 
-Keys are generated using 32 random bytes (256 bits of entropy) and prefixed with `sk_zoe_` for easy identification.
+Keys are generated using 32 random bytes (256 bits of entropy) and prefixed with `sk_seepient_` for easy identification.
 
 ## Generating keys
 
@@ -30,15 +30,15 @@ Keys are generated using 32 random bytes (256 bits of entropy) and prefixed with
 ::: code-group
 
 ```bash [Default scopes]
-zoe server keygen
+seepient server keygen
 ```
 
 ```bash [Custom scopes]
-zoe server keygen --scopes agent:run,agent:read
+seepient server keygen --scopes agent:run,agent:read
 ```
 
 ```bash [With label]
-zoe server keygen --scopes admin --label "production-admin"
+seepient server keygen --scopes admin --label "production-admin"
 ```
 
 :::
@@ -46,13 +46,13 @@ zoe server keygen --scopes admin --label "production-admin"
 ### Programmatic
 
 ```typescript
-import { generateApiKey } from "zoe-agent/server";
+import { generateApiKey } from "seepient/server";
 
 const entry = generateApiKey(["agent:run", "agent:read"], {
   label: "my-app",
 });
 
-console.log(entry.key);   // sk_zoe_...
+console.log(entry.key);   // sk_seepient_...
 console.log(entry.scopes); // ["agent:run", "agent:read"]
 ```
 
@@ -61,7 +61,7 @@ console.log(entry.scopes); // ["agent:run", "agent:read"]
 API keys are stored in:
 
 ```
-~/.zoe/server-keys.json
+~/.seepient/server-keys.json
 ```
 
 The file is created with `0o600` permissions (owner read/write only). The store is a JSON array:
@@ -70,7 +70,7 @@ The file is created with `0o600` permissions (owner read/write only). The store 
 {
   "keys": [
     {
-      "key": "sk_zoe_a1b2c3...",
+      "key": "sk_seepient_a1b2c3...",
       "scopes": ["agent:run"],
       "created": "2026-04-08T12:00:00.000Z",
       "label": "generated"
@@ -83,12 +83,12 @@ The file is created with `0o600` permissions (owner read/write only). The store 
 
 | Action | CLI | Programmatic |
 |---|---|---|
-| Generate | `zoe server keygen` | `generateApiKey(scopes, options)` |
-| List | `zoe server keys` | `loadApiKeys(filePath?)` |
-| Revoke | `zoe server revoke <key>` | `revokeApiKey(key, filePath?)` |
+| Generate | `seepient server keygen` | `generateApiKey(scopes, options)` |
+| List | `seepient server keys` | `loadApiKeys(filePath?)` |
+| Revoke | `seepient server revoke <key>` | `revokeApiKey(key, filePath?)` |
 
 ::: warning File permissions
-Ensure `~/.zoe/server-keys.json` remains `0o600`. The server caches keys in memory and reloads when the file changes, so modifications take effect without restart.
+Ensure `~/.seepient/server-keys.json` remains `0o600`. The server caches keys in memory and reloads when the file changes, so modifications take effect without restart.
 :::
 
 ## Scopes
@@ -122,27 +122,27 @@ Three methods are supported for passing API keys:
 
 ```bash
 curl http://localhost:7337/v1/chat \
-  -H "X-Zoe-API-Key: sk_zoe_..."
+  -H "X-Seepient-API-Key: sk_seepient_..."
 ```
 
 ### 2. Authorization Bearer header
 
 ```bash
 curl http://localhost:7337/v1/chat \
-  -H "Authorization: Bearer sk_zoe_..."
+  -H "Authorization: Bearer sk_seepient_..."
 ```
 
 ### 3. Query parameter (WebSocket only)
 
 ```javascript
-const ws = new WebSocket("ws://localhost:7337/ws?token=sk_zoe_...");
+const ws = new WebSocket("ws://localhost:7337/ws?token=sk_seepient_...");
 ```
 
 ### Lookup order
 
 The server checks credentials in this order:
 
-1. `X-Zoe-API-Key` header
+1. `X-Seepient-API-Key` header
 2. `Authorization: Bearer` header
 3. `token` query parameter
 

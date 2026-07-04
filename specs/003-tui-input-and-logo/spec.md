@@ -1,4 +1,4 @@
-# Feature Specification: TUI Persistent Input Box + Zoe Agent Logo
+# Feature Specification: TUI Persistent Input Box + Seepient Agent Logo
 
 **Feature Branch**: `003-tui-input-and-logo`
 
@@ -11,8 +11,9 @@
 > (not a separate `InputBox`); the input is always visible with the spinner above
 > it (queue / `/steer`-active, not dimmed); the logo is a figlet wordmark
 > (`ANSI Compact`) with a Tokyo Night 45° rainbow gradient + `by hashangit · v…`
-> descriptor, rendered as a `kind: 'logo'` feed entry that scrolls away. Rename is
-> logo-only (the full Zoe → Zoe rename is a separate, future task).
+> descriptor, rendered as a `kind: 'logo'` feed entry that scrolls away. Branding is
+> split by design: the logo shows the full wordmark ("Seepient Agent"), while the binary
+> and package use the short name (`seepient`).
 
 **Predecessor**: `specs/001-tui-upgrade` (the Ink/React TUI this builds on, US1-US4 shipped)
 
@@ -37,10 +38,10 @@ input box, and a brand logo.
 | Input positioning | **Last live element, directly above the Footer, in content flow.** NOT viewport-bottom-pinned — see *Constraints* |
 | Future: queue / steer mid-run | **Out of scope** — only noted as a follow-up |
 | Logo placement | **Large welcome banner on launch**, rendered as the first feed entry so it scrolls away as the feed grows |
-| Logo text | **"Zoe Agent"** (the product is being renamed Zoe → Zoe) |
+| Logo text | **"Seepient Agent"** (the full wordmark; the binary and package use the short name `seepient`) |
 | Logo color | **Tokyo Night rainbow** across all letters, sampled along a **45° axis**, interpolated in **HSL** (hue rotation) so mid-tones stay vivid |
 | Persistent compact wordmark | **Deferred** to a later task |
-| Rename width | **Logo only.** Placeholder, spinner, footer, binary name, package stay **Zoe** — mixed branding is **intentional** during the rename window |
+| Branding scope | **Logo only shows the full wordmark.** Placeholder, spinner, footer, binary name, and package use the short name `seepient` — split branding is **intentional** |
 
 ## Constraints (read before judging "pinned to the bottom")
 
@@ -71,7 +72,7 @@ sits lower — a partial, incidental mitigation only.
 The prompt renders inside a rounded-border box, directly above the status footer
 as the last live element, and is present on **every** frame. While the agent
 runs, the box stays visible but dimmed and stops accepting keystrokes; the
-"Zoe is working" spinner sits immediately above the box instead of replacing
+"Seepient is working" spinner sits immediately above the box instead of replacing
 it. While an overlay (palette/help/model/settings) or a permission prompt is
 open, the box also stays visible but inert (the overlay owns stdin).
 
@@ -80,7 +81,7 @@ mutually-exclusive options in the live region (see `app.tsx`) — while running 
 is replaced by the spinner, so it vanishes, and it has no border so it reads as
 just another line of the feed.
 
-**Independent Test**: Run `zoe`, submit a prompt that triggers a long shell
+**Independent Test**: Run `seepient`, submit a prompt that triggers a long shell
 command — the rounded input box stays (dimmed) with the spinner above it; when
 the run finishes the box is live again. Open Ctrl+P — the box stays visible but
 keystrokes go to the palette, not the box.
@@ -106,32 +107,32 @@ keystrokes go to the palette, not the box.
 
 ---
 
-### User Story 2 - Zoe Agent logo (Priority: P1)
+### User Story 2 - Seepient Agent logo (Priority: P1)
 
-On launch, a large "Zoe Agent" banner renders with a Tokyo Night rainbow
+On launch, a large "Seepient Agent" banner renders with a Tokyo Night rainbow
 gradient running across all the letters along a 45° axis. It renders as the
 **first feed entry**, so it scrolls up into native scrollback as the user chats.
 
 **Why this priority**: Brand presence + visual identity parity with peer agent
 CLIs. Pure presentation; touches only the TUI presentation layer.
 
-**Independent Test**: Run `zoe` on a fresh session — see the large gradient
-"Zoe Agent". Send a message — the banner scrolls up out of view. Confirm the
+**Independent Test**: Run `seepient` on a fresh session — see the large gradient
+"Seepient Agent". Send a message — the banner scrolls up out of view. Confirm the
 sweep is a vivid rainbow (red → orange → yellow → green → cyan → blue → purple).
 
 **Acceptance Scenarios**:
 
 1. **Given** a fresh session, **When** the TUI launches, **Then** the large
-   multi-line gradient "Zoe Agent" renders as the first feed entry.
+   multi-line gradient "Seepient Agent" renders as the first feed entry.
 2. **Given** the feed is growing, **When** entries scroll, **Then** the banner
    scrolls away via the normal `<Static>` mechanism (it is a real feed entry,
    not a special-case element).
 3. **Given** the logo, **When** inspected, **Then** every letter cell is colored
    from the Tokyo Night palette (`theme.ts`) interpolated in **HSL** along a 45°
    axis — no muddy RGB mid-tones, no new dependency.
-4. **Given** the rename is logo-only, **When** scanning the rest of the UI,
-   **Then** the placeholder, spinner, footer, binary, and package still say
-   Zoe — only the logo says "Zoe Agent" (intentional mixed branding).
+4. **Given** the branding split, **When** scanning the rest of the UI,
+   **Then** the placeholder, spinner, footer, binary, and package say
+   `seepient` — only the logo says "Seepient Agent" (intentional split branding).
 
 ---
 
@@ -163,7 +164,7 @@ sweep is a vivid rainbow (red → orange → yellow → green → cyan → blue 
   `Autocomplete`, history ↑/↓, `/`+`@` completion). A single `enabled` flag on
   `TextInput` powers disable (its `useInput` early-returns); `InputBox.disabled`
   composes it from `isRunning || overlay !== null || !!pendingPermission`.
-- **FR-004**: The logo MUST render "Zoe Agent" with per-cell colors sampled from
+- **FR-004**: The logo MUST render "Seepient Agent" with per-cell colors sampled from
   the Tokyo Night palette in `theme.ts` along a 45° axis, interpolated in **HSL**
   (hue rotation) for vivid mid-tones. Pure function, unit-tested, no new
   dependency.
@@ -172,8 +173,9 @@ sweep is a vivid rainbow (red → orange → yellow → green → cyan → blue 
   (`message-area.tsx`) rendering `<LogoBanner/>`; seed one logo entry at session
   start so it scrolls away with the feed via `<Static>`. No special-case element,
   no `as any`.
-- **FR-006**: Rename is logo-only. Every other user-visible string, the binary
-  name, and the package name MUST remain Zoe. Mixed branding is intentional.
+- **FR-006**: Branding is split by design. Every user-visible string other than the
+  logo, plus the binary name and package name, use the short name `seepient`; only the
+  logo shows the full "Seepient Agent" wordmark. Split branding is intentional.
 - **FR-007**: Non-interactive launch paths MUST never import the new components;
   the lazy-load invariant MUST hold.
 - **FR-008**: `pnpm test` MUST pass. The gradient function MUST have unit tests.
@@ -183,7 +185,7 @@ sweep is a vivid rainbow (red → orange → yellow → green → cyan → blue 
 - **`InputBox`** (presentation component): wraps `PromptArea`'s input in a
   rounded border; `disabled` dims + disables (composed from run/overlay/permission
   state by `app.tsx`).
-- **`LogoBanner`** (presentation component): large multi-line ASCII "Zoe Agent";
+- **`LogoBanner`** (presentation component): large multi-line ASCII "Seepient Agent";
   rendered through a `kind: 'logo'` feed entry.
 - **`FeedEntry` (`tui/types.ts`)**: gains a `kind: 'logo'` variant (one seeded at
   session start).
@@ -197,11 +199,11 @@ sweep is a vivid rainbow (red → orange → yellow → green → cyan → blue 
 - **SC-001**: Input is a clearly bordered box, present (dimmed) during runs and
   overlays — vs the current borderless prompt that vanishes while running.
 - **SC-002**: Spinner appears above the input box during runs — vs replacing it.
-- **SC-003**: "Zoe Agent" logo with a vivid 45° Tokyo Night rainbow shows on
+- **SC-003**: "Seepient Agent" logo with a vivid 45° Tokyo Night rainbow shows on
   launch and scrolls away as the feed grows.
-- **SC-004**: Only the logo text changed to "Zoe Agent"; binary/package/Zoe
+- **SC-004**: Only the logo text changed to "Seepient Agent"; binary/package/Seepient
   strings elsewhere unchanged.
-- **SC-005**: `zoe -n`, SDK, Server, and `pnpm test` unaffected.
+- **SC-005**: `seepient -n`, SDK, Server, and `pnpm test` unaffected.
 
 ## Assumptions
 

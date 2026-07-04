@@ -6,7 +6,7 @@ import type { LLMProvider, ProviderResponse } from "../providers/types.js";
 function mockProvider(response?: Partial<ProviderResponse>): LLMProvider {
   return {
     chat: vi.fn().mockResolvedValue({
-      content: "Hello from Zoe!",
+      content: "Hello from Seepient!",
       ...response,
     }),
   } as unknown as LLMProvider;
@@ -43,7 +43,7 @@ describe("SDK e2e — generateText with mock provider", () => {
       maxSteps: 1,
     });
 
-    expect(result.text).toBe("Hello from Zoe!");
+    expect(result.text).toBe("Hello from Seepient!");
     expect(result.finishReason).toBe("stop");
     expect(result.messages.length).toBeGreaterThan(0);
   });

@@ -1,5 +1,5 @@
 /**
- * Zoe Core — Provider Environment Resolution
+ * Seepient Core — Provider Environment Resolution
  *
  * Environment variable helpers, default models, and env-based resolution.
  * Extracted from provider-resolver.ts for single-responsibility.
@@ -43,9 +43,9 @@ export function resolveApiKey(type: ProviderType): string | undefined {
   }
   // Backward compat: check deprecated env vars
   if (type === "openai-compatible") {
-    const legacy = env("ZOE_API_KEY");
+    const legacy = env("SEEPIENT_API_KEY");
     if (legacy) {
-      console.warn("[zoe] ZOE_API_KEY is deprecated. Use OPENAI_COMPAT_API_KEY instead.");
+      console.warn("[seepient] SEEPIENT_API_KEY is deprecated. Use OPENAI_COMPAT_API_KEY instead.");
       return legacy;
     }
   }
@@ -62,7 +62,7 @@ export function resolveBaseUrl(type: ProviderType): string | undefined {
   if (type === "openai-compatible") {
     const legacy = env("OPENAI_BASE_URL");
     if (legacy) {
-      console.warn("[zoe] OPENAI_BASE_URL is deprecated. Use OPENAI_COMPAT_BASE_URL instead.");
+      console.warn("[seepient] OPENAI_BASE_URL is deprecated. Use OPENAI_COMPAT_BASE_URL instead.");
       return legacy;
     }
   }
@@ -70,7 +70,7 @@ export function resolveBaseUrl(type: ProviderType): string | undefined {
 }
 
 export function resolveDefaultType(): ProviderType {
-  const fromEnv = env("LLM_PROVIDER") ?? env("ZOE_PROVIDER");
+  const fromEnv = env("LLM_PROVIDER") ?? env("SEEPIENT_PROVIDER");
   if (
     fromEnv &&
     (fromEnv === "openai" ||
@@ -84,7 +84,7 @@ export function resolveDefaultType(): ProviderType {
 }
 
 export function resolveDefaultModel(type: ProviderType): string {
-  return env("LLM_MODEL") ?? env("ZOE_MODEL") ?? DEFAULT_MODELS[type];
+  return env("LLM_MODEL") ?? env("SEEPIENT_MODEL") ?? DEFAULT_MODELS[type];
 }
 
 // ── GLM model alias resolution ───────────────────────────────────────
@@ -135,24 +135,24 @@ export function resolveFromEnv(): MultiProviderConfig | null {
       model: process.env.GLM_MODEL ?? DEFAULT_MODELS.glm,
     };
   }
-  const compatApiKey = process.env.OPENAI_COMPAT_API_KEY || process.env.ZOE_API_KEY;
+  const compatApiKey = process.env.OPENAI_COMPAT_API_KEY || process.env.SEEPIENT_API_KEY;
   const compatBaseUrl = process.env.OPENAI_COMPAT_BASE_URL || process.env.OPENAI_BASE_URL;
   if (compatApiKey && compatBaseUrl) {
-    if (process.env.ZOE_API_KEY && !process.env.OPENAI_COMPAT_API_KEY) {
-      console.warn("[zoe] ZOE_API_KEY is deprecated. Use OPENAI_COMPAT_API_KEY instead.");
+    if (process.env.SEEPIENT_API_KEY && !process.env.OPENAI_COMPAT_API_KEY) {
+      console.warn("[seepient] SEEPIENT_API_KEY is deprecated. Use OPENAI_COMPAT_API_KEY instead.");
     }
     if (process.env.OPENAI_BASE_URL && !process.env.OPENAI_COMPAT_BASE_URL) {
-      console.warn("[zoe] OPENAI_BASE_URL is deprecated. Use OPENAI_COMPAT_BASE_URL instead.");
+      console.warn("[seepient] OPENAI_BASE_URL is deprecated. Use OPENAI_COMPAT_BASE_URL instead.");
     }
     config["openai-compatible"] = {
       apiKey: compatApiKey,
       baseUrl: compatBaseUrl,
-      model: process.env.OPENAI_COMPAT_MODEL ?? process.env.LLM_MODEL ?? process.env.ZOE_MODEL ?? DEFAULT_MODELS['openai-compatible'],
+      model: process.env.OPENAI_COMPAT_MODEL ?? process.env.LLM_MODEL ?? process.env.SEEPIENT_MODEL ?? DEFAULT_MODELS['openai-compatible'],
     };
   }
 
   if (Object.keys(config).length > 0) {
-    const defaultProvider = ((process.env.LLM_PROVIDER ?? process.env.ZOE_PROVIDER) as ProviderType) ??
+    const defaultProvider = ((process.env.LLM_PROVIDER ?? process.env.SEEPIENT_PROVIDER) as ProviderType) ??
       ((config.openai ? "openai" : Object.keys(config)[0]) as ProviderType);
 
     return {

@@ -1,9 +1,9 @@
-# Zoe Agent Server Settings API — Requirements Document
+# Seepient Agent Server Settings API — Requirements Document
 
 **Status:** Draft
 **Date:** 2026-04-15
 **Version:** 0.1.0
-**Audience:** Backend engineers implementing the settings API for the Zoe Agent standalone server.
+**Audience:** Backend engineers implementing the settings API for the Seepient Agent standalone server.
 
 ---
 
@@ -11,7 +11,7 @@
 
 ### 1.1 Problem
 
-The Zoe Agent server (`src/adapters/server/`) exposes REST and WebSocket endpoints for chat, sessions, models, and skills. There are no endpoints for reading or modifying server configuration. Server operators must edit `~/.zoe/setting.json` or environment variables manually and restart the process. SDK consumers and dashboard UIs have no programmatic way to discover or change settings at runtime.
+The Seepient Agent server (`src/adapters/server/`) exposes REST and WebSocket endpoints for chat, sessions, models, and skills. There are no endpoints for reading or modifying server configuration. Server operators must edit `~/.seepient/setting.json` or environment variables manually and restart the process. SDK consumers and dashboard UIs have no programmatic way to discover or change settings at runtime.
 
 ### 1.2 Goals
 
@@ -52,8 +52,8 @@ Secret fields: any field whose name ends in `ApiKey`, `Pass`, `Password`, `Secre
 ### Common Headers
 
 All authenticated endpoints accept:
-- `X-Zoe-API-Key: sk_zoe_...`
-- `Authorization: Bearer sk_zoe_...`
+- `X-Seepient-API-Key: sk_seepient_...`
+- `Authorization: Bearer sk_seepient_...`
 
 All responses are `Content-Type: application/json`.
 
@@ -83,7 +83,7 @@ Read all settings across all categories. Secrets are masked.
 **Request:**
 ```
 GET /v1/settings HTTP/1.1
-X-Zoe-API-Key: sk_zoe_abc123
+X-Seepient-API-Key: sk_seepient_abc123
 ```
 
 **Response 200:**
@@ -137,7 +137,7 @@ X-Zoe-API-Key: sk_zoe_abc123
     "maxPermissionLevel": "permissive"
   },
   "persistence": {
-    "sessionDir": "/home/user/.zoe/sessions",
+    "sessionDir": "/home/user/.seepient/sessions",
     "backendType": "file"
   },
   "skills": {
@@ -166,7 +166,7 @@ Read a single category. Secrets are masked.
 **Request:**
 ```
 GET /v1/settings/agent HTTP/1.1
-X-Zoe-API-Key: sk_zoe_abc123
+X-Seepient-API-Key: sk_seepient_abc123
 ```
 
 **Response 200:**
@@ -197,7 +197,7 @@ Partial update across multiple categories. Only supplied fields are changed; omi
 **Request:**
 ```
 PATCH /v1/settings HTTP/1.1
-X-Zoe-API-Key: sk_zoe_admin_key
+X-Seepient-API-Key: sk_seepient_admin_key
 Content-Type: application/json
 ```
 
@@ -261,7 +261,7 @@ Partial update within a single category.
 **Request:**
 ```
 PATCH /v1/settings/agent HTTP/1.1
-X-Zoe-API-Key: sk_zoe_admin_key
+X-Seepient-API-Key: sk_seepient_admin_key
 Content-Type: application/json
 ```
 
@@ -301,7 +301,7 @@ Add a new provider configuration. If the provider already exists, returns `409 C
 **Request:**
 ```
 POST /v1/providers HTTP/1.1
-X-Zoe-API-Key: sk_zoe_admin_key
+X-Seepient-API-Key: sk_seepient_admin_key
 Content-Type: application/json
 ```
 
@@ -356,7 +356,7 @@ Update an existing provider's configuration. Only supplied fields are changed.
 **Request:**
 ```
 PATCH /v1/providers/openai HTTP/1.1
-X-Zoe-API-Key: sk_zoe_admin_key
+X-Seepient-API-Key: sk_seepient_admin_key
 Content-Type: application/json
 ```
 
@@ -407,7 +407,7 @@ Remove a provider configuration. If the removed provider was the default, the se
 **Request:**
 ```
 DELETE /v1/providers/glm HTTP/1.1
-X-Zoe-API-Key: sk_zoe_admin_key
+X-Seepient-API-Key: sk_seepient_admin_key
 ```
 
 **Response 200:**
@@ -445,14 +445,14 @@ Return the JSON Schema for all settings. Used by UI tooling to build dynamic for
 **Request:**
 ```
 GET /v1/settings/schema HTTP/1.1
-X-Zoe-API-Key: sk_zoe_abc123
+X-Seepient-API-Key: sk_seepient_abc123
 ```
 
 **Response 200:**
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Zoe Agent Server Settings",
+  "title": "Seepient Agent Server Settings",
   "type": "object",
   "properties": {
     "providers": {
@@ -864,7 +864,7 @@ When exceeded, return `429 Too Many Requests`:
 
 ### 5.4 Audit Logging
 
-Every settings write operation is logged to `~/.zoe/settings-audit.jsonl` (one JSON object per line). Each entry:
+Every settings write operation is logged to `~/.seepient/settings-audit.jsonl` (one JSON object per line). Each entry:
 
 ```json
 {
@@ -998,8 +998,8 @@ Clients can poll health or receive `settings_changed` push to learn about pendin
 ### 8.1 File Format
 
 Settings are persisted to the existing `setting.json` file at either:
-- Local: `.zoe/setting.json` (project-level)
-- Global: `~/.zoe/setting.json` (user-level)
+- Local: `.seepient/setting.json` (project-level)
+- Global: `~/.seepient/setting.json` (user-level)
 
 The server resolves the active config path at startup (local if it exists, else global) and uses that single path for all writes.
 
@@ -1019,7 +1019,7 @@ Every write follows this sequence:
 - The temp file is also `0o600`.
 - On startup, if the config file has overly permissive modes (e.g., `0o644`), log a warning:
   ```
-  [zoe] WARNING: setting.json has mode 0644. Recommend 0600 to protect API keys.
+  [seepient] WARNING: setting.json has mode 0644. Recommend 0600 to protect API keys.
   ```
 
 ### 8.4 Corruption Recovery
@@ -1027,11 +1027,11 @@ Every write follows this sequence:
 If `setting.json` fails to parse on server startup:
 
 1. Log the error with the file path.
-2. Check for `.zoe/setting.json.bak` (previous version). If it exists and parses, use it.
+2. Check for `.seepient/setting.json.bak` (previous version). If it exists and parses, use it.
 3. If no backup exists, start with an empty config. Providers resolve from environment variables only.
-4. Do not automatically overwrite the corrupt file. Log: `[zoe] Config file corrupt. Using environment variables. Manual fix required: ~/.zoe/setting.json`.
+4. Do not automatically overwrite the corrupt file. Log: `[seepient] Config file corrupt. Using environment variables. Manual fix required: ~/.seepient/setting.json`.
 
-After every successful write, the previous file is preserved as `.zoe/setting.json.bak` before the atomic rename.
+After every successful write, the previous file is preserved as `.seepient/setting.json.bak` before the atomic rename.
 
 ---
 

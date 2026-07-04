@@ -1,5 +1,5 @@
 /**
- * Zoe Core — Provider Configuration Types & Mutation
+ * Seepient Core — Provider Configuration Types & Mutation
  *
  * Types, singleton management, config mutation functions, and file-based resolution.
  * Extracted from provider-resolver.ts for single-responsibility.
@@ -194,7 +194,7 @@ export function resolveProviderConfigFromApp(
 // ── CLI-config bridge ────────────────────────────────────────────────
 
 /**
- * Load CLI-style config (~/.zoe/setting.json + .zoe/setting.json + env
+ * Load CLI-style config (~/.seepient/setting.json + .seepient/setting.json + env
  * overrides) and translate it to a MultiProviderConfig suitable for
  * `configureProviders()`.
  *
@@ -366,7 +366,7 @@ export async function saveConfig(configPath?: string): Promise<void> {
   const path = await import("path");
   const os = await import("os");
 
-  const targetPath = configPath ?? path.join(os.homedir(), ".zoerc.json");
+  const targetPath = configPath ?? path.join(os.homedir(), ".seepientrc.json");
   const dir = path.dirname(targetPath);
 
   // Ensure directory exists

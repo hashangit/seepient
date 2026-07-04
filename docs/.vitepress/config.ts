@@ -1,9 +1,9 @@
 import { defineConfig } from 'vitepress'
 
 export default defineConfig({
-  title: 'Zoe Agent',
+  title: 'Seepient Agent',
   description: 'Headless AI agent framework with multi-provider LLM support',
-  base: '/zoe/',
+  base: '/seepient/',
   appearance: true,
   head: [
     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/logo.svg' }]
@@ -19,7 +19,7 @@ export default defineConfig({
       { text: 'Guides', link: '/guides/build-your-own-ui' },
       {
         text: 'GitHub',
-        link: 'https://github.com/hashangit/zoe-agent'
+        link: 'https://github.com/hashangit/seepient'
       }
     ],
 
@@ -97,12 +97,12 @@ export default defineConfig({
     },
 
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/hashangit/zoe-agent' }
+      { icon: 'github', link: 'https://github.com/hashangit/seepient' }
     ],
 
     footer: {
       message: 'Released under the MIT License.',
-      copyright: 'Copyright © 2024-present Zoe Agent contributors'
+      copyright: 'Copyright © 2024-present Seepient Agent contributors'
     },
 
     search: {

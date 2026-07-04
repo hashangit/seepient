@@ -88,7 +88,7 @@ All three adapters delegate to a single `runAgentLoop` in `src/core/agent-loop.t
 | Hooks | `src/core/hooks.ts` | Safe executor — errors never crash the loop |
 | Middleware | `src/core/middleware.ts` | `PipelineContext`, `Middleware` type, `compose()` chain |
 | Built-in middleware | `src/core/middleware/` | `logging`, `rate-limit`, `auth` |
-| Errors | `src/core/errors.ts` | `ZoeError` hierarchy with `code` + `retryable` |
+| Errors | `src/core/errors.ts` | `SeepientError` hierarchy with `code` + `retryable` |
 | Stream manager | `src/core/stream-manager.ts` | Shared streaming queue, async iterables, SSE for SDK and agent |
 | Session store | `src/core/session-store.ts` | `PersistenceBackend` factory + registry, file & memory backends |
 | Settings schema | `src/core/settings-schema.ts` | 31 dot-key settings, validation, env vars, 5 categories |
@@ -132,17 +132,17 @@ Custom tools: `tool({ description, parameters, execute })` → `ToolModule` regi
 
 ## Skills
 
-File-based plugin system. YAML frontmatter + body. Skills can specify allowed tools, preferred provider/model, and template args. Discovery from multiple sources with priority (last wins): built-in → `~/.zoe/skills/` → `.zoe/skills/` → `ZOE_SKILLS_PATH`.
+File-based plugin system. YAML frontmatter + body. Skills can specify allowed tools, preferred provider/model, and template args. Discovery from multiple sources with priority (last wins): built-in → `~/.seepient/skills/` → `.seepient/skills/` → `SEEPIENT_SKILLS_PATH`.
 
 ## Adapters
 
 ### CLI (`src/adapters/cli/`)
 
-Two modes via `resolveLaunchMode()`: the **Ink/React TUI** (`tui/`, default in a TTY — bordered always-visible input, figlet "Zoe Agent" logo, persistent todo panel, session manager, message queue + `/steer`) and the **readline REPL** fallback (non-interactive / piped / `--docker`). Commander.js args → `loadMergedConfig()` → setup → `bootstrapCliSession()` → TUI or REPL. The TUI renders via `<Static>` + native scrollback (no mouse capture → no gibberish) with `ink-reset.ts` (Ink-internals poke) for artifact-free resize. Slash commands via registry (`/help`, `/clear`, `/sessions`, `/settings`, `/models`, …). ESC/Ctrl+C → `agent.abort()`.
+Two modes via `resolveLaunchMode()`: the **Ink/React TUI** (`tui/`, default in a TTY — bordered always-visible input, figlet "Seepient Agent" logo, persistent todo panel, session manager, message queue + `/steer`) and the **readline REPL** fallback (non-interactive / piped / `--docker`). Commander.js args → `loadMergedConfig()` → setup → `bootstrapCliSession()` → TUI or REPL. The TUI renders via `<Static>` + native scrollback (no mouse capture → no gibberish) with `ink-reset.ts` (Ink-internals poke) for artifact-free resize. Slash commands via registry (`/help`, `/clear`, `/sessions`, `/settings`, `/models`, …). ESC/Ctrl+C → `agent.abort()`.
 
 ### SDK (`src/adapters/sdk/`)
 
-Programmatic library. Exports `generateText()`, `streamText()`, `createAgent()`. React hook via `zoe/react`. Session persistence via `persist` option.
+Programmatic library. Exports `generateText()`, `streamText()`, `createAgent()`. React hook via `seepient/react`. Session persistence via `persist` option.
 
 ### Server (`src/adapters/server/`)
 
@@ -150,16 +150,16 @@ HTTP + WebSocket standalone server. REST endpoints for generate/stream/agent. AP
 
 ## Configuration
 
-Multi-layer merge (highest wins): env vars → local `.zoe/setting.json` → global `~/.zoe/setting.json` → defaults.
+Multi-layer merge (highest wins): env vars → local `.seepient/setting.json` → global `~/.seepient/setting.json` → defaults.
 
 Env vars per provider: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GLM_API_KEY`, `OPENAI_COMPAT_API_KEY` + `OPENAI_COMPAT_BASE_URL`. General: `LLM_PROVIDER`, `LLM_MODEL`. Legacy vars work with deprecation warnings.
 
 ## Conventions
 
 - **No bundler** — plain `tsc` to ES2022 NodeNext. Dev via `tsx`.
-- **Package exports** — `zoe` (SDK), `zoe/react`, `zoe/server`. Binaries: `zoe` (CLI), `zoe-server`.
+- **Package exports** — `seepient` (SDK), `seepient/react`, `seepient/server`. Binaries: `seepient` (CLI), `seepient-server`.
 - **Vitest test suite (partial)** — 322 tests across 33 files covering P0/P1 areas; CI gates publish on test pass
-- **Errors carry metadata** — `code` (machine-readable) + `retryable` flag on all `ZoeError` subclasses.
+- **Errors carry metadata** — `code` (machine-readable) + `retryable` flag on all `SeepientError` subclasses.
 - **Hook errors are non-fatal** — never crash the agent loop.
 - **Dynamic provider imports** — unused provider SDKs stay out of memory.
 
@@ -263,5 +263,8 @@ Keep `CONTEXT.md` under 20 lines total. Do NOT summarize the full conversation �
 
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current plan
+shell commands, and other important information, read the current plan:
+- **ACTIVE PLAN**: `specs/007-tui-parity-upgrade/plan.md` — TUI parity & generative
+  widget upgrade (T0 streaming polish, T1 generative widgets, T3 hashline edits,
+  T4 ChatBlock + component parity). Stays on Ink; 005 stays reverted.
 <!-- SPECKIT END -->

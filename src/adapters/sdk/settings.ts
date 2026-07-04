@@ -1,8 +1,8 @@
 /**
- * Zoe SDK — Settings Facade
+ * Seepient SDK — Settings Facade
  *
  * Wraps SettingsManager for SDK consumers.
- * Import via `import { settings } from 'zoe-agent'`.
+ * Import via `import { settings } from 'seepient'`.
  */
 
 import {

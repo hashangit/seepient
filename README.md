@@ -1,24 +1,24 @@
-# Zoe Agent 🦞
+# Seepient Agent 🦞
 
-[![NPM Version](https://img.shields.io/npm/v/zoe-agent.svg?style=flat-square)](https://www.npmjs.com/package/zoe-agent)
-[![NPM Downloads](https://img.shields.io/npm/dm/zoe-agent.svg?style=flat-square)](https://www.npmjs.com/package/zoe-agent)
-[![GitHub Release](https://img.shields.io/github/v/tag/hashangit/zoe?style=flat-square&label=release)](https://github.com/hashangit/zoe/releases)
-[![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg?style=flat-square)](https://github.com/hashangit/zoe/blob/main/LICENSE)
+[![NPM Version](https://img.shields.io/npm/v/seepient.svg?style=flat-square)](https://www.npmjs.com/package/seepient)
+[![NPM Downloads](https://img.shields.io/npm/dm/seepient.svg?style=flat-square)](https://www.npmjs.com/package/seepient)
+[![GitHub Release](https://img.shields.io/github/v/tag/hashangit/seepient?style=flat-square&label=release)](https://github.com/hashangit/seepient/releases)
+[![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg?style=flat-square)](https://github.com/hashangit/seepient/blob/main/LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com)
 
 **The Engineering-First Headless Agent Framework: CLI, SDK, and Server. Stable, Scalable Automation for the Post-Vision Era.**
 
 ---
 
-🔗 **GitHub Repository**: [https://github.com/hashangit/zoe](https://github.com/hashangit/zoe)
+🔗 **GitHub Repository**: [https://github.com/hashangit/seepient](https://github.com/hashangit/seepient)
 
 ---
 
-Zoe Agent is a high-stability, open-source automation framework specifically engineered for **headless systems**.
+Seepient Agent is a high-stability, open-source automation framework specifically engineered for **headless systems**.
 
-Unlike "screen-seeing" agents (such as OpenClaw) that rely on visual interpretation, Zoe Agent is built on a foundation of precise command-driven execution. This makes it significantly more **stable**, **robust from an engineering perspective**, and **easier to scale** across complex environments—whether it's a local server, a CI/CD pipeline, or thousands of containerized nodes.
+Unlike "screen-seeing" agents (such as OpenClaw) that rely on visual interpretation, Seepient Agent is built on a foundation of precise command-driven execution. This makes it significantly more **stable**, **robust from an engineering perspective**, and **easier to scale** across complex environments—whether it's a local server, a CI/CD pipeline, or thousands of containerized nodes.
 
-## Why Zoe Agent?
+## Why Seepient Agent?
 - 🐳 **Docker Native**: Built to run safely inside containers. Minimal footprint (Node.js/Alpine friendly).
 - 🚀 **Better Engineering**: Operates via precise system APIs and shell commands rather than unstable visual recognition, ensuring deterministic outcomes.
 - 🛡️ **Superior Stability**: Immune to issues like UI rendering, screen resolution, or network lag that plague vision-based agents.
@@ -42,7 +42,7 @@ Unlike "screen-seeing" agents (such as OpenClaw) that rely on visual interpretat
 - 📦 **TypeScript SDK**: Programmatic access via `createAgent`, `streamText`, `generateText`.
 - 🖥 **Server Mode**: Standalone HTTP/WebSocket server with API key auth and session management.
 - 🛠 **Skills System**: Loadable skill packs from directories with `@path` file references and custom tool creation.
-- 🐚 **Shell Approval**: Interactive prompts or non-interactive modes via `ZOE_SHELL_APPROVE` env var.
+- 🐚 **Shell Approval**: Interactive prompts or non-interactive modes via `SEEPIENT_SHELL_APPROVE` env var.
 - 🖥️ **Interactive TUI**: In a TTY, a full-screen Ink/React UI — bordered always-on input, streaming feed, session manager, message queue/`/steer`, and inline `write_file` diffs (atomic, crash-safe writes).
 
 ## Tech Stack
@@ -57,45 +57,45 @@ Unlike "screen-seeing" agents (such as OpenClaw) that rely on visual interpretat
 
 ### npm
 ```bash
-npm install -g zoe-agent
+npm install -g seepient
 ```
 
 ### pnpm
 ```bash
-pnpm add -g zoe-agent
+pnpm add -g seepient
 ```
 
 ### Homebrew (macOS & Linux)
 ```bash
-brew tap hashangit/zoe
-brew install zoe-agent
+brew tap hashangit/seepient
+brew install seepient
 ```
 
 > **Note:** Requires [Node.js](https://nodejs.org/) 20 or later.
 
 ### Server Binary
-The `zoe-server` binary is included for running the standalone HTTP/WebSocket server:
+The `seepient-server` binary is included for running the standalone HTTP/WebSocket server:
 ```bash
-zoe-server --port 7337 --generate-api-key
+seepient-server --port 7337 --generate-api-key
 ```
 
 ### SDK Usage
 Import the SDK in your TypeScript/JavaScript project:
 ```bash
-npm install zoe-agent
+npm install seepient
 ```
 ```ts
 // Main exports
-import { createAgent, streamText, generateText } from 'zoe-agent';
+import { createAgent, streamText, generateText } from 'seepient';
 // Server utilities
-import { createServer } from 'zoe-agent/server';
+import { createServer } from 'seepient/server';
 ```
 
 ### Development Installation
 1.  Clone the repository:
     ```bash
-    git clone https://github.com/hashangit/zoe.git
-    cd zoe
+    git clone https://github.com/hashangit/seepient.git
+    cd seepient
     ```
 2.  Install dependencies:
     ```bash
@@ -114,50 +114,50 @@ import { createServer } from 'zoe-agent/server';
 
 1.  **Setup**: Run the interactive setup wizard to configure your API keys and integrations.
     ```bash
-    zoe setup
+    seepient setup
     ```
     The wizard now supports configuring multiple providers (OpenAI, Anthropic, GLM) in a single session.
 
 2.  **Run**: Start the agent in interactive mode.
     ```bash
-    zoe
+    seepient
     ```
 
 ## Usage
 
 ### Interactive Mode
-Simply run `zoe` to enter the chat loop.
+Simply run `seepient` to enter the chat loop.
 ```bash
-zoe
+seepient
 > List all TypeScript files in the src folder.
 ```
 
 ### Interactive TUI
 
-In a terminal (TTY), `zoe` launches a full-screen Ink/React TUI instead of the readline loop: a bordered always-visible input, a streaming message feed, a persistent task panel (`manage_todos`), session list/resume/export, and inline diffs for `write_file`. File writes are atomic (same-dir temp + `fs.rename`, so a crash never corrupts the file) and render as a green/red unified diff in the tool block; Ctrl+O expands collapsed blocks, and `/clear` starts a fresh session. It falls back to the readline REPL when piped or run with `--no-interactive`.
+In a terminal (TTY), `seepient` launches a full-screen Ink/React TUI instead of the readline loop: a bordered always-visible input, a streaming message feed, a persistent task panel (`manage_todos`), session list/resume/export, and inline diffs for `write_file`. File writes are atomic (same-dir temp + `fs.rename`, so a crash never corrupts the file) and render as a green/red unified diff in the tool block; Ctrl+O expands collapsed blocks, and `/clear` starts a fresh session. It falls back to the readline REPL when piped or run with `--no-interactive`.
 
 ### Headless Mode (One-Shot)
 Run a single command and exit.
 ```bash
-zoe "Check disk usage and save the report to usage.txt" --no-interactive
+seepient "Check disk usage and save the report to usage.txt" --no-interactive
 ```
 
 ### Auto-Confirm (CI/CD)
 Automatically approve all tool executions (dangerous, use with caution or in sandboxes).
 ```bash
-zoe "Refactor src/index.ts to use ES modules" -y
+seepient "Refactor src/index.ts to use ES modules" -y
 ```
 
 ### Provider Selection
 Use a specific provider for a single command:
 ```bash
-zoe -p anthropic "Analyze this code for security issues"
+seepient -p anthropic "Analyze this code for security issues"
 ```
 
 ### Switch Providers Mid-Conversation
 In interactive mode, type `/models` to switch between configured providers:
 ```bash
-zoe
+seepient
 > /models  # Select Anthropic from the list
 > Now analyze this with Claude...
 ```
@@ -168,7 +168,7 @@ zoe
 - `-n, --no-interactive`: Exit after processing the initial query (Headless mode).
 - `-y, --yes`: Auto-confirm all tool executions (e.g., shell commands).
 - `--docker`: Run in Docker-optimized non-interactive mode (auto-detected in containers).
-- `--generate-api-key`: Generate an API key for server mode (use with `zoe-server`).
+- `--generate-api-key`: Generate an API key for server mode (use with `seepient-server`).
 
 ### Interactive Commands
 - `/models`: Switch between configured providers during a conversation.
@@ -176,19 +176,19 @@ zoe
 
 ## Configuration
 
-Zoe Agent uses a hierarchical configuration system.
+Seepient Agent uses a hierarchical configuration system.
 
 **Priority Order (Highest to Lowest):**
 1.  **CLI Arguments**: (e.g., `-m gpt-4o`)
 2.  **Environment Variables**: (`OPENAI_API_KEY`, `.env` file)
-3.  **Project Config**: (`./.zoe/setting.json` in current directory)
-4.  **Global Config**: (`~/.zoe/setting.json`)
+3.  **Project Config**: (`./.seepient/setting.json` in current directory)
+4.  **Global Config**: (`~/.seepient/setting.json`)
 
 ### Supported Configuration Keys (JSON)
 
 **Environment Variables:**
-- `ZOE_SHELL_APPROVE`: Shell command approval mode (`auto`, `deny`, or unset for interactive)
-- `ZOE_SKILLS_PATH`: Colon-separated list of additional skill directories
+- `SEEPIENT_SHELL_APPROVE`: Shell command approval mode (`auto`, `deny`, or unset for interactive)
+- `SEEPIENT_SKILLS_PATH`: Colon-separated list of additional skill directories
 - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GLM_API_KEY`: Provider API keys
 - `OPENAI_COMPAT_API_KEY`, `OPENAI_COMPAT_BASE_URL`, `OPENAI_COMPAT_MODEL`: OpenAI-compatible provider settings
 
@@ -228,7 +228,7 @@ Zoe Agent uses a hierarchical configuration system.
 ```
 
 **Legacy Configuration (Still Supported):**
-Create a file at `.zoe/setting.json`:
+Create a file at `.seepient/setting.json`:
 ```json
 {
   "model": "gpt-3.5-turbo",
@@ -236,13 +236,13 @@ Create a file at `.zoe/setting.json`:
 }
 ```
 
-> **⚠️ Security Warning**: If you store your `apiKey` or secrets in `.zoe/setting.json`, make sure to add `.zoe/` to your `.gitignore` file to prevent leaking secrets!
+> **⚠️ Security Warning**: If you store your `apiKey` or secrets in `.seepient/setting.json`, make sure to add `.seepient/` to your `.gitignore` file to prevent leaking secrets!
 
 ## Integrations
 
 ### Gateway (MCP Client + REST Proxy + OpenAPI Adapter)
 
-Zoe Agent v0.3.0 introduces a universal API gateway that connects to downstream MCP servers and REST APIs:
+Seepient Agent v0.3.0 introduces a universal API gateway that connects to downstream MCP servers and REST APIs:
 
 - **Semantic Injection**: Middleware scores your message against all discovered tools and injects the top-K most relevant directly into the agent's tool context. Zero context pollution.
 - **Proxy Pattern**: Generic tools (`gateway_route`, `gateway_call_tool`, etc.) let the agent navigate targets when semantic injection finds no match.
@@ -250,7 +250,7 @@ Zoe Agent v0.3.0 introduces a universal API gateway that connects to downstream 
 - **Credential Trust Guard**: Admin-registered targets can resolve stored credentials; agent-registered targets cannot — preventing credential exfiltration.
 - **Audit Logging**: Ring-buffer audit logs with per-target usage summaries for debugging and self-healing.
 
-**Configuration** (`~/.zoe/setting.json` or env vars):
+**Configuration** (`~/.seepient/setting.json` or env vars):
 ```json
 {
   "gatewayEnabled": true,
@@ -266,12 +266,12 @@ Zoe Agent v0.3.0 introduces a universal API gateway that connects to downstream 
 
 **SDK**:
 ```ts
-import { gateway } from 'zoe-agent';
+import { gateway } from 'seepient';
 const gw = await gateway.createGateway({ enabled: true, semanticTopK: 3, defaultRateLimitPerMin: 60, maxAuditLogsInMemory: 1000 });
 ```
 
 ### Multi-Provider LLM Support
-Zoe Agent supports multiple AI providers with seamless switching:
+Seepient Agent supports multiple AI providers with seamless switching:
 - **OpenAI**: GPT-4, GPT-3.5-turbo, and latest models
 - **Anthropic**: Claude Sonnet, Haiku, Opus models
 - **GLM**: Z.ai GLM-4.5, GLM-4.7, GLM-5.1 models
@@ -280,7 +280,7 @@ Zoe Agent supports multiple AI providers with seamless switching:
 Configure multiple providers during setup and switch between them using `/models` command or `-p` flag.
 
 ### Web Search (Tavily)
-Zoe Agent can search the web if you provide a Tavily API Key during setup or in config.
+Seepient Agent can search the web if you provide a Tavily API Key during setup or in config.
 - **Usage**: "Search for the latest Node.js release notes."
 
 ### Email (SMTP)
@@ -297,11 +297,11 @@ Built-in utility to provide the agent with the current system time, ensuring acc
 
 ## SDK & Programmatic Usage
 
-Zoe Agent provides a TypeScript SDK for building agent-powered applications.
+Seepient Agent provides a TypeScript SDK for building agent-powered applications.
 
 ### Basic Agent
 ```ts
-import { createAgent } from 'zoe-agent';
+import { createAgent } from 'seepient';
 
 const agent = await createAgent({
   provider: 'anthropic',
@@ -314,7 +314,7 @@ console.log(result.text);
 
 ### Streaming
 ```ts
-import { streamText } from 'zoe-agent';
+import { streamText } from 'seepient';
 
 const stream = await streamText('Analyze the logs for errors', {
   provider: 'openai',
@@ -327,7 +327,7 @@ for await (const chunk of stream.textStream) {
 
 ### Structured Output
 ```ts
-import { generateText } from 'zoe-agent';
+import { generateText } from 'seepient';
 
 const result = await generateText('Extract the top 3 issues from these logs', {
   provider: 'anthropic',
@@ -340,15 +340,15 @@ console.log(result.text);
 Before first use, configure providers from your CLI config (or env vars):
 
 ```ts
-import { configureProviders, loadProviderConfig } from 'zoe-agent';
+import { configureProviders, loadProviderConfig } from 'seepient';
 
-const config = loadProviderConfig(); // reads ~/.zoe/setting.json + .zoe/setting.json + env
+const config = loadProviderConfig(); // reads ~/.seepient/setting.json + .seepient/setting.json + env
 if (config) {
   configureProviders(config);
 }
 
 // Now safe to call
-import { generateText } from 'zoe-agent';
+import { generateText } from 'seepient';
 const result = await generateText('Hello, world!');
 ```
 
@@ -356,7 +356,7 @@ Without this step, `generateText` defaults to OpenAI using `OPENAI_API_KEY` if p
 
 ### Custom Tools
 ```ts
-import { createAgent, tool } from 'zoe-agent';
+import { createAgent, tool } from 'seepient';
 
 const agent = await createAgent({
   provider: 'openai',
@@ -384,18 +384,18 @@ const agent = await createAgent({
 
 ## Server Mode
 
-Run Zoe Agent as a standalone HTTP/WebSocket server for remote agent access.
+Run Seepient Agent as a standalone HTTP/WebSocket server for remote agent access.
 
 ### Starting the Server
 ```bash
 # Start with default settings
-zoe-server
+seepient-server
 
 # Generate an API key
-zoe-server --generate-api-key
+seepient-server --generate-api-key
 
 # Custom port
-zoe-server --port 8080
+seepient-server --port 8080
 ```
 
 ### REST API
@@ -462,31 +462,31 @@ Reference files with @k8s/deployment.yaml.
 ### Discovery Locations
 Skills are discovered in priority order (last wins):
 1. Built-in bundled skills
-2. `~/.zoe/skills/`
-3. `.zoe/skills/` (project-level)
-4. `ZOE_SKILLS_PATH` directories
+2. `~/.seepient/skills/`
+3. `.seepient/skills/` (project-level)
+4. `SEEPIENT_SKILLS_PATH` directories
 
 ```bash
 # Add custom skill directories
-export ZOE_SKILLS_PATH=/path/to/skills:/another/path
+export SEEPIENT_SKILLS_PATH=/path/to/skills:/another/path
 ```
 
 ## Docker Support
 
-Zoe Agent includes a production-ready [`Dockerfile`](./Dockerfile) (Node 20 Alpine) and [`docker-compose.yml`](./docker-compose.yml) for containerized deployment.
+Seepient Agent includes a production-ready [`Dockerfile`](./Dockerfile) (Node 20 Alpine) and [`docker-compose.yml`](./docker-compose.yml) for containerized deployment.
 
 ### Quick Start with Docker
 
 ```bash
 # Clone and build
-git clone https://github.com/hashangit/zoe.git
-cd zoe
-docker build -t zoe-server .
+git clone https://github.com/hashangit/seepient.git
+cd seepient
+docker build -t seepient-server .
 
 # Run the server
 docker run -d -p 7337:7337 \
   -e OPENAI_API_KEY=sk-... \
-  zoe-server
+  seepient-server
 
 # Or use Docker Compose
 docker compose up -d
@@ -497,14 +497,14 @@ Use `--docker` for non-interactive execution inside containers:
 ```bash
 docker run --rm \
   -e OPENAI_API_KEY=sk-... \
-  -e ZOE_SHELL_APPROVE=auto \
-  zoe-server zoe "Check disk usage" --docker
+  -e SEEPIENT_SHELL_APPROVE=auto \
+  seepient-server seepient "Check disk usage" --docker
 ```
 
-Zoe Agent auto-detects Docker and non-interactive environments. When running in a container, it adjusts behavior accordingly (no interactive prompts, streamlined output).
+Seepient Agent auto-detects Docker and non-interactive environments. When running in a container, it adjusts behavior accordingly (no interactive prompts, streamlined output).
 
 ### Shell Approval in Containers
-Set `ZOE_SHELL_APPROVE` to control how shell commands are approved without interactive prompts:
+Set `SEEPIENT_SHELL_APPROVE` to control how shell commands are approved without interactive prompts:
 - `auto`: Automatically approve all commands (use in trusted/sandboxed environments)
 - `deny`: Deny all shell command execution
 - _(unset)_: Interactive prompt (default, requires a TTY)
@@ -512,19 +512,19 @@ Set `ZOE_SHELL_APPROVE` to control how shell commands are approved without inter
 ```yaml
 # docker-compose.yml example
 services:
-  zoe:
+  seepient:
     build: .
     ports:
       - "7337:7337"
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - ZOE_SHELL_APPROVE=auto
-      - ZOE_SKILLS_PATH=/app/skills
+      - SEEPIENT_SHELL_APPROVE=auto
+      - SEEPIENT_SKILLS_PATH=/app/skills
 ```
 
 ### Non-Latin Font Issues in Screenshots
-When running Zoe Agent inside a Docker container (especially Alpine or Debian Slim), screenshots of websites with non-Latin text (e.g., CJK characters) may display text as square boxes ("tofu") due to missing fonts. Emojis (e.g., 🔥) may also appear as squares.
+When running Seepient Agent inside a Docker container (especially Alpine or Debian Slim), screenshots of websites with non-Latin text (e.g., CJK characters) may display text as square boxes ("tofu") due to missing fonts. Emojis (e.g., 🔥) may also appear as squares.
 
 **Solution:** Install CJK (Chinese/Japanese/Korean) and Emoji fonts in your container.
 
@@ -538,12 +538,12 @@ apt-get update && apt-get install -y fonts-noto-cjk fonts-wqy-zenhei fonts-noto-
 
 ## License
 
-Zoe is distributed under the **Business Source License 1.1 (BSL)** — a
+Seepient is distributed under the **Business Source License 1.1 (BSL)** — a
 source-available license.
 
 - **Free for personal, non-commercial use** (including students, educators,
   and research), and for short evaluation/internal trial use.
-- **Commercial / production use** (including offering Zoe as a managed
+- **Commercial / production use** (including offering Seepient as a managed
   service) requires a commercial license from the Licensor.
 - On the **Change Date (2028-01-01)** the Licensed Work automatically becomes
   available under the Apache License 2.0.
@@ -562,7 +562,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 5.  Open a Pull Request
 
 ---
-GitHub: [https://github.com/hashangit/zoe](https://github.com/hashangit/zoe)
+GitHub: [https://github.com/hashangit/seepient](https://github.com/hashangit/seepient)
 
 ---
 

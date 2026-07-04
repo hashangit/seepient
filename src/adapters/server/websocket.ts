@@ -1,5 +1,5 @@
 /**
- * Zoe Server — WebSocket Protocol Handler
+ * Seepient Server — WebSocket Protocol Handler
  *
  * Re-export hub. Setup and teardown functions live here;
  * types and handlers are split into ws-types.ts and ws-handlers.ts.

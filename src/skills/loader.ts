@@ -12,19 +12,19 @@ export function getSkillPaths(cwd: string): string[] {
   const paths: string[] = [];
 
   // 1. Environment variable (highest priority, colon-separated)
-  const envPath = process.env.ZOE_SKILLS_PATH;
+  const envPath = process.env.SEEPIENT_SKILLS_PATH;
   if (envPath) {
     paths.push(...envPath.split(':').filter(p => p));
   }
 
   // 2. Project skills
-  paths.push(join(cwd, '.zoe', 'skills'));
+  paths.push(join(cwd, '.seepient', 'skills'));
 
   // 3. Volume-mounted skills (Docker)
   paths.push('/mnt/skills');
 
-  // 4. Bundled skills (shipped with zoe)
-  if (!process.env.ZOE_NO_BUNDLED_SKILLS) {
+  // 4. Bundled skills (shipped with seepient)
+  if (!process.env.SEEPIENT_NO_BUNDLED_SKILLS) {
     paths.push(join(__dirname, '..', '..', 'skills'));
   }
 

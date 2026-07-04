@@ -1,5 +1,5 @@
 /**
- * Zoe SDK — createAgent()
+ * Seepient SDK — createAgent()
  *
  * A persistent agent with session memory, provider switching, and abort support.
  * Wraps the LLMProvider directly (not the CLI-oriented Agent class) so results
@@ -22,7 +22,7 @@ import type {
   StepResult,
   ToolCall,
   Usage,
-  ZoeError,
+  SeepientError,
 } from "../../core/types.js";
 import { getProvider } from "../../core/provider-resolver.js";
 import { createHookExecutor } from "../../core/hooks.js";
@@ -34,7 +34,7 @@ import type { AgentLoopOptions } from "../../core/agent-loop.js";
 import {
   generateId,
   now,
-  toZoeError,
+  toSeepientError,
 } from "../../core/message-convert.js";
 import type { Middleware } from "../../core/middleware.js";
 
@@ -312,8 +312,8 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
         stream.resolveUsage(result.usage);
         stream.resolveFinish(result.finishReason);
       } catch (err) {
-        const zoeErr = toZoeError(err, "PROVIDER_ERROR");
-        if (streamOptions?.onError) streamOptions.onError(zoeErr);
+        const seepientErr = toSeepientError(err, "PROVIDER_ERROR");
+        if (streamOptions?.onError) streamOptions.onError(seepientErr);
         stream.resolveText("");
         stream.resolveUsage({ promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 });
         stream.resolveFinish("error");

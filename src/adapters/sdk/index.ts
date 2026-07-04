@@ -1,5 +1,5 @@
 /**
- * Zoe SDK — Public entry point
+ * Seepient SDK — Public entry point
  *
  * Exports `generateText`, `streamText`, `createAgent`, and all public types,
  * tool factories, provider helpers, and skill utilities.
@@ -15,7 +15,7 @@ import type {
   StepResult,
   ToolCall,
   Usage,
-  ZoeError,
+  SeepientError,
 } from "../../core/types.js";
 import { getProvider } from "../../core/provider-resolver.js";
 import { createHookExecutor } from "../../core/hooks.js";
@@ -25,7 +25,7 @@ import { runAgentLoop } from "../../core/agent-loop.js";
 import {
   generateId,
   now,
-  toZoeError,
+  toSeepientError,
 } from "../../core/message-convert.js";
 import type { Middleware } from "../../core/middleware.js";
 import { homedir } from 'os';
@@ -59,7 +59,7 @@ export const gateway = {
     const { createGateway } = await import('../../gateway/index.js');
     const { GatewaySettingsAdapter: Adapter } = await import('../../gateway/settings-adapter.js');
     const adapter = settingsAdapter ?? new Adapter(
-      process.env.ZOE_GATEWAY_DIR ?? path.join(homedir(), '.zoe')
+      process.env.SEEPIENT_GATEWAY_DIR ?? path.join(homedir(), '.seepient')
     );
     if (!settingsAdapter) await adapter.initialize();
     return createGateway(config, adapter);
@@ -91,7 +91,7 @@ export type {
   PersistenceBackend,
   PersistenceConfig,
   SkillMetadata,
-  ZoeError,
+  SeepientError,
   PermissionLevel,
   ToolRiskCategory,
 } from "../../core/types.js";
@@ -284,8 +284,8 @@ export async function streamText(
       stream.resolveUsage(result.usage);
       stream.resolveFinish(result.finishReason);
     } catch (err) {
-      const zoeErr = toZoeError(err, "PROVIDER_ERROR");
-      if (opts.onError) opts.onError(zoeErr);
+      const seepientErr = toSeepientError(err, "PROVIDER_ERROR");
+      if (opts.onError) opts.onError(seepientErr);
       stream.resolveText("");
       stream.resolveUsage({ promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 });
       stream.resolveFinish("error");

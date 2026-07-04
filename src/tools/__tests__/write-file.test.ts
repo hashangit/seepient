@@ -17,7 +17,7 @@ describe("WriteFileTool (safe atomic write)", () => {
   let dir: string;
 
   beforeEach(async () => {
-    dir = await fs.mkdtemp(path.join(os.tmpdir(), "zoe-write-"));
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), "seepient-write-"));
   });
   afterEach(async () => {
     await fs.rm(dir, { recursive: true, force: true });
@@ -112,7 +112,7 @@ describe("WriteFileTool (safe atomic write)", () => {
   it("sweeps a same-path temp orphaned by a prior hard kill", async () => {
     const file = path.join(dir, "sweep.txt");
     await fs.writeFile(file, "ORIGINAL", "utf-8");
-    const orphan = `${file}.zoe-deadbeef.tmp`;
+    const orphan = `${file}.seepient-deadbeef.tmp`;
     await fs.writeFile(orphan, "partial", "utf-8");
     // Age the orphan past the staleness threshold so the sweep treats it as dead.
     const old = Math.floor((Date.now() - 120_000) / 1000);
@@ -129,7 +129,7 @@ describe("WriteFileTool (safe atomic write)", () => {
     const file = path.join(dir, "race.txt");
     await fs.writeFile(file, "ORIGINAL", "utf-8");
     // A temp that looks like another process's live write (just created, ~now).
-    const live = `${file}.zoe-fresh.tmp`;
+    const live = `${file}.seepient-fresh.tmp`;
     await fs.writeFile(live, "in-flight", "utf-8");
 
     const result: any = await run(file, "NEW");

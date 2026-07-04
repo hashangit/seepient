@@ -57,8 +57,8 @@ export const DEFAULT_SKILL_BODY_WARN_CHARS = 8_000;
  * Falls back to defaults if not set or unparsable.
  */
 export function getSkillBodyLimits(): { maxChars: number; warnChars: number } {
-  const maxChars = parseInt(process.env.ZOE_SKILL_BODY_MAX_CHARS || '', 10);
-  const warnChars = parseInt(process.env.ZOE_SKILL_BODY_WARN_CHARS || '', 10);
+  const maxChars = parseInt(process.env.SEEPIENT_SKILL_BODY_MAX_CHARS || '', 10);
+  const warnChars = parseInt(process.env.SEEPIENT_SKILL_BODY_WARN_CHARS || '', 10);
   return {
     maxChars: Number.isFinite(maxChars) && maxChars > 0 ? maxChars : DEFAULT_SKILL_BODY_MAX_CHARS,
     warnChars: Number.isFinite(warnChars) && warnChars > 0 ? warnChars : DEFAULT_SKILL_BODY_WARN_CHARS,
@@ -109,7 +109,7 @@ export function limitSkillBody(
 
   const marker =
     `\n\n[... Skill body truncated: ${originalChars} chars total, ${max} shown. ` +
-    `Reduce skill body size or set ZOE_SKILL_BODY_MAX_CHARS to increase the limit. ...]`;
+    `Reduce skill body size or set SEEPIENT_SKILL_BODY_MAX_CHARS to increase the limit. ...]`;
 
   const truncatedBody = body.slice(0, max - marker.length) + marker;
   const finalChars = truncatedBody.length;

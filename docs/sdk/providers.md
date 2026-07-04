@@ -5,7 +5,7 @@ description: Multi-provider LLM support with OpenAI, Anthropic, GLM, and OpenAI-
 
 # Providers
 
-Zoe Agent supports multiple LLM providers with a unified interface. Bring your own API keys from each provider and switch with a single option — all other code stays the same. Zoe Agent does not provide LLM inference.
+Seepient Agent supports multiple LLM providers with a unified interface. Bring your own API keys from each provider and switch with a single option — all other code stays the same. Seepient Agent does not provide LLM inference.
 
 ## ProviderType
 
@@ -60,7 +60,7 @@ GLM accepts both the alias (`"haiku"`, `"sonnet"`, `"opus"`) and the full model 
 Pass `provider` and `model` as options:
 
 ```typescript
-import { generateText } from "zoe-agent";
+import { generateText } from "seepient";
 
 const result = await generateText("Explain recursion", {
   provider: "anthropic",
@@ -70,7 +70,7 @@ const result = await generateText("Explain recursion", {
 
 ## Environment variable auto-detection
 
-Zoe Agent automatically detects API keys from environment variables. No code changes needed to switch providers.
+Seepient Agent automatically detects API keys from environment variables. No code changes needed to switch providers.
 
 ### Provider-specific keys
 
@@ -106,7 +106,7 @@ export LLM_PROVIDER=anthropic
 Set up multiple providers programmatically at application startup:
 
 ```typescript
-import { configureProviders } from "zoe-agent";
+import { configureProviders } from "seepient";
 
 configureProviders({
   openai: {
@@ -142,7 +142,7 @@ interface MultiProviderConfig {
 Build individual provider config objects:
 
 ```typescript
-import { provider, configureProviders } from "zoe-agent";
+import { provider, configureProviders } from "seepient";
 
 configureProviders({
   openai: provider("openai", "sk-...", { model: "gpt-5.4" }),
@@ -166,7 +166,7 @@ function provider(
 Every SDK function accepts `provider` and `model` options that override the global default:
 
 ```typescript
-import { generateText } from "zoe-agent";
+import { generateText } from "seepient";
 
 // Uses the globally configured default provider
 const r1 = await generateText("Hello");
@@ -189,7 +189,7 @@ const r3 = await generateText("Hello", {
 Use `agent.switchProvider()` to change providers mid-conversation:
 
 ```typescript
-import { createAgent } from "zoe-agent";
+import { createAgent } from "seepient";
 
 const agent = await createAgent({
   provider: "openai",
@@ -222,7 +222,7 @@ console.log(r3.text);
 Connect to any LLM API that exposes an OpenAI-compatible endpoint (Ollama, vLLM, Together AI, local models, self-hosted LLMs, third-party proxies):
 
 ```typescript
-import { generateText } from "zoe-agent";
+import { generateText } from "seepient";
 
 const result = await generateText("Hello from local model", {
   provider: "openai-compatible",
@@ -235,7 +235,7 @@ const result = await generateText("Hello from local model", {
 Or configure it globally:
 
 ```typescript
-import { configureProviders } from "zoe-agent";
+import { configureProviders } from "seepient";
 
 configureProviders({
   "openai-compatible": {
@@ -260,7 +260,7 @@ import {
   addProvider,
   updateProviderConfig,
   removeProvider,
-} from "zoe-agent";
+} from "seepient";
 
 // Add a new provider
 addProvider("anthropic", {
@@ -280,7 +280,7 @@ removeProvider("glm");
 Use `resolveFromEnv()` to scan environment variables and build a `MultiProviderConfig` automatically:
 
 ```typescript
-import { configureProviders, resolveFromEnv } from "zoe-agent";
+import { configureProviders, resolveFromEnv } from "seepient";
 
 const envConfig = resolveFromEnv();
 if (envConfig) {

@@ -1,11 +1,11 @@
 ---
 title: Docker Deployment
-description: Deploy Zoe Agent as a Docker container with complete configuration and Docker Compose example.
+description: Deploy Seepient Agent as a Docker container with complete configuration and Docker Compose example.
 ---
 
 # Docker Deployment
 
-Run Zoe Agent as a containerized backend service. This example covers building the image, running it locally, persisting sessions, and using Docker Compose.
+Run Seepient Agent as a containerized backend service. This example covers building the image, running it locally, persisting sessions, and using Docker Compose.
 
 ## Prerequisites
 
@@ -14,46 +14,46 @@ Run Zoe Agent as a containerized backend service. This example covers building t
 
 ## Dockerfile
 
-Zoe Agent includes a Dockerfile in the repository. Build it from source:
+Seepient Agent includes a Dockerfile in the repository. Build it from source:
 
 ```bash
-git clone https://github.com/hashangit/zoe.git
-cd zoe
-docker build -t zoe-server .
+git clone https://github.com/hashangit/seepient.git
+cd seepient
+docker build -t seepient-server .
 ```
 
 ## Build and Run
 
-### Using the `zoe server` command
+### Using the `seepient server` command
 
-After building, start the server inside the container using `zoe server`:
+After building, start the server inside the container using `seepient server`:
 
 ```bash
 docker run -d \
-  --name zoe \
+  --name seepient \
   -p 7337:7337 \
   -e OPENAI_API_KEY=sk-... \
-  zoe-server \
-  zoe server
+  seepient-server \
+  seepient server
 ```
 
 Generate an API key for authenticated access:
 
 ```bash
-docker exec -it zoe zoe server --generate-api-key
+docker exec -it seepient seepient server --generate-api-key
 ```
 
-This prints a key like `sk_zoe_a1b2c3...` and stores it in `~/.zoe/server-keys.json`.
+This prints a key like `sk_seepient_a1b2c3...` and stores it in `~/.seepient/server-keys.json`.
 
 ### Using the `--docker` CLI flag
 
-Run the Zoe Agent CLI inside Docker with the `--docker` flag for container-aware defaults:
+Run the Seepient Agent CLI inside Docker with the `--docker` flag for container-aware defaults:
 
 ```bash
 docker run -it --rm \
   -e OPENAI_API_KEY=sk-... \
-  zoe-server \
-  zoe --docker "List files in the current directory"
+  seepient-server \
+  seepient --docker "List files in the current directory"
 ```
 
 ### Basic Run
@@ -62,10 +62,10 @@ Start the server on port 7337:
 
 ```bash
 docker run -d \
-  --name zoe \
+  --name seepient \
   -p 7337:7337 \
   -e OPENAI_API_KEY=sk-... \
-  zoe-server
+  seepient-server
 ```
 
 Verify it is running:
@@ -92,10 +92,10 @@ Run with the environment file:
 
 ```bash
 docker run -d \
-  --name zoe \
+  --name seepient \
   -p 7337:7337 \
   --env-file .env \
-  zoe-server
+  seepient-server
 ```
 
 ## Environment Variable Configuration
@@ -112,16 +112,16 @@ docker run -d \
 | `ANTHROPIC_MODEL` | No | Default Anthropic model (default: `claude-sonnet-4-6-20260320`) |
 | `GLM_MODEL` | No | Default GLM model (default: `glm-5.1`) |
 | `LLM_MODEL` | No | Default model for OpenAI-compatible provider (default: `gpt-5.4`) |
-| `ZOE_PORT` | No | Server port (default: `7337`) |
-| `ZOE_SKILLS_PATH` | No | Colon-separated paths to custom skill directories |
+| `SEEPIENT_PORT` | No | Server port (default: `7337`) |
+| `SEEPIENT_SKILLS_PATH` | No | Colon-separated paths to custom skill directories |
 | `TAVILY_API_KEY` | No | Required for `web_search` tool |
 | `SMTP_HOST` | No | SMTP server for `send_email` |
 | `SMTP_PORT` | No | SMTP port (default: `587`) |
 | `SMTP_USER` | No | SMTP username |
 | `SMTP_PASS` | No | SMTP password |
-| `ZOE_SESSION_DIR` | No | Session storage directory (default: `./.zoe/sessions`) |
-| `ZOE_SESSION_TTL` | No | Session TTL in seconds (default: `86400`) |
-| `ZOE_SHELL_APPROVE` | No | Shell command approval in containers: `auto` (approve all), `deny` (block all). Default in non-interactive: `deny` |
+| `SEEPIENT_SESSION_DIR` | No | Session storage directory (default: `./.seepient/sessions`) |
+| `SEEPIENT_SESSION_TTL` | No | Session TTL in seconds (default: `86400`) |
+| `SEEPIENT_SHELL_APPROVE` | No | Shell command approval in containers: `auto` (approve all), `deny` (block all). Default in non-interactive: `deny` |
 
 ## Volume Mounting for Sessions
 
@@ -129,22 +129,22 @@ Persist sessions to the host filesystem so they survive container restarts:
 
 ```bash
 docker run -d \
-  --name zoe \
+  --name seepient \
   -p 7337:7337 \
   --env-file .env \
-  -v zoe-sessions:/data/sessions \
-  zoe-server
+  -v seepient-sessions:/data/sessions \
+  seepient-server
 ```
 
 Or bind-mount a specific directory:
 
 ```bash
 docker run -d \
-  --name zoe \
+  --name seepient \
   -p 7337:7337 \
   --env-file .env \
   -v $(pwd)/sessions:/data/sessions \
-  zoe-server
+  seepient-server
 ```
 
 ## Docker Compose
@@ -153,8 +153,8 @@ Create a `docker-compose.yml` for a complete deployment with Redis for session s
 
 ```yaml
 services:
-  zoe:
-    image: zoe-server
+  seepient:
+    image: seepient-server
     build: .
     ports:
       - "7337:7337"
@@ -164,9 +164,9 @@ services:
       - LLM_PROVIDER=openai
       - OPENAI_MODEL=gpt-5.4
       - TAVILY_API_KEY=${TAVILY_API_KEY}
-      - ZOE_SKILLS_PATH=/mnt/skills
-      - ZOE_SESSION_DIR=/data/sessions
-      - ZOE_SESSION_TTL=86400
+      - SEEPIENT_SKILLS_PATH=/mnt/skills
+      - SEEPIENT_SESSION_DIR=/data/sessions
+      - SEEPIENT_SESSION_TTL=86400
     volumes:
       - ./skills:/mnt/skills
       - ./sessions:/data/sessions
@@ -187,7 +187,7 @@ docker compose up -d
 Check logs:
 
 ```bash
-docker compose logs -f zoe
+docker compose logs -f seepient
 ```
 
 Stop all services:
@@ -202,11 +202,11 @@ Mount a directory of custom skills into the container:
 
 ```bash
 docker run -d \
-  --name zoe \
+  --name seepient \
   -p 7337:7337 \
   --env-file .env \
   -v $(pwd)/my-skills:/mnt/skills \
-  zoe-server
+  seepient-server
 ```
 
 Skills in `/mnt/skills/` are automatically discovered. Each skill is a subdirectory containing a `SKILL.md` file:
@@ -226,7 +226,7 @@ my-skills/
 ```bash
 curl -X POST http://localhost:7337/v1/chat \
   -H "Content-Type: application/json" \
-  -H "X-Zoe-API-Key: sk_zoe_..." \
+  -H "X-Seepient-API-Key: sk_seepient_..." \
   -d '{
     "message": "List files in the current directory",
     "tools": ["execute_shell_command"],
@@ -237,7 +237,7 @@ curl -X POST http://localhost:7337/v1/chat \
 ### SDK
 
 ```typescript
-import { generateText } from "zoe-agent";
+import { generateText } from "seepient";
 
 // Point at the Docker instance
 const result = await generateText("Analyze the server logs", {
@@ -255,21 +255,21 @@ curl http://localhost:7337/v1/health
 
 ```bash
 # View logs
-docker logs -f zoe
+docker logs -f seepient
 
 # Restart
-docker restart zoe
+docker restart seepient
 
 # Stop
-docker stop zoe
+docker stop seepient
 
 # Remove
-docker rm zoe
+docker rm seepient
 
 # Update to latest
-docker pull zoe-server:latest
-docker stop zoe && docker rm zoe
-docker run -d --name zoe ... zoe-server:latest
+docker pull seepient-server:latest
+docker stop seepient && docker rm seepient
+docker run -d --name seepient ... seepient-server:latest
 ```
 
 ## Browser Tools (Playwright/Chromium)

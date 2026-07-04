@@ -1,5 +1,5 @@
 /**
- * Zoe Middleware — Logging
+ * Seepient Middleware — Logging
  *
  * Logs request start and response finish with duration, model, steps, and usage.
  */
@@ -31,7 +31,7 @@ export function loggingMiddleware(options?: LoggingOptions): Middleware {
   return async (ctx: PipelineContext, next: () => Promise<void>) => {
     if (logRequest) {
       log(
-        `[zoe] request=${ctx.requestId} model=${ctx.model} messages=${ctx.messages.length} start`,
+        `[seepient] request=${ctx.requestId} model=${ctx.model} messages=${ctx.messages.length} start`,
       );
     }
 
@@ -40,7 +40,7 @@ export function loggingMiddleware(options?: LoggingOptions): Middleware {
     if (logResponse && ctx.result) {
       const durationMs = Date.now() - ctx.startedAt;
       log(
-        `[zoe] request=${ctx.requestId} model=${ctx.model} finish=${ctx.result.finishReason} steps=${ctx.result.steps.length} tokens=${ctx.result.usage.totalTokens} duration=${durationMs}ms`,
+        `[seepient] request=${ctx.requestId} model=${ctx.model} finish=${ctx.result.finishReason} steps=${ctx.result.steps.length} tokens=${ctx.result.usage.totalTokens} duration=${durationMs}ms`,
       );
     }
   };

@@ -27,7 +27,7 @@ export const PromptOptimizerTool: ToolModule = {
   },
   handler: async (args: any, config: any) => {
     if (!config?.apiKey) {
-      return "Error: OpenAI API Key is missing in the configuration. Please run 'zoe setup' or check your .env file.";
+      return "Error: OpenAI API Key is missing in the configuration. Please run 'seepient setup' or check your .env file.";
     }
 
     const client = new OpenAI({

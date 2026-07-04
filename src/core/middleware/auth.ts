@@ -1,11 +1,11 @@
 /**
- * Zoe Middleware — Auth
+ * Seepient Middleware — Auth
  *
  * Simple, composable auth validation middleware.
  */
 
 import type { PipelineContext, Middleware } from "../middleware.js";
-import { ZoeError } from "../errors.js";
+import { SeepientError } from "../errors.js";
 
 export interface AuthOptions {
   /** Validate the request context. Throw or return false to reject. */
@@ -32,7 +32,7 @@ export function authMiddleware(options: AuthOptions): Middleware {
   return async (ctx: PipelineContext, next: () => Promise<void>) => {
     const allowed = await validate(ctx);
     if (!allowed) {
-      throw new ZoeError(errorMessage, "UNAUTHORIZED", false);
+      throw new SeepientError(errorMessage, "UNAUTHORIZED", false);
     }
     await next();
   };

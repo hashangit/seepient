@@ -1,5 +1,5 @@
 /**
- * Zoe Middleware Pipeline
+ * Seepient Middleware Pipeline
  *
  * Composable middleware chain that wraps `runAgentLoop`.
  * Follows the `(ctx, next) => Promise<void>` pattern for cross-cutting

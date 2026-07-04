@@ -1,5 +1,5 @@
 /**
- * Zoe SDK — Tool utilities (re-export layer)
+ * Seepient SDK — Tool utilities (re-export layer)
  *
  * All tool registry, resolution, and factory logic lives in core/tool-executor.
  * This file re-exports for backward compatibility.

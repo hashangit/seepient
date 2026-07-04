@@ -1,11 +1,11 @@
 /**
- * Zoe Middleware — Rate Limiting
+ * Seepient Middleware — Rate Limiting
  *
  * Token bucket rate limiter per key. Throws on limit exceeded.
  */
 
 import type { PipelineContext, Middleware } from "../middleware.js";
-import { ZoeError } from "../errors.js";
+import { SeepientError } from "../errors.js";
 
 export interface RateLimitOptions {
   /** Maximum requests allowed per window */
@@ -51,7 +51,7 @@ export function rateLimitMiddleware(options: RateLimitOptions): Middleware {
     }
 
     if (bucket.tokens <= 0) {
-      throw new ZoeError(
+      throw new SeepientError(
         `Rate limit exceeded for key "${key}": max ${maxRequests} requests per ${windowMs}ms`,
         "RATE_LIMITED",
         false,

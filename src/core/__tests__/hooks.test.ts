@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createHookExecutor } from "../hooks.js";
-import { ZoeError } from "../errors.js";
+import { SeepientError } from "../errors.js";
 import type { Hooks, StepResult, GenerateTextResult } from "../types.js";
 
 function makeStep(): StepResult {
@@ -44,7 +44,7 @@ describe("createHookExecutor", () => {
   it("calls onError hook", async () => {
     const onError = vi.fn();
     const executor = createHookExecutor({ onError } as Hooks);
-    const err = new ZoeError("boom", "TEST");
+    const err = new SeepientError("boom", "TEST");
     await executor.onError(err);
     expect(onError).toHaveBeenCalledWith(err);
   });
@@ -63,7 +63,7 @@ describe("createHookExecutor", () => {
     await executor.beforeToolCall({ name: "x", args: {} });
     await executor.afterToolCall({ name: "x", output: "", duration: 0 });
     await executor.onStep(makeStep());
-    await executor.onError(new ZoeError("x", "CODE"));
+    await executor.onError(new SeepientError("x", "CODE"));
     await executor.onFinish(makeResult());
   });
 

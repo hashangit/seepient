@@ -1,5 +1,5 @@
 /**
- * /clear command handler for Zoe CLI.
+ * /clear command handler for Seepient CLI.
  *
  * Aliases: /reset, /new
  */

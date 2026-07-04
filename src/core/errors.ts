@@ -1,7 +1,7 @@
 /**
- * Zoe Core — Error class hierarchy
+ * Seepient Core — Error class hierarchy
  *
- * Proper class hierarchy for all Zoe errors.
+ * Proper class hierarchy for all Seepient errors.
  * Each error class carries a `code`, `retryable` flag, and domain-specific
  * metadata (e.g. `provider`, `tool`, `steps`).
  */
@@ -9,12 +9,12 @@
 // ── Base error ──────────────────────────────────────────────────────────
 
 /**
- * Base class for all Zoe errors.
+ * Base class for all Seepient errors.
  *
  * Carries a machine-readable `code` and a `retryable` flag so callers can
  * decide whether to retry automatically.
  */
-export class ZoeError extends Error {
+export class SeepientError extends Error {
   /** Machine-readable error code, e.g. "PROVIDER_ERROR", "TOOL_FAILED". */
   code: string;
   /** Whether the operation that caused this error can be retried. */
@@ -22,7 +22,7 @@ export class ZoeError extends Error {
 
   constructor(message: string, code: string, retryable = false) {
     super(message);
-    this.name = "ZoeError";
+    this.name = "SeepientError";
     this.code = code;
     this.retryable = retryable;
   }
@@ -33,7 +33,7 @@ export class ZoeError extends Error {
 /**
  * Error originating from a provider (LLM API call failure, auth, rate-limit, etc.).
  */
-export class ProviderError extends ZoeError {
+export class ProviderError extends SeepientError {
   /** The provider name that produced the error, if known. */
   provider?: string;
 
@@ -49,7 +49,7 @@ export class ProviderError extends ZoeError {
 /**
  * Error from tool execution.
  */
-export class ToolError extends ZoeError {
+export class ToolError extends SeepientError {
   /** The tool name that produced the error, if known. */
   tool?: string;
 
@@ -65,7 +65,7 @@ export class ToolError extends ZoeError {
 /**
  * Thrown when the agent loop exceeds the configured maximum number of steps.
  */
-export class MaxStepsError extends ZoeError {
+export class MaxStepsError extends SeepientError {
   /** The number of steps that were executed. */
   steps: number;
 
@@ -85,7 +85,7 @@ export class MaxStepsError extends ZoeError {
 /**
  * Thrown when an operation is aborted (e.g. via AbortSignal).
  */
-export class AbortedError extends ZoeError {
+export class AbortedError extends SeepientError {
   constructor(message?: string) {
     super(message ?? "Operation was aborted", "ABORTED", false);
     this.name = "AbortedError";
@@ -97,7 +97,7 @@ export class AbortedError extends ZoeError {
 /**
  * Error from gateway operations (MCP client, REST proxy, target management).
  */
-export class GatewayError extends ZoeError {
+export class GatewayError extends SeepientError {
   /** The target name that produced the error, if known. */
   target?: string;
 

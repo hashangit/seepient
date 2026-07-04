@@ -25,7 +25,7 @@ interface Hooks {
   onStep?: (step: StepResult) => void | Promise<void>;
 
   /** Called when an error occurs. */
-  onError?: (error: ZoeError) => void | Promise<void>;
+  onError?: (error: SeepientError) => void | Promise<void>;
 
   /** Called when the agent loop finishes. */
   onFinish?: (result: GenerateTextResult) => void | Promise<void>;
@@ -35,7 +35,7 @@ interface Hooks {
 ## Quick example
 
 ```typescript
-import { generateText } from "zoe-agent";
+import { generateText } from "seepient";
 
 const result = await generateText("Deploy the staging environment", {
   tools: ["execute_shell_command"],
@@ -74,7 +74,7 @@ The agent loop triggers hooks in this order:
 Hooks work identically with `createAgent()`. They fire on every `chat()` and `chatStream()` call:
 
 ```typescript
-import { createAgent } from "zoe-agent";
+import { createAgent } from "seepient";
 
 const agent = await createAgent({
   tools: ["core", "web_search"],
@@ -86,7 +86,7 @@ const agent = await createAgent({
       metrics.timing("tool.duration", duration, { tool: name });
     },
     onError: (error) => {
-      alerting.notify(`Zoe Agent error: ${error.code} - ${error.message}`);
+      alerting.notify(`Seepient Agent error: ${error.code} - ${error.message}`);
     },
   },
 });
@@ -137,7 +137,7 @@ const result = await generateText("Analyze the codebase", {
 ### Analytics tracking
 
 ```typescript
-import { generateText } from "zoe-agent";
+import { generateText } from "seepient";
 import { analytics } from "./analytics.js";
 
 const result = await generateText("Search for AI news", {
@@ -167,7 +167,7 @@ const result = await generateText("Search for AI news", {
 ### Cost tracking
 
 ```typescript
-import { generateText } from "zoe-agent";
+import { generateText } from "seepient";
 
 const costs: { prompt: number; completion: number; total: number }[] = [];
 
@@ -191,7 +191,7 @@ console.log(`Total tokens used: ${totalTokens}`);
 ### Error alerting
 
 ```typescript
-import { generateText, ProviderError, ToolError } from "zoe-agent";
+import { generateText, ProviderError, ToolError } from "seepient";
 import { sendAlert } from "./ops.js";
 
 const result = await generateText("Run the migration", {
@@ -205,7 +205,7 @@ const result = await generateText("Run the migration", {
         const tool = error instanceof ToolError ? error.tool : undefined;
         sendAlert({
           level: "critical",
-          title: `Zoe Agent ${error.code}`,
+          title: `Seepient Agent ${error.code}`,
           message: error.message,
           provider,
           tool,
@@ -231,7 +231,7 @@ const result = await generateText("Run the migration", {
 Stream agent events to connected WebSocket clients in real time:
 
 ```typescript
-import { generateText } from "zoe-agent";
+import { generateText } from "seepient";
 import type { WebSocket } from "ws";
 
 function relayToClient(ws: WebSocket) {

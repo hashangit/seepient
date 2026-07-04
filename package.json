@@ -1,5 +1,5 @@
 {
-  "name": "zoe-agent",
+  "name": "seepient",
   "version": "0.3.2",
   "type": "module",
   "main": "dist/adapters/cli/index.js",
@@ -15,8 +15,8 @@
   },
   "types": "./dist/adapters/sdk/index.d.ts",
   "bin": {
-    "zoe": "dist/adapters/cli/index.js",
-    "zoe-server": "dist/adapters/server/standalone.js"
+    "seepient": "dist/adapters/cli/index.js",
+    "seepient-server": "dist/adapters/server/standalone.js"
   },
   "scripts": {
     "build": "tsc",
@@ -68,13 +68,13 @@
   "license": "BUSL-1.1",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/hashangit/zoe.git"
+    "url": "git+https://github.com/hashangit/seepient.git"
   },
   "bugs": {
-    "url": "https://github.com/hashangit/zoe/issues"
+    "url": "https://github.com/hashangit/seepient/issues"
   },
-  "homepage": "https://hashangit.github.io/zoe/",
-  "description": "Zoe — your AI person. A skill-driven AI agent with CLI, SDK, and server adapters; multi-provider LLM support and Docker-native deployment. Coding is one of the things she does.",
+  "homepage": "https://hashangit.github.io/seepient/",
+  "description": "Seepient — your AI person. A skill-driven AI agent with CLI, SDK, and server adapters; multi-provider LLM support and Docker-native deployment. Coding is one of the things she does.",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
     "@modelcontextprotocol/sdk": "^1.29.0",

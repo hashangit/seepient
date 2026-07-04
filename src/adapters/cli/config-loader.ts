@@ -1,5 +1,5 @@
 /**
- * Zoe CLI — Config Loader
+ * Seepient CLI — Config Loader
  *
  * Re-exports core config utilities and adds CLI-specific chalk output.
  */

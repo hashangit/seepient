@@ -1,9 +1,9 @@
 /**
- * Zoe Gateway — Settings Adapter
+ * Seepient Gateway — Settings Adapter
  *
  * Dedicated storage for gateway targets, credentials, and routes.
  * Bypasses the static SettingsManager SETTINGS_MAP which rejects dynamic keys.
- * Uses atomic writes (temp file + rename) matching existing Zoe patterns.
+ * Uses atomic writes (temp file + rename) matching existing Seepient patterns.
  */
 
 import * as fs from 'fs/promises';
@@ -22,7 +22,7 @@ export class GatewaySettingsAdapter {
   private cachedAdminTargets: Set<string> = new Set();
 
   constructor(storageDir: string) {
-    const base = process.env.ZOE_GATEWAY_DIR ?? path.join(storageDir, 'gateway');
+    const base = process.env.SEEPIENT_GATEWAY_DIR ?? path.join(storageDir, 'gateway');
     this.targetsPath = path.join(base, 'targets.json');
     this.credentialsPath = path.join(base, 'credentials.json');
     this.routesPath = path.join(base, 'routes.json');

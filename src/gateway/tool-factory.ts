@@ -1,5 +1,5 @@
 /**
- * Zoe Gateway — Proxy tool factory
+ * Seepient Gateway — Proxy tool factory
  *
  * Creates 10 gateway tools registered in the static tool registry.
  * Each tool delegates to MCPGateway methods.
@@ -69,7 +69,7 @@ export function createGatewayTools(gateway: MCPGateway): ToolModule[] {
         },
       },
       handler: async (args: any, config?: any) => {
-        const agent = config?.agentName ?? 'zoe';
+        const agent = config?.agentName ?? 'seepient';
         const result = await gateway.callMcpTool(
           agent,
           args.target,
@@ -122,7 +122,7 @@ export function createGatewayTools(gateway: MCPGateway): ToolModule[] {
         },
       },
       handler: async (args: any, config?: any) => {
-        const agent = config?.agentName ?? 'zoe';
+        const agent = config?.agentName ?? 'seepient';
         const result = await gateway.callRest(
           agent,
           args.target,
@@ -199,7 +199,7 @@ export function createGatewayTools(gateway: MCPGateway): ToolModule[] {
         },
       },
       handler: async (args: any, config?: any) => {
-        const agent = config?.agentName ?? 'zoe';
+        const agent = config?.agentName ?? 'seepient';
         const result = await gateway.readResource(agent, args.target, args.uri);
         return typeof result === 'string' ? result : JSON.stringify(result);
       },
@@ -237,7 +237,7 @@ export function createGatewayTools(gateway: MCPGateway): ToolModule[] {
         },
       },
       handler: async (args: any, config?: any) => {
-        const agent = config?.agentName ?? 'zoe';
+        const agent = config?.agentName ?? 'seepient';
         const result = await gateway.getPrompt(
           agent,
           args.target,

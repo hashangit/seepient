@@ -1,5 +1,5 @@
 /**
- * Zoe Gateway — Semantic Scorer
+ * Seepient Gateway — Semantic Scorer
  *
  * Keyword-based relevance scoring for tool injection.
  * Zero dependencies, deterministic, fast.

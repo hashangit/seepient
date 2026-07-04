@@ -1,5 +1,5 @@
 /**
- * /exit command handler for Zoe CLI.
+ * /exit command handler for Seepient CLI.
  *
  * Aliases: /quit
  */

@@ -30,7 +30,7 @@ export const SearchTool: ToolModule = {
     const apiKey = config.tavilyApiKey || process.env.TAVILY_API_KEY;
     
     if (!apiKey) {
-      return "Error: Tavily API Key is missing. Please run 'zoe setup' to configure it, or set TAVILY_API_KEY env var. Get a free key at https://tavily.com";
+      return "Error: Tavily API Key is missing. Please run 'seepient setup' to configure it, or set TAVILY_API_KEY env var. Get a free key at https://tavily.com";
     }
 
     try {

@@ -4,7 +4,7 @@ import { MCPGateway } from '../gateway.js';
 import { GatewaySettingsAdapter } from '../settings-adapter.js';
 
 function createMockGateway(): MCPGateway {
-  const adapter = new GatewaySettingsAdapter('/tmp/zoe-test-' + process.pid);
+  const adapter = new GatewaySettingsAdapter('/tmp/seepient-test-' + process.pid);
   return new MCPGateway(adapter, {
     enabled: true,
     semanticTopK: 3,

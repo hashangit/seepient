@@ -1,9 +1,9 @@
 ---
 
-description: "Task list for 003-tui-input-and-logo (TUI persistent input box + Zoe Agent logo) — post-scrutinize"
+description: "Task list for 003-tui-input-and-logo (TUI persistent input box + Seepient Agent logo) — post-scrutinize"
 ---
 
-# Tasks: TUI Persistent Input Box + Zoe Agent Logo
+# Tasks: TUI Persistent Input Box + Seepient Agent Logo
 
 **Input**: Design documents from `/specs/003-tui-input-and-logo/` (plan.md,
 spec.md, research.md, data-model.md, contracts/, quickstart.md) — revised after
@@ -55,7 +55,7 @@ either story after Setup.
 the footer on every frame; disabled (dimmed, inert) while running or while an
 overlay/permission prompt is open; spinner above the box while running.
 
-**Independent Test** (quickstart S1–S2): `zoe` → rounded box above the footer;
+**Independent Test** (quickstart S1–S2): `seepient` → rounded box above the footer;
 trigger a long shell command → box stays dimmed with spinner above it, keystrokes
 ignored; Ctrl+P → box stays visible but keys go to the palette, not the box.
 
@@ -64,20 +64,20 @@ ignored; Ctrl+P → box stays visible but keys go to the palette, not the box.
 - [ ] T002 [P] [US1] Add an optional `enabled` prop (default `true`) to `TextInput` in `src/adapters/cli/tui/components/text-input.tsx`: when `false`, the `useInput` callback early-returns (no keystrokes) and rendered text/placeholder uses `theme.fgDim`. No other input logic changes.
 - [ ] T003 [US1] Forward an optional `enabled` prop through `PromptArea` in `src/adapters/cli/tui/components/prompt-area.tsx` to the inner `TextInput`. Default `true`. (depends on T002)
 - [ ] T004 [US1] Create `InputBox` in `src/adapters/cli/tui/components/input-box.tsx`: rounded box (`╭─╮`/`│`/`╰─╯`) at `min(stdout.columns, MAX) - 2*HORIZONTAL_PADDING` (recompute on resize via `useStdout`), wrapping the existing `PromptArea` row. `disabled` dims border+text (`theme.fgDim`) and passes `enabled={!disabled}` to `PromptArea`. Multi-line input grows the box; bottom border closes around N rows. (depends on T003)
-- [ ] T005 [US1] Restructure the live region in `src/adapters/cli/tui/app.tsx`: render `<InputBox disabled={isRunning || overlay !== null || !!pendingPermission} …/>` **unconditionally** directly above `<Footer/>`; move the `"Zoe is working"` spinner into the mutually-exclusive live slot **above** the box (it must no longer replace the input). The composite `disabled` keeps an open overlay/palette as the sole live stdin owner. Verify the box is present in idle, running, overlay, and permission frames.
+- [ ] T005 [US1] Restructure the live region in `src/adapters/cli/tui/app.tsx`: render `<InputBox disabled={isRunning || overlay !== null || !!pendingPermission} …/>` **unconditionally** directly above `<Footer/>`; move the `"Seepient is working"` spinner into the mutually-exclusive live slot **above** the box (it must no longer replace the input). The composite `disabled` keeps an open overlay/palette as the sole live stdin owner. Verify the box is present in idle, running, overlay, and permission frames.
 
 **Checkpoint**: User Story 1 fully functional and independently testable.
 
 ---
 
-## Phase 4: User Story 2 - Zoe Agent logo (Priority: P1)
+## Phase 4: User Story 2 - Seepient Agent logo (Priority: P1)
 
-**Goal**: on launch, a large "Zoe Agent" banner with a vivid Tokyo Night rainbow
+**Goal**: on launch, a large "Seepient Agent" banner with a vivid Tokyo Night rainbow
 gradient (45° axis, HSL) renders as the first feed entry and scrolls away as the
 user chats.
 
-**Independent Test** (quickstart S3): `zoe` on a fresh session → large gradient
-"Zoe Agent", vivid red→…→purple sweep; send a message → banner scrolls up out of
+**Independent Test** (quickstart S3): `seepient` on a fresh session → large gradient
+"Seepient Agent", vivid red→…→purple sweep; send a message → banner scrolls up out of
 view; resize → reflows without breaking.
 
 ### Tests for User Story 2 (gradient pure function — FR-008)
@@ -89,7 +89,7 @@ view; resize → reflows without breaking.
 ### Implementation for User Story 2
 
 - [ ] T007 [US2] Implement the pure gradient module in `src/adapters/cli/tui/logo/gradient.ts`: `RAINBOW_STOPS` (red→orange→yellow→green→cyan→blue→purple), `rainbowCellColor(row,col,rows,cols,palette)` (45° projection `t=(col+row)/(maxCol+maxRow)`, **HSL hue rotation** between stops, S/L near palette), and `gradientGrid(grid,palette)` → `ColoredCell[][]`. Pure/deterministic; no React/Ink/Math.random. (TDD: make T006 pass)
-- [ ] T008 [P] [US2] Create the ASCII "Zoe Agent" banner grid as a constant in `src/adapters/cli/tui/logo/grids.ts`: a multi-line `string[][]` (lines split to cells), every line width-capped `< columns`.
+- [ ] T008 [P] [US2] Create the ASCII "Seepient Agent" banner grid as a constant in `src/adapters/cli/tui/logo/grids.ts`: a multi-line `string[][]` (lines split to cells), every line width-capped `< columns`.
 - [ ] T009 [P] [US2] Add `kind: 'logo'` to the `FeedEntry` union in `src/adapters/cli/tui/types.ts` and a `case 'logo': return <LogoBanner/>;` to `FeedItem` in `src/adapters/cli/tui/components/message-area.tsx`. No `as any`. (different files from T007/T008)
 - [ ] T010 [US2] Create `LogoBanner` in `src/adapters/cli/tui/components/logo-banner.tsx`: renders the banner grid with per-cell colors from `gradientGrid(grid, theme)`. No props. (depends on T007, T008; exported for the T009 case)
 - [ ] T011 [US2] In `src/adapters/cli/tui/app.tsx` (or `useFeed` init), seed exactly one `{ id: '__logo__', kind: 'logo' }` entry at session start, before any messages, so it scrolls away via the existing `<Static>` as the feed grows. On `/clear`, re-seed it. (depends on T005 — same file; and T009, T010)
@@ -100,7 +100,7 @@ view; resize → reflows without breaking.
 
 ## Phase 5: Polish & Cross-Cutting
 
-- [ ] T012 [P] Verify the lazy-load invariant: `echo hi | zoe`, `zoe -n "hi"`, `zoe --docker …` never statically import any new `.tsx`. Run any existing CI guard.
+- [ ] T012 [P] Verify the lazy-load invariant: `echo hi | seepient`, `seepient -n "hi"`, `seepient --docker …` never statically import any new `.tsx`. Run any existing CI guard.
 - [ ] T013 Run `quickstart.md` S1–S6 in a real TTY: fix box-border reflow at 80 cols / on resize; **visually confirm the gradient is a vivid rainbow (not muddy)**; confirm the box is disabled (inert) while running/overlay/permission; confirm positioning is content-flow (last live element above footer) and **flag to the user** if viewport-bottom pinning was actually expected (separate task).
 - [ ] T014 Run `pnpm test` (baseline count still passes **plus** T006) and `pnpm build`.
 
@@ -170,5 +170,5 @@ T010 → T011 → T012 → T013 → T014.
 - `[Story]` maps a task to its user story.
 - No new dependency; no schema/migration; no engine/core/infra change.
 - Only `app.tsx` is shared across stories — sequence its edits (T005 → T011).
-- Deferred: persistent compact wordmark; mid-run message queue/steering; full product rename; **true viewport-bottom input pinning** (needs fullscreen — separate task).
+- Deferred: persistent compact wordmark; mid-run message queue/steering; **true viewport-bottom input pinning** (needs fullscreen — separate task).
 - Commit after each task or logical group; stop at any checkpoint to validate.

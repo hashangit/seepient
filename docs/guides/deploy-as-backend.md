@@ -1,11 +1,11 @@
 ---
 title: Deploy as a Backend Service
-description: Deploy Zoe Agent as a production backend service using Docker or Google Cloud Run.
+description: Deploy Seepient Agent as a production backend service using Docker or Google Cloud Run.
 ---
 
 # Deploy as a Backend Service
 
-Zoe Agent runs as a standalone server with REST and WebSocket APIs. This guide covers deploying it as a containerized backend service suitable for production workloads.
+Seepient Agent runs as a standalone server with REST and WebSocket APIs. This guide covers deploying it as a containerized backend service suitable for production workloads.
 
 ## Prerequisites
 
@@ -16,23 +16,23 @@ Zoe Agent runs as a standalone server with REST and WebSocket APIs. This guide c
 
 ## Step 1: Build the Docker Image
 
-Zoe Agent ships with a Dockerfile. Build the image:
+Seepient Agent ships with a Dockerfile. Build the image:
 
 ```bash
-git clone https://github.com/zoe/zoe.git
-cd zoe
-docker build -t zoe-server .
+git clone https://github.com/seepient/seepient.git
+cd seepient
+docker build -t seepient-server .
 ```
 
 Verify the build:
 
 ```bash
-docker run --rm zoe-server --version
+docker run --rm seepient-server --version
 ```
 
 ## Step 2: Configure Environment Variables
 
-Zoe Agent uses environment variables for provider keys and server configuration. Create a `.env` file:
+Seepient Agent uses environment variables for provider keys and server configuration. Create a `.env` file:
 
 ```bash
 # LLM Provider Keys (set at least one)
@@ -45,8 +45,8 @@ LLM_PROVIDER=openai
 OPENAI_MODEL=gpt-5.4
 
 # Server settings
-ZOE_PORT=7337
-ZOE_PORT=7337
+SEEPIENT_PORT=7337
+SEEPIENT_PORT=7337
 
 # Optional: Tavily for web search
 TAVILY_API_KEY=tvly-...
@@ -61,7 +61,7 @@ SMTP_PASS=app-password
 IMAGE_MODEL=dall-e-3
 
 # Session storage (default: file-based)
-# ZOE_SESSION_DIR=/data/sessions
+# SEEPIENT_SESSION_DIR=/data/sessions
 ```
 
 ::: warning Never commit .env files
@@ -75,12 +75,12 @@ Deploy to Google Cloud Run for serverless scaling:
 ```bash
 # Tag and push to Artifact Registry
 gcloud auth configure-docker
-docker tag zoe-server gcr.io/YOUR_PROJECT/zoe-server
-docker push gcr.io/YOUR_PROJECT/zoe-server
+docker tag seepient-server gcr.io/YOUR_PROJECT/seepient-server
+docker push gcr.io/YOUR_PROJECT/seepient-server
 
 # Deploy to Cloud Run
-gcloud run deploy zoe-server \
-  --image gcr.io/YOUR_PROJECT/zoe-server \
+gcloud run deploy seepient-server \
+  --image gcr.io/YOUR_PROJECT/seepient-server \
   --platform managed \
   --region us-central1 \
   --port 7337 \
@@ -102,27 +102,27 @@ Run locally or on any Docker host:
 
 ```bash
 docker run -d \
-  --name zoe \
+  --name seepient \
   -p 7337:7337 \
   --env-file .env \
-  -v zoe-sessions:/data/sessions \
-  zoe-server
+  -v seepient-sessions:/data/sessions \
+  seepient-server
 ```
 
 ## Step 4: Generate API Keys
 
-Zoe Agent includes API key management for securing your deployment. Generate keys using the CLI or server endpoint:
+Seepient Agent includes API key management for securing your deployment. Generate keys using the CLI or server endpoint:
 
 ```bash
 # Via CLI (if running locally)
-zoe server keygen --scopes agent:run,agent:read
+seepient server keygen --scopes agent:run,agent:read
 ```
 
 Store the generated key securely. Clients must include it in requests:
 
 ```bash
 curl http://your-server/v1/chat \
-  -H "X-Zoe-API-Key: sk_zoe_..." \
+  -H "X-Seepient-API-Key: sk_seepient_..." \
   -H "Content-Type: application/json" \
   -d '{"message": "Hello"}'
 ```
@@ -134,7 +134,7 @@ Point your SDK client or HTTP calls at the deployed server:
 ### SDK Configuration
 
 ```typescript
-import { configureProviders } from "zoe-agent";
+import { configureProviders } from "seepient";
 
 configureProviders({
   openai: { apiKey: process.env.OPENAI_API_KEY },
@@ -149,7 +149,7 @@ const response = await fetch("https://your-server.run.app/v1/chat", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
-    "X-Zoe-API-Key": "sk_zoe_...",
+    "X-Seepient-API-Key": "sk_seepient_...",
   },
   body: JSON.stringify({
     message: "Analyze this dataset",
@@ -164,7 +164,7 @@ const result = await response.json();
 ### Streaming via WebSocket
 
 ```javascript
-const ws = new WebSocket("wss://your-server.run.app/ws?token=sk_zoe_...");
+const ws = new WebSocket("wss://your-server.run.app/ws?token=sk_seepient_...");
 
 ws.onopen = () => {
   ws.send(JSON.stringify({
@@ -194,7 +194,7 @@ Cloud Run instances are ephemeral. For multi-turn conversations, mount a persist
 
 ```bash
 # Set the session directory to a mounted volume
-ZOE_SESSION_DIR=/data/sessions
+SEEPIENT_SESSION_DIR=/data/sessions
 ```
 
 ::: warning Future: Redis sessions
@@ -207,7 +207,7 @@ CORS is enabled by default and mirrors the request `Origin` header. For producti
 
 ### Rate Limiting
 
-Implement rate limiting at the infrastructure level using a reverse proxy, API gateway, or Cloud Armor. Zoe Agent does not currently include built-in rate limiting.
+Implement rate limiting at the infrastructure level using a reverse proxy, API gateway, or Cloud Armor. Seepient Agent does not currently include built-in rate limiting.
 
 ### Resource Limits
 
@@ -221,7 +221,7 @@ Implement rate limiting at the infrastructure level using a reverse proxy, API g
 
 ## Monitoring and Logging
 
-Zoe Agent logs structured JSON to stdout, making it compatible with standard log aggregation tools.
+Seepient Agent logs structured JSON to stdout, making it compatible with standard log aggregation tools.
 
 ### Health Check Monitoring
 
@@ -239,18 +239,18 @@ For Cloud Run, logs flow automatically to Cloud Logging. For Docker deployments,
 
 ```bash
 # Stream logs
-docker logs -f zoe
+docker logs -f seepient
 
 # Send to external service
-docker logs zoe 2>&1 | your-log-shipper
+docker logs seepient 2>&1 | your-log-shipper
 ```
 
 ### Cost Tracking
 
-Zoe Agent reports token usage and estimated cost in every response. Aggregate `usage.cost` across requests to track spending:
+Seepient Agent reports token usage and estimated cost in every response. Aggregate `usage.cost` across requests to track spending:
 
 ```typescript
-import { generateText } from "zoe-agent";
+import { generateText } from "seepient";
 
 const result = await generateText("Hello", { tools: ["core"] });
 console.log(`Cost: $${result.usage.cost.toFixed(4)}`);

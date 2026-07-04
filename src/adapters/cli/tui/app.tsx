@@ -168,7 +168,7 @@ export function TuiApp({
     const name = raw.split(/\s+/)[0];
     const result = await dispatchCommand(raw);
     if (result.deferred) {
-      feed.appendEntry({ kind: 'assistant', content: `${name} is interactive — run it in the readline REPL (zoe), or wait for the TUI overlay.` });
+      feed.appendEntry({ kind: 'assistant', content: `${name} is interactive — run it in the readline REPL (seepient), or wait for the TUI overlay.` });
     } else if (result.exit) {
       onExit();
     } else if (result.output) {
@@ -374,7 +374,7 @@ export function TuiApp({
     <Box flexDirection="column">
       {showSpinner ? (
         <Box>
-          <Text color={theme.yellow}><Spinner type="dots" /> Zoe is working </Text>
+          <Text color={theme.yellow}><Spinner type="dots" /> Seepient is working </Text>
           <Text color={theme.fgDim}>(Esc to abort){queuedCount > 0 ? ` · ${queuedCount} queued` : ''}</Text>
         </Box>
       ) : null}

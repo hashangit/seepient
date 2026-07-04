@@ -1,5 +1,5 @@
 /**
- * Zoe CLI — REPL Functions
+ * Seepient CLI — REPL Functions
  *
  * Interrupt handling, chat-with-interrupt, and the main runChat loop.
  * Extracted from index.ts for single-responsibility.
@@ -79,10 +79,10 @@ export function setupInterrupt(agent: Agent): InterruptHandle {
 function getShellApprovalMode(config: any, newPermissionSystemActive?: boolean): 'auto' | 'prompt' | 'deny' {
   if (config?.autoConfirm) return 'auto';
 
-  // When the new permission system is active, ignore the legacy ZOE_SHELL_APPROVE env var
+  // When the new permission system is active, ignore the legacy SEEPIENT_SHELL_APPROVE env var
   // so it cannot bypass the permission matrix.
   if (!newPermissionSystemActive) {
-    const envMode = process.env.ZOE_SHELL_APPROVE;
+    const envMode = process.env.SEEPIENT_SHELL_APPROVE;
     if (envMode === 'auto' || envMode === 'true' || envMode === '1') return 'auto';
     if (envMode === 'deny' || envMode === 'false' || envMode === '0') return 'deny';
   }
@@ -116,7 +116,7 @@ export function createCliApproveTool(
 
     if (mode === 'deny') {
       console.log(chalk.red('Command denied (non-interactive mode).'));
-      console.log(chalk.dim('Set ZOE_SHELL_APPROVE=auto to auto-approve, or use --yes flag.'));
+      console.log(chalk.dim('Set SEEPIENT_SHELL_APPROVE=auto to auto-approve, or use --yes flag.'));
       return false;
     }
 
@@ -142,7 +142,7 @@ export function createCliApproveTool(
     }
 
     // Auto-approved
-    console.log(chalk.gray(`(Auto-approved: ${config?.autoConfirm ? '--yes flag' : 'ZOE_SHELL_APPROVE=auto'})`));
+    console.log(chalk.gray(`(Auto-approved: ${config?.autoConfirm ? '--yes flag' : 'SEEPIENT_SHELL_APPROVE=auto'})`));
     return true;
   };
 }
@@ -161,7 +161,7 @@ export async function chatWithInterrupt(agent: Agent, input: string, config?: an
 
 export async function runChat(queryParts: string[], options: any) {
   if (options.interactive) {
-    console.log(chalk.bold.cyan("Welcome to Zoe Agent CLI"));
+    console.log(chalk.bold.cyan("Welcome to Seepient Agent CLI"));
   }
 
   const initialQuery = queryParts.join(' ');

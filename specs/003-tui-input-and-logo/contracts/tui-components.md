@@ -61,7 +61,7 @@ export function LogoBanner(): JSX.Element;
   session start, before any messages. It then scrolls away with the feed via the
   existing single `<Static>` — no second `<Static>`, no `as any`.
 
-**Behavior**: renders the large multi-line ASCII "Zoe Agent" with the 45° HSL
+**Behavior**: renders the large multi-line ASCII "Seepient Agent" with the 45° HSL
 rainbow gradient; width-capped like every other feed item (stays `< columns`).
 
 ---
@@ -82,7 +82,7 @@ Top → bottom (within the live region):
     : overlay==='model'   ? <ModelSelector/>
     : overlay==='settings'? <SettingsEditor/>
     : pendingPermission   ? <PermissionPrompt/>
-    : (isRunning && !streamingText) ? <Spinner "Zoe is working"/>
+    : (isRunning && !streamingText) ? <Spinner "Seepient is working"/>
     : null
 }
 <InputBox disabled={isRunning || overlay !== null || !!pendingPermission} …/>

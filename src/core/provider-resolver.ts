@@ -1,5 +1,5 @@
 /**
- * Zoe Core — Unified Provider Resolver
+ * Seepient Core — Unified Provider Resolver
  *
  * Re-export hub. All logic has been split into:
  *   - provider-env.ts    — env var helpers, defaults, resolveFromEnv(), resolveGLMModel()

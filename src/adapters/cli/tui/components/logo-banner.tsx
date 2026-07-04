@@ -5,7 +5,7 @@ import { rainbowCellColor } from '../logo/gradient.js';
 
 // figlet is lazy-loaded: this module only imports under the interactive TUI
 // (app.tsx → message-area → here), so headless/SDK/Server never pull it in.
-const WORDMARK = 'Zoe Agent';
+const WORDMARK = 'Seepient Agent';
 // "ANSI Compact" = solid-block figlet font (~54 cols) — the block vibe of Delta
 // Corps Priest 1 at a size that fits an 80-col terminal. Swap here for another
 // figlet font (e.g. 'Small Block' = 25 cols pixelated, 'Delta Corps Priest 1' =
@@ -23,7 +23,7 @@ const ROWS = ART_LINES.length;
 const COLS = Math.max(...ART_LINES.map((l) => [...l].length));
 
 /**
- * Zoe Agent logo — figlet wordmark with a Tokyo Night 45° rainbow gradient
+ * Seepient Agent logo — figlet wordmark with a Tokyo Night 45° rainbow gradient
  * (lolcat-style sweep, our palette) + a dim descriptor. Rendered as the first
  * feed entry (kind: 'logo') on a fresh session, so it scrolls away as the user
  * chats.

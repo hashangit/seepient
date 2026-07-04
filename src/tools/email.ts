@@ -29,7 +29,7 @@ export const EmailTool: ToolModule = {
   handler: async (args: any, config: any) => {
     // Validate config
     if (!config?.smtpHost || !config?.smtpUser || !config?.smtpPass) {
-      return "Error: Email tool is not configured. Please run 'zoe setup' to configure SMTP settings.";
+      return "Error: Email tool is not configured. Please run 'seepient setup' to configure SMTP settings.";
     }
 
     try {

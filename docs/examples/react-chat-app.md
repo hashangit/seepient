@@ -5,12 +5,12 @@ description: Complete React + Express chat application with streaming, tool visu
 
 # React Chat Application
 
-A full-stack chat application built with React and Zoe Agent. Features real-time streaming, tool call visualization, and a clean chat interface.
+A full-stack chat application built with React and Seepient Agent. Features real-time streaming, tool call visualization, and a clean chat interface.
 
 ## Architecture
 
 ```
-React Frontend (Vite)  -->  Express Backend  -->  Zoe Agent SDK  -->  LLM
+React Frontend (Vite)  -->  Express Backend  -->  Seepient Agent SDK  -->  LLM
      |                           |
      |  SSE stream               |  streamText()
      |<--------------------------|  toResponse()
@@ -21,11 +21,11 @@ React Frontend (Vite)  -->  Express Backend  -->  Zoe Agent SDK  -->  LLM
 Create the project and install dependencies:
 
 ```bash
-mkdir zoe-react-chat && cd zoe-react-chat
+mkdir seepient-react-chat && cd seepient-react-chat
 mkdir server client
 cd server
 npm init -y
-npm install express cors zoe-agent
+npm install express cors seepient
 ```
 
 Create `server/index.js`:
@@ -33,7 +33,7 @@ Create `server/index.js`:
 ```javascript
 import express from "express";
 import cors from "cors";
-import { streamText } from "zoe-agent";
+import { streamText } from "seepient";
 
 const app = express();
 const PORT = 3001;
@@ -82,7 +82,7 @@ app.get("/api/health", (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Zoe Agent chat server running on http://localhost:${PORT}`);
+  console.log(`Seepient Agent chat server running on http://localhost:${PORT}`);
 });
 ```
 
@@ -243,7 +243,7 @@ export default function Chat() {
   return (
     <div style={styles.container}>
       <header style={styles.header}>
-        <h1 style={styles.title}>Zoe Agent Chat</h1>
+        <h1 style={styles.title}>Seepient Agent Chat</h1>
         <span style={styles.badge}>
           {isStreaming ? "Streaming..." : "Ready"}
         </span>
@@ -443,7 +443,7 @@ Start both servers in separate terminals:
 # Terminal 1: Backend
 cd server
 node index.js
-# Output: Zoe Agent chat server running on http://localhost:3001
+# Output: Seepient Agent chat server running on http://localhost:3001
 
 # Terminal 2: Frontend
 cd client

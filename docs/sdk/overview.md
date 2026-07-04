@@ -1,15 +1,15 @@
 ---
 title: SDK Overview
-description: Zoe Agent SDK architecture, installation, and quick-start guide.
+description: Seepient Agent SDK architecture, installation, and quick-start guide.
 ---
 
 # SDK Overview
 
-Zoe Agent is a headless AI agent framework for building LLM-powered applications. The SDK provides a functional, composable API -- no class hierarchies, no boilerplate. Import a function, pass a prompt, get a result.
+Seepient Agent is a headless AI agent framework for building LLM-powered applications. The SDK provides a functional, composable API -- no class hierarchies, no boilerplate. Import a function, pass a prompt, get a result.
 
 ## Architecture
 
-Zoe Agent is organized in three layers of increasing statefulness:
+Seepient Agent is organized in three layers of increasing statefulness:
 
 ```
 generateText()   -- One-shot. Stateless. No memory between calls.
@@ -34,15 +34,15 @@ Configuration is passed as options objects. Return types are plain interfaces. T
 ::: code-group
 
 ```bash [npm]
-npm install zoe-agent
+npm install seepient
 ```
 
 ```bash [pnpm]
-pnpm add zoe-agent
+pnpm add seepient
 ```
 
 ```bash [yarn]
-yarn add zoe-agent
+yarn add seepient
 ```
 
 :::
@@ -52,7 +52,7 @@ yarn add zoe-agent
 ::: code-group
 
 ```typescript [ESM -- recommended]
-import { generateText, streamText, createAgent } from "zoe-agent";
+import { generateText, streamText, createAgent } from "seepient";
 ```
 
 ```typescript [SDK types only]
@@ -61,19 +61,19 @@ import type {
   GenerateTextResult,
   StreamTextResult,
   SdkAgent,
-} from "zoe-agent";
+} from "seepient";
 ```
 
 ```typescript [Tools and factories]
-import { tool, CORE_TOOLS, COMM_TOOLS, ADVANCED_TOOLS, ALL_TOOLS } from "zoe-agent";
+import { tool, CORE_TOOLS, COMM_TOOLS, ADVANCED_TOOLS, ALL_TOOLS } from "seepient";
 ```
 
 ```typescript [React integration]
-import { createUseChat } from "zoe-agent/react";
+import { createUseChat } from "seepient/react";
 ```
 
 ```typescript [Server]
-import { createServer } from "zoe-agent/server";
+import { createServer } from "seepient/server";
 ```
 
 :::
@@ -83,7 +83,7 @@ import { createServer } from "zoe-agent/server";
 ### One-shot text generation
 
 ```typescript
-import { generateText } from "zoe-agent";
+import { generateText } from "seepient";
 
 const result = await generateText("Explain recursion in one paragraph");
 console.log(result.text);
@@ -93,7 +93,7 @@ console.log(result.usage.totalTokens);
 ### Streaming
 
 ```typescript
-import { streamText } from "zoe-agent";
+import { streamText } from "seepient";
 
 const stream = await streamText("Write a haiku about programming", {
   onText: (delta) => process.stdout.write(delta),
@@ -105,7 +105,7 @@ const finalText = await stream.fullText;
 ### Multi-turn agent
 
 ```typescript
-import { createAgent } from "zoe-agent";
+import { createAgent } from "seepient";
 
 const agent = await createAgent({
   model: "gpt-5.4",
@@ -123,7 +123,7 @@ console.log(followUp.text);
 ### Custom tools
 
 ```typescript
-import { generateText, tool } from "zoe-agent";
+import { generateText, tool } from "seepient";
 import { z } from "zod";
 
 const weatherTool = tool({
@@ -140,7 +140,7 @@ const result = await generateText("What is the weather in Tokyo?", {
 ### HTTP SSE endpoint
 
 ```typescript
-import { streamText } from "zoe-agent";
+import { streamText } from "seepient";
 
 app.get("/chat", async (req, res) => {
   const stream = await streamText(req.query.prompt as string);
@@ -150,7 +150,7 @@ app.get("/chat", async (req, res) => {
 
 ## Provider support
 
-Zoe Agent supports multiple LLM providers out of the box:
+Seepient Agent supports multiple LLM providers out of the box:
 
 | Provider         | `provider` value      | Default model                  |
 | ---------------- | --------------------- | ------------------------------ |
@@ -159,11 +159,11 @@ Zoe Agent supports multiple LLM providers out of the box:
 | GLM              | `"glm"`               | `opus`                          |
 | OpenAI-compatible| `"openai-compatible"` | `gpt-5.4` (configurable `baseUrl`) |
 
-Configure providers via environment variables, `.env`, or the `zoe setup` CLI wizard.
+Configure providers via environment variables, `.env`, or the `seepient setup` CLI wizard.
 
 ## Built-in tools
 
-Zoe Agent ships with a set of built-in tools organized into groups:
+Seepient Agent ships with a set of built-in tools organized into groups:
 
 | Group      | Tools                                                       |
 | ---------- | ----------------------------------------------------------- |

@@ -1,5 +1,5 @@
 /**
- * Zoe Gateway — Public API
+ * Seepient Gateway — Public API
  *
  * Barrel export for the gateway subsystem.
  */

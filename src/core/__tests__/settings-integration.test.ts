@@ -14,7 +14,7 @@ let tmpDir: string;
 let configPath: string;
 
 beforeEach(async () => {
-  tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'zoe-int-'));
+  tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'seepient-int-'));
   configPath = path.join(tmpDir, 'setting.json');
 });
 

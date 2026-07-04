@@ -1,5 +1,5 @@
 /**
- * Zoe Core — Settings Manager
+ * Seepient Core — Settings Manager
  *
  * Single source of truth for reading, writing, validating, and persisting
  * settings. Adapters (CLI, SDK, Server) delegate to this class.
@@ -7,7 +7,7 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { ZoeError } from './errors.js';
+import { SeepientError } from './errors.js';
 import {
   SETTINGS_MAP,
   SETTINGS_SCHEMA,
@@ -22,7 +22,7 @@ import {
 
 // ── Settings Error ────────────────────────────────────────────────────────
 
-export class SettingsError extends ZoeError {
+export class SettingsError extends SeepientError {
   constructor(message: string, code = 'SETTINGS_ERROR') {
     super(message, code, false);
     this.name = 'SettingsError';

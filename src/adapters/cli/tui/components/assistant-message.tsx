@@ -8,7 +8,7 @@ export function AssistantMessage({ entry }: { entry: AssistantMessageEntry }) {
   const theme = useTheme();
   return (
     <Box>
-      <Text color={theme.blue} bold>Zoe › </Text>
+      <Text color={theme.blue} bold>Seepient › </Text>
       <Markdown content={entry.content} />
     </Box>
   );

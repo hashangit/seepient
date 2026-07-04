@@ -5,12 +5,12 @@ description: Get typed, validated responses from LLMs using Zod schemas with gen
 
 # Structured Output
 
-Zoe Agent supports Zod-based structured output. Pass a Zod schema to the `output` option and receive a fully typed, validated result instead of raw text.
+Seepient Agent supports Zod-based structured output. Pass a Zod schema to the `output` option and receive a fully typed, validated result instead of raw text.
 
 ## Quick example
 
 ```typescript
-import { generateText } from "zoe-agent";
+import { generateText } from "seepient";
 import { z } from "zod";
 
 const Sentiment = z.object({
@@ -31,7 +31,7 @@ if (result.data) {
 ## How it works
 
 1. You pass a Zod schema as the `output` option to `generateText()` or `streamText()`.
-2. Zoe Agent instructs the LLM to produce JSON that conforms to the schema.
+2. Seepient Agent instructs the LLM to produce JSON that conforms to the schema.
 3. The raw JSON is parsed and validated against the schema.
 4. If validation succeeds, the typed data is available on `result.data`.
 5. If validation fails, error details are available on `result.error`.
@@ -68,7 +68,7 @@ When validation succeeds, `data` is present and `error` is `undefined`. When val
 Zod's full power is available -- nested objects, arrays, enums, unions, optional fields, and transforms:
 
 ```typescript
-import { generateText } from "zoe-agent";
+import { generateText } from "seepient";
 import { z } from "zod";
 
 const BugReport = z.object({
@@ -107,7 +107,7 @@ Use `.describe()` on schema fields. The descriptions are sent to the LLM and hel
 When the LLM output fails validation, check `result.error` for details:
 
 ```typescript
-import { generateText } from "zoe-agent";
+import { generateText } from "seepient";
 import { z } from "zod";
 
 const StrictSchema = z.object({
@@ -169,7 +169,7 @@ async function generateWithRetry(
 Structured output works alongside tools. The agent executes tools as needed, then produces structured output as the final response:
 
 ```typescript
-import { generateText } from "zoe-agent";
+import { generateText } from "seepient";
 import { z } from "zod";
 
 const AnalysisResult = z.object({
@@ -207,7 +207,7 @@ When using tools with structured output, the LLM must produce valid JSON as its 
 Structured output with `streamText()` validates the final result. During streaming, text deltas contain the raw JSON being generated:
 
 ```typescript
-import { streamText } from "zoe-agent";
+import { streamText } from "seepient";
 import { z } from "zod";
 
 const Summary = z.object({

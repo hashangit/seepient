@@ -16,7 +16,7 @@ export class AnthropicProvider implements LLMProvider {
   }
 
   /**
-   * Translate Zoe messages + tools into Anthropic's request shape. Shared by
+   * Translate Seepient messages + tools into Anthropic's request shape. Shared by
    * `chat()` and `chatStream()` so the (non-trivial) translation lives once.
    */
   private buildRequest(messages: ProviderMessage[], tools: ToolDefinition[]): {

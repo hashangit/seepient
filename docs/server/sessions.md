@@ -1,6 +1,6 @@
 ---
 title: Session Management
-description: Zoe Agent Server session lifecycle, storage, TTL, concurrency limits, and reconnection protocol.
+description: Seepient Agent Server session lifecycle, storage, TTL, concurrency limits, and reconnection protocol.
 ---
 
 # Session Management
@@ -27,13 +27,13 @@ Sessions enable multi-turn conversations by persisting message history between r
 Sessions are stored as individual JSON files on disk:
 
 ```
-./.zoe/sessions/
+./.seepient/sessions/
   ├── 550e8400-e29b-41d4-a716-446655440000.json
   ├── 660f9511-f3ac-52e5-b827-557766551111.json
   └── ...
 ```
 
-The session directory defaults to `./.zoe/sessions/` relative to the working directory, and can be overridden with the `ZOE_SESSION_DIR` environment variable.
+The session directory defaults to `./.seepient/sessions/` relative to the working directory, and can be overridden with the `SEEPIENT_SESSION_DIR` environment variable.
 
 ### Session file format
 
@@ -82,7 +82,7 @@ Sessions expire based on two independent conditions:
 
 | Condition | Default | Configurable |
 |---|---|---|
-| **Absolute TTL** | 24 hours from creation | `ZOE_SESSION_TTL` env (seconds) or `sessionTTL` server option |
+| **Absolute TTL** | 24 hours from creation | `SEEPIENT_SESSION_TTL` env (seconds) or `sessionTTL` server option |
 | **Inactivity timeout** | 30 minutes since last activity | `inactivityTimeout` server option (milliseconds) |
 
 A session is considered expired when **either** condition is met. Expired sessions are automatically deleted from memory and disk.
@@ -90,7 +90,7 @@ A session is considered expired when **either** condition is met. Expired sessio
 ### Configuring TTL
 
 ```typescript
-import { createServer } from "zoe-agent/server";
+import { createServer } from "seepient/server";
 
 await createServer({
   sessionTTL: 7200, // 2 hours in seconds
@@ -100,7 +100,7 @@ await createServer({
 Or via environment variable:
 
 ```bash
-ZOE_SESSION_TTL=7200 zoe server
+SEEPIENT_SESSION_TTL=7200 seepient server
 ```
 
 ## Concurrency limits

@@ -1,23 +1,23 @@
 ---
 title: Build Your Own Chat UI
-description: Tutorial for building a chat interface with React and Zoe Agent's streaming API.
+description: Tutorial for building a chat interface with React and Seepient Agent's streaming API.
 ---
 
 # Build Your Own Chat UI
 
-Build a real-time chat interface powered by Zoe Agent's streaming API. This tutorial walks you through creating a full-stack chat application with React on the frontend and Express on the backend.
+Build a real-time chat interface powered by Seepient Agent's streaming API. This tutorial walks you through creating a full-stack chat application with React on the frontend and Express on the backend.
 
 ## Prerequisites
 
 - Node.js 18+
-- A running Zoe Agent server or a Zoe Agent SDK installation
+- A running Seepient Agent server or a Seepient Agent SDK installation
 - An LLM provider API key (OpenAI, Anthropic, or GLM)
 - Basic familiarity with React and Express
 
 ## Architecture Overview
 
 ```
-Browser (React)  -->  Express Server  -->  Zoe Agent SDK  -->  LLM Provider
+Browser (React)  -->  Express Server  -->  Seepient Agent SDK  -->  LLM Provider
      |                     |
      |  SSE stream         |  streamText()
      |<--------------------|  toResponse()
@@ -27,12 +27,12 @@ The React frontend sends chat messages to an Express endpoint. The server calls 
 
 ## Step 1: Set Up the Backend
 
-Create an Express server that uses Zoe Agent's `streamText` function.
+Create an Express server that uses Seepient Agent's `streamText` function.
 
 ```bash
-mkdir zoe-chat && cd zoe-chat
+mkdir seepient-chat && cd seepient-chat
 npm init -y
-npm install express cors zoe-agent
+npm install express cors seepient
 ```
 
 Create `server.js`:
@@ -40,7 +40,7 @@ Create `server.js`:
 ```javascript
 import express from "express";
 import cors from "cors";
-import { streamText } from "zoe-agent";
+import { streamText } from "seepient";
 
 const app = express();
 const PORT = 3001;
@@ -105,7 +105,7 @@ export OPENAI_API_KEY=sk-...
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-Zoe Agent auto-detects available providers based on environment variables.
+Seepient Agent auto-detects available providers based on environment variables.
 :::
 
 ## Step 2: Set Up the React Frontend
@@ -118,7 +118,7 @@ cd client
 npm install
 ```
 
-No additional Zoe Agent packages are needed on the client. The frontend communicates with the backend via HTTP.
+No additional Seepient Agent packages are needed on the client. The frontend communicates with the backend via HTTP.
 
 ## Step 3: Create the Chat Component
 
@@ -225,7 +225,7 @@ export default function Chat() {
 
   return (
     <div style={{ maxWidth: 720, margin: "0 auto", padding: 24 }}>
-      <h2>Zoe Agent Chat</h2>
+      <h2>Seepient Agent Chat</h2>
 
       <div
         style={{
@@ -328,7 +328,7 @@ export default function App() {
 
 ## Step 4: Add Tool Call Display
 
-When Zoe Agent executes a tool during generation, the SSE stream emits `tool_call` and `tool_result` events. Extend the message parsing to display these:
+When Seepient Agent executes a tool during generation, the SSE stream emits `tool_call` and `tool_result` events. Extend the message parsing to display these:
 
 ```jsx
 // Add to the SSE parsing loop inside sendMessage:
@@ -448,7 +448,7 @@ Open `http://localhost:5173` in your browser and start chatting.
 - **Limit message width** to 80% of the container and align user messages to the right.
 - **Add markdown rendering** with a library like `react-markdown` for formatted assistant responses.
 - **Show token usage** by capturing the `done` SSE event, which includes `usage.totalTokens` and `usage.cost`.
-- **Persist chat history** by storing messages in `localStorage` or connecting to Zoe Agent's session API.
+- **Persist chat history** by storing messages in `localStorage` or connecting to Seepient Agent's session API.
 
 ## Common Pitfalls
 

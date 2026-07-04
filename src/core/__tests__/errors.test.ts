@@ -1,38 +1,38 @@
 import { describe, it, expect } from "vitest";
 import {
-  ZoeError,
+  SeepientError,
   ProviderError,
   ToolError,
   MaxStepsError,
   AbortedError,
 } from "../errors.js";
 
-describe("ZoeError", () => {
+describe("SeepientError", () => {
   it("stores code and retryable", () => {
-    const err = new ZoeError("something broke", "GENERIC", false);
+    const err = new SeepientError("something broke", "GENERIC", false);
     expect(err).toBeInstanceOf(Error);
-    expect(err).toBeInstanceOf(ZoeError);
+    expect(err).toBeInstanceOf(SeepientError);
     expect(err.message).toBe("something broke");
     expect(err.code).toBe("GENERIC");
     expect(err.retryable).toBe(false);
-    expect(err.name).toBe("ZoeError");
+    expect(err.name).toBe("SeepientError");
   });
 
   it("defaults retryable to false", () => {
-    const err = new ZoeError("msg", "CODE");
+    const err = new SeepientError("msg", "CODE");
     expect(err.retryable).toBe(false);
   });
 
   it("accepts retryable=true", () => {
-    const err = new ZoeError("msg", "CODE", true);
+    const err = new SeepientError("msg", "CODE", true);
     expect(err.retryable).toBe(true);
   });
 });
 
 describe("ProviderError", () => {
-  it("is a ZoeError with code PROVIDER_ERROR", () => {
+  it("is a SeepientError with code PROVIDER_ERROR", () => {
     const err = new ProviderError("rate limited");
-    expect(err).toBeInstanceOf(ZoeError);
+    expect(err).toBeInstanceOf(SeepientError);
     expect(err).toBeInstanceOf(ProviderError);
     expect(err.code).toBe("PROVIDER_ERROR");
     expect(err.retryable).toBe(true);
@@ -51,9 +51,9 @@ describe("ProviderError", () => {
 });
 
 describe("ToolError", () => {
-  it("is a ZoeError with code TOOL_FAILED", () => {
+  it("is a SeepientError with code TOOL_FAILED", () => {
     const err = new ToolError("tool crashed");
-    expect(err).toBeInstanceOf(ZoeError);
+    expect(err).toBeInstanceOf(SeepientError);
     expect(err).toBeInstanceOf(ToolError);
     expect(err.code).toBe("TOOL_FAILED");
     expect(err.retryable).toBe(true);
@@ -69,7 +69,7 @@ describe("ToolError", () => {
 describe("MaxStepsError", () => {
   it("formats message and stores steps", () => {
     const err = new MaxStepsError(15, 10);
-    expect(err).toBeInstanceOf(ZoeError);
+    expect(err).toBeInstanceOf(SeepientError);
     expect(err).toBeInstanceOf(MaxStepsError);
     expect(err.message).toBe("Maximum steps reached (15/10)");
     expect(err.code).toBe("MAX_STEPS");
@@ -82,7 +82,7 @@ describe("MaxStepsError", () => {
 describe("AbortedError", () => {
   it("uses default message when none provided", () => {
     const err = new AbortedError();
-    expect(err).toBeInstanceOf(ZoeError);
+    expect(err).toBeInstanceOf(SeepientError);
     expect(err).toBeInstanceOf(AbortedError);
     expect(err.message).toBe("Operation was aborted");
     expect(err.code).toBe("ABORTED");

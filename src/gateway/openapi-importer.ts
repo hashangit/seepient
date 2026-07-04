@@ -1,5 +1,5 @@
 /**
- * Zoe Gateway — OpenAPI/Swagger spec importer
+ * Seepient Gateway — OpenAPI/Swagger spec importer
  *
  * Fetches an OpenAPI spec (JSON or YAML), extracts operations,
  * and registers the result as a REST target on the gateway.

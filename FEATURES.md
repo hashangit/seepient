@@ -1,14 +1,14 @@
-# Zoe Agent - Complete Feature Documentation
+# Seepient Agent - Complete Feature Documentation
 
 **Version:** 1.0.40
 **License:** BSL 1.1 (Business Source License — source-available, free for non-commercial use)
-**Repository:** https://github.com/hashangit/zoe
+**Repository:** https://github.com/hashangit/seepient
 
 ---
 
 ## Overview
 
-Zoe Agent is an engineering-first headless AI agent framework designed for scalable automation in containerized environments. It combines LLM-powered decision making with 23 specialized tools to automate system administration, web operations, communications, media generation, and external API integration tasks.
+Seepient Agent is an engineering-first headless AI agent framework designed for scalable automation in containerized environments. It combines LLM-powered decision making with 23 specialized tools to automate system administration, web operations, communications, media generation, and external API integration tasks.
 
 ---
 
@@ -30,9 +30,9 @@ Zoe Agent is an engineering-first headless AI agent framework designed for scala
 | 11 | Headless Mode | `--no-interactive` Flag | Execute single query and exit without entering chat loop | One-Shot Automation | Perfect for scripts, CI/CD pipelines, and automated workflows |
 | 12 | Auto-Confirm Mode | `-y` / `--yes` Flag | Automatically approve all tool executions without user prompts | Unattended Operation | Enables fully automated scripts and batch processing without manual intervention |
 | **CLI & USER INTERFACE** |
-| 13 | Main Command | `zoe [query]` | Default chat command that starts interactive agent with optional initial query | Quick Start | Users can immediately start working by typing a single command |
-| 14 | Setup Wizard | `zoe setup` Command | Interactive Inquirer-based configuration wizard | Guided Configuration | Users don't need to manually edit config files; wizard walks them through setup |
-| 15 | Project Config | `zoe setup --project` | Saves configuration to project-level (`.zoe/setting.json`) | Per-Project Settings | Different projects can have different configurations (API keys, models, etc.) |
+| 13 | Main Command | `seepient [query]` | Default chat command that starts interactive agent with optional initial query | Quick Start | Users can immediately start working by typing a single command |
+| 14 | Setup Wizard | `seepient setup` Command | Interactive Inquirer-based configuration wizard | Guided Configuration | Users don't need to manually edit config files; wizard walks them through setup |
+| 15 | Project Config | `seepient setup --project` | Saves configuration to project-level (`.seepient/setting.json`) | Per-Project Settings | Different projects can have different configurations (API keys, models, etc.) |
 | 16 | Provider Selection | `-p, --provider <provider>` Flag | CLI flag to specify provider (openai-compatible|openai|anthropic|glm) | Provider Override | Users can override default provider per-command |
 | 17 | Models Command | `/models` Interactive Command | In-chat command to switch between configured providers | Provider Switching | Change AI providers without leaving the conversation |
 | 18 | Version Display | `-v` / `--version` Flag | Displays current version information | Version Tracking | Users can quickly check which version they're running |
@@ -92,8 +92,8 @@ Zoe Agent is an engineering-first headless AI agent framework designed for scala
 | 67 | Hierarchical Config | 4-Tier Priority System | CLI args > Env vars > Project config > Global config | Flexible Configuration | Users can override settings at different levels for different scenarios |
 | 68 | API Key Storage | Encrypted Config Storage | Secure storage of API keys in config files | Persistent Credentials | Don't need to re-enter API keys every session |
 | 69 | Environment Variables | `.env` File Support | Load configuration from environment variables | CI/CD Integration | Secrets can be managed via environment in production |
-| 70 | Global Config | `~/.zoe/setting.json` | User-level configuration applies to all projects | Default Settings | Set once, use everywhere; no repeated configuration |
-| 71 | Project Config | `./.zoe/setting.json` | Project-specific configuration | Project Isolation | Different projects can use different models, API keys |
+| 70 | Global Config | `~/.seepient/setting.json` | User-level configuration applies to all projects | Default Settings | Set once, use everywhere; no repeated configuration |
+| 71 | Project Config | `./.seepient/setting.json` | Project-specific configuration | Project Isolation | Different projects can use different models, API keys |
 | 72 | Image Configuration | Separate Image API Settings | Independent API key and base URL for image generation | Multi-Service Support | Can use different providers for chat vs. images |
 | 73 | Image Defaults | Default Size/Quality/Style/N | Configurable defaults for image generation parameters | Personalized Defaults | Set your preferred image settings once |
 | 74 | SMTP Configuration | Full SMTP Settings | Host, port, user, password, from address configuration | Email Integration | Configure once, send emails anytime |
@@ -106,7 +106,7 @@ Zoe Agent is an engineering-first headless AI agent framework designed for scala
 | 80 | API Key Input | Masked Password Input | API keys are hidden during input | Secure Entry | Shoulder-surfing protection during setup |
 | 81 | Optional Services | Conditional Service Prompts | Only asks about services user wants to configure | Customized Setup | Users aren't overwhelmed with irrelevant configuration |
 | 82 | Secret Preservation | Preserve Existing Secrets | Doesn't overwrite existing secrets when left empty | Safe Re-Configuration | Can update some settings without losing others |
-| 83 | Auto Directory Creation | Config Directory Creation | Automatically creates `~/.zoe` or `.zoe/` directories | No Manual Setup | Users don't need to create directories manually |
+| 83 | Auto Directory Creation | Config Directory Creation | Automatically creates `~/.seepient` or `.seepient/` directories | No Manual Setup | Users don't need to create directories manually |
 | 84 | Secure Permissions | 0o600 File Permissions | Config files created with owner-read-write only | File Security | Sensitive credentials protected from other users |
 | **DOCKER & CONTAINERIZATION** |
 | 85 | Headless Design | No GUI Dependencies | Designed to run without display or desktop environment | Container-Native | Runs in minimal Docker containers without X11 |
@@ -124,7 +124,7 @@ Zoe Agent is an engineering-first headless AI agent framework designed for scala
 | 96 | Build System | pnpm Build Scripts | Production build compiles TypeScript to `dist/` | Optimized Distribution | Production code is compiled and optimized |
 | 97 | Dev Mode | `pnpm run dev` | Development mode with ts-node for instant iteration | Fast Development | No build step needed during development |
 | 98 | Install Scripts | Windows (.bat) and Unix (.sh) | Platform-specific installation scripts | Easy Installation | Users can install with single command on any OS |
-| 99 | Global Binary | NPM Global Installation | Installs `zoe` command globally | System-Wide Access | Command available from any directory |
+| 99 | Global Binary | NPM Global Installation | Installs `seepient` command globally | System-Wide Access | Command available from any directory |
 | 100 | Package Filtering | .npmignore Configuration | Excludes source and config from npm package | Clean Distribution | Users only get what they need |
 | **ERROR HANDLING & RELIABILITY** |
 | 101 | Signal Handling | SIGINT/SIGTERM Capture | Gracefully handles Ctrl+C and termination signals | Safe Interruption | Can stop without corrupting files or leaving orphans |
@@ -204,8 +204,8 @@ Zoe Agent is an engineering-first headless AI agent framework designed for scala
 | **PACKAGE INFORMATION** |
 | 169 | Version | 1.0.40 | Current release version | Stable Release | Production-ready software |
 | 170 | License | BSL 1.1 | Business Source License — source-available | Free for Non-Commercial | Personal/eval use free; commercial use requires license |
-| 171 | NPM Package | `zoe-agent` | Published on NPM registry | Easy Installation | `npm install -g zoe-agent-core` |
-| 172 | GitHub Repo | hashangit/zoe | Source code on GitHub | Open Development | Can contribute, report issues, fork |
+| 171 | NPM Package | `seepient` | Published on NPM registry | Easy Installation | `npm install -g seepient-core` |
+| 172 | GitHub Repo | hashangit/seepient | Source code on GitHub | Open Development | Can contribute, report issues, fork |
 | 173 | Keywords | ai, cli, agent, automation, openai, docker, headless, devops, llm, typescript, orchestration, infrastructure, terminal | Package keywords | Discoverable | Easy to find via search |
 
 ---
@@ -218,7 +218,7 @@ In a TTY the CLI launches a full-screen Ink/React TUI (`src/adapters/cli/tui/`, 
 |---------|-------------|
 | Bordered persistent input | The prompt row is wrapped in a rounded box and is always visible; during a run the spinner renders above it (not in place of it) and the input stays active. |
 | `/` + `@` autocomplete | Fuzzy slash-command/skill dropdown (`/`) and project-file dropdown (`@`) floating above the input border; ↑/↓ navigate, Tab/Enter accept, multi-line via Shift+Enter. |
-| Zoe Agent logo | A figlet "Zoe Agent" wordmark (`ANSI Compact`) with a Tokyo Night 45° rainbow gradient + `by hashangit · v…` descriptor; the first feed entry, scrolls away as you chat, re-seeded on `/clear`. |
+| Seepient Agent logo | A figlet "Seepient Agent" wordmark (`ANSI Compact`) with a Tokyo Night 45° rainbow gradient + `by hashangit · v…` descriptor; the first feed entry, scrolls away as you chat, re-seeded on `/clear`. |
 | Persistent task panel | The `manage_todos` tool drives a persistent todo panel (status glyphs); the agent replaces the full list each call, and it survives session resume. |
 | Streaming feed | Assistant responses stream token-by-token; tool calls render as live bordered blocks with streaming output; Markdown rendering for messages. |
 | Inline write diffs | `write_file` renders a unified diff (green added / red removed, context-collapse) inside the tool block. Writes are atomic (same-dir temp + `fs.rename`), so a crash mid-write never corrupts the file; oversized writes skip the diff and show a plain summary. |
@@ -338,42 +338,42 @@ In a TTY the CLI launches a full-screen Ink/React TUI (`src/adapters/cli/tui/`, 
 
 ```bash
 # Install globally
-npm install -g zoe-agent
+npm install -g seepient
 
 # Run interactive mode
-zoe
+seepient
 
 # Run with initial query
-zoe "List all files in current directory"
+seepient "List all files in current directory"
 
 # Run headless (one-shot)
-zoe --no-interactive "Summarize README.md"
+seepient --no-interactive "Summarize README.md"
 
 # Run with auto-confirm
-zoe -y "Delete all .log files"
+seepient -y "Delete all .log files"
 
 # Run with specific model
-zoe -m "gpt-4-turbo" "Write a Python script"
+seepient -m "gpt-4-turbo" "Write a Python script"
 
 # Run with specific provider
-zoe -p anthropic "Generate code"
+seepient -p anthropic "Generate code"
 
 # Setup wizard
-zoe setup
+seepient setup
 
 # Project-specific setup
-zoe setup --project
+seepient setup --project
 ```
 
 ---
 
 ## Documentation
 
-- **README:** `/Users/hashanw/Developer/zoe/README.md`
-- **Contributing Guide:** `/Users/hashanw/Developer/zoe/CONTRIBUTING.md`
-- **GitHub:** https://github.com/hashangit/zoe
-- **NPM:** https://www.npmjs.com/package/zoe-agent
+- **README:** `/Users/hashanw/Developer/seepient/README.md`
+- **Contributing Guide:** `/Users/hashanw/Developer/seepient/CONTRIBUTING.md`
+- **GitHub:** https://github.com/hashangit/seepient
+- **NPM:** https://www.npmjs.com/package/seepient
 
 ---
 
-*This document was auto-generated to provide a comprehensive feature overview of Zoe Agent version 1.0.40.*
+*This document was auto-generated to provide a comprehensive feature overview of Seepient Agent version 1.0.40.*

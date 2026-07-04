@@ -1,5 +1,5 @@
 /**
- * Zoe Remote Server — Entry Point
+ * Seepient Remote Server — Entry Point
  *
  * Creates an HTTP server with REST endpoints and WebSocket support
  * for real-time streaming conversations with LLM providers.
@@ -27,7 +27,7 @@ import { MODEL_CATALOG } from "../../models-catalog.js";
 // ── Types ──────────────────────────────────────────────────────────────
 
 export interface ServerOptions {
-  /** Port to listen on (default: ZOE_PORT, PORT, or 7337) */
+  /** Port to listen on (default: SEEPIENT_PORT, PORT, or 7337) */
   port?: number;
   /** Host to bind to (default: "0.0.0.0") */
   host?: string;
@@ -60,7 +60,7 @@ function resolveVersion(): string {
 
 function resolvePort(options?: ServerOptions): number {
   if (options?.port) return options.port;
-  const fromEnv = parseInt(process.env.ZOE_PORT ?? process.env.PORT ?? "", 10);
+  const fromEnv = parseInt(process.env.SEEPIENT_PORT ?? process.env.PORT ?? "", 10);
   if (!isNaN(fromEnv) && fromEnv > 0) return fromEnv;
   return 7337;
 }
@@ -129,7 +129,7 @@ function addCORSHeaders(
   const origin = req.headers.origin ?? "*";
   res.setHeader("Access-Control-Allow-Origin", origin);
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Zoe-API-Key");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Seepient-API-Key");
   res.setHeader("Access-Control-Max-Age", "86400");
 }
 
@@ -148,7 +148,7 @@ function handlePreflight(
 // ── Server creation ────────────────────────────────────────────────────
 
 /**
- * Create and return the Zoe HTTP server (not yet listening).
+ * Create and return the Seepient HTTP server (not yet listening).
  *
  * This sets up REST endpoints, WebSocket upgrade handling,
  * session management, and CORS support.
@@ -163,10 +163,10 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
   const serverPermissionLevel = options?.permissionLevel ?? "moderate";
 
   // Resolve session directory
-  const sessionDir = process.env.ZOE_SESSION_DIR ??
-    path.join(process.cwd(), ".zoe", "sessions");
+  const sessionDir = process.env.SEEPIENT_SESSION_DIR ??
+    path.join(process.cwd(), ".seepient", "sessions");
 
-  const sessionTTL = (options?.sessionTTL ?? parseInt(process.env.ZOE_SESSION_TTL ?? "86400", 10)) * 1000;
+  const sessionTTL = (options?.sessionTTL ?? parseInt(process.env.SEEPIENT_SESSION_TTL ?? "86400", 10)) * 1000;
 
   // Create session manager
   const sessionManager = new ServerSessionManager({
@@ -206,7 +206,7 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
       };
 
       const { GatewaySettingsAdapter } = await import("../../gateway/settings-adapter.js");
-      const gatewayStorageDir = process.env.ZOE_GATEWAY_DIR ?? path.join(homedir(), ".zoe");
+      const gatewayStorageDir = process.env.SEEPIENT_GATEWAY_DIR ?? path.join(homedir(), ".seepient");
       const gwSettingsAdapter = new GatewaySettingsAdapter(gatewayStorageDir);
       await gwSettingsAdapter.initialize();
 
@@ -317,7 +317,7 @@ export async function startServer(options?: ServerOptions): Promise<http.Server>
 
   return new Promise((resolve) => {
     server.listen(port, host, () => {
-      console.log(`[zoe] Server listening on ${host}:${port}`);
+      console.log(`[seepient] Server listening on ${host}:${port}`);
       resolve(server);
     });
   });

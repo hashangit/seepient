@@ -78,7 +78,7 @@ const handler = async (args: any, config: any): Promise<string> => {
   const baseURL = config.imageBaseUrl || config.baseUrl || process.env.OPENAI_COMPAT_BASE_URL || process.env.OPENAI_BASE_URL;
 
   if (!apiKey) {
-    return "Error: Image Service API Key is missing. Please configure it in .zoe/setting.json (imageApiKey or apiKey).";
+    return "Error: Image Service API Key is missing. Please configure it in .seepient/setting.json (imageApiKey or apiKey).";
   }
 
   const client = new OpenAI({ 

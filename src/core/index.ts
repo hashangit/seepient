@@ -1,7 +1,7 @@
 /**
- * Zoe Core Module
+ * Seepient Core Module
  *
- * Central orchestrators and utilities for the Zoe unified architecture.
+ * Central orchestrators and utilities for the Seepient unified architecture.
  */
 
 export {
@@ -26,7 +26,7 @@ export type { BackendFactory } from './session-store.js';
 
 // Export error classes (canonical definitions live in ./errors.ts)
 export {
-  ZoeError,
+  SeepientError,
   ProviderError,
   ToolError,
   MaxStepsError,
@@ -74,9 +74,9 @@ export type {
   ToolRiskCategory,
 } from './types.js';
 
-// ZoeError is also re-exported as a value from types.ts, but the canonical
+// SeepientError is also re-exported as a value from types.ts, but the canonical
 // class export comes from ./errors.js above. The `export type` block omits
-// ZoeError intentionally to avoid a duplicate value export.
+// SeepientError intentionally to avoid a duplicate value export.
 
 // Export provider resolver functions
 export {
@@ -106,7 +106,7 @@ export {
   generateId,
   now,
   estimateTokens,
-  toZoeError,
+  toSeepientError,
   messageToProviderMessage,
   providerToolCallToToolCall,
   providerResponseToMessages,

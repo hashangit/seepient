@@ -1,5 +1,5 @@
 /**
- * Zoe Server — WebSocket Protocol Handlers
+ * Seepient Server — WebSocket Protocol Handlers
  *
  * All handler functions, safeSend helper, and active connections registry.
  * Extracted from websocket.ts for single-responsibility.

@@ -118,7 +118,7 @@ The bouncer at the door.
 
 ```ts
 const allowed = await validate(ctx);
-if (!allowed) throw new ZoeError("Unauthorized", "UNAUTHORIZED", false);
+if (!allowed) throw new SeepientError("Unauthorized", "UNAUTHORIZED", false);
 // If thrown, the loop NEVER RUNS. agent-loop.ts catches it and returns
 // finishReason: "error" with code "UNAUTHORIZED"
 await next();  // passed the check? let the next inspector run
@@ -129,7 +129,7 @@ await next();  // passed the check? let the next inspector run
 The ticket counter. Uses a token bucket algorithm — you get N requests per time window.
 
 ```ts
-if (bucket.tokens <= 0) throw new ZoeError("Rate limit exceeded", ...);
+if (bucket.tokens <= 0) throw new SeepientError("Rate limit exceeded", ...);
 bucket.tokens -= 1;   // use a ticket
 await next();         // still have tickets? continue
 ```
@@ -146,12 +146,12 @@ The stenographer. Logs structured lines before and after the loop runs.
 
 ```ts
 // BEFORE next():
-[zoe] request=abc-123 model=gpt-4o messages=5 start
+[seepient] request=abc-123 model=gpt-4o messages=5 start
 
 await next();
 
 // AFTER next():
-[zoe] request=abc-123 model=gpt-4o finish=stop steps=3 tokens=850 duration=2340ms
+[seepient] request=abc-123 model=gpt-4o finish=stop steps=3 tokens=850 duration=2340ms
 ```
 
 ### What Happens When Middleware Throws
@@ -283,10 +283,10 @@ await hooks.afterToolCall({ name: tc.name, output, duration });
 
 ```ts
 // agent-loop.ts:246 — provider factory fails
-await hooks.onError(zoeErr);
+await hooks.onError(seepientErr);
 
 // agent-loop.ts:267 — provider.chat() throws
-await hooks.onError(zoeErr);
+await hooks.onError(seepientErr);
 ```
 
 #### `onFinish` — called by the adapter, not the loop
@@ -321,7 +321,7 @@ async function run(fn, label) {
   try {
     await fn();                    // run the hook
   } catch (err) {
-    console.error(`[zoe] ${label} hook error:`, err);
+    console.error(`[seepient] ${label} hook error:`, err);
     // ⚠️ ERROR IS SWALLOWED — the loop continues!
   }
 }
@@ -366,14 +366,14 @@ async function persistMessages() {
 Factory + registry pattern:
 
 ```
-createPersistenceBackend({ type: "file", path: "~/.zoe/sessions" })
+createPersistenceBackend({ type: "file", path: "~/.seepient/sessions" })
        │
        ▼
   Registry lookup: "file" → FilePersistenceBackend
        │
        ▼
   FilePersistenceBackend
-    ├── save(id, SessionData)  → writes ~/.zoe/sessions/{id}.json
+    ├── save(id, SessionData)  → writes ~/.seepient/sessions/{id}.json
     ├── load(id)               → reads the file, parses JSON
     ├── delete(id)             → deletes the file
     └── list()                 → lists all .json files in directory
@@ -381,7 +381,7 @@ createPersistenceBackend({ type: "file", path: "~/.zoe/sessions" })
 
 #### Two Built-in Backends
 
-- **File** (`FilePersistenceBackend`): Each session = one JSON file on disk. Written to `~/.zoe/sessions/` by default, or any path you provide.
+- **File** (`FilePersistenceBackend`): Each session = one JSON file on disk. Written to `~/.seepient/sessions/` by default, or any path you provide.
 - **Memory** (`MemoryPersistenceBackend`): Each session = one entry in a `Map`. Vanishes on restart. Useful for testing.
 
 #### Custom Backends
@@ -463,7 +463,7 @@ A real request traced end-to-end. User says "Summarize this document" via the SD
         │               │
  T+8.2s │  SDK Adapter  │  persistMessages() called
         │  SESSION      │  backend.save(sessionId, { messages, createdAt, updatedAt })
-        │  STORE        │  → writes ~/.zoe/sessions/session-abc-123.json
+        │  STORE        │  → writes ~/.seepient/sessions/session-abc-123.json
         │               │
  T+8.3s │  DONE         │  Returns { text: "Here's the summary: ...", toolCalls: [...], usage: {...} }
 ```

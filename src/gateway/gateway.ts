@@ -1,5 +1,5 @@
 /**
- * Zoe Gateway — MCPGateway engine
+ * Seepient Gateway — MCPGateway engine
  *
  * Core engine that manages MCP and REST targets, routes requests,
  * and exposes injectable tools for the agent loop.
@@ -272,7 +272,7 @@ export class MCPGateway {
     if (cached) return cached;
 
     const client = new Client(
-      { name: 'zoe-gateway', version: '0.1.0' },
+      { name: 'seepient-gateway', version: '0.1.0' },
       { capabilities: { sampling: {} } },
     );
 
@@ -639,7 +639,7 @@ export class MCPGateway {
               },
             },
             handler: async (args: any, config?: any) => {
-              const agent = config?.agentName ?? 'zoe';
+              const agent = config?.agentName ?? 'seepient';
               const result = await this.callMcpTool(agent, targetName, toolDef.name, args);
               return typeof result === 'string' ? result : JSON.stringify(result);
             },
@@ -674,7 +674,7 @@ export class MCPGateway {
               },
             },
             handler: async (args: any, config?: any) => {
-              const agent = config?.agentName ?? 'zoe';
+              const agent = config?.agentName ?? 'seepient';
               const result = await this.callRest(
                 agent,
                 targetName,

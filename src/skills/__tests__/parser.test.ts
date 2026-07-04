@@ -5,7 +5,7 @@ import { tmpdir } from "os";
 import { parseSkillFile, parseFrontmatter } from "../parser.js";
 
 async function withTempFile(content: string): Promise<{ path: string; cleanup: () => Promise<void> }> {
-  const dir = await mkdtemp(join(tmpdir(), "zoe-test-"));
+  const dir = await mkdtemp(join(tmpdir(), "seepient-test-"));
   const path = join(dir, "test-skill.md");
   await writeFile(path, content, "utf-8");
   return { path, cleanup: () => rm(dir, { recursive: true }) };

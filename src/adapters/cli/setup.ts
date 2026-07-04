@@ -1,5 +1,5 @@
 /**
- * Zoe CLI — Setup Wizard
+ * Seepient CLI — Setup Wizard
  *
  * Interactive setup wizard for configuring API keys and providers.
  * Extracted from index.ts for separation of concerns.
@@ -47,16 +47,16 @@ export async function runSetup(options: any = {}): Promise<void> {
     console.log(chalk.dim('Set API keys via environment variables instead:'));
     console.log(chalk.dim('  OPENAI_API_KEY, ANTHROPIC_API_KEY, GLM_API_KEY'));
     console.log(chalk.dim('  LLM_PROVIDER (openai-compatible|openai|anthropic|glm)'));
-    console.log(chalk.dim('Or mount a config file at ~/.zoe/setting.json'));
+    console.log(chalk.dim('Or mount a config file at ~/.seepient/setting.json'));
     process.exit(1);
   }
 
   const isProject = options.project;
   const { global: GLOBAL_CONFIG_FILE, local: LOCAL_CONFIG_FILE, globalDir: GLOBAL_CONFIG_DIR } = getConfigPaths();
   const targetFile = isProject ? LOCAL_CONFIG_FILE : GLOBAL_CONFIG_FILE;
-  const targetDir = isProject ? path.join(process.cwd(), '.zoe') : GLOBAL_CONFIG_DIR;
+  const targetDir = isProject ? path.join(process.cwd(), '.seepient') : GLOBAL_CONFIG_DIR;
 
-  console.log(chalk.bold.cyan("Zoe Agent Setup Wizard \n"));
+  console.log(chalk.bold.cyan("Seepient Agent Setup Wizard \n"));
   console.log(chalk.dim(`Config will be saved to: ${targetFile}`));
 
   const globalConfig = loadJsonConfig(GLOBAL_CONFIG_FILE);
@@ -341,10 +341,10 @@ export async function runSetup(options: any = {}): Promise<void> {
     }
     fs.writeFileSync(targetFile, JSON.stringify(newConfig, null, 2), { mode: 0o600 });
     console.log(chalk.green(`\nConfiguration saved to ${targetFile}`));
-    console.log(chalk.cyan("You can now run 'zoe' to start using the agent."));
+    console.log(chalk.cyan("You can now run 'seepient' to start using the agent."));
 
-    // Create ~/zoe_documents workspace
-    const docsDir = path.join(os.homedir(), 'zoe_documents');
+    // Create ~/seepient_documents workspace
+    const docsDir = path.join(os.homedir(), 'seepient_documents');
     const subdirs = ['notes', 'templates', 'output', 'knowledge'];
     if (!fs.existsSync(docsDir)) {
       fs.mkdirSync(docsDir, { recursive: true });
@@ -353,7 +353,7 @@ export async function runSetup(options: any = {}): Promise<void> {
       }
       fs.writeFileSync(
         path.join(docsDir, 'README.md'),
-        `# zoe_documents\n\nThis is your Zoe agent workspace. Files here are accessible across all projects.\n\n- \`notes/\` — Agent-created notes and session logs\n- \`templates/\` — Reusable templates you or the agent can reference\n- \`output/\` — Generated artifacts (reports, summaries)\n- \`knowledge/\` — Reference documents for the agent to use\n\nReference files in conversation with \`@zoe_documents/path/to/file\`\n`,
+        `# seepient_documents\n\nThis is your Seepient agent workspace. Files here are accessible across all projects.\n\n- \`notes/\` — Agent-created notes and session logs\n- \`templates/\` — Reusable templates you or the agent can reference\n- \`output/\` — Generated artifacts (reports, summaries)\n- \`knowledge/\` — Reference documents for the agent to use\n\nReference files in conversation with \`@seepient_documents/path/to/file\`\n`,
         'utf-8'
       );
       console.log(chalk.green(`Created agent workspace at ${docsDir}`));

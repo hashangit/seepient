@@ -96,7 +96,7 @@ Old API — saves only `Message[]`, not full `SessionData`. Still works via an a
 
 | Backend | Class | Storage | Default Path |
 |---------|-------|---------|-------------|
-| `"file"` | `FilePersistenceBackend` | JSON files on disk | `~/.zoe/sessions/{id}.json` |
+| `"file"` | `FilePersistenceBackend` | JSON files on disk | `~/.seepient/sessions/{id}.json` |
 | `"memory"` | `MemoryPersistenceBackend` | In-process `Map` | N/A (testing) |
 
 ### FilePersistenceBackend — The Production Backend
@@ -404,7 +404,7 @@ try {
                       result = { text: "Hello!", ... }
                       persistMessages()
                       → backend.save(sessionId, messages)
-                      → writes ~/.zoe/sessions/{id}.json
+                      → writes ~/.seepient/sessions/{id}.json
 
  agent.chat("Bye")  →   messages.push(user msg)
                       runAgentLoop(messages, ...)   ← includes prior history
@@ -655,7 +655,7 @@ Runs every 5 minutes by default. Scans all in-memory sessions, deletes expired o
     │            PersistenceBackend                   │
     │  ┌──────────────┐  ┌────────────────────────┐  │
     │  │ FileBackend  │  │ MemoryBackend          │  │
-    │  │ ~/.zoe/    │  │ Map<string, SessionData│  │
+    │  │ ~/.seepient/    │  │ Map<string, SessionData│  │
     │  │ sessions/    │  │ (testing only)         │  │
     │  │ {id}.json    │  │                        │  │
     │  │ atomic write │  │                        │  │
@@ -706,7 +706,7 @@ Runs every 5 minutes by default. Scans all in-memory sessions, deletes expired o
 To add a Redis backend:
 
 ```ts
-import { registerBackend } from "zoe";
+import { registerBackend } from "seepient";
 
 class RedisPersistenceBackend implements PersistenceBackend {
   readonly __persistenceBackend = true as const;

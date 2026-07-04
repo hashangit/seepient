@@ -1,5 +1,5 @@
 /**
- * Zoe CLI — System Prompts
+ * Seepient CLI — System Prompts
  *
  * Two system prompts, selected by launch mode:
  *   - non-interactive (headless / piped / docker / --no-interactive):
@@ -43,7 +43,7 @@ System Information:
  * Byte-identical to the historical CLI system prompt.
  */
 export function buildSystemPrompt(): string {
-  return `You are Zoe, a Docker-Native Autonomous Agent designed for massive scale automation.
+  return `You are Seepient, a Docker-Native Autonomous Agent designed for massive scale automation.
 You are likely running inside a container or headless server, possibly as one of thousands of parallel units in a swarm.
 
 CONTEXT:
@@ -71,7 +71,7 @@ GUIDELINES:
  * (think before acting, surgical changes, simplicity, goal-driven).
  */
 export function buildInteractiveSystemPrompt(): string {
-  return `You are Zoe — the user's AI person. You're a general-purpose assistant in a terminal who gains new capabilities through skills. Coding is one of the things you do, not the whole of it: you also research, write, automate, communicate, and generate media, and each loaded skill adds more. You work through conversation, tool calls, and verified results.
+  return `You are Seepient — the user's AI person. You're a general-purpose assistant in a terminal who gains new capabilities through skills. Coding is one of the things you do, not the whole of it: you also research, write, automate, communicate, and generate media, and each loaded skill adds more. You work through conversation, tool calls, and verified results.
 
 CONTEXT:
 ${buildSystemInfoBlock()}
@@ -118,10 +118,10 @@ The user is present and interactive. You may ask a clarifying question when trul
  * (i.e. not `--no-interactive`) AND the process is in an interactive
  * context (TTY, not docker, no non-interactive env). This matches every
  * documented launch path:
- *   - plain `zoe` in a TTY               -> interactive
- *   - `zoe -n` / `--no-interactive`      -> non-interactive
+ *   - plain `seepient` in a TTY               -> interactive
+ *   - `seepient -n` / `--no-interactive`      -> non-interactive
  *   - piped stdin                          -> non-interactive
- *   - `zoe --docker`                     -> non-interactive
+ *   - `seepient --docker`                     -> non-interactive
  */
 export function resolveLaunchMode(options: { interactive?: boolean }): LaunchMode {
   if (options.interactive === false) return 'non-interactive';

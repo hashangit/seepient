@@ -1,5 +1,5 @@
 /**
- * Zoe CLI — /gateway slash command
+ * Seepient CLI — /gateway slash command
  *
  * Full management commands for the gateway subsystem.
  * Receives the MCPGateway instance from the REPL when gateway is enabled.

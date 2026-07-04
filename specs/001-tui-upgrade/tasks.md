@@ -73,7 +73,7 @@ packages must render under React 19 before components depend on them; the shared
 - [X] T005 Run `pnpm test` and confirm all pre-existing tests pass after the tsconfig `"jsx"` change (regression gate — fix any JSX-resolution failure before proceeding)
 - [X] T006 Smoke-test Ink 6 + React 19: write a throwaway script that `render()`s `<TextInput/>` and `<SelectInput/>` (from `ink-text-input`, `ink-select-input`) plus `ink-spinner` and `terminal-link` against `ink@6.6.0` + `react@^19`. Keep the packages that render cleanly; for any that crash at runtime, plan ~50-line custom replacements and drop the package. Record the keep/replace decision
 - [X] T007 Run `pnpm install` and confirm zero peer-dependency warnings (resolve any warning before proceeding — this is the PRD Phase-0 gate)
-- [X] T008 Extract the shared session-setup phase from `runChat()` in src/adapters/cli/repl.ts into a new `bootstrapCliSession()` in src/adapters/cli/bootstrap.ts (config loading, provider resolution, skills init, gateway init, permissions — ~175 lines of setup in `runChat`). Both `runChat` (readline) and `startTui` call it. Do not duplicate setup across the two dispatch paths. Verify `zoe -n` is byte-identical immediately after this extraction, before any TUI wiring
+- [X] T008 Extract the shared session-setup phase from `runChat()` in src/adapters/cli/repl.ts into a new `bootstrapCliSession()` in src/adapters/cli/bootstrap.ts (config loading, provider resolution, skills init, gateway init, permissions — ~175 lines of setup in `runChat`). Both `runChat` (readline) and `startTui` call it. Do not duplicate setup across the two dispatch paths. Verify `seepient -n` is byte-identical immediately after this extraction, before any TUI wiring
 - [X] T009 [P] Create src/adapters/cli/tui/theme.ts exporting the Tokyo Night Moon color tokens as a typed palette: `bg #222436`, `bgHighlight #2f334d`, `fg #c8d3f5`, `fgDim #828bb8`, `fgGutter #3b4261`, `blue #82aaff`, `cyan #86e1fc`, `green #c3e88d`, `yellow #ffc777`, `red #ff757f`, `purple #c099ff`, `orange #ff966c`
 
 **Checkpoint**: Foundation ready — JSX compiles, companions validated, shared
@@ -83,14 +83,14 @@ bootstrap extracted, theme tokens defined. User story implementation can begin.
 
 ## Phase 3: User Story 1 - Interactive TUI Shell & Streaming (Priority: P1) 🎯 MVP
 
-**Goal**: Launch `zoe` in a TTY into a full-screen Ink/React app that streams the
+**Goal**: Launch `seepient` in a TTY into a full-screen Ink/React app that streams the
 assistant response and renders tool execution as bordered blocks with inline
-permission approval — while `zoe -n`, piped stdin, `--docker`, and SDK/Server
+permission approval — while `seepient -n`, piped stdin, `--docker`, and SDK/Server
 modes stay byte-identical.
 
-**Independent Test**: Run `zoe` in a TTY, submit a prompt that triggers a shell
+**Independent Test**: Run `seepient` in a TTY, submit a prompt that triggers a shell
 command — the tool block renders with output and the response streams. Run
-`zoe -n` — readline path unchanged. `pnpm test` green.
+`seepient -n` — readline path unchanged. `pnpm test` green.
 
 **Engine note**: US1 needs NO new engine API. The loop's existing `onStep`
 callback (PRD line 275) already emits `text` and `tool_call` steps — `use-agent`
@@ -110,9 +110,9 @@ drives the existing `Agent.chat({ onStep, approveTool, signal })`. The dedicated
 - [X] T018 [US1] Create src/adapters/cli/tui/components/message-area.tsx — scrollable feed using Ink `Static` for immutable history + live components for streaming entries (depends on T010 use-feed, T012-T016)
 - [X] T019 [US1] Create src/adapters/cli/tui/app.tsx — `TuiApp` root: `<Box flexDirection="column">` layout (`MessageArea` flex-grow + `PromptArea`); wires `use-agent` + `use-feed`; maps ESC/Ctrl+C → `agent.abort()` via Ink `useInput` (depends on T017, T018)
 - [X] T020 [US1] Create src/adapters/cli/tui/index.ts — public entry `renderApp()` / `startTui({ agent, options, config, queryParts })` that calls Ink `render(<TuiApp .../>)`
-- [X] T021 [US1] Add TUI/REPL dispatch to src/adapters/cli/index.ts — dispatch on `resolveLaunchMode(options) === 'interactive'` (the SAME function that selects the system prompt, so `--docker` / `ZOE_NO_INTERACTIVE` / piped stdin never mis-launch the TUI); when interactive, dynamic `import('./tui/index.js')` and call `startTui`, otherwise call `runChat` (readline). Do NOT call `setupInterrupt()` in TUI mode (Ink owns raw stdin). Ship the "no React in headless" CI assertion (T055) with this commit, not later
+- [X] T021 [US1] Add TUI/REPL dispatch to src/adapters/cli/index.ts — dispatch on `resolveLaunchMode(options) === 'interactive'` (the SAME function that selects the system prompt, so `--docker` / `SEEPIENT_NO_INTERACTIVE` / piped stdin never mis-launch the TUI); when interactive, dynamic `import('./tui/index.js')` and call `startTui`, otherwise call `runChat` (readline). Do NOT call `setupInterrupt()` in TUI mode (Ink owns raw stdin). Ship the "no React in headless" CI assertion (T055) with this commit, not later
 - [X] T022 [US1] Consolidate `@path` reference resolution to one call site — resolve at the caller (`use-agent.ts` / `repl.ts`) and remove the duplicate `resolveReferences` call from `Agent.chat()` in src/adapters/cli/agent.ts (currently at `agent.ts:79-80` and `repl.ts:497`)
-- [ ] T023 [US1] Verify (manual gate): `zoe` in a TTY renders the Ink TUI; `pnpm dev` (tsx) resolves the lazy `./tui/index.js` import against the `.tsx` source and renders identically; a shell-tool prompt renders the tool block with output; a custom-model skill switches provider and runs; `--moderate` destructive tool prompts inline; ESC/Ctrl+C aborts; `zoe --docker` and `zoe -n` keep the readline path; `pnpm test` passes
+- [ ] T023 [US1] Verify (manual gate): `seepient` in a TTY renders the Ink TUI; `pnpm dev` (tsx) resolves the lazy `./tui/index.js` import against the `.tsx` source and renders identically; a shell-tool prompt renders the tool block with output; a custom-model skill switches provider and runs; `--moderate` destructive tool prompts inline; ESC/Ctrl+C aborts; `seepient --docker` and `seepient -n` keep the readline path; `pnpm test` passes
 
 **Checkpoint**: US1 fully functional and testable independently — this is the MVP.
 
@@ -131,7 +131,7 @@ time; non-streaming providers fall back to `chat()`.
 
 ### Implementation for User Story 2
 
-- [X] T024 [P] [US2] Create src/adapters/cli/tui/components/autocomplete.tsx — fuzzy dropdown driven by Ink `useInput`; two sources: slash commands and files (`fs.readdir`/glob; `@alias/` scopes to a reference root). Slash-command source = the built-in command registry (`repl.ts:193-236`) + skill names; a `.zoe/commands/` custom-command loader is added ONLY if that mechanism is introduced (it does not exist today)
+- [X] T024 [P] [US2] Create src/adapters/cli/tui/components/autocomplete.tsx — fuzzy dropdown driven by Ink `useInput`; two sources: slash commands and files (`fs.readdir`/glob; `@alias/` scopes to a reference root). Slash-command source = the built-in command registry (`repl.ts:193-236`) + skill names; a `.seepient/commands/` custom-command loader is added ONLY if that mechanism is introduced (it does not exist today)
 - [X] T025 [P] [US2] Create src/adapters/cli/tui/components/info-message.tsx — info/warning/status line entry
 - [X] T026 [P] [US2] ~~Create src/adapters/cli/tui/components/bash-output.tsx~~ **Implemented without a separate component**: execute_shell_command now spawn-based, streams stdout via `ToolContext.onUpdate`; the loop emits `tool_progress` steps; `use-agent` renders a live `streamingTool` block (reuses `ToolCallBlock` status=running) that's superseded by the committed entry on completion. Verified by an engine test. — live shell stdout streaming for `execute_shell_command` tool blocks
 - [X] T027 [US2] Extend src/adapters/cli/tui/components/prompt-area.tsx to wire autocomplete: type `/` → command dropdown, type `@` → file dropdown, fuzzy-filter as the user types (depends on T024)
@@ -169,7 +169,7 @@ Themes apply consistently. A markdown response renders styled.
 - [X] T041 [P] [US3] Create src/adapters/cli/tui/overlays/command-palette.tsx — Ctrl+P modal `<Box>` with fuzzy command matching
 - [X] T042 [P] [US3] Create src/adapters/cli/tui/overlays/model-selector.tsx — provider/model picker overlay (Ctrl+M)
 - [X] T043 [P] [US3] Create src/adapters/cli/tui/overlays/help-dialog.tsx — keybinding reference overlay
-- [X] T044 [US3] Create a markdown renderer in src/adapters/cli/tui/components/markdown.tsx — inline code, bold, lists, links. Either a custom renderer (~100 lines for the CommonMark subset Zoe needs) or `marked` + `marked-terminal` if the peer-version conflict is resolved (downgrade to `marked@^15` if compatible). Decide at kickoff (depends on T039 for theme tokens)
+- [X] T044 [US3] Create a markdown renderer in src/adapters/cli/tui/components/markdown.tsx — inline code, bold, lists, links. Either a custom renderer (~100 lines for the CommonMark subset Seepient needs) or `marked` + `marked-terminal` if the peer-version conflict is resolved (downgrade to `marked@^15` if compatible). Decide at kickoff (depends on T039 for theme tokens)
 - [ ] T045 [US3] Wire `use-keybindings` + `footer` + overlays into `app.tsx` in src/adapters/cli/tui/app.tsx (depends on T038, T040, T041-T043)
 - [X] T046 [US3] Apply theme tokens across all components via `use-theme()` in src/adapters/cli/tui/components/* (replace inline hex from US1 with the context) (depends on T039)
 - [ ] T047 [US3] Verify (manual gate): Ctrl+P opens the palette; shortcuts fire; footer updates live during a run; themes apply consistently; markdown renders styled; `pnpm test` passes

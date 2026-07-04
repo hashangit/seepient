@@ -1,5 +1,5 @@
 /**
- * Zoe CLI — /skills Command Handler
+ * Seepient CLI — /skills Command Handler
  *
  * Lists loaded skills with descriptions.
  */
@@ -12,7 +12,7 @@ export const skillsHandler: CommandHandler = async (ctx) => {
   const registry = agent.getSkillRegistry();
   if (!registry || registry.getAll().length === 0) {
     return {
-      output: `${chalk.yellow('No skills loaded.')}\n${chalk.dim('Add skills to .zoe/skills/ or set ZOE_SKILLS_PATH env var.')}`,
+      output: `${chalk.yellow('No skills loaded.')}\n${chalk.dim('Add skills to .seepient/skills/ or set SEEPIENT_SKILLS_PATH env var.')}`,
     };
   }
   const lines = [chalk.bold.cyan('Loaded Skills:')];

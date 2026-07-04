@@ -1,5 +1,5 @@
 /**
- * Zoe SDK — Hook executor
+ * Seepient SDK — Hook executor
  *
  * Wraps a user-supplied `Hooks` object in a safe executor that:
  *  - treats missing hooks as no-ops
@@ -10,7 +10,7 @@
 import type {
   Hooks,
   StepResult,
-  ZoeError,
+  SeepientError,
   GenerateTextResult,
 } from "./types.js";
 
@@ -22,7 +22,7 @@ export interface HookExecutor {
   beforeToolCall(call: { name: string; args: Record<string, unknown> }): Promise<void>;
   afterToolCall(result: { name: string; output: string; duration: number }): Promise<void>;
   onStep(step: StepResult): Promise<void>;
-  onError(error: ZoeError): Promise<void>;
+  onError(error: SeepientError): Promise<void>;
   onFinish(result: GenerateTextResult): Promise<void>;
 }
 
@@ -48,7 +48,7 @@ export function createHookExecutor(hooks?: Hooks): HookExecutor {
     try {
       await fn();
     } catch (err) {
-      console.error(`[zoe] ${label} hook error:`, err);
+      console.error(`[seepient] ${label} hook error:`, err);
     }
   }
 

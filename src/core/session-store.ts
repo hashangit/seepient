@@ -1,5 +1,5 @@
 /**
- * Zoe SDK — Session persistence
+ * Seepient SDK — Session persistence
  *
  * Provides composable persistence backends for storing conversation history.
  * Built-in "file" and "memory" backends are registered by default. Custom
@@ -35,7 +35,7 @@ function validateSessionId(sessionId: string): void {
 // ── Default path ────────────────────────────────────────────────────────
 
 function defaultSessionPath(): string {
-  return join(homedir(), ".zoe", "sessions");
+  return join(homedir(), ".seepient", "sessions");
 }
 
 // ── File-based PersistenceBackend ───────────────────────────────────────

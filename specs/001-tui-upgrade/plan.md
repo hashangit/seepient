@@ -13,7 +13,7 @@ bordered blocks, and offers inline permission approval. Headless / piped /
 `--no-interactive` / `--docker` modes are byte-identical to today — the TUI is
 lazy-loaded only when `resolveLaunchMode(options) === 'interactive'` (the shipped
 `resolveLaunchMode()` composes TTY + `--no-interactive` + piped stdin + `--docker`
-+ `ZOE_NO_INTERACTIVE`). US1 wires the existing `Agent.chat({ onStep })` path
++ `SEEPIENT_NO_INTERACTIVE`). US1 wires the existing `Agent.chat({ onStep })` path
 (no new engine API — PRD line 275). Token-level streaming (`provider.chatStream()`
 + `text_delta` step, plus the deferred `Agent.chatStream()`) is Phase 2 and remains
 an additive, backward-compatible enhancement to the shared `runAgentLoop`.
@@ -52,7 +52,7 @@ the bordered block; streaming items update per token in Phase 2.
   the loop's existing `onStep` is sufficient (PRD line 275).
 - **Launch-mode single source of truth** — TUI dispatch reuses the shipped
   `resolveLaunchMode()` (the same predicate that selects the system prompt), NOT a
-  separate `isTTY && interactive` check, so `--docker` / `ZOE_NO_INTERACTIVE` /
+  separate `isTTY && interactive` check, so `--docker` / `SEEPIENT_NO_INTERACTIVE` /
   piped stdin never mis-launch the TUI.
 - **Lazy load** — React/Ink enter memory ONLY in interactive mode via a dynamic
   `import('./tui/index.js')` in `index.ts`, guarded by
@@ -80,7 +80,7 @@ the bordered block; streaming items update per token in Phase 2.
 | II. Single Source of Truth | ✅ Compliant | `@path` resolution consolidated to one call site (caller). TUI dispatch reuses the shipped `resolveLaunchMode()` (one launch-mode predicate, shared with system-prompt selection). StreamManager reused by SDK/Server; the in-process TUI consumes `onStep`/deltas directly — no engine fork. |
 | III. Simplicity First | ✅ Compliant | Theme starts as inline hex (no hook). Companions only added if smoke test passes. `marked` removed. US1 wires the existing `Agent.chat({onStep})` path instead of pre-building `chatStream()` (PRD line 275: onStep suffices) — `chatStream()` deferred to US2. |
 | IV. Surgical Changes | ✅ Compliant | `repl.ts`/headless paths untouched. `setupInterrupt()` stays for readline fallback. |
-| V. Safe by Default & Verifiable | ✅ Compliant | Every phase has an explicit “Verify:” gate. Non-interactive `zoe -n` must keep working. The pre-existing test suite (snapshot 243) must pass after the tsconfig change. |
+| V. Safe by Default & Verifiable | ✅ Compliant | Every phase has an explicit “Verify:” gate. Non-interactive `seepient -n` must keep working. The pre-existing test suite (snapshot 243) must pass after the tsconfig change. |
 
 ## Project Structure
 

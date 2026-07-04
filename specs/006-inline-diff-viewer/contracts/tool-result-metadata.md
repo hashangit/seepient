@@ -6,7 +6,7 @@ context. This is the load-bearing interface change in T051.
 
 ## Scope
 
-zoe is a CLI/SDK/library (no HTTP contract for this feature). The "contract"
+seepient is a CLI/SDK/library (no HTTP contract for this feature). The "contract"
 here is the **in-process boundary** between Infrastructure (tool handlers) →
 Core (`executeTool`, `agent-loop`) → Presentation (TUI). One source of truth
 (constitution §II): `ToolResult.metadata`.

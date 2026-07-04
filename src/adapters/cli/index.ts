@@ -41,7 +41,7 @@ try {
 const program = new Command();
 
 program
-  .name('zoe')
+  .name('seepient')
   .description('A lightweight AI agent CLI tool')
   .version(version)
   .option('-m, --model <model>', 'Model to use')
@@ -58,7 +58,7 @@ program
 program
   .command('setup')
   .description('Run the interactive setup wizard to configure API keys')
-  .option('-p, --project', 'Save configuration to project-level (.zoe/setting.json)')
+  .option('-p, --project', 'Save configuration to project-level (.seepient/setting.json)')
   .action(async (options) => {
     // Setup wizard cannot run in non-interactive mode
     if (isNonInteractive()) {
@@ -66,7 +66,7 @@ program
       console.log(chalk.dim('Set API keys via environment variables instead:'));
       console.log(chalk.dim('  OPENAI_API_KEY, ANTHROPIC_API_KEY, GLM_API_KEY'));
       console.log(chalk.dim('  LLM_PROVIDER (openai-compatible|openai|anthropic|glm)'));
-      console.log(chalk.dim('Or mount a config file at ~/.zoe/setting.json'));
+      console.log(chalk.dim('Or mount a config file at ~/.seepient/setting.json'));
       process.exit(1);
     }
     await runSetup(options);
@@ -91,8 +91,8 @@ program
 // Apply --docker flag effects early from raw argv (before Commander parses)
 // This ensures isNonInteractive() works correctly during the parse phase
 if (process.argv.includes('--docker')) {
-  process.env.ZOE_DOCKER = 'true';
-  process.env.ZOE_NO_INTERACTIVE = 'true';
+  process.env.SEEPIENT_DOCKER = 'true';
+  process.env.SEEPIENT_NO_INTERACTIVE = 'true';
 }
 
 program.parse(process.argv);

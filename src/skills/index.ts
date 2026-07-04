@@ -17,7 +17,7 @@ export async function initializeSkillRegistry(cwd: string): Promise<SkillRegistr
   const skills = await discoverSkills(cwd);
   registry = new DefaultSkillRegistry(skills);
 
-  if (process.env.ZOE_SKILLS_DEBUG) {
+  if (process.env.SEEPIENT_SKILLS_DEBUG) {
     console.log(`[SKILLS] Loaded ${skills.length} skills`);
     for (const s of skills) {
       console.log(`[SKILLS]   - ${s.name} from ${s.source}`);

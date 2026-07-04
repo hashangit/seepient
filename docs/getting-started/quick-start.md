@@ -1,6 +1,6 @@
 # Quick Start
 
-Get up and running with Zoe Agent in under 5 minutes. This guide covers the essentials to start building AI-powered applications.
+Get up and running with Seepient Agent in under 5 minutes. This guide covers the essentials to start building AI-powered applications.
 
 ## Step 1: Set Up Your Provider API Key
 
@@ -37,7 +37,7 @@ You can use provider-specific keys like `ANTHROPIC_API_KEY` or `GLM_API_KEY` ins
 Create a file called `hello.js`:
 
 ```typescript
-import { generateText } from 'zoe-agent'
+import { generateText } from 'seepient'
 
 async function main() {
   const result = await generateText('Write a haiku about AI agents', {
@@ -61,10 +61,10 @@ You should see a haiku printed to your console!
 
 ## Step 3: Use Tools
 
-Zoe Agent includes 12 built-in tools. Let's use one:
+Seepient Agent includes 12 built-in tools. Let's use one:
 
 ```typescript
-import { generateText } from 'zoe-agent'
+import { generateText } from 'seepient'
 
 async function main() {
   const result = await generateText('List all files in the current directory', {
@@ -90,7 +90,7 @@ Always validate tool usage in production. The shell tool can execute any command
 For a better user experience, stream responses in real-time:
 
 ```typescript
-import { streamText } from 'zoe-agent'
+import { streamText } from 'seepient'
 
 async function main() {
   const stream = await streamText('Explain quantum computing', {
@@ -146,7 +146,7 @@ All other code remains the same!
 For complex, multi-step tasks, use `createAgent`:
 
 ```typescript
-import { createAgent } from 'zoe-agent'
+import { createAgent } from 'seepient'
 
 async function main() {
   const agent = await createAgent({
@@ -187,5 +187,5 @@ Congratulations! You've covered the basics. Here's what to explore next:
 - **[Production Checklist](/guides/production-checklist)** - Best practices
 
 ::: info Need Help?
-Check out our [GitHub Discussions](https://github.com/hashangit/zoe/discussions) or open an issue if you run into problems.
+Check out our [GitHub Discussions](https://github.com/hashangit/seepient/discussions) or open an issue if you run into problems.
 :::

@@ -1,5 +1,5 @@
 /**
- * Tokyo Night rainbow gradient for the Zoe Agent logo. Pure, deterministic, no
+ * Tokyo Night rainbow gradient for the Seepient Agent logo. Pure, deterministic, no
  * dependency. Each cell at (row, col) within a (rows × cols) grid is projected
  * onto the 45° axis: `t = (col + row) / ((cols-1) + (rows-1))` — sweeps
  * bottom-left → top-right; for a single row it reduces to a horizontal sweep.

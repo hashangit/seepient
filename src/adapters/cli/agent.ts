@@ -131,7 +131,7 @@ export class Agent {
       if (!spinner) return;
       if (step.type === "text" && step.content) {
         spinner.stop();
-        console.log(chalk.blue("Zoe: ") + step.content);
+        console.log(chalk.blue("Seepient: ") + step.content);
         spinner.start();
       } else if (step.type === "tool_call" && step.toolCall) {
         spinner.stop();

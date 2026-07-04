@@ -1,8 +1,8 @@
-# Zoe Agent System Architecture — Complete Analysis
+# Seepient Agent System Architecture — Complete Analysis
 
 ## 1. High-Level Architecture
 
-Zoe Agent follows a three-layer architecture with a single execution engine shared by all adapters:
+Seepient Agent follows a three-layer architecture with a single execution engine shared by all adapters:
 
 ```
 Adapters (CLI, SDK, Server)
@@ -28,7 +28,7 @@ src/
 │   ├── middleware/           # logging, rate-limit, auth middleware
 │   ├── stream-manager.ts    # Push-based streaming queue + SSE
 │   ├── session-store.ts     # PersistenceBackend interface + File/Memory backends
-│   ├── errors.ts            # ZoeError class hierarchy
+│   ├── errors.ts            # SeepientError class hierarchy
 │   ├── settings-schema.ts   # 31 dot-key settings definition
 │   ├── settings-manager.ts  # Runtime get/set/reset/list with persistence
 │   ├── config.ts            # Config file loading, merging, env override
@@ -182,7 +182,7 @@ opus   → glm-5.1
 ```
 CLI flag (--provider)
   → LLM_PROVIDER env var
-    → ZOE_PROVIDER env var (legacy)
+    → SEEPIENT_PROVIDER env var (legacy)
       → config.provider (setting.json)
         → 'openai' (default)
 ```
@@ -192,7 +192,7 @@ Per-provider env vars:
 - `ANTHROPIC_API_KEY` → anthropic
 - `GLM_API_KEY` → glm
 - `OPENAI_COMPAT_API_KEY` + `OPENAI_COMPAT_BASE_URL` → openai-compatible
-- Legacy: `ZOE_API_KEY`, `OPENAI_BASE_URL` (with deprecation warnings)
+- Legacy: `SEEPIENT_API_KEY`, `OPENAI_BASE_URL` (with deprecation warnings)
 
 ### Factory Pattern
 
@@ -340,8 +340,8 @@ Review the file $1 written in $2...
 Priority (last wins):
 1. Built-in skills (`<package>/skills/`)
 2. `/mnt/skills` (Docker volume mount)
-3. `.zoe/skills/` (project local)
-4. `ZOE_SKILLS_PATH` env var (colon-separated)
+3. `.seepient/skills/` (project local)
+4. `SEEPIENT_SKILLS_PATH` env var (colon-separated)
 
 Skills are loaded in **reverse priority order** so higher-priority sources overwrite lower ones. The `priority` field in frontmatter allows fine-grained control.
 
@@ -359,7 +359,7 @@ Three-layer defense:
 2. **Injection-time truncation**: `limitSkillBody()` truncates at 32,000 chars with a clear marker
 3. **Cumulative cap**: `@path` resolver limits total resolved content to 2MB
 
-Configurable via `ZOE_SKILL_BODY_MAX_CHARS` and `ZOE_SKILL_BODY_WARN_CHARS`.
+Configurable via `SEEPIENT_SKILL_BODY_MAX_CHARS` and `SEEPIENT_SKILL_BODY_WARN_CHARS`.
 
 ### Argument Substitution (`src/skills/args.ts`)
 
@@ -376,10 +376,10 @@ Quoted strings in user input are respected for multi-word arguments.
 
 Supports three patterns:
 - `@path/to/file` — relative to project root
-- `@zoe_documents/file` — resolves to `~/zoe_documents/file`
+- `@seepient_documents/file` — resolves to `~/seepient_documents/file`
 - `@~/path/to/file` — explicit home directory
 
-Security: Path traversal prevention — only allows access within project root, `~/zoe_documents`, and `~/.zoe`. Per-file max 1MB, max 10 references, cumulative 2MB total. Files are inlined with code block formatting.
+Security: Path traversal prevention — only allows access within project root, `~/seepient_documents`, and `~/.seepient`. Per-file max 1MB, max 10 references, cumulative 2MB total. Files are inlined with code block formatting.
 
 ### Skill Invocation Flow (`src/core/skill-invoker.ts`)
 
@@ -422,7 +422,7 @@ Interactive REPL with Commander.js setup.
 
 **Entry flow:**
 ```
-zoe chat [query]
+seepient chat [query]
   → Commander parses flags
   → loadMergedConfig() (global + local JSON, env overrides)
   → createProvider() → LLMProvider
@@ -473,7 +473,7 @@ const agent = createAgent({
   provider: "openai",
   systemPrompt: "You are a helpful assistant.",
   tools: ["core"],
-  persist: "~/.zoe/sessions/my-agent",
+  persist: "~/.seepient/sessions/my-agent",
 });
 const response = await agent.chat("Hello");
 // agent.chatStream(), agent.switchProvider(), agent.clear(), agent.getHistory()
@@ -497,20 +497,20 @@ HTTP + WebSocket standalone server on port 7337.
 | POST/PATCH/DELETE | `/v1/providers` | admin | Provider management |
 
 **WebSocket protocol:**
-- Connect: `ws://host:7337/ws?token=sk_zoe_...`
+- Connect: `ws://host:7337/ws?token=sk_seepient_...`
 - Messages: `chat`, `abort`, `tool_approval_response`, `resume`, `reconnect`, `switch_provider`, `list_models`, `list_skills`, `ping`, settings/providers CRUD
 - Tool approval: WS round-trip with 30-second timeout, defense-in-depth checks (origin connection, tool name match, expiry)
 - Auth: API key validated on upgrade, `401` if invalid
 
 **Sessions:** `ServerSessionManager` with TTL (24h absolute, 30min inactivity), per-key concurrency limit (5), periodic cleanup (5min), constant-time ownership verification (`crypto.timingSafeEqual`).
 
-**API Keys:** Format `sk_zoe_*`, validated via SHA-256 hash, scopes: `agent:run`, `agent:read`, `admin`.
+**API Keys:** Format `sk_seepient_*`, validated via SHA-256 hash, scopes: `agent:run`, `agent:read`, `admin`.
 
 ### Adapter Comparison
 
 | Dimension | CLI | SDK | Server |
 |-----------|-----|-----|--------|
-| **Entry** | `zoe chat [query]` | `generateText()`, `streamText()`, `createAgent()` | HTTP/WS on port 7337 |
+| **Entry** | `seepient chat [query]` | `generateText()`, `streamText()`, `createAgent()` | HTTP/WS on port 7337 |
 | **State** | Mutable `Agent` class | Stateless (gen/stream) or Stateful (agent) | Sessions via ServerSessionManager |
 | **Output** | Console (chalk, ora spinner) | Returned objects, AsyncIterables, SSE | JSON (REST), WS messages |
 | **Tool Approval** | inquirer prompts | User-supplied callback | WS round-trip (30s timeout) |
@@ -567,9 +567,9 @@ Errors thrown by middleware are caught by `runAgentLoop` and returned as structu
 
 **`loggingMiddleware()`** — Innermost. Logs request start, then response with finish reason, steps, tokens, duration.
 
-**`rateLimitMiddleware({ maxRequests, windowMs, keyExtractor })`** — Token bucket algorithm, per-key. Throws `ZoeError("RATE_LIMITED")` before loop runs.
+**`rateLimitMiddleware({ maxRequests, windowMs, keyExtractor })`** — Token bucket algorithm, per-key. Throws `SeepientError("RATE_LIMITED")` before loop runs.
 
-**`authMiddleware({ validate })`** — Pre-loop validation. Throws `ZoeError("UNAUTHORIZED")` if `validate(ctx)` returns false.
+**`authMiddleware({ validate })`** — Pre-loop validation. Throws `SeepientError("UNAUTHORIZED")` if `validate(ctx)` returns false.
 
 ---
 
@@ -611,7 +611,7 @@ registerBackend("redis", myRedisFactory);
 const backend = createPersistenceBackend({ type: "redis", url: "..." });
 ```
 
-Built-in: `"file"` (JSON files at `~/.zoe/sessions/`) and `"memory"` (Map-based).
+Built-in: `"file"` (JSON files at `~/.seepient/sessions/`) and `"memory"` (Map-based).
 
 ### FilePersistenceBackend
 
@@ -699,7 +699,7 @@ interface Hooks {
   beforeToolCall?: (call: { name: string; args: Record<string, unknown> }) => void | Promise<void>;
   afterToolCall?:  (result: { name: string; output: string; duration: number }) => void | Promise<void>;
   onStep?:         (step: StepResult) => void | Promise<void>;
-  onError?:        (error: ZoeError) => void | Promise<void>;
+  onError?:        (error: SeepientError) => void | Promise<void>;
   onFinish?:       (result: GenerateTextResult) => void | Promise<void>;
 }
 ```
@@ -757,8 +757,8 @@ Atomic writes with backup (`.bak`), secure permissions (`0o600`).
 
 Priority (highest to lowest):
 1. Environment variables
-2. Project local config (`.zoe/setting.json`)
-3. Global config (`~/.zoe/setting.json`)
+2. Project local config (`.seepient/setting.json`)
+3. Global config (`~/.seepient/setting.json`)
 4. Provider singleton (`configureProviders()`)
 5. Schema defaults
 
@@ -772,7 +772,7 @@ Runtime singleton for provider management:
 - `updateProviderConfig(type, updates)` — partial update
 - `removeProvider(type)` — remove (rejects if last)
 - `getProvider(type?)` → `{ provider: LLMProvider, model: string }`
-- Persists to `~/.zoerc.json`
+- Persists to `~/.seepientrc.json`
 
 Provider env vars (`provider-env.ts`) handle per-type key resolution with legacy fallbacks.
 
@@ -780,26 +780,26 @@ Provider env vars (`provider-env.ts`) handle per-type key resolution with legacy
 
 ## 12. Error Handling System
 
-### The `ZoeError` Hierarchy
+### The `SeepientError` Hierarchy
 
 ```
-ZoeError (base: message, code, retryable)
+SeepientError (base: message, code, retryable)
 ├── ProviderError  — code: "PROVIDER_ERROR", retryable: true, +provider
 ├── ToolError      — code: "TOOL_FAILED",    retryable: true, +tool
 ├── MaxStepsError  — code: "MAX_STEPS",      retryable: false, +steps
 └── AbortedError   — code: "ABORTED",        retryable: false
 ```
 
-### Error Bridging: `toZoeError()`
+### Error Bridging: `toSeepientError()`
 
-Normalizes arbitrary thrown values into proper `ZoeError` instances:
+Normalizes arbitrary thrown values into proper `SeepientError` instances:
 ```typescript
-function toZoeError(err: unknown, code: string): ZoeError {
+function toSeepientError(err: unknown, code: string): SeepientError {
   const message = err instanceof Error ? err.message : String(err);
   switch (code) {
     case "PROVIDER_ERROR": return new ProviderError(message);
     case "TOOL_FAILED":    return new ToolError(message);
-    default:              return new ZoeError(message, code, code === "PROVIDER_ERROR");
+    default:              return new SeepientError(message, code, code === "PROVIDER_ERROR");
   }
 }
 ```
@@ -809,8 +809,8 @@ function toZoeError(err: unknown, code: string): ZoeError {
 ```
 Provider SDK throw (network/auth/rate-limit)
   → agent-loop catch block
-    → toZoeError(err, "PROVIDER_ERROR") → ProviderError (retryable=true)
-    → hooks.onError(zoeErr) — fire-and-forget
+    → toSeepientError(err, "PROVIDER_ERROR") → ProviderError (retryable=true)
+    → hooks.onError(seepientErr) — fire-and-forget
     → AgentLoopResult.error populated → break loop
   → Adapter receives
     → CLI: chalk.red() to console
@@ -846,7 +846,7 @@ User types "What is the weather?"
     })
   → executeLoop():
       Step 1: provider.chat() → text "The weather is..."
-        → onStep → console.log("Zoe Agent: The weather is...")
+        → onStep → console.log("Seepient Agent: The weather is...")
         → no tool_calls → finishReason="stop" → break
   → Spinner stops, returns to REPL prompt
 ```

@@ -81,7 +81,7 @@ describe("tool-result metadata channel", () => {
 
 describe("write_file through the agent loop", () => {
   it("attaches FileWriteMetadata to the step and writes the file", async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "zoe-loop-"));
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "seepient-loop-"));
     const file = path.join(dir, "loop-out.txt");
     try {
       const writeDef: ToolDefinition = {

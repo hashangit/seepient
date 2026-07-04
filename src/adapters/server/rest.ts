@@ -1,5 +1,5 @@
 /**
- * Zoe Server — REST Endpoint Handlers
+ * Seepient Server — REST Endpoint Handlers
  *
  * Processes incoming HTTP requests and routes them to the appropriate
  * handler. All responses are JSON with proper Content-Type headers.

@@ -113,7 +113,7 @@ const lineCount = (text: string): number => {
  *  concurrent process) and are left alone; only older orphans are swept. */
 const STALE_TEMP_AGE_MS = 60_000;
 
-/** Remove orphaned `.zoe-*.tmp` write temps for `basename` in `dir` — left
+/** Remove orphaned `.seepient-*.tmp` write temps for `basename` in `dir` — left
  *  behind by a hard kill (SIGKILL/power loss) in the window between temp-write
  *  and rename, which the handler's catch block can't reach. Only temps older
  *  than STALE_TEMP_AGE_MS are removed, so a peer's in-flight temp is never
@@ -125,7 +125,7 @@ async function cleanStaleTemps(dir: string, basename: string): Promise<void> {
   } catch {
     return; // dir doesn't exist yet (new file in a new dir) — nothing to sweep
   }
-  const prefix = `${basename}.zoe-`;
+  const prefix = `${basename}.seepient-`;
   const cutoff = Date.now() - STALE_TEMP_AGE_MS;
   await Promise.all(
     entries
@@ -197,7 +197,7 @@ export const WriteFileTool: ToolModule = {
     //    is unlinked and the original is never partially written. A same-path
     //    temp orphaned by a prior hard kill is swept first.
     const dir = path.dirname(filePath);
-    const tmpPath = `${filePath}.zoe-${randomUUID().slice(0, 8)}.tmp`;
+    const tmpPath = `${filePath}.seepient-${randomUUID().slice(0, 8)}.tmp`;
     await cleanStaleTemps(dir, path.basename(filePath));
     try {
       await fs.mkdir(dir, { recursive: true });

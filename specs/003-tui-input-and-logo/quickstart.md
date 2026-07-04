@@ -1,4 +1,4 @@
-# Quickstart / Validation: TUI Input Box + Zoe Agent Logo
+# Quickstart / Validation: TUI Input Box + Seepient Agent Logo
 
 **Feature**: `003-tui-input-and-logo` | **Date**: 2026-06-15
 
@@ -41,12 +41,12 @@ Launch the interactive TUI:
 ```bash
 pnpm dev            # tsx — resolves the lazy './tui/*.tsx' import
 # or the built binary in a real terminal:
-zoe
+seepient
 ```
 
 ### S1 — Bordered input box, last live element above the footer (idle)
 
-1. Run `zoe` in a TTY.
+1. Run `seepient` in a TTY.
 2. **Expect**: the prompt sits inside a **rounded box** (`╭…╮` / `╰…╯`) directly
    above the footer status bar. It is clearly separated from the feed and the
    footer by its border.
@@ -60,17 +60,17 @@ zoe
 1. Submit a prompt that runs a slow shell command, e.g.:
    `run a shell command: sleep 4 && echo done`.
 2. **Expect**: the rounded input box **stays in place, dimmed** for the whole run;
-   the "Zoe is working" spinner renders **immediately above** the box.
+   the "Seepient is working" spinner renders **immediately above** the box.
 3. Type while running → **keystrokes are ignored** (input disabled).
 4. When the run finishes → the box is live (full color) again.
 
 > Positioning is content-flow (last live element above the footer), **not** pinned
 > to the viewport bottom on short sessions — see `spec.md` *Constraints*.
 
-### S3 — Zoe Agent logo on launch (scrolls away)
+### S3 — Seepient Agent logo on launch (scrolls away)
 
-1. Start `zoe` on a fresh session.
-2. **Expect**: a large "Zoe Agent" banner with a **vivid 45° Tokyo Night rainbow**
+1. Start `seepient` on a fresh session.
+2. **Expect**: a large "Seepient Agent" banner with a **vivid 45° Tokyo Night rainbow**
    (red → orange → yellow → green → cyan → blue → purple across the letters) —
    mid-tones must be saturated, **not** muddy gray/brown (HSL, not RGB lerp).
 3. Send a message → the large banner **scrolls up and away** as the feed grows
@@ -82,16 +82,16 @@ zoe
 ### S4 — Rename is logo-only
 
 1. While in the TUI, inspect: placeholder text, spinner text, footer.
-2. **Expect**: they still say **Zoe** (`Ask Zoe …`, `Zoe is working`).
-   Only the logo says "Zoe Agent".
-3. `zoe --version` / package name → still `zoe`.
+2. **Expect**: they still say **Seepient** (`Ask Seepient …`, `Seepient is working`).
+   Only the logo says "Seepient Agent".
+3. `seepient --version` / package name → still `seepient`.
 
 ### S5 — Non-interactive paths unchanged (regression)
 
 ```bash
-echo "hi" | zoe            # piped stdin → readline path, no React import
-zoe -n "hi"                # --no-interactive → readline path
-zoe --docker ...           # docker non-interactive → unchanged
+echo "hi" | seepient            # piped stdin → readline path, no React import
+seepient -n "hi"                # --no-interactive → readline path
+seepient --docker ...           # docker non-interactive → unchanged
 ```
 
 - **Expect**: byte-identical behavior to before; React/Ink never load. (If a CI
@@ -108,4 +108,3 @@ pnpm test                    # full suite passes (≈ pre-existing count)
 - Queuing / steering the agent with new messages mid-run (future feature).
 - A header pinned to the absolute top of the terminal viewport (requires a feed
   rewrite — separate task; see `research.md` R3).
-- Full product rename to Zoe (binary/package/docs — separate task).

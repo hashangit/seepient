@@ -1,5 +1,5 @@
 /**
- * Tokyo Night Moon — color palette for the Zoe TUI.
+ * Tokyo Night Moon — color palette for the Seepient TUI.
  *
  * US1 imports these tokens directly (`import { theme } from '../theme.js'`);
  * US3 wraps them in a React context via `use-theme.ts` so components can be

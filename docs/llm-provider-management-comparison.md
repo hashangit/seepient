@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-15
 **Scope:** Pi Agent, Hermes Agent, OpenClaw
-**Purpose:** Architectural research for Zoe Agent provider management strategy
+**Purpose:** Architectural research for Seepient Agent provider management strategy
 
 ---
 
@@ -13,7 +13,7 @@
 3. [Hermes Agent](#3-hermes-agent)
 4. [OpenClaw](#4-openclaw)
 5. [Head-to-Head Comparison](#5-head-to-head-comparison)
-6. [Lessons for Zoe Agent](#6-lessons-for-zoe)
+6. [Lessons for Seepient Agent](#6-lessons-for-seepient)
 7. [Sources](#7-sources)
 
 ---
@@ -542,9 +542,9 @@ interface StreamingEngine {
 
 ---
 
-## 6. Lessons for Zoe Agent
+## 6. Lessons for Seepient Agent
 
-Based on this analysis, here are key insights for Zoe Agent's provider management strategy:
+Based on this analysis, here are key insights for Seepient Agent's provider management strategy:
 
 ### 6.1 What to Adopt from Each
 
@@ -563,12 +563,12 @@ Based on this analysis, here are key insights for Zoe Agent's provider managemen
 - **Streaming engine** — Centralized streaming enables multi-consumer architectures
 - **Build-time safety** — Baseline checks prevent breaking changes in provider contracts
 
-### 6.2 Zoe Agent's Current Architecture
+### 6.2 Seepient Agent's Current Architecture
 
-Zoe Agent already implements several best practices:
+Seepient Agent already implements several best practices:
 
 ```typescript
-// src/core/provider-config.ts — Zoe Agent's provider management
+// src/core/provider-config.ts — Seepient Agent's provider management
 interface MultiProviderConfig {
   openai?: ProviderEntry;
   anthropic?: ProviderEntry;
@@ -586,7 +586,7 @@ interface MultiProviderConfig {
 
 ### 6.3 Recommended Enhancements
 
-Based on the comparison, Zoe Agent could benefit from:
+Based on the comparison, Seepient Agent could benefit from:
 
 1. **Model Registry** (from Pi Agent)
    - Auto-generate model metadata (cost, capabilities, context window)
@@ -632,7 +632,7 @@ Based on the comparison, Zoe Agent could benefit from:
 - [Official Documentation](https://docs.openclaw.ai/)
 - [Message Lifecycle Refactor](https://docs.openclaw.ai/concepts/message-lifecycle-refactor)
 
-### Zoe Agent (Local Codebase)
+### Seepient Agent (Local Codebase)
 - `src/core/provider-config.ts` — Provider configuration management
 - `src/core/provider-env.ts` — Environment variable resolution
 - `src/providers/factory.ts` — Provider factory pattern

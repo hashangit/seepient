@@ -1,8 +1,8 @@
 /**
- * Zoe Gateway — Type definitions
+ * Seepient Gateway — Type definitions
  *
  * Types for MCP targets, REST targets, audit records, and gateway config.
- * Reuses Zoe's existing ToolModule and ToolDefinition from src/tools/interface.ts.
+ * Reuses Seepient's existing ToolModule and ToolDefinition from src/tools/interface.ts.
  */
 
 export type AuthType = 'none' | 'header' | 'bearer' | 'query' | 'basic';

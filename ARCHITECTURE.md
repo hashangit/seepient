@@ -1,4 +1,4 @@
-# Zoe Agent Architecture
+# Seepient Agent Architecture
 
 Headless AI agent framework with CLI, SDK, and Server adapters. Multi-provider LLM support, skill plugin system, and Docker-native deployment.
 
@@ -6,14 +6,18 @@ Headless AI agent framework with CLI, SDK, and Server adapters. Multi-provider L
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  Adapters                                               │
-│  ┌──────────┐   ┌──────────┐   ┌────────────────────┐  │
-│  │   CLI    │   │   SDK    │   │      Server        │  │
-│  │  (REPL)  │   │  (Lib)   │   │  (WS + REST)       │  │
-│  └────┬─────┘   └────┬─────┘   └──────┬─────────────┘  │
-├───────┼──────────────┼────────────────┼─────────────────┤
-│       └──────────────┼────────────────┘                 │
-│                  Core                                   │
+│  Adapters (I/O & delivery)        Cognitive (BMI) ★     │
+│  ┌──────────┐ ┌────────┐         ┌──────────────────┐   │
+│  │   CLI    │ │  SDK   │         │ Conscience · AMG │   │
+│  │ (TUI/    │ │ (Lib)  │         │ RAS · DMN · ...  │   │
+│  │  REPL)   │ │        │         │ Hippo · Cortex · │   │
+│  │  Server  │ └───┬────┘         │ Basal Ganglia    │   │
+│  │ (WS+REST)│     │              └────────┬─────────┘   │
+│  └────┬─────┘     │        assembles system prompt +    │
+│       │           │        pre-call transform (RAS)     │
+│       └───────────┴────────┐ ┌──────────────┘           │
+│                           ▼ ▼                            │
+│                         Core                            │
 │  ┌──────────────────────────────────────────────────┐   │
 │  │  Agent Loop · Hooks · Tool Executor              │   │
 │  │  Provider Resolver · Message Convert              │   │
@@ -22,11 +26,11 @@ Headless AI agent framework with CLI, SDK, and Server adapters. Multi-provider L
 │  └──────────────────────────────────────────────────┘   │
 │                                                         │
 ├─────────────────────────────────────────────────────────┤
-│  Infrastructure                                         │
-│  ┌────────────┐  ┌────────────┐  ┌──────────────────┐  │
-│  │ Providers  │  │   Tools    │  │     Skills       │  │
-│  │  (4 LLMs)  │  │ (22 tools) │  │ (Plugin system)  │  │
-│  └────────────┘  └────────────┘  └──────────────────┘  │
+│  Infrastructure (the execution arms & legs)             │
+│  ┌────────────┐  ┌────────────┐  ┌──────────────────┐   │
+│  │ Providers  │  │   Tools    │  │     Skills       │   │
+│  │  (4 LLMs)  │  │ (22 tools) │  │ (Plugin system)  │   │
+│  └────────────┘  └────────────┘  └──────────────────┘   │
 │  ┌──────────────────────────────────────────────────┐   │
 │  │                  Gateway                         │   │
 │  │  (MCP client · REST proxy · OpenAPI · Semantic)  │   │
@@ -35,6 +39,12 @@ Headless AI agent framework with CLI, SDK, and Server adapters. Multi-provider L
 ```
 
 All three adapters delegate to a single `runAgentLoop` implementation in the core layer.
+
+> **★ The Cognitive (BMI) layer is planned — spec only.** No code lives under `src/core/bmi/` yet; the full design is in [`docs/superpowers/seepientagent-bmi/`](docs/superpowers/seepientagent-bmi/).
+>
+> The split is load-bearing: **cognition vs. execution**. The BMI owns the cognitive side — conscience (the immutable moral floor with veto power), amygdala (continuous safety-valence that can self-escalate), RAS (LLM-free attention/salience filter), DMN (offline self-model), persona, and memory (hippocampus working-memory, cortex long-term, basal-ganglia procedural skills). It does **not** execute anything itself: it assembles the system prompt and runs a pre-call RAS transform, then hands off.
+>
+> The **arms and legs** — the agent loop, tool executor, providers, the 22 tools, skills discovery, gateway — stay in Core and Infrastructure, and remain **BMI-agnostic**. `runAgentLoop` is unchanged by the BMI; it simply receives a system prompt the BMI assembled. This separation is what makes the components independently tunable, evolvable (conscience-gated), and verifiable. See `01-architecture.md` §5 ("modify-vs-new" table) for the contract that no execution system is duplicated by the BMI.
 
 ## Source Layout
 
@@ -216,7 +226,7 @@ Re-export hub for `provider-env.ts` (env var helpers, defaults, `resolveFromEnv(
 ```
 Explicit config (configureProviders())
   → Environment variables (OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.)
-    → Legacy env vars (ZOE_API_KEY, OPENAI_BASE_URL) with deprecation warnings
+    → Legacy env vars (SEEPIENT_API_KEY, OPENAI_BASE_URL) with deprecation warnings
       → Defaults (provider: openai, model: gpt-5.4)
 ```
 
@@ -280,16 +290,16 @@ Key behaviors:
 - **Atomic persistence**: Write to temp file → rename, with backup
 - **Deep merge**: Setting one provider key preserves sibling provider configs
 - **Validation**: Type coercion (string → number/boolean), enum constraints, URL parsing, hostname regex
-- **SettingsError**: Extends `ZoeError` with codes `SETTINGS_INVALID_KEY`, `SETTINGS_VALIDATION_FAILED`, `SETTINGS_WRITE_FAILED`
+- **SettingsError**: Extends `SeepientError` with codes `SETTINGS_INVALID_KEY`, `SETTINGS_VALIDATION_FAILED`, `SETTINGS_WRITE_FAILED`
 
 ### Session Store (`session-store.ts`)
 
-Composable persistence via `PersistenceBackend` interface: `save(id, SessionData)`, `load(id)`, `delete(id)`, `list()`. Factory function `createPersistenceBackend(config)` creates backends by type. `registerBackend(type, factory)` registers custom backends (Redis, SQLite, etc.). Built-in: `file` (JSON files in `~/.zoe/sessions/`) and `memory` (Map-based, for testing). Legacy `SessionStore`-based API (`createSessionStore`, `createMemoryStore`) preserved for backward compatibility.
+Composable persistence via `PersistenceBackend` interface: `save(id, SessionData)`, `load(id)`, `delete(id)`, `list()`. Factory function `createPersistenceBackend(config)` creates backends by type. `registerBackend(type, factory)` registers custom backends (Redis, SQLite, etc.). Built-in: `file` (JSON files in `~/.seepient/sessions/`) and `memory` (Map-based, for testing). Legacy `SessionStore`-based API (`createSessionStore`, `createMemoryStore`) preserved for backward compatibility.
 
 ### Error Hierarchy (`errors.ts`)
 
 ```
-ZoeError (base: message, code, retryable)
+SeepientError (base: message, code, retryable)
 ├── ProviderError  (provider field)
 ├── ToolError      (tool field)
 ├── MaxStepsError  (steps field)
@@ -333,22 +343,22 @@ Two interactive modes, chosen by `resolveLaunchMode()` (the same predicate that 
 
 **TUI rendering model** — Ink `<Static>` + native terminal scrollback (the same model Command Code uses): completed feed entries are painted once into the terminal's own scrollback, so the mouse wheel scrolls natively (no mouse capture → no gibberish, no alternate-screen buffer). `ink-reset.ts` pokes Ink's internal `instances.js` to reset `fullStaticOutput`/`lastOutput` before a `<Static>` remount, keeping resize / expand / session-resume repaints artifact-free.
 
-**TUI features**: bordered, always-visible prompt (input row in a rounded box; `/` + `@` autocomplete floats above it); a "Zoe Agent" figlet logo (Tokyo Night 45° rainbow gradient) as the first feed entry that scrolls away; a persistent task panel driven by `manage_todos`; overlays (command palette, model selector, settings editor, session selector, help); live token/cost footer; message queue + `/steer` (type during a run to queue, or `/steer <msg>` to interrupt + redirect).
+**TUI features**: bordered, always-visible prompt (input row in a rounded box; `/` + `@` autocomplete floats above it); a "Seepient Agent" figlet logo (Tokyo Night 45° rainbow gradient) as the first feed entry that scrolls away; a persistent task panel driven by `manage_todos`; overlays (command palette, model selector, settings editor, session selector, help); live token/cost footer; message queue + `/steer` (type during a run to queue, or `/steer <msg>` to interrupt + redirect).
 
 **Session management**: list / resume / delete / rename / export (JSON) / transcript (Markdown) via the session-selector overlay. Resume rebuilds the feed **and** the todo panel from persisted messages (`feed-serializer.ts` routes `manage_todos` to the persistent panel, not the feed).
 
-- **Config loading**: Global (`~/.zoe/setting.json`) + local (`.zoe/setting.json`) + env overrides
+- **Config loading**: Global (`~/.seepient/setting.json`) + local (`.seepient/setting.json`) + env overrides
 - **Interrupt handling**: ESC/Ctrl+C → `agent.abort()` (TUI owns raw stdin in TTY mode; the readline REPL uses `setupInterrupt()`)
 - **Slash commands**: registry-based dispatch (`/help`, `/clear`, `/exit`, `/compact`, `/sessions`, `/settings`, `/models`, …)
 - **Docker mode**: detects `.dockerenv`, switches to non-interactive + auto-approve shell
 
 ### SDK Adapter
 
-Programmatic library published as `zoe-agent` on npm.
+Programmatic library published as `seepient` on npm.
 
 Two entry points:
-- `zoe` → `generateText()`, `streamText()`, `createAgent()`
-- `zoe/server` → Server adapter (imports core directly, no SDK dependency)
+- `seepient` → `generateText()`, `streamText()`, `createAgent()`
+- `seepient/server` → Server adapter (imports core directly, no SDK dependency)
 
 `createAgent()` returns `SdkAgent` with: `chat()`, `chatStream()`, `switchProvider()`, `abort()`, `clear()`, `getHistory()`, `getUsage()`. Supports session persistence via `persist` option.
 
@@ -356,9 +366,9 @@ Two entry points:
 
 Standalone HTTP + WebSocket server. Delegates directly to `runAgentLoop` in core (no SDK dependency). REST endpoints for generate/stream/agent operations. WebSocket for real-time bidirectional communication with reconnection support.
 
-- **Auth**: API key with scopes (`chat`, `admin`). Keys stored in `~/.zoe/api-keys.json`
+- **Auth**: API key with scopes (`chat`, `admin`). Keys stored in `~/.seepient/api-keys.json`
 - **Sessions**: TTL-based expiration, per-key concurrency limits
-- **Deployment**: `zoe-server` binary, Docker image, or `docker-compose`
+- **Deployment**: `seepient-server` binary, Docker image, or `docker-compose`
 
 ## Skills System
 
@@ -387,9 +397,9 @@ System prompt and instructions for the skill...
 
 Skills are discovered from multiple sources with priority (last wins):
 1. Built-in skills bundled with the package
-2. User skills in `~/.zoe/skills/`
-3. Project skills in `.zoe/skills/`
-4. Custom paths via `ZOE_SKILLS_PATH`
+2. User skills in `~/.seepient/skills/`
+3. Project skills in `.seepient/skills/`
+4. Custom paths via `SEEPIENT_SKILLS_PATH`
 
 Discovery uses `parseFrontmatter()` which reads each skill file but discards the body text immediately, keeping only the YAML metadata and `filePath`. Bodies are loaded lazily from disk on first invocation via `registry.getBody()`, with an LRU cache (5 entries) in `DefaultSkillRegistry`.
 
@@ -442,8 +452,8 @@ Multi-layer merge with precedence (highest wins):
 
 ```
 Environment variables
-  → Local project config (.zoe/setting.json)
-    → Global user config (~/.zoe/setting.json)
+  → Local project config (.seepient/setting.json)
+    → Global user config (~/.seepient/setting.json)
       → Defaults
 ```
 
@@ -454,7 +464,7 @@ Env var mapping per provider:
 - OpenAI-compatible: `OPENAI_COMPAT_API_KEY`, `OPENAI_COMPAT_BASE_URL`, `OPENAI_COMPAT_MODEL`
 - General: `LLM_PROVIDER`, `LLM_MODEL`
 
-Legacy env vars (`ZOE_API_KEY`, `OPENAI_BASE_URL`, `ZOE_MODEL`) still work with deprecation warnings.
+Legacy env vars (`SEEPIENT_API_KEY`, `OPENAI_BASE_URL`, `SEEPIENT_MODEL`) still work with deprecation warnings.
 
 ## Build & Deployment
 
@@ -471,7 +481,7 @@ TypeScript (`tsc`) targeting ES2022 with NodeNext module resolution. No bundler 
 }
 ```
 
-Two binaries: `zoe` (CLI) and `zoe-server` (standalone server).
+Two binaries: `seepient` (CLI) and `seepient-server` (standalone server).
 
 ### Docker
 
@@ -479,7 +489,7 @@ Multi-stage build: build stage with full Node.js → production stage with compi
 
 Volumes: `/data/sessions` (session persistence), `/mnt/skills` (custom skills).
 
-Env var `ZOE_SHELL_APPROVE=auto` enables non-interactive shell tool approval.
+Env var `SEEPIENT_SHELL_APPROVE=auto` enables non-interactive shell tool approval.
 
 ### CI/CD
 
@@ -539,7 +549,7 @@ Targets registered by agents (via `gateway_register_target`) cannot resolve `cre
 
 ### Settings Adapter
 
-The `GatewaySettingsAdapter` provides dedicated storage for dynamic gateway data (targets, credentials, routes) in `~/.zoe/gateway/`. This bypasses the static `SettingsManager` which rejects unknown dot-keys. The 4 typed gateway settings (`gateway.enabled`, `gateway.semanticTopK`, `gateway.defaultRateLimitPerMin`, `gateway.maxAuditLogs`) go through `SettingsManager`; only the dynamic subtree uses the adapter.
+The `GatewaySettingsAdapter` provides dedicated storage for dynamic gateway data (targets, credentials, routes) in `~/.seepient/gateway/`. This bypasses the static `SettingsManager` which rejects unknown dot-keys. The 4 typed gateway settings (`gateway.enabled`, `gateway.semanticTopK`, `gateway.defaultRateLimitPerMin`, `gateway.maxAuditLogs`) go through `SettingsManager`; only the dynamic subtree uses the adapter.
 
 ### Gateway Adapter Wiring
 

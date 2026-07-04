@@ -1,5 +1,5 @@
 /**
- * Zoe Server — Settings REST & WebSocket Handlers
+ * Seepient Server — Settings REST & WebSocket Handlers
  *
  * REST endpoints and WS message handlers for settings management.
  */
@@ -189,7 +189,7 @@ export async function handleGetSettingsSchema(
 
   sendJSON(res, 200, {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
-    title: 'Zoe Agent Settings',
+    title: 'Seepient Agent Settings',
     type: 'object',
     properties,
   });

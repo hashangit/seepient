@@ -1,5 +1,5 @@
 /**
- * Slash Command Registry for Zoe CLI.
+ * Slash Command Registry for Seepient CLI.
  *
  * Flat namespace of `/command` handlers with alias support.
  *

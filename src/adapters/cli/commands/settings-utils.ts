@@ -1,5 +1,5 @@
 /**
- * Zoe CLI — Settings Display Utilities
+ * Seepient CLI — Settings Display Utilities
  *
  * Pure formatting functions for settings display.
  * Render functions produce bordered ASCII boxes for the wizard TUI.

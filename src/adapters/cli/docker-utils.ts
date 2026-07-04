@@ -1,5 +1,5 @@
 /**
- * Zoe CLI — Docker & Non-Interactive Detection
+ * Seepient CLI — Docker & Non-Interactive Detection
  *
  * Utilities for detecting Docker environments and non-interactive TTY contexts.
  * Used to guard inquirer prompts and readline settings.
@@ -12,11 +12,11 @@ import * as fs from 'fs';
  * Checks:
  *   1. /.dockerenv file existence
  *   2. /proc/1/cgroup contains "docker" or "containerd"
- *   3. ZOE_DOCKER env var is "true"
+ *   3. SEEPIENT_DOCKER env var is "true"
  */
 export function isDockerContainer(): boolean {
   // Explicit env var override (used by --docker flag too)
-  if (process.env.ZOE_DOCKER === 'true') return true;
+  if (process.env.SEEPIENT_DOCKER === 'true') return true;
 
   try {
     if (fs.existsSync('/.dockerenv')) return true;
@@ -38,15 +38,15 @@ export function isDockerContainer(): boolean {
  * Determine if the CLI is running in a non-interactive context.
  * Returns true if:
  *   - stdin is not a TTY
- *   - --no-interactive flag was passed (ZOE_NO_INTERACTIVE=true)
- *   - Running inside Docker (unless ZOE_INTERACTIVE=true overrides it)
+ *   - --no-interactive flag was passed (SEEPIENT_NO_INTERACTIVE=true)
+ *   - Running inside Docker (unless SEEPIENT_INTERACTIVE=true overrides it)
  */
 export function isNonInteractive(): boolean {
   // Explicit opt-in to interactive mode overrides everything
-  if (process.env.ZOE_INTERACTIVE === 'true') return false;
+  if (process.env.SEEPIENT_INTERACTIVE === 'true') return false;
 
   // Explicit non-interactive flag
-  if (process.env.ZOE_NO_INTERACTIVE === 'true') return true;
+  if (process.env.SEEPIENT_NO_INTERACTIVE === 'true') return true;
 
   // No TTY detected
   if (!process.stdin.isTTY) return true;

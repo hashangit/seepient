@@ -1,11 +1,11 @@
 /**
- * Zoe SDK — Shared TypeScript types
+ * Seepient SDK — Shared TypeScript types
  *
  * This file is the single source of truth for all SDK interfaces.
  * Every SDK module imports from here.
  */
 
-import type { ZoeError as ZoeErrorType } from "./errors.js";
+import type { SeepientError as SeepientErrorType } from "./errors.js";
 import type { Middleware } from "./middleware.js";
 
 // ── Provider ──────────────────────────────────────────────────────────
@@ -133,7 +133,7 @@ export interface Hooks {
     result: { name: string; output: string; duration: number },
   ) => void | Promise<void>;
   onStep?: (step: StepResult) => void | Promise<void>;
-  onError?: (error: ZoeErrorType) => void | Promise<void>;
+  onError?: (error: SeepientErrorType) => void | Promise<void>;
   onFinish?: (result: GenerateTextResult) => void | Promise<void>;
 }
 
@@ -180,7 +180,7 @@ export interface StreamTextOptions extends GenerateTextOptions {
     result: { callId: string; output: string; success: boolean },
   ) => void;
   onStep?: (step: StepResult) => void;
-  onError?: (error: ZoeErrorType) => void;
+  onError?: (error: SeepientErrorType) => void;
 }
 
 export interface StreamTextResult {
@@ -286,8 +286,8 @@ export interface SkillMetadata {
 
 // ── Errors ────────────────────────────────────────────────────────────
 // Error classes live in ./errors.ts. We re-export them here so that
-// existing consumers that import { ZoeError } from "./types.js"
+// existing consumers that import { SeepientError } from "./types.js"
 // continue to compile without changes.
 
-export { ZoeError, ProviderError, ToolError, MaxStepsError, AbortedError } from "./errors.js";
+export { SeepientError, ProviderError, ToolError, MaxStepsError, AbortedError } from "./errors.js";
 

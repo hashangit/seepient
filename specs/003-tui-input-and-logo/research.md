@@ -1,4 +1,4 @@
-# Research: TUI Persistent Input Box + Zoe Agent Logo
+# Research: TUI Persistent Input Box + Seepient Agent Logo
 
 **Feature**: `003-tui-input-and-logo` | **Date**: 2026-06-15 (revised post-scrutinize)
 
@@ -118,14 +118,13 @@ stays `< columns` (same discipline as `message-area.tsx`). Recompute from live
 
 ---
 
-## R6. "Logo only" rename — boundary (intentional mixed branding)
+## R6. Branding split — logo wordmark vs short name (intentional)
 
-**Decision**: `"Zoe Agent"` appears **only** in `LogoBanner`. Placeholder
-("Ask Zoe …"), spinner ("Zoe is working"), footer, help, binary name
-(`zoe`), package name, and docs stay Zoe. Both names are visible on screen
-at once during the rename window — this is **intentional** (the user is still
-planning the rename; the logo is forward-looking branding). The full rename is a
-separate task.
+**Decision**: `"Seepient Agent"` appears **only** in `LogoBanner`. Placeholder
+("Ask Seepient …"), spinner ("Seepient is working"), footer, help, binary name
+(`seepient`), and package name use the short name. Both forms appear on screen at
+once — this is **intentional**: the logo is the full product wordmark, while the CLI
+command and package keep the short, typeable name.
 
 ---
 

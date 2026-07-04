@@ -1,5 +1,5 @@
 /**
- * Zoe Core — Config Utilities
+ * Seepient Core — Config Utilities
  *
  * Config loading, merging, and environment overrides.
  * Chalk-free — suitable for all adapters (CLI, SDK, Server).
@@ -13,9 +13,9 @@ import { DEFAULT_MODELS } from '../models-catalog.js';
 
 // ── Constants ──────────────────────────────────────────────────────────
 
-const GLOBAL_CONFIG_DIR = path.join(os.homedir(), '.zoe');
+const GLOBAL_CONFIG_DIR = path.join(os.homedir(), '.seepient');
 const GLOBAL_CONFIG_FILE = path.join(GLOBAL_CONFIG_DIR, 'setting.json');
-const LOCAL_CONFIG_FILE = path.join(process.cwd(), '.zoe', 'setting.json');
+const LOCAL_CONFIG_FILE = path.join(process.cwd(), '.seepient', 'setting.json');
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -68,7 +68,7 @@ export function getConfigPath(global?: boolean): string {
  * Returns the config directory path for the given scope.
  */
 export function getConfigDir(global?: boolean): string {
-  return global ? GLOBAL_CONFIG_DIR : path.join(process.cwd(), '.zoe');
+  return global ? GLOBAL_CONFIG_DIR : path.join(process.cwd(), '.seepient');
 }
 
 /**
@@ -134,8 +134,8 @@ export function applyEnvOverrides(config: AppConfig): AppConfig {
   if (process.env.WECOM_KEYWORD) config.wecomKeyword = process.env.WECOM_KEYWORD;
 
   // Permission level
-  if (process.env.ZOE_PERMISSION) {
-    const val = process.env.ZOE_PERMISSION;
+  if (process.env.SEEPIENT_PERMISSION) {
+    const val = process.env.SEEPIENT_PERMISSION;
     if (val === "strict" || val === "moderate" || val === "permissive") {
       config.permissionLevel = val;
     }
@@ -154,7 +154,7 @@ export function applyEnvOverrides(config: AppConfig): AppConfig {
     config.models['openai-compatible'] = {
       apiKey: process.env.OPENAI_COMPAT_API_KEY,
       baseUrl: process.env.OPENAI_COMPAT_BASE_URL || process.env.OPENAI_BASE_URL || config.models['openai-compatible']?.baseUrl || 'https://api.openai.com/v1',
-      model: process.env.OPENAI_COMPAT_MODEL || process.env.LLM_MODEL || process.env.ZOE_MODEL || config.models['openai-compatible']?.model || DEFAULT_MODELS['openai-compatible'],
+      model: process.env.OPENAI_COMPAT_MODEL || process.env.LLM_MODEL || process.env.SEEPIENT_MODEL || config.models['openai-compatible']?.model || DEFAULT_MODELS['openai-compatible'],
     };
   }
   if (process.env.ANTHROPIC_API_KEY) {
@@ -195,7 +195,7 @@ export function migrateLegacyFormat(
 
 /**
  * Resolve the active provider type from CLI flags, env vars, and config.
- * Checks LLM_PROVIDER env var as a standard alias for ZOE_PROVIDER.
+ * Checks LLM_PROVIDER env var as a standard alias for SEEPIENT_PROVIDER.
  */
 export function resolveActiveProviderType(
   config: AppConfig,
@@ -204,7 +204,7 @@ export function resolveActiveProviderType(
   return (
     (options?.provider as ProviderType) ||
     (process.env.LLM_PROVIDER as ProviderType) ||
-    (process.env.ZOE_PROVIDER as ProviderType) ||
+    (process.env.SEEPIENT_PROVIDER as ProviderType) ||
     config.provider ||
     'openai'
   );
@@ -216,7 +216,7 @@ export function resolveActiveProviderType(
  * Save config to disk. If a local config exists, saves there; otherwise global.
  */
 export function saveConfig(config: AppConfig): void {
-  const targetFile = fs.existsSync(path.join(process.cwd(), '.zoe', 'setting.json'))
+  const targetFile = fs.existsSync(path.join(process.cwd(), '.seepient', 'setting.json'))
     ? LOCAL_CONFIG_FILE
     : GLOBAL_CONFIG_FILE;
 

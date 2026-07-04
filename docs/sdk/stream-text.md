@@ -19,7 +19,7 @@ function streamText(
 ## Quick example
 
 ```typescript
-import { streamText } from "zoe-agent";
+import { streamText } from "seepient";
 
 const stream = await streamText("Explain quantum computing simply", {
   onText: (delta) => process.stdout.write(delta),
@@ -66,7 +66,7 @@ console.log(`\nDone. ${(await stream.usage).totalTokens} tokens used.`);
 | `onToolCall`    | `(tool: { name: string; args: Record<string, unknown>; callId: string }) => void` | Called when the agent invokes a tool |
 | `onToolResult`  | `(result: { callId: string; output: string; success: boolean }) => void` | Called when a tool finishes execution |
 | `onStep`        | `(step: StepResult) => void` | Called for every agent loop step (text or tool_call) |
-| `onError`       | `(error: ZoeError) => void` | Called if an error occurs during execution |
+| `onError`       | `(error: SeepientError) => void` | Called if an error occurs during execution |
 
 ## Return type
 
@@ -90,7 +90,7 @@ console.log(`\nDone. ${(await stream.usage).totalTokens} tokens used.`);
 Pipe agent output to the terminal in real time:
 
 ```typescript
-import { streamText } from "zoe-agent";
+import { streamText } from "seepient";
 
 const stream = await streamText("Explain monads step by step", {
   provider: "anthropic",
@@ -140,7 +140,7 @@ One-liner for server-sent events in any framework that supports the Web API `Res
 
 ```typescript
 import express from "express";
-import { streamText } from "zoe-agent";
+import { streamText } from "seepient";
 
 const app = express();
 
@@ -157,7 +157,7 @@ app.listen(3000);
 
 ```typescript
 import { Hono } from "hono";
-import { streamText } from "zoe-agent";
+import { streamText } from "seepient";
 
 const app = new Hono();
 

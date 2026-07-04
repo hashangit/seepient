@@ -74,7 +74,7 @@ handler: async (args, _config, extra) => {
   }
 
   // 2. Atomic write: temp file + rename.
-  const tmpPath = filePath + '.zoe-tmp-' + Date.now();
+  const tmpPath = filePath + '.seepient-tmp-' + Date.now();
   try {
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(tmpPath, newContent, 'utf-8');
@@ -242,7 +242,7 @@ diff + potential undo).
 
 ### Problem
 Some providers (Anthropic, OpenAI o-series) emit **reasoning/thinking content**
-alongside the main response. Currently, Zoe Agent's providers don't surface
+alongside the main response. Currently, Seepient Agent's providers don't surface
 reasoning content — `ProviderResponse.content` is only the main text. The
 reasoning is invisible to the user, even though it's valuable for transparency
 ("why did the agent decide X?").
@@ -470,7 +470,7 @@ When the pi-ai migration lands, T052 becomes:
 
 ### Problem
 The TUI has no session management. The conversation is in-memory; if the user
-restarts Zoe Agent, the conversation is lost. There's no way to list, preview,
+restarts Seepient Agent, the conversation is lost. There's no way to list, preview,
 resume, or export past sessions.
 
 ### Target UX
@@ -486,7 +486,7 @@ that lists saved sessions with:
 1. **Session persistence for the CLI Agent**: The CLI Agent currently has no
    persistence. The SDK Agent does (`opts.persist` → PersistenceBackend). The
    CLI Agent needs:
-   - A `PersistenceBackend` (file backend — `~/.zoe/sessions/<id>.json`).
+   - A `PersistenceBackend` (file backend — `~/.seepient/sessions/<id>.json`).
    - Auto-save after each turn (like the SDK's `persistMessages()`).
    - Auto-load on startup (resume the last session or start fresh).
 

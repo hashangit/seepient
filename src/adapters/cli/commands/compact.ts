@@ -1,5 +1,5 @@
 /**
- * /compact command handler for Zoe CLI.
+ * /compact command handler for Seepient CLI.
  *
  * Summarizes the conversation to reduce token usage while preserving
  * key context needed to continue the session.

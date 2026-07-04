@@ -101,7 +101,7 @@ describe('runAgentLoop streaming', () => {
     // permission gate so it actually runs and streams stdout.
     const provider = streamProvider([
       { type: 'tool_call_begin', index: 0, id: 'tc1', name: 'execute_shell_command' },
-      { type: 'tool_call_delta', index: 0, argumentsDelta: '{"command":"echo zoe-t026","rationale":"x"}' },
+      { type: 'tool_call_delta', index: 0, argumentsDelta: '{"command":"echo seepient-t026","rationale":"x"}' },
       { type: 'finish' },
     ]);
     const steps: StepResult[] = [];
@@ -119,8 +119,8 @@ describe('runAgentLoop streaming', () => {
     const progress = steps.filter((s) => s.type === 'tool_progress');
     const toolCall = steps.find((s) => s.type === 'tool_call');
     expect(progress.length).toBeGreaterThan(0);
-    expect(progress.some((s) => (s.content ?? '').includes('zoe-t026'))).toBe(true);
-    expect(toolCall?.toolCall?.result).toContain('zoe-t026');
+    expect(progress.some((s) => (s.content ?? '').includes('seepient-t026'))).toBe(true);
+    expect(toolCall?.toolCall?.result).toContain('seepient-t026');
   });
 });
 

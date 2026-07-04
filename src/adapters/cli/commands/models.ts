@@ -1,5 +1,5 @@
 /**
- * Zoe CLI — /models Command Handler
+ * Seepient CLI — /models Command Handler
  *
  * In non-interactive mode, lists configured providers (returns output).
  * In interactive mode, launches the provider/model wizard (owns stdin) — the
