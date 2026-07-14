@@ -8,6 +8,8 @@ import { BrowserTool } from './browser.js';
 import { ScreenshotTool } from './screenshot.js';
 import { ImageTool } from './image.js';
 import { PromptOptimizerTool } from './prompt-optimizer.js';
+import { RenderWidgetTool } from './widgets.js';
+import { EditFileTool } from './edit-file.js';
 import { getSkillRegistry } from '../skills/index.js';
 import { limitSkillBody } from '../skills/types.js';
 
@@ -92,5 +94,7 @@ export const builtInTools: ToolModule[] = [
   BrowserTool,
   ScreenshotTool,
   ImageTool,
+  RenderWidgetTool,
+  EditFileTool,
   UseSkillTool
 ];

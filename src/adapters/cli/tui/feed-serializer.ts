@@ -60,6 +60,24 @@ export function messagesToFeedEntries(messages: Message[]): RebuiltFeed {
             }
             continue;
           }
+          // render_widget → rebuild as a finalized, non-interactive widget block.
+          if (tc.name === 'render_widget' && tc.arguments) {
+            try {
+              const args = typeof tc.arguments === 'string'
+                ? JSON.parse(tc.arguments)
+                : tc.arguments;
+              const spec = args as Record<string, unknown>;
+              if (spec && typeof spec.id === 'string' && typeof spec.kind === 'string') {
+                entries.push({
+                  kind: 'block' as const,
+                  blockKind: 'widget' as const,
+                  props: spec,
+                  finalized: true,
+                });
+                continue;
+              }
+            } catch { /* fall through to generic tool block */ }
+          }
           entries.push({
             kind: 'tool',
             name: tc.name,

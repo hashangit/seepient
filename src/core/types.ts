@@ -25,6 +25,33 @@ export interface MultiProviderConfig {
 export type ToolRiskCategory = "safe" | "edit" | "communications" | "destructive";
 export type PermissionLevel = "strict" | "moderate" | "permissive";
 
+// ── Tool Approval Grants ──────────────────────────────────────────────
+
+/** Where a remembered approval applies. Session grants are process-lifetime. */
+export type GrantScope = "session" | "project" | "global";
+
+/** "once" = do not remember; the others map to a persisted grant scope. */
+export type ApprovalScope = "once" | GrantScope;
+
+/**
+ * Backward-compatible approval return. A bare boolean is still accepted and
+ * is equivalent to `{ approved, scope: "once" }`. Adapters that surface
+ * scoped options return the object form so the loop can record a grant.
+ */
+export type ApprovalDecision = boolean | { approved: boolean; scope?: ApprovalScope };
+
+/**
+ * LLM-authored human-in-the-loop context attached to a risky tool call.
+ * Extracted by the agent loop from the tool's `approval` arg and surfaced to
+ * the adapter so the user can make an informed decision. `implications` is
+ * per-scope; the adapter falls back to a template when a scope is missing.
+ */
+export interface ApprovalContext {
+  title: string;
+  description: string;
+  implications?: Partial<Record<GrantScope, string>>;
+}
+
 // ── Messages ──────────────────────────────────────────────────────────
 
 export interface Message {
@@ -109,19 +136,26 @@ export interface ToolResult {
 export interface ApproveToolCall {
   name: string;
   args: Record<string, unknown>;
+  /** LLM-authored gate context, built by the loop from the tool's `approval` arg. */
+  approvalContext?: ApprovalContext;
 }
 
 /**
  * Adapter-provided callback invoked before every tool execution.
- * Return `true` to approve, `false` to deny (the tool is skipped
- * and "User denied tool execution" is returned as the tool output).
+ * Return `true` (or `{ approved: true }`) to approve, `false` (or
+ * `{ approved: false }`) to deny — the tool is skipped and "User denied
+ * tool execution" is returned as the tool output. When the object form
+ * carries a `scope` other than "once" (and a grantStore is configured),
+ * the loop persists the decision as a grant so future matching calls
+ * skip this prompt.
  *
  * Each adapter implements its own UX:
- *  - CLI: inquirer prompt (with ESC interrupt suspended)
+ *  - CLI TUI: bordered multi-option panel with per-scope implications
+ *  - CLI readline: y/n (defaults to "once")
  *  - SDK: user-supplied callback or auto-approve
  *  - Server: WebSocket round-trip to client
  */
-export type ApproveToolFn = (call: ApproveToolCall) => Promise<boolean>;
+export type ApproveToolFn = (call: ApproveToolCall) => Promise<ApprovalDecision>;
 
 // ── Hooks ─────────────────────────────────────────────────────────────
 
@@ -144,7 +178,8 @@ export interface GenerateTextOptions {
   provider?: ProviderType;
   systemPrompt?: string;
   tools?: string[] | UserToolDefinition[];
-  skills?: string[];
+  skills?: string[] | boolean;
+  cwd?: string;
   maxSteps?: number;
   temperature?: number;
   maxTokens?: number;
@@ -201,7 +236,8 @@ export interface AgentCreateOptions {
   provider?: ProviderType;
   systemPrompt?: string;
   tools?: string[] | UserToolDefinition[];
-  skills?: string[];
+  skills?: string[] | boolean;
+  cwd?: string;
   maxSteps?: number;
   permissionLevel?: PermissionLevel;
   persist?: string | PersistenceBackend | PersistenceConfig | SessionStore;

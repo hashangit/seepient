@@ -106,7 +106,15 @@ if (tc.name === 'render_widget') {
 
 ### 6. Action round-trip (consumer → new turn)
 
-When the user activates an action (Enter on focused button, or form submit):
+When the user activates an action (Ctrl+Enter on the focused action, or form submit):
+
+**Keybindings** (keyboard-first; no mouse capture in the live region):
+- `Ctrl+T` (idle, no overlay) — cycle focus between the prompt and the first live widget.
+- `Tab` / `→` (widget focused) — cycle focus across the widget's action bar.
+- `Ctrl+Enter` (widget focused) — fire the focused action. Plain `Enter` is reserved for the prompt's submit and form-field entry, so widgets use `Ctrl+Enter` to avoid the collision.
+- `Esc` — return focus to the prompt.
+
+While a widget owns focus, the prompt's `TextInput` is disabled (`disabled={focusedWidgetId !== null}`) so keystrokes don't leak into both surfaces.
 
 ```ts
 // Form widgets validate field values against each field's declared `type` BEFORE dispatch.

@@ -89,6 +89,7 @@ All three adapters delegate to a single `runAgentLoop` in `src/core/agent-loop.t
 | Middleware | `src/core/middleware.ts` | `PipelineContext`, `Middleware` type, `compose()` chain |
 | Built-in middleware | `src/core/middleware/` | `logging`, `rate-limit`, `auth` |
 | Errors | `src/core/errors.ts` | `SeepientError` hierarchy with `code` + `retryable` |
+| Hashline | `src/core/hashline/` | Hash-anchored patch language: types, parser, patcher, snapshot store |
 | Stream manager | `src/core/stream-manager.ts` | Shared streaming queue, async iterables, SSE for SDK and agent |
 | Session store | `src/core/session-store.ts` | `PersistenceBackend` factory + registry, file & memory backends |
 | Settings schema | `src/core/settings-schema.ts` | 31 dot-key settings, validation, env vars, 5 categories |
@@ -96,10 +97,12 @@ All three adapters delegate to a single `runAgentLoop` in `src/core/agent-loop.t
 | SDK entry | `src/adapters/sdk/index.ts` | `generateText`, `streamText`, `createAgent`, `settings` |
 | CLI entry | `src/adapters/cli/index.ts` | Commander setup; dispatches TUI (TTY) vs readline REPL |
 | CLI REPL | `src/adapters/cli/repl.ts` | Readline fallback (`runChat()`), non-interactive / piped / `--docker` |
-| CLI TUI | `src/adapters/cli/tui/` | Ink/React TUI (lazy, TTY only): `<Static>` + `ink-reset`; bordered input, figlet logo, todo panel, session manager, queue/`/steer` |
+| CLI TUI | `src/adapters/cli/tui/` | Ink/React TUI (lazy, TTY only): `<Static>` + `ink-reset`; bordered input, figlet logo, todo panel, session manager, queue/`/steer`; widget host (`widget-host.ts`), ChatBlock lifecycle (`chat-block.ts`), widget renderers (`widgets/`) |
 | TUI logo | `src/adapters/cli/tui/logo/gradient.ts` | Tokyo Night 45° rainbow for the logo |
 | Todo tool | `src/tools/todos.ts` | `manage_todos` — persistent TUI task panel |
 | Safe write + diff | `src/tools/core.ts` (`WriteFileTool`) + `tui/diff/` | Atomic `write_file` (temp + `fs.rename`); emits `FileWriteMetadata` → `StepResult.metadata` → TUI inline diff |
+| Hash-anchored edit | `src/tools/edit-file.ts` | `edit_file` — targeted line patches via hash-anchored grammar; reuses `DiffViewer` |
+| Generative widgets | `src/tools/widgets.ts` + `tui/widgets/` | `render_widget` tool + 9 L1 kind renderers (table, chart, product_card, form, …) |
 | Feed rebuild | `src/adapters/cli/tui/feed-serializer.ts` | Resume: messages → feed + todos |
 | System prompts | `src/adapters/cli/system-prompts.ts` | Interactive vs non-interactive (+ `manage_todos` nudge) |
 | Server entry | `src/adapters/server/index.ts` | HTTP + WebSocket, delegates to core directly |
@@ -121,7 +124,7 @@ Provider resolution chain: explicit config → env vars → legacy env vars → 
 
 ## Tools
 
-13 built-in tools in 4 tiers:
+15 built-in tools in 4 tiers:
 
 - **Core**: `execute_shell_command`, `read_file`, `write_file`, `get_current_datetime`
 - **Comm**: `send_email`, `web_search`, `send_notification`

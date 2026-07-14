@@ -25,7 +25,7 @@ Inspired by omp's `@oh-my-pi/hashline` (`packages/hashline/`). Sealed at the too
     properties: {
       patch: {
         type: 'string',
-        description: 'One or more [PATH#TAG] sections. TAG is the 4-hex content hash returned by read_file. Operations: SWAP A.=B:, SWAP.BLK A:, DEL A.=B, DEL.BLK A, INS.PRE A:, INS.POST A:, INS.HEAD:, INS.TAIL:, MV DEST, REM. Body rows prefixed with +.',
+        description: 'One or more [PATH#TAG] sections. TAG is the 4-hex content hash returned by read_file. Operations: SWAP A.=B:, SWAP.BLK A:, DEL A.=B, DEL.BLK A, INS.PRE A:, INS.POST A:, INS.HEAD:, INS.TAIL:. Body rows prefixed with +. Order multiple operations from bottom-to-top (highest line first) so line numbers stay correct.',
       },
     },
   },
@@ -39,31 +39,46 @@ Risk category `edit` (same as `write_file`) — permission matrix (`permission.t
 
 ```
 file-section := '[' PATH '#' TAG ']' newline (op newline)*
-op           := swap | swap_block | del | del_block | ins | mv | rem
+op           := swap | swap_block | del | del_block | ins
 swap         := 'SWAP' WS start '.=' end ':' newline body
 swap_block   := 'SWAP.BLK' WS line ':' newline body
 del          := 'DEL' WS start '.=' end
 del_block    := 'DEL.BLK' WS line
 ins          := ('INS.PRE' | 'INS.POST' | 'INS.HEAD' | 'INS.TAIL') [WS line] ':' newline body
-mv           := 'MV' WS DEST
-rem          := 'REM'
 body         := ('+' TEXT? newline)*
 ```
 
-`TAG` is a 4-hex content hash from the `SnapshotStore`. Line numbers are 1-based. Full grammar in `src/core/hashline/grammar.md` (port of omp's `grammar.lark`).
+`TAG` is a 4-hex content hash, path-scoped (different files with identical content get different tags). Line numbers are 1-based.
 
 ### 3. `SnapshotStore` (Core)
+
+Path-keyed content registry — one snapshot per path (the latest recorded
+content). Resolution is by path, then the stored tag is compared against the
+section's tag. Path-scoping (the tag hashes `path + NUL + content`) ensures
+different files with identical content never collide.
 
 ```ts
 // src/core/hashline/snapshot-store.ts
 export interface SnapshotStore {
-  record(path: string, content: string): string;              // returns tag
-  resolve(tag: string): { path: string; content: string } | null;
-  verify(tag: string, currentContent: string): boolean;       // hash compare
-  snapshot(tag: string): string | null;                       // pre-edit content for merge
+  /** Record a snapshot and return its 4-hex tag. Empty string if oversized (>1MB). */
+  record(path: string, content: string): string;
+  /** Path-keyed resolution — returns the stored tag + content for this path. */
+  resolvePath(path: string): { tag: string; content: string } | null;
+  /** Return the raw pre-edit content for a path (for stale-anchor reapply). */
+  snapshot(path: string): string | null;
   clear(): void;
 }
 ```
+
+**Design note (diverges from the original tag-keyed draft):** the store holds
+one entry per path, keyed by path, not by tag. Rationale: the tag is a *version
+stamp* verified on lookup, not a lookup key — this avoids any cross-path
+collision risk and keeps the store O(paths) rather than O(versions). The
+trade-off is that only the latest snapshot per path is retained, so the
+stale-anchor reapply (§5) operates on the latest recorded content for the path,
+not the content corresponding to the model's specific tag. This is acceptable
+because a stale tag is the signal to re-read; the reapply is a best-effort
+fast path, not a guaranteed merge.
 
 One store per CLI session (`src/adapters/cli/bootstrap.ts` creates it; passed to tools via the tool-executor config). Not persisted — rebuilt lazily as files are read.
 
@@ -88,28 +103,44 @@ Backward compatible: `snapshotStore` is optional on the tool config. SDK/Server 
 ```ts
 handler: async (args, config) => {
   const store = config.snapshotStore;
-  if (!store) throw new ToolError('edit_file requires a snapshot store', 'HASHLINE_NO_STORE');
+  if (!store) throw new HashlineError('edit_file requires a snapshot store', 'HASHLINE_NO_STORE', false);
 
   const patch = parsePatch(args.patch);   // throws HashlineError on malformed grammar
   const results: FileWriteMetadata[] = [];
 
   for (const section of patch.sections) {
-    const resolved = store.resolve(section.tag);
-    if (!resolved) throw new HashlineError(`Unknown tag ${section.tag}`, 'HASHLINE_UNKNOWN_TAG', { retryable: false });
+    const { path: filePath, tag } = section;
+    const resolved = store.resolvePath(filePath);          // path-keyed lookup
+    if (!resolved) throw new HashlineError(`No snapshot for path: ${filePath}`, 'HASHLINE_UNKNOWN_TAG', false);
 
-    const current = await fs.readFile(resolved.path, 'utf8');
-    if (!store.verify(section.tag, current)) {
-      // Stale anchor — attempt 3-way merge recovery
-      const merged = tryThreeWayMerge(store.snapshot(section.tag)!, current, section);
-      if (!merged.ok) throw new HashlineError(`Stale anchor for ${resolved.path}`, 'HASHLINE_STALE_ANCHOR', { retryable: true });
-      await atomicWrite(resolved.path, merged.content);
-      results.push(metadataFrom(resolved.path, current, merged.content, section.operations));
+    // Tag mismatch vs. the model's section tag → the model used a tag from a
+    // different version of this path (stale). Before rejecting, reapply ops to
+    // the snapshot and accept only if the result exactly matches current content.
+    if (resolved.tag !== tag) {
+      throw new HashlineError(`Stale tag for ${filePath} — file changed since snapshot`, 'HASHLINE_STALE_ANCHOR', true);
+    }
+
+    const current = await fs.readFile(filePath, 'utf8');
+    const currentTag = tagFor(filePath, current);
+    if (currentTag !== resolved.tag) {
+      // File changed on disk since the snapshot was recorded (external edit, or a
+      // prior edit_file in this session updated the store). Best-effort reapply:
+      // apply ops to the snapshot, accept only if the result matches current.
+      const snapshotContent = store.snapshot(filePath);
+      if (!snapshotContent) throw new HashlineError(`Stale anchor for ${filePath} (no snapshot)`, 'HASHLINE_STALE_ANCHOR', true);
+      const merged = tryReapplyOrReject(snapshotContent, current, section.operations);
+      if (!merged.ok) throw new HashlineError(`Stale anchor for ${filePath} — file changed since snapshot`, 'HASHLINE_STALE_ANCHOR', true);
+      await atomicWrite(filePath, merged.content!);
+      store.record(filePath, merged.content!);
+      results.push(metadataFrom(filePath, current, merged.content!, section.operations));
       continue;
     }
-    const next = applyOps(current, section.operations);   // throws on out-of-range lines
-    await atomicWrite(resolved.path, next);
-    store.record(resolved.path, next);
-    results.push(metadataFrom(resolved.path, current, next, section.operations));
+
+    // Fresh anchor: apply ops bottom-to-top so line numbers stay correct.
+    const next = applyOps(current, sortOpsBottomToTop(section.operations));
+    await atomicWrite(filePath, next);
+    store.record(filePath, next);
+    results.push(metadataFrom(filePath, current, next, section.operations));
   }
 
   return {
@@ -121,7 +152,7 @@ handler: async (args, config) => {
 }
 ```
 
-`atomicWrite` is the existing 006 helper (temp + `fs.rename`).
+`atomicWrite` is the existing 006 helper (temp + `fs.rename`). `sortOpsBottomToTop` orders operations by descending anchor line so sequential application doesn't shift line numbers of ops earlier in the file.
 
 ### 6. Metadata shape — reuses `FileWriteMetadata`
 

@@ -22,6 +22,8 @@ import { createHookExecutor } from "../../core/hooks.js";
 import { StreamManager } from "../../core/stream-manager.js";
 import { resolveTools, getAllToolDefinitions } from "./tools.js";
 import { runAgentLoop } from "../../core/agent-loop.js";
+import { initializeSkillRegistry } from "../../skills/index.js";
+import { buildSkillCatalog } from "../../core/skill-catalog.js";
 import {
   generateId,
   now,
@@ -111,6 +113,32 @@ export type {
 // ── generateText ─────────────────────────────────────────────────────────
 
 /**
+ * Resolve the skill catalog for a one-shot SDK call. Returns the system prompt
+ * with the catalog appended, or the prompt unchanged when skills are disabled
+ * or none are found. Best-effort: discovery failures are swallowed.
+ */
+async function resolveSkillCatalog(
+  systemPrompt: string | undefined,
+  skills: string[] | boolean | undefined,
+  cwd?: string,
+): Promise<string | undefined> {
+  if (skills === false) return systemPrompt;
+  try {
+    const registry = await initializeSkillRegistry(cwd ?? process.cwd());
+    let metadata = registry.getMetadata();
+    if (Array.isArray(skills)) {
+      const wanted = new Set(skills);
+      metadata = metadata.filter(s => wanted.has(s.name));
+    }
+    if (metadata.length === 0) return systemPrompt;
+    const catalog = buildSkillCatalog(metadata);
+    return systemPrompt ? systemPrompt + '\n\n' + catalog : catalog;
+  } catch {
+    return systemPrompt;
+  }
+}
+
+/**
  * Run a one-shot agent loop and return the structured result.
  *
  * Creates fresh state for each call (stateless). Handles tool calls
@@ -142,6 +170,9 @@ export async function generateText(
   // Hooks
   const hooks = createHookExecutor(opts.hooks);
 
+  // Resolve skill catalog and append to the system prompt
+  const systemPrompt = await resolveSkillCatalog(opts.systemPrompt, opts.skills, opts.cwd);
+
   // Build message list
   const messages: Message[] = [];
   messages.push({
@@ -157,7 +188,7 @@ export async function generateText(
     model,
     messages,
     toolDefs,
-    systemPrompt: opts.systemPrompt,
+    systemPrompt,
     maxSteps,
     hooks,
     signal: opts.signal,
@@ -224,6 +255,9 @@ export async function streamText(
   const mergedHooks = { ...opts.hooks };
   const hooks = createHookExecutor(mergedHooks);
 
+  // Resolve skill catalog and append to the system prompt
+  const systemPrompt = await resolveSkillCatalog(opts.systemPrompt, opts.skills, opts.cwd);
+
   // Build message list
   const messages: Message[] = [];
   messages.push({
@@ -247,7 +281,7 @@ export async function streamText(
         model,
         messages,
         toolDefs,
-        systemPrompt: opts.systemPrompt,
+        systemPrompt,
         maxSteps,
         hooks,
         signal: abortController.signal,

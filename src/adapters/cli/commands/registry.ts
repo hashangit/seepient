@@ -27,15 +27,41 @@ export interface CommandContext {
 }
 
 /**
+ * A structured render payload — a handler can return this instead of (or
+ * alongside) `output` so the TUI renders a purpose-built component rather than
+ * a chalk string that gets ANSI-stripped. The readline REPL ignores this and
+ * falls back to `output`.
+ */
+export type CommandRender =
+  | {
+      component: 'skills';
+      skills: Array<{ name: string; description: string }>;
+    };
+
+/**
  * A handler's outcome. `output` is the text the adapter renders (undefined if
  * the handler produced none). `exit` signals the session should terminate.
+ * `render` carries structured data the TUI renders as a dedicated component.
  */
 export interface CommandResult {
   output?: string;
   exit?: boolean;
+  render?: CommandRender;
 }
 
 export type CommandHandler = (ctx: CommandContext) => Promise<CommandResult>;
+
+/**
+ * Display form of a kebab-case skill name: capitalize the first letter of each
+ * segment (e.g. `debug-mantra` → `Debug-mantra`). The invocation name (passed
+ * to `/<skill-name>`) stays lowercase — this is a display-only transform.
+ */
+export function titleCaseSkill(name: string): string {
+  return name
+    .split('-')
+    .map((seg) => (seg.length === 0 ? seg : seg[0].toUpperCase() + seg.slice(1)))
+    .join('-');
+}
 
 export interface CommandEntry {
   name: string;
@@ -52,6 +78,7 @@ export type DispatchStatus = 'handled' | 'fallthrough' | 'exit';
 export interface DispatchResult {
   status: DispatchStatus;
   output?: string;
+  render?: CommandRender;
 }
 
 // ── Registry ───────────────────────────────────────────────────────────
@@ -104,7 +131,7 @@ export class CommandRegistry {
       const spaceIdx = withoutSlash.indexOf(' ');
       const args = spaceIdx === -1 ? '' : withoutSlash.slice(spaceIdx + 1);
       const result = await entry.handler({ ...ctx, args });
-      return { status: result.exit ? 'exit' : 'handled', output: result.output };
+      return { status: result.exit ? 'exit' : 'handled', output: result.output, render: result.render };
     }
 
     // Skill invocation — delegate to caller (skill name with no matching command)
@@ -149,7 +176,7 @@ export class CommandRegistry {
       lines.push(chalk.dim('  Use /<skill-name> [args] to invoke'));
       for (const s of skillRegistry.getAll()) {
         const desc = s.description.split('\n')[0];
-        lines.push(`  ${chalk.green(`/${s.name}`)}  — ${desc}`);
+        lines.push(`  ${chalk.green(`/${titleCaseSkill(s.name)}`)}  — ${desc}`);
       }
     }
 

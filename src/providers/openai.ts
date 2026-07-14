@@ -21,6 +21,13 @@ export class OpenAIProvider implements LLMProvider {
     const message = response.choices[0]?.message;
     if (!message) return {};
 
+    const usage = response.usage ? {
+      promptTokens: response.usage.prompt_tokens,
+      completionTokens: response.usage.completion_tokens,
+      totalTokens: response.usage.total_tokens,
+      cost: 0,
+    } : undefined;
+
     return {
       content: message.content ?? undefined,
       tool_calls: message.tool_calls
@@ -30,6 +37,7 @@ export class OpenAIProvider implements LLMProvider {
           name: tc.function.name,
           arguments: tc.function.arguments,
         })),
+      usage,
     };
   }
 

@@ -1,3 +1,4 @@
+import React from 'react';
 import { Box, Text } from 'ink';
 import figlet from 'figlet';
 import { useTheme } from '../hooks/use-theme.js';
@@ -28,7 +29,7 @@ const COLS = Math.max(...ART_LINES.map((l) => [...l].length));
  * feed entry (kind: 'logo') on a fresh session, so it scrolls away as the user
  * chats.
  */
-export function LogoBanner() {
+export const LogoBanner = React.memo(function LogoBanner() {
   const theme = useTheme();
   const stops = [theme.red, theme.orange, theme.yellow, theme.green, theme.cyan, theme.blue, theme.purple];
   return (
@@ -47,4 +48,4 @@ export function LogoBanner() {
       <Text color={theme.fgDim}> by hashangit · v{VERSION}</Text>
     </Box>
   );
-}
+});

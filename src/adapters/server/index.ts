@@ -102,15 +102,13 @@ let cachedSkillList: { name: string; description: string; tags: string[] }[] = [
  */
 export async function initializeSkills(): Promise<void> {
   try {
-    const { getSkillRegistry } = await import("../../skills/index.js");
-    const registry = getSkillRegistry();
-    if (registry) {
-      cachedSkillList = registry.getMetadata().map((s) => ({
-        name: s.name,
-        description: s.description,
-        tags: s.tags,
-      }));
-    }
+    const { initializeSkillRegistry } = await import("../../skills/index.js");
+    const registry = await initializeSkillRegistry(process.cwd());
+    cachedSkillList = registry.getMetadata().map((s) => ({
+      name: s.name,
+      description: s.description,
+      tags: s.tags,
+    }));
   } catch {
     // Skills system not available — keep empty list
   }

@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **TUI parity & generative widget upgrade** (#007): Streaming polish (30fps throttle, `React.memo`, cursor hide), ChatBlock lifecycle primitive, `render_widget` tool with 9 kind renderers (table, keyvalue, chart, tree, panel, diff, form, product_card, status_grid), hash-anchored `edit_file` tool (SnapshotStore + parser + patcher with fail-closed stale anchor), enriched Markdown (GFM tables), T4 parity components (thinking indicator, TabBar, plan review overlay, truncated text, toast). Tools count: 13 → 15.
+  - **Core**: `src/core/hashline/` — types, parser, patcher, snapshot-store; `WidgetError` + `HashlineError` in `errors.ts`.
+  - **Tools**: `src/tools/widgets.ts` (`render_widget`), `src/tools/edit-file.ts` (`edit_file`).
+  - **TUI**: `chat-block.ts`, `widget-host.ts`, `stream-flush.ts`, `widgets/` (9 renderers), `components/` (thinking-indicator, tab-bar, plan-review-overlay, truncated-text, toast), `hooks/` (use-cursor).
+
+### Fixed
+
+- **#007 scrutiny fixes**:
+  - Widget host recreation on every render → stable `useMemo([], [])`.
+  - Widget action keyboard wiring: `useInput` in `WidgetBlock` drives Tab/Enter through the action bar.
+  - Hashline multi-op line drift: `sortOpsBottomToTop` ensures ops apply highest-line-first.
+  - Hashline stale-anchor data loss: `tryThreeWayMerge` now fails closed (`HASHLINE_STALE_ANCHOR`) instead of silently destroying user content.
+  - Widget resume: `feed-serializer.ts` rebuilds `render_widget` as finalized blocks.
+  - SnapshotStore 1MB cap, duplicate action bars removed, dead `useBlockCleanup` deleted, `WidgetSpec` consolidated to one source.
+  - System prompt: hashline grammar section added (op table, ordering rule, worked example).
+
 - **Design skill** (`skills/design/SKILL.md`): Single bundled entry point for all design work. It is a router/dispatcher — it does not do design itself. On any design request it classifies the task, fetches the matching skill from the upstream OpenDesign catalogue (`https://raw.githubusercontent.com/nexu-io/open-design/main/skills/<slug>/SKILL.md` via `read_website`), maps upstream tool names to Seepient's tools, and follows that skill's procedure with Seepient's quality bar applied on top. Covers 145 verified upstream skills across 13 disciplines (process/brief/review, taste & aesthetic, brand, frontend/web, Figma/design systems, native platforms, slides/decks, image generation, social cards, video/motion, web animation/GSAP/Three.js, documents/editorial, audio). This mirrors how OpenDesign skills cross-reference Anthropic/Gemini design skills — one source of truth upstream, no drift. The new `design` skill brings the bundled-skill count to 13.
 
 ## [v0.3.0] - 2026-06-10

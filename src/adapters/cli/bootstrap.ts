@@ -29,12 +29,14 @@ import {
   applyEnvOverrides,
   migrateLegacyFormat,
   getConfigPaths,
+  getConfigDir,
 } from './config-loader.js';
 import { runSetup } from './setup.js';
 import { isNonInteractive } from './docker-utils.js';
 import type { PermissionLevel, PersistenceBackend, ProviderType } from '../../core/types.js';
 import { createPersistenceBackend } from '../../core/session-store.js';
 import { resolvePermissionLevel } from '../../core/permission.js';
+import { GrantStore } from '../../core/grants.js';
 import { SettingsManager } from '../../core/settings-manager.js';
 import { loadMergedConfig } from './config-loader.js';
 
@@ -59,6 +61,11 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
   }
 
   let fullConfig = { ...globalConfig, ...localConfig };
+
+  // T3: create session SnapshotStore for hash-anchored edits
+  const { createSnapshotStore } = await import('../../core/hashline/snapshot-store.js');
+  const snapshotStore = createSnapshotStore();
+  (fullConfig as any).snapshotStore = snapshotStore;
 
   // 2. Inject runtime flags
   fullConfig.autoConfirm = options.yes || options.headless || options.docker || false;
@@ -149,6 +156,14 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
   // defaultSessionPath()). Disabled backends can be added via registerBackend().
   const persistence = createPersistenceBackend({ type: 'file' });
   const agent = new Agent(provider, model, fullConfig, systemPrompt, persistence, activeProviderType as ProviderType);
+
+  // Tool-approval grant store: project grants at <cwd>/.seepient/grants.json,
+  // global at ~/.seepient/grants.json. Consulted by the agent loop so matching
+  // tool calls skip the approval prompt; managed via /permissions.
+  agent.setGrantStore(new GrantStore({
+    projectDir: getConfigDir(false),
+    globalDir: getConfigDir(true),
+  }));
 
   // Initialize skills system
   await agent.initializeSkills();

@@ -107,3 +107,26 @@ export class GatewayError extends SeepientError {
     this.target = target;
   }
 }
+
+// ── Widget errors ───────────────────────────────────────────────────────
+
+/** Widget validation error — malformed render_widget payload. */
+export class WidgetError extends SeepientError {
+  widgetId?: string;
+
+  constructor(message: string, code: 'WIDGET_INVALID_KIND' | 'WIDGET_INVALID_PROPS' | 'WIDGET_DUPLICATE_ACTION', widgetId?: string) {
+    super(message, code, true);
+    this.name = "WidgetError";
+    this.widgetId = widgetId;
+  }
+}
+
+// ── Hashline errors ─────────────────────────────────────────────────────
+
+/** Hashline patch application error. */
+export class HashlineError extends SeepientError {
+  constructor(message: string, code: string, retryable: boolean) {
+    super(message, code, retryable);
+    this.name = "HashlineError";
+  }
+}

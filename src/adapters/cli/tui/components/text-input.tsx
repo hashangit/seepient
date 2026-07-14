@@ -7,6 +7,8 @@ interface TextInputProps {
   onChange: (value: string) => void;
   onSubmit: (value: string) => void;
   placeholder?: string;
+  /** When true, all input is suppressed — a widget or overlay owns the keyboard. */
+  disabled?: boolean;
   /** When true, ↑/↓ are left to the parent (e.g. autocomplete dropdown nav). */
   ignoreArrows?: boolean;
   /** When true, Enter does not submit — the parent owns it (autocomplete accept). */
@@ -60,7 +62,7 @@ function moveVertical(value: string, cursor: number, dir: 1 | -1): number {
  * the end; user keystrokes move it to the insertion point.
  */
 export function TextInput({
-  value, onChange, onSubmit, placeholder, ignoreArrows, ignoreReturn, onHistoryUp, onHistoryDown,
+  value, onChange, onSubmit, placeholder, disabled, ignoreArrows, ignoreReturn, onHistoryUp, onHistoryDown,
 }: TextInputProps) {
   const theme = useTheme();
   const [cursor, setCursor] = useState(value.length);
@@ -83,6 +85,7 @@ export function TextInput({
   };
 
   useInput((inputChar, key) => {
+    if (disabled) return;
     // Newline before submit. Ink doesn't parse the modified-return CSI a
     // terminal sends for Shift+Enter/Alt+Enter (`\x1B[27;<modifier>;13~`, where
     // 13=return); detect that raw sequence too, plus the key-flag paths + Ctrl+J.
@@ -121,6 +124,10 @@ export function TextInput({
     }
     if (key.leftArrow) { setCursor(Math.max(0, at - 1)); return; }
     if (key.rightArrow) { setCursor(Math.min(value.length, at + 1)); return; }
+    // Tab is handled by the parent (PromptArea: autocomplete accept or cycle
+    // widget focus). Explicitly bail here so it never reaches the printable-char
+    // insertion path.
+    if (key.tab) return;
     // Insert printable text (multi-char = paste), but never raw CSI escape
     // sequences (e.g. leftover `\x1B[27;2;13~` from an unparsed modified key).
     const isCsi = /\x1b?\[\d[\d;]*[~A-Za-z]/.test(inputChar);

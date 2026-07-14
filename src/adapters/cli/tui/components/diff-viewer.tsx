@@ -11,6 +11,7 @@
  * canonical ink pattern for multi-line colored text (a `<Box>` of separate
  * `<Text>` rows mis-measures on some line widths).
  */
+import React from 'react';
 import { Text } from 'ink';
 import { useMemo, type ReactNode } from 'react';
 import { useTheme } from '../hooks/use-theme.js';
@@ -57,7 +58,7 @@ function lineColor(line: DiffViewLine, theme: Theme): string {
   return line.kind === 'added' ? theme.green : line.kind === 'removed' ? theme.red : theme.fgDim;
 }
 
-export function DiffViewer({ oldContent, newContent, expanded }: {
+export const DiffViewer = React.memo(function DiffViewer({ oldContent, newContent, expanded }: {
   oldContent: string | null;
   newContent: string;
   expanded: boolean;
@@ -116,4 +117,4 @@ export function DiffViewer({ oldContent, newContent, expanded }: {
   }
 
   return <Text>{nodes}</Text>;
-}
+});

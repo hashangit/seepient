@@ -9,13 +9,15 @@
 
 import { useCallback, useState } from 'react';
 import { generateId } from '../../../../core/message-convert.js';
-import type { FeedEntry, FeedEntryInput } from '../types.js';
+import type { FeedEntry, FeedEntryInput, BlockEntry } from '../types.js';
 
 export interface FeedApi {
   entries: FeedEntry[];
   appendEntry: (entry: FeedEntryInput) => string;
   updateEntry: (id: string, patch: Partial<FeedEntry>) => void;
   clear: () => void;
+  /** T4-1 — Extend an entry's props (narrower than updateEntry, for blocks). */
+  updateBlockEntry: (id: string, patch: Partial<BlockEntry>) => void;
 }
 
 export function useFeed(): FeedApi {
@@ -35,5 +37,9 @@ export function useFeed(): FeedApi {
     setEntries([]);
   }, []);
 
-  return { entries, appendEntry, updateEntry, clear };
+  const updateBlockEntry = useCallback((id: string, patch: Partial<BlockEntry>): void => {
+    setEntries((prev) => prev.map((e) => (e.id === id ? ({ ...e, ...patch } as FeedEntry) : e)));
+  }, []);
+
+  return { entries, appendEntry, updateEntry, clear, updateBlockEntry };
 }

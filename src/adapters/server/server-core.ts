@@ -5,6 +5,28 @@ import { resolveTools, getAllToolDefinitions } from "../../core/tool-executor.js
 import { generateId, now } from "../../core/message-convert.js";
 import { getProvider } from "../../core/provider-resolver.js";
 import type { Middleware } from "../../core/middleware.js";
+import { initializeSkillRegistry } from "../../skills/index.js";
+import { buildSkillCatalog } from "../../core/skill-catalog.js";
+
+/**
+ * Resolve the skill catalog for a server-side request. Returns the system
+ * prompt with the catalog appended, or undefined when no skills are found.
+ * Best-effort: discovery failures are swallowed.
+ */
+async function resolveServerSkillCatalog(skills?: string[]): Promise<string | undefined> {
+  try {
+    const registry = await initializeSkillRegistry(process.cwd());
+    let metadata = registry.getMetadata();
+    if (skills && skills.length > 0) {
+      const wanted = new Set(skills);
+      metadata = metadata.filter(s => wanted.has(s.name));
+    }
+    if (metadata.length === 0) return undefined;
+    return buildSkillCatalog(metadata);
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Server-side generateText using core agent loop directly.
@@ -30,8 +52,19 @@ export async function serverGenerateText(
   // Hooks
   const hooks = createHookExecutor();
 
+  // Resolve skill catalog
+  const skillCatalog = await resolveServerSkillCatalog(options.skills);
+
   // Build message list
   const messages: Message[] = [];
+  if (skillCatalog) {
+    messages.push({
+      id: generateId(),
+      role: "system",
+      content: skillCatalog,
+      timestamp: now(),
+    });
+  }
   messages.push({
     id: generateId(),
     role: "user",
@@ -103,8 +136,19 @@ export async function serverStreamText(
     // Hooks
     const hooks = createHookExecutor();
 
+    // Resolve skill catalog
+    const skillCatalog = await resolveServerSkillCatalog(opts.skills);
+
     // Build message list
     const messages: Message[] = [];
+    if (skillCatalog) {
+      messages.push({
+        id: generateId(),
+        role: "system",
+        content: skillCatalog,
+        timestamp: now(),
+      });
+    }
     messages.push({
       id: generateId(),
       role: "user",

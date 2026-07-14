@@ -5,6 +5,8 @@ import {
   ToolError,
   MaxStepsError,
   AbortedError,
+  WidgetError,
+  HashlineError,
 } from "../errors.js";
 
 describe("SeepientError", () => {
@@ -93,5 +95,52 @@ describe("AbortedError", () => {
   it("accepts custom message", () => {
     const err = new AbortedError("user cancelled");
     expect(err.message).toBe("user cancelled");
+  });
+});
+
+describe("WidgetError", () => {
+  // Contract widget-protocol.md §2: all three codes are retryable (the model
+  // can retry render_widget with corrected JSON).
+  it.each([
+    ["WIDGET_INVALID_KIND"],
+    ["WIDGET_INVALID_PROPS"],
+    ["WIDGET_DUPLICATE_ACTION"],
+  ] as const)("code %s is retryable and carries the code", (code) => {
+    const err = new WidgetError("bad widget", code);
+    expect(err).toBeInstanceOf(SeepientError);
+    expect(err).toBeInstanceOf(WidgetError);
+    expect(err.code).toBe(code);
+    expect(err.retryable).toBe(true);
+    expect(err.name).toBe("WidgetError");
+  });
+
+  it("stores optional widgetId", () => {
+    const err = new WidgetError("bad", "WIDGET_INVALID_PROPS", "w1");
+    expect(err.widgetId).toBe("w1");
+  });
+
+  it("leaves widgetId undefined when not passed", () => {
+    const err = new WidgetError("bad", "WIDGET_INVALID_PROPS");
+    expect(err.widgetId).toBeUndefined();
+  });
+});
+
+describe("HashlineError", () => {
+  // Contract hashline-edit.md "Error codes" table:
+  //   NO_STORE / UNKNOWN_TAG → retryable:false
+  //   STALE_ANCHOR / PARSE_ERROR / OUT_OF_RANGE → retryable:true
+  it.each([
+    ["HASHLINE_NO_STORE", false],
+    ["HASHLINE_UNKNOWN_TAG", false],
+    ["HASHLINE_STALE_ANCHOR", true],
+    ["HASHLINE_PARSE_ERROR", true],
+    ["HASHLINE_OUT_OF_RANGE", true],
+  ] as const)("code %s has retryable=%s", (code, retryable) => {
+    const err = new HashlineError("msg", code, retryable);
+    expect(err).toBeInstanceOf(SeepientError);
+    expect(err).toBeInstanceOf(HashlineError);
+    expect(err.code).toBe(code);
+    expect(err.retryable).toBe(retryable);
+    expect(err.name).toBe("HashlineError");
   });
 });

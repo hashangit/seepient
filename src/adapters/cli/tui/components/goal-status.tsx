@@ -1,3 +1,4 @@
+import React from 'react';
 import { Box, Text } from 'ink';
 import { useTheme } from '../hooks/use-theme.js';
 
@@ -18,7 +19,7 @@ const GLYPHS: Record<string, string> = {
  * status glyphs. Completed tasks are dimmed. Triggered when the agent calls
  * the `manage_todos` tool (detected in tool-call-block).
  */
-export function GoalStatus({ todos }: { todos: Todo[] }) {
+export const GoalStatus = React.memo(function GoalStatus({ todos }: { todos: Todo[] }) {
   const theme = useTheme();
   const colorFor = (s: string): string =>
     s === 'completed' ? theme.green
@@ -37,4 +38,4 @@ export function GoalStatus({ todos }: { todos: Todo[] }) {
       ))}
     </Box>
   );
-}
+});

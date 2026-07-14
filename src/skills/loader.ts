@@ -1,6 +1,7 @@
 import { readdir } from 'fs/promises';
 import { join, dirname } from 'path';
 import { existsSync } from 'fs';
+import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 import { parseFrontmatter } from './parser.js';
 import { Skill } from './types.js';
@@ -23,7 +24,10 @@ export function getSkillPaths(cwd: string): string[] {
   // 3. Volume-mounted skills (Docker)
   paths.push('/mnt/skills');
 
-  // 4. Bundled skills (shipped with seepient)
+  // 4. Global user skills (~/.seepient/skills)
+  paths.push(join(homedir(), '.seepient', 'skills'));
+
+  // 5. Bundled skills (shipped with seepient)
   if (!process.env.SEEPIENT_NO_BUNDLED_SKILLS) {
     paths.push(join(__dirname, '..', '..', 'skills'));
   }

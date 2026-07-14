@@ -45,7 +45,7 @@ export interface ChatBlockInstance {
   readonly isActive: boolean;      // false after finalize/dispose
   update(props: unknown): void;    // no-op after finalize; patches BlockEntry.props
   finalize(): void;                // freeze: finalized=true, run cleanups once
-  dispose(): void;                 // remove from feed, run cleanups once
+  dispose(): void;                 // freeze + run cleanups once
   onCleanup(fn: () => void): void; // register teardown (à la useEffect cleanup)
 }
 ```
@@ -53,28 +53,37 @@ export interface ChatBlockInstance {
 **Invariants**:
 - `finalize` and `dispose` each run cleanups exactly once; idempotent.
 - After `finalize`, `update` is a no-op (defensive — drops the patch silently).
-- After `dispose`, the `BlockEntry` is removed from `feed.entries`.
+- After `dispose`, the `BlockEntry` is frozen (finalized:true). Since dispose is only called on unmount (feed state is discarded), removal from feed.entries is unnecessary — the frozen entry degrades gracefully if ever persisted and replayed.
 - A block that is neither finalized nor disposed has `isActive:true`.
 
-### 3. `ChatBlockHost` — `useFeed` extension
+### 3. `ChatBlockHost` — `createChatBlock` factory
 
 ```ts
-// use-feed.ts (extended)
+// chat-block.ts (implementation)
+export function createChatBlock(
+  feed: FeedApi,
+  blockKind: BlockEntry['blockKind'],
+  initialProps: unknown,
+): ChatBlockInstance;
+```
+
+`createChatBlock` appends a `BlockEntry` with `finalized:false` via `feed.appendEntry({kind:'block',...})` and returns a `ChatBlockInstance` bound to that id. The instance methods call `feed.updateBlockEntry(id, patch)` for update/finalize/dispose — the lifecycle lives on the instance, not on the feed.
+
+The feed exposes a single block-aware method:
+
+```ts
+// use-feed.ts (actual surface)
 export interface FeedApi {
   entries: FeedEntry[];
-  appendEntry: (entry: FeedEntryInput) => string;       // existing
-  updateEntry: (id: string, patch: Partial<FeedEntry>) => void;  // existing
-  clear: () => void;                                     // existing
-
-  // NEW:
-  mountBlock(blockKind: BlockEntry['blockKind'], initialProps: unknown): ChatBlockInstance;
-  updateBlock(id: string, props: unknown): void;
-  finalizeBlock(id: string): void;
-  disposeBlock(id: string): void;
+  appendEntry: (entry: FeedEntryInput) => string;
+  updateEntry: (id: string, patch: Partial<FeedEntry>) => void;
+  clear: () => void;
+  /** Patch a block entry's props and/or finalized flag. */
+  updateBlockEntry: (id: string, patch: Partial<BlockEntry>) => void;
 }
 ```
 
-`mountBlock` appends a `BlockEntry` with `finalized:false` and returns a `ChatBlockInstance` bound to that id. The instance methods call back into the feed's update/finalize/dispose.
+(NOTE: The initial contract specified `mountBlock`/`updateBlock`/`finalizeBlock`/`disposeBlock` on `FeedApi`, but the implementation moved lifecycle ownership to `ChatBlockInstance`. The contract has been updated to match.)
 
 ### 4. `<MessageArea>` rendering rule
 

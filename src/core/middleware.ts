@@ -31,6 +31,7 @@ export interface PipelineContext {
     steps: StepResult[];
     toolCalls: ToolCall[];
     usage: Usage;
+    contextTokens: number;
     finishReason: string;
   };
   /** Abort signal */

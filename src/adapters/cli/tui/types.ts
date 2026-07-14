@@ -52,13 +52,27 @@ export interface LogoEntry {
   kind: 'logo';
 }
 
+/** T4-1 — Lifecycle-managed block entry.
+ *
+ * A block renders a React element, can update while unfinalized, and freezes
+ * on finalize. Used by widgets, thinking indicators, live tool blocks, and
+ * custom components. See `contracts/feed-lifecycle.md`. */
+export interface BlockEntry {
+  id: string;
+  kind: 'block';
+  blockKind: 'widget' | 'thinking' | 'live-tool' | 'custom';
+  props: unknown;
+  finalized: boolean;
+}
+
 export type FeedEntry =
   | UserMessageEntry
   | AssistantMessageEntry
   | ToolCallEntry
   | ErrorEntry
   | InfoEntry
-  | LogoEntry;
+  | LogoEntry
+  | BlockEntry;
 
 // `Omit<FeedEntry, 'id'>` collapses the union (it omits from the merged shape,
 // losing each kind's fields). This distributes Omit per member so callers can

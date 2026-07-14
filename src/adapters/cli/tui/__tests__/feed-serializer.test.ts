@@ -113,4 +113,42 @@ describe("messagesToFeedEntries", () => {
     const { latestTodos } = messagesToFeedEntries(messages);
     expect(latestTodos).toEqual([{ description: "new", status: "in_progress" }]);
   });
+
+  it("rebuilds render_widget as a finalized block entry on resume", () => {
+    const messages: Message[] = [
+      msg("assistant", "", {
+        toolCalls: [{
+          id: "tc1",
+          name: "render_widget",
+          arguments: { id: "w1", kind: "table", props: { columns: [], rows: [] } },
+          result: "Rendered table widget (w1).",
+        }],
+      }),
+    ];
+    const { entries } = messagesToFeedEntries(messages);
+    expect(entries).toHaveLength(1);
+    const entry = entries[0];
+    expect(entry.kind).toBe("block");
+    if (entry.kind === "block") {
+      expect(entry.blockKind).toBe("widget");
+      expect(entry.finalized).toBe(true);
+      expect(entry.props).toMatchObject({ id: "w1", kind: "table" });
+    }
+  });
+
+  it("renders render_widget as generic tool block when args are malformed", () => {
+    const messages: Message[] = [
+      msg("assistant", "", {
+        toolCalls: [{
+          id: "tc1",
+          name: "render_widget",
+          arguments: { notId: "bad" },
+          result: "error",
+        }],
+      }),
+    ];
+    const { entries } = messagesToFeedEntries(messages);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].kind).toBe("tool"); // falls through to generic block
+  });
 });

@@ -1,9 +1,11 @@
+import React from 'react';
 import { Box, Text } from 'ink';
 import { useTheme } from '../hooks/use-theme.js';
 import { Markdown } from './markdown.js';
 import { GoalStatus, type Todo } from './goal-status.js';
 import { DiffViewer } from './diff-viewer.js';
 import { isFileWriteMetadata } from '../diff/file-write-meta.js';
+import { TruncatedText } from './truncated-text.js';
 import type { ToolCallEntry } from '../types.js';
 
 const STATUS_GLYPH: Record<ToolCallEntry['status'], string> = {
@@ -22,11 +24,6 @@ function formatArgs(args: Record<string, unknown>): string {
   return json === '{}' ? '' : json;
 }
 
-function truncate(text: string, max: number): string {
-  if (text.length <= max) return text;
-  return `${text.slice(0, max)} … (${text.length - max} more chars)`;
-}
-
 type Theme = ReturnType<typeof useTheme>;
 
 /** Status glyph + tool name + args preview + duration — shared by every block. */
@@ -39,7 +36,7 @@ function BlockHeader({ entry, theme }: { entry: ToolCallEntry; theme: Theme }) {
     <Box>
       <Text color={glyphColor} bold>{glyph} </Text>
       <Text color={theme.purple} bold>{entry.name}</Text>
-      {argsPreview ? <Text color={theme.fgDim}> {truncate(argsPreview, 120)}</Text> : null}
+      {argsPreview ? <Text color={theme.fgDim}> <TruncatedText text={argsPreview} maxLength={120} /></Text> : null}
       {entry.durationMs != null ? <Text color={theme.fgDim}> ({entry.durationMs}ms)</Text> : null}
     </Box>
   );
@@ -51,7 +48,7 @@ function BlockHeader({ entry, theme }: { entry: ToolCallEntry; theme: Theme }) {
  * `expanded` shows the full output. Ctrl+O (handled in app.tsx) toggles
  * expand-all and bumps the `<Static>` key so this re-renders.
  */
-export function ToolCallBlock({ entry, expanded }: { entry: ToolCallEntry; expanded: boolean }) {
+export const ToolCallBlock = React.memo(function ToolCallBlock({ entry, expanded }: { entry: ToolCallEntry; expanded: boolean }) {
   const theme = useTheme();
 
   // manage_todos renders as a GoalStatus (task list with glyphs), not a
@@ -71,9 +68,40 @@ export function ToolCallBlock({ entry, expanded }: { entry: ToolCallEntry; expan
     const meta = isFileWriteMetadata(entry.metadata) ? entry.metadata : null;
     if (meta && !meta.diffSkipped && meta.newContent !== undefined) {
       return (
-        <Box flexDirection="column" borderStyle="round" borderColor={theme.fgGutter} paddingLeft={1} paddingRight={1}>
+        <Box flexDirection="column" borderStyle="round" borderColor={theme.orange} paddingLeft={1} paddingRight={1}>
           <BlockHeader entry={entry} theme={theme} />
           <DiffViewer oldContent={meta.oldContent ?? null} newContent={meta.newContent} expanded={expanded} />
+        </Box>
+      );
+    }
+  }
+
+  // edit_file (hashline) — single-section patch returns FileWriteMetadata directly;
+  // multi-section returns { edits: FileWriteMetadata[] }.
+  if (entry.name === 'edit_file') {
+    const meta = entry.metadata as Record<string, unknown> | undefined;
+    if (meta && Array.isArray(meta.edits)) {
+      const edits = meta.edits.filter(isFileWriteMetadata);
+      if (edits.length > 0) {
+        return (
+          <Box flexDirection="column" borderStyle="round" borderColor={theme.orange} paddingLeft={1} paddingRight={1}>
+            <BlockHeader entry={entry} theme={theme} />
+            {edits.map((edit, i) => (
+              <Box key={edit.path} flexDirection="column" marginTop={i > 0 ? 1 : 0}>
+                <Text color={theme.fgDim}>{edit.path}</Text>
+                <DiffViewer oldContent={edit.oldContent ?? null} newContent={edit.newContent ?? ''} expanded={expanded} />
+              </Box>
+            ))}
+          </Box>
+        );
+      }
+    }
+    const singleMeta = isFileWriteMetadata(entry.metadata) ? entry.metadata : null;
+    if (singleMeta && !singleMeta.diffSkipped && singleMeta.newContent !== undefined) {
+      return (
+        <Box flexDirection="column" borderStyle="round" borderColor={theme.orange} paddingLeft={1} paddingRight={1}>
+          <BlockHeader entry={entry} theme={theme} />
+          <DiffViewer oldContent={singleMeta.oldContent ?? null} newContent={singleMeta.newContent} expanded={expanded} />
         </Box>
       );
     }
@@ -82,24 +110,24 @@ export function ToolCallBlock({ entry, expanded }: { entry: ToolCallEntry; expan
   const output = entry.output ?? '';
   const isMarkdown = MARKDOWN_TOOLS.has(entry.name);
   const limit = expanded ? 50000 : isMarkdown ? 1000 : 400;
-  const shown = truncate(output, limit);
   const hasMore = output.length > limit;
+  const shown = output.length <= limit ? output : `${output.slice(0, limit)}`;
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={theme.fgGutter} paddingLeft={1} paddingRight={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor={theme.orange} paddingLeft={1} paddingRight={1}>
       <BlockHeader entry={entry} theme={theme} />
       {output ? (
-        MARKDOWN_TOOLS.has(entry.name) ? (
+        isMarkdown ? (
           <Markdown content={shown} />
         ) : (
-          <Text color={theme.fgDim}>{shown}</Text>
+          <TruncatedText text={output} maxLength={limit} />
         )
       ) : null}
       {hasMore ? (
-        <Text color={theme.fgDim}> … {output.length - limit} more chars (Ctrl+O to expand)</Text>
+        <Text color={theme.fgDim}> (Ctrl+O to expand)</Text>
       ) : output && expanded ? (
         <Text color={theme.fgDim}> (Ctrl+O to collapse)</Text>
       ) : null}
     </Box>
   );
-}
+});

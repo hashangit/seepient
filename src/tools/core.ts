@@ -2,7 +2,7 @@ import { spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { ToolModule, ToolExecExtra } from './interface.js';
+import { ToolModule, ToolExecExtra, APPROVAL_SCHEMA } from './interface.js';
 
 export const ShellTool: ToolModule = {
   name: "Shell Execution",
@@ -16,7 +16,8 @@ export const ShellTool: ToolModule = {
         type: "object",
         properties: {
           command: { type: "string", description: "The shell command to execute." },
-          rationale: { type: "string", description: "Explain why you are running this command." }
+          rationale: { type: "string", description: "Explain why you are running this command." },
+          approval: APPROVAL_SCHEMA
         },
         required: ["command", "rationale"]
       }
@@ -60,7 +61,7 @@ export const ReadFileTool: ToolModule = {
     type: "function",
     function: {
       name: "read_file",
-      description: "Read the content of a file.",
+      description: "Read the content of a file. Returns file content with a content tag for edit_file (e.g., [content-tag:a1f2]). Use this tag in edit_file's [PATH#TAG] sections for targeted patches.",
       parameters: {
         type: "object",
         properties: {
@@ -70,10 +71,11 @@ export const ReadFileTool: ToolModule = {
       }
     }
   },
-  handler: async (args: any) => {
+  handler: async (args: any, config?: any) => {
     try {
       const content = await fs.readFile(args.path, 'utf-8');
-      return content;
+      const tag = config?.snapshotStore?.record(args.path, content);
+      return tag ? `${content}\n\n[content-tag:${tag}]` : content;
     } catch (error: any) {
       return `Error reading file: ${error.message}`;
     }
@@ -152,13 +154,14 @@ export const WriteFileTool: ToolModule = {
         type: "object",
         properties: {
           path: { type: "string", description: "The path to the file to write." },
-          content: { type: "string", description: "The content to write." }
+          content: { type: "string", description: "The content to write." },
+          approval: APPROVAL_SCHEMA
         },
         required: ["path", "content"]
       }
     }
   },
-  handler: async (args: any) => {
+  handler: async (args: any, config?: any) => {
     const filePath: string = args.path;
     const newContent: string = args.content;
 
@@ -228,13 +231,32 @@ export const WriteFileTool: ToolModule = {
           byteDelta: newBytes - oldBytes,
         };
 
+    // T3: record into SnapshotStore for hashline edit-file operations
+    config?.snapshotStore?.record(filePath, newContent);
+
     return {
       output: `Successfully wrote to ${filePath} (${lineCount(oldContent ?? "")} -> ${lineCount(newContent)} lines)`,
       success: true,
       metadata,
     };
-  }
+  },
 };
+
+/** Shared atomic write helper (temp + fs.rename) — exported for hashline
+ *  patcher reuse so temp naming stays consistent with the 006 sweeper. */
+export async function atomicWrite(filePath: string, content: string): Promise<void> {
+  const dir = path.dirname(filePath);
+  const tmpPath = `${filePath}.seepient-${randomUUID().slice(0, 8)}.tmp`;
+  await cleanStaleTemps(dir, path.basename(filePath));
+  try {
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(tmpPath, content, 'utf-8');
+    await fs.rename(tmpPath, filePath);
+  } catch (error: unknown) {
+    try { await fs.unlink(tmpPath); } catch { /* temp may not have been created */ }
+    throw error;
+  }
+}
 
 export const DateTimeTool: ToolModule = {
   name: "Date & Time",

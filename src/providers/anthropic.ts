@@ -105,9 +105,17 @@ export class AnthropicProvider implements LLMProvider {
       }
     }
 
+    const usage = response.usage ? {
+      promptTokens: response.usage.input_tokens ?? 0,
+      completionTokens: response.usage.output_tokens ?? 0,
+      totalTokens: (response.usage.input_tokens ?? 0) + (response.usage.output_tokens ?? 0),
+      cost: 0,
+    } : undefined;
+
     return {
       content: content || undefined,
       tool_calls: toolCalls.length ? toolCalls : undefined,
+      usage,
     };
   }
 

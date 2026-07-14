@@ -19,6 +19,7 @@ import { compactHandler } from './compact.js';
 import { skillsHandler } from './skills.js';
 import { modelsHandler } from './models.js';
 import { settingsHandler } from './settings.js';
+import { permissionsHandler } from './permissions.js';
 import { runSetup } from '../setup.js';
 
 export function buildCommandRegistry(
@@ -77,6 +78,10 @@ export function buildCommandRegistry(
     // Not flagged interactive: read subcommands (list/get/reset/export/help)
     // return output and work in the TUI. The wizard (no args) + `set` use
     // inquirer and are intercepted by the TUI's handleUserInput.
+  });
+  registry.register('permissions', permissionsHandler, {
+    description: 'List and revoke tool-approval grants',
+    aliases: ['perms'],
   });
   registry.register('setup', async () => {
     await runSetup();

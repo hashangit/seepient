@@ -17,7 +17,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { bootstrapCliSession } from '../bootstrap.js';
 import { buildCommandRegistry } from '../commands/build-registry.js';
-import { warmInkReset, resetInkStatic } from './ink-reset.js';
+import { warmInkReset, resetInkStatic, guardInkVersion } from './ink-reset.js';
 import { ThemeProvider } from './hooks/use-theme.js';
 import { MODEL_CATALOG } from '../../../models-catalog.js';
 import { resolveProviderConfigFromApp } from '../../../core/provider-resolver.js';
@@ -193,13 +193,13 @@ export async function startTui({ queryParts, options }: StartTuiArgs): Promise<v
   const dispatchCommand = async (input: string): Promise<TuiCommandOutcome> => {
     const entry = registry.resolveCommand(input);
     if (entry?.interactive) return { status: 'handled', deferred: true };
-    const { status, output } = await registry.dispatch(
+    const { status, output, render } = await registry.dispatch(
       input,
       { agent, args: '', config: fullConfig },
       agent.getSkillRegistry(),
     );
     const isExit = status === 'exit';
-    return { status: isExit ? 'handled' : status, output, exit: isExit };
+    return { status: isExit ? 'handled' : status, output, render, exit: isExit };
   };
 
   // Clear any bootstrap status output (Loaded config / Gateway initialized) so
@@ -209,6 +209,7 @@ export async function startTui({ queryParts, options }: StartTuiArgs): Promise<v
   // Pre-load Ink's internal instances store (absolute-path import; see
   // ink-reset.ts) so resize/expand resets are synchronous.
   await warmInkReset();
+  guardInkVersion();
 
   let instance: ReturnType<typeof render>;
   const onExit = (): void => {

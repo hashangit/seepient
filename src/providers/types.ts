@@ -19,6 +19,8 @@ export interface ProviderToolCall {
 export interface ProviderResponse {
   content?: string;
   tool_calls?: ProviderToolCall[];
+  /** Real token usage from the provider API, when available. */
+  usage?: Usage;
 }
 
 export interface ChatOptions {

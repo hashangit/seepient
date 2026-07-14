@@ -31,6 +31,8 @@ import { resolveTools, getAllToolDefinitions } from "./tools.js";
 import { createPersistenceBackend, persistSession } from "../../core/session-store.js";
 import { runAgentLoop } from "../../core/agent-loop.js";
 import type { AgentLoopOptions } from "../../core/agent-loop.js";
+import { initializeSkillRegistry } from "../../skills/index.js";
+import { buildSkillCatalog } from "../../core/skill-catalog.js";
 import {
   generateId,
   now,
@@ -86,6 +88,28 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
 
   // System prompt
   let systemPrompt = opts.systemPrompt ?? "You are a helpful assistant.";
+
+  // Skills — initialize the registry and append the catalog to the system
+  // prompt (exactly once). `opts.skills` controls discovery: `false` disables;
+  // `string[]` filters to named skills; `true`/undefined loads all. Without
+  // this, `use_skill` returns "Skill system not initialized" and the model
+  // never learns skills exist.
+  let skillCatalog = '';
+  if (opts.skills !== false) {
+    try {
+      const registry = await initializeSkillRegistry(opts.cwd ?? process.cwd());
+      let metadata = registry.getMetadata();
+      if (Array.isArray(opts.skills)) {
+        const wanted = new Set(opts.skills);
+        metadata = metadata.filter(s => wanted.has(s.name));
+      }
+      if (metadata.length > 0) {
+        skillCatalog = buildSkillCatalog(metadata);
+      }
+    } catch { /* skill init is best-effort — don't block agent creation */ }
+  }
+  // Compose the full system content once; re-applied by clear()/setSystemPrompt().
+  const composeSystem = () => skillCatalog ? systemPrompt + '\n\n' + skillCatalog : systemPrompt;
 
   // Tools
   let toolDefs = opts.tools ? resolveTools(opts.tools) : getAllToolDefinitions();
@@ -149,7 +173,7 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
     messages.push({
       id: generateId(),
       role: "system",
-      content: systemPrompt,
+      content: composeSystem(),
       timestamp: now(),
     });
   }
@@ -352,20 +376,21 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
 
   function setSystemPrompt(prompt: string): void {
     systemPrompt = prompt;
+    const content = composeSystem();
     // Replace existing system message or add new one
     const sysIdx = messages.findIndex((m) => m.role === "system");
     if (sysIdx >= 0) {
       messages[sysIdx] = {
         id: messages[sysIdx].id,
         role: "system",
-        content: prompt,
+        content,
         timestamp: now(),
       };
     } else {
       messages.unshift({
         id: generateId(),
         role: "system",
-        content: prompt,
+        content,
         timestamp: now(),
       });
     }
@@ -391,7 +416,7 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
       messages.push({
         id: generateId(),
         role: "system",
-        content: systemPrompt,
+        content: composeSystem(),
         timestamp: now(),
       });
     }

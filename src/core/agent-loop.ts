@@ -1,6 +1,6 @@
 /** Seepient Core — THE Agent Loop (single implementation) */
 
-import type { Message, StepResult, ToolCall, Usage, SeepientError, ApproveToolFn, PermissionLevel, ToolRiskCategory } from "./types.js";
+import type { Message, StepResult, ToolCall, Usage, SeepientError, ApproveToolFn, ApprovalDecision, ApprovalScope, ApprovalContext, PermissionLevel, ToolRiskCategory } from "./types.js";
 import type { LLMProvider, ProviderMessage, ProviderToolCall, ProviderResponse } from "../providers/types.js";
 import type { ToolDefinition } from "../tools/interface.js";
 import { generateId, now, toSeepientError, messageToProviderMessage, providerToolCallToToolCall } from "./message-convert.js";
@@ -10,6 +10,7 @@ import type { HookExecutor } from "./hooks.js";
 import type { Middleware, PipelineContext } from "./middleware.js";
 import { compose } from "./middleware.js";
 import { checkToolPermission, getToolRiskCategory } from "./permission.js";
+import { GrantStore, extractPattern } from "./grants.js";
 import { getAllToolModules } from "./tool-executor.js";
 import { getModelMeta } from "../models-catalog.js";
 
@@ -25,7 +26,6 @@ export interface AgentLoopOptions {
   messages: Message[];
   toolDefs: ToolDefinition[];
   systemPrompt?: string;          // Prepended as system message if provided
-  skillCatalog?: string;          // Appended to existing system message
   maxSteps: number;
   hooks: HookExecutor;
   signal?: AbortSignal;
@@ -39,6 +39,8 @@ export interface AgentLoopOptions {
   approveTool?: ApproveToolFn;
   permissionLevel?: PermissionLevel;
   autoConfirm?: boolean;
+  /** Persisted approval grants. When set, matching calls skip the prompt. */
+  grantStore?: GrantStore;
 }
 
 export interface AgentLoopError {
@@ -54,8 +56,47 @@ export interface AgentLoopResult {
   steps: StepResult[];
   toolCalls: ToolCall[];
   usage: Usage;
+  /** Prompt tokens of the LAST provider request — reflects actual context-window usage. */
+  contextTokens: number;
   finishReason: "stop" | "max_steps" | "error" | "aborted";
   error?: AgentLoopError;
+}
+
+/**
+ * Normalize an ApprovalDecision (bare boolean OR scoped object) into a plain
+ * `{ approved, scope }`. Bare booleans default to scope "once".
+ */
+function normalizeApproval(decision: ApprovalDecision): { approved: boolean; scope: ApprovalScope } {
+  if (typeof decision === "boolean") return { approved: decision, scope: "once" };
+  return { approved: decision.approved, scope: decision.scope ?? "once" };
+}
+
+/**
+ * Build the LLM-authored gate context from a tool call's args. Reads the
+ * optional structured `approval` object; falls back to the legacy flat
+ * `rationale` string for the description; then to empty. Never throws.
+ */
+function buildApprovalContext(args: Record<string, unknown>): ApprovalContext | undefined {
+  const approval = args.approval;
+  if (approval && typeof approval === "object") {
+    const a = approval as Record<string, unknown>;
+    const title = typeof a.title === "string" ? a.title : "";
+    const description = typeof a.description === "string" ? a.description : "";
+    const implications = a.implications;
+    if (title || description) {
+      const ctx: ApprovalContext = { title, description };
+      if (implications && typeof implications === "object") {
+        ctx.implications = implications as ApprovalContext["implications"];
+      }
+      return ctx;
+    }
+  }
+  // Legacy fallback: flat `rationale` string (e.g. execute_shell_command).
+  const rationale = args.rationale;
+  if (typeof rationale === "string" && rationale.length > 0) {
+    return { title: "", description: rationale };
+  }
+  return undefined;
 }
 
 /**
@@ -83,7 +124,6 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
     messages,
     toolDefs,
     systemPrompt,
-    skillCatalog,
     maxSteps,
     hooks,
     signal,
@@ -129,6 +169,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         steps: result.steps,
         toolCalls: result.toolCalls,
         usage: result.usage,
+        contextTokens: result.contextTokens,
         finishReason: result.finishReason,
       };
     });
@@ -140,6 +181,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         steps: ctx.result.steps,
         toolCalls: ctx.result.toolCalls,
         usage: ctx.result.usage,
+        contextTokens: ctx.result.contextTokens,
         finishReason: ctx.result.finishReason as AgentLoopResult["finishReason"],
       };
     }
@@ -150,6 +192,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
       steps: [],
       toolCalls: [],
       usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 },
+      contextTokens: 0,
       finishReason: "error",
       error: {
         message: "Middleware completed without producing a result",
@@ -167,6 +210,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
       steps: [],
       toolCalls: [],
       usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 },
+      contextTokens: 0,
       finishReason: "error",
       error: {
         message: err instanceof Error ? err.message : String(err),
@@ -188,7 +232,6 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     messages,
     toolDefs,
     systemPrompt,
-    skillCatalog,
     maxSteps,
     hooks,
     signal,
@@ -202,6 +245,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
   const approveTool = options.approveTool;
   const permissionLevel = options.permissionLevel;
   const autoConfirm = options.autoConfirm;
+  const grantStore = options.grantStore;
 
   // Prepend system prompt if provided and messages[0] is not already a system message
   if (systemPrompt && messages.length > 0 && messages[0].role !== "system") {
@@ -213,19 +257,15 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     });
   }
 
-  // Append skill catalog to existing system message
-  if (skillCatalog && messages.length > 0 && messages[0].role === 'system') {
-    messages[0] = { ...messages[0], content: messages[0].content + '\n\n' + skillCatalog };
-  }
-
   const steps: StepResult[] = [];
   const allToolCalls: ToolCall[] = [];
   let finishReason: "stop" | "max_steps" | "error" | "aborted" = "stop";
   let loopError: AgentLoopError | undefined;
 
-  // For usage calculation
-  let totalPromptChars = 0;
-  let totalCompletionChars = 0;
+  // For usage calculation — prefer real API usage; fall back to char÷4 estimate.
+  let totalPromptTokens = 0;
+  let totalCompletionTokens = 0;
+  let lastContextTokens = 0;  // prompt tokens of the most recent provider request
 
   // Track current provider (may change per step if providerFactory is used)
   let currentProvider = provider;
@@ -275,10 +315,11 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     // 'text' step below. Tool calls are reassembled by the accumulator.
     let response: ProviderResponse;
     let streamed = false;
+    let acc: StreamingResponseAccumulator | undefined;
     try {
       if (stream && typeof currentProvider.chatStream === 'function') {
         streamed = true;
-        const acc = new StreamingResponseAccumulator();
+        acc = new StreamingResponseAccumulator();
         for await (const delta of currentProvider.chatStream(providerMessages, toolDefs, { signal })) {
           if (delta.type === 'text_delta' && delta.content) {
             acc.appendText(delta.content);
@@ -311,17 +352,31 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
       break;
     }
 
-    // Track prompt chars for usage
-    for (const msg of providerMessages) {
-      totalPromptChars += (msg.content ?? "").length;
+    // Capture real usage from the provider (streaming: accumulator; non-streaming:
+    // response.usage). Falls back to a char÷4 estimate when unavailable (e.g.
+    // mock/test providers), so usage is never zero for a real call.
+    const stepUsage = streamed ? acc?.getUsage() : response.usage;
+    if (stepUsage) {
+      totalPromptTokens += stepUsage.promptTokens;
+      totalCompletionTokens += stepUsage.completionTokens;
+      lastContextTokens = stepUsage.promptTokens;
+    } else {
+      // Fallback: estimate this step's prompt from the current providerMessages
+      let stepPromptChars = 0;
+      for (const msg of providerMessages) {
+        stepPromptChars += (msg.content ?? "").length;
+      }
+      const estPrompt = Math.ceil(stepPromptChars / 4);
+      const estCompletion = Math.ceil((response.content ?? "").length / 4);
+      totalPromptTokens += estPrompt;
+      totalCompletionTokens += estCompletion;
+      lastContextTokens = estPrompt;
     }
 
     // Text content. When streamed, tokens already went out as text_delta steps,
     // so we only emit the complete 'text' step for the non-streamed path; the
     // assembled content is always added to history either way.
     if (response.content) {
-      totalCompletionChars += response.content.length;
-
       if (!streamed) {
         const textStep: StepResult = {
           type: "text",
@@ -426,21 +481,34 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
         } else {
           const riskCategory: ToolRiskCategory = injectedModule?.risk
             ?? getToolRiskCategory(tc.name, getAllToolModules());
-          const decision = checkToolPermission(effectiveLevel, riskCategory);
+          const matrixDecision = checkToolPermission(effectiveLevel, riskCategory);
 
-          if (decision === "auto") {
+          if (matrixDecision === "auto") {
             ({ output, metadata } = await runToolSafely());
           } else if (approveTool) {
-            let approved: boolean;
-            try {
-              approved = await approveTool({ name: tc.name, args: parsedArgs });
-            } catch {
-              approved = false;
-            }
-            if (!approved) {
-              output = "User denied tool execution.";
-            } else {
+            // Grant check: a remembered approval skips the prompt entirely.
+            if (grantStore && grantStore.consult(tc.name, parsedArgs)) {
               ({ output, metadata } = await runToolSafely());
+            } else {
+              // Build LLM-authored gate context from the tool's `approval` arg.
+              const approvalContext = buildApprovalContext(parsedArgs);
+              let raw: ApprovalDecision;
+              try {
+                raw = await approveTool({ name: tc.name, args: parsedArgs, approvalContext });
+              } catch {
+                raw = false;
+              }
+              const { approved, scope } = normalizeApproval(raw);
+              if (!approved) {
+                output = "User denied tool execution.";
+              } else {
+                // Persist a scoped grant (fire-and-forget; non-fatal on error).
+                if (scope && scope !== "once") {
+                  const pattern = extractPattern(tc.name, parsedArgs);
+                  grantStore?.add(tc.name, scope, pattern).catch(() => { /* non-fatal */ });
+                }
+                ({ output, metadata } = await runToolSafely());
+              }
             }
           } else {
             output = "Tool execution denied.";
@@ -503,9 +571,9 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     finishReason = "max_steps";
   }
 
-  // Calculate usage
-  const promptTokens = Math.ceil(totalPromptChars / 4);
-  const completionTokens = Math.ceil(totalCompletionChars / 4);
+  // Calculate usage — real API tokens when available, char÷4 fallback otherwise.
+  const promptTokens = totalPromptTokens;
+  const completionTokens = totalCompletionTokens;
   const pricing = getModelMeta(currentModel)?.pricing;
   const cost = pricing
     ? (promptTokens * pricing.input + completionTokens * pricing.output) / 1_000_000
@@ -522,6 +590,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     steps,
     toolCalls: allToolCalls,
     usage,
+    contextTokens: lastContextTokens,
     finishReason,
     error: loopError,
   };

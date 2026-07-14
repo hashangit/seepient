@@ -13,6 +13,7 @@ import { buildSkillCatalog } from '../../core/skill-catalog.js';
 import { DEFAULT_MODELS } from '../../models-catalog.js';
 import type { Message, StepResult, Usage, ToolCall, ApproveToolFn, PermissionLevel, ProviderType, PersistenceBackend } from '../../core/types.js';
 import { persistSession } from '../../core/session-store.js';
+import type { GrantStore } from '../../core/grants.js';
 import type { Middleware } from '../../core/middleware.js';
 
 /**
@@ -25,6 +26,8 @@ export interface ChatResult {
   finishReason: string;
   error?: string;
   usage?: Usage;
+  /** Prompt tokens of the last provider request — for context-window display. */
+  contextTokens?: number;
 }
 
 export class Agent {
@@ -40,6 +43,7 @@ export class Agent {
   private readonly systemPrompt: string;
   private readonly providerType: ProviderType | undefined;
   private readonly persistence: PersistenceBackend | null;
+  private _grantStore: GrantStore | null = null;
   private sessionId: string;
 
   constructor(
@@ -70,14 +74,35 @@ export class Agent {
     }];
   }
 
+  /**
+   * Compose the full system message content: base prompt + skill catalog (if any).
+   * The catalog is appended exactly once here — callers that re-seed the system
+   * message (clearConversation, loadSession) use this so the catalog never
+   * accumulates across turns or survives a clear with duplicates.
+   */
+  private composeSystemContent(): string {
+    return this.skillCatalog
+      ? this.systemPrompt + '\n\n' + this.skillCatalog
+      : this.systemPrompt;
+  }
+
   async initializeSkills(): Promise<void> {
     try {
       this.skillRegistry = await initializeSkillRegistry(process.cwd());
       const metadata = this.skillRegistry.getMetadata();
 
       if (metadata.length > 0) {
-        // Build and store skill catalog — will be injected by runAgentLoop
+        // Build and store skill catalog — injected into the system message
+        // exactly once here (not on every runAgentLoop call, which would
+        // accumulate duplicates across turns).
         this.skillCatalog = buildSkillCatalog(metadata);
+        const sysIdx = this.messages.findIndex(m => m.role === 'system');
+        if (sysIdx >= 0) {
+          this.messages[sysIdx] = {
+            ...this.messages[sysIdx],
+            content: this.composeSystemContent(),
+          };
+        }
         console.log(chalk.green(`Loaded ${metadata.length} skill(s):`));
         for (const s of metadata) {
           console.log(chalk.dim(`  - ${s.name}`));
@@ -95,6 +120,15 @@ export class Agent {
   /** Set middleware pipeline (e.g., gateway semantic injection). */
   setMiddleware(middleware: Middleware[]): void {
     this._middleware = middleware;
+  }
+
+  /** Attach the persisted-grant store (used by the loop + /permissions). */
+  setGrantStore(store: GrantStore): void {
+    this._grantStore = store;
+  }
+
+  getGrantStore(): GrantStore | null {
+    return this._grantStore;
   }
 
   async chat(
@@ -146,7 +180,6 @@ export class Agent {
         model: this.model,
         messages: this.messages,
         toolDefs: getAllToolDefinitions(),
-        skillCatalog: this.skillCatalog || undefined,
         maxSteps: 30,
         hooks: createHookExecutor(),
         config: { ...this.config, agentName: 'cli' },
@@ -154,6 +187,7 @@ export class Agent {
         approveTool: wrappedApproveTool,
         permissionLevel,
         autoConfirm: this.autoConfirm,
+        grantStore: this._grantStore ?? undefined,
         middleware: this._middleware.length > 0 ? this._middleware : undefined,
         onStep: onStep ?? defaultOnStep,
         // Stream only when the caller supplies its own onStep (TUI mode) — the
@@ -173,7 +207,7 @@ export class Agent {
         }
       }
 
-      return { finishReason: result.finishReason, error: result.error?.message, usage: result.usage };
+      return { finishReason: result.finishReason, error: result.error?.message, usage: result.usage, contextTokens: result.contextTokens };
     } catch (error: any) {
       spinner?.stop();
       if (error.name === 'AbortError' || signal?.aborted) {
@@ -210,7 +244,7 @@ export class Agent {
     const hasSystem = data.messages.some(m => m.role === 'system');
     this.messages = hasSystem
       ? data.messages
-      : [{ id: generateId(), role: 'system', content: this.systemPrompt, timestamp: now() }, ...data.messages];
+      : [{ id: generateId(), role: 'system', content: this.composeSystemContent(), timestamp: now() }, ...data.messages];
     return true;
   }
 
@@ -225,10 +259,14 @@ export class Agent {
   }
 
   clearConversation(): void {
-    const systemPrompt = this.messages.find(m => m.role === 'system');
-    this.messages = systemPrompt
-      ? [systemPrompt]
-      : [{ id: generateId(), role: 'system', content: this.systemPrompt, timestamp: now() }];
+    // Re-seed with base prompt + catalog (one copy) — never carry over a
+    // possibly-accumulated system message from prior turns.
+    this.messages = [{
+      id: generateId(),
+      role: 'system',
+      content: this.composeSystemContent(),
+      timestamp: now(),
+    }];
     // Rotate the session id so the next save writes a new file instead of
     // overwriting the prior (now-superseded) session — it survives for resume.
     if (this.persistence) {

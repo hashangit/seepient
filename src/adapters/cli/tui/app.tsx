@@ -1,16 +1,20 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { Box, Text } from 'ink';
 import { useTheme } from './hooks/use-theme.js';
 import { useFeed } from './hooks/use-feed.js';
 import { useAgent } from './hooks/use-agent.js';
 import { useKeybindings } from './hooks/use-keybindings.js';
 import { useFileWatcher } from './hooks/use-file-watcher.js';
+import { useCursor } from './hooks/use-cursor.js';
+import { createWidgetHost } from './widget-host.js';
+import { stabilizeStreamingText } from './stream-commit-gate.js';
 import { MessageArea } from './components/message-area.js';
 import { PromptArea } from './components/prompt-area.js';
 import { PermissionPrompt } from './components/permission-prompt.js';
 import { AssistantMessage } from './components/assistant-message.js';
 import { ToolCallBlock } from './components/tool-call-block.js';
 import { GoalStatus } from './components/goal-status.js';
+
 import { Footer } from './components/footer.js';
 import Spinner from 'ink-spinner';
 import { CommandPalette } from './components/command-palette.js';
@@ -32,6 +36,8 @@ export interface TuiCommandOutcome {
   deferred?: boolean;
   /** ANSI-styled text; the TUI strips ANSI before rendering. */
   output?: string;
+  /** Structured payload rendered by a dedicated TUI component (preferred over `output`). */
+  render?: import('../commands/registry.js').CommandRender;
   /** Session should terminate. */
   exit?: boolean;
 }
@@ -87,18 +93,55 @@ export function TuiApp({
 }: TuiAppProps) {
   const theme = useTheme();
   const feed = useFeed();
-  const { isRunning, pendingPermission, streamingText, streamingTool, usage, contextTokens, latestTodos, submit, resolvePermission, abort, resetTodos, restoreTodos } = useAgent({
+  const widgetHost = useMemo(() => createWidgetHost(feed), []);
+  // Dispose all widget blocks on unmount (prevents orphan timers/subscriptions).
+  useEffect(() => () => widgetHost.disposeAll(), [widgetHost]);
+
+  const agentApi = useAgent({
     agent,
     feed,
     permissionLevel,
+    widgetHost,
   });
+  const { isRunning, pendingPermission, streamingText, streamingTool, usage, contextTokens, latestTodos, submit, resolvePermission, abort, resetTodos, restoreTodos } = agentApi;
+
+  // Wire the submit callback into the widget host (submit is created inside useAgent).
+  useEffect(() => {
+    widgetHost.setSubmit((synthetic: string) => { void submit(synthetic); });
+  }, [widgetHost, submit]);
   const [input, setInput] = useState('');
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [settingsList, setSettingsList] = useState<SettingItem[]>([]);
   const [sessionsList, setSessionsList] = useState<SessionListItem[]>([]);
 
+  // Widget focus — only active when agent is idle. When set, widgets render
+  // interactively (↑/↓ cycles actions, Enter fires) and prompt input is
+  // disabled so its Enter handler can't compete with the widget's.
+  const [focusedWidgetId, setFocusedWidgetId] = useState<string | null>(null);
+  // Reset focus when agent starts running (widget is being generated).
+  useEffect(() => { if (isRunning) setFocusedWidgetId(null); }, [isRunning]);
+
+  // Ctrl+T cycles focus between prompt and interactive widgets at idle.
+  // null → first widget → next widget → … → last → null (back to prompt).
+  const onCycleWidgetFocus = (): void => {
+    if (isRunning) return;
+    const liveWidgets = feed.entries.filter((e) => e.kind === 'block' && !e.finalized);
+    if (liveWidgets.length === 0) {
+      setFocusedWidgetId(null);
+      return;
+    }
+    const ids = liveWidgets.map((e) => e.id);
+    const idx = focusedWidgetId ? ids.indexOf(focusedWidgetId) : -1;
+    // null (-1) → first widget; otherwise advance; wrap past last → null (prompt).
+    const next = idx + 1 >= ids.length ? null : ids[idx + 1];
+    setFocusedWidgetId(next);
+  };
+
   // File-watcher: notifies when project files change externally while idle.
   const { changedFile, clear: clearFileChange } = useFileWatcher(!isRunning);
+
+  // T0-3: hide cursor during streaming, restore on idle / pending permission.
+  useCursor(isRunning, !!pendingPermission);
 
   // Input history lives here (not in PromptArea) so it survives PromptArea
   // unmounting during a run — otherwise every turn wiped the history.
@@ -171,6 +214,9 @@ export function TuiApp({
       feed.appendEntry({ kind: 'assistant', content: `${name} is interactive — run it in the readline REPL (seepient), or wait for the TUI overlay.` });
     } else if (result.exit) {
       onExit();
+    } else if (result.render) {
+      // Structured payload → dedicated component (e.g. SkillsList for /skills).
+      feed.appendEntry({ kind: 'block', blockKind: 'custom', props: result.render, finalized: true });
     } else if (result.output) {
       feed.appendEntry({ kind: 'assistant', content: stripAnsi(result.output) });
     } else if (result.status === 'fallthrough') {
@@ -359,9 +405,17 @@ export function TuiApp({
       onExpandToggle: () => { resetView(); setExpanded((e) => !e); setStaticKey((k) => k + 1); },
       onPalette: () => setOverlay('palette'),
       onClear: clearAll,
+      onCycleFocus: onCycleWidgetFocus,
+      onEscapeWidget: () => { if (focusedWidgetId) setFocusedWidgetId(null); },
     },
     { enabled: overlay === null, isRunning },
   );
+
+  // T2: stabilize streaming text for live display. While markdown is reflowing
+  // (open fences, incomplete tables, trailing diff removals), hold the unstable
+  // portion and show only the last-stable text. The full text is always committed
+  // to feed history — this gate is display-only.
+  const displayText = streamingText ? stabilizeStreamingText(streamingText).stable : '';
 
   const showSpinner = isRunning && !streamingText && !pendingPermission;
   // The bordered input is always visible (003 US1). While a tool needs approval
@@ -369,7 +423,7 @@ export function TuiApp({
   // renders ABOVE the input — the input stays active so queued/steered messages
   // can be typed during a run.
   const inputAreaSlot = pendingPermission ? (
-    <PermissionPrompt toolName={pendingPermission.toolName} args={pendingPermission.args} onResolve={resolvePermission} />
+    <PermissionPrompt toolName={pendingPermission.toolName} args={pendingPermission.args} approvalContext={pendingPermission.approvalContext} onResolve={resolvePermission} />
   ) : (
     <Box flexDirection="column">
       {showSpinner ? (
@@ -382,8 +436,10 @@ export function TuiApp({
         value={input}
         onChange={setInput}
         onSubmit={(v) => { void handleUserInput(v); }}
+        disabled={focusedWidgetId !== null}
         onHistoryUp={onHistoryUp}
         onHistoryDown={onHistoryDown}
+        onCycleFocus={onCycleWidgetFocus}
         commands={commands}
         skills={skills}
       />
@@ -392,11 +448,19 @@ export function TuiApp({
 
   return (
     <Box flexDirection="column" paddingLeft={HORIZONTAL_PADDING} paddingRight={HORIZONTAL_PADDING}>
-      <MessageArea entries={feed.entries} staticKey={staticKey} expanded={expanded} />
+      <MessageArea
+        entries={feed.entries}
+        staticKey={staticKey}
+        expanded={expanded}
+        focusedWidgetId={focusedWidgetId}
+        onWidgetAction={(spec, actionId, state) => {
+          widgetHost.dispatchAction(spec.id, actionId, state);
+        }}
+      />
       {/* Persistent todo panel — stays visible; updates on each manage_todos call. */}
       {latestTodos ? <GoalStatus todos={latestTodos} /> : null}
       {streamingText ? (
-        <AssistantMessage entry={{ id: '__streaming', kind: 'assistant', content: streamingText }} />
+        <AssistantMessage entry={{ id: '__streaming', kind: 'assistant', content: displayText }} />
       ) : null}
       {streamingTool ? (
         <ToolCallBlock

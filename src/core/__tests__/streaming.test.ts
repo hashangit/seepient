@@ -144,3 +144,106 @@ describe('StreamingResponseAccumulator', () => {
     expect(r.tool_calls?.map((tc) => tc.id)).toEqual(['a', 'b']);
   });
 });
+
+describe('runAgentLoop usage tracking', () => {
+  it('uses real API usage from the finish delta (not char÷4 estimate)', async () => {
+    // Provider returns a finish delta with usage { promptTokens: 100, completionTokens: 50 }
+    const provider = streamProvider([
+      { type: 'text_delta', content: 'hi' },
+      { type: 'finish', usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150, cost: 0 } },
+    ]);
+    const result = await runAgentLoop({
+      provider,
+      model: 'test',
+      messages: [userMsg('hello')],
+      toolDefs: [],
+      maxSteps: 5,
+      hooks: createHookExecutor(),
+      stream: true,
+    });
+    // Real usage, not the char÷4 estimate of the message content
+    expect(result.usage.promptTokens).toBe(100);
+    expect(result.usage.completionTokens).toBe(50);
+    expect(result.usage.totalTokens).toBe(150);
+    // contextTokens = last request's prompt tokens
+    expect(result.contextTokens).toBe(100);
+  });
+
+  it('contextTokens reflects the LAST step, not the sum across steps', async () => {
+    // Step 1: tool call with usage { promptTokens: 200, ... }
+    // Step 2: final text with usage { promptTokens: 300, ... }
+    // contextTokens should be 300 (last), not 500 (sum)
+    let call = 0;
+    const provider: LLMProvider = {
+      async chat() { throw new Error('use stream'); },
+      async *chatStream(): AsyncIterable<StreamDelta> {
+        call++;
+        if (call === 1) {
+          yield { type: 'tool_call_begin', index: 0, id: 'tc1', name: 'echo' };
+          yield { type: 'tool_call_delta', index: 0, argumentsDelta: '{"msg":"x"}' };
+          yield { type: 'finish', usage: { promptTokens: 200, completionTokens: 10, totalTokens: 210, cost: 0 } };
+        } else {
+          yield { type: 'text_delta', content: 'done' };
+          yield { type: 'finish', usage: { promptTokens: 300, completionTokens: 20, totalTokens: 320, cost: 0 } };
+        }
+      },
+    };
+    const result = await runAgentLoop({
+      provider,
+      model: 'test',
+      messages: [userMsg('hi')],
+      toolDefs: [echoTool],
+      maxSteps: 5,
+      hooks: createHookExecutor(),
+      stream: true,
+    });
+    // Cumulative usage sums across steps
+    expect(result.usage.promptTokens).toBe(500);  // 200 + 300
+    expect(result.usage.completionTokens).toBe(30); // 10 + 20
+    // But contextTokens = last step only
+    expect(result.contextTokens).toBe(300);
+  });
+
+  it('falls back to char÷4 estimate when provider returns no usage', async () => {
+    // Provider returns no finish delta with usage
+    const provider = streamProvider(
+      [{ type: 'text_delta', content: 'hello' }, { type: 'finish' }],
+      [{ type: 'finish' }],
+    );
+    const result = await runAgentLoop({
+      provider,
+      model: 'test',
+      messages: [userMsg('a test message')],
+      toolDefs: [],
+      maxSteps: 5,
+      hooks: createHookExecutor(),
+      stream: true,
+    });
+    // Fallback: char÷4 estimate > 0
+    expect(result.usage.promptTokens).toBeGreaterThan(0);
+    expect(result.contextTokens).toBeGreaterThan(0);
+  });
+
+  it('uses real usage from non-streaming chat() response', async () => {
+    const provider: LLMProvider = {
+      async chat() {
+        return {
+          content: 'response',
+          usage: { promptTokens: 42, completionTokens: 7, totalTokens: 49, cost: 0 },
+        };
+      },
+    };
+    const result = await runAgentLoop({
+      provider,
+      model: 'test',
+      messages: [userMsg('hi')],
+      toolDefs: [],
+      maxSteps: 5,
+      hooks: createHookExecutor(),
+      stream: false,
+    });
+    expect(result.usage.promptTokens).toBe(42);
+    expect(result.usage.completionTokens).toBe(7);
+    expect(result.contextTokens).toBe(42);
+  });
+});

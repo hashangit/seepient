@@ -2,7 +2,7 @@ import { OpenAI } from 'openai';
 import chalk from 'chalk';
 import * as fs from 'fs';
 import * as path from 'path';
-import { ToolModule } from './interface.js';
+import { ToolModule, APPROVAL_SCHEMA } from './interface.js';
 
 const toolDefinition = {
   type: "function",
@@ -59,7 +59,8 @@ const toolDefinition = {
         output_dir: {
           type: "string",
           description: "Directory to save the generated images. Defaults to current directory."
-        }
+        },
+        approval: APPROVAL_SCHEMA
       },
       required: []
     }
