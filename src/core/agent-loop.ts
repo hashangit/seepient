@@ -265,7 +265,10 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
   // For usage calculation — prefer real API usage; fall back to char÷4 estimate.
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
-  let lastContextTokens = 0;  // prompt tokens of the most recent provider request
+  // Context-window fill: the prompt tokens of the most recent provider request.
+  // Each request resends the full conversation (system + tools + all messages),
+  // so this equals how full the context window is after this turn.
+  let lastContextTokens = 0;
 
   // Track current provider (may change per step if providerFactory is used)
   let currentProvider = provider;

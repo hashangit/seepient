@@ -135,8 +135,17 @@ export class AnthropicProvider implements LLMProvider {
       tools: anthropicTools,
     }, { signal: options?.signal });
 
+    // Anthropic splits usage across two SSE events:
+    //   message_start  → input_tokens (prompt size)
+    //   message_delta  → cumulative output_tokens (input_tokens absent here)
+    // We capture input_tokens from message_start, then emit the combined usage
+    // on message_delta. Without this, promptTokens is always 0 in streaming.
+    let inputTokens = 0;
+
     for await (const event of stream) {
-      if (event.type === 'content_block_start' && event.content_block.type === 'tool_use') {
+      if (event.type === 'message_start' && event.message?.usage) {
+        inputTokens = event.message.usage.input_tokens ?? 0;
+      } else if (event.type === 'content_block_start' && event.content_block.type === 'tool_use') {
         yield {
           type: 'tool_call_begin',
           index: event.index,
@@ -150,7 +159,6 @@ export class AnthropicProvider implements LLMProvider {
           yield { type: 'tool_call_delta', index: event.index, argumentsDelta: event.delta.partial_json };
         }
       } else if (event.type === 'message_delta' && event.usage) {
-        const inputTokens = event.usage.input_tokens ?? 0;
         const outputTokens = event.usage.output_tokens ?? 0;
         yield {
           type: 'finish',

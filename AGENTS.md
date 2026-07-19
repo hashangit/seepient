@@ -60,6 +60,65 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
+# Documentation Storage
+
+Documentation is split between the **Obsidian vault** (internal) and the **project repo** (consumer-facing). When unsure where a document belongs, default to the vault.
+
+## Obsidian vault — internal documentation
+
+All internal engineering and management documentation lives in the Obsidian vault under `Seepient/` (`~/Documents/Obsidian/Seepient/`), **not** in the project repo. This includes:
+
+- Planning & architecture (e.g. `Architecture/`)
+- Implementation specs & feature specs (e.g. `Implementation-Specs/007-tui-parity-upgrade/`)
+- Research, data models, API/contract definitions
+- Management documents (roadmaps, strategy, decisions, lessons learned)
+
+**Access:** Read and write vault files directly via their filesystem paths (e.g. `Read` / `Write` / `Edit` on `~/Documents/Obsidian/Seepient/...`). The `obsidian` CLI only launches the GUI app and is not scriptable from agents — use direct filesystem access for all vault work.
+
+## Vault structure
+
+Current layout of the Obsidian vault (annotated):
+
+```
+~/Documents/Obsidian/Seepient/
+├── README.md                         # Vault overview / index
+├── Architecture/                     # Cross-cutting architectural references
+├── Implementation-Specs/             # One folder per spec: NNN-kebab-name/
+│   ├── 007-tui-parity-upgrade/       # TUI parity & generative widget upgrade
+│   │   ├── spec.md                   # Problem statement, requirements, scope
+│   │   ├── plan.md                   # Phased implementation plan
+│   │   ├── tasks.md                  # Dependency-ordered tasks
+│   │   └── ...                       # research.md, contracts/, etc. as needed
+│   └── 008-permission-system-redesign/  # OS sandbox + deny-layer + server policy
+│       ├── spec.md                      # Bug sweep findings + scope decisions
+│       ├── plan.md                      # 5-phase plan (P1+P2 close CRITICAL bugs)
+│       ├── research.md                  # Cross-tool study (Codex/Claude/Pi/Hermes/OpenClaw) + ASRT fit
+│       ├── data-model.md                # SandboxPolicy, PermissionGuard, SandboxRunner
+│       ├── contracts/                   # sandbox-api.md, server-policy.md, tui-escalation.md
+│       └── quickstart.md                # Per-phase validation scenarios
+├── Provider-Management/              # LLM provider notes
+├── System-Prompts/                   # Prompt engineering references
+├── Seepientagent-BMI/                # Body-model internal feature work
+└── Todo/                             # Internal todos / scratch
+```
+
+**Conventions:**
+- Top level holds cross-cutting references (`Architecture/`, `Provider-Management/`, `System-Prompts/`, etc.); per-feature work lives under `Implementation-Specs/`.
+- Each spec gets a numbered folder (`NNN-kebab-name/`) with the standard files above. Not every file is required — create what the spec needs, in this style.
+- New top-level areas (e.g. a `Decisions/` or `Roadmaps/` folder) should be added here when first created.
+
+**Maintenance — keep this map in sync.** This tree is the agent's contract for what to expect in the vault. When you add, remove, rename, or restructure vault files/directories, update this tree in the same change. If unsure of the current state, verify with `find ~/Documents/Obsidian/Seepient -type f | sort`.
+
+## Project repo — consumer-facing documentation
+
+Consumer-facing documentation stays in the repo, alongside the code:
+
+- Documentation websites (e.g. a VitePress site)
+- User guides, examples, onboarding material
+- `README.md`, `CHANGELOG.md`, and operational files
+
+Code and operational files always stay in the repo; only internal/engineering/management prose moves to the vault.
+
 # Architecture
 
 Full architectural reference: `ARCHITECTURE.md` in the project root.
@@ -267,7 +326,9 @@ Keep `CONTEXT.md` under 20 lines total. Do NOT summarize the full conversation �
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-- **ACTIVE PLAN**: `specs/007-tui-parity-upgrade/plan.md` — TUI parity & generative
-  widget upgrade (T0 streaming polish, T1 generative widgets, T3 hashline edits,
-  T4 ChatBlock + component parity). Stays on Ink; 005 stays reverted.
+- **ACTIVE PLAN**: `~/Documents/Obsidian/Seepient/Implementation-Specs/008-permission-system-redesign/plan.md`
+  — Permission system redesign: OS sandbox (`@anthropic-ai/sandbox-runtime`) +
+  TS deny-layer + server policy. Two-layer model (permission ≠ approval). P1+P2
+  close the two CRITICAL bugs (no path guard; edit auto-approve bypass). Prior
+  plan: `specs/007-tui-parity-upgrade/` (TUI parity — shipped).
 <!-- SPECKIT END -->

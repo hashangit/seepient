@@ -17,6 +17,7 @@ import { clearHandler } from './clear.js';
 import { exitHandler } from './exit.js';
 import { compactHandler } from './compact.js';
 import { skillsHandler } from './skills.js';
+import { contextHandler } from './context.js';
 import { modelsHandler } from './models.js';
 import { settingsHandler } from './settings.js';
 import { permissionsHandler } from './permissions.js';
@@ -53,6 +54,10 @@ export function buildCommandRegistry(
   // Tier 2 — Configuration & Discovery
   registry.register('skills', skillsHandler, {
     description: 'List loaded skills',
+  });
+  registry.register('context', contextHandler, {
+    description: 'Show context-window breakdown (tokens by component)',
+    aliases: ['ctx'],
   });
   registry.register('models', modelsHandler(agent, config, activeProviderType), {
     description: 'Switch providers and models',

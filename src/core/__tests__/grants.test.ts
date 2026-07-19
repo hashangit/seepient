@@ -22,9 +22,29 @@ describe("extractPattern", () => {
     expect(extractPattern("execute_shell_command", {})).toBeUndefined();
   });
 
-  it("returns the path string for write_file / edit_file", () => {
+  it("returns the path string for write_file", () => {
     expect(extractPattern("write_file", { path: "/tmp/a.txt" })).toBe("/tmp/a.txt");
-    expect(extractPattern("edit_file", { path: "/tmp/a.txt" })).toBe("/tmp/a.txt");
+  });
+
+  it("returns undefined for write_file with no path", () => {
+    expect(extractPattern("write_file", {})).toBeUndefined();
+  });
+
+  it("extracts the first section path for edit_file from a hashline patch", () => {
+    const patch = "[src/foo.ts#a1f2]\nSWAP 1.=3:\n+bar";
+    expect(extractPattern("edit_file", { patch })).toBe("src/foo.ts");
+  });
+
+  it("returns undefined for edit_file with a multi-file patch (tool-level fallback)", () => {
+    // First section path is still extracted; a user wanting all files uses tool-level.
+    const patch = "[src/a.ts#a1f2]\nSWAP 1.=1:\n+x\n[src/b.ts#b2c3]\nSWAP 1.=1:\n+y";
+    expect(extractPattern("edit_file", { patch })).toBe("src/a.ts");
+  });
+
+  it("returns undefined for edit_file with empty/garbage patch", () => {
+    expect(extractPattern("edit_file", { patch: "" })).toBeUndefined();
+    expect(extractPattern("edit_file", { patch: "no section header here" })).toBeUndefined();
+    expect(extractPattern("edit_file", {})).toBeUndefined();
   });
 
   it("returns undefined for other tools (tool-level)", () => {
@@ -56,10 +76,16 @@ describe("grantMatches", () => {
     expect(grantMatches(g, "execute_shell_command", { command: "npm install" })).toBe(false);
   });
 
-  it("path prefix grant matches nested paths", () => {
+  it("path prefix grant matches nested paths (write_file)", () => {
     const g: Grant = { id: "1", tool: "write_file", pattern: "/project/src", scope: "project", createdAt: 0 };
     expect(grantMatches(g, "write_file", { path: "/project/src/index.ts" })).toBe(true);
     expect(grantMatches(g, "write_file", { path: "/project/test/x.ts" })).toBe(false);
+  });
+
+  it("path prefix grant matches edit_file patches targeting a nested file", () => {
+    const g: Grant = { id: "1", tool: "edit_file", pattern: "src/components", scope: "project", createdAt: 0 };
+    expect(grantMatches(g, "edit_file", { patch: "[src/components/Button.tsx#a1f2]\nSWAP 1.=1:\n+x" })).toBe(true);
+    expect(grantMatches(g, "edit_file", { patch: "[src/utils/helpers.ts#a1f2]\nSWAP 1.=1:\n+x" })).toBe(false);
   });
 });
 

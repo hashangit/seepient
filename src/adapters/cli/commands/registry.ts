@@ -17,6 +17,7 @@
 import chalk from 'chalk';
 import type { Agent } from '../agent.js';
 import type { SkillRegistry } from '../../../skills/types.js';
+import type { ContextBreakdown } from '../../../core/context-breakdown.js';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -36,6 +37,10 @@ export type CommandRender =
   | {
       component: 'skills';
       skills: Array<{ name: string; description: string }>;
+    }
+  | {
+      component: 'context';
+      breakdown: ContextBreakdown;
     };
 
 /**

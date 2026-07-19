@@ -31,6 +31,7 @@ import { resolveTools, getAllToolDefinitions } from "./tools.js";
 import { createPersistenceBackend, persistSession } from "../../core/session-store.js";
 import { runAgentLoop } from "../../core/agent-loop.js";
 import type { AgentLoopOptions } from "../../core/agent-loop.js";
+import { createSessionGrantStore } from "../../core/grants.js";
 import { initializeSkillRegistry } from "../../skills/index.js";
 import { buildSkillCatalog } from "../../core/skill-catalog.js";
 import {
@@ -116,6 +117,9 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
 
   // Hooks
   const hookExecutor = createHookExecutor(opts.hooks);
+
+  // Pre-grants (session-scoped GrantStore built once from opts.grants).
+  const grantStore = opts.grants?.length ? createSessionGrantStore(opts.grants) : undefined;
 
   // State
   const messages: Message[] = [];
@@ -217,6 +221,7 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
       middleware: opts.middleware,
       approveTool: opts.approveTool,
       permissionLevel: opts.permissionLevel,
+      grantStore: grantStore,
     });
 
     // Update cumulative usage from result
@@ -290,6 +295,7 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
           middleware: opts.middleware,
           approveTool: opts.approveTool,
           permissionLevel: opts.permissionLevel,
+          grantStore: grantStore,
           stream: true,
           onStep: (step) => {
             if (streamOptions?.onStep) streamOptions.onStep(step);

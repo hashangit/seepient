@@ -33,7 +33,7 @@ import {
 } from './config-loader.js';
 import { runSetup } from './setup.js';
 import { isNonInteractive } from './docker-utils.js';
-import type { PermissionLevel, PersistenceBackend, ProviderType } from '../../core/types.js';
+import type { PermissionLevel, PersistenceBackend, ProviderType, GrantScope } from '../../core/types.js';
 import { createPersistenceBackend } from '../../core/session-store.js';
 import { resolvePermissionLevel } from '../../core/permission.js';
 import { GrantStore } from '../../core/grants.js';
@@ -160,10 +160,36 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
   // Tool-approval grant store: project grants at <cwd>/.seepient/grants.json,
   // global at ~/.seepient/grants.json. Consulted by the agent loop so matching
   // tool calls skip the approval prompt; managed via /permissions.
-  agent.setGrantStore(new GrantStore({
+  const grantStore = new GrantStore({
     projectDir: getConfigDir(false),
     globalDir: getConfigDir(true),
-  }));
+  });
+  agent.setGrantStore(grantStore);
+
+  // Pre-seed grants from --allow-* flags (repeatable, scope-specific):
+  //   --allow-once / --allow-session → session scope (process lifetime;
+  //     equivalent in non-interactive mode — one run = one session)
+  //   --allow-project                 → project scope (<cwd>/.seepient/grants.json)
+  //   --allow-global                  → global scope  (~/.seepient/grants.json)
+  // Spec format per flag: "tool" or "tool:pattern". Lets a headless/CI run
+  // pre-authorize specific tools (optionally scoped by arg prefix) without
+  // the blanket --yes / --headless auto-approval.
+  const allowFlags: Array<{ specs: string[]; scope: GrantScope }> = [
+    { specs: options.allowOnce ?? [], scope: 'session' },
+    { specs: options.allowSession ?? [], scope: 'session' },
+    { specs: options.allowProject ?? [], scope: 'project' },
+    { specs: options.allowGlobal ?? [], scope: 'global' },
+  ];
+  for (const { specs, scope } of allowFlags) {
+    for (const spec of specs) {
+      const sep = spec.indexOf(':');
+      const tool = (sep === -1 ? spec : spec.slice(0, sep)).trim();
+      const pattern = sep === -1 ? undefined : spec.slice(sep + 1).trim();
+      if (tool.length > 0) {
+        await grantStore.add(tool, scope, pattern || undefined);
+      }
+    }
+  }
 
   // Initialize skills system
   await agent.initializeSkills();

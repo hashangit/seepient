@@ -40,6 +40,12 @@ try {
 
 const program = new Command();
 
+/** Commander collect fn: accumulate repeated --option values into an array. */
+function collectRepeated(value: string, acc: string[]): string[] {
+  acc.push(value);
+  return acc;
+}
+
 program
   .name('seepient')
   .description('A lightweight AI agent CLI tool')
@@ -53,6 +59,10 @@ program
   .option('--strict', 'Permission level: auto-approve safe tools only')
   .option('--moderate', 'Permission level: auto-approve safe + edit + communications (default)')
   .option('--yolo', 'Permission level: auto-approve all tools')
+  .option('--allow-once <spec>', 'Pre-grant a tool for this run only (repeatable): "tool" or "tool:pattern"', collectRepeated, [])
+  .option('--allow-session <spec>', 'Pre-grant a tool for this session (repeatable): "tool" or "tool:pattern"', collectRepeated, [])
+  .option('--allow-project <spec>', 'Pre-grant a tool for this project, persisted (repeatable): "tool" or "tool:pattern"', collectRepeated, [])
+  .option('--allow-global <spec>', 'Pre-grant a tool globally, persisted (repeatable): "tool" or "tool:pattern"', collectRepeated, [])
   .option('-r, --resume <id>', 'Resume a previous session by id (or "last")');
 
 program

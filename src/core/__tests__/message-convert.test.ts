@@ -8,12 +8,14 @@ import {
 import { SeepientError, ProviderError, ToolError } from "../errors.js";
 
 describe("estimateTokens", () => {
-  it("returns ceil(length/4)", () => {
+  it("uses BPE tokenization (delegates to countTokens)", () => {
+    // estimateTokens now uses real BPE via gpt-tokenizer, not chars÷4.
     expect(estimateTokens("")).toBe(0);
-    expect(estimateTokens("abcd")).toBe(1);
-    expect(estimateTokens("abcde")).toBe(2);
-    expect(estimateTokens("12345678")).toBe(2);
-    expect(estimateTokens("a")).toBe(1);
+    expect(estimateTokens("hello world")).toBe(2);
+    // Longer text yields more tokens
+    expect(estimateTokens("this is a longer sentence")).toBeGreaterThan(
+      estimateTokens("short"),
+    );
   });
 });
 

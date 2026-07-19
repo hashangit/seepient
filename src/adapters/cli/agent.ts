@@ -26,7 +26,7 @@ export interface ChatResult {
   finishReason: string;
   error?: string;
   usage?: Usage;
-  /** Prompt tokens of the last provider request — for context-window display. */
+  /** Context-window fill level (prompt tokens of the last request = full conversation size). */
   contextTokens?: number;
 }
 
@@ -115,6 +115,16 @@ export class Agent {
 
   getSkillRegistry(): SkillRegistry | null {
     return this.skillRegistry;
+  }
+
+  /** The skill catalog string appended to the system message (empty if none). */
+  getSkillCatalog(): string {
+    return this.skillCatalog;
+  }
+
+  /** Active provider type (for tokenizer accuracy display). */
+  getProviderType(): ProviderType | undefined {
+    return this.providerType;
   }
 
   /** Set middleware pipeline (e.g., gateway semantic injection). */

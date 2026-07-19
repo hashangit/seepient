@@ -173,6 +173,18 @@ export interface Hooks {
 
 // ── generateText ──────────────────────────────────────────────────────
 
+/**
+ * A pre-granted tool permission for the SDK `grants` option. The matching
+ * rules mirror the CLI --allow flag and the GrantStore: `pattern` is a prefix
+ * the relevant arg must start with (command string for shell, path for
+ * write/edit); omit it for a tool-level grant. Grants skip the approval
+ * prompt for matching calls.
+ */
+export interface GrantSpec {
+  tool: string;
+  pattern?: string;
+}
+
 export interface GenerateTextOptions {
   model?: string;
   provider?: ProviderType;
@@ -191,6 +203,8 @@ export interface GenerateTextOptions {
   middleware?: Middleware[];
   approveTool?: ApproveToolFn;
   permissionLevel?: PermissionLevel;
+  /** Pre-grant tools so matching calls skip the approval prompt. */
+  grants?: GrantSpec[];
 }
 
 export interface GenerateTextResult {
@@ -246,6 +260,8 @@ export interface AgentCreateOptions {
   metadata?: Record<string, unknown>;
   middleware?: Middleware[];
   approveTool?: ApproveToolFn;
+  /** Pre-grant tools so matching calls skip the approval prompt. */
+  grants?: GrantSpec[];
 }
 
 export interface SdkAgent {

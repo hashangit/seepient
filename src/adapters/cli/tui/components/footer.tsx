@@ -10,7 +10,7 @@ interface FooterProps {
   skillCount: number;
   gatewayOn: boolean;
   mcpCount: number;
-  /** Last turn's input size in tokens (the current context-window usage). */
+  /** Context-window fill level: prompt tokens of the last request = full conversation size. */
   contextTokens: number;
   /** The active model's max context in tokens (undefined if unknown). */
   contextWindow?: number;

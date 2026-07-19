@@ -22,6 +22,7 @@ import { createHookExecutor } from "../../core/hooks.js";
 import { StreamManager } from "../../core/stream-manager.js";
 import { resolveTools, getAllToolDefinitions } from "./tools.js";
 import { runAgentLoop } from "../../core/agent-loop.js";
+import { createSessionGrantStore } from "../../core/grants.js";
 import { initializeSkillRegistry } from "../../skills/index.js";
 import { buildSkillCatalog } from "../../core/skill-catalog.js";
 import {
@@ -197,6 +198,7 @@ export async function generateText(
     middleware: opts.middleware,
     approveTool: opts.approveTool,
     permissionLevel: opts.permissionLevel,
+    grantStore: opts.grants?.length ? createSessionGrantStore(opts.grants) : undefined,
   });
 
   // Get the final text
@@ -290,6 +292,7 @@ export async function streamText(
         middleware: opts.middleware,
         approveTool: opts.approveTool,
         permissionLevel: opts.permissionLevel,
+        grantStore: opts.grants?.length ? createSessionGrantStore(opts.grants) : undefined,
         onStep: (step) => {
           if (opts.onStep) opts.onStep(step);
           if (step.type === "text" && step.content) {

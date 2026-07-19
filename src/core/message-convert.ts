@@ -3,6 +3,7 @@
 import type { Message, ToolCall } from "./types.js";
 import { SeepientError, ProviderError, ToolError } from "./errors.js";
 import type { ProviderMessage, ProviderResponse, ProviderToolCall } from "../providers/types.js";
+import { countTokens } from "./tokenizer.js";
 
 /**
  * Generate a unique identifier using crypto.randomUUID().
@@ -19,10 +20,11 @@ export function now(): number {
 }
 
 /**
- * Rough token estimate: ~4 characters per token.
+ * Token estimate using BPE (via gpt-tokenizer). Exact for OpenAI-family
+ * models, approximate elsewhere. Delegates to `countTokens`.
  */
 export function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
+  return countTokens(text);
 }
 
 /**

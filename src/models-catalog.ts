@@ -54,10 +54,12 @@ export const DEFAULT_MODELS: Record<ProviderType, string> = {
   'openai-compatible': 'gpt-5.4',
 };
 
-/** Look up a model's metadata (context window + pricing) by id, across providers. */
+/** Look up a model's metadata (context window + pricing) by id, across providers.
+ *  Case-insensitive — model ids may arrive display-cased (e.g. "Opus" vs "opus"). */
 export function getModelMeta(id: string): ModelEntry | undefined {
+  const lower = id.toLowerCase();
   for (const list of Object.values(MODEL_CATALOG)) {
-    const found = list.find((m) => m.id === id);
+    const found = list.find((m) => m.id.toLowerCase() === lower);
     if (found) return found;
   }
   return undefined;

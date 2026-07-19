@@ -456,6 +456,7 @@ export function TuiApp({
         onWidgetAction={(spec, actionId, state) => {
           widgetHost.dispatchAction(spec.id, actionId, state);
         }}
+        contextTokens={contextTokens}
       />
       {/* Persistent todo panel — stays visible; updates on each manage_todos call. */}
       {latestTodos ? <GoalStatus todos={latestTodos} /> : null}

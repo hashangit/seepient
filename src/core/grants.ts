@@ -21,6 +21,7 @@
  */
 
 import * as fs from "node:fs/promises";
+import * as os from "node:os";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { GrantScope } from "./types.js";
@@ -39,13 +40,42 @@ interface GrantFile {
   grants: Grant[];
 }
 
+/**
+ * Build a session-only GrantStore and pre-seed it from GrantSpecs. Used by the
+ * SDK (`grants` option) — no on-disk persistence (SDK callers are ephemeral;
+ * they pass their grant list up front each call). The returned store's project
+ * and global paths point at temp dirs so a stray write is harmless.
+ */
+export function createSessionGrantStore(specs: { tool: string; pattern?: string }[]): GrantStore {
+  // Temp dirs — session grants never hit disk; these only matter if a future
+  // scoped write somehow fires (it won't for session scope).
+  const store = new GrantStore({
+    projectDir: path.join(os.tmpdir(), `seepient-grants-${process.pid}`),
+    globalDir: path.join(os.tmpdir(), `seepient-grants-${process.pid}`),
+  });
+  for (const s of specs) {
+    if (s.tool && s.tool.length > 0) {
+      store.add(s.tool, "session", s.pattern || undefined);
+    }
+  }
+  return store;
+}
+
 // ── Pattern extraction + matching ─────────────────────────────────────
 
 /**
  * Extract the prefix string a grant should match for this tool call.
- *  - execute_shell_command → the command string
- *  - write_file / edit_file → the path string
- *  - anything else → undefined (tool-level)
+ * Uniform shape across tools: a string the relevant arg must start with.
+ *  - execute_shell_command → the command string ("npm test")
+ *  - write_file            → the path arg
+ *  - edit_file             → the path of the first [PATH#TAG] section in the patch
+ *  - anything else         → undefined (tool-level)
+ *
+ * For edit_file, the path lives inside the patch string as `[PATH#TAG]`
+ * sections (mirrors the hashline parser's section header). A single patch may
+ * span multiple files — we use the first section's path as the pattern. If a
+ * grant needs to cover multi-file patches, create it at tool-level (the grant
+ * with no pattern).
  */
 export function extractPattern(
   toolName: string,
@@ -55,9 +85,16 @@ export function extractPattern(
     const cmd = args.command;
     return typeof cmd === "string" && cmd.length > 0 ? cmd : undefined;
   }
-  if (toolName === "write_file" || toolName === "edit_file") {
+  if (toolName === "write_file") {
     const p = args.path;
     return typeof p === "string" && p.length > 0 ? p : undefined;
+  }
+  if (toolName === "edit_file") {
+    const patch = args.patch;
+    if (typeof patch !== "string" || patch.length === 0) return undefined;
+    // First [PATH#TAG] section header — same shape as the hashline parser.
+    const m = patch.match(/^\[(.+)#[0-9a-f]{4}\]/im);
+    return m ? m[1] : undefined;
   }
   return undefined;
 }

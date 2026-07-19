@@ -9,6 +9,7 @@ import { ErrorMessage } from './error-message.js';
 import { InfoMessage } from './info-message.js';
 import { LogoBanner } from './logo-banner.js';
 import { SkillsList } from './skills-list.js';
+import { ContextPanel } from './context-panel.js';
 import { WidgetBlock } from '../widgets/widget-block.js';
 import type { WidgetSpec } from '../widgets/types.js';
 
@@ -33,20 +34,24 @@ function parseBlockWidgetSpec(props: unknown): WidgetSpec | null {
  * Structured command output (e.g. /skills) flows through here instead of being
  * ANSI-stripped into a flat assistant message.
  */
-function CustomBlock({ props }: { props: unknown }) {
+function CustomBlock({ props, contextTokens }: { props: unknown; contextTokens?: number }) {
   const p = (props ?? {}) as Record<string, unknown>;
   if (p.component === 'skills' && Array.isArray(p.skills)) {
     return <SkillsList skills={p.skills as Array<{ name: string; description: string }>} />;
+  }
+  if (p.component === 'context' && p.breakdown) {
+    return <ContextPanel breakdown={p.breakdown as import('../../../../core/context-breakdown.js').ContextBreakdown} contextTokens={contextTokens} />;
   }
   return <Text color="gray">[unknown custom block]</Text>;
 }
 
 /** Renders one feed entry by kind. */
-function FeedItem({ entry, expanded, focusedWidgetId, onWidgetAction }: {
+function FeedItem({ entry, expanded, focusedWidgetId, onWidgetAction, contextTokens }: {
   entry: FeedEntry;
   expanded: boolean;
   focusedWidgetId: string | null;
   onWidgetAction?: (spec: WidgetSpec, actionId: string, state?: Record<string, unknown>) => void;
+  contextTokens?: number;
 }) {
   switch (entry.kind) {
     case 'user':
@@ -65,7 +70,7 @@ function FeedItem({ entry, expanded, focusedWidgetId, onWidgetAction }: {
       // 'widget' blockKind is the primary case; 'custom' renders structured
       // command output (e.g. /skills). thinking/live-tool are deferred (T4-3, T4-4).
       if (entry.blockKind === 'custom') {
-        return <CustomBlock props={entry.props} />;
+        return <CustomBlock props={entry.props} contextTokens={contextTokens} />;
       }
       if (entry.blockKind !== 'widget') return <Text color="gray">[block ({entry.blockKind})]</Text>;
       const spec = parseBlockWidgetSpec(entry.props);
@@ -95,12 +100,13 @@ function FeedItem({ entry, expanded, focusedWidgetId, onWidgetAction }: {
  * gutter and keeping every line `< columns`. `useStdout` reads the live column
  * count so resize reflows correctly.
  */
-export function MessageArea({ entries, staticKey, expanded, focusedWidgetId, onWidgetAction }: {
+export function MessageArea({ entries, staticKey, expanded, focusedWidgetId, onWidgetAction, contextTokens }: {
   entries: FeedEntry[];
   staticKey: number;
   expanded: boolean;
   focusedWidgetId: string | null;
   onWidgetAction?: (spec: WidgetSpec, actionId: string, state?: Record<string, unknown>) => void;
+  contextTokens?: number;
 }) {
   const theme = useTheme();
   const { stdout } = useStdout();
@@ -124,13 +130,13 @@ export function MessageArea({ entries, staticKey, expanded, focusedWidgetId, onW
       <Static key={staticKey} items={staticEntries}>
         {(entry) => (
           <Box key={entry.id} width={itemWidth} paddingLeft={HORIZONTAL_PADDING} marginBottom={1}>
-            <FeedItem entry={entry} expanded={expanded} focusedWidgetId={focusedWidgetId} onWidgetAction={onWidgetAction} />
+            <FeedItem entry={entry} expanded={expanded} focusedWidgetId={focusedWidgetId} onWidgetAction={onWidgetAction} contextTokens={contextTokens} />
           </Box>
         )}
       </Static>
       {liveBlocks.map((entry) => (
         <Box key={entry.id} width={itemWidth} paddingLeft={HORIZONTAL_PADDING} marginBottom={1}>
-          <FeedItem entry={entry} expanded={expanded} focusedWidgetId={focusedWidgetId} onWidgetAction={onWidgetAction} />
+          <FeedItem entry={entry} expanded={expanded} focusedWidgetId={focusedWidgetId} onWidgetAction={onWidgetAction} contextTokens={contextTokens} />
         </Box>
       ))}
     </Box>
