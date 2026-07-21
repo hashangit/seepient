@@ -15,6 +15,7 @@ import { GrantStore } from "./grants.js";
 import { extractPattern } from "../foundations/grant-pattern.js";
 import { getAllToolModules } from "./tool-executor.js";
 import { getModelMeta } from "../foundations/models-catalog.js";
+import type { ActionLifecycle } from "./permissions/action-lifecycle.js";
 
 // ProviderFactory for per-skill model switching
 export interface ProviderFactory {
@@ -43,6 +44,14 @@ export interface AgentLoopOptions {
   autoConfirm?: boolean;
   /** Persisted approval grants. When set, matching calls skip the prompt. */
   grantStore?: GrantStore;
+  /**
+   * Spec 008 action-lifecycle delegate. When set, each tool call is routed
+   * through the new Domain policy pipeline (PolicyEngine → ApprovalBroker →
+   * ExecutionBoundary → audit) instead of the legacy matrix/grant/admit
+   * branches. The legacy branches remain the default until P3 wires every
+   * adapter; this is the P0/P1 ship-strategy feature flag.
+   */
+  actionLifecycle?: ActionLifecycle;
 }
 
 export interface AgentLoopError {
