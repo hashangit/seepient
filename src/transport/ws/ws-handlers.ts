@@ -1,0 +1,674 @@
+/**
+ * Seepient Server — WebSocket Protocol Handlers
+ *
+ * All handler functions, safeSend helper, and active connections registry.
+ * Extracted from websocket.ts for single-responsibility.
+ */
+
+import * as crypto from "crypto";
+import { authMiddleware, hasScope } from "../auth/auth.js";
+import type { ApiKeyEntry, KeyScope } from "../auth/auth.js";
+import { hashKey } from "../http/session-store.js";
+import type {
+  WebSocket,
+  WSServer,
+  ClientMessage,
+  ServerMessage,
+  ChatMessage,
+  ToolApprovalResponse,
+  AbortMessage,
+  ResumeMessage,
+  ReconnectMessage,
+  SwitchProviderMessage,
+  GetSettingsMessage,
+  UpdateSettingsMessage,
+  ListProvidersMessage,
+  SetProviderMessage,
+  RemoveProviderMessage,
+  WebSocketHandlerContext,
+  ConnectionState,
+} from "./ws-types.js";
+import type { PermissionLevel } from "../../foundations/types.js";
+import type { SettingsHandlerContext } from "../http/settings-handlers.js";
+import { handleWsGetSettings, handleWsUpdateSettings } from "../http/settings-handlers.js";
+
+// ── Active connections registry ──────────────────────────────────────
+
+const activeConnections = new Map<WebSocket, ConnectionState>();
+
+// ── Pending tool approvals ───────────────────────────────────────────
+
+const pendingApprovals = new Map<string, {
+  resolve: (approved: boolean) => void;
+  timer: ReturnType<typeof setTimeout>;
+  ws: WebSocket;
+  toolName: string;
+  createdAt: number;
+}>();
+
+/**
+ * Get the number of currently active WebSocket connections.
+ */
+export function getActiveConnectionCount(): number {
+  return activeConnections.size;
+}
+
+/**
+ * Get all connected WS clients (excluding the given one).
+ * Used by settings broadcast to notify other connections of changes.
+ */
+export function getOtherClients(
+  excludeWs?: WebSocket,
+): Array<{ ws: WebSocket; state: ConnectionState }> {
+  const clients: Array<{ ws: WebSocket; state: ConnectionState }> = [];
+  for (const [ws, state] of activeConnections) {
+    if (ws !== excludeWs) {
+      clients.push({ ws, state });
+    }
+  }
+  return clients;
+}
+
+// ── Send helper ──────────────────────────────────────────────────────
+
+export function safeSend(ws: WebSocket, message: ServerMessage): void {
+  try {
+    if (ws.readyState === 1 /* OPEN */) {
+      ws.send(JSON.stringify(message));
+    }
+  } catch {
+    // Connection may have closed
+  }
+}
+
+// ── Protocol handler ─────────────────────────────────────────────────
+
+export function handleConnection(
+  ws: WebSocket,
+  req: import("http").IncomingMessage,
+  ctx: WebSocketHandlerContext,
+): void {
+  // Auth check — the token should have been validated during upgrade,
+  // but verify again for safety
+  const key = authMiddleware(req);
+  if (!key) {
+    safeSend(ws, {
+      type: "error",
+      code: "UNAUTHORIZED",
+      retryable: false,
+      message: "Authentication required",
+    });
+    ws.close(4001, "Unauthorized");
+    return;
+  }
+
+  const state: ConnectionState = {
+    sessionId: null,
+    currentAbortController: null,
+    activeProvider: null,
+    activeModel: null,
+    maxPermissionLevel: ctx.maxPermissionLevel,
+    apiKeyHash: hashKey(key.key),
+    apiKey: key,
+  };
+
+  activeConnections.set(ws, state);
+
+  // ── Message dispatch ───────────────────────────────────────────────
+
+  ws.on("message", (data: Buffer) => {
+    let msg: ClientMessage;
+    try {
+      msg = JSON.parse(data.toString("utf-8")) as ClientMessage;
+    } catch {
+      safeSend(ws, {
+        type: "error",
+        code: "INVALID_MESSAGE",
+        retryable: false,
+        message: "Invalid JSON message",
+      });
+      return;
+    }
+
+    switch (msg.type) {
+      case "chat":
+        handleChat(ws, msg, state, ctx);
+        break;
+      case "abort":
+        handleAbort(ws, msg, state);
+        break;
+      case "tool_approval_response":
+        handleToolApprovalResponse(ws, msg);
+        break;
+      case "resume":
+        void handleResume(ws, msg, state, ctx);
+        break;
+      case "reconnect":
+        void handleReconnect(ws, msg, state, ctx);
+        break;
+      case "switch_provider":
+        handleSwitchProvider(ws, msg, state);
+        break;
+      case "list_models":
+        handleListModels(ws, ctx);
+        break;
+      case "list_skills":
+        handleListSkills(ws, ctx);
+        break;
+      case "ping":
+        safeSend(ws, {
+          type: "pong",
+          serverTime: new Date().toISOString(),
+        });
+        break;
+      case "get_settings":
+        handleWsSettingsMessage(ws, msg as GetSettingsMessage, state, ctx, (sCtx) =>
+          handleWsGetSettings(msg as GetSettingsMessage, ws, state, sCtx));
+        break;
+      case "update_settings":
+        handleWsSettingsMessage(ws, msg as UpdateSettingsMessage, state, ctx, (sCtx) =>
+          void handleWsUpdateSettings(msg as UpdateSettingsMessage, ws, state, sCtx));
+        break;
+      case "list_providers":
+        handleWsSettingsMessage(ws, msg as ListProvidersMessage, state, ctx, (sCtx) =>
+          handleWsListProviders(msg as ListProvidersMessage, ws, state, sCtx));
+        break;
+      case "set_provider":
+        handleWsSettingsMessage(ws, msg as SetProviderMessage, state, ctx, (sCtx) =>
+          void handleWsSetProvider(msg as SetProviderMessage, ws, state, sCtx));
+        break;
+      case "remove_provider":
+        handleWsSettingsMessage(ws, msg as RemoveProviderMessage, state, ctx, (sCtx) =>
+          void handleWsRemoveProvider(msg as RemoveProviderMessage, ws, state, sCtx));
+        break;
+      default:
+        safeSend(ws, {
+          type: "error",
+          code: "UNKNOWN_MESSAGE_TYPE",
+          retryable: false,
+          message: `Unknown message type: ${(msg as { type: string }).type}`,
+        });
+    }
+  });
+
+  // ── Close ──────────────────────────────────────────────────────────
+
+  ws.on("close", () => {
+    // Abort any in-flight stream
+    if (state.currentAbortController) {
+      state.currentAbortController.abort();
+      state.currentAbortController = null;
+    }
+    activeConnections.delete(ws);
+  });
+
+  // ── Error ──────────────────────────────────────────────────────────
+
+  ws.on("error", (err: Error) => {
+    console.error("[ws] Connection error:", err.message);
+    if (state.currentAbortController) {
+      state.currentAbortController.abort();
+      state.currentAbortController = null;
+    }
+    activeConnections.delete(ws);
+  });
+}
+
+// ── Chat handler ─────────────────────────────────────────────────────
+
+function handleChat(
+  ws: WebSocket,
+  msg: ChatMessage,
+  state: ConnectionState,
+  ctx: WebSocketHandlerContext,
+): void {
+  const serverMsgId = crypto.randomUUID();
+
+  // Acknowledge
+  safeSend(ws, {
+    type: "ack",
+    clientMsgId: msg.id,
+    serverMsgId,
+    timestamp: new Date().toISOString(),
+  });
+
+  // Create session if needed
+  if (!state.sessionId && msg.sessionId) {
+    state.sessionId = msg.sessionId;
+  }
+
+  // Set up abort controller
+  const abortController = new AbortController();
+  state.currentAbortController = abortController;
+
+  // Resolve options with connection-level overrides
+  const provider = msg.options?.provider ?? state.activeProvider ?? undefined;
+  const model = msg.options?.model ?? state.activeModel ?? undefined;
+
+  // Resolve permission level with server ceiling
+  let effectivePermissionLevel: PermissionLevel | undefined = msg.options?.permissionLevel ?? state.permissionLevel;
+  if (effectivePermissionLevel && state.maxPermissionLevel) {
+    const levels: PermissionLevel[] = ["strict", "moderate", "permissive"];
+    const maxIdx = levels.indexOf(state.maxPermissionLevel);
+    const reqIdx = levels.indexOf(effectivePermissionLevel);
+    // QA-009: Unknown levels (-1) are capped to the server ceiling
+    if (reqIdx === -1 || reqIdx > maxIdx) {
+      effectivePermissionLevel = state.maxPermissionLevel;
+    }
+  }
+
+  // Stream text
+  try {
+    ctx.streamText({
+      message: msg.message,
+      model,
+      provider,
+      tools: msg.options?.tools,
+      maxSteps: msg.options?.maxSteps ?? 10,
+      skills: msg.options?.skills,
+      sessionId: state.sessionId ?? undefined,
+      permissionLevel: effectivePermissionLevel,
+      approveTool: createServerApproveTool(ws),
+      signal: abortController.signal,
+      onText: (delta) => {
+        safeSend(ws, {
+          type: "text",
+          delta,
+          serverMsgId,
+        });
+      },
+      onToolCall: (info) => {
+        safeSend(ws, {
+          type: "tool_call",
+          callId: info.callId,
+          name: info.name,
+          args: info.args,
+        });
+      },
+      onToolResult: (info) => {
+        safeSend(ws, {
+          type: "tool_result",
+          callId: info.callId,
+          output: info.output,
+          success: info.success,
+        });
+      },
+      onStep: (step) => {
+        // Estimate progress — we don't know totalSteps ahead of time
+        safeSend(ws, {
+          type: "progress",
+          step: 0,
+          totalSteps: 0,
+          percentage: 0,
+          activity: step.content ?? step.type,
+        });
+      },
+      onError: (error) => {
+        safeSend(ws, {
+          type: "error",
+          code: error.code || "STREAM_ERROR",
+          retryable: error.code === "PROVIDER_ERROR",
+          message: error.message,
+          provider: error.provider,
+          tool: error.tool,
+        });
+      },
+      onDone: (result) => {
+        safeSend(ws, {
+          type: "done",
+          serverMsgId,
+          usage: result.usage,
+          finishReason: result.finishReason,
+        });
+
+        // Add assistant message to session
+        if (state.sessionId) {
+          const assistantMsg: import("../../foundations/types.js").Message = {
+            id: serverMsgId,
+            role: "assistant",
+            content: result.text,
+            timestamp: Date.now(),
+          };
+          ctx.sessionManager.addMessage(state.sessionId, assistantMsg);
+        }
+
+        state.currentAbortController = null;
+      },
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Stream failed";
+    safeSend(ws, {
+      type: "error",
+      code: "STREAM_ERROR",
+      retryable: false,
+      message,
+    });
+    state.currentAbortController = null;
+  }
+}
+
+// ── Abort handler ────────────────────────────────────────────────────
+
+function handleAbort(
+  ws: WebSocket,
+  _msg: AbortMessage,
+  state: ConnectionState,
+): void {
+  if (state.currentAbortController) {
+    state.currentAbortController.abort();
+    state.currentAbortController = null;
+    safeSend(ws, {
+      type: "error",
+      code: "ABORTED",
+      retryable: false,
+      message: "Request aborted by client",
+    });
+  }
+}
+
+// ── Tool approval handler ────────────────────────────────────────────
+
+const APPROVAL_TIMEOUT_MS = 30_000; // 30 seconds
+
+/**
+ * Create an `approveTool` callback for the server adapter.
+ * Sends a `tool_approval_request` to the client and waits for a
+ * `tool_approval_response`. Falls back to auto-deny on timeout.
+ */
+export function createServerApproveTool(ws: WebSocket): import("../../foundations/types.js").ApproveToolFn {
+  return async (call) => {
+    const callId = crypto.randomUUID();
+
+    safeSend(ws, {
+      type: "tool_approval_request",
+      callId,
+      name: call.name,
+      args: call.args,
+    });
+
+    return new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        pendingApprovals.delete(callId);
+        resolve(false); // Timeout → deny
+      }, APPROVAL_TIMEOUT_MS);
+
+      pendingApprovals.set(callId, { resolve, timer, ws, toolName: call.name, createdAt: Date.now() });
+    });
+  };
+}
+
+function handleToolApprovalResponse(
+  ws: WebSocket,
+  msg: ToolApprovalResponse,
+): void {
+  const pending = pendingApprovals.get(msg.callId);
+  if (!pending) return;
+
+  // QA-001: Only the originating connection may resolve the approval
+  if (pending.ws !== ws) return;
+
+  // Defense-in-depth: verify the tool name matches the pending request
+  if (msg.name !== pending.toolName) return;
+
+  // Reject expired approvals (defense-in-depth, timer should have fired)
+  if (Date.now() - pending.createdAt > APPROVAL_TIMEOUT_MS) {
+    clearTimeout(pending.timer);
+    pendingApprovals.delete(msg.callId);
+    pending.resolve(false);
+    return;
+  }
+
+  clearTimeout(pending.timer);
+  pendingApprovals.delete(msg.callId);
+  pending.resolve(msg.approved);
+}
+
+// ── Resume handler ───────────────────────────────────────────────────
+
+async function handleResume(
+  ws: WebSocket,
+  msg: ResumeMessage,
+  state: ConnectionState,
+  ctx: WebSocketHandlerContext,
+): Promise<void> {
+  const session = await ctx.sessionManager.getSession(msg.sessionId, state.apiKeyHash);
+  if (!session) {
+    safeSend(ws, {
+      type: "error",
+      code: "SESSION_NOT_FOUND",
+      retryable: false,
+      message: `Session ${msg.sessionId} not found or expired`,
+    });
+    return;
+  }
+
+  state.sessionId = msg.sessionId;
+
+  safeSend(ws, {
+    type: "session_resumed",
+    sessionId: msg.sessionId,
+    messages: session.messages,
+  });
+}
+
+// ── Reconnect handler ────────────────────────────────────────────────
+
+async function handleReconnect(
+  ws: WebSocket,
+  msg: ReconnectMessage,
+  state: ConnectionState,
+  ctx: WebSocketHandlerContext,
+): Promise<void> {
+  const session = await ctx.sessionManager.getSession(msg.sessionId, state.apiKeyHash);
+  if (!session) {
+    safeSend(ws, {
+      type: "error",
+      code: "SESSION_NOT_FOUND",
+      retryable: false,
+      message: `Session ${msg.sessionId} not found or expired`,
+    });
+    return;
+  }
+
+  state.sessionId = msg.sessionId;
+
+  // Replay messages — optionally only those after lastSeenId
+  let messages = session.messages;
+  if (msg.lastSeenId) {
+    const lastIndex = messages.findIndex((m) => m.id === msg.lastSeenId);
+    if (lastIndex !== -1) {
+      messages = messages.slice(lastIndex + 1);
+    }
+  }
+
+  safeSend(ws, {
+    type: "replay",
+    messages,
+    currentStatus: "ready",
+  });
+}
+
+// ── Switch provider handler ──────────────────────────────────────────
+
+function handleSwitchProvider(
+  ws: WebSocket,
+  msg: SwitchProviderMessage,
+  state: ConnectionState,
+): void {
+  state.activeProvider = msg.provider;
+  if (msg.model) {
+    state.activeModel = msg.model;
+  }
+
+  safeSend(ws, {
+    type: "ack",
+    clientMsgId: "",
+    serverMsgId: crypto.randomUUID(),
+    timestamp: new Date().toISOString(),
+  });
+}
+
+// ── List models handler ──────────────────────────────────────────────
+
+function handleListModels(
+  ws: WebSocket,
+  ctx: WebSocketHandlerContext,
+): void {
+  safeSend(ws, {
+    type: "models_list",
+    models: ctx.listModels(),
+  });
+}
+
+// ── List skills handler ──────────────────────────────────────────────
+
+function handleListSkills(
+  ws: WebSocket,
+  ctx: WebSocketHandlerContext,
+): void {
+  safeSend(ws, {
+    type: "skills_list",
+    skills: ctx.listSkills(),
+  });
+}
+
+// ── Settings dispatch helper ────────────────────────────────────────────
+
+function handleWsSettingsMessage(
+  ws: WebSocket,
+  _msg: ClientMessage,
+  _state: ConnectionState,
+  ctx: WebSocketHandlerContext,
+  fn: (sCtx: SettingsHandlerContext) => void,
+): void {
+  const sCtx = ctx.settingsHandlerContext;
+  if (!sCtx) {
+    safeSend(ws, {
+      type: "error",
+      code: "SERVICE_UNAVAILABLE",
+      retryable: false,
+      message: "Settings not configured",
+    });
+    return;
+  }
+  fn(sCtx);
+}
+
+// ── WS scope helper ─────────────────────────────────────────────────────
+
+function requireWsScope(state: ConnectionState, scope: KeyScope): boolean {
+  return !!state.apiKey && hasScope(state.apiKey, scope);
+}
+
+// ── WS Settings: list providers ─────────────────────────────────────────
+
+function handleWsListProviders(
+  msg: ListProvidersMessage,
+  ws: WebSocket,
+  state: ConnectionState,
+  ctx: SettingsHandlerContext,
+): void {
+  if (!requireWsScope(state, "agent:read")) {
+    safeSend(ws, { type: "providers_list", id: msg.id, providers: {}, error: { code: "FORBIDDEN", message: "Requires agent:read scope" } } as any);
+    return;
+  }
+
+  const providers: Record<string, any> = {};
+  for (const pType of ["openai", "anthropic", "glm", "openai-compatible"]) {
+    const prefix = `providers.${pType === "openai-compatible" ? "openai-compat" : pType}`;
+    const apiKeyVal = ctx.settingsManager.get(`${prefix}.apiKey`).value;
+    if (apiKeyVal != null) {
+      providers[pType] = { type: pType };
+      const model = ctx.settingsManager.get(`${prefix}.model`).value;
+      if (model) providers[pType].model = model;
+      if (pType === "openai-compatible") {
+        const baseUrl = ctx.settingsManager.get(`${prefix}.baseUrl`).value;
+        if (baseUrl) providers[pType].baseUrl = baseUrl;
+      }
+    }
+  }
+
+  safeSend(ws, { type: "providers_list", id: msg.id, providers } as any);
+}
+
+// ── WS Settings: set provider ───────────────────────────────────────────
+
+async function handleWsSetProvider(
+  msg: SetProviderMessage,
+  ws: WebSocket,
+  state: ConnectionState,
+  ctx: SettingsHandlerContext,
+): Promise<void> {
+  if (!requireWsScope(state, "admin")) {
+    safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "FORBIDDEN", message: "Requires admin scope" } } as any);
+    return;
+  }
+
+  const { type: providerType, apiKey, baseUrl, model } = msg.provider;
+  const VALID_PROVIDER_TYPES = new Set(["openai", "anthropic", "glm", "openai-compatible"]);
+  if (!providerType || !VALID_PROVIDER_TYPES.has(providerType)) {
+    safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "VALIDATION_ERROR", message: "Invalid provider type" } } as any);
+    return;
+  }
+
+  const prefix = `providers.${providerType === "openai-compatible" ? "openai-compat" : providerType}`;
+  try {
+    if (apiKey) await ctx.settingsManager.set(`${prefix}.apiKey`, apiKey);
+    if (model) await ctx.settingsManager.set(`${prefix}.model`, model);
+    if (baseUrl && providerType === "openai-compatible") await ctx.settingsManager.set(`${prefix}.baseUrl`, baseUrl);
+  } catch (e: any) {
+    safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "SET_ERROR", message: e.message } } as any);
+    return;
+  }
+
+  safeSend(ws, { type: "settings_updated", id: msg.id, applied: { [providerType]: true }, requiresRestart: false, restartAffected: [] } as any);
+}
+
+// ── WS Settings: remove provider ────────────────────────────────────────
+
+async function handleWsRemoveProvider(
+  msg: RemoveProviderMessage,
+  ws: WebSocket,
+  state: ConnectionState,
+  ctx: SettingsHandlerContext,
+): Promise<void> {
+  if (!requireWsScope(state, "admin")) {
+    safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "FORBIDDEN", message: "Requires admin scope" } } as any);
+    return;
+  }
+
+  const VALID_PROVIDER_TYPES = new Set(["openai", "anthropic", "glm", "openai-compatible"]);
+  if (!msg.providerType || !VALID_PROVIDER_TYPES.has(msg.providerType)) {
+    safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "VALIDATION_ERROR", message: "Invalid provider type" } } as any);
+    return;
+  }
+
+  const prefix = `providers.${msg.providerType === "openai-compatible" ? "openai-compat" : msg.providerType}`;
+  try {
+    await ctx.settingsManager.reset(`${prefix}.apiKey`);
+    try { await ctx.settingsManager.reset(`${prefix}.model`); } catch { /* may not exist */ }
+    try { await ctx.settingsManager.reset(`${prefix}.baseUrl`); } catch { /* may not exist */ }
+  } catch (e: any) {
+    safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "RESET_ERROR", message: e.message } } as any);
+    return;
+  }
+
+  safeSend(ws, { type: "settings_updated", id: msg.id, applied: { removed: msg.providerType }, requiresRestart: false, restartAffected: [] } as any);
+}
+
+// ── Active connections accessor (for closeWebSocket) ──────────────────
+
+/**
+ * Close all active connections and clear the registry.
+ * Used by closeWebSocket() during shutdown.
+ */
+export function closeAllConnections(): void {
+  for (const [ws] of activeConnections) {
+    try {
+      ws.close(1001, "Server shutting down");
+    } catch {
+      // Ignore errors during shutdown
+    }
+  }
+  activeConnections.clear();
+}

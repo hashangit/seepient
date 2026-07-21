@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-import type { LLMProvider, ProviderResponse } from "../providers/types.js";
+import type { LLMProvider, ProviderResponse } from "../foundations/contracts/llm.js";
 
 // Mock provider that returns a canned response
 function mockProvider(response?: Partial<ProviderResponse>): LLMProvider {
@@ -23,7 +23,7 @@ describe("SDK e2e — generateText with mock provider", () => {
     const provider = mockProvider();
 
     // Mock the provider-resolver module to inject our mock provider
-    vi.doMock("../core/provider-resolver.js", () => ({
+    vi.doMock("../domain/providers/provider-resolver.js", () => ({
       getProvider: vi.fn().mockResolvedValue({
         provider,
         model: "mock-model",
@@ -36,7 +36,7 @@ describe("SDK e2e — generateText with mock provider", () => {
       saveConfig: vi.fn(),
     }));
 
-    const { generateText } = await import("../adapters/sdk/index.js");
+    const { generateText } = await import("../transport/sdk/index.js");
 
     const result = await generateText("Say hello", {
       tools: [],
@@ -51,7 +51,7 @@ describe("SDK e2e — generateText with mock provider", () => {
   it("fires hooks through the loop", async () => {
     const provider = mockProvider();
 
-    vi.doMock("../core/provider-resolver.js", () => ({
+    vi.doMock("../domain/providers/provider-resolver.js", () => ({
       getProvider: vi.fn().mockResolvedValue({
         provider,
         model: "mock-model",
@@ -64,7 +64,7 @@ describe("SDK e2e — generateText with mock provider", () => {
       saveConfig: vi.fn(),
     }));
 
-    const { generateText } = await import("../adapters/sdk/index.js");
+    const { generateText } = await import("../transport/sdk/index.js");
 
     const onStep = vi.fn();
     const onError = vi.fn();
@@ -87,7 +87,7 @@ describe("SDK e2e — generateText with mock provider", () => {
     });
     const provider = { chat: chatFn } as unknown as LLMProvider;
 
-    vi.doMock("../core/provider-resolver.js", () => ({
+    vi.doMock("../domain/providers/provider-resolver.js", () => ({
       getProvider: vi.fn().mockResolvedValue({
         provider,
         model: "mock-model",
@@ -100,7 +100,7 @@ describe("SDK e2e — generateText with mock provider", () => {
       saveConfig: vi.fn(),
     }));
 
-    const { generateText } = await import("../adapters/sdk/index.js");
+    const { generateText } = await import("../transport/sdk/index.js");
 
     await generateText("Hello", {
       tools: [],
@@ -135,7 +135,7 @@ describe("SDK e2e — chatStream with a streaming provider", () => {
       },
     } as unknown as LLMProvider;
 
-    vi.doMock("../core/provider-resolver.js", () => ({
+    vi.doMock("../domain/providers/provider-resolver.js", () => ({
       getProvider: vi.fn().mockResolvedValue({ provider, model: "mock-model" }),
       configureProviders: vi.fn(),
       provider: vi.fn(),
@@ -145,7 +145,7 @@ describe("SDK e2e — chatStream with a streaming provider", () => {
       saveConfig: vi.fn(),
     }));
 
-    const { createAgent } = await import("../adapters/sdk/index.js");
+    const { createAgent } = await import("../transport/sdk/index.js");
     const agent = await createAgent({ tools: [], maxSteps: 1 });
 
     const result = await agent.chatStream("hi");

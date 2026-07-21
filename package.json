@@ -2,41 +2,39 @@
   "name": "seepient",
   "version": "0.3.2",
   "type": "module",
-  "main": "dist/adapters/cli/index.js",
+  "main": "dist/ui/cli/index.js",
   "exports": {
     ".": {
-      "import": "./dist/adapters/sdk/index.js",
-      "types": "./dist/adapters/sdk/index.d.ts"
+      "import": "./dist/transport/sdk/index.js",
+      "types": "./dist/transport/sdk/index.d.ts"
     },
     "./server": {
-      "import": "./dist/adapters/server/index.js",
-      "types": "./dist/adapters/server/index.d.ts"
+      "import": "./dist/transport/http/index.js",
+      "types": "./dist/transport/http/index.d.ts"
     }
   },
-  "types": "./dist/adapters/sdk/index.d.ts",
+  "types": "./dist/transport/sdk/index.d.ts",
   "bin": {
-    "seepient": "dist/adapters/cli/index.js",
-    "seepient-server": "dist/adapters/server/standalone.js"
+    "seepient": "dist/ui/cli/index.js",
+    "seepient-server": "dist/transport/http/standalone.js"
   },
   "scripts": {
     "build": "tsc",
-    "start": "node dist/adapters/cli/index.js",
-    "server": "node dist/adapters/server/standalone.js",
-    "dev": "tsx src/adapters/cli/index.ts",
-    "dev:server": "tsx src/adapters/server/standalone.ts",
+    "start": "node dist/ui/cli/index.js",
+    "server": "node dist/transport/http/standalone.js",
+    "dev": "tsx src/ui/cli/index.ts",
+    "dev:server": "tsx src/transport/http/standalone.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "prepublishOnly": "pnpm run build"
   },
   "files": [
-    "dist/core",
-    "dist/adapters",
-    "dist/providers",
-    "dist/tools",
-    "dist/skills",
-    "dist/gateway",
-    "dist/models-catalog.js",
+    "dist/foundations",
+    "dist/capabilities",
+    "dist/domain",
+    "dist/transport",
+    "dist/ui",
     "skills",
     "README.md",
     "CHANGELOG.md",
