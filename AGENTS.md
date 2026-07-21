@@ -140,7 +140,9 @@ UI → Transport → Domain → Capabilities → Vendors
 | **Vendors** | `src/vendors/` | Third-party SDK wrappers, quarantined |
 | **Foundations** | `src/foundations/` | Shared types, errors, contracts, settings-schema, hashline, persistence |
 
-Composition roots (CLI bin, server standalone, SDK index) may wire across all layers — for wiring only, no logic.
+**Hard rules:** no layer-skipping, no importing upward, no `utils/` grab-bag; no service-SDK import outside `src/vendors/`; sibling capabilities never import each other (shared vocabulary moves to `foundations/contracts/`); kebab-case file/folder names everywhere. UI frameworks (Ink, React, Commander, ws, figlet) are the sanctioned substrate of `ui/`.
+
+**Composition roots** may wire across all layers — for wiring only, no logic. Sanctioned roots: CLI (`src/ui/cli/index.ts`, `src/transport/cli/bootstrap.ts`, `agent.ts`), TUI (`src/ui/tui/index.tsx`, `hooks/use-agent.ts`), REPL (`src/ui/repl/repl.ts`), Server (`src/transport/http/index.ts`, `server-core.ts`, `standalone.ts`), SDK (`src/transport/sdk/index.ts`, `agent.ts`). Tolerated type-only edges: transport commands importing `SkillRegistry`/`Target` types, `rest-gateway.ts` gateway types.
 
 ## Key Files
 
