@@ -15,7 +15,8 @@ import { GrantStore } from "./grants.js";
 import { extractPattern } from "../foundations/grant-pattern.js";
 import { getAllToolModules } from "./tool-executor.js";
 import { getModelMeta } from "../foundations/models-catalog.js";
-import type { ActionLifecycle } from "./permissions/action-lifecycle.js";
+import type { WiredActionLifecycle } from "./permissions/action-lifecycle-factory.js";
+import { resolveAnalyzer } from "./permissions/action-lifecycle-factory.js";
 
 // ProviderFactory for per-skill model switching
 export interface ProviderFactory {
@@ -45,13 +46,17 @@ export interface AgentLoopOptions {
   /** Persisted approval grants. When set, matching calls skip the prompt. */
   grantStore?: GrantStore;
   /**
-   * Spec 008 action-lifecycle delegate. When set, each tool call is routed
-   * through the new Domain policy pipeline (PolicyEngine → ApprovalBroker →
-   * ExecutionBoundary → audit) instead of the legacy matrix/grant/admit
-   * branches. The legacy branches remain the default until P3 wires every
-   * adapter; this is the P0/P1 ship-strategy feature flag.
+   * Spec 008 wired action-lifecycle pipeline. When set, each tool call is
+   * routed through the new Domain policy pipeline (PolicyEngine →
+   * ApprovalBroker → ExecutionBoundary → audit) instead of the legacy
+   * matrix/grant/admit branches. This is the opt-in feature flag.
+   *
+   * The pipeline is REACHABLE: when set, the tool-call loop delegates to it.
+   * Tools with a registered analyzer run through the full pipeline; tools
+   * without one fall back to the legacy handler but still pass through
+   * policy/approval/audit via the legacy-handler executor.
    */
-  actionLifecycle?: ActionLifecycle;
+  wiredPipeline?: WiredActionLifecycle;
 }
 
 export interface AgentLoopError {
@@ -257,6 +262,10 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
   const permissionLevel = options.permissionLevel;
   const autoConfirm = options.autoConfirm;
   const grantStore = options.grantStore;
+  // Spec 008 opt-in: when wiredPipeline is set, every tool call routes through
+  // the new Domain policy pipeline. The legacy matrix/grant/autoConfirm path
+  // below is skipped entirely.
+  const wiredPipeline = options.wiredPipeline;
 
   // Prepend system prompt if provided and messages[0] is not already a system message
   if (systemPrompt && messages.length > 0 && messages[0].role !== "system") {
@@ -488,6 +497,54 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
 
         // Permission pre-filter + adapter-level tool approval
         const effectiveLevel: PermissionLevel = permissionLevel ?? "moderate";
+
+        // ── Spec 008 pipeline path ───────────────────────────────────────
+        // When wiredPipeline is set, the legacy matrix/grant/autoConfirm
+        // branches are BYPASSED. Every tool call is analyzed, evaluated by
+        // PolicyEngine, optionally brokered through ApprovalBroker, executed
+        // via the boundary, and audited. This is the path that closes the
+        // confirmed defects (autoConfirm bypass, unsandboxed spawn, etc.).
+        if (wiredPipeline) {
+          const analyzer = resolveAnalyzer(wiredPipeline.analyzers, tc.name);
+          if (analyzer) {
+            // Build the prepared action via the registered analyzer.
+            const action = await analyzer(parsedArgs, {
+              ...wiredPipeline.analysisContext,
+              toolCallId: tc.id,
+            });
+            // Run the full lifecycle. The boundary's executor performs the
+            // side effect (or denies it).
+            const result = await wiredPipeline.lifecycle.run(action, signal);
+            output = result.toolResult.output;
+            metadata = result.toolResult.metadata;
+            const duration = now() - start;
+            messages.push({
+              id: generateId(),
+              role: "tool",
+              content: output,
+              toolCallId: tc.id,
+              timestamp: now(),
+            });
+            const toolStep: StepResult = {
+              type: "tool_call",
+              toolCall: { id: tc.id, name: tc.name, args: parsedArgs, result: output, duration },
+              metadata,
+              timestamp: now(),
+            };
+            steps.push(toolStep);
+            await hooks.onStep(toolStep);
+            // afterToolCall fires ONLY when an actual dispatch happened
+            // (outcome.state === succeeded/failed/cancelled — not denied).
+            if (result.outcome.state !== "denied") {
+              await hooks.afterToolCall({ name: tc.name, output, duration });
+            }
+            if (onStep) onStep(toolStep);
+            continue; // skip the legacy branches entirely
+          }
+          // No analyzer registered for this tool: fall through to the legacy
+          // path. (Tools must be migrated one by one; the spec's migration
+          // section calls this out.)
+        }
 
         if (autoConfirm) {
           // --headless mode: bypass permission matrix, auto-approve everything

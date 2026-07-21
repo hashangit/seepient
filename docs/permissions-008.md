@@ -3,10 +3,32 @@
 This document describes the spec-008 permission system: what changed, how to
 operate it, and how to migrate from the legacy grant model.
 
-## What changed
+## Current status (read this first)
 
-Spec 008 replaces the parallel matrix/grant/admit/autoConfirm permission paths
-with **one Domain-owned action policy pipeline**:
+The spec-008 pipeline is **implemented and wired but opt-in**. Two code paths
+coexist:
+
+- **Legacy path** (default): the matrix/grant/admit/autoConfirm branches in
+  `runAgentLoop`. The six confirmed defects in spec §"Confirmed current
+  defects" remain live on this path.
+- **Spec-008 path** (opt-in via `wiredPipeline`): the new Domain-owned
+  pipeline. When `wiredPipeline` is set on `AgentLoopOptions`, every tool call
+  with a registered analyzer routes through PolicyEngine → ApprovalBroker →
+  ExecutionBoundary → audit, bypassing the legacy branches entirely. End-to-
+  end proof: `src/transport/__tests__/agent-loop-pipeline.e2e.test.ts`.
+
+Tools with a registered analyzer (`write_file`, `read_file`,
+`execute_shell_command`, `send_email`, `web_search`, `send_notification`,
+`read_website`, `generate_image`) use the new path when the flag is set. Tools
+without an analyzer fall through to the legacy path until migrated.
+
+The default is NOT yet flipped to the new path. Operators who want the
+security guarantees today must construct a `WiredActionLifecycle` (via
+`buildActionLifecycle`) and pass it as `wiredPipeline`.
+
+## What the new pipeline does
+
+When `wiredPipeline` is set, each tool call follows:
 
 ```
 tool call
@@ -19,9 +41,9 @@ tool call
   → one terminal audit outcome
 ```
 
-There is no `autoConfirm` bypass, no separate `admitTool`, no post-preflight
-risk matrix, and no second grant check. `approvalMode` is an input to the one
-policy evaluation.
+On this path there is no `autoConfirm` bypass, no separate `admitTool`, no
+post-preflight risk matrix, and no second grant check. `approvalMode` is an
+input to the one policy evaluation.
 
 ## Effective authority
 

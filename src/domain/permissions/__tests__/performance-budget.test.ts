@@ -1,11 +1,18 @@
 /**
- * P6 performance measurement (spec 008, T603, NFR-005).
+ * P6 performance microbenchmark (spec 008, T603, NFR-005).
  *
- * Measures analyzer + policy overhead per action. NFR-005 targets ≤5 ms/tool
- * excluding filesystem snapshots. This is a measurement, not a correctness
- * condition — the test publishes p50/p95 and asserts the budget is met on
- * the host running CI. Slow CI runners are allowed to exceed; the numbers
- * are always printed for visibility.
+ * Measures the in-process CPU cost of `digestAction + PolicyEngine.evaluate`
+ * on the fast allow-path (capability already present). This is a COMPONENT
+ * measurement, NOT the end-to-end per-tool overhead. It EXCLUDES:
+ *  - filesystem canonicalization (realpath + lstat in the analyzer)
+ *  - artifact store writes (content hashing)
+ *  - audit fsync (the dominant cost in the real path)
+ *  - approval-broker round-trips
+ *
+ * NFR-005 targets ≤5 ms/tool excluding snapshots for the policy/analyzer
+ * component specifically. The end-to-end budget (including audit fsync) is
+ * a separate measurement that requires the pipeline to be wired into the
+ * real call path with a real audit store; that measurement is pending.
  */
 import { describe, it, expect } from "vitest";
 import { PolicyEngine } from "../policy-engine.js";
@@ -98,8 +105,8 @@ describe("performance budget (T603, NFR-005)", () => {
     const p95 = percentile(samples, 95);
     // eslint-disable-next-line no-console
     console.log(`[T603] analyzer+policy overhead: p50=${p50.toFixed(3)}ms p95=${p95.toFixed(3)}ms (n=${iterations})`);
-    // NFR-005 target: ≤5 ms excluding snapshots. Allow generous headroom for
-    // slow CI; print the numbers regardless.
+    // NFR-005 component target: ≤5 ms for the policy/analyzer CPU work.
+    // This does NOT include audit fsync or filesystem I/O; see file header.
     expect(p50).toBeLessThan(50);
     expect(p95).toBeLessThan(100);
   });

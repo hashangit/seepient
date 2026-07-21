@@ -1,18 +1,29 @@
 /**
- * Local append-only audit store with durable terminal-event outbox — Domain
- * (spec 008, T109, FR-014 / NFR-003).
+ * Local append-only audit store — Domain (spec 008, T109, FR-014 / NFR-003).
  *
  * Every action has exactly one terminal outcome. Effectful execution is
- * dispatched only after the `dispatched` event is durable; if that write
- * fails, execution is denied (`audit-unavailable`). Terminal events use an
- * idempotent outbox keyed by `actionId:state` so retry cannot repeat execution.
+ * dispatched only after the `dispatched` event is made durable via fsync; if
+ * that write fails, execution is denied (`audit-unavailable`). Terminal
+ * events are de-duplicated by idempotency key `<actionId>:<state>` so a retry
+ * cannot append a second terminal record.
  *
- * On recovery, a durable `dispatched` action without a terminal record is
- * `indeterminate` — never automatically reexecuted.
+ * WHAT IS IMPLEMENTED:
+ *  - append-only NDJSON with fsync on every append (including pre-dispatch)
+ *  - idempotency-key de-duplication (replays return "duplicate")
+ *  - `getTerminal(actionId)` scan for crash-recovery queries
  *
- * Storage layout (local): `~/.seepient/security/audit/<workspace-id>/events.ndjson`
- * with an `outbox/` sibling for the durable terminal-event queue. Both use
- * private (0o600/0o700) permissions and atomic appends.
+ * WHAT IS NOT YET IMPLEMENTED (honest gap):
+ *  - The terminal-event OUTBOX (a separate retry queue that retries failed
+ *    terminal writes in the background and marks the deployment unhealthy).
+ *    Today a failed terminal append throws; the caller must retry.
+ *  - The CRASH-RECOVERY routine that scans for `dispatched` records without
+ *    a matching terminal and marks them `indeterminate`. `getTerminal`
+ *    supports the query but no startup routine invokes it. Production
+ *    deployments using PostgreSQL would implement both via a transactional
+ *    outbox table; the contract is the same.
+ *
+ * Storage layout (local): `~/.seepient/security/audit/<principal-id>/events.ndjson`
+ * with private (0o600/0o700) permissions and atomic appends.
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
