@@ -1,0 +1,104 @@
+# Seepient reference deployment — permission system 008 (T410, FR-017/FR-018).
+#
+# This is the spec-008 control-plane/scheduler/worker/broker topology, distinct
+# from the simple single-container `docker-compose.yml`. Use this for multi-
+# tenant or untrusted tool execution; the simple compose remains for trusted
+# single-user server mode.
+#
+# Topology:
+#   - control-plane: HTTP/WS + LLM clients + policy + durable stores. NO Docker
+#     socket, NO model-authored execution.
+#   - scheduler: the ONLY Docker-socket holder. Launches ephemeral immutable
+#     worker images per run/session lease.
+#   - effect-broker: the ONLY network egress for workers. Typed HTTP/external-
+#     send operations; validates action-bound worker leases.
+#   - db: PostgreSQL transactions for active policy, pending approvals,
+#     continuations, dispatch idempotency, results, audit, terminal outbox.
+#
+# The Docker socket is mounted ONLY in `scheduler`. Control plane and worker
+# never receive it. Workers reach ONLY the effect-broker on `broker-net`.
+
+version: "3.9"
+
+services:
+  control-plane:
+    image: seepient/control-plane:${SEEPIENT_VERSION:-latest}
+    read_only: true
+    user: "10001:10001"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GLM_API_KEY=${GLM_API_KEY}
+      - DATABASE_URL=postgres://seepient:${DB_PASSWORD}@db:5432/seepient
+      - SEEPIENT_WORKER_SCHEDULER_ENDPOINT=scheduler:7000
+      - SEEPIENT_BROKER_ENDPOINT=http://effect-broker:7001
+    ports:
+      - "7337:7337"
+    networks: [control-net, broker-net]
+    volumes:
+      - policy-data:/var/lib/seepient/security:rw
+    depends_on: [db, scheduler]
+    security_opt: [no-new-privileges:true]
+    deploy:
+      resources:
+        limits: { cpus: "2.0", memory: 1G }
+
+  scheduler:
+    image: seepient/scheduler:${SEEPIENT_VERSION:-latest}
+    read_only: true
+    user: "10002:10002"
+    environment:
+      - SEEPIENT_CONTROL_PLANE_ID=control-plane-1
+      - SEEPIENT_WORKER_IMAGE=seepient/worker:${SEEPIENT_VERSION:-latest}
+      - SEEPIENT_WORKER_IMAGE_DIGEST=${WORKER_IMAGE_DIGEST}
+    volumes:
+      # Docker socket — ONLY in the scheduler service.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - worker-workspaces:/var/lib/seepient/workspaces:rw
+    networks: [control-net, broker-net]
+    ports: ["7000:7000"]
+    security_opt: [no-new-privileges:true]
+
+  effect-broker:
+    image: seepient/effect-broker:${SEEPIENT_VERSION:-latest}
+    read_only: true
+    user: "10003:10003"
+    environment:
+      - SEEPIENT_CONNECTOR_SECRETS=/run/secrets/connectors
+      - ALLOWED_NETWORKS=broker-net
+    networks: [broker-net]
+    ports: ["7001:7001"]
+    secrets: [connectors]
+    security_opt: [no-new-privileges:true]
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=seepient
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=seepient
+    volumes:
+      - pg-data:/var/lib/postgresql/data:rw
+    networks: [control-net]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "seepient"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+networks:
+  control-net:
+    driver: bridge
+  broker-net:
+    driver: bridge
+    # Workers attach to broker-net and can reach ONLY effect-broker.
+    # Public-internet egress is brokered by effect-broker, not direct.
+
+volumes:
+  policy-data:
+  pg-data:
+  worker-workspaces:
+
+secrets:
+  connectors:
+    file: ./secrets/connectors.json

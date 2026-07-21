@@ -98,14 +98,14 @@ Current layout of the Obsidian vault (annotated):
 │   │   ├── contracts/                   # sandbox-api.md, server-policy.md, tui-escalation.md
 │   │   ├── quickstart.md                # Per-phase validation scenarios
 │   │   └── tasks.md                     # Dependency-ordered implementation tasks
-│   └── 009-agents-md-alignment/      # AGENTS.md loader + .agents/skills/ direct discovery (v2 — no bridge)
-│       ├── spec.md                   # Problem, scope (on-by-default), Codex startup discovery, trust hierarchy
-│       ├── plan.md                   # P1 (loader+composer+skills edits) → P2 (5 adapter paths) → P3 (resume+settings)
-│       ├── research.md               # Codex semantics + compatibility matrix (not "convergence") + 5-path integration surface
-│       ├── data-model.md             # AgentInstructionFile, findWorkspaceRoot, Domain composer, resume re-seed
-│       ├── contracts/                # agents-md-loader.md, domain-composer.md, system-prompt-composition.md
-│       ├── quickstart.md             # ~34 deterministic scenarios, all 5 adapter paths, resume, no grep -v
-│       └── tasks.md                  # 39 dependency-ordered tasks, 13 regression gates
+│   └── 009-agents-md-alignment/      # AGENTS.md loader only (v3 — .agents/skills/ moves to separate spec)
+│       ├── spec.md                   # Codex startup discovery, 4-layer trust hierarchy, drop-whole byte budget
+│       ├── plan.md                   # P1 (loader+composer+resolver) → P2 (settings) → P3 (5 adapters) → P4 (trust+/context)
+│       ├── research.md               # Codex semantics + compatibility matrix + R2 blocker disposition
+│       ├── data-model.md             # AgentInstructionFile, FsAdapter, resolveSystemContext, resume re-resolve
+│       ├── contracts/                # agents-md-loader.md, domain-composer.md, resolve-system-context.md, system-prompt-composition.md
+│       ├── quickstart.md             # ~37 deterministic scenarios (no process.chdir, no chmod, no grep -v)
+│       └── tasks.md                  # 40 dependency-ordered tasks, 14 regression gates
 ├── 010-provider-management-redesign/ # Provider mgmt redesign: contracts + runtime + purpose/tier routing
 │   ├── spec.md                       # Problem, 5 blockers + 4 gaps, scope decisions, success criteria
 │   ├── plan.md                       # P0-P7 phased plan (contracts → Pi adapter → runtime → resolution → surfaces → reliability)
@@ -344,13 +344,17 @@ shell commands, and other important information, read the current plan:
   a governed self-evolution activation boundary. Prior
   plan: `specs/007-tui-parity-upgrade/` (TUI parity — shipped).
 - **UPCOMING (planned, not yet in implementation)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/009-agents-md-alignment/plan.md`
-  — AGENTS.md standard alignment (v2, reworked after R1 review): Codex-compatible
-  startup discovery (root → cwd walk, one file per directory, `AGENTS.override.md`
-  replaces at level, 32 KiB byte budget); `.agents/skills/` added to the existing
-  skills loader as direct discovery paths (no bridge — Dirent.isDirectory() is
-  false for symlinks, so a bridge cannot work); one Domain composer routes all
-  five adapter paths (CLI, SDK×3, HTTP×2); resume re-seeds; trust hierarchy
-  base > project > skills. Based on `008-upgrade`, not `main`.
+  — AGENTS.md standard alignment (v3, scope-narrowed after R2 review):
+  Codex-compatible startup discovery (root → cwd walk, one file per directory,
+  `AGENTS.override.md` replaces at level, 32 KiB drop-whole byte budget — a
+  labeled Seepient divergence); one Domain `resolveSystemContext()` routes all
+  five adapter paths (CLI, SDK×3, HTTP×2); resume re-runs the resolver against
+  current cwd (no stale/cross-project instructions); four-layer trust hierarchy
+  (runtime safety > explicit user prompt > project guidance > skill catalog,
+  enforced by the permission system not by prompt position); two settings
+  (`instructions.agentsMd.enabled`, `instructions.agentsMd.maxBytes`); HTTP
+  accepts explicit `workspaceRoot`. **AGENTS.md only — `.agents/skills/`
+  discovery is a separate future spec.** Based on `008-upgrade` at a clean SHA.
 - **UPCOMING (planned, not yet in implementation)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/010-provider-management-redesign/plan.md`
   — Provider management redesign: contract layer resolving the 5-blocker review
   (canonical inference contracts, normative config schema, aggregate media
