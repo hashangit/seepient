@@ -23,7 +23,7 @@ import type {
   WorkerScheduler,
   SchedulerAuthContext,
 } from "../../foundations/contracts/worker-protocol.js";
-import type { DockerEngine, MountAllowlist, ImageAllowlist, WorkerLimits } from "../../vendors/docker/index.js";
+import type { DockerEngine, MountAllowlist, ImageAllowlist, WorkerLimits, WorkspaceTenantRegistry } from "../../vendors/docker/index.js";
 import { DEFAULT_WORKER_LIMITS } from "../../vendors/docker/index.js";
 import { validateDispatch, resolveMount } from "../../vendors/docker/index.js";
 import { WorkerSchedulerError } from "../../foundations/errors.js";
@@ -32,6 +32,8 @@ export interface DockerWorkerSchedulerOptions {
   engine: DockerEngine;
   images: ImageAllowlist;
   mounts: MountAllowlist;
+  /** Workspace-tenant binding registry — the QS-4.2 tenant-isolation gate. */
+  registry?: WorkspaceTenantRegistry;
   limits?: WorkerLimits;
   /** Default worker image ref (digest-verified at create time). */
   defaultImage: string;
@@ -105,10 +107,11 @@ export class DockerWorkerScheduler implements WorkerScheduler {
         { dispatchId: req.dispatchId },
       );
     }
-    // 6. Validate against allowlists.
+    // 6. Validate against allowlists + tenant registry.
     const validation = validateDispatch(req, {
       images: this.opts.images,
       mounts: this.opts.mounts,
+      registry: this.opts.registry,
       limits: this.limits,
     });
     if (!validation.ok) {

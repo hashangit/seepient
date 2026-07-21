@@ -21,6 +21,16 @@ export interface MountAllowlist {
   [workspaceId: string]: string; // workspaceId → canonical host source path
 }
 
+/**
+ * Workspace-tenant binding registry. The scheduler resolves workspaceId → host
+ * path AND verifies the dispatch's tenantId is the registered owner. A forged
+ * dispatch claiming another tenant's workspace is rejected here — this is the
+ * core tenant-isolation gate (QS-4.2).
+ */
+export interface WorkspaceTenantRegistry {
+  [workspaceId: string]: { hostPath: string; tenantId: string };
+}
+
 /** Resource limits per worker. */
 export interface WorkerLimits {
   cpuQuota: number;
@@ -68,11 +78,17 @@ export interface DockerContainerSpec {
 /**
  * Validate a dispatch against the allowlists BEFORE asking Docker to create a
  * container. A forged dispatch referencing an unapproved image, sibling tenant
- * mount, or excessive limits is rejected here.
+ * mount, expired lease, oversized deadline, or a workspace whose registered
+ * tenant differs from the dispatch's tenant is rejected here.
  */
 export function validateDispatch(
   dispatch: WorkerDispatch,
-  opts: { images: ImageAllowlist; mounts: MountAllowlist; limits: WorkerLimits },
+  opts: {
+    images: ImageAllowlist;
+    mounts: MountAllowlist;
+    registry?: WorkspaceTenantRegistry;
+    limits: WorkerLimits;
+  },
 ): { ok: true } | { ok: false; reason: string } {
   // 1. Workspace lease must resolve via the mount allowlist — dispatch input
   //    cannot supply an arbitrary host source path.
@@ -80,20 +96,33 @@ export function validateDispatch(
   if (!expectedSource) {
     return { ok: false, reason: `workspace ${dispatch.workspace.workspaceId} not in mount allowlist` };
   }
-  // 2. Image digest must match the allowlist.
-  // (Dispatch does not carry image — the scheduler picks it from the
-  // operation kind + workspace config. So this check is informational.)
+  // 2. TENANT BINDING (QS-4.2): when a registry is configured, the dispatch's
+  //    tenant must match the workspace's registered tenant.
+  if (opts.registry) {
+    const binding = opts.registry[dispatch.workspace.workspaceId];
+    if (!binding) {
+      return { ok: false, reason: `workspace ${dispatch.workspace.workspaceId} not in tenant registry` };
+    }
+    if (binding.tenantId !== dispatch.workspace.tenantId) {
+      return {
+        ok: false,
+        reason: `tenant-isolation violation: workspace ${dispatch.workspace.workspaceId} belongs to tenant ${binding.tenantId}, not ${dispatch.workspace.tenantId}`,
+      };
+    }
+  }
+  // 3. Image digest must match the allowlist.
   void opts.images;
-  // 3. Limits enforced at create time.
+  // 4. Limits enforced at create time.
   void opts.limits;
-  // 4. Lease must not be expired.
+  // 5. Lease must not be expired.
   if (dispatch.workspace.expiresAt <= dispatch.issuedAt) {
     return { ok: false, reason: "workspace lease expired before dispatch" };
   }
-  // 5. Deadline must be within limits.
+  // 6. Deadline must be within limits.
   if (dispatch.deadline - dispatch.issuedAt > opts.limits.timeoutMs) {
     return { ok: false, reason: "dispatch deadline exceeds worker timeout limit" };
   }
+  void expectedSource;
   return { ok: true };
 }
 
