@@ -16,6 +16,9 @@ import type { Message, StepResult, Usage, ToolCall, ApproveToolFn, PermissionLev
 import { persistSession } from '../../domain/sessions/session-store.js';
 import type { GrantStore } from '../../domain/grants.js';
 import type { Middleware } from '../../foundations/contracts/middleware.js';
+import type { Capability, CapabilitySet } from '../../foundations/contracts/permission-policy.js';
+import type { PolicyStore } from '../../foundations/contracts/execution-brokers.js';
+import type { PolicySnapshot } from '../../foundations/contracts/execution-brokers.js';
 
 /**
  * Outcome of a single `Agent.chat()` turn. Returned so non-readline callers
@@ -45,6 +48,10 @@ export class Agent {
   private readonly providerType: ProviderType | undefined;
   private readonly persistence: PersistenceBackend | null;
   private _grantStore: GrantStore | null = null;
+  // Spec 008 protected policy store + pending proposals (T307).
+  private _policyStore: PolicyStore | null = null;
+  private _workspaceId: string | null = null;
+  private _policyProposals: Array<{ id: string; capability: Capability }> = [];
   private sessionId: string;
 
   constructor(
@@ -140,6 +147,77 @@ export class Agent {
 
   getGrantStore(): GrantStore | null {
     return this._grantStore;
+  }
+
+  // ── Spec 008 protected policy store accessors (T307) ─────────────────
+  // These route active-policy mutations exclusively through
+  // PolicyStore.compareAndSet — the trusted administrative flow. Proposals
+  // are inert until /permissions approve writes them outside executor roots.
+
+  /** Attach the protected PolicyStore (composition root wires LocalPolicyStore). */
+  setPolicyStore(store: PolicyStore, workspaceId: string): void {
+    this._policyStore = store;
+    this._workspaceId = workspaceId;
+  }
+
+  getPolicyStore(): PolicyStore | null {
+    return this._policyStore;
+  }
+
+  /** Stage an inert capability proposal (does NOT touch active policy). */
+  async stagePolicyProposal(capability: Capability): Promise<string> {
+    const id = generateId().slice(0, 8);
+    this._policyProposals.push({ id, capability });
+    return id;
+  }
+
+  /** All pending proposals (inert). */
+  listPolicyProposals(): Array<{ id: string; capability: Capability }> {
+    return this._policyProposals;
+  }
+
+  /** Approve a proposal → writes active policy via compare-and-set. */
+  async approvePolicyProposal(id: string): Promise<PolicySnapshot> {
+    if (!this._policyStore || !this._workspaceId) {
+      throw new Error('Protected policy store not configured');
+    }
+    const idx = this._policyProposals.findIndex((p) => p.id === id);
+    if (idx === -1) throw new Error(`No proposal "${id}"`);
+    const proposal = this._policyProposals[idx];
+    const current = await this._policyStore.read(this._workspaceId);
+    const next: CapabilitySet = {
+      version: 1,
+      capabilities: [...current.policy.capabilities, proposal.capability],
+    };
+    const snap = await this._policyStore.compareAndSet(
+      this._workspaceId,
+      current.version,
+      next,
+      { kind: 'human', authorityId: 'operator', authenticatedBy: 'cli' },
+    );
+    this._policyProposals.splice(idx, 1);
+    return snap;
+  }
+
+  /** Revoke the capability at an index in the active policy. */
+  async revokePolicyCapability(index: number): Promise<PolicySnapshot> {
+    if (!this._policyStore || !this._workspaceId) {
+      throw new Error('Protected policy store not configured');
+    }
+    const current = await this._policyStore.read(this._workspaceId);
+    if (index < 0 || index >= current.policy.capabilities.length) {
+      throw new Error(`Index ${index} out of range (0..${current.policy.capabilities.length - 1})`);
+    }
+    const next: CapabilitySet = {
+      version: 1,
+      capabilities: current.policy.capabilities.filter((_, i) => i !== index),
+    };
+    return this._policyStore.compareAndSet(
+      this._workspaceId,
+      current.version,
+      next,
+      { kind: 'human', authorityId: 'operator', authenticatedBy: 'cli' },
+    );
   }
 
   async chat(

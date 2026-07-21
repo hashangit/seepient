@@ -103,10 +103,34 @@ export function PermissionPrompt({ toolName, args, approvalContext, onResolve }:
         <Text color={theme.fgDim}> ── {toolName} · {riskLabel(toolName, args)}</Text>
       </Box>
 
-      {/* Description (LLM-authored) */}
+      {/* Deterministic facts (spec 008 T306/FR-021) — tamper-proof, derived
+          from the prepared action, NOT from LLM-authored text. The target,
+          effect, and boundary are what the user is actually approving. */}
+      <Box flexDirection="column" marginTop={0}>
+        {actual ? (
+          <Box>
+            <Text color={theme.cyan}>  Target  </Text>
+            <Text color={theme.fg}>{truncate(actual, 100)}</Text>
+          </Box>
+        ) : null}
+        <Box>
+          <Text color={theme.cyan}>  Effect  </Text>
+          <Text color={theme.fg}>{effectLabel(toolName, args)}</Text>
+        </Box>
+        <Box>
+          <Text color={theme.cyan}>  Expires </Text>
+          <Text color={theme.fgDim}>when this action completes (other paths remain denied)</Text>
+        </Box>
+      </Box>
+
+      {/* Description (LLM-authored) — explicitly labelled UNTRUSTED per FR-021.
+          It cannot alter the displayed target/effect/boundary above. */}
       {description ? (
-        <Box marginTop={0}>
-          <Text color={theme.fgDim}>{description}</Text>
+        <Box marginTop={1}>
+          <Text color={theme.fgDim}>
+            <Text color={theme.yellow} bold>Agent rationale (untrusted): </Text>
+            {description}
+          </Text>
         </Box>
       ) : null}
 
@@ -177,6 +201,20 @@ function riskLabel(toolName: string, args: Record<string, unknown>): string {
   if (toolName === 'execute_shell_command') return 'destructive';
   if (toolName === 'write_file' || toolName === 'edit_file' || toolName === 'generate_image') return 'edit';
   if (args.command) return 'destructive';
+  return 'unknown';
+}
+
+/** Deterministic effect label (spec 008 T306) — derived from tool+args, not
+ *  from LLM-authored text. Mirrors the effect vocabulary in tool-effects.ts. */
+function effectLabel(toolName: string, args: Record<string, unknown>): string {
+  if (toolName === 'execute_shell_command') return 'process-exec (root-shaped caps)';
+  if (toolName === 'write_file' || toolName === 'edit_file') return 'filesystem-write (exact commit)';
+  if (toolName === 'read_file') return 'filesystem-read + model-egress';
+  if (toolName === 'send_email') return 'external-send (smtp) + secret-use';
+  if (toolName === 'web_search' || toolName === 'read_website') return 'network-egress + model-egress';
+  if (toolName === 'send_notification') return 'external-send (im) + secret-use';
+  if (toolName === 'generate_image') return 'network-egress + secret-use + model-egress';
+  if (args.command) return 'process-exec';
   return 'unknown';
 }
 
