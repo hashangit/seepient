@@ -205,6 +205,14 @@ export interface GenerateTextOptions {
   permissionLevel?: PermissionLevel;
   /** Pre-grant tools so matching calls skip the approval prompt. */
   grants?: GrantSpec[];
+  /**
+   * Spec 008 opt-in: route tool calls through the new Domain policy pipeline
+   * (PolicyEngine → ApprovalBroker → ExecutionBoundary → audit) instead of
+   * the legacy matrix/grant/admit branches. When true, the composition root
+   * constructs an ActionLifecycle and the agent loop delegates each tool
+   * call to it. Default false — legacy behavior is preserved.
+   */
+  permissionPipeline?: boolean;
 }
 
 export interface GenerateTextResult {
@@ -262,6 +270,8 @@ export interface AgentCreateOptions {
   approveTool?: ApproveToolFn;
   /** Pre-grant tools so matching calls skip the approval prompt. */
   grants?: GrantSpec[];
+  /** Spec 008 opt-in policy pipeline (see GenerateTextOptions). */
+  permissionPipeline?: boolean;
 }
 
 export interface SdkAgent {
