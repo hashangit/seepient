@@ -258,18 +258,18 @@ export class UnsupportedBackendError extends PermissionError {
   backend?: string;
   operationKind?: string;
 
-  constructor(
-    message: string,
-    opts: {
-      backend?: string;
-      operationKind?: string;
-      actionDigest?: string;
-    } = {},
-  ) {
-    super(message, "BACKEND_UNSUPPORTED", {
-      retryable: false,
-      actionDigest: opts.actionDigest,
-    });
+  constructor(opts: {
+    backend?: string;
+    operationKind?: string;
+    actionDigest?: string;
+    message?: string;
+  }) {
+    super(
+      opts.message ??
+        `Backend cannot enforce operation "${opts.operationKind ?? "?"}"`,
+      "BACKEND_UNSUPPORTED",
+      { retryable: false, actionDigest: opts.actionDigest },
+    );
     this.name = "UnsupportedBackendError";
     this.backend = opts.backend;
     this.operationKind = opts.operationKind;
