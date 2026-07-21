@@ -89,14 +89,33 @@ Current layout of the Obsidian vault (annotated):
 │   │   ├── plan.md                   # Phased implementation plan
 │   │   ├── tasks.md                  # Dependency-ordered tasks
 │   │   └── ...                       # research.md, contracts/, etc. as needed
-│   └── 008-permission-system-redesign/  # OS sandbox + deny-layer + server policy
-│       ├── spec.md                      # Bug sweep findings + scope decisions
-│       ├── plan.md                      # 5-phase plan (P1+P2 close CRITICAL bugs)
-│       ├── research.md                  # Cross-tool study (Codex/Claude/Pi/Hermes/OpenClaw) + ASRT fit
-│       ├── data-model.md                # SandboxPolicy, PermissionGuard, SandboxRunner
-│       ├── contracts/                   # sandbox-api.md, server-policy.md, tui-escalation.md
-│       └── quickstart.md                # Per-phase validation scenarios
-├── Provider-Management/              # LLM provider notes
+│   ├── 008-permission-system-redesign/  # OS sandbox + deny-layer + server policy
+│   │   ├── spec.md                      # Bug sweep findings + scope decisions
+│   │   ├── plan.md                      # P0-P6 plan: policy, local/server enforcement, self-evolution
+│   │   ├── research.md                  # Cross-tool study + R8 end-to-end architecture review
+│   │   ├── research-permissions-ux.md   # Deep-dive: Codex/OMP/Hermes implementation + interactive/non-interactive UX
+│   │   ├── data-model.md                # Prepared actions, capabilities, brokers, execution boundaries
+│   │   ├── contracts/                   # sandbox-api.md, server-policy.md, tui-escalation.md
+│   │   ├── quickstart.md                # Per-phase validation scenarios
+│   │   └── tasks.md                     # Dependency-ordered implementation tasks
+│   └── 009-agents-md-alignment/      # AGENTS.md loader + .agents/skills/ direct discovery (v2 — no bridge)
+│       ├── spec.md                   # Problem, scope (on-by-default), Codex startup discovery, trust hierarchy
+│       ├── plan.md                   # P1 (loader+composer+skills edits) → P2 (5 adapter paths) → P3 (resume+settings)
+│       ├── research.md               # Codex semantics + compatibility matrix (not "convergence") + 5-path integration surface
+│       ├── data-model.md             # AgentInstructionFile, findWorkspaceRoot, Domain composer, resume re-seed
+│       ├── contracts/                # agents-md-loader.md, domain-composer.md, system-prompt-composition.md
+│       ├── quickstart.md             # ~34 deterministic scenarios, all 5 adapter paths, resume, no grep -v
+│       └── tasks.md                  # 39 dependency-ordered tasks, 13 regression gates
+├── 010-provider-management-redesign/ # Provider mgmt redesign: contracts + runtime + purpose/tier routing
+│   ├── spec.md                       # Problem, 5 blockers + 4 gaps, scope decisions, success criteria
+│   ├── plan.md                       # P0-P7 phased plan (contracts → Pi adapter → runtime → resolution → surfaces → reliability)
+│   ├── tasks.md                      # Dependency-ordered task list per phase
+│   ├── research.md                   # Resolves 5 blockers + 4 gaps (D1-D20)
+│   ├── data-model.md                 # PurposeModelMap, ResolvedInvocation, dispatch inventory
+│   ├── migration.md                  # v1→v2 config migration, lazy sessions, SDK deprecation
+│   ├── quickstart.md                 # Per-phase validation scenarios + production budgets
+│   └── contracts/                    # inference-adapter, canonical-messages, provider-config, credential-store, server-management-api, public-sdk
+├── Provider-Management/              # LLM provider notes (incl. llm-provider-management-comparison.md — the architectural guideline for 010)
 ├── System-Prompts/                   # Prompt engineering references
 ├── Seepientagent-BMI/                # Body-model internal feature work
 └── Todo/                             # Internal todos / scratch
@@ -319,8 +338,26 @@ Keep `CONTEXT.md` under 20 lines total. Do NOT summarize the full conversation �
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
 - **ACTIVE PLAN**: `~/Documents/Obsidian/Seepient/Implementation-Specs/008-permission-system-redesign/plan.md`
-  — Permission system redesign: OS sandbox (`@anthropic-ai/sandbox-runtime`) +
-  TS deny-layer + server policy. Two-layer model (permission ≠ approval). P1+P2
-  close the two CRITICAL bugs (no path guard; edit auto-approve bypass). Prior
+  — Permission system redesign R9: analyzer-only tools, one Domain policy and
+  execution boundary, native exact commits, typed effect/secret/model-egress
+  brokers, external Docker worker scheduler, protected policy/audit stores, and
+  a governed self-evolution activation boundary. Prior
   plan: `specs/007-tui-parity-upgrade/` (TUI parity — shipped).
+- **UPCOMING (planned, not yet in implementation)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/009-agents-md-alignment/plan.md`
+  — AGENTS.md standard alignment (v2, reworked after R1 review): Codex-compatible
+  startup discovery (root → cwd walk, one file per directory, `AGENTS.override.md`
+  replaces at level, 32 KiB byte budget); `.agents/skills/` added to the existing
+  skills loader as direct discovery paths (no bridge — Dirent.isDirectory() is
+  false for symlinks, so a bridge cannot work); one Domain composer routes all
+  five adapter paths (CLI, SDK×3, HTTP×2); resume re-seeds; trust hierarchy
+  base > project > skills. Based on `008-upgrade`, not `main`.
+- **UPCOMING (planned, not yet in implementation)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/010-provider-management-redesign/plan.md`
+  — Provider management redesign: contract layer resolving the 5-blocker review
+  (canonical inference contracts, normative config schema, aggregate media
+  adapter ownership, Pi version pin, server security policy) + 4 planning gaps
+  (purpose dispatch inventory, v1→v2 migration, retry defaults, production
+  budgets). Implements the comparison doc's purpose × tier × thinking-level
+  selection model behind a `PiAiInferenceAdapter` + instance-scoped
+  `ProviderRuntime`. Phased P0-P7; architectural guideline lives in
+  `Provider-Management/llm-provider-management-comparison.md`.
 <!-- SPECKIT END -->
