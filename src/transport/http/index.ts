@@ -39,6 +39,8 @@ export interface ServerOptions {
   permissionLevel?: PermissionLevel;
   /** Maximum permission level clients can request (caps WebSocket messages) */
   maxPermissionLevel?: PermissionLevel;
+  /** Spec 008: route every tool call through the Domain policy pipeline. */
+  permissionPipeline?: boolean;
 }
 
 interface ReadPackageJson {
@@ -160,6 +162,61 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
 
   const serverPermissionLevel = options?.permissionLevel ?? "moderate";
 
+  // Spec 008: build the wired pipeline when the operator opts in. The
+  // execution boundary is the WorkerExecutionBoundary when a scheduler
+  // endpoint is configured (the control plane delegates EVERY effectful op
+  // to the scheduler — T405); otherwise the legacy-handler boundary (the
+  // control plane runs the tool handler, but policy/approval/audit still
+  // govern the call).
+  let serverWiredPipeline: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle | undefined;
+  if (process.env.SEEPIENT_PERMISSION_PIPELINE === "1" || options?.permissionPipeline) {
+    const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
+    const { NoneApprovalBroker } = await import("../approval-brokers.js");
+    let boundary: import("../../foundations/contracts/execution-boundary.js").ExecutionBoundary;
+    if (process.env.SEEPIENT_WORKER_SCHEDULER_ENDPOINT) {
+      // T405 wiring: control-plane delegates to the scheduler. The scheduler
+      // client and lease issuer are operator-configured; a real deployment
+      // constructs them at startup. Here we construct the boundary shape and
+      // let the operator's scheduler client be injected via env.
+      const { WorkerExecutionBoundary } = await import("../../capabilities/execution/worker-execution-boundary.js");
+      boundary = new WorkerExecutionBoundary({
+        scheduler: {
+          async dispatch() {
+            throw new Error("SEEPIENT_WORKER_SCHEDULER_ENDPOINT set but no scheduler client wired — configure one in createServer()");
+          },
+          async cancel() {},
+        },
+        auth: { controlPlaneId: "control-plane-1", authenticatedTransport: "mtls" },
+        signingKeyId: "cp-key-1",
+        sign: (c) => `cp-sig:${c.slice(0, 8)}`,
+        resolveWorkspace: () => ({
+          leaseId: "lease", tenantId: "t", sessionId: "s", workspaceId: "ws",
+          mountTarget: "/workspace", expiresAt: Date.now() + 60_000,
+        }),
+        capabilities: {
+          backend: "docker-worker",
+          capabilityKinds: ["commit-file", "read-file", "process", "model-egress", "network-destination"],
+          exactCommit: true, hostFilteredEgress: true, environmentIsolation: true,
+          supportedOperationKinds: ["none", "read-file", "commit-files", "process", "broker"],
+        },
+      });
+    } else {
+      // No scheduler configured — legacy handler boundary. Policy/approval/
+      // audit still govern; the tool handler runs (without a native executor).
+      const { legacyHandlerBoundary } = await import("../legacy-adapter.js");
+      boundary = legacyHandlerBoundary();
+    }
+    serverWiredPipeline = await buildActionLifecycle({
+      principalId: "server",
+      runId: "server-run",
+      workspaceRoot: process.cwd(),
+      modelProviderClass: "openai",
+      approvalBroker: new NoneApprovalBroker(), // REST returns approval_required; no synchronous wait
+      executionBoundary: boundary,
+      approvalMode: "never", // server never prompts synchronously
+    });
+  }
+
   // Resolve session directory
   const sessionDir = process.env.SEEPIENT_SESSION_DIR ??
     path.join(process.cwd(), ".seepient", "sessions");
@@ -232,7 +289,7 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
     version,
     startTime,
     sessionManager,
-    generateText: (opts) => serverGenerateText(opts, serverPermissionLevel, gatewayMiddleware),
+    generateText: (opts) => serverGenerateText({ ...opts, wiredPipeline: serverWiredPipeline }, serverPermissionLevel, gatewayMiddleware),
     listModels,
     listSkills,
     settingsHandlerContext,
@@ -264,7 +321,7 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
   const wsCtx: WebSocketHandlerContext = {
     sessionManager,
     streamText: (opts) => {
-      serverStreamText(opts, serverPermissionLevel, gatewayMiddleware).catch((err) => {
+      serverStreamText({ ...opts, wiredPipeline: serverWiredPipeline }, serverPermissionLevel, gatewayMiddleware).catch((err) => {
         opts.onError({
           code: "STREAM_ERROR",
           message: err instanceof Error ? err.message : "Stream failed",

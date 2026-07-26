@@ -149,6 +149,93 @@ export class Agent {
     return this._grantStore;
   }
 
+  // The spec-008 wired pipeline (built lazily by enablePermissionPipeline()).
+  private _wiredPipeline: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle | null = null;
+
+  /**
+   * Opt into the spec-008 pipeline for this agent. After this call, every
+   * chat()/chatStream() routes tool calls through PolicyEngine → broker →
+   * boundary → audit, bypassing the legacy matrix/grant/autoConfirm path.
+   *
+   * The broker consults the current `approveTool` at decision time — set it
+   * via `setPipelineApproveTool()` before each chat() (the REPL/TUI construct
+   * their approveTool per-session, after bootstrap).
+   */
+  async enablePermissionPipeline(opts: {
+    workspaceRoot?: string;
+    modelProviderClass?: string;
+  }): Promise<void> {
+    const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
+    const { legacyApproveToolToBroker, legacyHandlerBoundary } = await import("../legacy-adapter.js");
+    // Use a mutable holder so the broker picks up the per-session approveTool
+    // when chat() is called (REPL/TUI wire approveTool after bootstrap).
+    this._pipelineApproveTool = undefined;
+    const broker = legacyApproveToolToBroker(undefined);
+    // Wrap the broker so it consults the live approveTool holder.
+    const liveBroker = {
+      mode: broker.mode,
+      request: async (req: any, opts2: any) => {
+        if (this._pipelineApproveTool) {
+          const liveBroker = legacyApproveToolToBroker(this._pipelineApproveTool);
+          return liveBroker.request(req, opts2);
+        }
+        return new (await import("../approval-brokers.js")).NoneApprovalBroker().request(req);
+      },
+    };
+    const boundary = legacyHandlerBoundary();
+    this._wiredPipeline = await buildActionLifecycle({
+      principalId: "cli-user",
+      runId: this.sessionId,
+      workspaceRoot: opts.workspaceRoot ?? process.cwd(),
+      modelProviderClass: opts.modelProviderClass ?? "openai",
+      approvalBroker: liveBroker,
+      executionBoundary: boundary,
+      policyStore: this._policyStore ?? undefined,
+    });
+    // Spec 008 FR-014: run crash-recovery on startup. Marks any `dispatched`
+    // actions without a terminal record as `indeterminate` (never re-executed).
+    // Also starts a background outbox-flush timer for failed terminal appends.
+    try {
+      const { recoverIndeterminateActions } = await import(
+        "../../domain/permissions/audit-recorder.js"
+      );
+      const auditStore = this._wiredPipeline!.auditStore as import("../../domain/permissions/audit-recorder.js").LocalAuditStore;
+      const recovered = await recoverIndeterminateActions(auditStore, this._wiredPipeline!.terminalOutbox);
+      if (recovered.length > 0) {
+        console.warn(
+          chalk.yellow(
+            `[permissions] ${recovered.length} action(s) recovered as indeterminate from a prior crash. They will NOT be re-executed.`,
+          ),
+        );
+      }
+    } catch {
+      // Recovery is best-effort on surfaces without a local audit store.
+    }
+    if (this._wiredPipeline!.terminalOutbox) {
+      const outbox = this._wiredPipeline!.terminalOutbox;
+      this._outboxTimer = setInterval(() => {
+        outbox.flush().catch(() => {
+          /* retry on next tick */
+        });
+      }, 5_000);
+      this._outboxTimer.unref?.();
+    }
+  }
+
+  private _outboxTimer?: ReturnType<typeof setInterval>;
+
+  /** Update the approveTool the pipeline consults (called by REPL/TUI per chat). */
+  setPipelineApproveTool(approveTool: ApproveToolFn | undefined): void {
+    this._pipelineApproveTool = approveTool;
+  }
+
+  private _pipelineApproveTool: ApproveToolFn | undefined;
+
+  /** Whether the spec-008 pipeline is active for this agent. */
+  isPermissionPipelineEnabled(): boolean {
+    return this._wiredPipeline !== null;
+  }
+
   // ── Spec 008 protected policy store accessors (T307) ─────────────────
   // These route active-policy mutations exclusively through
   // PolicyStore.compareAndSet — the trusted administrative flow. Proposals
@@ -282,6 +369,9 @@ export class Agent {
         // Stream only when the caller supplies its own onStep (TUI mode) — the
         // readline default handler prints complete 'text' steps, not deltas.
         stream: customSteps,
+        // Spec 008: when enablePermissionPipeline() was called, route through
+        // the new Domain pipeline instead of the legacy matrix/grant branches.
+        wiredPipeline: this._wiredPipeline ?? undefined,
       });
 
       spinner?.stop();

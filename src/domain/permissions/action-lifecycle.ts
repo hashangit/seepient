@@ -56,6 +56,13 @@ export interface ActionLifecycleOptions {
   audit: AuditStore;
   /** Run-scoped capability store; approvals add an action-scoped cap here. */
   activeCapabilities: MutableCapabilitySet;
+  /**
+   * Optional terminal-event outbox. When set, a failed terminal-event append
+   * is enqueued here instead of throwing — execution still returns its
+   * result, but the deployment reports degraded audit health until the outbox
+   * flushes. The outbox + crash-recovery are the FR-014 durability contract.
+   */
+  terminalOutbox?: { enqueue: (event: import("../../foundations/contracts/execution-brokers.js").ActionAuditEvent, idempotencyKey: string) => void };
   /** Now-injectable for deterministic tests. */
   now?: () => number;
 }
@@ -117,6 +124,8 @@ export class ActionLifecycle {
   private readonly active: MutableCapabilitySet;
   private readonly now: () => number;
 
+  private readonly terminalOutbox?: { enqueue: (event: import("../../foundations/contracts/execution-brokers.js").ActionAuditEvent, idempotencyKey: string) => void };
+
   constructor(opts: ActionLifecycleOptions) {
     this.policy = opts.policy;
     this.policyContext = opts.policyContext;
@@ -125,6 +134,7 @@ export class ActionLifecycle {
     this.audit = opts.audit;
     this.active = opts.activeCapabilities;
     this.now = opts.now ?? (() => Date.now());
+    this.terminalOutbox = opts.terminalOutbox;
   }
 
   async run(
@@ -292,14 +302,17 @@ export class ActionLifecycle {
       };
     }
 
-    // 7. Record terminal outcome (idempotent).
+    // 7. Record terminal outcome (idempotent). A failure here is enqueued in
+    //    the terminal-event outbox (FR-014): execution has already happened,
+    //    so we cannot un-execute it; the outbox retries the append and the
+    //    deployment reports degraded audit health until it succeeds.
     const terminalState =
       execution.state === "succeeded"
         ? "succeeded"
         : execution.state === "cancelled"
           ? "cancelled"
           : "failed";
-    await this.record(action, terminalState);
+    await this.recordTerminal(action, terminalState);
 
     const outcome = this.toOutcome(
       action,
@@ -352,6 +365,42 @@ export class ActionLifecycle {
     await this.audit.append(event, {
       idempotencyKey: idempotencyKey(action.actionId, state),
     });
+  }
+
+  /**
+   * Record a TERMINAL event with outbox fallback. If the synchronous append
+   * throws, the event is enqueued in the terminal-event outbox (when wired)
+   * and execution returns its result — the deployment reports degraded audit
+   * health until the outbox flushes. Per FR-014, execution is never repeated
+   * to compensate for a missing terminal record.
+   */
+  private async recordTerminal(
+    action: PreparedToolAction,
+    state: "succeeded" | "failed" | "cancelled",
+  ): Promise<void> {
+    const key = idempotencyKey(action.actionId, state);
+    try {
+      await this.record(action, state);
+    } catch (err) {
+      if (this.terminalOutbox) {
+        // Build the same event record() would have appended, then enqueue.
+        const event = {
+          eventId: generateId(),
+          actionId: action.actionId,
+          actionDigest: action.actionDigest,
+          principalId: action.principalId,
+          runId: action.runId,
+          state,
+          timestamp: this.now(),
+          policyDigest: this.policyContext.deploymentCeiling.version.toString(),
+          backend: this.boundary.capabilities.backend,
+        };
+        this.terminalOutbox.enqueue(event, key);
+      } else {
+        // No outbox wired — surface the failure (default behavior pre-outbox).
+        throw err;
+      }
+    }
   }
 }
 

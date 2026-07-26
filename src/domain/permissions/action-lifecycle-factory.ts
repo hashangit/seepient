@@ -86,6 +86,11 @@ export interface WiredActionLifecycle {
   policyStore: PolicyStore;
   /** The workspace id the store is keyed by. */
   workspaceId: string;
+  /** Terminal-event outbox (when the audit store is LocalAuditStore). Composition
+   *  roots call `outbox.flush()` on a timer and check `outbox.isHealthy()`. */
+  terminalOutbox?: import("./audit-recorder.js").TerminalEventOutbox;
+  /** The backing audit store, for crash-recovery on startup. */
+  auditStore: AuditStore;
 }
 
 /**
@@ -114,6 +119,15 @@ export async function buildActionLifecycle(
 
   const auditStore = inputs.auditStore ?? new LocalAuditStore();
   const artifacts = new InMemoryArtifactStore();
+
+  // Spec 008 FR-014: terminal-event outbox. When the audit store is the local
+  // default, wire its outbox so a failed terminal append is retried rather
+  // than thrown. The caller (composition root) runs `recoverIndeterminateActions`
+  // on startup and `outbox.flush()` on a timer.
+  let terminalOutbox: import("./audit-recorder.js").TerminalEventOutbox | undefined;
+  if (auditStore instanceof LocalAuditStore) {
+    terminalOutbox = new (await import("./audit-recorder.js")).TerminalEventOutbox(auditStore);
+  }
 
   const deploymentCeiling = inputs.deploymentCeiling ?? {
     version: 1 as const,
@@ -157,6 +171,7 @@ export async function buildActionLifecycle(
     boundary: inputs.executionBoundary,
     audit: auditStore,
     activeCapabilities,
+    terminalOutbox,
   });
 
   return {
@@ -164,6 +179,8 @@ export async function buildActionLifecycle(
     policyContext,
     activeCapabilities,
     analyzers: ALL_ANALYZERS,
+    auditStore,
+    terminalOutbox,
     analysisContext: {
       principalId: inputs.principalId,
       runId: inputs.runId,

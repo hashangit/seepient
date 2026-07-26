@@ -40,6 +40,8 @@ export async function serverGenerateText(
     tools?: string[];
     maxSteps?: number;
     skills?: string[];
+    /** Spec 008 wired pipeline (constructed by createServer). */
+    wiredPipeline?: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle;
   },
   permissionLevel: PermissionLevel,
   middleware?: Middleware[],
@@ -84,6 +86,7 @@ export async function serverGenerateText(
     permissionLevel,
     middleware,
     config: { agentName: "server" },
+    wiredPipeline: options.wiredPipeline,
   });
 
   // Extract final text from last assistant message
@@ -114,6 +117,12 @@ export async function serverStreamText(
     maxSteps?: number;
     skills?: string[];
     sessionId?: string;
+    /**
+     * Spec 008: when set, route every tool call through the wired pipeline.
+     * The pipeline is constructed at server startup (bootstrap) and passed
+     * in here; serverStreamText itself is stateless.
+     */
+    wiredPipeline?: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle;
     permissionLevel?: PermissionLevel;
     approveTool?: ApproveToolFn;
     onText: (delta: string) => void;
@@ -173,6 +182,7 @@ export async function serverStreamText(
       signal: opts.signal,
       middleware,
       config: { agentName: "server" },
+      wiredPipeline: opts.wiredPipeline,
       onStep: (step) => {
         if (step.type === "text" && step.content) {
           accumulatedText += step.content;

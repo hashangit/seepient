@@ -150,6 +150,10 @@ export function createCliApproveTool(
 export async function chatWithInterrupt(agent: Agent, input: string, config?: any, permissionLevel?: PermissionLevel): Promise<void> {
   const handle = setupInterrupt(agent);
   const approveTool = config ? createCliApproveTool(config, handle, permissionLevel) : undefined;
+  // Spec 008: when the pipeline is enabled, the broker consults this approveTool.
+  if (agent.isPermissionPipelineEnabled()) {
+    agent.setPipelineApproveTool(approveTool);
+  }
   try {
     await agent.chat(input, handle.signal, approveTool, permissionLevel);
   } finally {
@@ -167,6 +171,15 @@ export async function runChat(queryParts: string[], options: any) {
   const initialQuery = queryParts.join(' ');
   const ctx = await bootstrapCliSession(options);
   const { agent, fullConfig, activeProviderType, providerConfig, permissionLevel, gatewayInstance } = ctx;
+
+  // Spec 008: enable the new policy pipeline when --permission-pipeline is set.
+  // The REPL's approveTool (readline y/n) is wired per-chat below; the broker
+  // wrapper consults it at decision time.
+  if (options.permissionPipeline) {
+    await agent.enablePermissionPipeline({
+      modelProviderClass: activeProviderType,
+    });
+  }
 
   if (options.interactive) {
     console.log(chalk.green(`Agent initialized with ${activeProviderType} (${providerConfig.model})`));

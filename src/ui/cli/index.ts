@@ -63,6 +63,7 @@ program
   .option('--allow-session <spec>', 'Pre-grant a tool for this session (repeatable): "tool" or "tool:pattern"', collectRepeated, [])
   .option('--allow-project <spec>', 'Pre-grant a tool for this project, persisted (repeatable): "tool" or "tool:pattern"', collectRepeated, [])
   .option('--allow-global <spec>', 'Pre-grant a tool globally, persisted (repeatable): "tool" or "tool:pattern"', collectRepeated, [])
+  .option('--permission-pipeline', 'Spec 008: route tool calls through the Domain policy pipeline (PolicyEngine → broker → boundary → audit). Default off; the legacy matrix/grant path is used otherwise.')
   .option('-r, --resume <id>', 'Resume a previous session by id (or "last")');
 
 program

@@ -124,6 +124,26 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
   // State
   const messages: Message[] = [];
   const sessionId = generateId();
+
+  // Spec 008 opt-in: construct the wired pipeline ONCE at agent creation so
+  // every chat()/chatStream() call routes through it. The pipeline reads the
+  // PolicyStore at construction (snapshotted for the agent's lifetime per the
+  // spec's "policy is snapshotted for a run" rule).
+  let wiredPipeline: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle | undefined;
+  if (opts.permissionPipeline) {
+    const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
+    const { legacyApproveToolToBroker, legacyHandlerBoundary } = await import("../legacy-adapter.js");
+    const broker = legacyApproveToolToBroker(opts.approveTool);
+    const boundary = legacyHandlerBoundary();
+    wiredPipeline = await buildActionLifecycle({
+      principalId: "sdk-user",
+      runId: sessionId,
+      workspaceRoot: opts.cwd ?? process.cwd(),
+      modelProviderClass: (opts.provider ?? "openai") as string,
+      approvalBroker: broker,
+      executionBoundary: boundary,
+    });
+  }
   let activeAbortController: AbortController = new AbortController();
 
   // Concurrency guard — only one chat/chatStream at a time
@@ -222,6 +242,7 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
       approveTool: opts.approveTool,
       permissionLevel: opts.permissionLevel,
       grantStore: grantStore,
+      wiredPipeline,
     });
 
     // Update cumulative usage from result
@@ -296,6 +317,7 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
           approveTool: opts.approveTool,
           permissionLevel: opts.permissionLevel,
           grantStore: grantStore,
+          wiredPipeline,
           stream: true,
           onStep: (step) => {
             if (streamOptions?.onStep) streamOptions.onStep(step);

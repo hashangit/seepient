@@ -184,6 +184,23 @@ export async function generateText(
     timestamp: now(),
   });
 
+  // Spec 008 opt-in: construct the wired pipeline for this call when
+  // permissionPipeline is set. (createAgent does this once; generateText and
+  // streamText build it per-call since they're stateless.)
+  let wiredPipeline: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle | undefined;
+  if (opts.permissionPipeline) {
+    const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
+    const { legacyApproveToolToBroker, legacyHandlerBoundary } = await import("../legacy-adapter.js");
+    wiredPipeline = await buildActionLifecycle({
+      principalId: "sdk-user",
+      runId: generateId(),
+      workspaceRoot: opts.cwd ?? process.cwd(),
+      modelProviderClass: (opts.provider ?? "openai") as string,
+      approvalBroker: legacyApproveToolToBroker(opts.approveTool),
+      executionBoundary: legacyHandlerBoundary(),
+    });
+  }
+
   // Run the agent loop
   const result = await runAgentLoop({
     provider: llmProvider,
@@ -200,6 +217,7 @@ export async function generateText(
     approveTool: opts.approveTool,
     permissionLevel: opts.permissionLevel,
     grantStore: opts.grants?.length ? createSessionGrantStore(opts.grants) : undefined,
+    wiredPipeline,
   });
 
   // Get the final text
@@ -276,6 +294,21 @@ export async function streamText(
   // Stream manager handles queues, async iterables, and SSE
   const stream = new StreamManager();
 
+  // Spec 008 opt-in: build the wired pipeline for this stream call.
+  let wiredPipeline: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle | undefined;
+  if (opts.permissionPipeline) {
+    const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
+    const { legacyApproveToolToBroker, legacyHandlerBoundary } = await import("../legacy-adapter.js");
+    wiredPipeline = await buildActionLifecycle({
+      principalId: "sdk-user",
+      runId: generateId(),
+      workspaceRoot: opts.cwd ?? process.cwd(),
+      modelProviderClass: (opts.provider ?? "openai") as string,
+      approvalBroker: legacyApproveToolToBroker(opts.approveTool),
+      executionBoundary: legacyHandlerBoundary(),
+    });
+  }
+
   // Run loop in background
   (async () => {
     try {
@@ -294,6 +327,7 @@ export async function streamText(
         approveTool: opts.approveTool,
         permissionLevel: opts.permissionLevel,
         grantStore: opts.grants?.length ? createSessionGrantStore(opts.grants) : undefined,
+        wiredPipeline,
         onStep: (step) => {
           if (opts.onStep) opts.onStep(step);
           if (step.type === "text" && step.content) {

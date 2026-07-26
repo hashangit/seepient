@@ -202,4 +202,174 @@ export class LocalAuditStore implements AuditStoreContract {
   }
 }
 
+// ── Terminal-event outbox ───────────────────────────────────────────────
+
+/**
+ * A pending terminal event that could not be appended durably. The outbox
+ * retries these in the background; while any entry remains, the deployment is
+ * considered to have degraded audit health (FR-014).
+ */
+export interface OutboxEntry {
+  event: ActionAuditEvent;
+  idempotencyKey: string;
+  attempts: number;
+  lastAttempt: number;
+}
+
+/**
+ * The terminal-event outbox. Pending entries are retried by `flush()`; while
+ * any entry remains, `isHealthy()` returns false. A production deployment
+ * persists this outbox in the same transaction as the result; the in-memory
+ * implementation here is suitable for single-instance local runs and tests.
+ */
+export class TerminalEventOutbox {
+  private readonly pending = new Map<string, OutboxEntry>();
+  private readonly store: LocalAuditStore;
+  private unhealthy = false;
+
+  constructor(store: LocalAuditStore) {
+    this.store = store;
+  }
+
+  /**
+   * Enqueue a terminal event that could not be appended. Called when the
+   * synchronous terminal append in ActionLifecycle throws.
+   */
+  enqueue(event: ActionAuditEvent, idempotencyKey: string): void {
+    this.pending.set(idempotencyKey, {
+      event,
+      idempotencyKey,
+      attempts: 0,
+      lastAttempt: 0,
+    });
+    this.unhealthy = true;
+  }
+
+  /**
+   * Retry all pending terminal events. Returns the number still pending.
+   * A production deployment calls this on a timer AND on startup.
+   */
+  async flush(): Promise<number> {
+    let remaining = 0;
+    for (const [key, entry] of this.pending) {
+      entry.attempts += 1;
+      entry.lastAttempt = Date.now();
+      try {
+        const result = await this.store.append(entry.event, { idempotencyKey: key });
+        if (result === "written" || result === "duplicate") {
+          this.pending.delete(key);
+        } else {
+          remaining += 1;
+        }
+      } catch {
+        remaining += 1;
+      }
+    }
+    if (this.pending.size === 0) this.unhealthy = false;
+    return remaining;
+  }
+
+  /** True while any terminal event remains un-persisted (degraded audit). */
+  isHealthy(): boolean {
+    return !this.unhealthy;
+  }
+
+  /** Number of pending terminal events. */
+  size(): number {
+    return this.pending.size;
+  }
+}
+
+// ── Crash-recovery routine ─────────────────────────────────────────────
+
+/**
+ * Scan the audit store for `dispatched` records without a matching terminal
+ * event and mark them `indeterminate`. Per FR-014, a durable `dispatched`
+ * action without a terminal record is NEVER automatically re-executed; it
+ * surfaces as `indeterminate` for operator reconciliation.
+ *
+ * Returns the action IDs that were marked indeterminate. A production
+ * deployment runs this on startup.
+ */
+export async function recoverIndeterminateActions(
+  store: LocalAuditStore,
+  outbox?: TerminalEventOutbox,
+): Promise<string[]> {
+  const fsLocal = await import("node:fs/promises");
+  const pathLocal = await import("node:path");
+  const indeterminate: string[] = [];
+  let dir: string;
+  // Access the store's private dir via a public probe — the constructor
+  // stores it on `this.dir`. We re-list using the same layout.
+  // (The store exposes its layout via the eventsFile pattern; recovery walks
+  // the same tree.)
+  try {
+    // The store's root is private; recovery accepts it via the same
+    // constructor pattern. In practice the composition root that owns the
+    // store also owns recovery. We pass the store and let it scan.
+    dir = (store as unknown as { dir: string }).dir;
+  } catch {
+    return indeterminate;
+  }
+
+  let workspaces: string[];
+  try {
+    workspaces = await fsLocal.readdir(dir);
+  } catch {
+    return indeterminate; // no audit data yet
+  }
+
+  for (const wsId of workspaces) {
+    const wsDir = pathLocal.join(dir, wsId);
+    const stat = await fsLocal.stat(wsDir).catch(() => null);
+    if (!stat?.isDirectory()) continue;
+    const file = pathLocal.join(wsDir, "events.ndjson");
+    let raw: string;
+    try {
+      raw = await fsLocal.readFile(file, "utf8");
+    } catch {
+      continue;
+    }
+    // First pass: collect dispatched + terminal action IDs.
+    const dispatched = new Set<string>();
+    const hasTerminal = new Set<string>();
+    for (const line of raw.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const entry = JSON.parse(line) as AuditFileEntry;
+        if (entry.event.state === "dispatched") dispatched.add(entry.event.actionId);
+        if (TERMINAL_STATES.has(entry.event.state)) hasTerminal.add(entry.event.actionId);
+      } catch {
+        /* skip malformed */
+      }
+    }
+    // Second pass: for each dispatched without terminal, append an
+    // `indeterminate` event (idempotent — it's the recovery marker).
+    for (const actionId of dispatched) {
+      if (hasTerminal.has(actionId)) continue;
+      const event: ActionAuditEvent = {
+        eventId: createHash("sha256").update(`${actionId}|indeterminate|recovery`).digest("hex").slice(0, 16),
+        actionId,
+        actionDigest: "", // unknown at recovery time
+        principalId: wsId,
+        runId: "",
+        state: "indeterminate",
+        timestamp: Date.now(),
+        policyDigest: "",
+      };
+      try {
+        await store.append(event, { idempotencyKey: idempotencyKey(actionId, "indeterminate") });
+        indeterminate.push(actionId);
+      } catch {
+        // If append fails, enqueue in the outbox for retry. The action is
+        // still indeterminate (we just couldn't persist the marker yet); the
+        // outbox will retry and the deployment reports degraded audit health.
+        outbox?.enqueue(event, idempotencyKey(actionId, "indeterminate"));
+        indeterminate.push(actionId);
+      }
+    }
+  }
+  return indeterminate;
+}
+
 export { TERMINAL_STATES };

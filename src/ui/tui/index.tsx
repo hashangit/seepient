@@ -42,6 +42,15 @@ export async function startTui({ queryParts, options }: StartTuiArgs): Promise<v
   const ctx = await bootstrapCliSession(options);
   const { agent, fullConfig, activeProviderType, gatewayInstance, permissionLevel, persistence } = ctx;
 
+  // Spec 008: enable the new policy pipeline when --permission-pipeline is set.
+  // The TUI's approveTool (the permission prompt overlay) is wired via useAgent;
+  // the broker wrapper consults it at decision time.
+  if (options.permissionPipeline) {
+    await agent.enablePermissionPipeline({
+      modelProviderClass: activeProviderType,
+    });
+  }
+
   // Same registry the readline REPL uses — one owner of the command set.
   const registry = buildCommandRegistry(agent, fullConfig, activeProviderType, gatewayInstance);
 
