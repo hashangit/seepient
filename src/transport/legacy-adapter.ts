@@ -65,15 +65,14 @@ export function legacyApproveToolToBroker(
 }
 
 /**
- * A boundary that delegates execution to the LEGACY tool handler — i.e. it
- * runs the existing `executeTool()` path BUT through the new pipeline's
- * policy/approval/audit gates. This is the bridge for tools that haven't
- * been migrated to a native executor (commit-files, process, broker).
+ * A boundary that delegates execution to the real tool registry. Each tool
+ * call that the new pipeline approves is executed by calling `executeTool()`
+ * — the SAME function the legacy path uses. The difference: the new path
+ * gates the call through PolicyEngine → ApprovalBroker → audit first.
  *
- * Why this exists: the spec ships behind a flag precisely so that tools can
- * be migrated one-by-one to native executors. Until a tool has a native
- * executor, the legacy handler runs — but policy and audit still govern it.
- * When a native executor IS registered, it takes precedence.
+ * The boundary carries the per-call arguments in a mutable slot. The
+ * agent-loop sets them just before invoking the lifecycle (it has the raw
+ * parsedArgs at that point; the analyzer only stores a digest).
  *
  * The boundary advertises honest capabilities: `exactCommit: false` (the
  * legacy handler writes directly, no commit broker) and
@@ -81,15 +80,18 @@ export function legacyApproveToolToBroker(
  * capabilities that require exact-commit or sandbox enforcement.
  */
 export function legacyHandlerBoundary(): ExecutionBoundary & {
-  setHandler(handler: (action: PreparedToolAction) => Promise<ToolResult>): void;
+  setCallContext(toolName: string, args: Record<string, unknown>, config?: Record<string, unknown>, extra?: { signal?: AbortSignal; onUpdate?: (p: { message?: string; percentage?: number }) => void }): void;
 } {
-  let handler: ((action: PreparedToolAction) => Promise<ToolResult>) | undefined;
+  // Per-call context: set by the agent-loop just before lifecycle.run().
+  let callContext: {
+    toolName: string;
+    args: Record<string, unknown>;
+    config?: Record<string, unknown>;
+    extra?: { signal?: AbortSignal; onUpdate?: (p: { message?: string; percentage?: number }) => void };
+  } | undefined;
+
   const capabilities: ExecutionBackendCapabilities = {
     backend: "uncontained",
-    // Legacy handlers can read/write files and run processes, but NOT through
-    // an enforceable boundary — so we advertise only the kinds that policy
-    // treats as "the legacy handler does this without enforcement." Policy
-    // still gates the call; it just can't promise exact-commit or sandbox.
     capabilityKinds: ["commit-file", "read-file", "process", "model-egress"],
     exactCommit: false,
     hostFilteredEgress: false,
@@ -98,20 +100,20 @@ export function legacyHandlerBoundary(): ExecutionBoundary & {
   };
   return {
     capabilities,
-    setHandler(fn) {
-      handler = fn;
+    setCallContext(toolName, args, config, extra) {
+      callContext = { toolName, args, config, extra };
     },
     async execute(
       action: PreparedToolAction,
       envelope: CapabilityEnvelope,
     ): Promise<ExecutionResult> {
       void envelope;
-      if (!handler) {
+      if (!callContext) {
         return {
           state: "failed",
           error: {
-            code: "NO_LEGACY_HANDLER",
-            message: "legacyHandlerBoundary has no handler set",
+            code: "NO_CALL_CONTEXT",
+            message: "legacyHandlerBoundary.setCallContext() was not called before execute()",
             retryable: false,
           },
           evidence: {
@@ -122,8 +124,16 @@ export function legacyHandlerBoundary(): ExecutionBoundary & {
           },
         };
       }
+      // Execute via the REAL tool registry — the same path the legacy loop uses.
       try {
-        const result = await handler(action);
+        const { executeTool } = await import("../domain/tool-executor.js");
+        const result = await executeTool(
+          callContext.toolName,
+          callContext.args,
+          callContext.config,
+          callContext.extra,
+        );
+        callContext = undefined; // clear for the next call
         return {
           state: "succeeded",
           result,
@@ -135,6 +145,7 @@ export function legacyHandlerBoundary(): ExecutionBoundary & {
           },
         };
       } catch (err) {
+        callContext = undefined;
         return {
           state: "failed",
           error: {

@@ -5,7 +5,7 @@
  * denies, backend support, monotonic intersection, and headless denial.
  */
 import { describe, it, expect } from "vitest";
-import { PolicyEngine } from "../policy-engine.js";
+import { PolicyEngine, computePolicyDigest } from "../policy-engine.js";
 import type {
   Capability,
   CapabilitySet,
@@ -185,5 +185,48 @@ describe("PolicyEngine (T106/T110)", () => {
     });
     const d = engine.evaluate(writeAction("/proj/a.txt"), ctx);
     expect(d.decision).not.toBe("needs-approval");
+  });
+});
+
+describe("policy digest deep-canonicalization (reviewer fix #7)", () => {
+  it("two different capability sets produce different digests", () => {
+    const ctx1 = {
+      deploymentCeiling: { version: 1 as const, capabilities: [{ kind: "commit-file" as const, path: "/a" }] },
+      principalPolicy: { version: 1 as const, capabilities: [] },
+      runtimeBaseline: { version: 1 as const, capabilities: [] },
+      activeCapabilities: { version: 1 as const, capabilities: [] },
+      immutableDenies: [],
+      approvalMode: "manual" as const,
+      interaction: { mode: "inline" as const },
+      backendCapabilities: { backend: "local-native" as const, capabilityKinds: [], exactCommit: false, hostFilteredEgress: false, environmentIsolation: false, supportedOperationKinds: [] },
+    };
+    const ctx2 = { ...ctx1, deploymentCeiling: { version: 1 as const, capabilities: [{ kind: "commit-file" as const, path: "/b" }] } };
+    expect(computePolicyDigest(ctx1)).not.toBe(computePolicyDigest(ctx2));
+  });
+
+  it("key-order-independent: same content → same digest", () => {
+    const base = {
+      deploymentCeiling: { version: 1 as const, capabilities: [{ kind: "commit-file" as const, path: "/a" }] },
+      principalPolicy: { version: 1 as const, capabilities: [] },
+      runtimeBaseline: { version: 1 as const, capabilities: [] },
+      activeCapabilities: { version: 1 as const, capabilities: [] },
+      immutableDenies: [],
+      approvalMode: "manual" as const,
+      interaction: { mode: "inline" as const },
+      backendCapabilities: { backend: "local-native" as const, capabilityKinds: [], exactCommit: false, hostFilteredEgress: false, environmentIsolation: false, supportedOperationKinds: [] },
+    };
+    // Same content, manually reversed key order at the top level. deepSort
+    // canonicalizes both to the same output.
+    const reordered = {
+      backendCapabilities: base.backendCapabilities,
+      interaction: base.interaction,
+      approvalMode: base.approvalMode,
+      immutableDenies: base.immutableDenies,
+      activeCapabilities: base.activeCapabilities,
+      runtimeBaseline: base.runtimeBaseline,
+      principalPolicy: base.principalPolicy,
+      deploymentCeiling: base.deploymentCeiling,
+    };
+    expect(computePolicyDigest(base)).toBe(computePolicyDigest(reordered as never));
   });
 });

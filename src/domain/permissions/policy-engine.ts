@@ -150,6 +150,11 @@ export class PolicyEngine implements PolicyEngineContract {
     this.policyDigest = policyDigest;
   }
 
+  /** The digest of the PolicyContext this engine was constructed with. */
+  getPolicyDigest(): string {
+    return this.policyDigest;
+  }
+
   evaluate(action: PreparedToolAction, context: PolicyContext): PolicyDecision {
     const trace = emptyTrace(this.policyDigest);
 
@@ -300,11 +305,28 @@ export class PolicyEngine implements PolicyEngineContract {
   }
 }
 
-/** Convenience: compute a stable policy digest from a serialized context. */
+/**
+ * Compute a stable policy digest from a PolicyContext. Uses DEEP key sorting
+ * so two materially different policies always produce different digests.
+ *
+ * The previous implementation used `JSON.stringify(context, keyArray)` which
+ * only sorts top-level keys and DROPS nested object values — two different
+ * capability sets could collide. This deep-sorts every nested object.
+ */
 export function computePolicyDigest(context: PolicyContext): string {
-  // Deterministic JSON serialization (sorted keys) for cross-process stability.
-  const canonical = JSON.stringify(context, Object.keys(context).sort());
+  const canonical = JSON.stringify(deepSort(context));
   return createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+
+/** Recursively sort object keys for deterministic serialization. */
+function deepSort(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(deepSort);
+  if (value === null || typeof value !== "object") return value;
+  const sorted: Record<string, unknown> = {};
+  for (const k of Object.keys(value as Record<string, unknown>).sort()) {
+    sorted[k] = deepSort((value as Record<string, unknown>)[k]);
+  }
+  return sorted;
 }
 
 export { EMPTY_CAPABILITY_SET };

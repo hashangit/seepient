@@ -28,6 +28,21 @@ export const EMPTY_CAPABILITY_SET: CapabilitySet = {
 type CapKind = Capability["kind"];
 
 /**
+ * Path-segment containment: does `child` live inside `parent`?
+ *
+ * `/project/data` covers `/project/data`, `/project/data/x`, `/project/data/sub/y`.
+ * It does NOT cover `/project/database` (different folder) or `/project/dat` (shorter).
+ *
+ * This replaces the unsafe `startsWith` check that let a grant for
+ * `/project/data` match `/project/database`.
+ */
+function pathContains(parent: string, child: string): boolean {
+  if (child === parent) return true;
+  // child must be longer and the parent must be a folder prefix: parent + "/"
+  return child.startsWith(parent) && child.charAt(parent.length) === "/";
+}
+
+/**
  * Does an outer capability `outer` cover (permit) an inner requested
  * capability `inner`? Coverage is the monotonic relation: the outer must be
  * at least as broad as the inner on every dimension, and shape must match.
@@ -40,20 +55,26 @@ type CapKind = Capability["kind"];
 export function covers(outer: Capability, inner: Capability): boolean {
   // A deny on a kind can never cover anything.
   if (outer.kind !== inner.kind) {
-    // Special case: read-root can cover read-file; write-root cannot cover
-    // commit-file (exact commits are a separate, stricter shape in v1).
+    // Cross-kind coverage: a root-shaped capability can cover a more specific
+    // capability of the same family within the root.
     if (outer.kind === "read-root" && inner.kind === "read-file") {
-      return inner.path.startsWith(outer.root);
+      return pathContains(outer.root, inner.path);
+    }
+    // write-root covers commit-file: if you have write authority over a folder,
+    // you can commit files in it. The enforcement mechanism (exact-commit
+    // broker vs direct write) is a backend detail, not an authority boundary.
+    if (outer.kind === "write-root" && inner.kind === "commit-file") {
+      return pathContains(outer.root, inner.path);
     }
     return false;
   }
   switch (outer.kind) {
     case "read-root":
-      return inner.kind === "read-root" && inner.root.startsWith(outer.root);
+      return inner.kind === "read-root" && pathContains(outer.root, inner.root);
     case "read-file":
       return inner.kind === "read-file" && inner.path === outer.path;
     case "write-root":
-      return inner.kind === "write-root" && inner.root.startsWith(outer.root);
+      return inner.kind === "write-root" && pathContains(outer.root, inner.root);
     case "commit-file":
       // Exact match only — a commit-file cap never covers a sibling path.
       return inner.kind === "commit-file" && inner.path === outer.path;
@@ -221,7 +242,9 @@ export function isDeniedByRule(
     if (r.effect !== "*" && r.effect !== effect) return false;
     if (r.target === undefined) return true;
     if (target === undefined) return false;
-    return target === r.target || target.startsWith(r.target);
+    // Path-segment containment — a deny on /project/data must not be escaped
+    // by /project/database.
+    return target === r.target || pathContains(r.target, target);
   });
 }
 

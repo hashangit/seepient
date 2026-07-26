@@ -74,6 +74,8 @@ export interface ActionLifecycleInputs {
  */
 export interface WiredActionLifecycle {
   lifecycle: ActionLifecycle;
+  /** The execution boundary — exposed so the agent-loop can setCallContext. */
+  boundary: ExecutionBoundary;
   /** The PolicyContext used for every evaluation this run. */
   policyContext: PolicyContext;
   /** Mutable active-capability set; approvals add action-scoped caps here. */
@@ -107,15 +109,25 @@ export async function buildActionLifecycle(
   // Seed principal policy from the protected store. This is the ONE place the
   // PolicyStore feeds into a PolicyContext — answering Finding #2 from the
   // scrutiny review (approved capabilities now affect the next run).
-  let principalPolicy = inputs.principalPolicy ?? { version: 1 as const, capabilities: [] };
+  // When no policy exists yet (fresh install), the principal policy defaults
+  // to the deployment ceiling — so the operator's ceiling IS the starting
+  // authority. /permissions approve can only NARROW from there.
+  let principalPolicy: CapabilitySet;
   try {
     const snap = await policyStore.read(workspaceId);
     if (snap.policy.capabilities.length > 0) {
       principalPolicy = snap.policy;
+    } else {
+      // Empty store → use caller-supplied or defer to deployment ceiling.
+      principalPolicy = inputs.principalPolicy ?? { version: 1, capabilities: [] };
     }
   } catch {
-    // Best effort — fall back to the caller-supplied policy.
+    principalPolicy = inputs.principalPolicy ?? { version: 1, capabilities: [] };
   }
+  // If the principal policy is empty (no operator config), it should NOT
+  // narrow the deployment ceiling — default it to the same ceiling so the
+  // monotonic intersection preserves the workspace-root defaults.
+  // This will be set after deploymentCeiling is computed below.
 
   const auditStore = inputs.auditStore ?? new LocalAuditStore();
   const artifacts = new InMemoryArtifactStore();
@@ -129,10 +141,29 @@ export async function buildActionLifecycle(
     terminalOutbox = new (await import("./audit-recorder.js")).TerminalEventOutbox(auditStore);
   }
 
-  const deploymentCeiling = inputs.deploymentCeiling ?? {
-    version: 1 as const,
-    capabilities: [],
+  // Default deployment ceiling: the workspace root is readable and writable.
+  // Without this default, turning on the pipeline in a fresh install blocks
+  // every action (empty ceiling → deny all). The operator can narrow via
+  // /permissions or the inputs; the workspace root is the sensible product
+  // default for local interactive surfaces.
+  const root = inputs.workspaceRoot;
+  const defaultCeiling: CapabilitySet = {
+    version: 1,
+    capabilities: [
+      { kind: "read-root", root },
+      { kind: "write-root", root },
+      { kind: "model-egress", providerClass: inputs.modelProviderClass, dataClasses: ["normal"] },
+    ],
   };
+  const deploymentCeiling = inputs.deploymentCeiling ?? defaultCeiling;
+  // If no principal policy was configured (fresh install, empty store), the
+  // principal inherits the deployment ceiling. This means: on a fresh install
+  // the workspace root is readable/writable, and /permissions approve can only
+  // narrow from there. Without this, the intersection of (ceiling ∩ empty) is
+  // empty and every action is denied — the "empty ceiling" bug.
+  if (principalPolicy.capabilities.length === 0) {
+    principalPolicy = deploymentCeiling;
+  }
   // Runtime baseline default: do not narrow beyond principal/deployment.
   // An empty set here would intersect to nothing (deny all), which is wrong
   // for the common case where the caller hasn't configured a separate runtime
@@ -176,6 +207,7 @@ export async function buildActionLifecycle(
 
   return {
     lifecycle,
+    boundary: inputs.executionBoundary,
     policyContext,
     activeCapabilities,
     analyzers: ALL_ANALYZERS,

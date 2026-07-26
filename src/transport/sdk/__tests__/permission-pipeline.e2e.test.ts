@@ -69,18 +69,20 @@ describe("E2E: CLI Agent.enablePermissionPipeline", () => {
     };
   }
 
-  it("enablePermissionPipeline wires the new path; the boundary is reached, not the legacy handler", async () => {
+  it("enablePermissionPipeline wires the new path; the boundary executes the real tool", async () => {
     const provider = fakeProvider();
     const agent = new Agent(provider, "test", { snapshotStore: createSnapshotStore() }, "sys", null, "openai");
     await agent.enablePermissionPipeline({ workspaceRoot: dir, modelProviderClass: "openai" });
     expect(agent.isPermissionPipelineEnabled()).toBe(true);
 
-    // The default broker (NoneApprovalBroker, since no approveTool) will deny.
-    // The legacy handler would write the file; the new path denies before that.
+    // The default ceiling authorizes writes within the workspace root, so the
+    // write_file call is ALLOWED (no broker consultation needed). The boundary
+    // executes the REAL write_file handler via executeTool, and the file is
+    // actually written — proving the pipeline is wired end-to-end.
     const targetPath = join(dir, "x.txt");
     await agent.chat(`write to ${targetPath}`);
-    // The legacy write_file handler was NOT reached.
-    expect(existsSync(targetPath)).toBe(false);
+    // The file WAS written — the real tool handler ran through the new pipeline.
+    expect(existsSync(targetPath)).toBe(true);
   });
 });
 

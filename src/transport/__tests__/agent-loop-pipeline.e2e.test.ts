@@ -141,7 +141,7 @@ async function wirePipeline(opts: {
     modelProviderClass: "openai",
     approvalBroker: opts.broker,
     executionBoundary: opts.boundary,
-    policyStore: opts.policyStore ?? new LocalPolicyStore(),
+    policyStore: opts.policyStore ?? new LocalPolicyStore({ root: dir }),
     auditStore: opts.auditStore ?? new LocalAuditStore({ root: dir }),
     deploymentCeiling: opts.ceiling ?? set({ kind: "commit-file", path: join(dir, "a.txt") }),
     principalPolicy: opts.principal ?? set({ kind: "commit-file", path: join(dir, "a.txt") }),
@@ -304,7 +304,7 @@ describe("E2E: runAgentLoop routes through the wired pipeline", () => {
   it("PolicyStore-approved capability is honored on the next run (Finding #2 fix)", async () => {
     const targetPath = join(dir, "policy.txt");
     const capPath = canonicalize(targetPath);
-    const policyStore = new LocalPolicyStore();
+    const policyStore = new LocalPolicyStore({ root: dir });
     const workspaceId = (await import("../../domain/permissions/policy-store.js")).computeWorkspaceId(dir);
 
     // Pre-approve the capability directly through the store (simulates

@@ -228,3 +228,34 @@ describe("immutable deny rules (T106)", () => {
     expect(isDeniedByRule(rules, "filesystem-read", "/home/me")).toBeUndefined();
   });
 });
+
+describe("path-segment containment (reviewer fix #6)", () => {
+  it("read-root /project/data does NOT cover /project/database", () => {
+    const outer: Capability = { kind: "read-root", root: "/project/data" };
+    expect(covers(outer, { kind: "read-file", path: "/project/database/secret" })).toBe(false);
+    expect(covers(outer, { kind: "read-file", path: "/project/data/file" })).toBe(true);
+    expect(covers(outer, { kind: "read-file", path: "/project/data" })).toBe(true);
+  });
+
+  it("read-root /project/data does NOT cover /project/dat", () => {
+    const outer: Capability = { kind: "read-root", root: "/project/data" };
+    expect(covers(outer, { kind: "read-file", path: "/project/dat" })).toBe(false);
+  });
+
+  it("write-root segment containment", () => {
+    const outer: Capability = { kind: "write-root", root: "/a/project" };
+    expect(covers(outer, { kind: "write-root", root: "/a/project-evil" })).toBe(false);
+    expect(covers(outer, { kind: "write-root", root: "/a/project/sub" })).toBe(true);
+  });
+
+  it("deny rule /etc/secure does NOT match /etc/security", () => {
+    const rules = [{
+      ruleId: "r1",
+      effect: "filesystem-read" as const,
+      target: "/etc/secure",
+      reason: "immutable-deny" as const,
+    }];
+    expect(isDeniedByRule(rules, "filesystem-read", "/etc/security/passwords")?.ruleId).toBeUndefined();
+    expect(isDeniedByRule(rules, "filesystem-read", "/etc/secure/key")?.ruleId).toBe("r1");
+  });
+});

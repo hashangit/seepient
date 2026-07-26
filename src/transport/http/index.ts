@@ -162,59 +162,73 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
 
   const serverPermissionLevel = options?.permissionLevel ?? "moderate";
 
-  // Spec 008: build the wired pipeline when the operator opts in. The
-  // execution boundary is the WorkerExecutionBoundary when a scheduler
-  // endpoint is configured (the control plane delegates EVERY effectful op
-  // to the scheduler — T405); otherwise the legacy-handler boundary (the
-  // control plane runs the tool handler, but policy/approval/audit still
-  // govern the call).
-  let serverWiredPipeline: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle | undefined;
-  if (process.env.SEEPIENT_PERMISSION_PIPELINE === "1" || options?.permissionPipeline) {
+  // Spec 008: build a per-request pipeline factory when the operator opts in.
+  // Product behavior: each API request gets its OWN permission identity
+  // (principal, tenant, session, run). Sharing one pipeline across requests
+  // would let one user's authority or audit trail leak into another's.
+  //
+  // The factory creates a fresh WiredActionLifecycle per call with the
+  // authenticated principal's identity. The execution boundary is per-request
+  // too, so workspace leases and broker leases are isolated.
+  type PipelineFactory = (identity: {
+    principalId: string;
+    tenantId: string;
+    sessionId: string;
+    runId: string;
+    workspaceRoot: string;
+    modelProviderClass: string;
+  }) => Promise<import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle>;
+  let serverPipelineFactory: PipelineFactory | undefined;
+  const serverPermissionPipelineEnabled = process.env.SEEPIENT_PERMISSION_PIPELINE === "1" || options?.permissionPipeline === true;
+  if (serverPermissionPipelineEnabled) {
     const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
     const { NoneApprovalBroker } = await import("../approval-brokers.js");
-    let boundary: import("../../foundations/contracts/execution-boundary.js").ExecutionBoundary;
-    if (process.env.SEEPIENT_WORKER_SCHEDULER_ENDPOINT) {
-      // T405 wiring: control-plane delegates to the scheduler. The scheduler
-      // client and lease issuer are operator-configured; a real deployment
-      // constructs them at startup. Here we construct the boundary shape and
-      // let the operator's scheduler client be injected via env.
-      const { WorkerExecutionBoundary } = await import("../../capabilities/execution/worker-execution-boundary.js");
-      boundary = new WorkerExecutionBoundary({
-        scheduler: {
-          async dispatch() {
-            throw new Error("SEEPIENT_WORKER_SCHEDULER_ENDPOINT set but no scheduler client wired — configure one in createServer()");
+    serverPipelineFactory = async (identity) => {
+      let boundary: import("../../foundations/contracts/execution-boundary.js").ExecutionBoundary;
+      if (process.env.SEEPIENT_WORKER_SCHEDULER_ENDPOINT) {
+        // T405: control plane delegates to the scheduler. A real deployment
+        // injects a real scheduler client; without one, the boundary reports
+        // backend-unsupported (fail closed) rather than executing in-process.
+        const { WorkerExecutionBoundary } = await import("../../capabilities/execution/worker-execution-boundary.js");
+        boundary = new WorkerExecutionBoundary({
+          scheduler: {
+            async dispatch() {
+              throw new Error("SEEPIENT_WORKER_SCHEDULER_ENDPOINT set but no scheduler client wired — configure one in createServer()");
+            },
+            async cancel() {},
           },
-          async cancel() {},
-        },
-        auth: { controlPlaneId: "control-plane-1", authenticatedTransport: "mtls" },
-        signingKeyId: "cp-key-1",
-        sign: (c) => `cp-sig:${c.slice(0, 8)}`,
-        resolveWorkspace: () => ({
-          leaseId: "lease", tenantId: "t", sessionId: "s", workspaceId: "ws",
-          mountTarget: "/workspace", expiresAt: Date.now() + 60_000,
-        }),
-        capabilities: {
-          backend: "docker-worker",
-          capabilityKinds: ["commit-file", "read-file", "process", "model-egress", "network-destination"],
-          exactCommit: true, hostFilteredEgress: true, environmentIsolation: true,
-          supportedOperationKinds: ["none", "read-file", "commit-files", "process", "broker"],
-        },
+          auth: { controlPlaneId: "control-plane-1", authenticatedTransport: "mtls" },
+          signingKeyId: "cp-key-1",
+          sign: (c) => `cp-sig:${c.slice(0, 8)}`,
+          resolveWorkspace: () => ({
+            leaseId: `lease-${identity.runId}`,
+            tenantId: identity.tenantId,
+            sessionId: identity.sessionId,
+            workspaceId: `ws-${identity.tenantId}`,
+            mountTarget: "/workspace",
+            expiresAt: Date.now() + 60_000,
+          }),
+          capabilities: {
+            backend: "docker-worker",
+            capabilityKinds: ["commit-file", "read-file", "process", "model-egress", "network-destination"],
+            exactCommit: true, hostFilteredEgress: true, environmentIsolation: true,
+            supportedOperationKinds: ["none", "read-file", "commit-files", "process", "broker"],
+          },
+        });
+      } else {
+        const { legacyHandlerBoundary } = await import("../legacy-adapter.js");
+        boundary = legacyHandlerBoundary();
+      }
+      return buildActionLifecycle({
+        principalId: identity.principalId,
+        runId: identity.runId,
+        workspaceRoot: identity.workspaceRoot,
+        modelProviderClass: identity.modelProviderClass,
+        approvalBroker: new NoneApprovalBroker(),
+        executionBoundary: boundary,
+        approvalMode: "never",
       });
-    } else {
-      // No scheduler configured — legacy handler boundary. Policy/approval/
-      // audit still govern; the tool handler runs (without a native executor).
-      const { legacyHandlerBoundary } = await import("../legacy-adapter.js");
-      boundary = legacyHandlerBoundary();
-    }
-    serverWiredPipeline = await buildActionLifecycle({
-      principalId: "server",
-      runId: "server-run",
-      workspaceRoot: process.cwd(),
-      modelProviderClass: "openai",
-      approvalBroker: new NoneApprovalBroker(), // REST returns approval_required; no synchronous wait
-      executionBoundary: boundary,
-      approvalMode: "never", // server never prompts synchronously
-    });
+    };
   }
 
   // Resolve session directory
@@ -289,7 +303,22 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
     version,
     startTime,
     sessionManager,
-    generateText: (opts) => serverGenerateText({ ...opts, wiredPipeline: serverWiredPipeline }, serverPermissionLevel, gatewayMiddleware),
+    generateText: async (opts) => {
+      // Spec 008: construct a per-request pipeline with the authenticated
+      // principal's identity. No shared state between requests.
+      let wiredPipeline: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle | undefined;
+      if (serverPipelineFactory) {
+        wiredPipeline = await serverPipelineFactory({
+          principalId: (opts as { apiKeyHash?: string }).apiKeyHash ?? "anonymous",
+          tenantId: (opts as { tenantId?: string }).tenantId ?? "default",
+          sessionId: (opts as { sessionId?: string }).sessionId ?? `sess-${Date.now()}`,
+          runId: `run-${Date.now()}`,
+          workspaceRoot: process.cwd(),
+          modelProviderClass: (opts.provider ?? "openai") as string,
+        });
+      }
+      return serverGenerateText({ ...opts, wiredPipeline }, serverPermissionLevel, gatewayMiddleware);
+    },
     listModels,
     listSkills,
     settingsHandlerContext,
@@ -320,8 +349,21 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
   // Create WebSocket handler context
   const wsCtx: WebSocketHandlerContext = {
     sessionManager,
-    streamText: (opts) => {
-      serverStreamText({ ...opts, wiredPipeline: serverWiredPipeline }, serverPermissionLevel, gatewayMiddleware).catch((err) => {
+    streamText: async (opts) => {
+      // Spec 008: construct a per-request pipeline with the WS client's
+      // authenticated identity. No shared state between connections.
+      let wiredPipeline: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle | undefined;
+      if (serverPipelineFactory) {
+        wiredPipeline = await serverPipelineFactory({
+          principalId: (opts as { apiKeyHash?: string }).apiKeyHash ?? "anonymous",
+          tenantId: (opts as { tenantId?: string }).tenantId ?? "default",
+          sessionId: opts.sessionId ?? `sess-${Date.now()}`,
+          runId: `run-${Date.now()}`,
+          workspaceRoot: process.cwd(),
+          modelProviderClass: (opts.provider ?? "openai") as string,
+        });
+      }
+      serverStreamText({ ...opts, wiredPipeline }, serverPermissionLevel, gatewayMiddleware).catch((err) => {
         opts.onError({
           code: "STREAM_ERROR",
           message: err instanceof Error ? err.message : "Stream failed",

@@ -337,3 +337,78 @@ export const DEFAULT_ANALYZERS: Record<string, ToolAnalyzer> = {
   execute_shell_command: (args, ctx) =>
     analyzeShellCommand(args as { command: string }, ctx),
 };
+
+/**
+ * Generic fallback analyzer for tools that don't have a dedicated analyzer.
+ *
+ * Product behavior: every tool MUST go through the pipeline when it's enabled.
+ * Tools without a specific analyzer get a generic one that classifies them by
+ * their risk category and produces a `trusted-host` operation (the legacy
+ * handler executes them). This means policy still evaluates, approval can
+ * still be required, and audit still records — the tool doesn't silently
+ * bypass the new system.
+ */
+export async function genericAnalyzer(
+  toolName: string,
+  args: unknown,
+  ctx: ToolAnalysisContext,
+  risk: ToolRiskCategory = "safe",
+): Promise<PreparedToolAction> {
+  const argsDigest = digestArgs(args);
+  const effects: EffectRequest[] = [
+    {
+      kind: "model-egress",
+      providerClass: ctx.modelProviderClass,
+      dataClasses: ["normal"],
+      sources: [toolName],
+    },
+  ];
+  const operation = {
+    kind: "trusted-host" as const,
+    registrationId: toolName,
+    args: (args ?? {}) as import("../../foundations/contracts/tool-effects.js").JsonValue,
+  };
+  const actionDigest = digestAction({
+    operation,
+    effects,
+    principalId: ctx.principalId,
+    toolName,
+    argsDigest,
+  });
+  return {
+    version: 1,
+    actionId: generateId(),
+    runId: ctx.runId,
+    toolCallId: ctx.toolCallId,
+    toolName,
+    principalId: ctx.principalId,
+    argsDigest,
+    actionDigest,
+    risk,
+    effects,
+    display: {
+      title: `${toolName}`,
+      summary: `Run ${toolName}`,
+      canonicalTargets: [],
+      effects: ["model-egress"],
+    },
+    operation,
+  };
+}
+
+/**
+ * The complete analyzer registry: dedicated analyzers for the 8 tools that
+ * have them, PLUS a generic fallback for every other registered tool. When
+ * the pipeline is enabled, NO tool falls through to the legacy matrix path.
+ *
+ * Call `resolveAnalyzerWithFallback(analyzers, toolName, allToolNames)` to
+ * get either the dedicated analyzer or the generic fallback.
+ */
+export function resolveAnalyzerWithFallback(
+  analyzers: Record<string, ToolAnalyzer>,
+  toolName: string,
+): ToolAnalyzer {
+  if (analyzers[toolName]) return analyzers[toolName];
+  // Generic fallback: every tool gets governed by the pipeline.
+  return (args, ctx) => genericAnalyzer(toolName, args, ctx);
+}

@@ -16,7 +16,7 @@ import { extractPattern } from "../foundations/grant-pattern.js";
 import { getAllToolModules } from "./tool-executor.js";
 import { getModelMeta } from "../foundations/models-catalog.js";
 import type { WiredActionLifecycle } from "./permissions/action-lifecycle-factory.js";
-import { resolveAnalyzer } from "./permissions/action-lifecycle-factory.js";
+import { resolveAnalyzerWithFallback } from "./permissions/default-analyzers.js";
 
 // ProviderFactory for per-skill model switching
 export interface ProviderFactory {
@@ -113,6 +113,36 @@ function buildApprovalContext(args: Record<string, unknown>): ApprovalContext | 
     return { title: "", description: rationale };
   }
   return undefined;
+}
+
+/**
+ * Spec 008 FR-010: classify tool output sensitivity for the model-egress gate.
+ * Product behavior: when a tool reads a secret-class file (SSH keys, .env,
+ * certificates, active policy), its output must not reach the AI provider.
+ * Returns "secret" for known secret paths, "sensitive" for config paths,
+ * "normal" otherwise. Only read_file produces variable sensitivity; other
+ * tools produce normal output by default.
+ */
+function classifyOutputSensitivity(
+  toolName: string,
+  args: Record<string, unknown>,
+): "normal" | "sensitive" | "secret" {
+  if (toolName !== "read_file") return "normal";
+  const p = String(args.path ?? "").toLowerCase();
+  if (
+    p.includes("/.ssh/") ||
+    p.includes("/.aws/credentials") ||
+    p.includes("/.env") ||
+    p.endsWith(".pem") ||
+    p.endsWith(".key") ||
+    p.includes("/.seepient/security/")
+  ) {
+    return "secret";
+  }
+  if (p.includes("/.seepient/") || p.includes("/.config/")) {
+    return "sensitive";
+  }
+  return "normal";
 }
 
 /**
@@ -505,7 +535,9 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
         // via the boundary, and audited. This is the path that closes the
         // confirmed defects (autoConfirm bypass, unsandboxed spawn, etc.).
         if (wiredPipeline) {
-          const analyzer = resolveAnalyzer(wiredPipeline.analyzers, tc.name);
+          // Every tool goes through the pipeline — dedicated analyzer or
+          // generic fallback. No tool falls through to the legacy matrix.
+          const analyzer = resolveAnalyzerWithFallback(wiredPipeline.analyzers, tc.name);
           if (analyzer) {
             // Build the prepared action via the registered analyzer.
             const action = await analyzer(parsedArgs, {
@@ -513,10 +545,38 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
               toolCallId: tc.id,
             });
             // Run the full lifecycle. The boundary's executor performs the
-            // side effect (or denies it).
+            // side effect (or denies it). Set the per-call context first so
+            // the legacy-handler boundary can call the real tool registry.
+            const boundary = wiredPipeline.boundary as { setCallContext?: (n: string, a: Record<string, unknown>, c?: Record<string, unknown>, e?: { signal?: AbortSignal; onUpdate?: (p: { message?: string; percentage?: number }) => void }) => void };
+            boundary.setCallContext?.(tc.name, parsedArgs, config, execExtra);
             const result = await wiredPipeline.lifecycle.run(action, signal);
             output = result.toolResult.output;
             metadata = result.toolResult.metadata;
+
+            // Spec 008 FR-010: Model-egress gate. Before tool output enters
+            // model-visible history, check whether the data classification
+            // permits release to the configured provider. Secret-class data
+            // (e.g. .ssh/id_rsa, .env, active policy) is replaced with a
+            // redaction notice — the bytes never reach the provider.
+            if (result.outcome.state !== "denied" && output.length > 0) {
+              const sensitivity = classifyOutputSensitivity(tc.name, parsedArgs);
+              if (sensitivity !== "normal") {
+                const { ModelEgressGate } = await import("./permissions/model-egress-gate-proxy.js");
+                const gate = new ModelEgressGate();
+                const envelope = result.outcome.envelopeId
+                  ? { capabilities: [], version: 1 as const, envelopeId: result.outcome.envelopeId, principalId: action.principalId, runId: action.runId, actionDigest: action.actionDigest, lifetime: { kind: "action" as const, actionDigest: action.actionDigest, consumeOnce: true as const }, issuedBy: { kind: "service" as const, authorityId: "policy-engine", authenticatedBy: "deployment" }, issuedAt: 0, policyDigest: "d" }
+                  : undefined;
+                if (envelope) {
+                  const decision = await gate.authorize(
+                    { actionDigest: action.actionDigest, providerClass: wiredPipeline.analysisContext.modelProviderClass, dataClasses: [sensitivity] },
+                    envelope,
+                  );
+                  if (decision.decision === "deny") {
+                    output = `[model-egress denied] ${("message" in decision ? decision.message : "sensitive data withheld from model")}`;
+                  }
+                }
+              }
+            }
             const duration = now() - start;
             messages.push({
               id: generateId(),
@@ -541,9 +601,10 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
             if (onStep) onStep(toolStep);
             continue; // skip the legacy branches entirely
           }
-          // No analyzer registered for this tool: fall through to the legacy
-          // path. (Tools must be migrated one by one; the spec's migration
-          // section calls this out.)
+          // resolveAnalyzerWithFallback always returns an analyzer (generic
+          // fallback), so this point is unreachable when wiredPipeline is set.
+          // The legacy path below handles only the case where wiredPipeline
+          // is NOT set (the default).
         }
 
         if (autoConfirm) {

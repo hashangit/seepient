@@ -358,7 +358,7 @@ export class ActionLifecycle {
       runId: action.runId,
       state,
       timestamp: this.now(),
-      policyDigest: this.policyContext.deploymentCeiling.version.toString(), // v1: simplified
+      policyDigest: this.policy.getPolicyDigest(),
       reason,
       backend: this.boundary.capabilities.backend,
     };
