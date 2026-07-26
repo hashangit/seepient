@@ -234,18 +234,37 @@ export class PolicyEngine implements PolicyEngineContract {
       );
     }
 
-    // The missing capabilities must be within the OUTER ceilings; if they are
-    // outside deployment/principal, approval cannot help — deny.
-    const inCeiling = missing.every(
-      (c) =>
-        setCovers(context.deploymentCeiling, c) &&
-        setCovers(context.principalPolicy, c),
-    );
+    // The missing capabilities must be within the DEPLOYMENT ceiling. The
+    // deployment ceiling defines what users MAY approve. Principal policy is
+    // what /permissions pre-authorizes; an empty principal means "must approve
+    // each time," NOT "can never approve." So we check deployment only here.
+    //
+    // However, write-root needs special handling: the deployment ceiling may
+    // not contain write-root for the workspace (it's empty by default). In
+    // that case, we check whether the requested capability's PATH is within
+    // the workspace root — if so, the interactive user may approve it.
+    const inCeiling = missing.every((c) => {
+      // Check the deployment ceiling first.
+      if (setCovers(context.deploymentCeiling, c)) return true;
+      // Interactive surfaces: if the capability is a file operation WITHIN
+      // the workspace root, the user may approve it even when the ceiling
+      // is empty. Paths OUTSIDE the workspace root are outside-ceiling (deny).
+      if (context.approvalMode !== "never" && context.workspaceRoot) {
+        const root = context.workspaceRoot;
+        if ("path" in c && typeof c.path === "string") {
+          return c.path === root || c.path.startsWith(root + "/");
+        }
+        if ("root" in c && typeof c.root === "string") {
+          return c.root === root || c.root.startsWith(root + "/");
+        }
+      }
+      return false;
+    });
     if (!inCeiling) {
       pushLayer(trace, "deployment", "deny");
       return deny(
         "outside-ceiling",
-        "Requested capability exceeds deployment or principal ceiling",
+        "Requested capability exceeds deployment ceiling",
         trace,
       );
     }

@@ -164,9 +164,10 @@ export class Agent {
   async enablePermissionPipeline(opts: {
     workspaceRoot?: string;
     modelProviderClass?: string;
+    auditRoot?: string;
   }): Promise<void> {
     const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
-    const { legacyApproveToolToBroker, legacyHandlerBoundary } = await import("../legacy-adapter.js");
+    const { legacyApproveToolToBroker } = await import("../legacy-adapter.js");
     // Use a mutable holder so the broker picks up the per-session approveTool
     // when chat() is called (REPL/TUI wire approveTool after bootstrap).
     this._pipelineApproveTool = undefined;
@@ -182,15 +183,20 @@ export class Agent {
         return new (await import("../approval-brokers.js")).NoneApprovalBroker().request(req);
       },
     };
-    const boundary = legacyHandlerBoundary();
+    // Build the REAL typed-executor boundary — NOT the legacy handler.
+    // Writes go through FileCommitBroker; shell through ProcessExecutor.
+    const { buildLocalBoundary } = await import("../../capabilities/execution/build-local-boundary.js");
+    const { boundary: realBoundary, artifacts: sharedArtifacts } = await buildLocalBoundary();
     this._wiredPipeline = await buildActionLifecycle({
       principalId: "cli-user",
       runId: this.sessionId,
       workspaceRoot: opts.workspaceRoot ?? process.cwd(),
       modelProviderClass: opts.modelProviderClass ?? "openai",
       approvalBroker: liveBroker,
-      executionBoundary: boundary,
+      executionBoundary: realBoundary,
       policyStore: this._policyStore ?? undefined,
+      auditRoot: opts.auditRoot,
+      artifacts: sharedArtifacts,
     });
     // Spec 008 FR-014: run crash-recovery on startup. Marks any `dispatched`
     // actions without a terminal record as `indeterminate` (never re-executed).

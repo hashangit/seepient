@@ -115,6 +115,10 @@ export interface PolicyContext {
   approvalMode: "manual" | "balanced" | "never";
   interaction: InteractionContract;
   backendCapabilities: ExecutionBackendCapabilities;
+  /** The workspace root — interactive surfaces let users approve file
+   *  operations within this root even when the ceiling is empty. Paths
+   *  OUTSIDE this root are outside-ceiling (deny). */
+  workspaceRoot?: string;
 }
 
 export interface PolicyTrace {

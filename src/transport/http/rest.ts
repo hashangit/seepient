@@ -312,7 +312,9 @@ async function handleChat(
       tools: parsed.tools,
       maxSteps: parsed.maxSteps ?? 10,
       skills: parsed.skills,
-    });
+      // Spec 008: pass the authenticated API key as the principal identity.
+      apiKeyHash: (req as any).apiKey,
+    } as any);
 
     sendJSON(res, 200, {
       text: result.text,

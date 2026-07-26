@@ -268,6 +268,8 @@ function handleChat(
       skills: msg.options?.skills,
       sessionId: state.sessionId ?? undefined,
       permissionLevel: effectivePermissionLevel,
+      // Spec 008: pass the authenticated API-key hash as principal identity.
+      ...(state.apiKeyHash ? { apiKeyHash: state.apiKeyHash } : {}),
       approveTool: createServerApproveTool(ws),
       signal: abortController.signal,
       onText: (delta) => {

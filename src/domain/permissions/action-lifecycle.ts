@@ -215,8 +215,9 @@ export class ActionLifecycle {
       }
 
       // Approved. Reevaluate ONCE with the approved capability added.
-      // Approval MUST NOT widen the requested capability — we only add caps
-      // that were in the proposed envelope.
+      // The approved cap is added to BOTH activeCapabilities AND the principal
+      // policy so the monotonic intersection sees it at every layer. Approval
+      // is the authority — the cap doesn't need to pre-exist in principal.
       approval = answer;
       const approved = decision.proposedEnvelope.capabilities;
       const withApproval: CapabilitySet = {
@@ -226,6 +227,10 @@ export class ActionLifecycle {
       const reevalContext: PolicyContext = {
         ...this.policyContext,
         activeCapabilities: withApproval,
+        // Also widen principal + runtime so the intersection preserves the
+        // approved cap (the monotonic chain intersects ALL layers).
+        principalPolicy: { version: 1, capabilities: [...this.policyContext.principalPolicy.capabilities, ...approved] },
+        runtimeBaseline: { version: 1, capabilities: [...this.policyContext.runtimeBaseline.capabilities, ...approved] },
       };
       decision = this.policy.evaluate(action, reevalContext);
       // Persist the action-scoped cap so execution sees it.
@@ -392,7 +397,7 @@ export class ActionLifecycle {
           runId: action.runId,
           state,
           timestamp: this.now(),
-          policyDigest: this.policyContext.deploymentCeiling.version.toString(),
+          policyDigest: this.policy.getPolicyDigest(),
           backend: this.boundary.capabilities.backend,
         };
         this.terminalOutbox.enqueue(event, key);

@@ -54,6 +54,14 @@ export interface ActionLifecycleInputs {
   policyStore?: PolicyStore;
   /** Optional: audit store. When absent, defaults to LocalAuditStore. */
   auditStore?: AuditStore;
+  /** Optional: audit root directory. When absent, uses ~/.seepient/security/audit.
+   *  Tests pass a temp dir; production uses the default. */
+  auditRoot?: string;
+  /** Optional: artifact store shared between analyzers and executors. When
+   *  absent, a new InMemoryArtifactStore is created. The transport root that
+   *  calls buildLocalBoundary() should pass the SAME store here so the
+   *  analyzer and executor share content. */
+  artifacts?: import("../../capabilities/execution/in-memory-artifact-store.js").InMemoryArtifactStore;
   /** Optional: deployment ceiling. Default: deny everything not explicitly granted. */
   deploymentCeiling?: CapabilitySet;
   /** Optional: principal policy. Default: empty (caller has no pre-granted caps). */
@@ -129,8 +137,8 @@ export async function buildActionLifecycle(
   // monotonic intersection preserves the workspace-root defaults.
   // This will be set after deploymentCeiling is computed below.
 
-  const auditStore = inputs.auditStore ?? new LocalAuditStore();
-  const artifacts = new InMemoryArtifactStore();
+  const auditStore = inputs.auditStore ?? new LocalAuditStore(inputs.auditRoot ? { root: inputs.auditRoot } : undefined);
+  const artifacts = inputs.artifacts ?? new InMemoryArtifactStore();
 
   // Spec 008 FR-014: terminal-event outbox. When the audit store is the local
   // default, wire its outbox so a failed terminal append is retried rather
@@ -141,34 +149,29 @@ export async function buildActionLifecycle(
     terminalOutbox = new (await import("./audit-recorder.js")).TerminalEventOutbox(auditStore);
   }
 
-  // Default deployment ceiling: the workspace root is readable and writable.
-  // Without this default, turning on the pipeline in a fresh install blocks
-  // every action (empty ceiling → deny all). The operator can narrow via
-  // /permissions or the inputs; the workspace root is the sensible product
-  // default for local interactive surfaces.
+  // Deployment ceiling: defines what the user MAY approve. The workspace root
+  // is readable and writable — this is the MAXIMUM authority the user can
+  // approve. It is NOT a pre-grant: activeCapabilities starts empty, so every
+  // action still prompts the user the first time. The ceiling just says
+  // "these are the scopes you're allowed to approve." Without workspace-root
+  // in the ceiling, the user couldn't approve writes at all.
   const root = inputs.workspaceRoot;
-  const defaultCeiling: CapabilitySet = {
-    version: 1,
+  const deploymentCeiling = inputs.deploymentCeiling ?? {
+    version: 1 as const,
     capabilities: [
       { kind: "read-root", root },
       { kind: "write-root", root },
       { kind: "model-egress", providerClass: inputs.modelProviderClass, dataClasses: ["normal"] },
     ],
   };
-  const deploymentCeiling = inputs.deploymentCeiling ?? defaultCeiling;
-  // If no principal policy was configured (fresh install, empty store), the
-  // principal inherits the deployment ceiling. This means: on a fresh install
-  // the workspace root is readable/writable, and /permissions approve can only
-  // narrow from there. Without this, the intersection of (ceiling ∩ empty) is
-  // empty and every action is denied — the "empty ceiling" bug.
+  // Principal policy: starts at the deployment ceiling (pass-through — no
+  // additional narrowing). /permissions approve adds capabilities here.
+  // An empty principal would intersect to nothing, which is wrong — the
+  // principal defaults to the ceiling so the user CAN approve.
   if (principalPolicy.capabilities.length === 0) {
     principalPolicy = deploymentCeiling;
   }
-  // Runtime baseline default: do not narrow beyond principal/deployment.
-  // An empty set here would intersect to nothing (deny all), which is wrong
-  // for the common case where the caller hasn't configured a separate runtime
-  // floor. The spec's monotonic chain still holds: principal ∩ deployment is
-  // already the effective ceiling, and runtime = principal preserves it.
+  // Runtime baseline: pass-through.
   const runtimeBaseline = inputs.runtimeBaseline ?? principalPolicy;
 
   const policyContext: PolicyContext = {
@@ -182,6 +185,7 @@ export async function buildActionLifecycle(
     activeCapabilities: { version: 1, capabilities: runtimeBaseline.capabilities },
     immutableDenies: inputs.immutableDenies ?? [],
     approvalMode: inputs.approvalMode ?? "manual",
+    workspaceRoot: inputs.workspaceRoot,
     interaction: inputs.interaction ?? {
       mode: inputs.approvalBroker.mode,
       deadlineMs: 30_000,

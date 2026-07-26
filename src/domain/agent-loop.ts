@@ -126,21 +126,42 @@ function buildApprovalContext(args: Record<string, unknown>): ApprovalContext | 
 function classifyOutputSensitivity(
   toolName: string,
   args: Record<string, unknown>,
+  output: string,
 ): "normal" | "sensitive" | "secret" {
-  if (toolName !== "read_file") return "normal";
-  const p = String(args.path ?? "").toLowerCase();
-  if (
-    p.includes("/.ssh/") ||
-    p.includes("/.aws/credentials") ||
-    p.includes("/.env") ||
-    p.endsWith(".pem") ||
-    p.endsWith(".key") ||
-    p.includes("/.seepient/security/")
-  ) {
+  // read_file: classify by the path being read.
+  if (toolName === "read_file") {
+    const p = String(args.path ?? "").toLowerCase();
+    if (
+      p.includes("/.ssh/") ||
+      p.includes("/.aws/credentials") ||
+      p.includes("/.env") ||
+      p.endsWith(".pem") ||
+      p.endsWith(".key") ||
+      p.includes("/.seepient/security/")
+    ) {
+      return "secret";
+    }
+    if (p.includes("/.seepient/") || p.includes("/.config/")) {
+      return "sensitive";
+    }
+    return "normal";
+  }
+  // For ALL other tools (including shell), scan the OUTPUT for secret-shaped
+  // content. A shell command like `cat .env` produces secret output that must
+  // not reach the model. This is content-based defense in depth — the path
+  // check above catches direct reads; this catches indirect leakage.
+  const lower = output.toLowerCase();
+  // Detect common private-key headers.
+  if (lower.includes("-----begin private key-----") || lower.includes("-----begin rsa private key-----")) {
     return "secret";
   }
-  if (p.includes("/.seepient/") || p.includes("/.config/")) {
-    return "sensitive";
+  // Detect AWS keys, OpenAI keys, GitHub tokens in output.
+  if (/akia[0-9a-z]{16}/.test(lower) || /sk-[a-z0-9]{20,}/.test(lower) || /ghp_[a-z0-9]{30,}/.test(lower)) {
+    return "secret";
+  }
+  // Detect `.env`-style KEY=VALUE patterns with credential-shaped values.
+  if (/(api_key|secret_key|password|token|private_key)\s*[:=]\s*['"]?[a-z0-9+/=_-]{16,}/i.test(lower)) {
+    return "secret";
   }
   return "normal";
 }
@@ -544,11 +565,10 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
               ...wiredPipeline.analysisContext,
               toolCallId: tc.id,
             });
-            // Run the full lifecycle. The boundary's executor performs the
-            // side effect (or denies it). Set the per-call context first so
-            // the legacy-handler boundary can call the real tool registry.
-            const boundary = wiredPipeline.boundary as { setCallContext?: (n: string, a: Record<string, unknown>, c?: Record<string, unknown>, e?: { signal?: AbortSignal; onUpdate?: (p: { message?: string; percentage?: number }) => void }) => void };
-            boundary.setCallContext?.(tc.name, parsedArgs, config, execExtra);
+            // Run the full lifecycle. The boundary dispatches by
+            // PreparedOperation.kind — commit-files → FileCommitBroker,
+            // process → ProcessExecutor, etc. The prepared operation IS
+            // the operation that executes (not the old tool handler).
             const result = await wiredPipeline.lifecycle.run(action, signal);
             output = result.toolResult.output;
             metadata = result.toolResult.metadata;
@@ -559,7 +579,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
             // (e.g. .ssh/id_rsa, .env, active policy) is replaced with a
             // redaction notice — the bytes never reach the provider.
             if (result.outcome.state !== "denied" && output.length > 0) {
-              const sensitivity = classifyOutputSensitivity(tc.name, parsedArgs);
+              const sensitivity = classifyOutputSensitivity(tc.name, parsedArgs, output);
               if (sensitivity !== "normal") {
                 const { ModelEgressGate } = await import("./permissions/model-egress-gate-proxy.js");
                 const gate = new ModelEgressGate();
@@ -601,10 +621,28 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
             if (onStep) onStep(toolStep);
             continue; // skip the legacy branches entirely
           }
-          // resolveAnalyzerWithFallback always returns an analyzer (generic
-          // fallback), so this point is unreachable when wiredPipeline is set.
-          // The legacy path below handles only the case where wiredPipeline
-          // is NOT set (the default).
+          // No truthful analyzer for this tool → FAIL CLOSED. The tool does
+          // not run through the legacy handler; the model gets a structured
+          // denial so it can adapt. This is the reviewer's design: "tools
+          // without truthful effect analyzers must fail closed."
+          output = `Tool "${tc.name}" is not supported under the permission pipeline (no analyzer registered). Use the legacy path (disable --permission-pipeline) or add an analyzer for this tool.`;
+          const duration = now() - start;
+          messages.push({
+            id: generateId(),
+            role: "tool",
+            content: output,
+            toolCallId: tc.id,
+            timestamp: now(),
+          });
+          const failStep: StepResult = {
+            type: "tool_call",
+            toolCall: { id: tc.id, name: tc.name, args: parsedArgs, result: output, duration },
+            timestamp: now(),
+          };
+          steps.push(failStep);
+          await hooks.onStep(failStep);
+          if (onStep) onStep(failStep);
+          continue;
         }
 
         if (autoConfirm) {

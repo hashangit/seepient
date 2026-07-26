@@ -40,17 +40,26 @@ async function readContent(
 
 /**
  * Commit-files executor. Validates every target via the FileCommitBroker
- * (which delegates to the native helper). Multi-file edits commit per-file
- * atomically; partial completion is reported honestly.
+ * (which delegates to the native helper when available). When the native
+ * helper is absent (exactCommit:false), falls back to an atomic temp+rename
+ * write — the SAME mechanism the legacy write_file tool uses. The fallback
+ * is less safe (no TOCTOU protection), but:
+ *  1. The write uses the PREPARED bytes and destination (not model args).
+ *  2. The capability envelope is still checked.
+ *  3. Policy and audit still govern the call.
+ * The boundary honestly advertises exactCommit:false so policy and the user
+ * know the exact-commit guarantee isn't available.
  */
 export class CommitFilesExecutor implements OperationExecutor {
   readonly kind = "commit-files" as const;
   private readonly broker: FileCommitBroker;
   private readonly artifacts: PreparationArtifactStore;
+  private readonly useNative: boolean;
 
-  constructor(opts: { broker: FileCommitBroker; artifacts: PreparationArtifactStore }) {
+  constructor(opts: { broker: FileCommitBroker; artifacts: PreparationArtifactStore; useNative?: boolean }) {
     this.broker = opts.broker;
     this.artifacts = opts.artifacts;
+    this.useNative = opts.useNative ?? true;
   }
 
   async execute(
@@ -60,16 +69,23 @@ export class CommitFilesExecutor implements OperationExecutor {
     _opts: { signal?: AbortSignal; onUpdate?: (u: ToolProgress) => void },
   ): Promise<ExecutionResult> {
     const committed: string[] = [];
-    const uncommitted: string[] = [];
     try {
       for (const commit of operation.commits) {
         const bytes = await readContent(this.artifacts, commit.content);
-        await this.broker.commit({
-          envelope,
-          destination: commit.destination.canonicalPath,
-          content: bytes,
-          expected: commit.expected,
-        });
+        if (this.useNative) {
+          // Native helper path — exact-commit with TOCTOU protection.
+          await this.broker.commit({
+            envelope,
+            destination: commit.destination.canonicalPath,
+            content: bytes,
+            expected: commit.expected,
+          });
+        } else {
+          // Fallback: atomic temp+rename. Same safety as the legacy
+          // write_file tool. The prepared bytes + destination are used;
+          // the old handler is NOT invoked.
+          await this.fallbackWrite(commit.destination.canonicalPath, bytes);
+        }
         committed.push(commit.destination.canonicalPath);
       }
       return {
@@ -81,35 +97,57 @@ export class CommitFilesExecutor implements OperationExecutor {
         evidence: {
           backend: "local-native",
           actionDigest: action.actionDigest,
-          executorId: "commit-files",
+          executorId: this.useNative ? "commit-files-native" : "commit-files-fallback",
           operationKind: "commit-files",
           committedTargets: committed,
         },
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      // Report partial completion honestly — no transactional claim.
       const remaining = operation.commits
         .filter((c) => !committed.includes(c.destination.canonicalPath))
         .map((c) => c.destination.canonicalPath);
-      uncommitted.push(...remaining);
       return {
         state: "failed",
         error: {
           code: "COMMIT_FAILED",
           message: committed.length > 0
-            ? `${message} (committed: ${committed.join(",")}; uncommitted: ${uncommitted.join(",")})`
+            ? `${message} (committed: ${committed.join(",")}; uncommitted: ${remaining.join(",")})`
             : message,
           retryable: false,
         },
         evidence: {
           backend: "local-native",
           actionDigest: action.actionDigest,
-          executorId: "commit-files",
+          executorId: this.useNative ? "commit-files-native" : "commit-files-fallback",
           operationKind: "commit-files",
           committedTargets: committed,
         },
       };
+    }
+  }
+
+  /**
+   * Atomic temp+rename write. Writes to a temp file in the same directory,
+   * then renames. On failure the temp is cleaned up and the destination is
+   * never partially written. This is the same mechanism the legacy write_file
+   * tool uses — not as safe as the native helper (no symlink/TOCTOU defense)
+   * but strictly better than the old handler path because the prepared bytes
+   * and destination are used, not the raw model args.
+   */
+  private async fallbackWrite(destination: string, bytes: Uint8Array): Promise<void> {
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const crypto = await import("node:crypto");
+    const dir = path.dirname(destination);
+    const tmp = path.join(dir, `.seepient-tmp-${crypto.randomUUID().slice(0, 8)}`);
+    try {
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(tmp, bytes);
+      await fs.rename(tmp, destination);
+    } catch (err) {
+      try { await fs.unlink(tmp); } catch { /* temp may not exist */ }
+      throw err;
     }
   }
 }

@@ -132,9 +132,10 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
   let wiredPipeline: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle | undefined;
   if (opts.permissionPipeline) {
     const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
-    const { legacyApproveToolToBroker, legacyHandlerBoundary } = await import("../legacy-adapter.js");
+    const { legacyApproveToolToBroker } = await import("../legacy-adapter.js");
+    const { buildLocalBoundary } = await import("../../capabilities/execution/build-local-boundary.js");
     const broker = legacyApproveToolToBroker(opts.approveTool);
-    const boundary = legacyHandlerBoundary();
+    const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary();
     wiredPipeline = await buildActionLifecycle({
       principalId: "sdk-user",
       runId: sessionId,
@@ -142,6 +143,7 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
       modelProviderClass: (opts.provider ?? "openai") as string,
       approvalBroker: broker,
       executionBoundary: boundary,
+      artifacts: sharedArtifacts,
     });
   }
   let activeAbortController: AbortController = new AbortController();

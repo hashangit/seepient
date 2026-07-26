@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runAgentLoop } from "../../domain/agent-loop.js";
 import { buildActionLifecycle } from "../../domain/permissions/action-lifecycle-factory.js";
-import { legacyHandlerBoundary, legacyApproveToolToBroker } from "../legacy-adapter.js";
+import { buildLocalBoundary } from "../../capabilities/execution/build-local-boundary.js";
 import { InlineApprovalBroker, type InlineApprovalPresenter } from "../approval-brokers.js";
 import { createHookExecutor } from "../../domain/hooks.js";
 import type { LLMProvider, ProviderResponse } from "../../foundations/contracts/llm.js";
@@ -48,7 +48,7 @@ describe("REAL tool execution through the new pipeline (reviewer fix #2)", () =>
         return { approved: true, requestId: req.requestId, actionDigest: req.actionDigest, lifetime: "action", actorId: "u", decidedAt: Date.now() };
       },
     };
-    const boundary = legacyHandlerBoundary();
+    const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary();
     const wired = await buildActionLifecycle({
       principalId: "u",
       runId: "r1",
@@ -56,6 +56,8 @@ describe("REAL tool execution through the new pipeline (reviewer fix #2)", () =>
       modelProviderClass: "openai",
       approvalBroker: new InlineApprovalBroker(presenter, { deadlineMs: 5000 }),
       executionBoundary: boundary,
+      auditRoot: dir,
+      artifacts: sharedArtifacts,
     });
     const provider = fakeProvider("write_file", { path: targetPath, content: "hello from the new pipeline" });
 
@@ -69,7 +71,6 @@ describe("REAL tool execution through the new pipeline (reviewer fix #2)", () =>
       wiredPipeline: wired,
     });
 
-    // The REAL write_file handler ran (via executeTool) and wrote the file.
     expect(existsSync(targetPath)).toBe(true);
     expect(readFileSync(targetPath, "utf-8")).toBe("hello from the new pipeline");
   });
@@ -85,7 +86,7 @@ describe("REAL tool execution through the new pipeline (reviewer fix #2)", () =>
         return { approved: false, requestId: req.requestId, actionDigest: req.actionDigest, actorId: "u", decidedAt: Date.now() };
       },
     };
-    const boundary = legacyHandlerBoundary();
+    const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary();
     const wired = await buildActionLifecycle({
       principalId: "u",
       runId: "r1",
@@ -93,6 +94,8 @@ describe("REAL tool execution through the new pipeline (reviewer fix #2)", () =>
       modelProviderClass: "openai",
       approvalBroker: new InlineApprovalBroker(presenter, { deadlineMs: 5000 }),
       executionBoundary: boundary,
+      auditRoot: dir,
+      artifacts: sharedArtifacts,
     });
     const provider = fakeProvider("write_file", { path: targetPath, content: "should not be written" });
 
@@ -110,7 +113,7 @@ describe("REAL tool execution through the new pipeline (reviewer fix #2)", () =>
   });
 
   it("get_current_datetime runs through the pipeline (tool without a native executor)", async () => {
-    const boundary = legacyHandlerBoundary();
+    const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary();
     const wired = await buildActionLifecycle({
       principalId: "u",
       runId: "r1",
@@ -118,10 +121,11 @@ describe("REAL tool execution through the new pipeline (reviewer fix #2)", () =>
       modelProviderClass: "openai",
       approvalBroker: new InlineApprovalBroker({ async prompt(req) { return { approved: true, requestId: req.requestId, actionDigest: req.actionDigest, lifetime: "action", actorId: "u", decidedAt: Date.now() }; } }, { deadlineMs: 5000 }),
       executionBoundary: boundary,
+      auditRoot: dir,
+      artifacts: sharedArtifacts,
     });
-    // get_current_datetime has no analyzer → falls through to legacy path.
-    // The legacy path runs it directly. This proves tools without analyzers
-    // still work (don't break) when the pipeline is on.
+    // get_current_datetime has no analyzer → FAIL CLOSED under the new
+    // pipeline. The tool produces a structured denial, not a silent bypass.
     const provider = fakeProvider("get_current_datetime", {});
     const result = await runAgentLoop({
       provider,
@@ -132,8 +136,8 @@ describe("REAL tool execution through the new pipeline (reviewer fix #2)", () =>
       hooks: createHookExecutor({}),
       wiredPipeline: wired,
     });
-    // The tool ran (legacy fallthrough) and produced a result.
+    // The tool was DENIED (no analyzer → fail closed).
     const toolStep = result.steps.find((s) => s.type === "tool_call");
-    expect(toolStep).toBeDefined();
+    expect(toolStep?.toolCall?.result).toMatch(/not supported|no analyzer/i);
   });
 });

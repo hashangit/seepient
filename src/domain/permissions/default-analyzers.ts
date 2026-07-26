@@ -397,18 +397,15 @@ export async function genericAnalyzer(
 }
 
 /**
- * The complete analyzer registry: dedicated analyzers for the 8 tools that
- * have them, PLUS a generic fallback for every other registered tool. When
- * the pipeline is enabled, NO tool falls through to the legacy matrix path.
- *
- * Call `resolveAnalyzerWithFallback(analyzers, toolName, allToolNames)` to
- * get either the dedicated analyzer or the generic fallback.
+ * Resolve an analyzer for a tool. Returns the dedicated analyzer if one
+ * exists, or `null` when no truthful analyzer is registered. Tools without
+ * analyzers FAIL CLOSED — the agent-loop produces a structured "unsupported
+ * tool" denial rather than running the old handler. This is the reviewer's
+ * correct design: "tools without truthful effect analyzers must fail closed."
  */
 export function resolveAnalyzerWithFallback(
   analyzers: Record<string, ToolAnalyzer>,
   toolName: string,
-): ToolAnalyzer {
-  if (analyzers[toolName]) return analyzers[toolName];
-  // Generic fallback: every tool gets governed by the pipeline.
-  return (args, ctx) => genericAnalyzer(toolName, args, ctx);
+): ToolAnalyzer | null {
+  return analyzers[toolName] ?? null;
 }

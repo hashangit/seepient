@@ -106,6 +106,10 @@ Current layout of the Obsidian vault (annotated):
 │       ├── contracts/                # agents-md-loader.md, domain-composer.md, resolve-system-context.md, system-prompt-composition.md
 │       ├── quickstart.md             # ~37 deterministic scenarios (no process.chdir, no chmod, no grep -v)
 │       └── tasks.md                  # 40 dependency-ordered tasks, 14 regression gates
+│   └── 011-tui-permission-scope-ux/       # Multi-tab TUI permission scope & duration UX
+│       ├── spec.md                   # Problem statement, requirements, scope
+│       ├── plan.md                   # Phased implementation plan
+│       └── tasks.md                  # Dependency-ordered implementation tasks
 ├── 010-provider-management-redesign/ # Provider mgmt redesign: contracts + runtime + purpose/tier routing
 │   ├── spec.md                       # Problem, 5 blockers + 4 gaps, scope decisions, success criteria
 │   ├── plan.md                       # P0-P7 phased plan (contracts → Pi adapter → runtime → resolution → surfaces → reliability)

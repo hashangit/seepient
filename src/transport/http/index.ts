@@ -216,9 +216,21 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
           },
         });
       } else {
-        const { legacyHandlerBoundary } = await import("../legacy-adapter.js");
-        boundary = legacyHandlerBoundary();
+        const { buildLocalBoundary } = await import("../../capabilities/execution/build-local-boundary.js");
+        const localResult = await buildLocalBoundary();
+        boundary = localResult.boundary;
+        return buildActionLifecycle({
+          principalId: identity.principalId,
+          runId: identity.runId,
+          workspaceRoot: identity.workspaceRoot,
+          modelProviderClass: identity.modelProviderClass,
+          approvalBroker: new NoneApprovalBroker(),
+          executionBoundary: boundary,
+          approvalMode: "never",
+          artifacts: localResult.artifacts,
+        });
       }
+      // Worker path (scheduler configured) — buildActionLifecycle below.
       return buildActionLifecycle({
         principalId: identity.principalId,
         runId: identity.runId,

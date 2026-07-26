@@ -190,14 +190,17 @@ export async function generateText(
   let wiredPipeline: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle | undefined;
   if (opts.permissionPipeline) {
     const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
-    const { legacyApproveToolToBroker, legacyHandlerBoundary } = await import("../legacy-adapter.js");
+    const { legacyApproveToolToBroker } = await import("../legacy-adapter.js");
+    const { buildLocalBoundary } = await import("../../capabilities/execution/build-local-boundary.js");
+    const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary();
     wiredPipeline = await buildActionLifecycle({
       principalId: "sdk-user",
       runId: generateId(),
       workspaceRoot: opts.cwd ?? process.cwd(),
       modelProviderClass: (opts.provider ?? "openai") as string,
       approvalBroker: legacyApproveToolToBroker(opts.approveTool),
-      executionBoundary: legacyHandlerBoundary(),
+      executionBoundary: boundary,
+      artifacts: sharedArtifacts,
     });
   }
 
@@ -298,14 +301,17 @@ export async function streamText(
   let wiredPipeline: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle | undefined;
   if (opts.permissionPipeline) {
     const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
-    const { legacyApproveToolToBroker, legacyHandlerBoundary } = await import("../legacy-adapter.js");
+    const { legacyApproveToolToBroker } = await import("../legacy-adapter.js");
+    const { buildLocalBoundary } = await import("../../capabilities/execution/build-local-boundary.js");
+    const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary();
     wiredPipeline = await buildActionLifecycle({
       principalId: "sdk-user",
       runId: generateId(),
       workspaceRoot: opts.cwd ?? process.cwd(),
       modelProviderClass: (opts.provider ?? "openai") as string,
       approvalBroker: legacyApproveToolToBroker(opts.approveTool),
-      executionBoundary: legacyHandlerBoundary(),
+      executionBoundary: boundary,
+      artifacts: sharedArtifacts,
     });
   }
 
