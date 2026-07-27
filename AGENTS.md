@@ -91,11 +91,11 @@ Current layout of the Obsidian vault (annotated):
 │   │   └── ...                       # research.md, contracts/, etc. as needed
 │   ├── 008-permission-system-redesign/  # OS sandbox + deny-layer + server policy
 │   │   ├── spec.md                      # Bug sweep findings + scope decisions
-│   │   ├── plan.md                      # P0-P6 plan: policy, local/server enforcement, self-evolution
+│   │   ├── plan.md                      # P0-P6 plan (R9.1): policy, local/server enforcement, self-evolution, audit durability
 │   │   ├── research.md                  # Cross-tool study + R8 end-to-end architecture review
 │   │   ├── research-permissions-ux.md   # Deep-dive: Codex/OMP/Hermes implementation + interactive/non-interactive UX
-│   │   ├── data-model.md                # Prepared actions, capabilities, brokers, execution boundaries
-│   │   ├── contracts/                   # sandbox-api.md, server-policy.md, tui-escalation.md
+│   │   ├── data-model.md                # Prepared actions, capabilities, brokers, execution boundaries, tool map, authority rules
+│   │   ├── contracts/                   # sandbox-api.md, server-policy.md, tui-escalation.md, execution-brokers.md
 │   │   ├── quickstart.md                # Per-phase validation scenarios
 │   │   └── tasks.md                     # Dependency-ordered implementation tasks
 │   └── 009-agents-md-alignment/      # AGENTS.md loader only (v3 — .agents/skills/ moves to separate spec)
@@ -342,10 +342,13 @@ Keep `CONTEXT.md` under 20 lines total. Do NOT summarize the full conversation �
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
 - **ACTIVE PLAN**: `~/Documents/Obsidian/Seepient/Implementation-Specs/008-permission-system-redesign/plan.md`
-  — Permission system redesign R9: analyzer-only tools, one Domain policy and
+  — Permission system redesign R9.1: analyzer-only tools, one Domain policy and
   execution boundary, native exact commits, typed effect/secret/model-egress
-  brokers, external Docker worker scheduler, protected policy/audit stores, and
-  a governed self-evolution activation boundary. Prior
+  brokers, external Docker worker scheduler (localhost mTLS in R9.1, multi-host
+  post-R9.1), protected policy/audit stores with persisted replay ledger and
+  durable outbox, atomic authority consumption (action/run/session lifetimes),
+  and a governed self-evolution activation boundary. Six-item reviewer
+  correction: see decisions D45–D47. Prior
   plan: `specs/007-tui-parity-upgrade/` (TUI parity — shipped).
 - **UPCOMING (planned, not yet in implementation)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/009-agents-md-alignment/plan.md`
   — AGENTS.md standard alignment (v3, scope-narrowed after R2 review):

@@ -37,18 +37,27 @@ export function legacyApproveToolToBroker(
 ): ApprovalBroker {
   if (!approveTool) return new NoneApprovalBroker();
   return new CallbackApprovalBroker(async (req: PermissionRequest, opts): Promise<PermissionDecision> => {
-    // Bridge back to the legacy signature.
+    const scopeToLifetime = (scope?: string): "action" | "run" | "session" => {
+      if (scope === "session") return "session";
+      if (scope === "project" || scope === "global") return "session";
+      return "action";
+    };
     const decision = await approveTool({
       name: req.action.title,
-      args: {}, // the legacy callback doesn't need args; it has its own UX context
+      args: {
+        summary: req.action.summary,
+        canonicalTargets: req.action.canonicalTargets,
+        effects: req.action.effects,
+      },
     });
     const approved = typeof decision === "boolean" ? decision : decision.approved;
+    const scope = typeof decision === "object" ? decision.scope : undefined;
     if (approved) {
       return {
         approved: true,
         requestId: req.requestId,
         actionDigest: req.actionDigest,
-        lifetime: "action",
+        lifetime: scopeToLifetime(scope),
         actorId: "legacy-adapter",
         decidedAt: Date.now(),
       };

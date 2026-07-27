@@ -184,6 +184,27 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
     }
   }
 
+  // T109c: Audit recovery — reload durable outbox + scan for dispatched
+  // records without a terminal event on startup. Best-effort, never blocks.
+  try {
+    const { LocalAuditStore, TerminalEventOutbox, recoverIndeterminateActions } = await import(
+      '../../domain/permissions/audit-recorder.js'
+    );
+    const auditStore = new LocalAuditStore();
+    const outbox = new TerminalEventOutbox(auditStore);
+    await outbox.reload();
+    if (!outbox.isHealthy()) {
+      const remaining = await outbox.flush();
+      if (remaining > 0 && process.env.DEBUG) {
+        console.warn(`[audit] ${remaining} terminal event(s) still pending after startup flush`);
+      }
+    }
+    const recovered = await recoverIndeterminateActions(auditStore, outbox);
+    if (recovered.length > 0 && process.env.DEBUG) {
+      console.warn(`[audit] Recovered ${recovered.length} indeterminate action(s): ${recovered.join(', ')}`);
+    }
+  } catch { /* best-effort — never block startup on audit recovery */ }
+
   // Pre-seed grants from --allow-* flags (repeatable, scope-specific):
   //   --allow-once / --allow-session → session scope (process lifetime;
   //     equivalent in non-interactive mode — one run = one session)

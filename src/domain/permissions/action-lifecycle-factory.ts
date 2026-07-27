@@ -36,6 +36,8 @@ import type { PreparedToolAction } from "../../foundations/contracts/prepared-ac
 import type { ToolAnalysisContext } from "../../foundations/contracts/custom-tools.js";
 import type { AuditStore } from "../../foundations/contracts/execution-brokers.js";
 import { InMemoryArtifactStore } from "../../capabilities/execution/in-memory-artifact-store.js";
+import * as path from "node:path";
+import { PersistedCapabilityLedger } from "./persisted-capability-ledger.js";
 
 /** All analyzers, merged. Tools without an analyzer fall through. */
 export const ALL_ANALYZERS: Record<string, ToolAnalyzer> = {
@@ -74,6 +76,8 @@ export interface ActionLifecycleInputs {
   approvalMode?: "manual" | "balanced" | "never";
   /** Interaction contract — derived from the broker by default. */
   interaction?: PolicyContext["interaction"];
+  /** Optional: persisted capability ledger for authority consumption & revocation (T107a). */
+  capabilityLedger?: PersistedCapabilityLedger;
 }
 
 /**
@@ -99,6 +103,8 @@ export interface WiredActionLifecycle {
   /** Terminal-event outbox (when the audit store is LocalAuditStore). Composition
    *  roots call `outbox.flush()` on a timer and check `outbox.isHealthy()`. */
   terminalOutbox?: import("./audit-recorder.js").TerminalEventOutbox;
+  /** Persisted capability ledger for action consumption & run/session revocation (T107a). */
+  capabilityLedger?: PersistedCapabilityLedger;
   /** The backing audit store, for crash-recovery on startup. */
   auditStore: AuditStore;
 }
@@ -117,75 +123,60 @@ export async function buildActionLifecycle(
   // Seed principal policy from the protected store. This is the ONE place the
   // PolicyStore feeds into a PolicyContext — answering Finding #2 from the
   // scrutiny review (approved capabilities now affect the next run).
+  // Deployment ceiling: defines what the user MAY approve. Canonicalize workspaceRoot
+  // with realpathSync so symlink prefixes (e.g. macOS /var -> /private/var) match.
+  let root = inputs.workspaceRoot;
+  try {
+    const { realpathSync: fs_realpathSync, existsSync: fs_existsSync } = await import("node:fs");
+    if (root && fs_existsSync(root)) {
+      root = fs_realpathSync(root);
+    }
+  } catch {
+    /* keep raw root */
+  }
+
+  const deploymentCeiling = inputs.deploymentCeiling ?? {
+    version: 1 as const,
+    capabilities: [
+      { kind: "read-root", root },
+      { kind: "write-root", root },
+      { kind: "process" },
+      { kind: "model-egress", providerClass: inputs.modelProviderClass, dataClasses: ["normal"] },
+    ],
+  };
+
   // When no policy exists yet (fresh install), the principal policy defaults
-  // to the deployment ceiling — so the operator's ceiling IS the starting
-  // authority. /permissions approve can only NARROW from there.
+  // to the deployment ceiling so the operator's ceiling IS the starting maximum authority.
   let principalPolicy: CapabilitySet;
   try {
     const snap = await policyStore.read(workspaceId);
     if (snap.policy.capabilities.length > 0) {
       principalPolicy = snap.policy;
     } else {
-      // Empty store → use caller-supplied or defer to deployment ceiling.
-      principalPolicy = inputs.principalPolicy ?? { version: 1, capabilities: [] };
+      principalPolicy = inputs.principalPolicy ?? deploymentCeiling;
     }
   } catch {
-    principalPolicy = inputs.principalPolicy ?? { version: 1, capabilities: [] };
-  }
-  // If the principal policy is empty (no operator config), it should NOT
-  // narrow the deployment ceiling — default it to the same ceiling so the
-  // monotonic intersection preserves the workspace-root defaults.
-  // This will be set after deploymentCeiling is computed below.
-
-  const auditStore = inputs.auditStore ?? new LocalAuditStore(inputs.auditRoot ? { root: inputs.auditRoot } : undefined);
-  const artifacts = inputs.artifacts ?? new InMemoryArtifactStore();
-
-  // Spec 008 FR-014: terminal-event outbox. When the audit store is the local
-  // default, wire its outbox so a failed terminal append is retried rather
-  // than thrown. The caller (composition root) runs `recoverIndeterminateActions`
-  // on startup and `outbox.flush()` on a timer.
-  let terminalOutbox: import("./audit-recorder.js").TerminalEventOutbox | undefined;
-  if (auditStore instanceof LocalAuditStore) {
-    terminalOutbox = new (await import("./audit-recorder.js")).TerminalEventOutbox(auditStore);
+    principalPolicy = inputs.principalPolicy ?? deploymentCeiling;
   }
 
-  // Deployment ceiling: defines what the user MAY approve. The workspace root
-  // is readable and writable — this is the MAXIMUM authority the user can
-  // approve. It is NOT a pre-grant: activeCapabilities starts empty, so every
-  // action still prompts the user the first time. The ceiling just says
-  // "these are the scopes you're allowed to approve." Without workspace-root
-  // in the ceiling, the user couldn't approve writes at all.
-  const root = inputs.workspaceRoot;
-  const deploymentCeiling = inputs.deploymentCeiling ?? {
+  // Runtime baseline: caller-supplied or pass-through from deploymentCeiling.
+  const runtimeBaseline = inputs.runtimeBaseline ?? deploymentCeiling;
+  // Active session capabilities start with pre-granted capabilities from a
+  // stored principal policy or baseline. Default moderate baseline includes
+  // workspace read-root and write-root.
+  const activeCapabilities = {
     version: 1 as const,
-    capabilities: [
-      { kind: "read-root", root },
-      { kind: "write-root", root },
-      { kind: "model-egress", providerClass: inputs.modelProviderClass, dataClasses: ["normal"] },
-    ],
+    capabilities: [...principalPolicy.capabilities],
   };
-  // Principal policy: starts at the deployment ceiling (pass-through — no
-  // additional narrowing). /permissions approve adds capabilities here.
-  // An empty principal would intersect to nothing, which is wrong — the
-  // principal defaults to the ceiling so the user CAN approve.
-  if (principalPolicy.capabilities.length === 0) {
-    principalPolicy = deploymentCeiling;
-  }
-  // Runtime baseline: pass-through.
-  const runtimeBaseline = inputs.runtimeBaseline ?? principalPolicy;
 
   const policyContext: PolicyContext = {
     deploymentCeiling,
     principalPolicy,
     runtimeBaseline,
-    // activeCapabilities defaults to the runtime baseline so an empty action-
-    // scoped store (no prior approvals) does NOT narrow the intersection to
-    // deny-all. The spec's monotonic chain treats each layer as a constraint;
-    // an unconstrained action scope = "no additional narrowing beyond runtime."
-    activeCapabilities: { version: 1, capabilities: runtimeBaseline.capabilities },
+    activeCapabilities: { version: 1, capabilities: activeCapabilities.capabilities },
     immutableDenies: inputs.immutableDenies ?? [],
     approvalMode: inputs.approvalMode ?? "manual",
-    workspaceRoot: inputs.workspaceRoot,
+    workspaceRoot: root,
     interaction: inputs.interaction ?? {
       mode: inputs.approvalBroker.mode,
       deadlineMs: 30_000,
@@ -193,11 +184,19 @@ export async function buildActionLifecycle(
     backendCapabilities: inputs.executionBoundary.capabilities,
   };
 
+  const capabilityLedger = inputs.capabilityLedger ?? new PersistedCapabilityLedger(inputs.auditRoot ? { root: path.join(inputs.auditRoot, "caps") } : undefined);
+  await capabilityLedger.load().catch(() => {});
+
   const policyDigest = computePolicyDigest(policyContext);
-  const engine = new PolicyEngine(policyDigest);
-  // The mutable action-scoped store starts at the runtime baseline (same
-  // rationale: an empty store must not deny-all). Approvals add caps here.
-  const activeCapabilities = { capabilities: [...runtimeBaseline.capabilities] as Capability[] };
+  const engine = new PolicyEngine(policyDigest, { ledger: capabilityLedger });
+
+  const auditStore = inputs.auditStore ?? new LocalAuditStore(inputs.auditRoot ? { root: inputs.auditRoot } : undefined);
+  const artifacts = inputs.artifacts ?? new InMemoryArtifactStore();
+
+  let terminalOutbox: import("./audit-recorder.js").TerminalEventOutbox | undefined;
+  if (auditStore instanceof LocalAuditStore) {
+    terminalOutbox = new (await import("./audit-recorder.js")).TerminalEventOutbox(auditStore);
+  }
 
   const lifecycle = new ActionLifecycle({
     policy: engine,
@@ -207,6 +206,7 @@ export async function buildActionLifecycle(
     audit: auditStore,
     activeCapabilities,
     terminalOutbox,
+    capabilityLedger,
   });
 
   return {
@@ -217,12 +217,13 @@ export async function buildActionLifecycle(
     analyzers: ALL_ANALYZERS,
     auditStore,
     terminalOutbox,
+    capabilityLedger,
     analysisContext: {
       principalId: inputs.principalId,
       runId: inputs.runId,
       workspace: {
         workspaceId,
-        canonicalRoot: inputs.workspaceRoot,
+        canonicalRoot: root,
         policyVersion: 0,
         policyDigest,
       },

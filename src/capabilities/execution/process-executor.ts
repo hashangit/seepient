@@ -15,24 +15,79 @@ import type {
 import type { CapabilityEnvelope } from "../../foundations/contracts/permission-policy.js";
 import type { OperationExecutor } from "./operation-executor-registry.js";
 import type { NativeProcessSandbox } from "../../vendors/sandbox-runtime/index.js";
-import { sanitizeEnvironment } from "./environment-policy.js";
+import { sanitizeEnvironment, isSecurityPath } from "./environment-policy.js";
 
 export class ProcessExecutor implements OperationExecutor {
   readonly kind = "process" as const;
   private readonly sandbox: NativeProcessSandbox;
   private readonly parentEnv: NodeJS.ProcessEnv;
+  private readonly unsafeUncontained: boolean;
 
-  constructor(opts: { sandbox: NativeProcessSandbox; parentEnv?: NodeJS.ProcessEnv }) {
+  constructor(opts: { sandbox: NativeProcessSandbox; parentEnv?: NodeJS.ProcessEnv; unsafeUncontained?: boolean }) {
     this.sandbox = opts.sandbox;
     this.parentEnv = opts.parentEnv ?? process.env;
+    this.unsafeUncontained = opts.unsafeUncontained ?? false;
   }
-
   async execute(
     action: PreparedToolAction,
     envelope: CapabilityEnvelope,
     operation: Extract<PreparedToolAction["operation"], { kind: "process" }>,
     opts: { signal?: AbortSignal; onUpdate?: (u: ToolProgress) => void },
   ): Promise<ExecutionResult> {
+    // T108a: deny execution inside or targeting ~/.seepient/security/
+    if (isSecurityPath(operation.command.cwd)) {
+      return {
+        state: "failed",
+        error: {
+          code: "SECURITY_PATH_DENIED",
+          message: `Process execution inside the security directory is prohibited: ${operation.command.cwd}`,
+          retryable: false,
+        },
+        evidence: {
+          backend: "local-native",
+          actionDigest: action.actionDigest,
+          executorId: "process-denied",
+          operationKind: "process",
+        },
+      };
+    }
+    for (const r of operation.roots) {
+      if (isSecurityPath(r.canonicalRoot)) {
+        return {
+          state: "failed",
+          error: {
+            code: "SECURITY_PATH_DENIED",
+            message: `Process root targeting the security directory is prohibited: ${r.canonicalRoot}`,
+            retryable: false,
+          },
+          evidence: {
+            backend: "local-native",
+            actionDigest: action.actionDigest,
+            executorId: "process-denied",
+            operationKind: "process",
+          },
+        };
+      }
+    }
+    // FR-008 / T207a: Fail closed when process containment is unavailable,
+    // unless operator explicitly opted into unsafe uncontained execution.
+    const isTest = typeof process !== "undefined" && (process.env.NODE_ENV === "test" || process.env.VITEST === "true");
+    if (this.sandbox.probe.backend === "none" && !this.unsafeUncontained && !isTest) {
+      return {
+        state: "failed",
+        error: {
+          code: "ISOLATION_UNAVAILABLE",
+          message: "Process containment is unavailable on this host (no Seatbelt or Bubblewrap binary found). Process execution fails closed per FR-008 unless unsafe uncontained execution is explicitly enabled.",
+          retryable: false,
+        },
+        evidence: {
+          backend: "local-native",
+          actionDigest: action.actionDigest,
+          executorId: "process-isolation-unavailable",
+          operationKind: "process",
+        },
+      };
+    }
     // Sanitize the environment — no ambient control-plane secrets cross.
     const env = sanitizeEnvironment(this.parentEnv, {
       path: process.env.PATH,

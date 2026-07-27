@@ -129,4 +129,23 @@ describe("architecture boundaries (spec 008, T008)", () => {
     }
     expect(violations, violations.join("\n")).toEqual([]);
   });
+
+  it("Domain exports no analyze* symbols (T008a / D46)", () => {
+    // Domain must contain no tool-specific analyzers. Analyzer implementations
+    // live in src/capabilities/tools/. The Domain shim (comm-analyzers.ts,
+    // default-analyzers.ts) may re-export but must not define analyze* itself.
+    const violations: string[] = [];
+    for (const f of files) {
+      const rel = relative(ROOT, f).replace(/\\/g, "/");
+      if (!rel.startsWith("domain/")) continue;
+      const src = readFileSync(f, "utf8");
+      // Detect export declarations that define a function named analyze*
+      const exportFnRe = /export\s+(?:async\s+)?function\s+(analyze[A-Za-z]+)/g;
+      let m: RegExpExecArray | null;
+      while ((m = exportFnRe.exec(src)) !== null) {
+        violations.push(`${rel} exports analyzer function: ${m[1]}`);
+      }
+    }
+    expect(violations, violations.join("\n")).toEqual([]);
+  });
 });

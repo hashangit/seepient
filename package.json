@@ -35,6 +35,7 @@
     "dist/domain",
     "dist/transport",
     "dist/ui",
+    "dist/vendors",
     "skills",
     "README.md",
     "CHANGELOG.md",

@@ -7,20 +7,14 @@
  * events are de-duplicated by idempotency key `<actionId>:<state>` so a retry
  * cannot append a second terminal record.
  *
- * WHAT IS IMPLEMENTED:
+ * IMPLEMENTED (R9.1):
  *  - append-only NDJSON with fsync on every append (including pre-dispatch)
  *  - idempotency-key de-duplication (replays return "duplicate")
  *  - `getTerminal(actionId)` scan for crash-recovery queries
- *
- * WHAT IS NOT YET IMPLEMENTED (honest gap):
- *  - The terminal-event OUTBOX (a separate retry queue that retries failed
- *    terminal writes in the background and marks the deployment unhealthy).
- *    Today a failed terminal append throws; the caller must retry.
- *  - The CRASH-RECOVERY routine that scans for `dispatched` records without
- *    a matching terminal and marks them `indeterminate`. `getTerminal`
- *    supports the query but no startup routine invokes it. Production
- *    deployments using PostgreSQL would implement both via a transactional
- *    outbox table; the contract is the same.
+ *  - Advisory lock retry loop in `append()` for concurrent-write safety (T109b)
+ *  - Durable TerminalEventOutbox backed by NDJSON file under
+ *    `~/.seepient/security/outbox/` with tmp+fsync+rename discipline (T109a)
+ *  - `recoverIndeterminateActions()` startup routine (T109c)
  *
  * Storage layout (local): `~/.seepient/security/audit/<principal-id>/events.ndjson`
  * with private (0o600/0o700) permissions and atomic appends.
@@ -99,23 +93,45 @@ export class LocalAuditStore implements AuditStoreContract {
     const wsId = event.principalId; // workspaceId routes via principal in v1 local
     await this.ensureDir(wsId);
     const file = this.eventsFile(wsId);
+    const lockFile = file + ".lock";
 
-    // De-dup check: scan existing events for the same idempotency key.
-    // Append-only NDJSON is small per workspace; a linear scan is acceptable
-    // for v1 local. Server uses SQL UNIQUE constraints instead.
-    if (await this.hasKey(file, opts.idempotencyKey)) {
-      return "duplicate";
+    // T109b: Advisory lock retry loop — prevents concurrent writers from
+    // corrupting the dedup index. We use an exclusive lock file with a retry
+    // loop (max 20 attempts, 25ms apart ≈ 500ms total). If the lock cannot be
+    // acquired, we throw so the caller can retry or enqueue in the outbox.
+    const MAX_LOCK_ATTEMPTS = 20;
+    const LOCK_RETRY_MS = 25;
+    let lockHandle: fs.FileHandle | undefined;
+    for (let attempt = 0; attempt < MAX_LOCK_ATTEMPTS; attempt++) {
+      try {
+        lockHandle = await fs.open(lockFile, "wx", 0o600);
+        break;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+        if (attempt === MAX_LOCK_ATTEMPTS - 1) {
+          throw new AuditError(
+            "Audit lock timeout: another writer holds the lock",
+            "AUDIT_UNAVAILABLE",
+            { retryable: true, actionId: event.actionId, state: event.state },
+          );
+        }
+        await new Promise<void>((r) => setTimeout(r, LOCK_RETRY_MS));
+      }
     }
-
-    const entry: AuditFileEntry = {
-      event: { ...event, eventId: event.eventId || this.eventId(event) },
-      idempotencyKey: opts.idempotencyKey,
-    };
-    const line = JSON.stringify(entry) + "\n";
-
-    // Atomic append with fsync. Pre-dispatch events MUST be durable before
-    // execution; a failure here denies effectful dispatch.
     try {
+      // De-dup check under lock.
+      if (await this.hasKey(file, opts.idempotencyKey)) {
+        return "duplicate";
+      }
+
+      const entry: AuditFileEntry = {
+        event: { ...event, eventId: event.eventId || this.eventId(event) },
+        idempotencyKey: opts.idempotencyKey,
+      };
+      const line = JSON.stringify(entry) + "\n";
+
+      // Atomic append with fsync. Pre-dispatch events MUST be durable before
+      // execution; a failure here denies effectful dispatch.
       const handle = await fs.open(file, "a", 0o600);
       try {
         await handle.appendFile(line);
@@ -123,7 +139,9 @@ export class LocalAuditStore implements AuditStoreContract {
       } finally {
         await handle.close();
       }
+      return "written";
     } catch (err) {
+      if (err instanceof AuditError) throw err;
       throw new AuditError(
         `Failed to durably append audit event: ${(err as Error).message}`,
         "AUDIT_UNAVAILABLE",
@@ -133,8 +151,12 @@ export class LocalAuditStore implements AuditStoreContract {
           state: event.state,
         },
       );
+    } finally {
+      if (lockHandle) {
+        await lockHandle.close().catch(() => {});
+        await fs.unlink(lockFile).catch(() => {});
+      }
     }
-    return "written";
   }
 
   async getTerminal(actionId: string): Promise<ActionAuditEvent | undefined> {
@@ -202,7 +224,7 @@ export class LocalAuditStore implements AuditStoreContract {
   }
 }
 
-// ── Terminal-event outbox ───────────────────────────────────────────────
+// ── Terminal-event outbox (durable, T109a) ──────────────────────────────
 
 /**
  * A pending terminal event that could not be appended durably. The outbox
@@ -217,25 +239,58 @@ export interface OutboxEntry {
 }
 
 /**
- * The terminal-event outbox. Pending entries are retried by `flush()`; while
- * any entry remains, `isHealthy()` returns false. A production deployment
- * persists this outbox in the same transaction as the result; the in-memory
- * implementation here is suitable for single-instance local runs and tests.
+ * Durable terminal-event outbox (T109a). Pending entries are written to an
+ * NDJSON file under `~/.seepient/security/outbox/` with the same atomic
+ * tmp+fsync+rename discipline as the audit store. On startup, `reload()` must
+ * be called to rebuild the in-memory index from the persisted file.
+ *
+ * `flush()` retries all pending entries against the audit store and removes
+ * successfully written ones from both the index and the persisted file
+ * (atomic rewrite).
  */
 export class TerminalEventOutbox {
-  private readonly pending = new Map<string, OutboxEntry>();
+  private pending = new Map<string, OutboxEntry>();
   private readonly store: LocalAuditStore;
+  private readonly outboxFile: string;
   private unhealthy = false;
 
-  constructor(store: LocalAuditStore) {
+  constructor(
+    store: LocalAuditStore,
+    opts?: { outboxDir?: string },
+  ) {
     this.store = store;
+    const dir =
+      opts?.outboxDir ??
+      path.join(os.homedir(), ".seepient", "security", "outbox");
+    this.outboxFile = path.join(dir, "pending.ndjson");
   }
 
   /**
-   * Enqueue a terminal event that could not be appended. Called when the
-   * synchronous terminal append in ActionLifecycle throws.
+   * Reload pending entries from the durable outbox file. Call once at
+   * startup before the first flush (T109c recovery integration).
    */
-  enqueue(event: ActionAuditEvent, idempotencyKey: string): void {
+  async reload(): Promise<void> {
+    try {
+      const raw = await fs.readFile(this.outboxFile, "utf8");
+      this.pending = new Map();
+      for (const line of raw.split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const entry = JSON.parse(line) as OutboxEntry;
+          this.pending.set(entry.idempotencyKey, entry);
+        } catch { /* skip malformed */ }
+      }
+      this.unhealthy = this.pending.size > 0;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+  }
+
+  /**
+   * Enqueue a terminal event that could not be appended. Persists the entry
+   * to the durable outbox file before returning (T109a atomic write).
+   */
+  async enqueue(event: ActionAuditEvent, idempotencyKey: string): Promise<void> {
     this.pending.set(idempotencyKey, {
       event,
       idempotencyKey,
@@ -243,11 +298,12 @@ export class TerminalEventOutbox {
       lastAttempt: 0,
     });
     this.unhealthy = true;
+    await this.persistOutbox();
   }
 
   /**
    * Retry all pending terminal events. Returns the number still pending.
-   * A production deployment calls this on a timer AND on startup.
+   * A production deployment calls this on a timer AND on startup (T109c).
    */
   async flush(): Promise<number> {
     let remaining = 0;
@@ -265,7 +321,13 @@ export class TerminalEventOutbox {
         remaining += 1;
       }
     }
-    if (this.pending.size === 0) this.unhealthy = false;
+    if (this.pending.size === 0) {
+      this.unhealthy = false;
+      // Remove the durable outbox file when fully flushed.
+      await fs.unlink(this.outboxFile).catch(() => {});
+    } else {
+      await this.persistOutbox().catch(() => {});
+    }
     return remaining;
   }
 
@@ -277,6 +339,29 @@ export class TerminalEventOutbox {
   /** Number of pending terminal events. */
   size(): number {
     return this.pending.size;
+  }
+
+  /**
+   * Atomically persist the current pending map to the outbox file.
+   * Uses tmp+fsync+rename for durability (T109a).
+   */
+  private async persistOutbox(): Promise<void> {
+    const dir = path.dirname(this.outboxFile);
+    await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+    const tmp = this.outboxFile + `.tmp.${process.pid}`;
+    const lines = [...this.pending.values()].map((e) => JSON.stringify(e)).join("\n") + "\n";
+    const handle = await fs.open(tmp, "w", 0o600);
+    try {
+      await handle.writeFile(lines, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    try {
+      await fs.rename(tmp, this.outboxFile);
+    } catch {
+      await fs.unlink(tmp).catch(() => {});
+    }
   }
 }
 

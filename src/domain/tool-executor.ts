@@ -112,9 +112,10 @@ function generateToolName(): string {
  * });
  * ```
  */
+import { classifyLegacyTool } from "../foundations/contracts/custom-tools.js";
 export function tool(definition: UserToolDefinition): ToolModule {
   const functionName = definition.name ?? generateToolName();
-
+  classifyLegacyTool(definition);
   const jsonSchema = parametersToJsonSchema(definition.parameters);
 
   const openaiDefinition: ToolDefinition = {

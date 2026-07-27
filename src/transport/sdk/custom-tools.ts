@@ -70,27 +70,7 @@ export function trustedHostTool(reg: Omit<TrustedHostToolRegistration, "trust">)
  * execution until migrated to an explicit trust model. It never silently
  * becomes policy-governed or `safe`.
  */
-export function classifyLegacyTool(def: UserToolDefinition): LegacyHostToolRegistration {
-  if (typeof console !== "undefined") {
-    console.warn(
-      `[seepient] DEPRECATION: tool(${def.name ?? "<anonymous>"}) uses the legacy \`tool({ execute })\` factory. ` +
-        `It will fail closed at execution. Migrate to preparedTool(), brokerConnector(), or ` +
-        `trustedHostTool({ trust: "host" }) to select an explicit trust model.`,
-    );
-  }
-  return {
-    trust: "legacy-host",
-    definition: {
-      type: "function",
-      function: {
-        name: def.name ?? "legacy_tool",
-        description: def.description,
-        parameters: { type: "object", properties: {}, required: [] },
-      },
-    },
-    execute: def.execute,
-  };
-}
+export { classifyLegacyTool } from "../../foundations/contracts/custom-tools.js";
 
 /**
  * Decide whether a host tool is permitted in the current deployment. Server

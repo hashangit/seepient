@@ -18,6 +18,7 @@ import type {
   Capability,
   CapabilitySet,
 } from "../../foundations/contracts/permission-policy.js";
+import type { PermissionRequest, PermissionDecision } from "../../foundations/contracts/permission-policy.js";
 import { intersect } from "./capability-store.js";
 
 /** Server-side policy context (additive over the local PolicyContext). */
@@ -92,3 +93,82 @@ function coversEqual(a: Capability, b: Capability): boolean {
 }
 
 export { intersect };
+export interface PendingApprovalRecord {
+  continuationId: string;
+  tenantId: string;
+  sessionId: string;
+  request: PermissionRequest;
+  version: number;
+  status: "pending" | "approved" | "denied" | "cancelled" | "expired";
+  decision?: PermissionDecision;
+}
+
+export class PendingApprovalStore {
+  private records = new Map<string, PendingApprovalRecord>();
+
+  create(input: {
+    request: PermissionRequest;
+    tenantId: string;
+    sessionId: string;
+    continuationId: string;
+  }): PendingApprovalRecord {
+    const existing = [...this.records.values()].find((r) => r.request.requestId === input.request.requestId);
+    if (existing) return existing;
+
+    const rec: PendingApprovalRecord = {
+      continuationId: input.continuationId,
+      tenantId: input.tenantId,
+      sessionId: input.sessionId,
+      request: input.request,
+      version: 1,
+      status: "pending",
+    };
+    this.records.set(input.continuationId, rec);
+    return rec;
+  }
+
+  cas(
+    continuationId: string,
+    expectedVersion: number,
+    decision: PermissionDecision,
+  ): { status: "transitioned" | "duplicate" | "stale" | "expired"; record?: PendingApprovalRecord } {
+    const rec = this.records.get(continuationId);
+    if (!rec) return { status: "stale" };
+    if (rec.version !== expectedVersion) return { status: "stale" };
+    if (rec.status !== "pending") return { status: "duplicate" };
+    if (rec.request.expiresAt <= Date.now()) {
+      rec.status = "expired";
+      return { status: "expired", record: rec };
+    }
+    rec.status = decision.approved ? "approved" : "denied";
+    rec.decision = decision;
+    rec.version += 1;
+    return { status: "transitioned", record: rec };
+  }
+
+  listPending(opts: { principalId?: string; tenantId?: string; sessionId?: string }): PendingApprovalRecord[] {
+    const now = Date.now();
+    return [...this.records.values()].filter((r) => {
+      if (r.status !== "pending") return false;
+      if (r.request.expiresAt <= now) return false;
+      if (opts.principalId && r.request.principalId !== opts.principalId) return false;
+      if (opts.tenantId && r.tenantId !== opts.tenantId) return false;
+      if (opts.sessionId && r.sessionId !== opts.sessionId) return false;
+      return true;
+    });
+  }
+
+  cancel(continuationId: string): void {
+    const rec = this.records.get(continuationId);
+    if (rec && rec.status === "pending") {
+      rec.status = "cancelled";
+    }
+  }
+
+  reevaluate(continuationId: string, allowed: boolean): void {
+    const rec = this.records.get(continuationId);
+    if (rec && rec.status === "approved" && !allowed) {
+      rec.status = "denied";
+    }
+  }
+}

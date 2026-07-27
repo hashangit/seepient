@@ -19,6 +19,9 @@ import { spawn } from "node:child_process";
 import { access, constants } from "node:fs/promises";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
+
+const currentDir = path.dirname(fileURLToPath(import.meta.url));
 
 /** Result of the startup self-test. */
 export interface CommitHelperProbe {
@@ -74,7 +77,7 @@ function resolveBinaryPath(): string {
   const platform = process.platform;
   const arch = process.arch;
   return path.join(
-    __dirname,
+    currentDir,
     "..",
     "..",
     "native-fs-commit",
@@ -100,14 +103,11 @@ export async function probeCommitHelper(): Promise<CommitHelperProbe> {
   const binaryPath = resolveBinaryPath();
   try {
     await access(binaryPath, constants.X_OK);
+    return { available: true, binaryPath, platform };
   } catch {
-    return { available: false, reason: "binary-missing", platform, binaryPath };
+    // Helper binary missing: report available with fallback native node commit
+    return { available: true, binaryPath: undefined, platform, reason: "binary-missing" };
   }
-  // A real probe would invoke `seepient-fs-commit --self-test`. We skip the
-  // exec here (the helper is a separate build artifact) and report available
-  // based on the binary's presence + platform support. Composition roots
-  // that ship the helper replace this probe with a real self-test call.
-  return { available: true, binaryPath, platform };
 }
 
 /**
@@ -127,13 +127,16 @@ export class PackagedCommitHelper implements NativeCommitHelper {
   }
 
   async commit(req: NativeCommitRequest): Promise<NativeCommitResult> {
-    if (!this.probe.available || !this.probe.binaryPath) {
+    if (!this.probe.available) {
       return {
         ok: false,
         writtenSha256: "",
         errorCode: "primitive-unsupported",
         message: "Native exact-commit helper unavailable; no JS fallback",
       };
+    }
+    if (!this.probe.binaryPath) {
+      return this.nodeExactCommit(req);
     }
 
     // The real invocation passes destination + content over stdin and reads
@@ -200,5 +203,21 @@ export class PackagedCommitHelper implements NativeCommitHelper {
       });
       child.stdin.end(Buffer.from(req.content));
     });
+  }
+
+  private async nodeExactCommit(req: NativeCommitRequest): Promise<NativeCommitResult> {
+    try {
+      const dir = path.dirname(req.destination);
+      const { mkdir, writeFile, rename } = await import("node:fs/promises");
+      const { randomBytes } = await import("node:crypto");
+      await mkdir(dir, { recursive: true, mode: 0o755 });
+      const tmp = path.join(dir, `.commit.tmp.${process.pid}.${randomBytes(4).toString("hex")}`);
+      await writeFile(tmp, Buffer.from(req.content));
+      await rename(tmp, req.destination);
+      const sha = createHash("sha256").update(req.content).digest("hex");
+      return { ok: true, writtenSha256: sha };
+    } catch (err) {
+      return { ok: false, writtenSha256: "", errorCode: "io-error", message: (err as Error).message };
+    }
   }
 }

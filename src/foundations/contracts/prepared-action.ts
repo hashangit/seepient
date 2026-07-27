@@ -35,11 +35,11 @@ export interface PreparedArtifactRef {
 /** Versioned prepared operation. Variant `kind` selects the executor. */
 export type PreparedOperation =
   | { kind: "none"; result: ToolResult }
-  | { kind: "read-file"; target: CanonicalPathTarget; expected: FileSnapshot }
+  | { kind: "read-file"; target: CanonicalPathTarget; expected: FileSnapshot; sensitivity?: import("./tool-effects.js").SensitivityClass }
   | { kind: "commit-files"; commits: PreparedFileCommit[] }
   | { kind: "process"; command: CommandDescriptor; roots: RootRequest[] }
   | { kind: "broker"; request: BrokeredEffectRequest }
-  | { kind: "trusted-host"; registrationId: string; args: JsonValue };
+  | { kind: "trusted-host"; registrationId: string; toolName?: string; args: JsonValue };
 
 /** One exact-file commit prepared by an analyzer. */
 export interface PreparedFileCommit {
@@ -94,6 +94,7 @@ export interface PreparedToolAction {
   version: 1;
   actionId: string;
   runId: string;
+  sessionId?: string;
   toolCallId: string;
   toolName: string;
   principalId: string;

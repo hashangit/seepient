@@ -38,8 +38,9 @@ type CapKind = Capability["kind"];
  */
 function pathContains(parent: string, child: string): boolean {
   if (child === parent) return true;
-  // child must be longer and the parent must be a folder prefix: parent + "/"
-  return child.startsWith(parent) && child.charAt(parent.length) === "/";
+  if (parent === "/") return child.startsWith("/");
+  const prefix = parent.endsWith("/") ? parent : parent + "/";
+  return child.startsWith(prefix);
 }
 
 /**
@@ -144,9 +145,10 @@ export function intersect(outer: CapabilitySet, inner: CapabilitySet): Capabilit
 }
 
 /**
- * The full monotonic chain:
+ * The effective capability formula:
  *
- *   deployment ∩ principal ∩ runtime ∩ active
+ *   Maximum Authority = deploymentCeiling ∩ principalPolicy ∩ runtimeBaseline
+ *   Effective         = Maximum Authority ∩ activeCapabilities
  *
  * Applied left to right. Each step may only narrow.
  */
@@ -156,7 +158,8 @@ export function effectiveCapabilities(
   runtime: CapabilitySet,
   active: CapabilitySet,
 ): CapabilitySet {
-  return intersect(intersect(intersect(deployment, principal), runtime), active);
+  const maxAuthority = intersect(intersect(deployment, principal), runtime);
+  return intersect(maxAuthority, active);
 }
 
 /**

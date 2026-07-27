@@ -312,8 +312,9 @@ async function handleChat(
       tools: parsed.tools,
       maxSteps: parsed.maxSteps ?? 10,
       skills: parsed.skills,
-      // Spec 008: pass the authenticated API key as the principal identity.
-      apiKeyHash: (req as any).apiKey,
+      // Spec 008: pass authenticated principal identity (hashed API key) so
+      // the per-request pipeline constructor derives `principalId` from it.
+      apiKeyHash: hashKey(key.key),
     } as any);
 
     sendJSON(res, 200, {

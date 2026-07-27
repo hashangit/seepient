@@ -53,7 +53,8 @@ export type Capability =
 /** When a capability is valid. Action-scoped caps are never persisted. */
 export type CapabilityLifetime =
   | { kind: "action"; actionDigest: string; consumeOnce: true }
-  | { kind: "run"; runId: string; expiresAt?: number }
+  | { kind: "run"; runId: string; expiresAt: number }
+  | { kind: "session"; sessionId: string; expiresAt?: number }
   | { kind: "project"; workspaceId: string; expiresAt?: number }
   | { kind: "global"; expiresAt?: number };
 
@@ -153,7 +154,11 @@ export type PermissionDenyReason =
   | "secret-denied"
   | "security-activation-required"
   | "policy-conflict"
-  | "unknown-tool";
+  | "unknown-tool"
+  /** T107d: capability was consumed (action-scoped) or has expired (run/session). */
+  | "capability-expired"
+  /** T107d: capability was revoked before use (run/session revocation). */
+  | "capability-revoked";
 
 /**
  * Closed decision union. `needs-approval` carries the proposed envelope to
@@ -189,7 +194,7 @@ export interface PermissionRequest {
   actionDigest: string;
   action: import("./prepared-action.js").ActionDisplay;
   requestedCapabilities: Capability[];
-  offeredLifetimes: Array<"action" | "run">;
+  offeredLifetimes: Array<"action" | "run" | "session">;
   createdAt: number;
   expiresAt: number;
 }
@@ -199,7 +204,7 @@ export type PermissionDecision =
       approved: true;
       requestId: string;
       actionDigest: string;
-      lifetime: "action" | "run";
+      lifetime: "action" | "run" | "session";
       actorId: string;
       decidedAt: number;
     }

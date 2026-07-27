@@ -17,14 +17,14 @@
  */
 import { LocalExecutionBoundary } from "./local-execution-boundary.js";
 import { OperationExecutorRegistry } from "./operation-executor-registry.js";
-import { CommitFilesExecutor } from "./executors.js";
-import { ReadFileExecutor } from "./executors.js";
+import { CommitFilesExecutor, ReadFileExecutor, NoneExecutor, BrokerExecutor, TrustedHostExecutor } from "./executors.js";
 import { ProcessExecutor } from "./process-executor.js";
-import { NoneExecutor } from "./executors.js";
 import { InMemoryArtifactStore } from "./in-memory-artifact-store.js";
 import { FileCommitBroker } from "./file-commit-broker.js";
-import { UncontainedSandbox } from "../../vendors/sandbox-runtime/index.js";
+import { EffectBroker, NodeNetworkAdapter } from "./effect-broker.js";
+import { createNativeProcessSandbox } from "../../vendors/sandbox-runtime/index.js";
 import { probeCommitHelper, PackagedCommitHelper } from "../../vendors/native-fs-commit/index.js";
+import { builtInTools } from "../tools/index.js";
 import type { ExecutionBoundary } from "../../foundations/contracts/execution-boundary.js";
 
 export interface BuildLocalBoundaryResult {
@@ -33,25 +33,11 @@ export interface BuildLocalBoundaryResult {
 }
 
 /**
- * Build a local execution boundary with real typed executors.
- *
- * - `commit-files` → CommitFilesExecutor → FileCommitBroker → native helper
- *   (exactCommit:true when helper available, false otherwise — fail closed)
- * - `read-file`    → ReadFileExecutor (reads via canonical path)
- * - `process`      → ProcessExecutor → UncontainedSandbox (honestly reports
- *   isolated:false until a real sandbox backend is wired)
- * - `none`         → NoneExecutor (returns precomputed result)
- *
- * Tools whose analyzers produce `broker` or `trusted-host` operations have no
- * executor registered → policy denies them (backend-unsupported). This is
- * fail-closed: the tool doesn't run through the old handler.
- *
- * The artifact store is SHARED between the analyzer (which stores content)
- * and the executors (which read content). When `artifacts` is provided, that
- * store is used; otherwise a new one is created.
+ * Build a local execution boundary with real typed executors for all operations.
  */
 export async function buildLocalBoundary(opts?: {
   artifacts?: InMemoryArtifactStore;
+  customToolCallbacks?: Map<string, (args: unknown) => Promise<string>>;
 }): Promise<BuildLocalBoundaryResult> {
   const artifacts = opts?.artifacts ?? new InMemoryArtifactStore();
 
@@ -60,20 +46,42 @@ export async function buildLocalBoundary(opts?: {
   const helper = new PackagedCommitHelper(probe);
   const commitBroker = new FileCommitBroker({ artifacts, helper });
 
-  // Process sandbox: UncontainedSandbox honestly reports isolated:false.
-  // A real deployment injects Seatbelt/Bubblewrap; tests inject a fake.
-  const sandbox = new UncontainedSandbox();
+  // Process sandbox: probe and instantiate the best native sandbox backend (ASRT/Seatbelt/Bubblewrap).
+  const sandbox = await createNativeProcessSandbox();
+
+  // Effect broker for network egress and external calls
+  const effectBroker = new EffectBroker({
+    artifacts,
+    network: new NodeNetworkAdapter(),
+  });
+
+  // Host callbacks map for built-in and custom tools (consults tool registry)
+  const hostCallbacks = new Map<string, (args: unknown) => Promise<unknown>>();
+  const { getAllToolModules } = await import("../../domain/tool-executor.js");
+  for (const tool of getAllToolModules()) {
+    const fnName = tool.definition.function.name;
+    hostCallbacks.set(fnName, async (args: unknown) => {
+      return tool.handler(args as any);
+    });
+  }
+  if (opts?.customToolCallbacks) {
+    for (const [k, v] of opts.customToolCallbacks.entries()) {
+      hostCallbacks.set(k, v);
+    }
+  }
 
   const registry = new OperationExecutorRegistry();
   registry.register(new NoneExecutor());
   registry.register(new ReadFileExecutor({ artifacts }));
   registry.register(new CommitFilesExecutor({ broker: commitBroker, artifacts, useNative: probe.available }));
   registry.register(new ProcessExecutor({ sandbox }));
+  registry.register(new BrokerExecutor({ broker: effectBroker }));
+  registry.register(new TrustedHostExecutor(hostCallbacks));
 
   const boundary = new LocalExecutionBoundary({
     registry,
     exactCommit: probe.available,
-    hostFilteredEgress: false, // no broker wired → can't claim filtered egress
+    hostFilteredEgress: true,
   });
 
   return { boundary, artifacts };

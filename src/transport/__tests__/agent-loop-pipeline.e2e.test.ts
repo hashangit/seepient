@@ -287,13 +287,13 @@ describe("E2E: runAgentLoop routes through the wired pipeline", () => {
   });
 
   it("tools without a registered analyzer fall through to the legacy path", async () => {
-    // get_current_datetime has no analyzer → the legacy handler runs.
+    // A tool with no registered analyzer falls through to the legacy path.
     const boundary = recordingBoundary({});
     const wired = await wirePipeline({
       broker: new NoneApprovalBroker(),
       boundary,
     });
-    const provider = fakeProvider("get_current_datetime", {});
+    const provider = fakeProvider("unregistered_unknown_tool", {});
 
     await runAgentLoop(loopOpts({ provider, wiredPipeline: wired }));
 

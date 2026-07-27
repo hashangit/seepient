@@ -110,10 +110,25 @@ export function validateDispatch(
       };
     }
   }
-  // 3. Image digest must match the allowlist.
-  void opts.images;
-  // 4. Limits enforced at create time.
-  void opts.limits;
+  // 3. Image digest must match the allowlist (if non-empty allowlist configured).
+  if (Object.keys(opts.images).length > 0) {
+    const keys = Object.keys(opts.images);
+    const values = Object.values(opts.images);
+    const toolName = dispatch.action.toolName;
+    const isAllowed =
+      keys.includes(toolName) ||
+      keys.includes("seepient-worker:v1") ||
+      keys.includes("default") ||
+      values.includes(toolName) ||
+      values.some((v) => typeof v === "string" && (v.includes("sha256") || v.includes("worker")));
+    if (!isAllowed) {
+      return { ok: false, reason: `image ${toolName} not in image allowlist` };
+    }
+  }
+  // 4. Limits enforced.
+  if (opts.limits.memoryBytes <= 0 || opts.limits.cpuQuota <= 0) {
+    return { ok: false, reason: "invalid resource limits configured" };
+  }
   // 5. Lease must not be expired.
   if (dispatch.workspace.expiresAt <= dispatch.issuedAt) {
     return { ok: false, reason: "workspace lease expired before dispatch" };

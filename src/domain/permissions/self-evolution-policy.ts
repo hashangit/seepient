@@ -18,6 +18,7 @@ import type {
   SelfEvolutionPolicy,
 } from "../../foundations/contracts/self-evolution.js";
 
+import { createVerify } from "node:crypto";
 /** Protected change classes — always require independent activation. */
 export const PROTECTED_CHANGE_CLASSES: ReadonlySet<SelfEvolutionChangeClass> =
   new Set<SelfEvolutionChangeClass>([
@@ -39,6 +40,29 @@ export type ClassificationResult =
   | { status: "needs-attestation" }
   | { status: "disallowed"; disallowedClasses: SelfEvolutionChangeClass[] };
 
+export function classifyPathsToChangeClasses(paths: string[]): SelfEvolutionChangeClass[] {
+  const classes = new Set<SelfEvolutionChangeClass>();
+  for (const p of paths) {
+    const normalized = p.replace(/\\/g, "/");
+    if (
+      normalized.includes("domain/permissions/") ||
+      normalized.includes("capabilities/execution/") ||
+      normalized.includes("vendors/") ||
+      normalized.includes("foundations/contracts/") ||
+      normalized.includes("policy-engine") ||
+      normalized.includes("native-helper")
+    ) {
+      classes.add("security-kernel");
+    } else if (normalized.includes(".seepient/security/") || normalized.includes("deployment/")) {
+      classes.add("deployment-policy");
+    } else if (normalized.startsWith("docs/") || normalized.endsWith(".md")) {
+      classes.add("docs");
+    } else if (normalized.startsWith("src/") || normalized.includes("src/")) {
+      classes.add("application-code");
+    }
+  }
+  return [...classes];
+}
 export function classifyProposal(
   policy: SelfEvolutionPolicy,
   proposal: Pick<
@@ -46,15 +70,18 @@ export function classifyProposal(
     "changeClasses" | "changedPaths" | "authorRunId"
   >,
 ): ClassificationResult {
+  // D47: Automatically derive canonical change classes from changedPaths
+  const derivedClasses = classifyPathsToChangeClasses(proposal.changedPaths ?? []);
+  const effectiveClasses = Array.from(new Set([...proposal.changeClasses, ...derivedClasses]));
   // Disallowed: any class outside the operator allowlist.
   const allowed = new Set(policy.allowedChangeClasses);
-  const disallowed = proposal.changeClasses.filter((c) => !allowed.has(c));
+  const disallowed = effectiveClasses.filter((c) => !allowed.has(c));
   if (disallowed.length > 0) {
     return { status: "disallowed", disallowedClasses: disallowed };
   }
 
   // Protected: any class in the protected set.
-  const protectedClasses = proposal.changeClasses.filter((c) =>
+  const protectedClasses = effectiveClasses.filter((c) =>
     PROTECTED_CHANGE_CLASSES.has(c),
   );
   if (protectedClasses.length > 0) {
@@ -64,7 +91,7 @@ export function classifyProposal(
   // Delegated: an activation rule covers every class and permits automatic
   // submission with delegated authority.
   const matchingRule = policy.activationRules.find((r) =>
-    proposal.changeClasses.every((c) => r.changeClasses.includes(c)),
+    effectiveClasses.every((c) => r.changeClasses.includes(c)),
   );
   if (
     matchingRule &&
@@ -106,11 +133,24 @@ export function attestationMatches(
   },
   proposal: { proposalId: string; candidateArtifactDigest: string },
   now: number,
+  publicKeyPem?: string,
 ): boolean {
-  return (
-    attestation.proposalId === proposal.proposalId &&
-    attestation.candidateArtifactDigest === proposal.candidateArtifactDigest &&
-    attestation.expiresAt > now &&
-    attestation.signature.length > 0
-  );
+  if (
+    attestation.proposalId !== proposal.proposalId ||
+    attestation.candidateArtifactDigest !== proposal.candidateArtifactDigest ||
+    attestation.expiresAt <= now ||
+    !attestation.signature
+  ) {
+    return false;
+  }
+  if (publicKeyPem && publicKeyPem.length > 0) {
+    try {
+      const verifier = createVerify("SHA256");
+      verifier.update(`${proposal.proposalId}|${proposal.candidateArtifactDigest}`);
+      return verifier.verify(publicKeyPem, Buffer.from(attestation.signature, "base64"));
+    } catch {
+      return false;
+    }
+  }
+  return attestation.signature.length > 0;
 }

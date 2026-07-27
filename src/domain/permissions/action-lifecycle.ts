@@ -43,6 +43,7 @@ import type { ToolResult } from "../../foundations/types.js";
 import type { PolicyEngine } from "./policy-engine.js";
 import { generateId } from "../../foundations/id.js";
 import { idempotencyKey } from "./audit-recorder.js";
+import type { PersistedCapabilityLedger } from "./persisted-capability-ledger.js";
 
 /**
  * Inputs to one action lifecycle. The lifecycle is constructed once per run
@@ -62,7 +63,14 @@ export interface ActionLifecycleOptions {
    * result, but the deployment reports degraded audit health until the outbox
    * flushes. The outbox + crash-recovery are the FR-014 durability contract.
    */
-  terminalOutbox?: { enqueue: (event: import("../../foundations/contracts/execution-brokers.js").ActionAuditEvent, idempotencyKey: string) => void };
+  terminalOutbox?: { enqueue: (event: import("../../foundations/contracts/execution-brokers.js").ActionAuditEvent, idempotencyKey: string) => Promise<void> | void };
+  /**
+   * Optional persisted capability ledger. When set, action-scoped envelopes are
+   * atomically consumed before dispatch (T107a). A replay of a consumed
+   * actionDigest → capability-expired deny. Run/session revocation is also
+   * checked here before the dispatched audit event.
+   */
+  capabilityLedger?: PersistedCapabilityLedger;
   /** Now-injectable for deterministic tests. */
   now?: () => number;
 }
@@ -125,6 +133,7 @@ export class ActionLifecycle {
   private readonly now: () => number;
 
   private readonly terminalOutbox?: { enqueue: (event: import("../../foundations/contracts/execution-brokers.js").ActionAuditEvent, idempotencyKey: string) => void };
+  private readonly capabilityLedger?: PersistedCapabilityLedger;
 
   constructor(opts: ActionLifecycleOptions) {
     this.policy = opts.policy;
@@ -132,17 +141,52 @@ export class ActionLifecycle {
     this.broker = opts.broker;
     this.boundary = opts.boundary;
     this.audit = opts.audit;
-    this.active = opts.activeCapabilities;
+    const baseActive = (opts.activeCapabilities?.capabilities.length ?? 0) > 0
+      ? opts.activeCapabilities!
+      : (opts.policyContext.activeCapabilities ?? { version: 1, capabilities: [] });
+    this.active = { capabilities: [...baseActive.capabilities] };
+    this.policyContext.activeCapabilities = { version: 1 as const, capabilities: this.active.capabilities };
     this.now = opts.now ?? (() => Date.now());
     this.terminalOutbox = opts.terminalOutbox;
+    this.capabilityLedger = opts.capabilityLedger;
   }
-
   async run(
     action: PreparedToolAction,
-    signal?: AbortSignal,
+    signalOrOpts?: AbortSignal | { signal?: AbortSignal; onUpdate?: (u: import("../../foundations/contracts/execution-boundary.js").ToolProgress) => void },
   ): Promise<LifecycleResult> {
+    const signal = signalOrOpts instanceof AbortSignal ? signalOrOpts : signalOrOpts?.signal;
+    const runOpts = signalOrOpts instanceof AbortSignal ? undefined : signalOrOpts;
     // 1. Record `prepared`.
     await this.record(action, "prepared");
+
+    // 1b. T107b/c: Check run/session active capabilities for expiry + revocation
+    //     BEFORE policy evaluation. Hard rule: expired or revoked run/session grants
+    //     fail closed — they must not reach policy as valid active caps.
+    if (this.capabilityLedger) {
+      const nowTs = this.now();
+      const { checkRunLifetime, checkSessionLifetime } = await import("./persisted-capability-ledger.js");
+      if (action.runId) {
+        const runRes = checkRunLifetime(action.runId, Infinity, this.capabilityLedger, nowTs);
+        if (runRes === "revoked") {
+          const outcome = this.toOutcome(action, "denied", undefined, "capability-revoked");
+          await this.record(action, "denied", "capability-revoked");
+          return {
+            decision: { decision: "deny", reason: "capability-revoked", message: "Run capability was revoked", trace: { policyDigest: this.policy.getPolicyDigest(), evaluatedLayers: [] } },
+            outcome,
+            toolResult: { output: denialOutput("capability-revoked", "Run capability was revoked"), success: false },
+          };
+        }
+      }
+      if (action.sessionId && this.capabilityLedger.isSessionRevoked(action.sessionId)) {
+        const outcome = this.toOutcome(action, "denied", undefined, "capability-revoked");
+        await this.record(action, "denied", "capability-revoked");
+        return {
+          decision: { decision: "deny", reason: "capability-revoked", message: "Session capability was revoked", trace: { policyDigest: this.policy.getPolicyDigest(), evaluatedLayers: [] } },
+          outcome,
+          toolResult: { output: denialOutput("capability-revoked", "Session capability was revoked"), success: false },
+        };
+      }
+    }
 
     // 2. Policy evaluation.
     let decision = this.policy.evaluate(action, this.policyContext);
@@ -214,12 +258,11 @@ export class ActionLifecycle {
         };
       }
 
-      // Approved. Reevaluate ONCE with the approved capability added.
-      // The approved cap is added to BOTH activeCapabilities AND the principal
-      // policy so the monotonic intersection sees it at every layer. Approval
-      // is the authority — the cap doesn't need to pre-exist in principal.
+      // Approved. Reevaluate ONCE with the approved capability added to activeCapabilities.
+      // Approval NEVER mutates or widens principalPolicy, runtimeBaseline, or deploymentCeiling.
       approval = answer;
       const approved = decision.proposedEnvelope.capabilities;
+      const lifetimeKind = answer.lifetime ?? "action";
       const withApproval: CapabilitySet = {
         version: 1,
         capabilities: [...this.active.capabilities, ...approved],
@@ -227,14 +270,20 @@ export class ActionLifecycle {
       const reevalContext: PolicyContext = {
         ...this.policyContext,
         activeCapabilities: withApproval,
-        // Also widen principal + runtime so the intersection preserves the
-        // approved cap (the monotonic chain intersects ALL layers).
-        principalPolicy: { version: 1, capabilities: [...this.policyContext.principalPolicy.capabilities, ...approved] },
-        runtimeBaseline: { version: 1, capabilities: [...this.policyContext.runtimeBaseline.capabilities, ...approved] },
       };
       decision = this.policy.evaluate(action, reevalContext);
-      // Persist the action-scoped cap so execution sees it.
+      if (decision.decision === "allow") {
+        decision.envelope.lifetime = {
+          kind: lifetimeKind,
+          actionDigest: action.actionDigest,
+          consumeOnce: lifetimeKind === "action" ? (true as const) : undefined,
+          runId: action.runId,
+          sessionId: action.sessionId,
+          expiresAt: lifetimeKind === "run" ? Date.now() + 86400000 : undefined,
+        } as any;
+      }
       this.active.capabilities.push(...approved);
+      this.policyContext.activeCapabilities.capabilities = this.active.capabilities;
     }
 
     // 4. Deny path — one terminal denial, no afterToolCall.
@@ -258,7 +307,71 @@ export class ActionLifecycle {
       };
     }
 
-    // 5. Allow path — durable `dispatched` audit BEFORE execution.
+    // 5. Allow path — consume action-scoped capability (T107a) + durable
+    //    `dispatched` audit BEFORE execution.
+    if (decision.decision === "allow") {
+      const envelope = decision.envelope;
+      if (this.capabilityLedger) {
+        const nowTs = this.now();
+        const { checkRunLifetime, checkSessionLifetime } = await import("./persisted-capability-ledger.js");
+
+        if (envelope.lifetime.kind === "action") {
+          const consumed = await this.capabilityLedger.consume(
+            envelope.envelopeId,
+            envelope.actionDigest,
+          );
+          if (!consumed) {
+            // Already consumed — replay attempt.
+            const outcome = this.toOutcome(
+              action,
+              "denied",
+              undefined,
+              "capability-expired",
+            );
+            await this.record(action, "denied", "capability-expired");
+            return {
+              decision,
+              approval,
+              outcome,
+              toolResult: {
+                output: denialOutput(
+                  "capability-expired",
+                  "Capability was already consumed (replay attempt)",
+                ),
+                success: false,
+              },
+            };
+          }
+        } else if (envelope.lifetime.kind === "run") {
+          const runRes = checkRunLifetime(envelope.runId, envelope.expiresAt ?? Infinity, this.capabilityLedger, nowTs);
+          if (runRes !== "ok") {
+            const reason = runRes === "revoked" ? "capability-revoked" : "capability-expired";
+            const outcome = this.toOutcome(action, "denied", undefined, reason);
+            await this.record(action, "denied", reason);
+            return {
+              decision,
+              approval,
+              outcome,
+              toolResult: { output: denialOutput(reason, `Run capability was ${runRes}`), success: false },
+            };
+          }
+        } else if (envelope.lifetime.kind === "session") {
+          const sessRes = checkSessionLifetime(action.sessionId ?? envelope.lifetime.sessionId, envelope.expiresAt, this.capabilityLedger, nowTs);
+          if (sessRes !== "ok") {
+            const reason = sessRes === "revoked" ? "capability-revoked" : "capability-expired";
+            const outcome = this.toOutcome(action, "denied", undefined, reason);
+            await this.record(action, "denied", reason);
+            return {
+              decision,
+              approval,
+              outcome,
+              toolResult: { output: denialOutput(reason, `Session capability was ${sessRes}`), success: false },
+            };
+          }
+        }
+      }
+    }
+
     try {
       await this.record(action, "dispatched");
     } catch {
@@ -289,8 +402,8 @@ export class ActionLifecycle {
     try {
       execution = await this.boundary.execute(action, decision.envelope, {
         signal,
-        onUpdate: () => {
-          /* progress forwarded by caller via onStep */
+        onUpdate: (chunk) => {
+          runOpts?.onUpdate?.(chunk);
         },
       });
     } catch (err) {
@@ -319,6 +432,19 @@ export class ActionLifecycle {
           : "failed";
     await this.recordTerminal(action, terminalState);
 
+    // 8. Remove action-scoped capabilities from activeCapabilities after terminal
+    //    audit event (T107a hard rule: consumed caps don't persist).
+    if (decision.decision === "allow" && decision.envelope.lifetime.kind === "action") {
+      const envelopedIds = new Set(
+        decision.envelope.capabilities.map((c) => JSON.stringify(c)),
+      );
+      const remaining = this.active.capabilities.filter(
+        (c) => !envelopedIds.has(JSON.stringify(c)),
+      );
+      this.active.capabilities.length = 0;
+      this.active.capabilities.push(...remaining);
+      this.policyContext.activeCapabilities.capabilities = this.active.capabilities;
+    }
     const outcome = this.toOutcome(
       action,
       terminalState,
@@ -400,7 +526,7 @@ export class ActionLifecycle {
           policyDigest: this.policy.getPolicyDigest(),
           backend: this.boundary.capabilities.backend,
         };
-        this.terminalOutbox.enqueue(event, key);
+        await this.terminalOutbox.enqueue(event, key);
       } else {
         // No outbox wired — surface the failure (default behavior pre-outbox).
         throw err;

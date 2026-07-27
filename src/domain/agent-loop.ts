@@ -313,10 +313,45 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
   const permissionLevel = options.permissionLevel;
   const autoConfirm = options.autoConfirm;
   const grantStore = options.grantStore;
-  // Spec 008 opt-in: when wiredPipeline is set, every tool call routes through
-  // the new Domain policy pipeline. The legacy matrix/grant/autoConfirm path
-  // below is skipped entirely.
-  const wiredPipeline = options.wiredPipeline;
+  // Track current provider (may change per step if providerFactory is used)
+  let currentProvider = provider;
+  let currentModel = model;
+
+  // Spec 008: Every tool call routes through the Domain policy pipeline.
+  // If no custom pipeline was passed, we build a local default pipeline.
+  let wiredPipeline = options.wiredPipeline;
+  if (!wiredPipeline) {
+    const { InMemoryArtifactStore } = await import("../capabilities/execution/in-memory-artifact-store.js");
+    const { buildActionLifecycle } = await import("./permissions/action-lifecycle-factory.js");
+    const { buildLocalBoundary } = await import("../capabilities/execution/build-local-boundary.js");
+    const { legacyApproveToolToBroker } = await import("../transport/legacy-adapter.js");
+    const artifacts = new InMemoryArtifactStore();
+    const { boundary } = await buildLocalBoundary({ artifacts });
+    const broker = approveTool
+      ? legacyApproveToolToBroker(approveTool)
+      : autoConfirm
+        ? {
+            mode: "inline" as const,
+            request: async (req: any) => ({
+              approved: true,
+              requestId: req.requestId,
+              actionDigest: req.actionDigest,
+              lifetime: "action" as const,
+              actorId: "autoConfirm",
+              decidedAt: Date.now(),
+            }),
+          }
+        : legacyApproveToolToBroker(undefined);
+    wiredPipeline = await buildActionLifecycle({
+      principalId: "agent-user",
+      runId: generateId(),
+      workspaceRoot: "/",
+      modelProviderClass: (currentProvider as any)?.type ?? "normal",
+      approvalBroker: broker,
+      executionBoundary: boundary,
+      artifacts,
+    });
+  }
 
   // Prepend system prompt if provided and messages[0] is not already a system message
   if (systemPrompt && messages.length > 0 && messages[0].role !== "system") {
@@ -341,9 +376,6 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
   // so this equals how full the context window is after this turn.
   let lastContextTokens = 0;
 
-  // Track current provider (may change per step if providerFactory is used)
-  let currentProvider = provider;
-  let currentModel = model;
 
   // Track whether the loop exhausted maxSteps
   let hitMaxSteps = false;
@@ -511,6 +543,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
         // adapter as a tool_progress step. Emitted via onStep only — not pushed
         // to result.steps (chunks are transient presentation, not semantic).
         const onUpdate = (progress: { percentage?: number; message?: string }): void => {
+          process.stderr.write(`ONUPDATE CALLED: ${JSON.stringify(progress)}, onStep: ${Boolean(onStep)}\n`);
           if (progress.message != null && onStep) {
             onStep({
               type: "tool_progress",
@@ -569,10 +602,9 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
             // PreparedOperation.kind — commit-files → FileCommitBroker,
             // process → ProcessExecutor, etc. The prepared operation IS
             // the operation that executes (not the old tool handler).
-            const result = await wiredPipeline.lifecycle.run(action, signal);
+            const result = await wiredPipeline.lifecycle.run(action, { signal, onUpdate: execExtra.onUpdate });
             output = result.toolResult.output;
             metadata = result.toolResult.metadata;
-
             // Spec 008 FR-010: Model-egress gate. Before tool output enters
             // model-visible history, check whether the data classification
             // permits release to the configured provider. Secret-class data
@@ -583,9 +615,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
               if (sensitivity !== "normal") {
                 const { ModelEgressGate } = await import("./permissions/model-egress-gate-proxy.js");
                 const gate = new ModelEgressGate();
-                const envelope = result.outcome.envelopeId
-                  ? { capabilities: [], version: 1 as const, envelopeId: result.outcome.envelopeId, principalId: action.principalId, runId: action.runId, actionDigest: action.actionDigest, lifetime: { kind: "action" as const, actionDigest: action.actionDigest, consumeOnce: true as const }, issuedBy: { kind: "service" as const, authorityId: "policy-engine", authenticatedBy: "deployment" }, issuedAt: 0, policyDigest: "d" }
-                  : undefined;
+                const envelope = result.decision.decision === "allow" ? result.decision.envelope : undefined;
                 if (envelope) {
                   const decision = await gate.authorize(
                     { actionDigest: action.actionDigest, providerClass: wiredPipeline.analysisContext.modelProviderClass, dataClasses: [sensitivity] },

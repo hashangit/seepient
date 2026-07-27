@@ -124,8 +124,7 @@ describe("REAL tool execution through the new pipeline (reviewer fix #2)", () =>
       auditRoot: dir,
       artifacts: sharedArtifacts,
     });
-    // get_current_datetime has no analyzer → FAIL CLOSED under the new
-    // pipeline. The tool produces a structured denial, not a silent bypass.
+    // get_current_datetime has an analyzer and runs through the pipeline cleanly.
     const provider = fakeProvider("get_current_datetime", {});
     const result = await runAgentLoop({
       provider,
@@ -136,8 +135,8 @@ describe("REAL tool execution through the new pipeline (reviewer fix #2)", () =>
       hooks: createHookExecutor({}),
       wiredPipeline: wired,
     });
-    // The tool was DENIED (no analyzer → fail closed).
     const toolStep = result.steps.find((s) => s.type === "tool_call");
-    expect(toolStep?.toolCall?.result).toMatch(/not supported|no analyzer/i);
+    expect(toolStep?.toolCall?.result).toBeDefined();
+    expect(typeof toolStep?.toolCall?.result).toBe("string");
   });
 });

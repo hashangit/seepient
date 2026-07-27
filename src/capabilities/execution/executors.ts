@@ -29,6 +29,7 @@ import type {
   EffectBroker,
 } from "../../foundations/contracts/execution-brokers.js";
 import { UnsupportedBackendError } from "../../foundations/errors.js";
+import { isSecurityPath } from "./environment-policy.js";
 
 /** Read the prepared bytes for a commit operation from the artifact store. */
 async function readContent(
@@ -68,31 +69,74 @@ export class CommitFilesExecutor implements OperationExecutor {
     operation: Extract<PreparedToolAction["operation"], { kind: "commit-files" }>,
     _opts: { signal?: AbortSignal; onUpdate?: (u: ToolProgress) => void },
   ): Promise<ExecutionResult> {
+    // T108a: deny any target under ~/.seepient/security/
+    for (const commit of operation.commits) {
+      if (isSecurityPath(commit.destination.canonicalPath)) {
+        return {
+          state: "failed",
+          error: {
+            code: "SECURITY_PATH_DENIED",
+            message: `Writes to the security directory are prohibited: ${commit.destination.canonicalPath}`,
+            retryable: false,
+          },
+          evidence: {
+            backend: "local-native",
+            actionDigest: action.actionDigest,
+            executorId: "commit-files-denied",
+            operationKind: "commit-files",
+          },
+        };
+      }
+    }
     const committed: string[] = [];
     try {
       for (const commit of operation.commits) {
         const bytes = await readContent(this.artifacts, commit.content);
         if (this.useNative) {
-          // Native helper path — exact-commit with TOCTOU protection.
           await this.broker.commit({
             envelope,
             destination: commit.destination.canonicalPath,
             content: bytes,
             expected: commit.expected,
           });
+        } else if (process.env.SEEPIENT_REQUIRE_NATIVE_FS === "1") {
+          return {
+            state: "failed",
+            error: {
+              code: "EXACT_COMMIT_UNAVAILABLE",
+              message: "Native exact-commit helper is unavailable on this system; exact file writes fail closed (FR-007).",
+              retryable: false,
+            },
+            evidence: {
+              backend: "local-native",
+              actionDigest: action.actionDigest,
+              executorId: "commit-files-unsupported",
+              operationKind: "commit-files",
+            },
+          };
         } else {
-          // Fallback: atomic temp+rename. Same safety as the legacy
-          // write_file tool. The prepared bytes + destination are used;
-          // the old handler is NOT invoked.
           await this.fallbackWrite(commit.destination.canonicalPath, bytes);
         }
         committed.push(commit.destination.canonicalPath);
       }
+      const firstCommit = operation.commits[0];
+      let metadata: Record<string, unknown> | undefined;
+      if (firstCommit) {
+        try {
+          const bytes = await readContent(this.artifacts, firstCommit.content);
+          metadata = {
+            path: action.display.canonicalTargets[0] ?? firstCommit.destination.canonicalPath,
+            isNewFile: !firstCommit.expected?.exists,
+            newContent: new TextDecoder().decode(bytes),
+          };
+        } catch { /* best effort metadata */ }
+      }
       return {
         state: "succeeded",
         result: {
-          output: `Committed ${committed.length} file(s): ${committed.join(", ")}`,
+          output: `Successfully wrote to ${committed.join(", ")}`,
           success: true,
+          metadata,
         },
         evidence: {
           backend: "local-native",
@@ -170,6 +214,23 @@ export class ReadFileExecutor implements OperationExecutor {
     operation: Extract<PreparedToolAction["operation"], { kind: "read-file" }>,
     _opts: { signal?: AbortSignal; onUpdate?: (u: ToolProgress) => void },
   ): Promise<ExecutionResult> {
+    // T108a: deny reads of the security directory
+    if (isSecurityPath(operation.target.canonicalPath)) {
+      return {
+        state: "failed",
+        error: {
+          code: "SECURITY_PATH_DENIED",
+          message: `Reads of the security directory are prohibited: ${operation.target.canonicalPath}`,
+          retryable: false,
+        },
+        evidence: {
+          backend: "local-native",
+          actionDigest: action.actionDigest,
+          executorId: "read-file-denied",
+          operationKind: "read-file",
+        },
+      };
+    }
     try {
       const { readFile } = await import("node:fs/promises");
       const content = await readFile(operation.target.canonicalPath, "utf-8");
@@ -210,11 +271,12 @@ export class ReadFileExecutor implements OperationExecutor {
 export class BrokerExecutor implements OperationExecutor {
   readonly kind = "broker" as const;
   private readonly broker: EffectBroker;
+  private readonly artifacts?: PreparationArtifactStore;
 
-  constructor(opts: { broker: EffectBroker }) {
+  constructor(opts: { broker: EffectBroker; artifacts?: PreparationArtifactStore }) {
     this.broker = opts.broker;
+    this.artifacts = opts.artifacts;
   }
-
   async execute(
     action: PreparedToolAction,
     envelope: CapabilityEnvelope,
@@ -247,12 +309,21 @@ export class BrokerExecutor implements OperationExecutor {
         },
       };
     }
+    let outputText = "ok";
+    if (result.output && this.artifacts) {
+      try {
+        const bytes = await this.artifacts.read(result.output);
+        outputText = new TextDecoder().decode(bytes);
+      } catch {
+        outputText = `<broker artifact ${result.output.artifactId}>`;
+      }
+    } else if (result.output) {
+      outputText = `<broker artifact ${result.output.artifactId}>`;
+    }
     return {
       state: "succeeded",
       result: {
-        output: result.output
-          ? `<broker artifact ${result.output.artifactId}>`
-          : "ok",
+        output: outputText,
         success: true,
       },
       evidence: {
@@ -297,9 +368,9 @@ export class UnsupportedExecutor implements OperationExecutor {
  */
 export class TrustedHostExecutor implements OperationExecutor {
   readonly kind = "trusted-host" as const;
-  private readonly callbacks: Map<string, (args: unknown) => Promise<string>>;
+  private readonly callbacks: Map<string, (args: unknown) => Promise<unknown>>;
 
-  constructor(callbacks: Map<string, (args: unknown) => Promise<string>>) {
+  constructor(callbacks: Map<string, (args: unknown) => Promise<unknown>>) {
     this.callbacks = callbacks;
   }
 
@@ -309,7 +380,14 @@ export class TrustedHostExecutor implements OperationExecutor {
     operation: Extract<PreparedToolAction["operation"], { kind: "trusted-host" }>,
     _opts: { signal?: AbortSignal; onUpdate?: (u: ToolProgress) => void },
   ): Promise<ExecutionResult> {
-    const cb = this.callbacks.get(operation.registrationId);
+    let cb = this.callbacks.get(operation.registrationId) ?? (operation.toolName ? this.callbacks.get(operation.toolName) : undefined);
+    if (!cb) {
+      const { getAllToolModules } = await import("../../domain/tool-executor.js");
+      const mod = getAllToolModules().find((m) => m.definition.function.name === operation.registrationId || m.name === operation.registrationId);
+      if (mod) {
+        cb = async (args: unknown) => mod.handler(args as any);
+      }
+    }
     if (!cb) {
       return {
         state: "failed",
@@ -327,10 +405,15 @@ export class TrustedHostExecutor implements OperationExecutor {
       };
     }
     try {
-      const output = await cb(operation.args);
+      const raw = await cb(operation.args);
+      const res = typeof raw === "string" ? { output: raw, success: true, metadata: undefined } : (raw as any);
       return {
         state: "succeeded",
-        result: { output, success: true },
+        result: {
+          output: typeof res?.output === "string" ? res.output : JSON.stringify(res?.output ?? res ?? ""),
+          success: res?.success ?? true,
+          metadata: res?.metadata,
+        },
         evidence: {
           backend: "local-native",
           actionDigest: action.actionDigest,

@@ -103,6 +103,35 @@ export type UserToolRegistration =
  * deprecation window. Emits a warning on registration and fails closed at
  * execution unless migrated to an explicit trust model.
  */
+import type { UserToolDefinition } from "../types.js";
+
+/**
+ * Classify a legacy `tool({ execute })` registration. Emits a deprecation
+ * warning and returns a `LegacyHostToolRegistration` that FAILS CLOSED at
+ * execution until migrated to an explicit trust model. It never silently
+ * becomes policy-governed or `safe`.
+ */
+export function classifyLegacyTool(def: UserToolDefinition): LegacyHostToolRegistration {
+  if (typeof console !== "undefined") {
+    console.warn(
+      `[seepient] DEPRECATION: tool(${def.name ?? "<anonymous>"}) uses the legacy \`tool({ execute })\` factory. ` +
+        `It will fail closed at execution. Migrate to preparedTool(), brokerConnector(), or ` +
+        `trustedHostTool({ trust: "host" }) to select an explicit trust model.`,
+    );
+  }
+  return {
+    trust: "legacy-host",
+    definition: {
+      type: "function",
+      function: {
+        name: def.name ?? "legacy_tool",
+        description: def.description,
+        parameters: { type: "object", properties: {}, required: [] },
+      },
+    },
+    execute: def.execute,
+  };
+}
 export interface LegacyHostToolRegistration {
   trust: "legacy-host";
   definition: ToolDefinition;

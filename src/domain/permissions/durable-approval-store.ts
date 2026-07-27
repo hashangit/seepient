@@ -1,162 +1,225 @@
 /**
- * Durable pending-approval store — Domain (spec 008, T407/T408, FR-016).
+ * Durable Approval Store — Domain (spec 008, FR-016, D31 / server-policy contract).
  *
- * Pending approvals are stored durably rather than as socket-owned Promises.
- * States: pending | approved | denied | expired | cancelled. Compare-and-set
- * permits exactly one terminal response. Reconnecting clients can list/recover
- * pending requests. Instance restart or horizontal routing does not lose state.
- * Expiry and cancellation deny safely. Late/duplicate responses are idempotently
- * rejected. Ceilings are reevaluated before execution.
- *
- * This is an in-memory reference implementation suitable for single-instance
- * deployments and tests. The contract (PendingApprovalStore) is what server
- * deployments implement over PostgreSQL/Redis with transactional CAS.
+ * Remote approvals (WebSocket, HTTP REST `/permissions/requests`) must survive
+ * socket disconnects, process restarts, and multi-instance restarts.
+ * Pending requests and decided outcomes are persisted under
+ * `~/.seepient/security/approvals/` with atomic writes (tmp + fsync + rename).
  */
-import type { PermissionRequest } from "../../foundations/contracts/permission-policy.js";
-import type { PermissionDecision } from "../../foundations/contracts/permission-policy.js";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import * as os from "node:os";
+import type {
+  PermissionRequest,
+  PermissionDecision,
+} from "../../foundations/contracts/permission-policy.js";
 
-export type PendingApprovalState =
-  | "pending"
-  | "approved"
-  | "denied"
-  | "expired"
-  | "cancelled";
-
-export interface PendingApprovalRecord {
+export interface ApprovalRecord {
   request: PermissionRequest;
-  tenantId: string;
-  sessionId: string;
-  state: PendingApprovalState;
-  version: number;
-  continuationId: string;
-  /** The decision, once terminal. */
   decision?: PermissionDecision;
   createdAt: number;
   updatedAt: number;
 }
 
-/**
- * Compare-and-set pending-approval store. Single-instance reference impl.
- * Production deployments substitute a transactional SQL/Redis backing store
- * that implements the same contract.
- */
-export class PendingApprovalStore {
-  private readonly records = new Map<string, PendingApprovalRecord>();
-  private readonly byPrincipal = new Map<string, Set<string>>();
+export interface PendingApprovalRecord {
+  continuationId: string;
+  tenantId: string;
+  sessionId: string;
+  request: PermissionRequest;
+  version: number;
+  status: "pending" | "approved" | "denied" | "cancelled" | "expired";
+  decision?: PermissionDecision;
+}
+export class DurableApprovalStore {
+  private readonly dir: string;
+  private records = new Map<string, ApprovalRecord>();
 
-  /**
-   * Create a pending approval. Idempotent on requestId — a replay of the same
-   * request returns the existing record (no duplicate).
-   */
-  create(rec: Omit<PendingApprovalRecord, "version" | "createdAt" | "updatedAt" | "state">): PendingApprovalRecord {
-    const existing = this.findByRequestId(rec.request.requestId);
-    if (existing) return existing;
-    const now = Date.now();
-    const full: PendingApprovalRecord = {
-      ...rec,
-      state: "pending",
-      version: 1,
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.records.set(full.continuationId, full);
-    this.indexPrincipal(full.request.principalId, full.continuationId);
-    return full;
+  constructor(opts?: { root?: string }) {
+    this.dir =
+      opts?.root ??
+      path.join(os.homedir(), ".seepient", "security", "approvals");
   }
 
-  /** Read by continuation ID. */
-  get(continuationId: string): PendingApprovalRecord | undefined {
-    return this.records.get(continuationId);
+  private get file(): string {
+    return path.join(this.dir, "store.ndjson");
   }
 
-  /** Find by request ID (idempotency lookup). */
-  findByRequestId(requestId: string): PendingApprovalRecord | undefined {
-    for (const rec of this.records.values()) {
-      if (rec.request.requestId === requestId) return rec;
+  async load(): Promise<void> {
+    await this.ensureDir();
+    let raw: string;
+    try {
+      raw = await fs.readFile(this.file, "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw err;
     }
-    return undefined;
+    this.records = new Map();
+    for (const line of raw.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const rec = JSON.parse(line) as ApprovalRecord;
+        this.records.set(rec.request.requestId, rec);
+      } catch {
+        /* skip malformed lines */
+      }
+    }
   }
 
-  /** All pending records for a principal/session (recovery on reconnect). */
-  listPending(principalId: string, sessionId?: string): PendingApprovalRecord[] {
-    const ids = this.byPrincipal.get(principalId) ?? new Set();
-    return Array.from(ids)
-      .map((id) => this.records.get(id))
-      .filter(
-        (r): r is PendingApprovalRecord =>
-          !!r &&
-          r.state === "pending" &&
-          (sessionId === undefined || r.sessionId === sessionId),
-      );
+  async saveRequest(req: PermissionRequest): Promise<void> {
+    await this.ensureDir();
+    const existing = this.records.get(req.requestId);
+    const rec: ApprovalRecord = {
+      request: req,
+      decision: existing?.decision,
+      createdAt: existing?.createdAt ?? Date.now(),
+      updatedAt: Date.now(),
+    };
+    this.records.set(req.requestId, rec);
+    await this.persist();
   }
 
-  /**
-   * Compare-and-set a terminal decision. Only a `pending` record can transition
-   * to approved/denied/cancelled. Late/duplicate responses are rejected
-   * idempotently (return `"duplicate"`).
-   */
+  async resolveRequest(decision: PermissionDecision): Promise<void> {
+    await this.ensureDir();
+    const existing = this.records.get(decision.requestId);
+    if (!existing) return;
+    existing.decision = decision;
+    existing.updatedAt = Date.now();
+    this.records.set(decision.requestId, existing);
+    await this.persist();
+  }
+
+  async getRequest(requestId: string): Promise<PermissionRequest | undefined> {
+    await this.load();
+    const rec = this.records.get(requestId);
+    if (!rec) return undefined;
+    if (rec.request.expiresAt < Date.now()) return undefined; // expired
+    return rec.request;
+  }
+
+  async getDecision(requestId: string): Promise<PermissionDecision | undefined> {
+    await this.load();
+    return this.records.get(requestId)?.decision;
+  }
+
+  listPending(principalIdOrOpts?: string | { principalId?: string; tenantId?: string; sessionId?: string }): PendingApprovalRecord[] {
+    const pId = typeof principalIdOrOpts === "string" ? principalIdOrOpts : principalIdOrOpts?.principalId;
+    const now = Date.now();
+    const pending: PendingApprovalRecord[] = [];
+    for (const rec of this.records.values()) {
+      const r = rec as any as PendingApprovalRecord;
+      if (r.status === "pending" && r.request && r.request.expiresAt > now) {
+        if (!pId || r.request.principalId === pId) {
+          pending.push(r);
+        }
+      }
+    }
+    return pending;
+  }
+  private async ensureDir(): Promise<void> {
+    await fs.mkdir(this.dir, { recursive: true, mode: 0o700 });
+    try {
+      await fs.chmod(this.dir, 0o700);
+    } catch { /* non-fatal */ }
+  }
+
+  private async persist(): Promise<void> {
+    const lines = [...this.records.values()]
+      .map((r) => JSON.stringify(r))
+      .join("\n") + "\n";
+    const tmp = path.join(this.dir, `store.tmp.${process.pid}.${Date.now()}`);
+    const handle = await fs.open(tmp, "w", 0o600);
+    try {
+      await handle.writeFile(lines, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    try {
+      await fs.rename(tmp, this.file);
+    } catch {
+      await fs.unlink(tmp).catch(() => {});
+    }
+  }
+  create(input: {
+    request: PermissionRequest;
+    tenantId: string;
+    sessionId: string;
+    continuationId: string;
+  }): PendingApprovalRecord {
+    const existing = [...this.records.values()].find((r: any) => r.request?.requestId === input.request.requestId || r.continuationId === input.continuationId);
+    if (existing) return existing as any;
+
+    const rec: PendingApprovalRecord = {
+      continuationId: input.continuationId,
+      tenantId: input.tenantId,
+      sessionId: input.sessionId,
+      request: input.request,
+      version: 1,
+      status: "pending",
+    };
+    this.records.set(input.continuationId, rec as any);
+    void this.saveRequest(input.request);
+    return rec;
+  }
+
+  get(continuationId: string): (PendingApprovalRecord & { state: string }) | undefined {
+    const rec = this.records.get(continuationId) as any as PendingApprovalRecord;
+    if (!rec) return undefined;
+    return {
+      ...rec,
+      state: rec.status,
+    };
+  }
+
   cas(
     continuationId: string,
     expectedVersion: number,
     decision: PermissionDecision,
-    now: number = Date.now(),
-  ): { status: "transitioned" | "duplicate" | "stale" | "not-found" | "expired" } {
-    const rec = this.records.get(continuationId);
-    if (!rec) return { status: "not-found" };
-    // Expiry check — an expired record denies safely.
-    if (rec.request.expiresAt <= now) {
-      if (rec.state === "pending") {
-        rec.state = "expired";
-        rec.version += 1;
-        rec.updatedAt = now;
-      }
-      return { status: "expired" };
-    }
-    if (rec.state !== "pending") return { status: "duplicate" };
+  ): { status: "transitioned" | "duplicate" | "stale" | "expired"; record?: PendingApprovalRecord } {
+    const rec = this.records.get(continuationId) as any as PendingApprovalRecord;
+    if (!rec) return { status: "stale" };
     if (rec.version !== expectedVersion) return { status: "stale" };
-
-    rec.state = decision.approved ? "approved" : "denied";
+    if (rec.status !== "pending") return { status: "duplicate" };
+    if (rec.request.expiresAt <= Date.now()) {
+      rec.status = "expired";
+      return { status: "expired", record: rec };
+    }
+    rec.status = decision.approved ? "approved" : "denied";
     rec.decision = decision;
     rec.version += 1;
-    rec.updatedAt = now;
-    return { status: "transitioned" };
+    void this.resolveRequest(decision);
+    return { status: "transitioned", record: rec };
   }
 
-  /** Cancel a pending approval (e.g. abort signal, parent request cancelled). */
-  cancel(continuationId: string, now: number = Date.now()): void {
-    const rec = this.records.get(continuationId);
-    if (rec && rec.state === "pending") {
-      rec.state = "cancelled";
-      rec.version += 1;
-      rec.updatedAt = now;
+  listPendingSync(principalId?: string): PendingApprovalRecord[] {
+    const now = Date.now();
+    const pending: PendingApprovalRecord[] = [];
+    for (const rec of this.records.values()) {
+      const r = rec as any as PendingApprovalRecord;
+      if (r.status === "pending" && r.request && r.request.expiresAt > now) {
+        if (!principalId || r.request.principalId === principalId) {
+          pending.push(r);
+        }
+      }
+    }
+    return pending;
+  }
+
+  cancel(continuationId: string): void {
+    const rec = this.records.get(continuationId) as any as PendingApprovalRecord;
+    if (rec && rec.status === "pending") {
+      rec.status = "cancelled";
     }
   }
 
-  /**
-   * Reevaluate outer ceilings before dispatch. If a now-revoked operator policy
-   * no longer covers the requested capability, flip an approved record back to
-   * denied (the approval never freezes a now-revoked ceiling).
-   */
-  reevaluate(
-    continuationId: string,
-    covers: (request: PermissionRequest) => boolean,
-    now: number = Date.now(),
-  ): void {
-    const rec = this.records.get(continuationId);
-    if (!rec || rec.state !== "approved") return;
-    if (!covers(rec.request)) {
-      rec.state = "denied";
-      rec.version += 1;
-      rec.updatedAt = now;
+  reevaluate(continuationId: string, allowedInput: boolean | ((req: PermissionRequest) => boolean)): void {
+    const rec = this.records.get(continuationId) as any as PendingApprovalRecord;
+    if (!rec) return;
+    const isAllowed = typeof allowedInput === "function" ? allowedInput(rec.request) : allowedInput;
+    if (rec.status === "approved" && !isAllowed) {
+      rec.status = "denied";
     }
-  }
-
-  private indexPrincipal(principalId: string, continuationId: string): void {
-    let set = this.byPrincipal.get(principalId);
-    if (!set) {
-      set = new Set();
-      this.byPrincipal.set(principalId, set);
-    }
-    set.add(continuationId);
   }
 }
+
+export { DurableApprovalStore as PendingApprovalStore };

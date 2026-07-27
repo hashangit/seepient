@@ -116,7 +116,9 @@ function deriveCapabilityKinds(
   if (kinds.includes("broker")) {
     out.push("network-destination", "external-recipient", "secret-ref");
   }
-  out.push("model-egress");
+  if (kinds.includes("trusted-host")) {
+    out.push("commit-file", "read-file", "read-root", "process");
+  }
   return out;
 }
 

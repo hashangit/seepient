@@ -172,15 +172,22 @@ export class Agent {
     // when chat() is called (REPL/TUI wire approveTool after bootstrap).
     this._pipelineApproveTool = undefined;
     const broker = legacyApproveToolToBroker(undefined);
-    // Wrap the broker so it consults the live approveTool holder.
+    // The CLI surface is interactive-capable: REPL/TUI wire `approveTool`
+    // per chat() after bootstrap, so `mode` reports `inline` to keep the
+    // policy engine from short-circuiting on `approval-unavailable`. The
+    // dynamic consultation happens in `request()` at decision time. If no
+    // approveTool is wired when a prompt is actually needed, `request()`
+    // throws — `ActionLifecycle` catches that and records the correct
+    // `approval-unavailable` deny reason (rather than mislabeling a
+    // `NoneApprovalBroker` auto-deny as `user-denied`).
     const liveBroker = {
-      mode: broker.mode,
+      mode: "inline" as const,
       request: async (req: any, opts2: any) => {
         if (this._pipelineApproveTool) {
-          const liveBroker = legacyApproveToolToBroker(this._pipelineApproveTool);
-          return liveBroker.request(req, opts2);
+          const lb = legacyApproveToolToBroker(this._pipelineApproveTool);
+          return lb.request(req, opts2);
         }
-        return new (await import("../approval-brokers.js")).NoneApprovalBroker().request(req);
+        throw new Error("approval-unavailable: no approveTool wired for this chat()");
       },
     };
     // Build the REAL typed-executor boundary — NOT the legacy handler.
