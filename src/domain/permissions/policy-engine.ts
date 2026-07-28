@@ -273,9 +273,8 @@ export class PolicyEngine implements PolicyEngineContract {
     const inCeiling = missing.every((c) => {
       // Check the deployment ceiling first.
       if (setCovers(context.deploymentCeiling, c)) return true;
-      // Registered trusted-host callbacks are within the interactive operator ceiling
+      // Host callbacks registered in the tool registry are within operator ceiling
       if (c.kind === "trusted-host") return true;
-      // is empty. Paths OUTSIDE the workspace root are outside-ceiling (deny).
       if (context.approvalMode !== "never" && context.workspaceRoot) {
         let root = context.workspaceRoot;
         try {

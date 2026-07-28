@@ -38,6 +38,8 @@ export interface BuildLocalBoundaryResult {
 export async function buildLocalBoundary(opts?: {
   artifacts?: InMemoryArtifactStore;
   customToolCallbacks?: Map<string, (args: unknown) => Promise<string>>;
+  unsafeUncontained?: boolean;
+  allowFallback?: boolean;
 }): Promise<BuildLocalBoundaryResult> {
   const artifacts = opts?.artifacts ?? new InMemoryArtifactStore();
 
@@ -73,8 +75,8 @@ export async function buildLocalBoundary(opts?: {
   const registry = new OperationExecutorRegistry();
   registry.register(new NoneExecutor());
   registry.register(new ReadFileExecutor({ artifacts }));
-  registry.register(new CommitFilesExecutor({ broker: commitBroker, artifacts, useNative: probe.available }));
-  registry.register(new ProcessExecutor({ sandbox, unsafeUncontained: sandbox.probe.backend === "none" }));
+  registry.register(new CommitFilesExecutor({ broker: commitBroker, artifacts, useNative: probe.available, allowFallback: opts?.allowFallback ?? true }));
+  registry.register(new ProcessExecutor({ sandbox, unsafeUncontained: opts?.unsafeUncontained ?? false }));
   registry.register(new BrokerExecutor({ broker: effectBroker }));
   registry.register(new TrustedHostExecutor(hostCallbacks));
 

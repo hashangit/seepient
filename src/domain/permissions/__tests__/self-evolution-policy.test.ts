@@ -103,6 +103,15 @@ describe("attestation independence (T504)", () => {
   });
 
   it("attestation must match proposal digest and not be expired", () => {
+    const { generateKeyPairSync, createSign } = require("node:crypto");
+    const { publicKey, privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const pubKeyPem = publicKey.export({ type: "pkcs1", format: "pem" }).toString();
+    const privKeyPem = privateKey.export({ type: "pkcs1", format: "pem" }).toString();
+    const payload = "p1:sha256:abc:200";
+    const signer = createSign("SHA256");
+    signer.update(payload);
+    const validSig = signer.sign(privKeyPem, "hex");
+
     const att: ActivationAttestation = {
       proposalId: "p1",
       candidateArtifactDigest: "sha256:abc",
@@ -110,23 +119,24 @@ describe("attestation independence (T504)", () => {
       authorityId: "a1",
       issuedAt: 100,
       expiresAt: 200,
-      signature: "sig",
+      signature: validSig,
     };
     const proposal = {
       proposalId: "p1",
       candidateArtifactDigest: "sha256:abc",
     };
-    expect(attestationMatches(att, proposal, 150)).toBe(true);
-    expect(attestationMatches(att, proposal, 250)).toBe(false); // expired
+    expect(attestationMatches(att, proposal, 150, pubKeyPem)).toBe(true);
+    expect(attestationMatches(att, proposal, 250, pubKeyPem)).toBe(false); // expired
     expect(
       attestationMatches(
         { ...att, candidateArtifactDigest: "sha256:other" },
         proposal,
         150,
+        pubKeyPem,
       ),
     ).toBe(false); // digest mismatch
     expect(
-      attestationMatches({ ...att, signature: "" }, proposal, 150),
+      attestationMatches({ ...att, signature: "" }, proposal, 150, pubKeyPem),
     ).toBe(false); // missing sig
   });
 });

@@ -78,22 +78,6 @@ export class PersistedReplayLedger {
    * (replay detected). Atomically appends to the NDJSON file with fsync.
    */
   async consume(requestId: string): Promise<boolean> {
-    await this.load();
-    if (this.consumed.has(requestId)) return false;
-    const entry: ReplayEntry = { requestId, consumedAt: Date.now() };
-    await this.appendEntry(entry);
-    this.consumed.add(requestId);
-    return true;
-  }
-
-  private async ensureDir(): Promise<void> {
-    await fs.mkdir(this.dir, { recursive: true, mode: 0o700 });
-    try {
-      await fs.chmod(this.dir, 0o700);
-    } catch { /* non-fatal */ }
-  }
-
-  private async appendEntry(entry: ReplayEntry): Promise<void> {
     await this.ensureDir();
     const lockFile = this.file + ".lock";
     let lockHandle: fs.FileHandle | undefined;
@@ -105,7 +89,16 @@ export class PersistedReplayLedger {
         await new Promise((r) => setTimeout(r, 25));
       }
     }
+    if (!lockHandle) {
+      return false; // Fail closed if lock acquisition fails
+    }
     try {
+      this.loaded = false;
+      await this.load();
+      if (this.consumed.has(requestId)) {
+        return false;
+      }
+      const entry: ReplayEntry = { requestId, consumedAt: Date.now() };
       const line = JSON.stringify(entry) + "\n";
       const handle = await fs.open(this.file, "a", 0o600);
       try {
@@ -114,11 +107,18 @@ export class PersistedReplayLedger {
       } finally {
         await handle.close();
       }
+      this.consumed.add(requestId);
+      return true;
     } finally {
-      if (lockHandle) {
-        await lockHandle.close().catch(() => {});
-        await fs.unlink(lockFile).catch(() => {});
-      }
+      await lockHandle.close().catch(() => {});
+      await fs.unlink(lockFile).catch(() => {});
     }
+  }
+
+  private async ensureDir(): Promise<void> {
+    await fs.mkdir(this.dir, { recursive: true, mode: 0o700 });
+    try {
+      await fs.chmod(this.dir, 0o700);
+    } catch { /* non-fatal */ }
   }
 }

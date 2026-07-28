@@ -42,8 +42,10 @@ beforeEach(() => {
   mkdirSync(join(dir, "active"), { recursive: true });
   writeFileSync(protectedAsset, "release-key-material", { mode: 0o600 });
 });
-
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+const { generateKeyPairSync, createSign } = require("node:crypto");
+const { publicKey, privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+const pubKeyPem = publicKey.export({ type: "pkcs1", format: "pem" }).toString();
+const privKeyPem = privateKey.export({ type: "pkcs1", format: "pem" }).toString();
 
 function policy(overrides: Partial<SelfEvolutionPolicy> = {}): SelfEvolutionPolicy {
   return {
@@ -65,17 +67,24 @@ function policy(overrides: Partial<SelfEvolutionPolicy> = {}): SelfEvolutionPoli
   };
 }
 
-function attestation(opts: Partial<ActivationAttestation> & { proposalId: string; candidateArtifactDigest: string }): ActivationAttestation {
+function signPayload(payload: string): string {
+  const signer = createSign("SHA256");
+  signer.update(payload);
+  return signer.sign(privKeyPem, "hex");
+}
+
+function attestation(opts: Partial<ActivationAttestation> & { proposalId: string; candidateArtifactDigest: string; expiresAt?: number }): ActivationAttestation {
+  const expiresAt = opts.expiresAt ?? Date.now() + 10_000;
+  const payload = `${opts.proposalId}:${opts.candidateArtifactDigest}:${expiresAt}`;
   return {
     verifierId: "verifier-2",
     authorityId: "sup-2",
     issuedAt: 100,
-    expiresAt: Date.now() + 10_000,
-    signature: "sig-by-verifier-2",
+    expiresAt,
+    signature: signPayload(payload),
     ...opts,
   };
 }
-
 /** A fake supervisor that records submissions. */
 function fakeSupervisor(): ActivationSupervisor & { submissions: ChangeProposal[] } {
   const submissions: ChangeProposal[] = [];
@@ -134,6 +143,7 @@ describe("self-evolution runtime (T502-T507)", () => {
       proposal,
       attestation: attestation({ proposalId: proposal.proposalId, candidateArtifactDigest: proposal.candidateArtifactDigest }),
       policy: policy(),
+      supervisorPublicKeyPem: pubKeyPem,
       supervisor: sup,
     });
     expect(outcome.status).toBe("submitted");
@@ -156,6 +166,7 @@ describe("self-evolution runtime (T502-T507)", () => {
         authorityId: "run-1",
       }),
       policy: policy(),
+      supervisorPublicKeyPem: pubKeyPem,
       supervisor: fakeSupervisor(),
     });
     expect(outcome.status).toBe("rejected");
@@ -170,6 +181,7 @@ describe("self-evolution runtime (T502-T507)", () => {
         candidateArtifactDigest: proposal.candidateArtifactDigest,
       }),
       policy: policy(),
+      supervisorPublicKeyPem: pubKeyPem,
       // no supervisor configured
     });
     expect(outcome.status).toBe("verified-pending-activation");
@@ -189,6 +201,7 @@ describe("self-evolution runtime (T502-T507)", () => {
         candidateArtifactDigest: proposal.candidateArtifactDigest,
       }),
       policy: operatorPolicy,
+      supervisorPublicKeyPem: pubKeyPem,
       supervisor: fakeSupervisor(),
     });
     expect(outcome.status).toBe("rejected");
@@ -204,6 +217,7 @@ describe("self-evolution runtime (T502-T507)", () => {
         candidateArtifactDigest: proposal.candidateArtifactDigest,
       }),
       policy: policy(),
+      supervisorPublicKeyPem: pubKeyPem,
       // no supervisor
     });
     expect(outcome.status).toBe("verified-pending-activation");
@@ -223,6 +237,7 @@ describe("self-evolution runtime (T502-T507)", () => {
         candidateArtifactDigest: p1.candidateArtifactDigest,
       }),
       policy: policy(),
+      supervisorPublicKeyPem: pubKeyPem,
       supervisor: fakeSupervisor(),
     });
     expect(outcome.status).toBe("rejected");
@@ -238,6 +253,7 @@ describe("self-evolution runtime (T502-T507)", () => {
         expiresAt: 1, // expired
       }),
       policy: policy(),
+      supervisorPublicKeyPem: pubKeyPem,
       supervisor: fakeSupervisor(),
     });
     expect(outcome.status).toBe("rejected");
@@ -253,6 +269,7 @@ describe("self-evolution runtime (T502-T507)", () => {
         signature: "",
       }),
       policy: policy(),
+      supervisorPublicKeyPem: pubKeyPem,
       supervisor: fakeSupervisor(),
     });
     expect(outcome.status).toBe("rejected");

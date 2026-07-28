@@ -133,26 +133,25 @@ export function attestationMatches(
   },
   proposal: { proposalId: string; candidateArtifactDigest: string },
   now: number,
-  publicKeyPem?: string,
+  publicKeyPem: string,
 ): boolean {
   if (
     attestation.proposalId !== proposal.proposalId ||
     attestation.candidateArtifactDigest !== proposal.candidateArtifactDigest ||
     attestation.expiresAt <= now ||
     !attestation.signature ||
-    attestation.signature.trim().length === 0
+    attestation.signature.trim().length === 0 ||
+    !publicKeyPem ||
+    publicKeyPem.trim().length === 0
   ) {
     return false;
   }
-  if (publicKeyPem && publicKeyPem.trim().length > 0) {
-    try {
-      const payload = `${attestation.proposalId}:${attestation.candidateArtifactDigest}:${attestation.expiresAt}`;
-      const verifier = createVerify("SHA256");
-      verifier.update(payload);
-      return verifier.verify(publicKeyPem, attestation.signature, "hex");
-    } catch {
-      return false;
-    }
+  try {
+    const payload = `${attestation.proposalId}:${attestation.candidateArtifactDigest}:${attestation.expiresAt}`;
+    const verifier = createVerify("SHA256");
+    verifier.update(payload);
+    return verifier.verify(publicKeyPem, attestation.signature, "hex");
+  } catch {
+    return false;
   }
-  return true;
 }

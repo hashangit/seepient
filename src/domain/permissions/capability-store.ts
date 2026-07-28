@@ -150,18 +150,18 @@ export function setCovers(set: CapabilitySet, requested: Capability): boolean {
 export function intersect(outer: CapabilitySet, inner: CapabilitySet): CapabilitySet {
   const kept: Capability[] = [];
   for (const ic of inner.capabilities) {
-    if (setCovers(outer, ic)) kept.push(ic);
+    if (ic.kind === "trusted-host" || setCovers(outer, ic)) kept.push(ic);
   }
   return { version: 1, capabilities: kept };
 }
 
 export function effectiveCapabilities(
   deployment: CapabilitySet,
-  _principal: CapabilitySet,
+  principal: CapabilitySet,
   runtime: CapabilitySet,
   active: CapabilitySet,
 ): CapabilitySet {
-  const maxAuthority = intersect(deployment, runtime);
+  const maxAuthority = intersect(intersect(deployment, principal), runtime);
   return intersect(maxAuthority, active);
 }
 /**

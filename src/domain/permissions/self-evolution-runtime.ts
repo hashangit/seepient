@@ -140,18 +140,19 @@ export async function submitForActivation(opts: {
   proposal: ChangeProposal;
   attestation: ActivationAttestation;
   policy: SelfEvolutionPolicy;
+  supervisorPublicKeyPem: string;
   supervisor?: ActivationSupervisor;
   now?: () => number;
 }): Promise<SubmissionOutcome> {
   const now = (opts.now ?? Date.now)();
-  // 1. Attestation must match the candidate digest and be unexpired.
+  // 1. Attestation must match the candidate digest, be unexpired, and verify signature.
   if (
-    !attestationMatches(opts.attestation, opts.proposal, now) ||
+    !attestationMatches(opts.attestation, opts.proposal, now, opts.supervisorPublicKeyPem) ||
     !isIndependentAttestation(opts.attestation, opts.proposal)
   ) {
     return {
       status: "rejected",
-      reason: "attestation mismatch, expired, or not independent of author",
+      reason: "attestation mismatch, expired, invalid signature, or not independent of author",
     };
   }
   // 2. Classify the change.

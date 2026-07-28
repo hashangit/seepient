@@ -56,11 +56,18 @@ export class DurableApprovalStore {
       throw err;
     }
     this.records = new Map();
+    this.pendingRecords = new Map();
     for (const line of raw.split("\n")) {
       if (!line.trim()) continue;
       try {
-        const rec = JSON.parse(line) as ApprovalRecord;
-        this.records.set(rec.request.requestId, rec);
+        const obj = JSON.parse(line);
+        if (obj.kind === "pending" || obj.continuationId) {
+          const rec = obj as PendingApprovalRecord;
+          this.pendingRecords.set(rec.continuationId, rec);
+        } else if (obj.request?.requestId) {
+          const rec = obj as ApprovalRecord;
+          this.records.set(rec.request.requestId, rec);
+        }
       } catch {
         /* skip malformed lines */
       }
@@ -112,9 +119,9 @@ export class DurableApprovalStore {
 
   private async persist(): Promise<void> {
     await this.ensureDir();
-    const lines = [...this.records.values()]
-      .map((r) => JSON.stringify(r))
-      .join("\n") + "\n";
+    const reqLines = [...this.records.values()].map((r) => JSON.stringify({ kind: "request", ...r }));
+    const pendingLines = [...this.pendingRecords.values()].map((r) => JSON.stringify({ kind: "pending", ...r }));
+    const lines = [...reqLines, ...pendingLines].join("\n") + "\n";
     const tmp = path.join(this.dir, `store.tmp.${process.pid}.${Date.now()}`);
     const handle = await fs.open(tmp, "w", 0o600);
     try {

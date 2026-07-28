@@ -158,11 +158,13 @@ export class DockerWorkerScheduler implements WorkerScheduler {
         readOnlyRoot: true,
       });
       rec.state = "running";
-      // Attach + exchange dispatch/result over the attach stream.
+      // Attach + start + exchange dispatch/result over the stream + wait + cleanup
       const stream = await this.opts.engine.attachStream(id);
+      await this.opts.engine.start(id);
       stream.write(Buffer.from(JSON.stringify(req)));
       const result = await this.readResult(stream, req);
-      await this.opts.engine.remove(id);
+      await this.opts.engine.wait(id).catch(() => {});
+      await this.opts.engine.remove(id).catch(() => {});
       rec.result = result;
       rec.state = "completed";
       return result;
@@ -189,10 +191,11 @@ export class DockerWorkerScheduler implements WorkerScheduler {
   async cancel(leaseId: string, reason: string): Promise<void> {
     void reason;
     // Find the running record by lease ID and kill the container.
-    for (const rec of this.records.values()) {
-      if (rec.leaseId === leaseId && rec.state === "running") {
+    for (const [containerId, rec] of this.records.entries()) {
+      if (rec.leaseId === leaseId && (rec.state === "running" || rec.state === "launching")) {
         rec.state = "failed";
-        // Real impl: this.opts.engine.kill(containerId).
+        await this.opts.engine?.kill(containerId).catch(() => {});
+        await this.opts.engine?.remove(containerId).catch(() => {});
       }
     }
   }

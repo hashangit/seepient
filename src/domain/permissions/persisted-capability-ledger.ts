@@ -121,17 +121,44 @@ export class PersistedCapabilityLedger {
    * Otherwise records the consumption durably and returns true.
    */
   async consume(envelopeId: string, actionDigest: string): Promise<boolean> {
-    if (this.consumedDigests.has(actionDigest)) return false;
-    const entry: LedgerEntry = {
-      kind: "consumed-action",
-      envelopeId,
-      actionDigest,
-      consumedAt: Date.now(),
-    };
-    await this.appendEntry(entry);
-    this.consumedDigests.add(actionDigest);
-    this.consumedEnvelopes.add(envelopeId);
-    return true;
+    await this.ensureDir();
+    const lockFile = this.file + ".lock";
+    let lockHandle: fs.FileHandle | undefined;
+    for (let attempt = 0; attempt < 20; attempt++) {
+      try {
+        lockHandle = await fs.open(lockFile, "wx", 0o600);
+        break;
+      } catch {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    }
+    if (!lockHandle) {
+      return false; // Fail closed if lock acquisition fails
+    }
+    try {
+      await this.load();
+      if (this.consumedDigests.has(actionDigest)) return false;
+      const entry: LedgerEntry = {
+        kind: "consumed-action",
+        envelopeId,
+        actionDigest,
+        consumedAt: Date.now(),
+      };
+      const line = JSON.stringify(entry) + "\n";
+      const handle = await fs.open(this.file, "a", 0o600);
+      try {
+        await handle.appendFile(line, "utf8");
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      this.consumedDigests.add(actionDigest);
+      this.consumedEnvelopes.add(envelopeId);
+      return true;
+    } finally {
+      await lockHandle.close().catch(() => {});
+      await fs.unlink(lockFile).catch(() => {});
+    }
   }
 
   /**

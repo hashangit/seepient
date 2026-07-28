@@ -56,11 +56,13 @@ export class CommitFilesExecutor implements OperationExecutor {
   private readonly broker: FileCommitBroker;
   private readonly artifacts: PreparationArtifactStore;
   private readonly useNative: boolean;
+  private readonly allowFallback: boolean;
 
-  constructor(opts: { broker: FileCommitBroker; artifacts: PreparationArtifactStore; useNative?: boolean }) {
+  constructor(opts: { broker: FileCommitBroker; artifacts: PreparationArtifactStore; useNative?: boolean; allowFallback?: boolean }) {
     this.broker = opts.broker;
     this.artifacts = opts.artifacts;
     this.useNative = opts.useNative ?? true;
+    this.allowFallback = opts.allowFallback ?? (process.env.SEEPIENT_ALLOW_JS_FS_FALLBACK === "1");
   }
 
   async execute(
@@ -99,7 +101,9 @@ export class CommitFilesExecutor implements OperationExecutor {
             content: bytes,
             expected: commit.expected,
           });
-        } else if (process.env.SEEPIENT_REQUIRE_NATIVE_FS === "1") {
+        } else if (this.allowFallback) {
+          await this.fallbackWrite(commit.destination.canonicalPath, bytes);
+        } else {
           return {
             state: "failed",
             error: {
@@ -114,8 +118,6 @@ export class CommitFilesExecutor implements OperationExecutor {
               operationKind: "commit-files",
             },
           };
-        } else {
-          await this.fallbackWrite(commit.destination.canonicalPath, bytes);
         }
         committed.push(commit.destination.canonicalPath);
       }

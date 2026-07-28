@@ -48,11 +48,11 @@ export const ALL_ANALYZERS: Record<string, ToolAnalyzer> = {
 export interface ActionLifecycleInputs {
   principalId: string;
   runId: string;
+  sessionId?: string;
   workspaceRoot: string;
-  modelProviderClass: string;
   approvalBroker: ApprovalBroker;
   executionBoundary: ExecutionBoundary;
-  /** Optional: protected policy store. When absent, defaults to LocalPolicyStore. */
+  modelProviderClass?: string;
   policyStore?: PolicyStore;
   /** Optional: audit store. When absent, defaults to LocalAuditStore. */
   auditStore?: AuditStore;
@@ -142,8 +142,7 @@ export async function buildActionLifecycle(
       { kind: "read-root", root },
       { kind: "write-root", root },
       { kind: "process" },
-      { kind: "trusted-host" },
-      { kind: "model-egress", providerClass: inputs.modelProviderClass, dataClasses: ["normal"] },
+      { kind: "model-egress", providerClass: inputs.modelProviderClass ?? "normal", dataClasses: ["normal"] },
     ],
   };
 
@@ -216,6 +215,7 @@ export async function buildActionLifecycle(
     activeCapabilities,
     terminalOutbox,
     capabilityLedger,
+    sessionId: inputs.sessionId,
   });
 
   return {
@@ -227,6 +227,7 @@ export async function buildActionLifecycle(
     auditStore,
     terminalOutbox,
     capabilityLedger,
+    policyStore,
     analysisContext: {
       principalId: inputs.principalId,
       runId: inputs.runId,
@@ -237,9 +238,8 @@ export async function buildActionLifecycle(
         policyDigest,
       },
       artifacts,
-      modelProviderClass: inputs.modelProviderClass,
+      modelProviderClass: inputs.modelProviderClass ?? "normal",
     },
-    policyStore,
     workspaceId,
   };
 }

@@ -33,7 +33,7 @@ change.
 | Provider API keys (OPENAI/ANTHROPIC/GLM) | Worker exfiltration | `sanitizeEnvironment` strips; `WorkerExecutionBoundary` routes effectful ops to scheduler | `src/capabilities/execution/environment-policy.ts`, `worker-execution-boundary.ts` |
 | Server/SMTP/release credentials | Worker reads them from env | `FORBIDDEN_ENV_PREFIXES`; worker env reconstructed, never inherited | `environment-policy.ts` |
 | Active security policy | Executor rewrites it to self-escalate | `LocalPolicyStore` at `~/.seepient/security/policies/`, private perms, CAS, digest verification | `src/domain/permissions/policy-store.ts` |
-| Filesystem (exact write) | Symlink/TOCTOU escape | `seepient-fs-commit` native helper (openat2 / openat+O_NOFOLLOW); no JS fallback | `src/vendors/native-fs-commit/index.ts`, `file-commit-broker.ts` |
+| Filesystem (exact write) | Symlink/TOCTOU escape | `seepient-fs-commit` native helper; fails closed with `EXACT_COMMIT_UNAVAILABLE` unless `allowFallback: true` is explicitly configured | `src/vendors/native-fs-commit/index.ts`, `file-commit-broker.ts` |
 | Network egress | Worker bypasses broker for private/metadata ranges | `EffectBroker` DNS resolve + address-range check + DNS-rebinding check; `BrokerLeaseAuthority` action-bound single-use lease | `effect-broker.ts`, `broker-lease-authority.ts` |
 | Secrets at the broker | Worker requests raw secret retrieval | `BrokeredEffectRequest` union has no fetch-secret variant — structurally unrepresentable | `foundations/contracts/prepared-action.ts` |
 | Model-visible history | Secret-class tool output reaches the provider | `ModelEgressGate` immutable-deny for secret/active-policy/release-key/control-plane-credential | `model-egress-gate.ts` |
@@ -161,7 +161,7 @@ The reviewer signs off each item independently.
 - [ ] Legacy grants: ambiguous prefix grants are quarantined, never auto-widened.
 
 ### Capabilities (execution)
-- [ ] `FileCommitBroker` throws `UnsupportedBackendError` when the native helper is unavailable — no JS fallback.
+- [ ] `CommitFilesExecutor` fails closed (`EXACT_COMMIT_UNAVAILABLE`) when native helper is unavailable — JS fallback is opt-in (`allowFallback: true`).
 - [ ] `EffectBroker` rejects loopback, private, link-local, reserved, and metadata addresses post-DNS.
 - [ ] `EffectBroker` rejects DNS rebinding (effective IP must be in resolved set).
 - [ ] `EffectBroker` strips `Authorization`, `Cookie`, `Host`, proxy, forwarding headers.

@@ -100,9 +100,32 @@ describe('runAgentLoop streaming', () => {
     const { mkdtempSync } = await import('node:fs');
     const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
+    const { buildLocalBoundary } = await import('../../../capabilities/execution/build-local-boundary.js');
+    const { buildActionLifecycle } = await import('../../permissions/action-lifecycle-factory.js');
+    const { InMemoryArtifactStore } = await import('../../../capabilities/execution/in-memory-artifact-store.js');
+
     const dir = mkdtempSync(join(tmpdir(), 'seepient-stream-test-'));
-    // Provider requests a real execute_shell_command; autoConfirm bypasses the
-    // permission gate so it actually runs and streams stdout.
+    const artifacts = new InMemoryArtifactStore();
+    const { boundary } = await buildLocalBoundary({ artifacts, unsafeUncontained: true });
+    const wiredPipeline = await buildActionLifecycle({
+      principalId: 'agent-user',
+      runId: 'r1',
+      workspaceRoot: dir,
+      approvalBroker: {
+        mode: 'inline',
+        request: async (req: any) => ({
+          approved: true,
+          requestId: req.requestId,
+          actionDigest: req.actionDigest,
+          lifetime: 'action',
+          actorId: 'autoConfirm',
+          decidedAt: Date.now(),
+        }),
+      },
+      executionBoundary: boundary,
+      artifacts,
+    });
+
     const provider = streamProvider([
       { type: 'tool_call_begin', index: 0, id: 'tc1', name: 'execute_shell_command' },
       { type: 'tool_call_delta', index: 0, argumentsDelta: '{"command":"echo seepient-t026","rationale":"x"}' },
@@ -119,6 +142,7 @@ describe('runAgentLoop streaming', () => {
       hooks: createHookExecutor(),
       stream: true,
       autoConfirm: true,
+      wiredPipeline,
       onStep: (s) => steps.push(s),
     });
     const progress = steps.filter((s) => s.type === 'tool_progress');

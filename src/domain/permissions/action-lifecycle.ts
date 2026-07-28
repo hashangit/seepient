@@ -71,6 +71,7 @@ export interface ActionLifecycleOptions {
    * checked here before the dispatched audit event.
    */
   capabilityLedger?: PersistedCapabilityLedger;
+  sessionId?: string;
   /** Now-injectable for deterministic tests. */
   now?: () => number;
 }
@@ -131,6 +132,7 @@ export class ActionLifecycle {
   private readonly audit: AuditStore;
   private readonly active: MutableCapabilitySet;
   private readonly now: () => number;
+  private readonly sessionId?: string;
 
   private readonly terminalOutbox?: { enqueue: (event: import("../../foundations/contracts/execution-brokers.js").ActionAuditEvent, idempotencyKey: string) => void };
   private readonly capabilityLedger?: PersistedCapabilityLedger;
@@ -140,6 +142,7 @@ export class ActionLifecycle {
     this.policyContext = opts.policyContext;
     this.broker = opts.broker;
     this.boundary = opts.boundary;
+    this.sessionId = opts.sessionId;
     this.audit = opts.audit;
     const baseActive = (opts.activeCapabilities?.capabilities.length ?? 0) > 0
       ? opts.activeCapabilities!
@@ -266,8 +269,13 @@ export class ActionLifecycle {
         version: 1,
         capabilities: [...this.active.capabilities, ...approved],
       };
+      const reevalPrincipal: CapabilitySet = {
+        version: 1,
+        capabilities: [...this.policyContext.principalPolicy.capabilities, ...approved],
+      };
       const reevalContext: PolicyContext = {
         ...this.policyContext,
+        principalPolicy: reevalPrincipal,
         activeCapabilities: withApproval,
       };
       decision = this.policy.evaluate(action, reevalContext);
