@@ -9,6 +9,7 @@
  *
  * Foundations imports no Seepient layer.
  */
+export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
 /** Canonical effect kinds. `risk` remains a presentation hint only. */
 export type ToolEffectKind =
@@ -20,8 +21,8 @@ export type ToolEffectKind =
   | "secret-use"
   | "model-egress"
   | "security-policy-change"
-  | "software-activation";
-
+  | "software-activation"
+  | "host-callback";
 /** Presentation-only risk category. Never a substitute for effect analysis. */
 export type ToolRiskCategory = "safe" | "edit" | "communications" | "destructive";
 
@@ -113,13 +114,9 @@ export type EffectRequest =
       sources: string[];
     }
   | { kind: "security-policy-change"; proposalId: string }
-  | { kind: "software-activation"; candidateId: string };
-
-/** JSON value type — serializable vocabulary shared across contracts. */
-export type JsonValue =
-  | null
-  | boolean
-  | number
-  | string
-  | JsonValue[]
-  | { [key: string]: JsonValue };
+  | { kind: "software-activation"; candidateId: string }
+  | HostCallbackEffect;
+export interface HostCallbackEffect {
+  kind: "host-callback";
+  toolName: string;
+}

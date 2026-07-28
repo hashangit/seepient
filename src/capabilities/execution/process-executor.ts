@@ -34,7 +34,6 @@ export class ProcessExecutor implements OperationExecutor {
     operation: Extract<PreparedToolAction["operation"], { kind: "process" }>,
     opts: { signal?: AbortSignal; onUpdate?: (u: ToolProgress) => void },
   ): Promise<ExecutionResult> {
-    // T108a: deny execution inside or targeting ~/.seepient/security/
     if (isSecurityPath(operation.command.cwd)) {
       return {
         state: "failed",
@@ -71,8 +70,7 @@ export class ProcessExecutor implements OperationExecutor {
     }
     // FR-008 / T207a: Fail closed when process containment is unavailable,
     // unless operator explicitly opted into unsafe uncontained execution.
-    const isTest = typeof process !== "undefined" && (process.env.NODE_ENV === "test" || process.env.VITEST === "true");
-    if (this.sandbox.probe.backend === "none" && !this.unsafeUncontained && !isTest) {
+    if (this.sandbox.probe.backend === "none" && !this.unsafeUncontained) {
       return {
         state: "failed",
         error: {

@@ -91,10 +91,12 @@ function describeCapability(cap: Capability): string {
       return `process:${cap.executable ?? "*"}`;
     case "secret-ref":
       return `secret:${cap.ref}`;
-    case "model-egress":
-      return `model-egress:${cap.providerClass}[${cap.dataClasses.join(",")}]`;
+    case "trusted-host":
+      return `trusted-host:${cap.registrationId ?? "*"}`;
     case "activate-change-class":
       return `activate:${cap.changeClass}`;
+    default:
+      return (cap as any).kind ?? "unknown";
   }
 }
 

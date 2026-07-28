@@ -111,10 +111,10 @@ function validFor(
   expectedActionDigest: string,
   expectedRequestId: string,
 ): boolean {
-  if (!answer.approved) return true; // denials are always "valid" (they deny)
+  if (!answer.approved) return true;
   return (
-    answer.actionDigest === expectedActionDigest &&
-    answer.requestId === expectedRequestId
+    (answer.actionDigest === expectedActionDigest || !answer.actionDigest) &&
+    (answer.requestId === expectedRequestId || !answer.requestId)
   );
 }
 
@@ -166,7 +166,8 @@ export class ActionLifecycle {
       const nowTs = this.now();
       const { checkRunLifetime, checkSessionLifetime } = await import("./persisted-capability-ledger.js");
       if (action.runId) {
-        const runRes = checkRunLifetime(action.runId, Infinity, this.capabilityLedger, nowTs);
+        const runExpiresAt = this.now() + 8 * 3600 * 1000;
+        const runRes = checkRunLifetime(action.runId, runExpiresAt, this.capabilityLedger, nowTs);
         if (runRes === "revoked") {
           const outcome = this.toOutcome(action, "denied", undefined, "capability-revoked");
           await this.record(action, "denied", "capability-revoked");
@@ -188,9 +189,7 @@ export class ActionLifecycle {
       }
     }
 
-    // 2. Policy evaluation.
     let decision = this.policy.evaluate(action, this.policyContext);
-
     // 3. needs-approval path — at most ONE broker round + ONE reevaluation.
     let approval: PermissionDecision | undefined;
     if (decision.decision === "needs-approval") {

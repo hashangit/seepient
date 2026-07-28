@@ -68,7 +68,11 @@ export class LocalPolicyStore implements PolicyStoreContract {
   private readonly root: string;
 
   constructor(opts?: { root?: string }) {
-    this.root = opts?.root ?? path.join(os.homedir(), ".seepient", "security", "policies");
+    this.root =
+      opts?.root ??
+      (process.env.SEEPIENT_SECURITY_DIR
+        ? path.join(process.env.SEEPIENT_SECURITY_DIR, "policies")
+        : path.join(os.homedir(), ".seepient", "security", "policies"));
     this.dir = this.root;
   }
 

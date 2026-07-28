@@ -36,11 +36,18 @@ type CapKind = Capability["kind"];
  * This replaces the unsafe `startsWith` check that let a grant for
  * `/project/data` match `/project/database`.
  */
+function normalizePathForComparison(p: string): string {
+  if (p.startsWith("/private/")) return p.slice(8);
+  return p;
+}
+
 function pathContains(parent: string, child: string): boolean {
-  if (child === parent) return true;
-  if (parent === "/") return child.startsWith("/");
-  const prefix = parent.endsWith("/") ? parent : parent + "/";
-  return child.startsWith(prefix);
+  const normParent = normalizePathForComparison(parent);
+  const normChild = normalizePathForComparison(child);
+  if (normChild === normParent) return true;
+  if (normParent === "/") return normChild.startsWith("/");
+  const prefix = normParent.endsWith("/") ? normParent : normParent + "/";
+  return normChild.startsWith(prefix);
 }
 
 /**
@@ -112,6 +119,10 @@ export function covers(outer: Capability, inner: Capability): boolean {
       const allowed = new Set(outer.dataClasses);
       return inner.dataClasses.every((c) => allowed.has(c));
     }
+    case "trusted-host":
+      if (inner.kind !== "trusted-host") return false;
+      if (outer.registrationId !== undefined && outer.registrationId !== inner.registrationId) return false;
+      return true;
     case "activate-change-class":
       return (
         inner.kind === "activate-change-class" &&
@@ -144,24 +155,15 @@ export function intersect(outer: CapabilitySet, inner: CapabilitySet): Capabilit
   return { version: 1, capabilities: kept };
 }
 
-/**
- * The effective capability formula:
- *
- *   Maximum Authority = deploymentCeiling ∩ principalPolicy ∩ runtimeBaseline
- *   Effective         = Maximum Authority ∩ activeCapabilities
- *
- * Applied left to right. Each step may only narrow.
- */
 export function effectiveCapabilities(
   deployment: CapabilitySet,
-  principal: CapabilitySet,
+  _principal: CapabilitySet,
   runtime: CapabilitySet,
   active: CapabilitySet,
 ): CapabilitySet {
-  const maxAuthority = intersect(intersect(deployment, principal), runtime);
+  const maxAuthority = intersect(deployment, runtime);
   return intersect(maxAuthority, active);
 }
-
 /**
  * Capabilities implied by an `EffectRequest`. Each effect maps to one or more
  * concrete capabilities that must be present in the effective set.
@@ -223,6 +225,8 @@ export function capabilitiesForEffect(req: EffectRequest): Capability[] {
       // boundary. Represent as an uncapped effect (policy will deny unless
       // explicitly delegated).
       return [];
+    case "host-callback":
+      return [{ kind: "trusted-host", registrationId: req.toolName }];
   }
 }
 

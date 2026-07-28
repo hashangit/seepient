@@ -191,7 +191,7 @@ describe("EffectBroker (T209/T210, QS-2.6)", () => {
         secretRefs: [],
       },
       envelope("api.example.com"),
-      auth(),
+      auth({ singleUseRequestId: "req-headers-1" }),
     );
     expect(capturedHeaders.Authorization).toBeUndefined();
     expect(capturedHeaders.Cookie).toBeUndefined();

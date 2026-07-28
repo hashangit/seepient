@@ -48,8 +48,8 @@ export type Capability =
   | { kind: "process"; executable?: string; argvPrefix?: string[] }
   | { kind: "secret-ref"; ref: string }
   | { kind: "model-egress"; providerClass: string; dataClasses: string[] }
-  | { kind: "activate-change-class"; changeClass: import("./self-evolution.js").SelfEvolutionChangeClass };
-
+  | { kind: "activate-change-class"; changeClass: import("./self-evolution.js").SelfEvolutionChangeClass }
+  | { kind: "trusted-host"; registrationId?: string };
 /** When a capability is valid. Action-scoped caps are never persisted. */
 export type CapabilityLifetime =
   | { kind: "action"; actionDigest: string; consumeOnce: true }

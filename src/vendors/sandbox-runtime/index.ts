@@ -135,7 +135,7 @@ export class UncontainedSandbox implements NativeProcessSandbox {
 
   constructor() {
     this.probe = {
-      available: true,
+      available: false,
       platform: process.platform,
       backend: "none",
       reason: "primitive-unsupported",
@@ -155,26 +155,46 @@ export class UncontainedSandbox implements NativeProcessSandbox {
       });
       let stdout = "";
       let stderr = "";
-      let flushed = false;
-      const flushProgress = () => {
-        if (!flushed && stdout.length > 0) {
-          flushed = true;
-          req.onUpdate?.({ message: stdout });
+      let lastFlushedLen = 0;
+
+      const emitProgress = (chunk: string) => {
+        if (chunk.length > 0) {
+          req.onUpdate?.({ message: chunk });
         }
       };
+
       child.stdout?.on("data", (b: Buffer) => {
         const chunk = b.toString();
         stdout += chunk;
-        req.onUpdate?.({ message: chunk });
+        lastFlushedLen = stdout.length;
+        emitProgress(chunk);
       });
       child.stderr?.on("data", (b: Buffer) => (stderr += b.toString()));
-      child.on("close", (code) => {
-        flushProgress();
-        resolve({ exitCode: code ?? 0, stdout, stderr, isolated: false });
+
+      let exitCode = 0;
+      let closed = false;
+      let stdoutEnded = !child.stdout;
+
+      const checkDone = () => {
+        if (closed && stdoutEnded) {
+          if (stdout.length > lastFlushedLen) {
+            const remaining = stdout.slice(lastFlushedLen);
+            emitProgress(remaining);
+          }
+          resolve({ exitCode, stdout, stderr, isolated: false });
+        }
+      };
+
+      child.stdout?.on("end", () => {
+        stdoutEnded = true;
+        checkDone();
       });
-      child.on("error", () =>
-        resolve({ exitCode: 1, stdout, stderr: stderr + "spawn failed", isolated: false }),
-      );
+
+      child.on("close", (code) => {
+        exitCode = code ?? 0;
+        closed = true;
+        checkDone();
+      });
       req.signal?.addEventListener("abort", () => child.kill("SIGTERM"));
     });
   }

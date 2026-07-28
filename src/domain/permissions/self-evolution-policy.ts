@@ -139,18 +139,20 @@ export function attestationMatches(
     attestation.proposalId !== proposal.proposalId ||
     attestation.candidateArtifactDigest !== proposal.candidateArtifactDigest ||
     attestation.expiresAt <= now ||
-    !attestation.signature
+    !attestation.signature ||
+    attestation.signature.trim().length === 0
   ) {
     return false;
   }
-  if (publicKeyPem && publicKeyPem.length > 0) {
+  if (publicKeyPem && publicKeyPem.trim().length > 0) {
     try {
+      const payload = `${attestation.proposalId}:${attestation.candidateArtifactDigest}:${attestation.expiresAt}`;
       const verifier = createVerify("SHA256");
-      verifier.update(`${proposal.proposalId}|${proposal.candidateArtifactDigest}`);
-      return verifier.verify(publicKeyPem, Buffer.from(attestation.signature, "base64"));
+      verifier.update(payload);
+      return verifier.verify(publicKeyPem, attestation.signature, "hex");
     } catch {
       return false;
     }
   }
-  return attestation.signature.length > 0;
+  return true;
 }

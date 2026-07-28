@@ -179,7 +179,7 @@ describe("ProcessExecutor (T213)", () => {
     // Capture the env handed to the sandbox.
     let capturedEnv: Record<string, string> | undefined;
     const sandbox = {
-      probe: { available: true, platform: process.platform, backend: "none" as const },
+      probe: { available: true, platform: "darwin", backend: "seatbelt" },
       async exec(req: { env: Record<string, string>; command: { executable: string; argv: string[]; cwd: string } }) {
         capturedEnv = req.env;
         // Echo the env's OPENAI_API_KEY presence so we can prove it's absent.
@@ -209,7 +209,7 @@ describe("ProcessExecutor (T213)", () => {
 
   it("uncontained sandbox reports isolated:false in evidence executorId", async () => {
     const sandbox = new UncontainedSandbox();
-    const executor = new ProcessExecutor({ sandbox, parentEnv: { PATH: "/usr/bin" } });
+    const executor = new ProcessExecutor({ sandbox, parentEnv: { PATH: "/usr/bin" }, unsafeUncontained: true });
     const action = {
       ...actionWith("process", {}),
       operation: {

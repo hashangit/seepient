@@ -154,3 +154,14 @@ export function resolveMount(
     readOnly: false, // workers may write to their own workspace mount
   };
 }
+
+/** Probe for Docker daemon socket availability at /var/run/docker.sock. */
+export async function probeDockerEngine(socketPath = "/var/run/docker.sock"): Promise<{ available: boolean; socketPath: string }> {
+  try {
+    const { access, constants } = await import("node:fs/promises");
+    await access(socketPath, constants.R_OK | constants.W_OK);
+    return { available: true, socketPath };
+  } catch {
+    return { available: false, socketPath };
+  }
+}

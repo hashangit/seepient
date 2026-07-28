@@ -105,8 +105,8 @@ export async function probeCommitHelper(): Promise<CommitHelperProbe> {
     await access(binaryPath, constants.X_OK);
     return { available: true, binaryPath, platform };
   } catch {
-    // Helper binary missing: report available with fallback native node commit
-    return { available: true, binaryPath: undefined, platform, reason: "binary-missing" };
+    // Helper binary missing: fail closed
+    return { available: false, binaryPath: undefined, platform, reason: "binary-missing" };
   }
 }
 

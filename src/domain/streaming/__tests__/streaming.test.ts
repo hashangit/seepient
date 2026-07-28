@@ -97,6 +97,10 @@ describe('runAgentLoop streaming', () => {
   });
 
   it('emits tool_progress steps while a streaming tool runs (T026)', async () => {
+    const { mkdtempSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'seepient-stream-test-'));
     // Provider requests a real execute_shell_command; autoConfirm bypasses the
     // permission gate so it actually runs and streams stdout.
     const provider = streamProvider([
@@ -110,11 +114,12 @@ describe('runAgentLoop streaming', () => {
       model: 't',
       messages: [userMsg('run it')],
       toolDefs: [],
+      cwd: dir,
       maxSteps: 3,
       hooks: createHookExecutor(),
-      onStep: (s) => steps.push(s),
       stream: true,
       autoConfirm: true,
+      onStep: (s) => steps.push(s),
     });
     const progress = steps.filter((s) => s.type === 'tool_progress');
     const toolCall = steps.find((s) => s.type === 'tool_call');

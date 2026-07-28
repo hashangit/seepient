@@ -129,7 +129,9 @@ export class CommitFilesExecutor implements OperationExecutor {
             isNewFile: !firstCommit.expected?.exists,
             newContent: new TextDecoder().decode(bytes),
           };
-        } catch { /* best effort metadata */ }
+        } catch (e) {
+          process.stderr.write(`METADATA ERROR: ${e instanceof Error ? e.stack : String(e)}\n`);
+        }
       }
       return {
         state: "succeeded",

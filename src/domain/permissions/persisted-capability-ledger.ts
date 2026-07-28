@@ -69,7 +69,9 @@ export class PersistedCapabilityLedger {
   constructor(opts?: { root?: string }) {
     this.dir =
       opts?.root ??
-      path.join(os.homedir(), ".seepient", "security", "caps");
+      (process.env.SEEPIENT_SECURITY_DIR
+        ? path.join(process.env.SEEPIENT_SECURITY_DIR, "caps")
+        : path.join(os.homedir(), ".seepient", "security", "caps"));
     this.file = path.join(this.dir, "ledger.ndjson");
   }
 
@@ -184,15 +186,30 @@ export class PersistedCapabilityLedger {
   /** Append one entry atomically: write to tmp → fsync → rename. */
   private async appendEntry(entry: LedgerEntry): Promise<void> {
     await this.ensureDir();
-    const line = JSON.stringify(entry) + "\n";
-    // Atomic append: open with "a" flag so concurrent appends are serialized
-    // by the OS and fsync ensures durability before returning.
-    const handle = await fs.open(this.file, "a", 0o600);
+    const lockFile = this.file + ".lock";
+    let lockHandle: fs.FileHandle | undefined;
+    for (let attempt = 0; attempt < 20; attempt++) {
+      try {
+        lockHandle = await fs.open(lockFile, "wx", 0o600);
+        break;
+      } catch {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    }
     try {
-      await handle.appendFile(line, "utf8");
-      await handle.sync();
+      const line = JSON.stringify(entry) + "\n";
+      const handle = await fs.open(this.file, "a", 0o600);
+      try {
+        await handle.appendFile(line, "utf8");
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
     } finally {
-      await handle.close();
+      if (lockHandle) {
+        await lockHandle.close().catch(() => {});
+        await fs.unlink(lockFile).catch(() => {});
+      }
     }
   }
 }

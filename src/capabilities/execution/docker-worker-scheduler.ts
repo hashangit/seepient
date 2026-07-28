@@ -71,6 +71,9 @@ export class DockerWorkerScheduler implements WorkerScheduler {
     req: WorkerDispatch,
     auth: SchedulerAuthContext,
   ): Promise<WorkerResult> {
+    if (!this.opts.engine) {
+      throw new WorkerSchedulerError("Docker daemon socket is unavailable", "WORKER_UNAVAILABLE");
+    }
     // 1. mTLS authentication.
     if (auth.authenticatedTransport !== "mtls") {
       throw new WorkerSchedulerError("Scheduler requires mTLS authentication", "WORKER_UNAVAILABLE");

@@ -72,7 +72,8 @@ export interface ActionLifecycleInputs {
   runtimeBaseline?: CapabilitySet;
   /** Optional: immutable deny rules. Default: []. */
   immutableDenies?: PolicyContext["immutableDenies"];
-  /** Approval mode (mirrors the legacy `approvalMode`). */
+  /** Optional: active session capabilities baseline. */
+  activeCapabilities?: CapabilitySet;
   approvalMode?: "manual" | "balanced" | "never";
   /** Interaction contract — derived from the broker by default. */
   interaction?: PolicyContext["interaction"];
@@ -141,6 +142,7 @@ export async function buildActionLifecycle(
       { kind: "read-root", root },
       { kind: "write-root", root },
       { kind: "process" },
+      { kind: "trusted-host" },
       { kind: "model-egress", providerClass: inputs.modelProviderClass, dataClasses: ["normal"] },
     ],
   };
@@ -148,25 +150,33 @@ export async function buildActionLifecycle(
   // When no policy exists yet (fresh install), the principal policy defaults
   // to the deployment ceiling so the operator's ceiling IS the starting maximum authority.
   let principalPolicy: CapabilitySet;
+  let hasStoredPolicy = false;
   try {
     const snap = await policyStore.read(workspaceId);
     if (snap.policy.capabilities.length > 0) {
       principalPolicy = snap.policy;
+      hasStoredPolicy = true;
     } else {
       principalPolicy = inputs.principalPolicy ?? deploymentCeiling;
+      hasStoredPolicy = Boolean(inputs.principalPolicy);
     }
   } catch {
     principalPolicy = inputs.principalPolicy ?? deploymentCeiling;
+    hasStoredPolicy = Boolean(inputs.principalPolicy);
   }
 
   // Runtime baseline: caller-supplied or pass-through from deploymentCeiling.
   const runtimeBaseline = inputs.runtimeBaseline ?? deploymentCeiling;
-  // Active session capabilities start with pre-granted capabilities from a
-  // stored principal policy or baseline. Default moderate baseline includes
-  // workspace read-root and write-root.
-  const activeCapabilities = {
+
+  // Active session capabilities:
+  // - If caller provided explicit activeCapabilities, use them.
+  // - If a principal policy exists (from policyStore or inputs.principalPolicy), start with those pre-approved capabilities.
+  // - Otherwise (fresh install), start with workspace read-root baseline so writes/exec require approval.
+  const activeCapabilities = inputs.activeCapabilities ?? {
     version: 1 as const,
-    capabilities: [...principalPolicy.capabilities],
+    capabilities: hasStoredPolicy
+      ? [...principalPolicy.capabilities]
+      : [{ kind: "read-root", root }],
   };
 
   const policyContext: PolicyContext = {
@@ -176,7 +186,6 @@ export async function buildActionLifecycle(
     activeCapabilities: { version: 1, capabilities: activeCapabilities.capabilities },
     immutableDenies: inputs.immutableDenies ?? [],
     approvalMode: inputs.approvalMode ?? "manual",
-    workspaceRoot: root,
     interaction: inputs.interaction ?? {
       mode: inputs.approvalBroker.mode,
       deadlineMs: 30_000,

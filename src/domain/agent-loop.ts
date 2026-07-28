@@ -34,6 +34,7 @@ export interface AgentLoopOptions {
   hooks: HookExecutor;
   signal?: AbortSignal;
   config?: Record<string, unknown>;
+  cwd?: string;
   metadata?: Record<string, unknown>;
   onStep?: (step: StepResult) => void;
   /** Opt into token streaming (provider.chatStream). Off → always chat(). */
@@ -345,7 +346,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     wiredPipeline = await buildActionLifecycle({
       principalId: "agent-user",
       runId: generateId(),
-      workspaceRoot: "/",
+      workspaceRoot: options.cwd ?? process.cwd(),
       modelProviderClass: (currentProvider as any)?.type ?? "normal",
       approvalBroker: broker,
       executionBoundary: boundary,
@@ -446,7 +447,6 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
         response = await currentProvider.chat(providerMessages, toolDefs, { signal });
       }
     } catch (err) {
-      finishReason = "error";
       const seepientErr = toSeepientError(err, "PROVIDER_ERROR");
       loopError = {
         message: seepientErr.message,
@@ -543,7 +543,6 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
         // adapter as a tool_progress step. Emitted via onStep only — not pushed
         // to result.steps (chunks are transient presentation, not semantic).
         const onUpdate = (progress: { percentage?: number; message?: string }): void => {
-          process.stderr.write(`ONUPDATE CALLED: ${JSON.stringify(progress)}, onStep: ${Boolean(onStep)}\n`);
           if (progress.message != null && onStep) {
             onStep({
               type: "tool_progress",

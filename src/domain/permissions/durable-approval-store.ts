@@ -33,11 +33,13 @@ export interface PendingApprovalRecord {
 export class DurableApprovalStore {
   private readonly dir: string;
   private records = new Map<string, ApprovalRecord>();
-
+  private pendingRecords = new Map<string, PendingApprovalRecord>();
   constructor(opts?: { root?: string }) {
     this.dir =
       opts?.root ??
-      path.join(os.homedir(), ".seepient", "security", "approvals");
+      (process.env.SEEPIENT_SECURITY_DIR
+        ? path.join(process.env.SEEPIENT_SECURITY_DIR, "approvals")
+        : path.join(os.homedir(), ".seepient", "security", "approvals"));
   }
 
   private get file(): string {
@@ -101,20 +103,6 @@ export class DurableApprovalStore {
     return this.records.get(requestId)?.decision;
   }
 
-  listPending(principalIdOrOpts?: string | { principalId?: string; tenantId?: string; sessionId?: string }): PendingApprovalRecord[] {
-    const pId = typeof principalIdOrOpts === "string" ? principalIdOrOpts : principalIdOrOpts?.principalId;
-    const now = Date.now();
-    const pending: PendingApprovalRecord[] = [];
-    for (const rec of this.records.values()) {
-      const r = rec as any as PendingApprovalRecord;
-      if (r.status === "pending" && r.request && r.request.expiresAt > now) {
-        if (!pId || r.request.principalId === pId) {
-          pending.push(r);
-        }
-      }
-    }
-    return pending;
-  }
   private async ensureDir(): Promise<void> {
     await fs.mkdir(this.dir, { recursive: true, mode: 0o700 });
     try {
@@ -123,6 +111,7 @@ export class DurableApprovalStore {
   }
 
   private async persist(): Promise<void> {
+    await this.ensureDir();
     const lines = [...this.records.values()]
       .map((r) => JSON.stringify(r))
       .join("\n") + "\n";
@@ -146,8 +135,10 @@ export class DurableApprovalStore {
     sessionId: string;
     continuationId: string;
   }): PendingApprovalRecord {
-    const existing = [...this.records.values()].find((r: any) => r.request?.requestId === input.request.requestId || r.continuationId === input.continuationId);
-    if (existing) return existing as any;
+    const existing = [...this.pendingRecords.values()].find(
+      (r) => r.request?.requestId === input.request.requestId || r.continuationId === input.continuationId,
+    );
+    if (existing) return existing;
 
     const rec: PendingApprovalRecord = {
       continuationId: input.continuationId,
@@ -157,45 +148,61 @@ export class DurableApprovalStore {
       version: 1,
       status: "pending",
     };
-    this.records.set(input.continuationId, rec as any);
+    this.pendingRecords.set(input.continuationId, rec);
     void this.saveRequest(input.request);
+    void this.persist();
     return rec;
   }
 
   get(continuationId: string): (PendingApprovalRecord & { state: string }) | undefined {
-    const rec = this.records.get(continuationId) as any as PendingApprovalRecord;
+    const rec = this.pendingRecords.get(continuationId);
     if (!rec) return undefined;
     return {
       ...rec,
       state: rec.status,
     };
   }
-
-  cas(
+  casSync(
     continuationId: string,
     expectedVersion: number,
     decision: PermissionDecision,
+    now = Date.now(),
   ): { status: "transitioned" | "duplicate" | "stale" | "expired"; record?: PendingApprovalRecord } {
-    const rec = this.records.get(continuationId) as any as PendingApprovalRecord;
+    const rec = this.pendingRecords.get(continuationId);
     if (!rec) return { status: "stale" };
     if (rec.version !== expectedVersion) return { status: "stale" };
     if (rec.status !== "pending") return { status: "duplicate" };
-    if (rec.request.expiresAt <= Date.now()) {
+    if (rec.request.expiresAt <= now) {
       rec.status = "expired";
+      void this.persist();
       return { status: "expired", record: rec };
     }
     rec.status = decision.approved ? "approved" : "denied";
     rec.decision = decision;
     rec.version += 1;
+    this.records.set(continuationId, rec as any);
     void this.resolveRequest(decision);
+    void this.persist();
     return { status: "transitioned", record: rec };
   }
-
+  cas(
+    continuationId: string,
+    expectedVersion: number,
+    decision: PermissionDecision,
+    now = Date.now(),
+  ): { status: "transitioned" | "duplicate" | "stale" | "expired"; record?: PendingApprovalRecord } & PromiseLike<any> {
+    const res = this.casSync(continuationId, expectedVersion, decision, now);
+    const promise = this.persist().then(() => res);
+    return Object.assign(res, {
+      then: promise.then.bind(promise),
+      catch: promise.catch.bind(promise),
+      finally: promise.finally.bind(promise),
+    }) as any;
+  }
   listPendingSync(principalId?: string): PendingApprovalRecord[] {
     const now = Date.now();
     const pending: PendingApprovalRecord[] = [];
-    for (const rec of this.records.values()) {
-      const r = rec as any as PendingApprovalRecord;
+    for (const r of this.pendingRecords.values()) {
       if (r.status === "pending" && r.request && r.request.expiresAt > now) {
         if (!principalId || r.request.principalId === principalId) {
           pending.push(r);
@@ -205,19 +212,26 @@ export class DurableApprovalStore {
     return pending;
   }
 
+  listPending(principalIdOrOpts?: string | { principalId?: string; tenantId?: string; sessionId?: string }): PendingApprovalRecord[] {
+    const pId = typeof principalIdOrOpts === "string" ? principalIdOrOpts : principalIdOrOpts?.principalId;
+    return this.listPendingSync(pId);
+  }
+
   cancel(continuationId: string): void {
-    const rec = this.records.get(continuationId) as any as PendingApprovalRecord;
+    const rec = this.pendingRecords.get(continuationId);
     if (rec && rec.status === "pending") {
       rec.status = "cancelled";
+      void this.persist();
     }
   }
 
   reevaluate(continuationId: string, allowedInput: boolean | ((req: PermissionRequest) => boolean)): void {
-    const rec = this.records.get(continuationId) as any as PendingApprovalRecord;
+    const rec = this.pendingRecords.get(continuationId);
     if (!rec) return;
     const isAllowed = typeof allowedInput === "function" ? allowedInput(rec.request) : allowedInput;
-    if (rec.status === "approved" && !isAllowed) {
+    if (!isAllowed) {
       rec.status = "denied";
+      void this.persist();
     }
   }
 }

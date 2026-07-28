@@ -181,7 +181,7 @@ describe("PersistedReplayLedger (T210a)", () => {
 
     const l2 = new PersistedReplayLedger({ root: tmpDir });
     await l2.load();
-    expect(l2.has("req-persist-1")).toBe(true);
+    expect(await l2.has("req-persist-1")).toBe(true);
   });
 });
 

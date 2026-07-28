@@ -59,7 +59,10 @@ export class LocalAuditStore implements AuditStoreContract {
 
   constructor(opts?: { root?: string }) {
     this.dir =
-      opts?.root ?? path.join(os.homedir(), ".seepient", "security", "audit");
+      opts?.root ??
+      (process.env.SEEPIENT_SECURITY_DIR
+        ? path.join(process.env.SEEPIENT_SECURITY_DIR, "audit")
+        : path.join(os.homedir(), ".seepient", "security", "audit"));
   }
 
   private eventsFile(workspaceId: string): string {
@@ -261,7 +264,9 @@ export class TerminalEventOutbox {
     this.store = store;
     const dir =
       opts?.outboxDir ??
-      path.join(os.homedir(), ".seepient", "security", "outbox");
+      (process.env.SEEPIENT_SECURITY_DIR
+        ? path.join(process.env.SEEPIENT_SECURITY_DIR, "outbox")
+        : path.join(os.homedir(), ".seepient", "security", "outbox"));
     this.outboxFile = path.join(dir, "pending.ndjson");
   }
 

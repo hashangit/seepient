@@ -99,6 +99,10 @@ export interface EffectBrokerOptions {
   deadlineMs?: number;
   /** T210a: Persisted replay ledger. If omitted, falls back to in-memory Set. */
   replayLedger?: PersistedReplayLedger;
+  /** Optional handler for external-send (email/chat/notification) requests. */
+  externalSendHandler?: (req: Extract<BrokeredEffectRequest, { kind: "external-send" }>) => Promise<BrokeredEffectResult>;
+  /** Optional handler for vendor-operation requests. */
+  vendorOperationHandler?: (req: Extract<BrokeredEffectRequest, { kind: "vendor-operation" }>) => Promise<BrokeredEffectResult>;
 }
 
 /**
@@ -119,8 +123,8 @@ export class EffectBroker implements EffectBrokerContract {
   private readonly deadlineMs: number;
   /** T210a: Durable replay ledger. Falls back to in-memory when not provided. */
   private readonly replayLedger: PersistedReplayLedger;
-  /** In-memory fallback set (used when replayLedger was not pre-loaded). */
-  private readonly inMemoryConsumed = new Set<string>();
+  private readonly externalSendHandler?: (req: Extract<BrokeredEffectRequest, { kind: "external-send" }>) => Promise<BrokeredEffectResult>;
+  private readonly vendorOperationHandler?: (req: Extract<BrokeredEffectRequest, { kind: "vendor-operation" }>) => Promise<BrokeredEffectResult>;
 
   constructor(opts: EffectBrokerOptions) {
     this.artifacts = opts.artifacts;
@@ -128,6 +132,8 @@ export class EffectBroker implements EffectBrokerContract {
     this.maxResponseBytes = opts.maxResponseBytes ?? 10 * 1024 * 1024;
     this.deadlineMs = opts.deadlineMs ?? 30_000;
     this.replayLedger = opts.replayLedger ?? new PersistedReplayLedger();
+    this.externalSendHandler = opts.externalSendHandler;
+    this.vendorOperationHandler = opts.vendorOperationHandler;
   }
 
   async execute(
@@ -145,10 +151,9 @@ export class EffectBroker implements EffectBrokerContract {
     }
     // T210a: Atomic replay consumption BEFORE execution.
     const consumed = await this.replayLedger.consume(auth.singleUseRequestId);
-    if (!consumed || this.inMemoryConsumed.has(auth.singleUseRequestId)) {
+    if (!consumed) {
       return this.denied(request.requestId, "replay: request ID already consumed");
     }
-    this.inMemoryConsumed.add(auth.singleUseRequestId);
 
     // 2. Reject unknown contract versions / operation kinds.
     const requestId = request.requestId;
@@ -173,7 +178,7 @@ export class EffectBroker implements EffectBrokerContract {
   private async executeExternalSend(
     request: Extract<BrokeredEffectRequest, { kind: "external-send" }>,
     envelope: CapabilityEnvelope,
-    _auth: BrokerAuthContext,
+    auth: BrokerAuthContext,
   ): Promise<BrokeredEffectResult> {
     for (const recipient of request.recipients) {
       const cap = envelope.capabilities.find(
@@ -189,22 +194,27 @@ export class EffectBroker implements EffectBrokerContract {
         );
       }
     }
-    return {
-      requestId: request.requestId,
-      status: "succeeded",
-      output: request.payload,
-    };
+    if (this.externalSendHandler) {
+      return await this.externalSendHandler(request);
+    }
+    return this.denied(
+      request.requestId,
+      "EFFECT_UNSUPPORTED: No external send transport configured (SMTP/SendGrid/Chat transport missing)",
+    );
   }
 
   private async executeVendorOperation(
     request: Extract<BrokeredEffectRequest, { kind: "vendor-operation" }>,
-    envelope: CapabilityEnvelope,
+    _envelope: CapabilityEnvelope,
     _auth: BrokerAuthContext,
   ): Promise<BrokeredEffectResult> {
-    return {
-      requestId: request.requestId,
-      status: "succeeded",
-    };
+    if (this.vendorOperationHandler) {
+      return await this.vendorOperationHandler(request);
+    }
+    return this.denied(
+      request.requestId,
+      "EFFECT_UNSUPPORTED: No vendor operation handler configured",
+    );
   }
 
   private async executeHttp(

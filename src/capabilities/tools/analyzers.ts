@@ -815,10 +815,11 @@ export function resolveAnalyzerWithFallback(
       toolName,
       args: jsonArgs as any,
     };
+    const effects: EffectRequest[] = [{ kind: "host-callback", toolName }];
     const argsDigest = digestArgs(args);
     const actionDigest = digestAction({
       operation,
-      effects: [],
+      effects,
       principalId: ctx.principalId,
       toolName,
       argsDigest,
@@ -834,13 +835,13 @@ export function resolveAnalyzerWithFallback(
       principalId: ctx.principalId,
       argsDigest,
       actionDigest,
-      risk: "safe",
-      effects: [],
+      risk: "destructive",
+      effects,
       display: {
         title: toolName,
-        summary: `Execute ${toolName}`,
+        summary: `Execute host callback ${toolName}`,
         canonicalTargets: [],
-        effects: [],
+        effects: ["host-callback"],
       },
       operation,
     };

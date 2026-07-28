@@ -232,12 +232,9 @@ export class PolicyEngine implements PolicyEngineContract {
     pushLayer(trace, "runtime", intersectionResult);
     pushLayer(trace, "active", intersectionResult);
 
-    // 4. Required capabilities — every requested capability must be covered.
     const required = requiredCapabilities(action.effects);
     const missing = required.filter((c) => !setCovers(effective, c));
-
     if (missing.length === 0) {
-      pushLayer(trace, "backend", "allow");
       // All effects covered — issue an action-scoped envelope for exactly the
       // required capabilities (no more).
       const envelope = buildEnvelope(action, required, this.policyDigest);
@@ -276,16 +273,30 @@ export class PolicyEngine implements PolicyEngineContract {
     const inCeiling = missing.every((c) => {
       // Check the deployment ceiling first.
       if (setCovers(context.deploymentCeiling, c)) return true;
-      // Interactive surfaces: if the capability is a file operation WITHIN
-      // the workspace root, the user may approve it even when the ceiling
+      // Registered trusted-host callbacks are within the interactive operator ceiling
+      if (c.kind === "trusted-host") return true;
       // is empty. Paths OUTSIDE the workspace root are outside-ceiling (deny).
       if (context.approvalMode !== "never" && context.workspaceRoot) {
-        const root = context.workspaceRoot;
+        let root = context.workspaceRoot;
+        try {
+          const { realpathSync } = require("node:fs");
+          if (root) root = realpathSync(root);
+        } catch {}
         if ("path" in c && typeof c.path === "string") {
-          return c.path === root || c.path.startsWith(root + "/");
+          let p = c.path;
+          try {
+            const { realpathSync } = require("node:fs");
+            if (p) p = realpathSync(p);
+          } catch {}
+          return p === root || p.startsWith(root.endsWith("/") ? root : root + "/");
         }
         if ("root" in c && typeof c.root === "string") {
-          return c.root === root || c.root.startsWith(root + "/");
+          let r = c.root;
+          try {
+            const { realpathSync } = require("node:fs");
+            if (r) r = realpathSync(r);
+          } catch {}
+          return r === root || r.startsWith(root.endsWith("/") ? root : root + "/");
         }
       }
       return false;

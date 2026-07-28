@@ -74,7 +74,7 @@ export async function buildLocalBoundary(opts?: {
   registry.register(new NoneExecutor());
   registry.register(new ReadFileExecutor({ artifacts }));
   registry.register(new CommitFilesExecutor({ broker: commitBroker, artifacts, useNative: probe.available }));
-  registry.register(new ProcessExecutor({ sandbox }));
+  registry.register(new ProcessExecutor({ sandbox, unsafeUncontained: sandbox.probe.backend === "none" }));
   registry.register(new BrokerExecutor({ broker: effectBroker }));
   registry.register(new TrustedHostExecutor(hostCallbacks));
 

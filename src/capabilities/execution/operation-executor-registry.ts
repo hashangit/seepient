@@ -109,15 +109,15 @@ export function registryCapabilities(
 function deriveCapabilityKinds(
   kinds: PreparedOperation["kind"][],
 ): import("../../foundations/contracts/permission-policy.js").Capability["kind"][] {
-  const out: import("../../foundations/contracts/permission-policy.js").Capability["kind"][] = [];
+  const out: import("../../foundations/contracts/permission-policy.js").Capability["kind"][] = ["model-egress"];
   if (kinds.includes("read-file")) out.push("read-file", "read-root");
   if (kinds.includes("commit-files")) out.push("commit-file");
-  if (kinds.includes("process")) out.push("process");
+  if (kinds.includes("process")) out.push("process", "read-root", "write-root", "read-file", "commit-file");
   if (kinds.includes("broker")) {
     out.push("network-destination", "external-recipient", "secret-ref");
   }
   if (kinds.includes("trusted-host")) {
-    out.push("commit-file", "read-file", "read-root", "process");
+    out.push("trusted-host", "commit-file", "read-file", "read-root", "process");
   }
   return out;
 }
