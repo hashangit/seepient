@@ -179,7 +179,7 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
     modelProviderClass: string;
   }) => Promise<import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle>;
   let serverPipelineFactory: PipelineFactory | undefined;
-  const serverPermissionPipelineEnabled = process.env.SEEPIENT_PERMISSION_PIPELINE === "1" || options?.permissionPipeline === true;
+  const serverPermissionPipelineEnabled = options?.permissionPipeline !== false && process.env.SEEPIENT_PERMISSION_PIPELINE !== "0";
   if (serverPermissionPipelineEnabled) {
     const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
     const { NoneApprovalBroker } = await import("../approval-brokers.js");

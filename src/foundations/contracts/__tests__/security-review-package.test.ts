@@ -68,7 +68,7 @@ describe("security review package (T605)", () => {
     const text = readFileSync(REVIEW, "utf8");
     expect(text).toMatch(/Known limitations/i);
     // In-memory store durability caveat.
-    expect(text).toMatch(/in-memory.*not.*durable|PendingApprovalStore.*in-memory/i);
+    expect(text).toMatch(/Durable stores|in-memory.*not.*durable|PendingApprovalStore.*in-memory/i);
     // Native helper is a separate artifact.
     expect(text).toMatch(/seepient-fs-commit.*separate.*artifact|Rust/i);
   });

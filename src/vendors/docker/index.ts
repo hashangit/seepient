@@ -63,6 +63,98 @@ export interface DockerEngine {
   remove(id: string): Promise<void>;
 }
 
+/** Real Unix-socket Docker Engine implementation talking /var/run/docker.sock. */
+export class DockerSocketEngine implements DockerEngine {
+  private readonly socketPath: string;
+
+  constructor(socketPath = process.env.DOCKER_HOST?.replace(/^unix:\/\//, "") ?? "/var/run/docker.sock") {
+    this.socketPath = socketPath;
+  }
+
+  private async request(method: string, path: string, body?: unknown): Promise<any> {
+    const { request } = await import("node:http");
+    return new Promise((resolve, reject) => {
+      const payload = body ? JSON.stringify(body) : undefined;
+      const req = request(
+        {
+          socketPath: this.socketPath,
+          path,
+          method,
+          headers: payload
+            ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) }
+            : {},
+        },
+        (res) => {
+          let data = "";
+          res.on("data", (chunk) => (data += chunk));
+          res.on("end", () => {
+            if (res.statusCode && res.statusCode >= 400) {
+              return reject(new Error(`Docker API HTTP ${res.statusCode}: ${data}`));
+            }
+            try {
+              resolve(data ? JSON.parse(data) : {});
+            } catch {
+              resolve(data as any);
+            }
+          });
+        },
+      );
+      req.on("error", reject);
+      if (payload) req.write(payload);
+      req.end();
+    });
+  }
+
+  async createContainer(opts: DockerContainerSpec): Promise<{ id: string }> {
+    const binds = opts.mounts.map((m) => `${m.source}:${m.target}:${m.readOnly ? "ro" : "rw"}`);
+    const res = await this.request("POST", "/containers/create", {
+      Image: opts.image,
+      Cmd: opts.command,
+      Env: opts.env,
+      User: opts.user,
+      HostConfig: {
+        Binds: binds,
+        NetworkMode: opts.network,
+        Memory: opts.limits.memoryBytes,
+        CpuQuota: opts.limits.cpuQuota,
+        PidsLimit: opts.limits.pidsLimit,
+        ReadonlyRootfs: opts.readOnlyRoot,
+      },
+    });
+    return { id: res.Id ?? res.id };
+  }
+
+  async attachStream(id: string): Promise<NodeJS.ReadableStream & NodeJS.WritableStream> {
+    const { connect } = await import("node:net");
+    return new Promise((resolve, reject) => {
+      const socket = connect(this.socketPath);
+      socket.on("connect", () => {
+        socket.write(
+          `POST /containers/${id}/attach?stream=1&stdin=1&stdout=1&stderr=1 HTTP/1.1\r\nHost: docker\r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\n`,
+        );
+        resolve(socket as unknown as NodeJS.ReadableStream & NodeJS.WritableStream);
+      });
+      socket.on("error", reject);
+    });
+  }
+
+  async start(id: string): Promise<void> {
+    await this.request("POST", `/containers/${id}/start`);
+  }
+
+  async kill(id: string): Promise<void> {
+    await this.request("POST", `/containers/${id}/kill`);
+  }
+
+  async wait(id: string): Promise<{ exitCode: number }> {
+    const res = await this.request("POST", `/containers/${id}/wait`);
+    return { exitCode: res.StatusCode ?? res.exitCode ?? 0 };
+  }
+
+  async remove(id: string): Promise<void> {
+    await this.request("DELETE", `/containers/${id}?v=1&force=1`);
+  }
+}
 export interface DockerContainerSpec {
   image: string;
   imageDigest: string;

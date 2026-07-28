@@ -118,7 +118,6 @@ describe("CommitFilesExecutor (T205)", () => {
     const failingHelper = { ...fakeHelper(), async commit() { return { ok: false, writtenSha256: "", errorCode: "io-error" as const }; } };
     const broker = new FileCommitBroker({ artifacts, helper: failingHelper as never });
     const executor = new CommitFilesExecutor({ broker, artifacts });
-
     const ref = await artifacts.put(Buffer.from("x"), "text/plain");
     const dest1 = join(dir, "a.txt");
     const dest2 = join(dir, "b.txt");
@@ -244,5 +243,57 @@ describe("TrustedHostExecutor", () => {
   });
 });
 
+describe("CommitFilesExecutor fail-closed defaults (P0-1)", () => {
+  it("fails closed with EXACT_COMMIT_UNAVAILABLE when useNative:false and allowFallback:false", async () => {
+    const artifacts = new InMemoryArtifactStore();
+    const broker = new FileCommitBroker({ artifacts });
+    const dest = join(dir, "out.txt");
+    const contentRef = await artifacts.put(Buffer.from("content"), "text/plain");
+    const executor = new CommitFilesExecutor({ broker, artifacts, useNative: false, allowFallback: false });
+    const action = actionWith("commit-files", {});
+    action.operation = {
+      kind: "commit-files",
+      commits: [
+        {
+          destination: { canonicalPath: dest, canonicalParent: dir, basename: "out.txt", exists: false, finalSymlink: false },
+          content: contentRef,
+          expected: { exists: false },
+        },
+      ],
+    };
+    const result = await executor.execute(action, envelope(dest), action.operation, {});
+    expect(result.state).toBe("failed");
+    if (result.state === "failed") {
+      expect(result.error.code).toBe("EXACT_COMMIT_UNAVAILABLE");
+    }
+  });
+
+  it("production buildLocalBoundary() defaults to fail-closed exactCommit:false when native is missing", async () => {
+    const { buildLocalBoundary } = await import("../build-local-boundary.js");
+    const artifacts = new InMemoryArtifactStore();
+    const { boundary } = await buildLocalBoundary({ artifacts });
+    expect(boundary.capabilities.exactCommit).toBe(false);
+    const dest = join(dir, "should-not-be-written.txt");
+    const contentRef = await artifacts.put(Buffer.from("do not write"), "text/plain");
+    const action = actionWith("commit-files", {});
+    action.operation = {
+      kind: "commit-files",
+      commits: [
+        {
+          destination: { canonicalPath: dest, canonicalParent: dir, basename: "should-not-be-written.txt", exists: false, finalSymlink: false },
+          content: contentRef,
+          expected: { exists: false },
+        },
+      ],
+    };
+    const result = await boundary.execute(action, envelope(dest));
+    expect(result.state).toBe("failed");
+    if (result.state === "failed") {
+      expect(result.error.code).toBe("EXACT_COMMIT_UNAVAILABLE");
+    }
+    const { existsSync } = await import("node:fs");
+    expect(existsSync(dest)).toBe(false);
+  });
+});
 // Re-export to satisfy type-only import in test file.
 export { sanitizeEnvironment };

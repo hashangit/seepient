@@ -1,6 +1,7 @@
 /** Seepient Core — THE Agent Loop (single implementation) */
 
-import type { Message, StepResult, ToolCall, Usage, SeepientError, ApproveToolFn, ApprovalDecision, ApprovalScope, ApprovalContext, PermissionLevel, ToolRiskCategory } from "../foundations/types.js";
+import { SeepientError } from "../foundations/errors.js";
+import type { Message, StepResult, ToolCall, Usage, ApproveToolFn, ApprovalDecision, ApprovalScope, ApprovalContext, PermissionLevel, ToolRiskCategory } from "../foundations/types.js";
 import type { LLMProvider, ProviderMessage, ProviderToolCall, ProviderResponse } from "../foundations/contracts/llm.js";
 import type { ToolDefinition } from "../foundations/contracts/tool.js";
 import { now, toSeepientError, messageToProviderMessage, providerToolCallToToolCall } from "./context/message-convert.js";
@@ -58,6 +59,8 @@ export interface AgentLoopOptions {
    * policy/approval/audit via the legacy-handler executor.
    */
   wiredPipeline?: WiredActionLifecycle;
+  /** Allow JS filesystem fallback for file commits when native helper is absent. */
+  allowFallback?: boolean;
 }
 
 export interface AgentLoopError {
@@ -327,7 +330,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     const { buildLocalBoundary } = await import("../capabilities/execution/build-local-boundary.js");
     const { legacyApproveToolToBroker } = await import("../transport/legacy-adapter.js");
     const artifacts = new InMemoryArtifactStore();
-    const { boundary } = await buildLocalBoundary({ artifacts });
+    const { boundary } = await buildLocalBoundary({ artifacts, allowFallback: options.allowFallback ?? false });
     const broker = approveTool
       ? legacyApproveToolToBroker(approveTool)
       : autoConfirm
@@ -346,12 +349,16 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     wiredPipeline = await buildActionLifecycle({
       principalId: "agent-user",
       runId: generateId(),
+      sessionId: (options.config?.sessionId as string) ?? "default-session",
       workspaceRoot: options.cwd ?? process.cwd(),
       modelProviderClass: (currentProvider as any)?.type ?? "normal",
       approvalBroker: broker,
       executionBoundary: boundary,
       artifacts,
     });
+  }
+  if (!wiredPipeline) {
+    throw new SeepientError("Permission pipeline failed to initialize", "PIPELINE_NOT_INITIALIZED", false);
   }
 
   // Prepend system prompt if provided and messages[0] is not already a system message
@@ -610,14 +617,29 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
             // (e.g. .ssh/id_rsa, .env, active policy) is replaced with a
             // redaction notice — the bytes never reach the provider.
             if (result.outcome.state !== "denied" && output.length > 0) {
+              const declaredDataClasses: string[] = [];
+              for (const eff of action.effects) {
+                if (eff.kind === "model-egress" && (eff as any).dataClasses) {
+                  declaredDataClasses.push(...(eff as any).dataClasses);
+                }
+              }
+              for (const eff of action.display.effects) {
+                if ((eff as any).dataClasses) {
+                  declaredDataClasses.push(...(eff as any).dataClasses);
+                }
+              }
               const sensitivity = classifyOutputSensitivity(tc.name, parsedArgs, output);
-              if (sensitivity !== "normal") {
+              if (sensitivity !== "normal" && !declaredDataClasses.includes(sensitivity)) {
+                declaredDataClasses.push(sensitivity);
+              }
+              const nonNormalDataClasses = [...new Set(declaredDataClasses.filter((dc) => dc !== "normal"))];
+              if (nonNormalDataClasses.length > 0) {
                 const { ModelEgressGate } = await import("./permissions/model-egress-gate-proxy.js");
                 const gate = new ModelEgressGate();
                 const envelope = result.decision.decision === "allow" ? result.decision.envelope : undefined;
                 if (envelope) {
                   const decision = await gate.authorize(
-                    { actionDigest: action.actionDigest, providerClass: wiredPipeline.analysisContext.modelProviderClass, dataClasses: [sensitivity] },
+                    { actionDigest: action.actionDigest, providerClass: wiredPipeline.analysisContext.modelProviderClass, dataClasses: nonNormalDataClasses },
                     envelope,
                   );
                   if (decision.decision === "deny") {
@@ -673,78 +695,6 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
           if (onStep) onStep(failStep);
           continue;
         }
-
-        if (autoConfirm) {
-          // --headless mode: bypass permission matrix, auto-approve everything
-          ({ output, metadata } = await runToolSafely());
-        } else {
-          const riskCategory: ToolRiskCategory = injectedModule?.risk
-            ?? getToolRiskCategory(tc.name, getAllToolModules());
-          const matrixDecision = checkToolPermission(effectiveLevel, riskCategory);
-
-          if (matrixDecision === "auto") {
-            ({ output, metadata } = await runToolSafely());
-          } else if (approveTool) {
-            // Grant check: a remembered approval skips the prompt entirely.
-            if (grantStore && grantStore.consult(tc.name, parsedArgs)) {
-              ({ output, metadata } = await runToolSafely());
-            } else {
-              // Build LLM-authored gate context from the tool's `approval` arg.
-              const approvalContext = buildApprovalContext(parsedArgs);
-              let raw: ApprovalDecision;
-              try {
-                raw = await approveTool({ name: tc.name, args: parsedArgs, approvalContext });
-              } catch {
-                raw = false;
-              }
-              const { approved, scope } = normalizeApproval(raw);
-              if (!approved) {
-                output = "User denied tool execution.";
-              } else {
-                // Persist a scoped grant (fire-and-forget; non-fatal on error).
-                if (scope && scope !== "once") {
-                  const pattern = extractPattern(tc.name, parsedArgs);
-                  grantStore?.add(tc.name, scope, pattern).catch(() => { /* non-fatal */ });
-                }
-                ({ output, metadata } = await runToolSafely());
-              }
-            }
-          } else {
-            output = "Tool execution denied.";
-          }
-        }
-        const duration = now() - start;
-
-        // Note: tool output chars are NOT counted here because they will be
-        // counted as promptChars on the next loop iteration when the message
-        // history (including tool results) is sent to the provider.
-
-        // Add tool result message
-        messages.push({
-          id: generateId(),
-          role: "tool",
-          content: output,
-          toolCallId: tc.id,
-          timestamp: now(),
-        });
-
-        // Record step
-        const toolStep: StepResult = {
-          type: "tool_call",
-          toolCall: {
-            id: tc.id,
-            name: tc.name,
-            args: parsedArgs,
-            result: output,
-            duration,
-          },
-          metadata,
-          timestamp: now(),
-        };
-        steps.push(toolStep);
-        await hooks.onStep(toolStep);
-        await hooks.afterToolCall({ name: tc.name, output, duration });
-        if (onStep) onStep(toolStep);
       }
 
       if (finishReason === "aborted") break;

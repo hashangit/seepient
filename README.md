@@ -42,9 +42,11 @@ Unlike "screen-seeing" agents (such as OpenClaw) that rely on visual interpretat
 - 📦 **TypeScript SDK**: Programmatic access via `createAgent`, `streamText`, `generateText`.
 - 🖥 **Server Mode**: Standalone HTTP/WebSocket server with API key auth and session management.
 - 🛠 **Skills System**: Loadable skill packs from directories with `@path` file references and custom tool creation.
-- 🐚 **Shell Approval**: Interactive prompts or non-interactive modes via `SEEPIENT_SHELL_APPROVE` env var.
+- 🛡️ **Security & Permission Pipeline**: Single Domain-owned enforcement pipeline (`PolicyEngine` → `ApprovalBroker` → `ExecutionBoundary` → `AuditRecorder`) default-on across CLI, TUI, SDK, and HTTP/WebSocket server.
+- 🔒 **Fail-Closed Isolation**: Process containment (macOS Seatbelt / Linux Bubblewrap via `@anthropic-ai/sandbox-runtime`) and exact-file write helpers default to fail-closed (`ISOLATION_UNAVAILABLE` & `EXACT_COMMIT_UNAVAILABLE`).
+- 💾 **Durable Approvals & Audit**: File-locked, atomic NDJSON stores (`~/.seepient/security/`) ensure approvals, replay ledgers, and outbox logs survive process restarts and socket reconnects.
+- 🐳 **Server Worker Backend**: ephemereal Docker worker container scheduler with mTLS transport, Ed25519/HMAC signed dispatches, and secret-free worker execution environments.
 - 🖥️ **Interactive TUI**: In a TTY, a full-screen Ink/React UI — bordered always-on input, streaming feed, session manager, message queue/`/steer`, and inline `write_file` diffs (atomic, crash-safe writes).
-
 ## Tech Stack
 - **Runtime**: Node.js
 - **Language**: TypeScript

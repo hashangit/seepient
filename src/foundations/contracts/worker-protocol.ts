@@ -89,3 +89,34 @@ export interface WorkerScheduler {
   ): Promise<WorkerResult>;
   cancel(leaseId: string, reason: string): Promise<void>;
 }
+import { createHmac, createSign, createVerify } from "node:crypto";
+
+export function computeDispatchDigest(dispatch: Omit<WorkerDispatch, "signature"> | WorkerDispatch): string {
+  return `${dispatch.dispatchId}:${dispatch.nonce}:${dispatch.issuedAt}:${dispatch.action.actionDigest}:${dispatch.signingKeyId}`;
+}
+
+export function signDispatchPayload(dispatch: Omit<WorkerDispatch, "signature">, key: string): string {
+  const digest = computeDispatchDigest(dispatch);
+  if (key.includes("BEGIN PRIVATE KEY") || key.includes("BEGIN RSA PRIVATE KEY")) {
+    const signer = createSign("SHA256");
+    signer.update(digest);
+    return signer.sign(key, "hex");
+  }
+  return createHmac("sha256", key).update(digest).digest("hex");
+}
+
+export function verifyDispatchSignature(dispatch: WorkerDispatch, publicKeyOrSecret: string): boolean {
+  if (!dispatch.signature) return false;
+  const payload = computeDispatchDigest(dispatch);
+  if (publicKeyOrSecret.includes("BEGIN PUBLIC KEY") || publicKeyOrSecret.includes("BEGIN RSA PUBLIC KEY")) {
+    try {
+      const verifier = createVerify("SHA256");
+      verifier.update(payload);
+      return verifier.verify(publicKeyOrSecret, dispatch.signature, "hex");
+    } catch {
+      return false;
+    }
+  }
+  const expected = createHmac("sha256", publicKeyOrSecret).update(payload).digest("hex");
+  return dispatch.signature === expected;
+}

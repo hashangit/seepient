@@ -90,18 +90,14 @@ export class OperationExecutorRegistry {
 export function registryCapabilities(
   registry: OperationExecutorRegistry,
   backend: ExecutionBackendCapabilities["backend"],
-  opts: { exactCommit?: boolean; hostFilteredEgress?: boolean } = {},
+  opts: { exactCommit?: boolean; hostFilteredEgress?: boolean; environmentIsolation?: boolean } = {},
 ): ExecutionBackendCapabilities {
   return {
     backend,
-    // The capability kinds a backend can enforce. For local-native: the
-    // operation kinds translate to capability kinds; commit-files → commit-file,
-    // read-file → read-file, process → process (+roots), broker → network/
-    // external/secret.
     capabilityKinds: deriveCapabilityKinds(registry.supportedKinds()),
     exactCommit: opts.exactCommit ?? false,
     hostFilteredEgress: opts.hostFilteredEgress ?? false,
-    environmentIsolation: backend !== "uncontained",
+    environmentIsolation: opts.environmentIsolation ?? (backend !== "uncontained"),
     supportedOperationKinds: registry.supportedKinds(),
   };
 }

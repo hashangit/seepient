@@ -115,7 +115,7 @@ function generateToolName(): string {
 import { classifyLegacyTool } from "../foundations/contracts/custom-tools.js";
 export function tool(definition: UserToolDefinition): ToolModule {
   const functionName = definition.name ?? generateToolName();
-  classifyLegacyTool(definition);
+  const classification = classifyLegacyTool(definition);
   const jsonSchema = parametersToJsonSchema(definition.parameters);
 
   const openaiDefinition: ToolDefinition = {
@@ -132,14 +132,22 @@ export function tool(definition: UserToolDefinition): ToolModule {
   };
 
   const handler: ToolModule["handler"] = async (args: unknown, config?: any, extra?: ToolExecExtra) => {
+    if (classification.trust === "legacy-host") {
+      return {
+        output: `Tool execution denied (LEGACY_TOOL_DENIED): Legacy tool("${functionName}") uses the legacy tool({ execute }) factory without an explicit trust model. Migrate to preparedTool(), brokerConnector(), or trustedHostTool({ trust: "host" }).`,
+        success: false,
+        error: {
+          code: "LEGACY_TOOL_DENIED",
+          message: `Legacy tool("${functionName}") uses the legacy tool({ execute }) factory without an explicit trust model.`,
+          retryable: false,
+        },
+      };
+    }
     const context: ToolContext = {
       config: config ?? {},
       onUpdate: extra?.onUpdate,
       signal: extra?.signal,
     };
-    // Passthrough — normalization (string | ToolResult → ToolResult) happens once
-    // at the executeTool boundary. Direct handler callers get back exactly what
-    // `execute` returned (a string in the common case → backward compatible).
     return definition.execute(args, context);
   };
 

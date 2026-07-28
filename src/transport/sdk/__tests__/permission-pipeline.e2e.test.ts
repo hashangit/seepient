@@ -72,7 +72,7 @@ describe("E2E: CLI Agent.enablePermissionPipeline", () => {
   it("enablePermissionPipeline wires the new path; the boundary executes the real tool", async () => {
     const provider = fakeProvider();
     const agent = new Agent(provider, "test", { snapshotStore: createSnapshotStore() }, "sys", null, "openai");
-    await agent.enablePermissionPipeline({ workspaceRoot: dir, modelProviderClass: "openai", auditRoot: dir });
+    await agent.enablePermissionPipeline({ workspaceRoot: dir, modelProviderClass: "openai", auditRoot: dir, allowFallback: true });
     agent.setPipelineApproveTool(async () => true);
     expect(agent.isPermissionPipelineEnabled()).toBe(true);
 

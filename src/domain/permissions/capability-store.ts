@@ -135,7 +135,7 @@ export function covers(outer: Capability, inner: Capability): boolean {
  * Does any capability in `set` cover the requested capability?
  */
 export function setCovers(set: CapabilitySet, requested: Capability): boolean {
-  return set.capabilities.some((c) => covers(c, requested));
+  return set.capabilities.some((c) => c != null && covers(c, requested));
 }
 
 /**

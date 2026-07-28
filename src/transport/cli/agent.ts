@@ -165,6 +165,7 @@ export class Agent {
     workspaceRoot?: string;
     modelProviderClass?: string;
     auditRoot?: string;
+    allowFallback?: boolean;
   }): Promise<void> {
     const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
     const { legacyApproveToolToBroker } = await import("../legacy-adapter.js");
@@ -193,10 +194,11 @@ export class Agent {
     // Build the REAL typed-executor boundary — NOT the legacy handler.
     // Writes go through FileCommitBroker; shell through ProcessExecutor.
     const { buildLocalBoundary } = await import("../../capabilities/execution/build-local-boundary.js");
-    const { boundary: realBoundary, artifacts: sharedArtifacts } = await buildLocalBoundary();
+    const { boundary: realBoundary, artifacts: sharedArtifacts } = await buildLocalBoundary({ allowFallback: opts.allowFallback });
     this._wiredPipeline = await buildActionLifecycle({
       principalId: "cli-user",
       runId: this.sessionId,
+      sessionId: this.sessionId,
       workspaceRoot: opts.workspaceRoot ?? process.cwd(),
       modelProviderClass: opts.modelProviderClass ?? "openai",
       approvalBroker: liveBroker,

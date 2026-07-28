@@ -170,7 +170,7 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
   // at ~/.seepient/security/policies/<workspace-id>.json — outside executor-
   // writable roots. /permissions propose|review|approve|revoke-cap route
   // through compare-and-set; proposals are inert until approved.
-  if (process.env.SEEPIENT_PERMISSION_PIPELINE !== '0') {
+  if (options.permissionPipeline !== false && process.env.SEEPIENT_PERMISSION_PIPELINE !== '0') {
     try {
       const { LocalPolicyStore, computeWorkspaceId } = await import(
         '../../domain/permissions/policy-store.js'
@@ -178,9 +178,12 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
       const policyStore = new LocalPolicyStore();
       const workspaceId = computeWorkspaceId(process.cwd());
       agent.setPolicyStore(policyStore, workspaceId);
+      await agent.enablePermissionPipeline({
+        workspaceRoot: process.cwd(),
+        modelProviderClass: activeProviderType ?? 'openai',
+      });
     } catch {
-      // Policy store is best-effort on surfaces that haven't opted in;
-      // /permissions status reports it as not configured.
+      // Policy store / pipeline is best-effort; fallback to default loop pipeline.
     }
   }
 

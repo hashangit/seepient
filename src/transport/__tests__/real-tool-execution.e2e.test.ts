@@ -48,7 +48,7 @@ describe("REAL tool execution through the new pipeline (reviewer fix #2)", () =>
         return { approved: true, requestId: req.requestId, actionDigest: req.actionDigest, lifetime: "action", actorId: "u", decidedAt: Date.now() };
       },
     };
-    const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary();
+    const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary({ allowFallback: true });
     const wired = await buildActionLifecycle({
       principalId: "u",
       runId: "r1",

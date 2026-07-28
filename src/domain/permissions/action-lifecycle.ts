@@ -169,8 +169,7 @@ export class ActionLifecycle {
       const nowTs = this.now();
       const { checkRunLifetime, checkSessionLifetime } = await import("./persisted-capability-ledger.js");
       if (action.runId) {
-        const runExpiresAt = this.now() + 8 * 3600 * 1000;
-        const runRes = checkRunLifetime(action.runId, runExpiresAt, this.capabilityLedger, nowTs);
+        const runRes = checkRunLifetime(action.runId, Number.MAX_SAFE_INTEGER, this.capabilityLedger, nowTs);
         if (runRes === "revoked") {
           const outcome = this.toOutcome(action, "denied", undefined, "capability-revoked");
           await this.record(action, "denied", "capability-revoked");
@@ -285,9 +284,12 @@ export class ActionLifecycle {
           actionDigest: action.actionDigest,
           consumeOnce: lifetimeKind === "action" ? (true as const) : undefined,
           runId: action.runId,
-          sessionId: action.sessionId,
-          expiresAt: lifetimeKind === "run" ? Date.now() + 86400000 : undefined,
+          sessionId: action.sessionId ?? this.sessionId,
+          expiresAt: (answer as any).expiresAt ?? (lifetimeKind === "run" ? this.now() + 86400000 : undefined),
         } as any;
+        if ((answer as any).expiresAt) {
+          decision.envelope.expiresAt = (answer as any).expiresAt;
+        }
       }
       this.active.capabilities.push(...approved);
       this.policyContext.activeCapabilities.capabilities = this.active.capabilities;

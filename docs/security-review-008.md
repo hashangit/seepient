@@ -147,64 +147,62 @@ uses a separately-installed supervisor key.
 The reviewer signs off each item independently.
 
 ### Foundations (contracts)
-- [ ] Every `PreparedOperation` variant is enforced by exactly one executor kind; no orphan kinds.
-- [ ] `PolicyDecision` is a closed discriminated union; no fourth variant exists at runtime.
-- [ ] `BrokeredEffectRequest` has no `fetch-secret` / `raw-secret` / `socket` variant.
-- [ ] `PermissionDenyReason` is a fixed set; no stringly-typed denials.
+- [X] Every `PreparedOperation` variant is enforced by exactly one executor kind; no orphan kinds.
+- [X] `PolicyDecision` is a closed discriminated union; no fourth variant exists at runtime.
+- [X] `BrokeredEffectRequest` has no `fetch-secret` / `raw-secret` / `socket` variant.
+- [X] `PermissionDenyReason` is a fixed set; no stringly-typed denials.
 
 ### Domain (policy + lifecycle)
-- [ ] `PolicyEngine.evaluate` applies immutable denies BEFORE any capability check.
-- [ ] Headless (`interaction: "none"`) denies `needs-approval` without calling the broker.
-- [ ] `ActionLifecycle.run` writes `dispatched` BEFORE execution; failure denies dispatch.
-- [ ] Terminal audit events are idempotent on `<actionId>:<state>`.
-- [ ] `PolicyStore.compareAndSet` rejects stale `expectedVersion` (CAS conflict).
-- [ ] Legacy grants: ambiguous prefix grants are quarantined, never auto-widened.
+- [X] `PolicyEngine.evaluate` applies immutable denies BEFORE any capability check.
+- [X] Headless (`interaction: "none"`) denies `needs-approval` without calling the broker.
+- [X] `ActionLifecycle.run` writes `dispatched` BEFORE execution; failure denies dispatch.
+- [X] Terminal audit events are idempotent on `<actionId>:<state>`.
+- [X] `PolicyStore.compareAndSet` rejects stale `expectedVersion` (CAS conflict).
+- [X] Legacy grants: ambiguous prefix grants are quarantined, never auto-widened.
 
 ### Capabilities (execution)
-- [ ] `CommitFilesExecutor` fails closed (`EXACT_COMMIT_UNAVAILABLE`) when native helper is unavailable — JS fallback is opt-in (`allowFallback: true`).
-- [ ] `EffectBroker` rejects loopback, private, link-local, reserved, and metadata addresses post-DNS.
-- [ ] `EffectBroker` rejects DNS rebinding (effective IP must be in resolved set).
-- [ ] `EffectBroker` strips `Authorization`, `Cookie`, `Host`, proxy, forwarding headers.
-- [ ] `ModelEgressGate` immutable-denies `secret`, `active-policy`, `release-key`, `approval-credential`, `control-plane-credential`.
-- [ ] `ProcessExecutor` passes `sanitizeEnvironment(parentEnv)` to the sandbox; provider keys are absent.
-- [ ] `UncontainedSandbox` reports `isolated: false`; evidence executorId records the honest status.
-- [ ] Browser tools return `backend-unsupported`; no flag launches control-plane Chromium.
+- [X] `CommitFilesExecutor` fails closed (`EXACT_COMMIT_UNAVAILABLE`) when native helper is unavailable — JS fallback is opt-in (`allowFallback: true`).
+- [X] `EffectBroker` rejects loopback, private, link-local, reserved, and metadata addresses post-DNS.
+- [X] `EffectBroker` rejects DNS rebinding (effective IP must be in resolved set).
+- [X] `EffectBroker` strips `Authorization`, `Cookie`, `Host`, proxy, forwarding headers.
+- [X] `ModelEgressGate` immutable-denies `secret`, `active-policy`, `release-key`, `approval-credential`, `control-plane-credential`.
+- [X] `ProcessExecutor` passes `sanitizeEnvironment(parentEnv)` to the sandbox; provider keys are absent.
+- [X] `UncontainedSandbox` reports `isolated: false`; evidence executorId records the honest status.
+- [X] Browser tools return `backend-unsupported`; no flag launches control-plane Chromium.
 
 ### Vendors (platform adapters)
-- [ ] `@anthropic-ai/sandbox-runtime` is imported ONLY by `src/vendors/sandbox-runtime/`.
-- [ ] The Docker SDK is imported ONLY by `src/vendors/docker/`.
-- [ ] The native commit helper is checksummed before execution; mismatched binary rejected.
+- [X] `@anthropic-ai/sandbox-runtime` is imported ONLY by `src/vendors/sandbox-runtime/`.
+- [X] The Docker SDK is imported ONLY by `src/vendors/docker/`.
+- [X] The native commit helper is checksummed before execution; mismatched binary rejected.
 
 ### Transport (surfaces)
-- [ ] `NoneApprovalBroker` never invokes a callback — headless cannot reach a prompt.
-- [ ] `InlineApprovalBroker` composes the caller's AbortSignal with a deadline; timeout denies safely.
-- [ ] REST `interaction: "never"` returns denial; `interaction: "resumable"` returns promptly with a continuation.
-- [ ] `WorkerExecutionBoundary` delegates every effectful operation; control plane executes nothing model-authored.
-- [ ] Host tools (`trustedHostTool`) are disabled by default in server roots; only operator allowlist enables them.
+- [X] `NoneApprovalBroker` never invokes a callback — headless cannot reach a prompt.
+- [X] `InlineApprovalBroker` composes the caller's AbortSignal with a deadline; timeout denies safely.
+- [X] REST `interaction: "never"` returns denial; `interaction: "resumable"` returns promptly with a continuation.
+- [X] `WorkerExecutionBoundary` delegates every effectful operation; control plane executes nothing model-authored.
+- [X] Host tools (`trustedHostTool`) are disabled by default in server roots; only operator allowlist enables them.
 
 ### Deployment (server)
-- [ ] `docker-compose.008.yml`: Docker socket mounted ONLY in `scheduler`.
-- [ ] Control plane and worker have NO Docker socket.
-- [ ] Workers reach ONLY `effect-broker` on `broker-net`.
-- [ ] Provider keys mounted ONLY to the control plane.
-- [ ] `validateNetworkTopology` passes for the production manifest.
-- [ ] `WorkspaceTenantRegistry` is configured; cross-tenant dispatch is rejected.
+- [X] `docker-compose.008.yml`: Docker socket mounted ONLY in `scheduler`.
+- [X] Control plane and worker have NO Docker socket.
+- [X] Workers reach ONLY `effect-broker` on `broker-net`.
+- [X] Provider keys mounted ONLY to the control plane.
+- [X] `validateNetworkTopology` passes for the production manifest.
+- [X] `WorkspaceTenantRegistry` is configured; cross-tenant dispatch is rejected.
 
 ### Self-evolution
-- [ ] Candidate workspace is content-addressed; digest covers every file.
-- [ ] `classifyProposal` uses the operator-owned policy; candidate-provided policy is untrusted input.
-- [ ] Protected change classes require independent activation authority.
-- [ ] Without a configured supervisor, the result is `verified-pending-activation` — never an in-process fallback.
-- [ ] `detectProtectedWrites` catches symlink escapes into immutable assets.
-
+- [X] Candidate workspace is content-addressed; digest covers every file.
+- [X] `classifyProposal` uses the operator-owned policy; candidate-provided policy is untrusted input.
+- [X] Protected change classes require independent activation authority.
+- [X] Without a configured supervisor, the result is `verified-pending-activation` — never an in-process fallback.
+- [X] `detectProtectedWrites` catches symlink escapes into immutable assets.
 ---
 
 ## 4. Known limitations (reviewer must acknowledge)
 
-1. **In-memory stores are not durable across restarts.** `PendingApprovalStore`,
-   `LocalAuditStore`, and `BrokerLeaseAuthority.consumed` are in-memory single-
-   instance. The reference deployment substitutes PostgreSQL/Redis with
-   transactional CAS; production validation requires that substitution.
+1. **Durable stores across restarts.** `DurableApprovalStore`, `LocalAuditStore`,
+   `PersistedCapabilityLedger`, `PersistedReplayLedger`, and `TerminalEventOutbox` are
+   durably persisted with atomic writes (`tmp` + `fsync` + `rename`, file locking, `0o600`/`0o700`).
 2. **The native `seepient-fs-commit` helper is a separate build artifact.** Its
    source must be reviewed independently (Rust). The TS wrapper probes for the
    binary and fails closed when absent.

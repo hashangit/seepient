@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Permission System Redesign R9.1** (#008): Production-ready single-path permission pipeline. Every tool call across CLI, TUI, REPL, SDK, and HTTP/WS routes through `PolicyEngine` → `ApprovalBroker` → `ExecutionBoundary` → `AuditRecorder`.
+  - **Fail-Closed Defaults**: Process containment (`ProcessExecutor`) and exact-file commits (`CommitFilesExecutor`) default to fail-closed (`ISOLATION_UNAVAILABLE` and `EXACT_COMMIT_UNAVAILABLE`) when native isolation tools (`Seatbelt` / `Bubblewrap` / Rust commit helper) are absent. JS fallback write requires explicit opt-in (`allowFallback: true` or `SEEPIENT_ALLOW_JS_FS_FALLBACK=1`). Uncontained shell execution requires explicit operator opt-in (`unsafeUncontained: true`).
+  - **Monotonic 4-Layer Intersection**: `effectiveCapabilities` strictly enforces maxAuthority = (deployment ∩ principal ∩ runtime) and effective = (maxAuthority ∩ active). User approvals are bound up to deployment and runtime limits without expanding outer ceilings.
+  - **Real Process Containment**: Integrated `@anthropic-ai/sandbox-runtime` exact-pinned dependency for native macOS Seatbelt and Linux Bubblewrap process isolation. `probeSandbox` honestly advertises backend support.
+  - **Durable Remote Approvals & Replay Protection**: `DurableApprovalStore`, `PersistedCapabilityLedger`, `PersistedReplayLedger`, and `TerminalEventOutbox` persist state with atomic writes (`tmp` + `fsync` + `rename`, `0o600`/`0o700` permissions, file locking with retry loops). WS composition root handles remote approvals durably across socket reconnects.
+  - **Server Worker Backend**: `DockerSocketEngine` and `DockerWorkerScheduler` support single-host Docker worker execution with mTLS transport, Ed25519/HMAC signed dispatches, per-tenant workspace mounts, secret-free worker env, and durable replay protection.
+  - **Model-Egress Gating**: `ModelEgressGate` evaluates model release for all tool outputs based on the action's declared data classes (`secret`, `active-policy`, `release-key`, `control-plane-credential`), keeping sensitive data out of model-visible history.
+
 - **TUI parity & generative widget upgrade** (#007): Streaming polish (30fps throttle, `React.memo`, cursor hide), ChatBlock lifecycle primitive, `render_widget` tool with 9 kind renderers (table, keyvalue, chart, tree, panel, diff, form, product_card, status_grid), hash-anchored `edit_file` tool (SnapshotStore + parser + patcher with fail-closed stale anchor), enriched Markdown (GFM tables), T4 parity components (thinking indicator, TabBar, plan review overlay, truncated text, toast). Tools count: 13 → 15.
   - **Core**: `src/core/hashline/` — types, parser, patcher, snapshot-store; `WidgetError` + `HashlineError` in `errors.ts`.
   - **Tools**: `src/tools/widgets.ts` (`render_widget`), `src/tools/edit-file.ts` (`edit_file`).

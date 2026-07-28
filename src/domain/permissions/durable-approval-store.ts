@@ -177,8 +177,8 @@ export class DurableApprovalStore {
   ): { status: "transitioned" | "duplicate" | "stale" | "expired"; record?: PendingApprovalRecord } {
     const rec = this.pendingRecords.get(continuationId);
     if (!rec) return { status: "stale" };
+    if (rec.status !== "pending") return { status: "duplicate", record: rec };
     if (rec.version !== expectedVersion) return { status: "stale" };
-    if (rec.status !== "pending") return { status: "duplicate" };
     if (rec.request.expiresAt <= now) {
       rec.status = "expired";
       void this.persist();
@@ -197,14 +197,10 @@ export class DurableApprovalStore {
     expectedVersion: number,
     decision: PermissionDecision,
     now = Date.now(),
-  ): { status: "transitioned" | "duplicate" | "stale" | "expired"; record?: PendingApprovalRecord } & PromiseLike<any> {
+  ): Promise<{ status: "transitioned" | "duplicate" | "stale" | "expired"; record?: PendingApprovalRecord }> & { status: "transitioned" | "duplicate" | "stale" | "expired"; record?: PendingApprovalRecord } {
     const res = this.casSync(continuationId, expectedVersion, decision, now);
     const promise = this.persist().then(() => res);
-    return Object.assign(res, {
-      then: promise.then.bind(promise),
-      catch: promise.catch.bind(promise),
-      finally: promise.finally.bind(promise),
-    }) as any;
+    return Object.assign(promise, res);
   }
   listPendingSync(principalId?: string): PendingApprovalRecord[] {
     const now = Date.now();

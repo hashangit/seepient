@@ -75,7 +75,7 @@ export async function buildLocalBoundary(opts?: {
   const registry = new OperationExecutorRegistry();
   registry.register(new NoneExecutor());
   registry.register(new ReadFileExecutor({ artifacts }));
-  registry.register(new CommitFilesExecutor({ broker: commitBroker, artifacts, useNative: probe.available, allowFallback: opts?.allowFallback ?? true }));
+  registry.register(new CommitFilesExecutor({ broker: commitBroker, artifacts, useNative: probe.available, allowFallback: opts?.allowFallback ?? false }));
   registry.register(new ProcessExecutor({ sandbox, unsafeUncontained: opts?.unsafeUncontained ?? false }));
   registry.register(new BrokerExecutor({ broker: effectBroker }));
   registry.register(new TrustedHostExecutor(hostCallbacks));
@@ -84,6 +84,7 @@ export async function buildLocalBoundary(opts?: {
     registry,
     exactCommit: probe.available,
     hostFilteredEgress: true,
+    environmentIsolation: sandbox.probe.backend !== "none" || (opts?.unsafeUncontained ?? false),
   });
 
   return { boundary, artifacts };

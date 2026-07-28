@@ -117,7 +117,7 @@ describe("tool() factory", () => {
     expect(mod.definition.function.description).toBe("Says hi");
   });
 
-  it("handler passes a string execute result through verbatim", async () => {
+  it("handler refuses to execute legacy tool({ execute }) and returns LEGACY_TOOL_DENIED", async () => {
     const mod = tool({
       name: "echo",
       description: "echo",
@@ -125,20 +125,11 @@ describe("tool() factory", () => {
       execute: async () => "pong",
     });
     const result = await mod.handler({}, undefined);
-    // Direct handler callers get the raw string (backward compatible);
-    // normalization to a ToolResult happens once at the executeTool boundary.
-    expect(result).toBe("pong");
-  });
-
-  it("handler passes a ToolResult through verbatim, preserving metadata", async () => {
-    const mod = tool({
-      name: "structured",
-      description: "returns structured",
-      parameters: { type: "object", properties: {} },
-      execute: async () => ({ output: "structured result", success: true, metadata: { path: "/x", delta: 3 } }),
-    });
-    const result = await mod.handler({}, undefined);
-    expect(result).toEqual({ output: "structured result", success: true, metadata: { path: "/x", delta: 3 } });
+    expect(typeof result).toBe("object");
+    if (typeof result === "object" && result !== null && "error" in result) {
+      expect((result as any).error.code).toBe("LEGACY_TOOL_DENIED");
+      expect((result as any).output).toContain("LEGACY_TOOL_DENIED");
+    }
   });
 
   it("executeTool normalizes a string-returning handler to a ToolResult", async () => {

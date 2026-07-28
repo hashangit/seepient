@@ -29,6 +29,8 @@ export interface LocalExecutionBoundaryOptions {
   exactCommit?: boolean;
   /** Whether the effect broker enforces host-filtered egress. */
   hostFilteredEgress?: boolean;
+  /** Honest advertisement of process containment availability. */
+  environmentIsolation?: boolean;
 }
 
 /**
@@ -45,6 +47,7 @@ export class LocalExecutionBoundary implements ExecutionBoundary {
     this.capabilities = registryCapabilities(opts.registry, "local-native", {
       exactCommit: opts.exactCommit ?? false,
       hostFilteredEgress: opts.hostFilteredEgress ?? false,
+      environmentIsolation: opts.environmentIsolation,
     });
   }
 

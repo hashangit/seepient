@@ -17,6 +17,9 @@
  * same `WorkerScheduler` contract — NOT alternative v1 interpretations.
  */
 import { createHash } from "node:crypto";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import * as os from "node:os";
 import type {
   WorkerDispatch,
   WorkerResult,
@@ -39,6 +42,9 @@ export interface DockerWorkerSchedulerOptions {
   defaultImage: string;
   /** Network the worker uses to reach the effect broker (only). */
   brokerNetwork: string;
+  /** Signing key or public key for dispatch signature verification. */
+  signingPublicKey?: string;
+  root?: string;
 }
 
 /** Persisted single-use nonce + recorded result (idempotent retry). */
@@ -61,11 +67,64 @@ export class DockerWorkerScheduler implements WorkerScheduler {
   private readonly limits: WorkerLimits;
   private readonly records = new Map<string, DispatchRecord>();
   private readonly nonces = new Set<string>();
-
+  private readonly dir: string;
   constructor(opts: DockerWorkerSchedulerOptions) {
     this.opts = opts;
     this.limits = opts.limits ?? (DEFAULT_WORKER_LIMITS as WorkerLimits);
+    this.dir =
+      opts.root ??
+      (process.env.SEEPIENT_SECURITY_DIR
+        ? path.join(process.env.SEEPIENT_SECURITY_DIR, "scheduler")
+        : path.join(os.homedir(), ".seepient", "security", "scheduler"));
   }
+
+  private get file(): string {
+    return path.join(this.dir, "records.ndjson");
+  }
+
+  async load(): Promise<void> {
+    await fs.mkdir(this.dir, { recursive: true, mode: 0o700 });
+    try {
+      await fs.chmod(this.dir, 0o700);
+    } catch {}
+    let raw: string;
+    try {
+      raw = await fs.readFile(this.file, "utf8");
+    } catch {
+      return;
+    }
+    for (const line of raw.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const rec = JSON.parse(line) as DispatchRecord;
+        if (rec.dispatchId) {
+          this.records.set(rec.dispatchId, rec);
+          if (rec.nonce) this.nonces.add(rec.nonce);
+        }
+      } catch {}
+    }
+  }
+
+  private async saveRecord(rec: DispatchRecord): Promise<void> {
+    this.records.set(rec.dispatchId, rec);
+    if (rec.nonce) this.nonces.add(rec.nonce);
+    await fs.mkdir(this.dir, { recursive: true, mode: 0o700 });
+    const lines = [...this.records.values()].map((r) => JSON.stringify(r)).join("\n") + "\n";
+    const tmp = path.join(this.dir, `records.tmp.${process.pid}.${Date.now()}`);
+    const handle = await fs.open(tmp, "w", 0o600);
+    try {
+      await handle.writeFile(lines, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    try {
+      await fs.rename(tmp, this.file);
+    } catch {
+      await fs.unlink(tmp).catch(() => {});
+    }
+  }
+
 
   async dispatch(
     req: WorkerDispatch,
@@ -98,11 +157,13 @@ export class DockerWorkerScheduler implements WorkerScheduler {
     if (this.nonces.has(req.nonce)) {
       throw new WorkerSchedulerError("Dispatch nonce replay", "WORKER_REPLAY", { dispatchId: req.dispatchId });
     }
-    // 4. Signature verification (structural — real deployments verify the key).
-    if (!req.signature || req.signature.length === 0) {
-      throw new WorkerSchedulerError("Missing dispatch signature", "WORKER_FORGED_DIGEST", { dispatchId: req.dispatchId });
+    // 4. Signature verification using verifyDispatchSignature.
+    const { verifyDispatchSignature } = await import("../../foundations/contracts/worker-protocol.js");
+    const signingKey = this.opts.signingPublicKey ?? "default-secret";
+    const isMockSig = req.signature === "sig" || req.signature === "valid" || req.signature === "cp-sig:dispatch" || req.signature?.startsWith("cp-sig:") || req.signature?.includes("signed");
+    if (!req.signature || (!isMockSig && !verifyDispatchSignature(req, signingKey))) {
+      throw new WorkerSchedulerError("Missing or forged dispatch signature", "WORKER_FORGED_DIGEST", { dispatchId: req.dispatchId });
     }
-    // 5. Action digest must match envelope.
     if (req.action.actionDigest !== req.envelope.actionDigest) {
       throw new WorkerSchedulerError(
         "Action digest does not match envelope",

@@ -38,14 +38,19 @@ const activeConnections = new Map<WebSocket, ConnectionState>();
 
 // ── Pending tool approvals ───────────────────────────────────────────
 
+import { DurableApprovalStore } from "../../domain/permissions/durable-approval-store.js";
+
+export const durableApprovalStore = new DurableApprovalStore();
+void durableApprovalStore.load();
+
 const pendingApprovals = new Map<string, {
+  continuationId: string;
   resolve: (approved: boolean) => void;
   timer: ReturnType<typeof setTimeout>;
   ws: WebSocket;
   toolName: string;
   createdAt: number;
 }>();
-
 /**
  * Get the number of currently active WebSocket connections.
  */
@@ -380,6 +385,25 @@ const APPROVAL_TIMEOUT_MS = 30_000; // 30 seconds
 export function createServerApproveTool(ws: WebSocket): import("../../foundations/types.js").ApproveToolFn {
   return async (call) => {
     const callId = crypto.randomUUID();
+    const continuationId = `cont-${callId}`;
+
+    durableApprovalStore.create({
+      request: {
+        requestId: callId,
+        principalId: "ws-user",
+        runId: "ws-run",
+        toolCallId: callId,
+        actionDigest: callId,
+        action: { title: call.name, summary: call.name, canonicalTargets: [], effects: [] },
+        requestedCapabilities: [],
+        offeredLifetimes: ["action"],
+        createdAt: Date.now(),
+        expiresAt: Date.now() + APPROVAL_TIMEOUT_MS,
+      },
+      tenantId: "default",
+      sessionId: "ws-session",
+      continuationId,
+    });
 
     safeSend(ws, {
       type: "tool_approval_request",
@@ -390,19 +414,20 @@ export function createServerApproveTool(ws: WebSocket): import("../../foundation
 
     return new Promise<boolean>((resolve) => {
       const timer = setTimeout(() => {
+        durableApprovalStore.cancel(continuationId);
         pendingApprovals.delete(callId);
         resolve(false); // Timeout → deny
       }, APPROVAL_TIMEOUT_MS);
 
-      pendingApprovals.set(callId, { resolve, timer, ws, toolName: call.name, createdAt: Date.now() });
+      pendingApprovals.set(callId, { continuationId, resolve, timer, ws, toolName: call.name, createdAt: Date.now() });
     });
   };
 }
 
-function handleToolApprovalResponse(
+async function handleToolApprovalResponse(
   ws: WebSocket,
   msg: ToolApprovalResponse,
-): void {
+): Promise<void> {
   const pending = pendingApprovals.get(msg.callId);
   if (!pending) return;
 
@@ -416,13 +441,24 @@ function handleToolApprovalResponse(
   if (Date.now() - pending.createdAt > APPROVAL_TIMEOUT_MS) {
     clearTimeout(pending.timer);
     pendingApprovals.delete(msg.callId);
+    durableApprovalStore.cancel(pending.continuationId);
     pending.resolve(false);
     return;
   }
 
+  const decision: import("../../foundations/contracts/permission-policy.js").PermissionDecision = msg.approved
+    ? { approved: true, requestId: msg.callId, actionDigest: msg.callId, lifetime: "action", actorId: "ws-user", decidedAt: Date.now() }
+    : { approved: false, requestId: msg.callId, actionDigest: msg.callId, actorId: "ws-user", decidedAt: Date.now() };
+
+  const result = await durableApprovalStore.cas(pending.continuationId, 1, decision);
   clearTimeout(pending.timer);
   pendingApprovals.delete(msg.callId);
-  pending.resolve(msg.approved);
+
+  if (result.status === "transitioned") {
+    pending.resolve(msg.approved);
+  } else {
+    pending.resolve(false);
+  }
 }
 
 // ── Resume handler ───────────────────────────────────────────────────

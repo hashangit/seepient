@@ -115,6 +115,7 @@ describe("write_file through the agent loop", () => {
         hooks: createHookExecutor(),
         stream: true,
         autoConfirm: true,
+        allowFallback: true,
       });
       const step = result.steps.find((s) => s.type === "tool_call" && s.toolCall?.name === "write_file");
       console.log("TEST 2 STEPS:", JSON.stringify(result.steps, null, 2));
