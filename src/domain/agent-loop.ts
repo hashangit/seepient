@@ -132,7 +132,20 @@ function classifyOutputSensitivity(
   args: Record<string, unknown>,
   output: string,
 ): "normal" | "sensitive" | "secret" {
-  // read_file: classify by the path being read.
+  const lower = output.toLowerCase();
+  // 1. Content-based secret detection (defense in depth for all output).
+  if (
+    lower.includes("-----begin private key-----") ||
+    lower.includes("-----begin rsa private key-----") ||
+    /akia[0-9a-z]{16}/.test(lower) ||
+    /sk-[a-z0-9]{20,}/.test(lower) ||
+    /ghp_[a-z0-9]{30,}/.test(lower) ||
+    /(api_key|secret_key|password|token|private_key)\s*[:=]\s*['"]?[a-z0-9+/=_-]{16,}/i.test(lower)
+  ) {
+    return "secret";
+  }
+
+  // 2. read_file origin classification.
   if (toolName === "read_file") {
     const p = String(args.path ?? "").toLowerCase();
     if (
@@ -150,24 +163,16 @@ function classifyOutputSensitivity(
     }
     return "normal";
   }
-  // For ALL other tools (including shell), scan the OUTPUT for secret-shaped
-  // content. A shell command like `cat .env` produces secret output that must
-  // not reach the model. This is content-based defense in depth — the path
-  // check above catches direct reads; this catches indirect leakage.
-  const lower = output.toLowerCase();
-  // Detect common private-key headers.
-  if (lower.includes("-----begin private key-----") || lower.includes("-----begin rsa private key-----")) {
-    return "secret";
+
+  // 3. Known safe local tools.
+  if (toolName === "get_current_datetime" || toolName === "manage_todos") {
+    return "normal";
   }
-  // Detect AWS keys, OpenAI keys, GitHub tokens in output.
-  if (/akia[0-9a-z]{16}/.test(lower) || /sk-[a-z0-9]{20,}/.test(lower) || /ghp_[a-z0-9]{30,}/.test(lower)) {
-    return "secret";
-  }
-  // Detect `.env`-style KEY=VALUE patterns with credential-shaped values.
-  if (/(api_key|secret_key|password|token|private_key)\s*[:=]\s*['"]?[a-z0-9+/=_-]{16,}/i.test(lower)) {
-    return "secret";
-  }
-  return "normal";
+
+  // 4. Process execution, web reads, screenshots, broker connectors, or unknown tools:
+  //    Output is derived from external or process boundaries. Per FR-010 / D42,
+  //    unknown-derived output MUST NOT default to "normal" — default to "sensitive".
+  return "sensitive";
 }
 
 /**
@@ -612,39 +617,45 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
             output = result.toolResult.output;
             metadata = result.toolResult.metadata;
             // Spec 008 FR-010: Model-egress gate. Before tool output enters
-            // model-visible history, check whether the data classification
-            // permits release to the configured provider. Secret-class data
-            // (e.g. .ssh/id_rsa, .env, active policy) is replaced with a
-            // redaction notice — the bytes never reach the provider.
+            // model-visible history, the Domain enforces the gate centrally so
+            // transport adapters cannot implement separate redaction policies.
+            // The classification is built ONLY from trusted sources: the
+            // action's declared `model-egress` effect classes (origin-derived,
+            // set by the analyzer) PLUS the call-site classifier's verdict on
+            // the actual output bytes — which can only ESCALATE (never
+            // downgrade). A caller cannot inject or soften these classes.
             if (result.outcome.state !== "denied" && output.length > 0) {
-              const declaredDataClasses: string[] = [];
+              // Trusted origin classes from the prepared action's effects.
+              const originDataClasses: string[] = [];
               for (const eff of action.effects) {
                 if (eff.kind === "model-egress" && (eff as any).dataClasses) {
-                  declaredDataClasses.push(...(eff as any).dataClasses);
+                  originDataClasses.push(...(eff as any).dataClasses);
                 }
               }
-              for (const eff of action.display.effects) {
-                if ((eff as any).dataClasses) {
-                  declaredDataClasses.push(...(eff as any).dataClasses);
-                }
-              }
+              // Classifier verdict on real bytes — escalate-only. If the
+              // output looks secret/sensitive (e.g. a key, .env contents) it is
+              // forced into the origin set regardless of what the analyzer
+              // declared, so a caller claiming "normal" cannot bypass the gate.
               const sensitivity = classifyOutputSensitivity(tc.name, parsedArgs, output);
-              if (sensitivity !== "normal" && !declaredDataClasses.includes(sensitivity)) {
-                declaredDataClasses.push(sensitivity);
+              if (!originDataClasses.includes(sensitivity)) {
+                originDataClasses.push(sensitivity);
               }
-              const nonNormalDataClasses = [...new Set(declaredDataClasses.filter((dc) => dc !== "normal"))];
-              if (nonNormalDataClasses.length > 0) {
+              const envelope = result.decision.decision === "allow" ? result.decision.envelope : undefined;
+              if (envelope) {
                 const { ModelEgressGate } = await import("./permissions/model-egress-gate-proxy.js");
                 const gate = new ModelEgressGate();
-                const envelope = result.decision.decision === "allow" ? result.decision.envelope : undefined;
-                if (envelope) {
-                  const decision = await gate.authorize(
-                    { actionDigest: action.actionDigest, providerClass: wiredPipeline.analysisContext.modelProviderClass, dataClasses: nonNormalDataClasses },
-                    envelope,
-                  );
-                  if (decision.decision === "deny") {
-                    output = `[model-egress denied] ${("message" in decision ? decision.message : "sensitive data withheld from model")}`;
-                  }
+                // The gate derives its decision SOLELY from provenance + envelope.
+                // No caller-supplied classification is passed.
+                const decision = await gate.authorize(
+                  {
+                    actionDigest: action.actionDigest,
+                    providerClass: wiredPipeline.analysisContext.modelProviderClass,
+                    originDataClasses: [...new Set(originDataClasses)],
+                  },
+                  envelope,
+                );
+                if (decision.decision === "deny") {
+                  output = `[model-egress denied] ${("message" in decision ? decision.message : "sensitive data withheld from model")}`;
                 }
               }
             }

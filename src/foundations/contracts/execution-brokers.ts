@@ -134,19 +134,44 @@ export type ModelEgressDecision =
   | { decision: "deny"; reason: PermissionDenyReason; message: string };
 
 /**
+ * Trusted provenance for a model-egress authorization. Built by the Domain
+ * agent loop from immutable prepared-action data — NOT from caller-supplied
+ * labels. `originDataClasses` are the authoritative classification: they
+ * combine the analyzer-declared `model-egress` effect classes (origin-derived)
+ * with the call-site classifier's verdict on the actual output bytes, which can
+ * only ESCALATE (never downgrade). A caller cannot inject or soften these.
+ *
+ * `actionDigest` binds the decision to the exact approved action; `sourceArtifact`
+ * (when the output came from a broker/content-addressed store) lets the gate
+ * verify the artifact belongs to this action.
+ */
+export interface ModelEgressProvenance {
+  /** The digest of the prepared action whose output is being released. */
+  actionDigest: string;
+  /** The provider trust class for the configured model provider. */
+  providerClass: string;
+  /**
+   * Origin-derived data classes, taken from the action's `model-egress` effect
+   * declarations and escalated by the call-site classifier. The gate treats
+   * this list as the only authoritative classification.
+   */
+  originDataClasses: string[];
+  /** Content-addressed artifact the output was read from, if any. */
+  sourceArtifact?: PreparedArtifactRef;
+}
+
+/**
  * Invoked before tool output enters model-visible history or is sent to a
  * provider. Secret-class data, active policy, approval credentials, release
  * keys, and control-plane credentials are immutable denies. Local/on-device
  * providers still pass through the gate with an explicit provider class.
+ *
+ * The decision is derived SOLELY from `provenance` (trusted) + the envelope.
+ * Caller-supplied classifications are not accepted.
  */
 export interface ModelEgressGate {
   authorize(
-    req: {
-      actionDigest: string;
-      providerClass: string;
-      dataClasses: string[];
-      sourceArtifact?: PreparedArtifactRef;
-    },
+    provenance: ModelEgressProvenance,
     envelope: CapabilityEnvelope,
   ): Promise<ModelEgressDecision>;
 }

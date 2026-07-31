@@ -142,7 +142,7 @@ describe("quickstart gates (T606)", () => {
           return ["10.0.0.1"]; // private range
         },
         async fetch() {
-          return { status: 200, bytes: new Uint8Array([0]), effectiveHost: "h", effectiveIp: "10.0.0.1" };
+          return { status: 200, bytes: new Uint8Array([0]), effectiveHost: "h", effectiveIp: "10.0.0.1", headers: {} };
         },
       },
     });
@@ -179,7 +179,7 @@ describe("quickstart gates (T606)", () => {
     const gate = new ModelEgressGate();
     const env = set({ kind: "model-egress", providerClass: "openai", dataClasses: ["secret"] });
     const d = await gate.authorize(
-      { actionDigest: "d", providerClass: "openai", dataClasses: ["secret"] },
+      { actionDigest: "d", providerClass: "openai", originDataClasses: ["secret"] },
       { version: 1, envelopeId: "e", principalId: "u", runId: "r", actionDigest: "d", capabilities: env.capabilities, lifetime: { kind: "action", actionDigest: "d", consumeOnce: true }, issuedBy: { kind: "service", authorityId: "pe", authenticatedBy: "d" }, issuedAt: 0, policyDigest: "d" },
     );
     expect(d.decision).toBe("deny");
