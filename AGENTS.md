@@ -119,6 +119,11 @@ Current layout of the Obsidian vault (annotated):
 │   ├── migration.md                  # v1→v2 config migration, lazy sessions, SDK deprecation
 │   ├── quickstart.md                 # Per-phase validation scenarios + production budgets
 │   └── contracts/                    # inference-adapter, canonical-messages, provider-config, credential-store, server-management-api, public-sdk
+├── Website Planning/                 # Public website strategy and delivery planning
+│   ├── implementation_planv0.1.md    # Original kinetic-design exploration
+│   ├── implementation_planv0.2.md    # Benchmark and product-strategy iteration
+│   ├── implementation_planv0.3.md    # Universal-scenarios iteration
+│   └── plan.md                       # Consolidated, evidence-led website master plan
 ├── Provider-Management/              # LLM provider notes (incl. llm-provider-management-comparison.md — the architectural guideline for 010)
 ├── System-Prompts/                   # Prompt engineering references
 ├── Seepientagent-BMI/                # Body-model internal feature work
