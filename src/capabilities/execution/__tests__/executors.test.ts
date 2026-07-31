@@ -22,9 +22,18 @@ import { FileCommitBroker } from "../file-commit-broker.js";
 import { InMemoryArtifactStore } from "../in-memory-artifact-store.js";
 import { UncontainedSandbox } from "../../../vendors/sandbox-runtime/index.js";
 import { sanitizeEnvironment } from "../environment-policy.js";
-import type { PreparedToolAction } from "../../../foundations/contracts/prepared-action.js";
+import type { PreparedToolAction, PreparedOperation } from "../../../foundations/contracts/prepared-action.js";
 import type { CapabilityEnvelope } from "../../../foundations/contracts/permission-policy.js";
 import { UnsupportedBackendError } from "../../../foundations/errors.js";
+
+/** Narrow a PreparedOperation union member by its `kind`. Returns `never` if
+ *  the kind does not match (callers guard on `.kind` first). */
+function asOp<K extends PreparedOperation["kind"]>(
+  op: PreparedOperation,
+  kind: K,
+): Extract<PreparedOperation, { kind: K }> {
+  return op as Extract<PreparedOperation, { kind: K }>;
+}
 
 let dir: string;
 beforeEach(() => {
@@ -121,7 +130,7 @@ describe("CommitFilesExecutor (T205)", () => {
     const ref = await artifacts.put(Buffer.from("x"), "text/plain");
     const dest1 = join(dir, "a.txt");
     const dest2 = join(dir, "b.txt");
-    const action = {
+    const action: PreparedToolAction = {
       ...actionWith("commit-files", {}),
       operation: {
         kind: "commit-files" as const,
@@ -130,9 +139,9 @@ describe("CommitFilesExecutor (T205)", () => {
           { destination: { canonicalPath: dest2, canonicalParent: dir, basename: "b.txt", exists: false, finalSymlink: false }, content: ref },
         ],
       },
-    } as never;
+    };
 
-    const result = await executor.execute(action, envelope(dest1), action.operation, {});
+    const result = await executor.execute(action, envelope(dest1), asOp(action.operation, "commit-files"), {});
     expect(result.state).toBe("failed");
   });
 });
@@ -143,7 +152,7 @@ describe("ReadFileExecutor (T205)", () => {
     writeFileSync(file, "content");
     const executor = new ReadFileExecutor();
     const action = actionWith("read-file", { destinationPath: file });
-    const result = await executor.execute(action, envelope(file), action.operation, {});
+    const result = await executor.execute(action, envelope(file), asOp(action.operation, "read-file"), {});
     expect(result.state).toBe("succeeded");
     if (result.state === "succeeded") expect(result.result.output).toBe("content");
   });
@@ -153,7 +162,7 @@ describe("NoneExecutor", () => {
   it("returns the precomputed result", async () => {
     const executor = new NoneExecutor();
     const action = actionWith("none", { result: { output: "datetime", success: true } });
-    const result = await executor.execute(action, envelope("/"), action.operation, {});
+    const result = await executor.execute(action, envelope("/"), asOp(action.operation, "none"), {});
     expect(result.state).toBe("succeeded");
   });
 });
@@ -192,15 +201,15 @@ describe("ProcessExecutor (T213)", () => {
       },
     };
     const executor = new ProcessExecutor({ sandbox: sandbox as never, parentEnv });
-    const action = {
+    const action: PreparedToolAction = {
       ...actionWith("process", {}),
       operation: {
         kind: "process" as const,
         command: { executable: "/bin/echo", argv: ["hi"], cwd: dir },
         roots: [{ access: "read" as const, canonicalRoot: dir }],
       },
-    } as never;
-    const result = await executor.execute(action, envelope(dir), action.operation, {});
+    };
+    const result = await executor.execute(action, envelope(dir), asOp(action.operation, "process"), {});
     expect(result.state).toBe("succeeded");
     expect(capturedEnv!.OPENAI_API_KEY).toBeUndefined();
     if (result.state === "succeeded") expect(result.result.output).toBe("clean");
@@ -209,15 +218,15 @@ describe("ProcessExecutor (T213)", () => {
   it("uncontained sandbox reports isolated:false in evidence executorId", async () => {
     const sandbox = new UncontainedSandbox();
     const executor = new ProcessExecutor({ sandbox, parentEnv: { PATH: "/usr/bin" }, unsafeUncontained: true });
-    const action = {
+    const action: PreparedToolAction = {
       ...actionWith("process", {}),
       operation: {
         kind: "process" as const,
         command: { executable: "/bin/echo", argv: ["hi"], cwd: dir },
         roots: [],
       },
-    } as never;
-    const result = await executor.execute(action, envelope(dir), action.operation, {});
+    };
+    const result = await executor.execute(action, envelope(dir), asOp(action.operation, "process"), {});
     // UncontainedSandbox.backend === "none" → executorId records the honest status.
     if (result.state === "succeeded") {
       expect(result.evidence.executorId).toBe("process-uncontained");
@@ -230,7 +239,7 @@ describe("TrustedHostExecutor", () => {
     const callbacks = new Map([["host-1", async () => "host-result"]]);
     const executor = new TrustedHostExecutor(callbacks);
     const action = actionWith("trusted-host", { registrationId: "host-1", args: {} });
-    const result = await executor.execute(action, envelope("/"), action.operation, {});
+    const result = await executor.execute(action, envelope("/"), asOp(action.operation, "trusted-host"), {});
     expect(result.state).toBe("succeeded");
     if (result.state === "succeeded") expect(result.result.output).toBe("host-result");
   });
@@ -238,7 +247,7 @@ describe("TrustedHostExecutor", () => {
   it("fails when callback not registered", async () => {
     const executor = new TrustedHostExecutor(new Map());
     const action = actionWith("trusted-host", { registrationId: "missing", args: {} });
-    const result = await executor.execute(action, envelope("/"), action.operation, {});
+    const result = await executor.execute(action, envelope("/"), asOp(action.operation, "trusted-host"), {});
     expect(result.state).toBe("failed");
   });
 });
@@ -246,7 +255,7 @@ describe("TrustedHostExecutor", () => {
 describe("CommitFilesExecutor fail-closed defaults (P0-1)", () => {
   it("fails closed with EXACT_COMMIT_UNAVAILABLE when useNative:false and allowFallback:false", async () => {
     const artifacts = new InMemoryArtifactStore();
-    const broker = new FileCommitBroker({ artifacts });
+    const broker = new FileCommitBroker({ artifacts, helper: fakeHelper() as never });
     const dest = join(dir, "out.txt");
     const contentRef = await artifacts.put(Buffer.from("content"), "text/plain");
     const executor = new CommitFilesExecutor({ broker, artifacts, useNative: false, allowFallback: false });
@@ -261,7 +270,7 @@ describe("CommitFilesExecutor fail-closed defaults (P0-1)", () => {
         },
       ],
     };
-    const result = await executor.execute(action, envelope(dest), action.operation, {});
+    const result = await executor.execute(action, envelope(dest), asOp(action.operation, "commit-files"), {});
     expect(result.state).toBe("failed");
     if (result.state === "failed") {
       expect(result.error.code).toBe("EXACT_COMMIT_UNAVAILABLE");
@@ -286,7 +295,7 @@ describe("CommitFilesExecutor fail-closed defaults (P0-1)", () => {
         },
       ],
     };
-    const result = await boundary.execute(action, envelope(dest));
+    const result = await boundary.execute(action, envelope(dest), {});
     expect(result.state).toBe("failed");
     if (result.state === "failed") {
       expect(result.error.code).toBe("EXACT_COMMIT_UNAVAILABLE");

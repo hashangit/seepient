@@ -10,6 +10,7 @@ import * as path from 'path';
 import { createSnapshotStore } from '../../../foundations/hashline/snapshot-store.js';
 import { ReadFileTool } from '../core.js';
 import { EditFileTool } from '../edit-file.js';
+import type { ToolResult } from '../../../foundations/types.js';
 
 describe('edit_file integration', () => {
   let tmpDir: string;
@@ -107,7 +108,7 @@ SWAP 2.=2:
 
 [${f2}#${t2}]
 DEL 2.=2`;
-    const result = await EditFileTool.handler({ patch }, { snapshotStore: store });
+    const result = (await EditFileTool.handler({ patch }, { snapshotStore: store })) as ToolResult;
     expect(result.success).toBe(true);
     expect(result.output).toContain('Edited 2 file(s)');
 

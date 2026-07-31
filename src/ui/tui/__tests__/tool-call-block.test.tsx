@@ -3,7 +3,7 @@ import { render } from "ink-testing-library";
 import React from "react";
 import { ToolCallBlock } from "../components/tool-call-block.js";
 import type { ToolCallEntry } from "../types.js";
-import type { FileWriteMetadata } from "../../../capabilities/tools/core.js";
+import type { FileWriteMetadata } from "../../../foundations/contracts/presentation.js";
 
 describe("ToolCallBlock — write_file diff wiring", () => {
   it("renders an inline diff when write_file carries metadata", () => {

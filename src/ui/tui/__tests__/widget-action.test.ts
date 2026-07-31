@@ -7,7 +7,8 @@
 import { describe, it, expect } from 'vitest';
 import { createWidgetHost } from '../widget-host.js';
 import { generateId } from '../../../foundations/id.js';
-import type { FeedApi, FeedEntry, FeedEntryInput, BlockEntry } from '../types.js';
+import type { FeedApi } from '../hooks/use-feed.js';
+import type { FeedEntry, FeedEntryInput, BlockEntry } from '../types.js';
 
 /** Non-React feed for testing — same FeedApi interface. */
 function createTestFeed(): FeedApi {
@@ -110,7 +111,7 @@ describe('widget action round-trip', () => {
     host.mount({ id: 'w2', kind: 'panel' as const, props: { body: 'hello' } });
 
     host.finalizeAll();
-    expect(feed.entries.every((e) => e.kind === 'block' && e.finalized)).toBe(true);
+    expect(feed.entries.every((e: FeedEntry) => e.kind === 'block' && e.finalized)).toBe(true);
   });
 
   it('disposeAll clears blocks', () => {

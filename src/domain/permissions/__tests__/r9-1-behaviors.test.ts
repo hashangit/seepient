@@ -75,7 +75,7 @@ describe("PersistedCapabilityLedger (T107a)", () => {
 describe("PermissionDenyReason includes T107d variants", () => {
   it("capability-expired and capability-revoked are valid deny reasons", () => {
     // Type-level check: if TS compiles this, the union contains these values.
-    const reasons: import("../../foundations/contracts/permission-policy.js").PermissionDenyReason[] = [
+    const reasons: import("../../../foundations/contracts/permission-policy.js").PermissionDenyReason[] = [
       "capability-expired",
       "capability-revoked",
     ];
@@ -83,7 +83,7 @@ describe("PermissionDenyReason includes T107d variants", () => {
   });
 
   it("CapabilityLifetime includes session kind", () => {
-    const lifetime: import("../../foundations/contracts/permission-policy.js").CapabilityLifetime = {
+    const lifetime: import("../../../foundations/contracts/permission-policy.js").CapabilityLifetime = {
       kind: "session",
       sessionId: "s-001",
     };
@@ -91,7 +91,7 @@ describe("PermissionDenyReason includes T107d variants", () => {
   });
 
   it("run lifetime requires expiresAt (T107b mandatory expiry)", () => {
-    const lifetime: import("../../foundations/contracts/permission-policy.js").CapabilityLifetime = {
+    const lifetime: import("../../../foundations/contracts/permission-policy.js").CapabilityLifetime = {
       kind: "run",
       runId: "r-001",
       expiresAt: Date.now() + 60_000,
@@ -287,7 +287,9 @@ describe("R9.1 Integration Wiring Verification", () => {
     await wired.capabilityLedger!.revoke({ sessionId: "sess-revoked-123" });
 
     // Construct an action associated with that revoked session
-    const action = {
+    const action: import("../../../foundations/contracts/prepared-action.js").PreparedToolAction = {
+      version: 1,
+      actionId: "a-1",
       toolCallId: "tc-1",
       toolName: "get_current_datetime",
       principalId: "test-user",
@@ -295,9 +297,10 @@ describe("R9.1 Integration Wiring Verification", () => {
       sessionId: "sess-revoked-123",
       argsDigest: "digest-1",
       actionDigest: "digest-2",
+      risk: "safe",
       effects: [],
-      operation: { kind: "none" as const },
-      display: { title: "Get datetime", summary: "Get datetime", parameters: {} },
+      operation: { kind: "none", result: { output: "", success: true } },
+      display: { title: "Get datetime", summary: "Get datetime", canonicalTargets: [], effects: [] },
     };
 
     const res = await wired.lifecycle.run(action);
@@ -314,19 +317,22 @@ describe("R9.1 Integration Wiring Verification", () => {
 
     const executor = new ProcessExecutor({ sandbox: new UncontainedSandbox() });
     const action = {
+      version: 1 as const,
+      actionId: "a-1",
       toolCallId: "tc-1",
       toolName: "execute_shell_command",
       principalId: "u1",
       runId: "r1",
       argsDigest: "a1",
       actionDigest: "ad1",
+      risk: "edit" as const,
       effects: [],
       operation: {
         kind: "process" as const,
-        command: { executable: "/bin/ls", argv: [], cwd: SECURITY_DIR_CANONICAL },
+        command: { executable: "/bin/ls", argv: [] as string[], cwd: SECURITY_DIR_CANONICAL },
         roots: [],
       },
-      display: { title: "ls", summary: "ls", parameters: {} },
+      display: { title: "ls", summary: "ls", canonicalTargets: [], effects: [] },
     };
 
     const env = {
@@ -366,8 +372,8 @@ describe("R9.1 Integration Wiring Verification", () => {
     });
 
     const file = join(tmpDir, "test.txt");
-    const actionA = {
-      version: 1 as const,
+    const actionA: import("../../../foundations/contracts/prepared-action.js").PreparedToolAction = {
+      version: 1,
       actionId: "a1",
       toolCallId: "tc-1",
       toolName: "write_file",
@@ -376,24 +382,25 @@ describe("R9.1 Integration Wiring Verification", () => {
       sessionId: "session-A",
       argsDigest: "a1",
       actionDigest: "ad1",
-      risk: "edit" as const,
+      risk: "edit",
       effects: [
         {
-          kind: "filesystem-write" as const,
+          kind: "filesystem-write",
           targets: [
             {
               target: { canonicalPath: file, canonicalParent: tmpDir, basename: "test.txt", exists: false, finalSymlink: false },
+              mode: "create",
               expected: { exists: false },
             },
           ],
         },
       ],
       operation: {
-        kind: "commit-files" as const,
+        kind: "commit-files",
         commits: [
           {
             destination: { canonicalPath: file, canonicalParent: tmpDir, basename: "test.txt", exists: false, finalSymlink: false },
-            content: "c1",
+            content: { artifactId: "art-1", sha256: "sha256:c1", byteLength: 2, mediaType: "text/plain" },
             expected: { exists: false },
           },
         ],
@@ -438,15 +445,15 @@ describe("R9.1 Integration Wiring Verification", () => {
     const store = new DurableApprovalStore({ root: tmpDir });
     await store.load();
 
-    const req = {
+    const req: import("../../../foundations/contracts/permission-policy.js").PermissionRequest = {
       requestId: "req-1",
       principalId: "u1",
       runId: "r1",
       toolCallId: "tc-1",
       actionDigest: "ad1",
-      action: { title: "Test", summary: "Test", parameters: {} },
+      action: { title: "Test", summary: "Test", canonicalTargets: [], effects: [] },
       requestedCapabilities: [],
-      offeredLifetimes: ["action" as const],
+      offeredLifetimes: ["action"],
       createdAt: Date.now(),
       expiresAt: Date.now() + 60000,
     };

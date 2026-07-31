@@ -161,6 +161,10 @@ function makeScheduler(opts: {
   const result = opts.result ?? successResult(dispatch());
   const engine = fakeSchedulerEngine({ dispatches, result });
   const mounts = opts.mounts ?? { "ws-a": "/workspaces/a", "ws-b": "/workspaces/b" };
+  // Isolated temp root per scheduler so the persisted nonce ledger does not
+  // leak across tests (otherwise a later dispatch short-circuits as an
+  // idempotent-retry of an earlier one).
+  const root = mkdtempSync(join(tmpdir(), "seepient-matrix-sched-"));
   const sched = new DockerWorkerScheduler({
     engine: engine as never,
     images: { "seepient/worker:latest": "sha256:abc" },
@@ -172,6 +176,7 @@ function makeScheduler(opts: {
       ),
     defaultImage: "seepient/worker:latest",
     brokerNetwork: "broker-net",
+    root,
   });
   return { sched, engine: { created: engine.created, dispatches } };
 }
@@ -438,7 +443,7 @@ describe("QS-4.6 network boundary (T411)", () => {
           return ["169.254.169.254"]; // cloud metadata
         },
         async fetch() {
-          return { status: 200, bytes: new Uint8Array([0]), effectiveHost: "h", effectiveIp: "169.254.169.254" };
+          return { status: 200, bytes: new Uint8Array([0]), effectiveHost: "h", effectiveIp: "169.254.169.254", headers: {} };
         },
       },
     });

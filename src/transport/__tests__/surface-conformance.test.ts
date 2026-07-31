@@ -136,7 +136,7 @@ describe("NoneApprovalBroker (headless, T301)", () => {
       createdAt: 0,
       expiresAt: 1,
     };
-    const decision = await broker.request(req, {});
+    const decision = await broker.request(req);
     expect(decision.approved).toBe(false);
     if (!decision.approved) {
       expect(decision.reason).toContain("headless");

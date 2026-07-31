@@ -65,6 +65,8 @@ function randomCap(r: () => number): Capability {
       return { kind, executable: `/bin/x${n}` };
     case "activate-change-class":
       return { kind, changeClass: "docs" };
+    case "trusted-host":
+      return { kind, registrationId: `reg-${n}` };
   }
 }
 

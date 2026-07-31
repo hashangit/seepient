@@ -12,6 +12,7 @@ import {
   WorkerExecutionBoundary,
   canonicalDispatch,
 } from "../worker-execution-boundary.js";
+import type { WorkerExecutionBoundaryOptions } from "../worker-execution-boundary.js";
 import type { WorkerScheduler, WorkerDispatch, WorkerResult } from "../../../foundations/contracts/worker-protocol.js";
 import type { PreparedToolAction } from "../../../foundations/contracts/prepared-action.js";
 import type { CapabilityEnvelope } from "../../../foundations/contracts/permission-policy.js";
@@ -108,7 +109,7 @@ function workerSuccess(): WorkerResult {
   };
 }
 
-function makeBoundary(opts: Partial<Parameters<typeof WorkerExecutionBoundary>[0]> = {}) {
+function makeBoundary(opts: Partial<WorkerExecutionBoundaryOptions> = {}) {
   return new WorkerExecutionBoundary({
     scheduler: opts.scheduler ?? fakeScheduler(workerSuccess()),
     auth: { controlPlaneId: "cp-1", authenticatedTransport: "mtls" },
@@ -154,7 +155,7 @@ describe("WorkerExecutionBoundary (T405)", () => {
     const boundary = makeBoundary({
       scheduler: sched,
       safeExecutor: {
-        async execute(a) {
+        async execute(a: PreparedToolAction) {
           safeExec++;
           return { state: "succeeded", result: { output: "local", success: true }, evidence: { backend: "docker-worker", actionDigest: a.actionDigest, executorId: "control-plane", operationKind: "none" } };
         },
@@ -176,7 +177,7 @@ describe("WorkerExecutionBoundary (T405)", () => {
   it("dispatch signature covers every field except signature itself", async () => {
     const signCalls: string[] = [];
     const boundary = makeBoundary({
-      sign: (c) => {
+      sign: (c: string) => {
         signCalls.push(c);
         return "signed";
       },
@@ -246,7 +247,7 @@ describe("WorkerExecutionBoundary (T405)", () => {
     const sched = fakeScheduler(workerSuccess());
     const boundary = makeBoundary({
       scheduler: sched,
-      issueBrokerLease: (digest) => {
+      issueBrokerLease: (digest: string) => {
         leaseIssued++;
         return { endpoint: "http://effect-broker:7001", token: `lease-${digest}`, expiresAt: Date.now() + 1000 };
       },

@@ -14,7 +14,8 @@
 import { describe, it, expect } from 'vitest';
 import { createChatBlock } from '../chat-block.js';
 import { generateId } from '../../../foundations/id.js';
-import type { FeedApi, FeedEntry, FeedEntryInput, BlockEntry } from '../types.js';
+import type { FeedApi } from '../hooks/use-feed.js';
+import type { FeedEntry, FeedEntryInput, BlockEntry } from '../types.js';
 
 /** Non-React feed for testing — same FeedApi interface as use-feed.ts. */
 function createTestFeed(): FeedApi {

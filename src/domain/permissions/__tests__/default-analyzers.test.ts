@@ -152,7 +152,7 @@ describe("write_file analyzer (T102/T105)", () => {
       { path: join(dir, "x.txt"), content: "x" },
       c,
     );
-    expect(action.effects).toHaveLength(1);
+    expect(action.effects.map((e) => e.kind)).toEqual(["filesystem-write", "model-egress"]);
     expect(action.effects[0].kind).toBe("filesystem-write");
     expect(action.display.canonicalTargets[0]).toBe(join(dir, "x.txt"));
   });

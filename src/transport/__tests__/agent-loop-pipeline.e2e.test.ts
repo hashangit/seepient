@@ -75,7 +75,6 @@ function fakeProvider(toolName: string, args: Record<string, unknown>): LLMProvi
               id: "tc1",
               name: toolName,
               arguments: JSON.stringify(args),
-              type: "function",
             },
           ],
         };
@@ -124,6 +123,7 @@ interface PreparedActionDigestLog {
 }
 
 const set = (...c: Capability[]): CapabilitySet => ({ version: 1, capabilities: c });
+const defaultEgress: Capability = { kind: "model-egress", providerClass: "*", dataClasses: ["normal", "sensitive"] };
 
 /** Build a wired pipeline + the runAgentLoop options to use it. */
 async function wirePipeline(opts: {
@@ -134,6 +134,9 @@ async function wirePipeline(opts: {
   policyStore?: LocalPolicyStore;
   auditStore?: LocalAuditStore;
 }) {
+  const defaultCeiling = set({ kind: "write-root", root: dir }, { kind: "read-root", root: dir }, defaultEgress);
+  const defaultPrincipal = set({ kind: "write-root", root: dir }, { kind: "read-root", root: dir }, defaultEgress);
+
   const wired = await buildActionLifecycle({
     principalId: "u",
     runId: "r1",
@@ -143,8 +146,8 @@ async function wirePipeline(opts: {
     executionBoundary: opts.boundary,
     policyStore: opts.policyStore ?? new LocalPolicyStore({ root: dir }),
     auditStore: opts.auditStore ?? new LocalAuditStore({ root: dir }),
-    deploymentCeiling: opts.ceiling ?? set({ kind: "commit-file", path: join(dir, "a.txt") }),
-    principalPolicy: opts.principal ?? set({ kind: "commit-file", path: join(dir, "a.txt") }),
+    deploymentCeiling: opts.ceiling ?? defaultCeiling,
+    principalPolicy: opts.principal ?? defaultPrincipal,
     approvalMode: "manual",
   });
   return wired;
@@ -153,7 +156,6 @@ async function wirePipeline(opts: {
 /** Common option shape for runAgentLoop. */
 function loopOpts(overrides: Partial<Parameters<typeof runAgentLoop>[0]> & { provider: LLMProvider }) {
   return {
-    provider: overrides.provider,
     model: "test-model",
     messages: [],
     toolDefs: [] as ToolDefinition[],
@@ -174,8 +176,8 @@ describe("E2E: runAgentLoop routes through the wired pipeline", () => {
     const wired = await wirePipeline({
       broker: new NoneApprovalBroker(),
       boundary,
-      principal: set({ kind: "commit-file", path: capPath }),
-      ceiling: set({ kind: "commit-file", path: capPath }),
+      principal: set({ kind: "commit-file", path: capPath }, defaultEgress),
+      ceiling: set({ kind: "commit-file", path: capPath }, defaultEgress),
     });
     const provider = fakeProvider("write_file", { path: targetPath, content: "hi" });
 
@@ -271,11 +273,12 @@ describe("E2E: runAgentLoop routes through the wired pipeline", () => {
       },
     };
     const broker = new InlineApprovalBroker(presenter, { deadlineMs: 5000 });
+    const defaultEgress: Capability = { kind: "model-egress", providerClass: "*", dataClasses: ["normal", "sensitive"] };
     const wired = await wirePipeline({
       broker,
       boundary,
-      principal: set({ kind: "commit-file", path: capPath }),
-      ceiling: set({ kind: "commit-file", path: capPath }),
+      principal: set({ kind: "commit-file", path: capPath }, defaultEgress),
+      ceiling: set({ kind: "commit-file", path: capPath }, defaultEgress),
     });
     const provider = fakeProvider("write_file", { path: targetPath, content: "x" });
 
@@ -312,7 +315,7 @@ describe("E2E: runAgentLoop routes through the wired pipeline", () => {
     await policyStore.compareAndSet(
       workspaceId,
       0,
-      { version: 1, capabilities: [{ kind: "commit-file", path: capPath }] },
+      { version: 1, capabilities: [{ kind: "commit-file", path: capPath }, defaultEgress] },
       { kind: "human", authorityId: "operator", authenticatedBy: "cli" },
     );
 
@@ -321,7 +324,7 @@ describe("E2E: runAgentLoop routes through the wired pipeline", () => {
       broker: new NoneApprovalBroker(), // headless — no interactive approval
       boundary,
       policyStore,
-      ceiling: set({ kind: "commit-file", path: capPath }),
+      ceiling: set({ kind: "commit-file", path: capPath }, defaultEgress),
       principal: set(), // no caller-supplied policy — must come from the store
     });
     const provider = fakeProvider("write_file", { path: targetPath, content: "x" });
@@ -331,5 +334,25 @@ describe("E2E: runAgentLoop routes through the wired pipeline", () => {
     // The store-approved capability let the call through even though the
     // caller passed no principal policy and the broker would deny.
     expect(boundary.calls.length).toBe(1);
+  });
+
+  it("a deployment ceiling omitting model-egress denies execution or redacts output (monotonic intersection preserved)", async () => {
+    const targetPath = join(dir, "restrictive.txt");
+    const capPath = canonicalize(targetPath);
+    const boundary = recordingBoundary({});
+    // Explicit ceiling that ONLY allows commit-file (NO model-egress)
+    const wired = await wirePipeline({
+      broker: new NoneApprovalBroker(),
+      boundary,
+      ceiling: set({ kind: "commit-file", path: capPath }),
+      principal: set({ kind: "commit-file", path: capPath }),
+    });
+    const provider = fakeProvider("write_file", { path: targetPath, content: "x" });
+
+    const result = await runAgentLoop(loopOpts({ provider, wiredPipeline: wired }));
+    // Because deploymentCeiling lacks model-egress, policy denies execution up front!
+    expect(boundary.calls.length).toBe(0);
+    const toolMsg = result.messages.find((m) => m.role === "tool");
+    expect(toolMsg?.content).toContain("denied");
   });
 });

@@ -70,7 +70,7 @@ describe("/permissions protected-policy (T307, QS-3.3)", () => {
     const agent = makeAgent();
     await run(agent, "propose commit-file:/proj/a.txt");
     const review = await run(agent, "review");
-    const id = (review.output.match(/\b[a-f0-9]{8}\b/g) ?? [])[0];
+    const id = (review.output!.match(/\b[a-f0-9]{8}\b/g) ?? [])[0];
     expect(id).toBeDefined();
 
     const res = await run(agent, `approve ${id}`);
@@ -85,7 +85,7 @@ describe("/permissions protected-policy (T307, QS-3.3)", () => {
     const agent = makeAgent();
     await run(agent, "propose commit-file:/proj/a.txt");
     const review = await run(agent, "review");
-    const id = (review.output.match(/\b[a-f0-9]{8}\b/g) ?? [])[0];
+    const id = (review.output!.match(/\b[a-f0-9]{8}\b/g) ?? [])[0];
     await run(agent, `approve ${id}`);
 
     const res = await run(agent, "revoke-cap 0");

@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { checkToolPermission, resolvePermissionLevel } from "../../permission.js";
+import type { PolicyContext } from "../../../foundations/contracts/permission-policy.js";
 
 /**
  * QS-0.1 / QS-0.2 / QS-0.3 — the three CRITICAL current defects documented as
@@ -81,7 +82,7 @@ describe("P0 regression fixtures — fixed behavior (spec-008 pipeline)", () => 
     // returns needs-approval (or deny in headless) for the same call when
     // the capability isn't pre-granted.
     const engine = new PolicyEngine("dig");
-    const ctx = {
+    const ctx: PolicyContext = {
       deploymentCeiling: { version: 1 as const, capabilities: [] },
       principalPolicy: { version: 1 as const, capabilities: [] },
       runtimeBaseline: { version: 1 as const, capabilities: [] },
@@ -117,7 +118,7 @@ describe("P0 regression fixtures — fixed behavior (spec-008 pipeline)", () => 
 
   it("QS-0.2 FIXED: headless interaction.mode denies rather than auto-executing", () => {
     const engine = new PolicyEngine("dig");
-    const ctx = {
+    const ctx: PolicyContext = {
       deploymentCeiling: { version: 1 as const, capabilities: [{ kind: "commit-file" as const, path: "/p/a.txt" }] },
       principalPolicy: { version: 1 as const, capabilities: [{ kind: "commit-file" as const, path: "/p/a.txt" }] },
       runtimeBaseline: { version: 1 as const, capabilities: [{ kind: "commit-file" as const, path: "/p/a.txt" }] },

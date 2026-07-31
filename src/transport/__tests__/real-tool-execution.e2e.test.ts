@@ -31,7 +31,7 @@ function fakeProvider(toolName: string, args: Record<string, unknown>): LLMProvi
         called = true;
         return {
           content: "",
-          tool_calls: [{ id: "tc1", name: toolName, arguments: JSON.stringify(args), type: "function" }],
+          tool_calls: [{ id: "tc1", name: toolName, arguments: JSON.stringify(args) }],
         };
       }
       return { content: "done", tool_calls: [] };

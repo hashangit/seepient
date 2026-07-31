@@ -251,6 +251,12 @@ export async function analyzeWriteFile(
       kind: "filesystem-write",
       targets: [{ target, mode: target.exists ? "replace" : "create", expected }],
     },
+    {
+      kind: "model-egress",
+      providerClass: ctx.modelProviderClass,
+      dataClasses: ["normal", "sensitive"],
+      sources: [target.canonicalPath],
+    },
   ];
 
   const operation: PreparedOperation = {
@@ -288,6 +294,12 @@ export async function analyzeEditFile(
     {
       kind: "filesystem-write",
       targets: [{ target, mode: "replace", expected }],
+    },
+    {
+      kind: "model-egress",
+      providerClass: ctx.modelProviderClass,
+      dataClasses: ["normal", "sensitive"],
+      sources: [target.canonicalPath],
     },
   ];
 
@@ -333,7 +345,7 @@ export async function analyzeExecuteShellCommand(
     {
       kind: "model-egress",
       providerClass: ctx.modelProviderClass,
-      dataClasses: ["normal"],
+      dataClasses: ["normal", "sensitive"],
       sources: ["shell-output"],
     },
   ];
@@ -815,7 +827,15 @@ export function resolveAnalyzerWithFallback(
       toolName,
       args: jsonArgs as any,
     };
-    const effects: EffectRequest[] = [{ kind: "host-callback", toolName }];
+    const effects: EffectRequest[] = [
+      { kind: "host-callback", toolName },
+      {
+        kind: "model-egress",
+        providerClass: ctx.modelProviderClass,
+        dataClasses: ["normal", "sensitive"],
+        sources: [toolName],
+      },
+    ];
     const argsDigest = digestArgs(args);
     const actionDigest = digestAction({
       operation,

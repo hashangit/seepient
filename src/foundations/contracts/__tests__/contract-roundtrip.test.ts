@@ -85,16 +85,22 @@ describe("P0 contract round-trip (T001)", () => {
   });
 
   it("actionDigest changes when a target changes", () => {
+    // `sampleAction.operation` is the full `PreparedOperation` union; narrow to
+    // the commit-files variant so `.commits` resolves without changing runtime.
+    const originalOp = sampleAction.operation as Extract<
+      typeof sampleAction.operation,
+      { kind: "commit-files" }
+    >;
     const mutated: PreparedToolAction = {
       ...sampleAction,
       operation: {
-        ...sampleAction.operation,
+        ...originalOp,
         kind: "commit-files",
         commits: [
           {
-            ...sampleAction.operation.commits[0],
+            ...originalOp.commits[0],
             destination: {
-              ...sampleAction.operation.commits[0].destination,
+              ...originalOp.commits[0].destination,
               canonicalPath: "/project/other.txt",
             },
           },
