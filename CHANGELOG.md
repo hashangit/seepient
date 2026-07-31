@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.4.0] - 2026-07-31
+
+Welcome to **Seepient v0.4.0**! This release brings a big upgrade to how Seepient talks to you in the terminal and how it safely gets things done on your system.
+
+Instead of plain text walls, Seepient can now build interactive visual widgets right inside your terminal stream—like live charts, data tables, visual forms, and color-coded code diffs. Under the hood, a new security and permission engine keeps your system isolated and safe, giving you control over every command, file edit, and external request before it happens.
+
+---
+
+### 🎨 What's New
+
+#### 1. Interactive Visual Widgets in Your Terminal
+Seepient no longer relies on plain markdown text alone. When analyzing code, summarizing data, or asking for input, Seepient now renders rich visual widgets right inside your terminal stream:
+
+* **Interactive Forms**: Fill out text fields, cycle through options, and toggle checkboxes directly in your terminal without typing long command strings — then submit your answers back to Seepient.
+* **Visual Data Charts**: View inline bar charts, trend lines, and sparklines to visualize performance data and progress metrics.
+* **Structured Data Tables**: Read datasets, file lists, and benchmark results in clean, formatted tables with bold headers and aligned columns.
+* **File Trees**: Browse directory structures and file hierarchies visually.
+* **Color-Coded Code Diffs**: Preview code changes with added lines shown in green and removed lines in red before they land on disk.
+* **Status Grids & Preview Cards**: Track active tasks with ok / warn / fail / pending markers, and inspect structured item previews at a glance.
+
+#### 2. Smoother, Flicker-Free Streaming
+* **Buffered Rendering**: Terminal output is now throttled to roughly 30 frames per second, so the screen no longer flickers while text streams in quickly.
+* **Stable Widget Display**: Visual widgets no longer rebuild on every keystroke, so the stream stays readable even during long replies.
+
+#### 3. Built-in Security, Sandboxing & Data Privacy
+* **Smart Permission Prompts**: Whenever Seepient needs to run a command or touch a file, it shows a clear prompt explaining what it wants to do and why. You can allow it once, for the current session, for this project, everywhere, or deny it.
+* **Remembered Approvals**: Approvals you give are saved securely — project and global ones stick across restarts — so you don't get asked repeatedly for routine, safe operations.
+* **Native Process Sandboxing**: Risky shell commands run inside a native OS sandbox — Apple's Seatbelt on macOS and Bubblewrap on Linux — by default. If Seepient can't set up a sandbox, the command is blocked rather than allowed to run loose. *(Container-based isolation for server-driven workflows is built but not switched on in this release; it arrives in a follow-on update.)*
+* **Atomic File Edits**: Every edit is fully checked and then written in a single atomic step. If something fails mid-edit, your file is never left half-written or corrupted — the original stays intact.
+* **Built-in Privacy Guard**: Before tool results are sent to the AI model, Seepient checks them for sensitive data classes (secrets, credentials, keys, active policy) and holds back anything sensitive, so local passwords and API keys don't slip into the model's view.
+* **Tamper-Resistant Audit Trail**: Every permission decision, command run, and file edit is written to a local, append-only audit log with locked-down file permissions — a clear, durable history of everything Seepient did.
+
+#### 4. Direct Control & Management Tools
+* **/permissions**: Manage saved permissions, view active rules, and revoke access.
+* **/context**: Inspect your current prompt context and token usage budget.
+* **/skills**: Browse and manage installed agent skills.
+
+---
+
+### 🚀 How This Improves Your Experience
+
+| Area | Before (v0.3.x) | Now (v0.4.0) | Why It Matters |
+| :--- | :--- | :--- | :--- |
+| **Terminal Output** | Plain text walls | Live visual widgets (forms, charts, tables, diffs) | Easier to read data and interact naturally |
+| **User Input** | Text-only prompts | Visual forms with inputs, checkboxes, & options | Faster, cleaner input without formatting errors |
+| **Streaming** | Flickery during fast output | Smooth ~30fps buffered rendering | Comfortable to watch, even in long replies |
+| **System Safety** | Runs directly on your machine | Runs in a native OS sandbox (or is blocked) | Safe to run autonomous workflows; untrusted commands can't touch your system |
+| **File Editing** | Direct file overwrites | Atomic, all-or-nothing edits | No risk of half-written or corrupted files |
+| **Data Privacy** | Raw tool outputs sent to AI | Sensitive outputs held back from the model | API keys & secrets stay private |
+
+
+
+### Technical Details
+
 ### Added
 
 - **Permission System Redesign R9.1** (#008): Production-ready single-path permission pipeline. Every tool call across CLI, TUI, REPL, SDK, and HTTP/WS routes through `PolicyEngine` → `ApprovalBroker` → `ExecutionBoundary` → `AuditRecorder`.
@@ -34,6 +88,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - System prompt: hashline grammar section added (op table, ordering rule, worked example).
 
 - **Design skill** (`skills/design/SKILL.md`): Single bundled entry point for all design work. It is a router/dispatcher — it does not do design itself. On any design request it classifies the task, fetches the matching skill from the upstream OpenDesign catalogue (`https://raw.githubusercontent.com/nexu-io/open-design/main/skills/<slug>/SKILL.md` via `read_website`), maps upstream tool names to Seepient's tools, and follows that skill's procedure with Seepient's quality bar applied on top. Covers 145 verified upstream skills across 13 disciplines (process/brief/review, taste & aesthetic, brand, frontend/web, Figma/design systems, native platforms, slides/decks, image generation, social cards, video/motion, web animation/GSAP/Three.js, documents/editorial, audio). This mirrors how OpenDesign skills cross-reference Anthropic/Gemini design skills — one source of truth upstream, no drift. The new `design` skill brings the bundled-skill count to 13.
+
+
+
 
 ## [v0.3.0] - 2026-06-10
 
