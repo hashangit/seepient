@@ -9,7 +9,7 @@
  *  - idempotency: recovery does not double-mark an already-indeterminate action
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -26,11 +26,11 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 describe("TerminalEventOutbox (T109 fix)", () => {
-  it("enqueue marks the deployment unhealthy", () => {
+  it("enqueue marks the deployment unhealthy", async () => {
     const store = new LocalAuditStore({ root: dir });
     const outbox = new TerminalEventOutbox(store);
     expect(outbox.isHealthy()).toBe(true);
-    outbox.enqueue(
+    await outbox.enqueue(
       {
         eventId: "e",
         actionId: "a",
@@ -50,7 +50,7 @@ describe("TerminalEventOutbox (T109 fix)", () => {
   it("flush retries pending terminal events and clears them on success", async () => {
     const store = new LocalAuditStore({ root: dir });
     const outbox = new TerminalEventOutbox(store);
-    outbox.enqueue(
+    await outbox.enqueue(
       {
         eventId: "e",
         actionId: "a",
@@ -81,7 +81,7 @@ describe("TerminalEventOutbox (T109 fix)", () => {
       },
     } as unknown as LocalAuditStore;
     const outbox = new TerminalEventOutbox(failingStore);
-    outbox.enqueue(
+    await outbox.enqueue(
       {
         eventId: "e",
         actionId: "a",
@@ -225,5 +225,96 @@ describe("recoverIndeterminateActions (T109 fix, FR-014)", () => {
     // it enqueued it for retry.
     expect(indeterminate).toContain("a-fail");
     expect(outbox.size()).toBeGreaterThan(0);
+  });
+});
+
+describe("TerminalEventOutbox concurrency (shared outbox safety)", () => {
+  it("persists every enqueued event exactly once under concurrent enqueue + flush", async () => {
+    // A shared outbox (one instance across N concurrent per-request lifecycles,
+    // as the HTTP server uses) must not lose entries when enqueue and flush
+    // interleave. Without the in-process mutex, a flush iterating `pending`
+    // races an enqueue mutating it and entries can be dropped.
+    const store = new LocalAuditStore({ root: dir });
+    const outbox = new TerminalEventOutbox(store);
+
+    // Make the underlying append briefly slow so flush is genuinely in flight
+    // while enqueues land — widens the race window the mutex must close.
+    const N = 50;
+    const events = Array.from({ length: N }, (_, i) => ({
+      eventId: `e-${i}`,
+      actionId: `a-${i}`,
+      actionDigest: `d-${i}`,
+      principalId: "ws",
+      runId: "r",
+      state: "succeeded" as const,
+      timestamp: Date.now(),
+      policyDigest: "d",
+    }));
+
+    // Interleave enqueues with flushes; all concurrent.
+    const ops: Promise<unknown>[] = [];
+    for (let i = 0; i < N; i++) {
+      ops.push(outbox.enqueue(events[i], idempotencyKey(`a-${i}`, "succeeded")));
+      if (i % 5 === 0) ops.push(outbox.flush());
+    }
+    await Promise.all(ops);
+
+    // Final flush drains everything.
+    const remaining = await outbox.flush();
+    expect(remaining).toBe(0);
+    expect(outbox.size()).toBe(0);
+    expect(outbox.isHealthy()).toBe(true);
+
+    // Every event MUST be present in the audit store exactly once — no losses
+    // from the race, no duplicates.
+    for (let i = 0; i < N; i++) {
+      const term = await store.getTerminal(`a-${i}`);
+      expect(term, `event a-${i} should be persisted`).toBeDefined();
+      expect(term?.state).toBe("succeeded");
+    }
+  });
+
+  it("reload discovers and drains an abandoned sibling-process outbox (cross-process recovery)", async () => {
+    // Gate 5 / cross-process safety: each process owns pending.<pid>.ndjson;
+    // a crashed process leaves its outbox behind. A NEW process starting
+    // against the same ~/.seepient must discover that abandoned file and
+    // drain its entries — otherwise terminal events are lost forever.
+    const store = new LocalAuditStore({ root: dir });
+    const outboxDir = join(dir, "outbox");
+    // Simulate a sibling process (pid 99999) that enqueued a terminal event
+    // and crashed before flushing. Write its per-process outbox file directly.
+    const siblingFile = join(outboxDir, "pending.99999.ndjson");
+    mkdirSync(outboxDir, { recursive: true });
+    writeFileSync(
+      siblingFile,
+      JSON.stringify({
+        event: {
+          eventId: "e-sib",
+          actionId: "a-sibling",
+          actionDigest: "d-sib",
+          principalId: "ws",
+          runId: "r",
+          state: "succeeded",
+          timestamp: Date.now(),
+          policyDigest: "d",
+        },
+        idempotencyKey: idempotencyKey("a-sibling", "succeeded"),
+        attempts: 0,
+        lastAttempt: 0,
+      }) + "\n",
+      "utf8",
+    );
+
+    // A fresh outbox (this process) loads ALL pending.*.ndjson at startup.
+    const outbox = new TerminalEventOutbox(store, { outboxDir });
+    await outbox.reload();
+    expect(outbox.size()).toBe(1);
+    expect(outbox.isHealthy()).toBe(false);
+
+    // Flush drains the sibling's entry into the shared audit store.
+    const remaining = await outbox.flush();
+    expect(remaining).toBe(0);
+    const term = await store.getTerminal("a-sibling");
+    expect(term?.state).toBe("succeeded");
   });
 });

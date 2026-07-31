@@ -43,6 +43,28 @@ export function idempotencyKey(actionId: string, state: ActionState): string {
   return `${actionId}:${state}`;
 }
 
+/**
+ * Stale-lock break: if a `wx`-create of `lockFile` fails with EEXIST, inspect
+ * the lock's mtime. A lock older than the threshold is assumed to belong to a
+ * crashed writer and is unlinked so subsequent writers can proceed; without
+ * this a process killed mid-`persistOutbox`/`append` permanently blocks every
+ * later write (20 retries → fail-closed forever). The threshold is well above
+ * the retry window (20 × 25 ms ≈ 0.5 s) so a live writer is never wrongly
+ * broken.
+ */
+const STALE_LOCK_MS = 30_000;
+async function breakStaleLock(lockFile: string): Promise<void> {
+  let stat: import("node:fs").Stats;
+  try {
+    stat = await fs.stat(lockFile);
+  } catch {
+    return; // lock already gone — nothing to break
+  }
+  if (Date.now() - stat.mtimeMs > STALE_LOCK_MS) {
+    await fs.unlink(lockFile).catch(() => {});
+  }
+}
+
 interface AuditFileEntry {
   event: ActionAuditEvent;
   idempotencyKey: string;
@@ -111,6 +133,9 @@ export class LocalAuditStore implements AuditStoreContract {
         break;
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+        // A crash mid-write can leave a stale lock; break it so the store
+        // doesn't block forever.
+        await breakStaleLock(lockFile);
         if (attempt === MAX_LOCK_ATTEMPTS - 1) {
           throw new AuditError(
             "Audit lock timeout: another writer holds the lock",
@@ -256,6 +281,15 @@ export class TerminalEventOutbox {
   private readonly store: LocalAuditStore;
   private readonly outboxFile: string;
   private unhealthy = false;
+  /**
+   * In-process mutex serializing `enqueue`/`flush`/`reload`. A shared outbox
+   * (e.g. the HTTP server's, one instance across all per-request lifecycles)
+   * is reached concurrently; without this, a flush iterating `pending` races
+   * an enqueue mutating it and entries can be lost. The file lock in
+   * `persistOutbox` only serializes the on-disk write, not the in-memory
+   * read-modify-write, so this chain guards the whole critical section.
+   */
+  private tail: Promise<unknown> = Promise.resolve();
 
   constructor(
     store: LocalAuditStore,
@@ -267,28 +301,70 @@ export class TerminalEventOutbox {
       (process.env.SEEPIENT_SECURITY_DIR
         ? path.join(process.env.SEEPIENT_SECURITY_DIR, "outbox")
         : path.join(os.homedir(), ".seepient", "security", "outbox"));
-    this.outboxFile = path.join(dir, "pending.ndjson");
+    // Per-process outbox file (Gate 5 / cross-process safety): each process
+    // owns `pending.<pid>.ndjson`, so concurrent processes sharing
+    // ~/.seepient never contend on one file. `reload()` scans EVERY
+    // `pending.*.ndjson` in the dir, so an abandoned outbox from a crashed
+    // sibling process is discovered and drained at startup.
+    this.outboxFile = path.join(dir, `pending.${process.pid}.ndjson`);
+  }
+
+  /** Run `fn` after all prior enqueues/flushes complete, preserving rejection. */
+  private serialize<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.tail.then(fn, fn);
+    // Keep the chain alive regardless of rejection, but surface the error to
+    // the caller of THIS invocation.
+    this.tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
   }
 
   /**
-   * Reload pending entries from the durable outbox file. Call once at
-   * startup before the first flush (T109c recovery integration).
+   * Reload pending entries from the durable outbox. Call once at startup
+   * before the first flush (T109c recovery integration). Scans EVERY
+   * `pending.*.ndjson` in the outbox dir — not just this process's file — so
+   * abandoned entries from a crashed sibling process are discovered and
+   * drained. (Per-process file isolation means concurrent writers never
+   * contend on one file; recovery reconciles them.)
    */
   async reload(): Promise<void> {
-    try {
-      const raw = await fs.readFile(this.outboxFile, "utf8");
+    await this.serialize(async () => {
       this.pending = new Map();
-      for (const line of raw.split("\n")) {
-        if (!line.trim()) continue;
+      const dir = path.dirname(this.outboxFile);
+      let files: string[] = [];
+      try {
+        files = await fs.readdir(dir);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+        this.unhealthy = false;
+        return;
+      }
+      // Every per-process outbox file matches pending.<pid>.ndjson. Include
+      // the legacy shared `pending.ndjson` name too, for migration.
+      const outboxFiles = files.filter(
+        (f) => f === "pending.ndjson" || /^pending\.\d+\.ndjson$/.test(f),
+      );
+      for (const f of outboxFiles) {
+        const fullPath = path.join(dir, f);
         try {
-          const entry = JSON.parse(line) as OutboxEntry;
-          this.pending.set(entry.idempotencyKey, entry);
-        } catch { /* skip malformed */ }
+          const raw = await fs.readFile(fullPath, "utf8");
+          for (const line of raw.split("\n")) {
+            if (!line.trim()) continue;
+            try {
+              const entry = JSON.parse(line) as OutboxEntry;
+              // Last-writer-wins by idempotencyKey; duplicates across files
+              // collapse safely (the audit store dedups on append).
+              this.pending.set(entry.idempotencyKey, entry);
+            } catch { /* skip malformed */ }
+          }
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+        }
       }
       this.unhealthy = this.pending.size > 0;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-    }
+    });
   }
 
   /**
@@ -296,14 +372,16 @@ export class TerminalEventOutbox {
    * to the durable outbox file before returning (T109a atomic write).
    */
   async enqueue(event: ActionAuditEvent, idempotencyKey: string): Promise<void> {
-    this.pending.set(idempotencyKey, {
-      event,
-      idempotencyKey,
-      attempts: 0,
-      lastAttempt: 0,
+    await this.serialize(async () => {
+      this.pending.set(idempotencyKey, {
+        event,
+        idempotencyKey,
+        attempts: 0,
+        lastAttempt: 0,
+      });
+      this.unhealthy = true;
+      await this.persistOutbox();
     });
-    this.unhealthy = true;
-    await this.persistOutbox();
   }
 
   /**
@@ -311,6 +389,7 @@ export class TerminalEventOutbox {
    * A production deployment calls this on a timer AND on startup (T109c).
    */
   async flush(): Promise<number> {
+    return this.serialize(async () => {
     let remaining = 0;
     for (const [key, entry] of this.pending) {
       entry.attempts += 1;
@@ -328,12 +407,33 @@ export class TerminalEventOutbox {
     }
     if (this.pending.size === 0) {
       this.unhealthy = false;
-      // Remove the durable outbox file when fully flushed.
-      await fs.unlink(this.outboxFile).catch(() => {});
+      // Drain complete: remove this process's outbox file AND any sibling
+      // per-process files that were loaded into this pending set (recovery of
+      // a crashed process's abandoned entries). The audit store dedups on
+      // append, so a sibling draining the same entries is safe.
+      await this.cleanupOwnOutboxFile().catch(() => {});
     } else {
       await this.persistOutbox().catch(() => {});
     }
     return remaining;
+    });
+  }
+
+  /**
+   * Remove THIS instance's outbox file once drained. It deletes only the
+   * current process's `pending.<pid>.ndjson` (and the legacy `pending.ndjson`),
+   * never sibling files: `this.pending.size === 0` proves only that THIS
+   * instance has no parsed entries, not that other processes' files are
+   * drained. A sibling that enqueued between reload() and cleanup would have
+   * its pending file wrongly deleted. Coordinated cross-process reclamation of
+   * drained sibling files is a documented follow-up.
+   */
+  private async cleanupOwnOutboxFile(): Promise<void> {
+    await fs.unlink(this.outboxFile).catch(() => {});
+    // Also clean a legacy shared `pending.ndjson` if present (single-writer
+    // legacy form; safe to remove when this instance is drained).
+    const dir = path.dirname(this.outboxFile);
+    await fs.unlink(path.join(dir, "pending.ndjson")).catch(() => {});
   }
 
   /** True while any terminal event remains un-persisted (degraded audit). */
@@ -353,19 +453,50 @@ export class TerminalEventOutbox {
   private async persistOutbox(): Promise<void> {
     const dir = path.dirname(this.outboxFile);
     await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+    const lockFile = this.outboxFile + ".lock";
+    const MAX_LOCK_ATTEMPTS = 20;
+    const LOCK_RETRY_MS = 25;
+    let lockHandle: fs.FileHandle | undefined;
+    for (let attempt = 0; attempt < MAX_LOCK_ATTEMPTS; attempt++) {
+      try {
+        lockHandle = await fs.open(lockFile, "wx", 0o600);
+        break;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+        await breakStaleLock(lockFile);
+        if (attempt === MAX_LOCK_ATTEMPTS - 1) {
+          throw new AuditError("Outbox lock timeout", "AUDIT_UNAVAILABLE", { retryable: true });
+        }
+        await new Promise<void>((r) => setTimeout(r, LOCK_RETRY_MS));
+      }
+    }
     const tmp = this.outboxFile + `.tmp.${process.pid}`;
     const lines = [...this.pending.values()].map((e) => JSON.stringify(e)).join("\n") + "\n";
-    const handle = await fs.open(tmp, "w", 0o600);
     try {
-      await handle.writeFile(lines, "utf8");
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-    try {
+      const handle = await fs.open(tmp, "w", 0o600);
+      try {
+        await handle.writeFile(lines, "utf8");
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
       await fs.rename(tmp, this.outboxFile);
-    } catch {
+    } catch (err) {
       await fs.unlink(tmp).catch(() => {});
+      // Preserve the lock-timeout AuditError; wrap unexpected fs failures
+      // (e.g. EACCES/ENOSPC during rename) into a retryable AuditError so
+      // callers see a consistent shape.
+      if (err instanceof AuditError) throw err;
+      throw new AuditError(
+        `Outbox persist failed: ${(err as Error).message}`,
+        "AUDIT_UNAVAILABLE",
+        { retryable: true },
+      );
+    } finally {
+      if (lockHandle) {
+        await lockHandle.close().catch(() => {});
+        await fs.unlink(lockFile).catch(() => {});
+      }
     }
   }
 }

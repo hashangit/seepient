@@ -72,7 +72,21 @@ export interface BrokerNetworkAdapter {
   fetch(
     destination: NetworkDestination,
     init: { method: string; headers: Record<string, string>; body?: Uint8Array; signal?: AbortSignal },
-  ): Promise<{ status: number; bytes: Uint8Array; effectiveHost: string; effectiveIp: string }>;
+  ): Promise<BrokerNetworkResponse>;
+}
+
+/** Response surface returned by a `BrokerNetworkAdapter.fetch` call. */
+export interface BrokerNetworkResponse {
+  status: number;
+  bytes: Uint8Array;
+  effectiveHost: string;
+  effectiveIp: string;
+  /**
+   * Response headers, lower-cased keys. Required so the broker can read the
+   * `location` header to reauthorize redirects (D38). Adapters MUST populate
+   * at least `location` when status is a 3xx redirect.
+   */
+  headers: Record<string, string>;
 }
 
 /** Headers the broker strips unless a connector schema owns them. */
@@ -272,32 +286,119 @@ export class EffectBroker implements EffectBrokerContract {
       body = await this.artifacts.read(request.body);
     }
 
-    // 2f. Connect with deadline. The adapter enforces TLS verification and
-    // reauthorizes every redirect (no automatic redirect following across
-    // hosts outside the capability).
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.deadlineMs);
+    // 2f. Connect with deadline and manual redirect validation.
+    // Every redirect re-verifies scheme, host, capability envelope, and DNS IPs.
+    // Per-hop method/body follow RFC 7231 §6.4: 303 always becomes GET with no
+    // body; 301/302 from POST also become GET with no body (safe default for a
+    // security boundary); 307/308 preserve method and body. A secret-bearing
+    // body must never be re-posted to a redirect target host.
+    let currentDest = dest;
+    let currentMethod = request.method;
+    let currentBody = body;
+    let redirectCount = 0;
+    const MAX_REDIRECTS = 5;
+    const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+    // Overall deadline bound across all hops: each per-hop timeout is the
+    // minimum of the configured hop deadline and the time remaining, so a
+    // redirect chain cannot run for `deadlineMs × hops`.
+    const overallDeadlineAt = Date.now() + this.deadlineMs;
+
     try {
-      const response = await this.network.fetch(
-        dest,
-        { method: request.method, headers: cleanHeaders, body, signal: controller.signal },
-      );
-      // Response-size cap.
-      if (response.bytes.byteLength > this.maxResponseBytes) {
-        return this.denied(request.requestId, "response exceeds size cap");
+      while (true) {
+        const remaining = overallDeadlineAt - Date.now();
+        if (remaining <= 0) {
+          return this.denied(request.requestId, "request deadline exceeded (redirect chain)");
+        }
+        const controller = new AbortController();
+        let timeout: NodeJS.Timeout | undefined;
+        try {
+          timeout = setTimeout(() => controller.abort(), Math.min(this.deadlineMs, remaining));
+          const response = await this.network.fetch(
+            currentDest,
+            { method: currentMethod, headers: cleanHeaders, body: currentBody, signal: controller.signal },
+          );
+          if (timeout) clearTimeout(timeout);
+
+          // Check for HTTP redirect response (301, 302, 303, 307, 308)
+          if (REDIRECT_STATUSES.has(response.status)) {
+            // Exceeding the redirect cap is an error, NOT a silent success —
+            // returning the 3xx body would look like a successful fetch.
+            if (redirectCount >= MAX_REDIRECTS) {
+              return this.denied(request.requestId, `redirect chain exceeded ${MAX_REDIRECTS} hops`);
+            }
+            // Adapter returns lower-cased header keys (BrokerNetworkResponse).
+            const location = response.headers?.location;
+            if (location) {
+              let targetUrl: URL;
+              try {
+                targetUrl = new URL(location, `${currentDest.scheme}://${currentDest.host}`);
+              } catch {
+                return this.denied(request.requestId, `invalid redirect Location: ${location}`);
+              }
+              const nextScheme = targetUrl.protocol.replace(":", "") as "http" | "https";
+              const nextHost = targetUrl.hostname;
+              const nextPort = targetUrl.port ? parseInt(targetUrl.port, 10) : undefined;
+
+              // Re-validate against envelope, DENIED_HOSTS, and DNS IP ranges
+              const redirectCap = envelope.capabilities.find(
+                (c) =>
+                  c.kind === "network-destination" &&
+                  c.scheme === nextScheme &&
+                  c.host === nextHost,
+              );
+              if (!redirectCap) {
+                return this.denied(request.requestId, `redirect to unauthorized destination ${nextScheme}://${nextHost} denied`);
+              }
+              if (DENIED_HOSTS.has(nextHost.toLowerCase())) {
+                return this.denied(request.requestId, `redirect to denied host: ${nextHost}`);
+              }
+
+              let nextIps: string[];
+              try {
+                nextIps = await this.network.resolve(nextHost);
+              } catch {
+                return this.denied(request.requestId, `DNS resolution failed for redirect target ${nextHost}`);
+              }
+              if (nextIps.length === 0 || nextIps.some((ip) => this.isDeniedAddress(ip))) {
+                return this.denied(request.requestId, `redirect to private/metadata address for ${nextHost}`);
+              }
+
+              // Target valid — apply per-status method/body semantics before
+              // following the redirect (RFC 7231 §6.4).
+              if (response.status === 303 || (currentMethod !== "GET" && currentMethod !== "HEAD" && (response.status === 301 || response.status === 302))) {
+                currentMethod = "GET";
+                currentBody = undefined;
+              }
+              // 307/308 (and same-method 301/302) preserve method and body.
+
+              redirectCount++;
+              // Preserve the query string (pathname alone drops ?search).
+              currentDest = { scheme: nextScheme, host: nextHost, port: nextPort, pathPrefix: targetUrl.pathname + targetUrl.search };
+              resolvedIps = nextIps;
+              continue;
+            }
+          }
+
+          // Response-size cap.
+          if (response.bytes.byteLength > this.maxResponseBytes) {
+            return this.denied(request.requestId, "response exceeds size cap");
+          }
+          // DNS rebinding: the effective IP must match one of the resolved IPs.
+          if (response.effectiveIp && !resolvedIps.includes(response.effectiveIp)) {
+            return this.denied(request.requestId, "DNS rebinding detected");
+          }
+          // Store the response as an artifact (never raw to the worker).
+          const artifact = await this.artifacts.put(response.bytes, "application/octet-stream");
+          return {
+            requestId: request.requestId,
+            status: "succeeded",
+            output: artifact,
+            effectiveDestination: { ...currentDest, host: response.effectiveHost },
+          };
+        } finally {
+          clearTimeout(timeout);
+        }
       }
-      // DNS rebinding: the effective IP must match one of the resolved IPs.
-      if (!resolvedIps.includes(response.effectiveIp)) {
-        return this.denied(request.requestId, "DNS rebinding detected");
-      }
-      // Store the response as an artifact (never raw to the worker).
-      const artifact = await this.artifacts.put(response.bytes, "application/octet-stream");
-      return {
-        requestId: request.requestId,
-        status: "succeeded",
-        output: artifact,
-        effectiveDestination: { ...dest, host: response.effectiveHost },
-      };
     } catch (err) {
       return {
         requestId: request.requestId,
@@ -309,7 +410,6 @@ export class EffectBroker implements EffectBrokerContract {
         },
       };
     } finally {
-      clearTimeout(timeout);
       void auth;
     }
   }
@@ -346,7 +446,7 @@ export class NodeNetworkAdapter implements BrokerNetworkAdapter {
   async fetch(
     destination: NetworkDestination,
     init: { method: string; headers: Record<string, string>; body?: Uint8Array; signal?: AbortSignal },
-  ): Promise<{ status: number; bytes: Uint8Array; effectiveHost: string; effectiveIp: string }> {
+  ): Promise<BrokerNetworkResponse> {
     // T210c: Resolve IPs BEFORE opening the connection. Pin the resolved IP and
     // force the socket lookup callback to connect to THAT IP.
     const resolvedIps = await this.resolve(destination.host);
@@ -381,6 +481,12 @@ export class NodeNetworkAdapter implements BrokerNetworkAdapter {
 
       const req = httpModule.request(reqOpts, (res) => {
         const socketIp = res.socket.remoteAddress || pinnedIp;
+        // Lower-case header keys so the broker can read `location` uniformly.
+        const headers: Record<string, string> = {};
+        for (const [k, v] of Object.entries(res.headers ?? {})) {
+          if (typeof v === "string") headers[k.toLowerCase()] = v;
+          else if (Array.isArray(v)) headers[k.toLowerCase()] = v.join(", ");
+        }
         const chunks: Buffer[] = [];
         res.on("data", (chunk: Buffer) => chunks.push(chunk));
         res.on("end", () => {
@@ -390,6 +496,7 @@ export class NodeNetworkAdapter implements BrokerNetworkAdapter {
             bytes,
             effectiveHost: destination.host,
             effectiveIp: socketIp,
+            headers,
           });
         });
         res.on("error", rejectPromise);
