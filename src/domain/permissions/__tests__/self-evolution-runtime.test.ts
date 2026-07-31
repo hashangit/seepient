@@ -123,6 +123,10 @@ async function makeVerifiedProposal(changeClasses: SelfEvolutionPolicy["allowedC
       evidenceDigest: "unit-ev",
       workerId: "w-1",
       completedAt: Date.now(),
+      executorImageDigest: "sha256:unit-image",
+      commandDigest: "sha256:unit-command",
+      signingKeyId: "supervisor-key-1",
+      evidenceSignature: "unit-sig",
     },
   ];
   const { proposal } = await buildProposal({
@@ -148,7 +152,7 @@ describe("self-evolution runtime (T502-T507)", () => {
     });
     expect(outcome.status).toBe("submitted");
     if (outcome.status === "submitted") {
-      expect(outcome.receipt.parentArtifactDigest ?? outcome.receipt.candidateArtifactDigest).toBeDefined();
+      expect(outcome.receipt.candidateArtifactDigest).toBeDefined();
       expect(outcome.receipt.candidateArtifactDigest).toBe(proposal.candidateArtifactDigest);
       expect(sup.submissions).toHaveLength(1);
     }
@@ -187,13 +191,43 @@ describe("self-evolution runtime (T502-T507)", () => {
     expect(outcome.status).toBe("verified-pending-activation");
   });
 
-  it("QS-5.3: policy self-escalation — candidate-provided policy is untrusted input", async () => {
-    // A candidate's own policy proposal (e.g. add "security-kernel" to its
-    // own allowed list) is NOT used; the operator-owned policy governs.
+  it("QS-5.3: candidate-supplied change classes are untrusted — path-derived classes govern", async () => {
+    // Change classes are derived ONLY from operator-owned path rules; the
+    // author cannot influence (in particular cannot downgrade) its own
+    // classification. A candidate that writes to a security-kernel PATH is
+    // classified protected regardless of what it CLAIMS, and without a
+    // supervisor it stays verified-pending (never auto-activated).
     const operatorPolicy = policy({
-      allowedChangeClasses: ["docs"], // does NOT include security-kernel
+      allowedChangeClasses: ["docs", "application-code", "security-kernel"],
     });
-    const { proposal } = await makeVerifiedProposal(["security-kernel"], operatorPolicy);
+    const candidate = await createCandidateWorkspace({
+      policy: operatorPolicy,
+      parentArtifactDigest: "parent-sha",
+      authorRunId: "run-1",
+    });
+    // Write to a security-kernel path AND claim it is "docs" — the claim must
+    // be ignored; classification is security-kernel (protected).
+    mkdirSync(join(candidate.root, "src/domain/permissions"), { recursive: true });
+    writeFileSync(join(candidate.root, "src/domain/permissions/policy-engine.ts"), "// change");
+    const { proposal } = await buildProposal({
+      candidate,
+      changeClasses: ["docs"], // author's (ignored) claim
+      policy: operatorPolicy,
+      verification: [
+        {
+          checkId: "unit",
+          state: "passed",
+          evidenceDigest: "ev",
+          workerId: "w",
+          completedAt: Date.now(),
+          executorImageDigest: "sha256:img",
+          commandDigest: "sha256:cmd",
+          signingKeyId: "k",
+          evidenceSignature: "sig",
+        },
+      ],
+      requestedActivation: true,
+    });
     const outcome = await submitForActivation({
       proposal,
       attestation: attestation({
@@ -202,10 +236,13 @@ describe("self-evolution runtime (T502-T507)", () => {
       }),
       policy: operatorPolicy,
       supervisorPublicKeyPem: pubKeyPem,
-      supervisor: fakeSupervisor(),
+      // No supervisor: protected change MUST stay pending, never rejected as
+      // disallowed and never auto-activated.
     });
-    expect(outcome.status).toBe("rejected");
-    if (outcome.status === "rejected") expect(outcome.reason).toContain("disallowed");
+    expect(outcome.status).toBe("verified-pending-activation");
+    if (outcome.status === "verified-pending-activation") {
+      expect(outcome.reason).toBe("no-supervisor-configured");
+    }
   });
 
   it("QS-5.4: absent supervisor → verified-pending-activation (no fallback)", async () => {
@@ -302,5 +339,47 @@ describe("self-evolution runtime (T502-T507)", () => {
     writeFileSync(join(candidate.root, "file.txt"), "ok");
     const violations = await detectProtectedWrites({ candidate, policy: p });
     expect(violations).toEqual([]);
+  });
+});
+
+describe("candidate tree integrity (T502, Blocker 1)", () => {
+  it("digestTree rejects a candidate containing a symlink", async () => {
+    const p = policy();
+    const candidate = await createCandidateWorkspace({
+      policy: p,
+      parentArtifactDigest: "parent",
+      authorRunId: "run-1",
+    });
+    writeFileSync(join(candidate.root, "real.txt"), "ok");
+    // A symlink — even to an innocuous target — is forbidden in the digest.
+    symlinkSync(join(candidate.root, "real.txt"), join(candidate.root, "link.txt"));
+    await expect(
+      buildProposal({
+        candidate,
+        changeClasses: ["docs"],
+        policy: p,
+        verification: [],
+        requestedActivation: false,
+      }),
+    ).rejects.toThrow(/symlink forbidden/);
+  });
+
+  it("detectProtectedWrites flags nested symlinks, not only top-level", async () => {
+    const p = policy({ immutableAssets: [protectedAsset] });
+    const candidate = await createCandidateWorkspace({
+      policy: p,
+      parentArtifactDigest: "parent",
+      authorRunId: "run-1",
+    });
+    // Nested symlink deep in the tree (not a direct child of the root).
+    mkdirSync(join(candidate.root, "sub"), { recursive: true });
+    symlinkSync(protectedAsset, join(candidate.root, "sub", "escape"));
+    const violations = await detectProtectedWrites({
+      candidate,
+      policy: p,
+      policyStoreDir: protectedAsset,
+    });
+    expect(violations.length).toBeGreaterThan(0);
+    expect(violations.some((v) => v.includes("escape"))).toBe(true);
   });
 });

@@ -22,8 +22,8 @@ function proposal(overrides: Partial<ChangeProposal> = {}): ChangeProposal {
     changedPaths: ["/cand/x.ts"],
     authorRunId: "run-1",
     verification: [
-      { checkId: "unit", state: "passed", evidenceDigest: "ev1", workerId: "w1", completedAt: 0 },
-      { checkId: "integration", state: "passed", evidenceDigest: "ev2", workerId: "w1", completedAt: 0 },
+      { checkId: "unit", state: "passed", evidenceDigest: "ev1", workerId: "w1", completedAt: 0, executorImageDigest: "sha256:img1", commandDigest: "sha256:cmd1", signingKeyId: "k1", evidenceSignature: "sig1" },
+      { checkId: "integration", state: "passed", evidenceDigest: "ev2", workerId: "w1", completedAt: 0, executorImageDigest: "sha256:img2", commandDigest: "sha256:cmd2", signingKeyId: "k1", evidenceSignature: "sig2" },
     ],
     requestedActivation: true,
     ...overrides,
@@ -94,8 +94,8 @@ describe("SelfEvolutionStatus (T308)", () => {
       <SelfEvolutionStatus
         proposal={proposal({
           verification: [
-            { checkId: "unit", state: "passed", evidenceDigest: "ev", workerId: "w", completedAt: 0 },
-            { checkId: "security", state: "failed", evidenceDigest: "ev", workerId: "w", completedAt: 0 },
+            { checkId: "unit", state: "passed", evidenceDigest: "ev", workerId: "w", completedAt: 0, executorImageDigest: "sha256:img1", commandDigest: "sha256:cmd1", signingKeyId: "k1", evidenceSignature: "sig1" },
+            { checkId: "security", state: "failed", evidenceDigest: "ev", workerId: "w", completedAt: 0, executorImageDigest: "sha256:img2", commandDigest: "sha256:cmd2", signingKeyId: "k1", evidenceSignature: "sig2" },
           ],
         })}
         classification={{ status: "delegated", rule: {} }}

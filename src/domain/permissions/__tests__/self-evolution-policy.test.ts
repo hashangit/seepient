@@ -45,14 +45,21 @@ describe("classifyProposal (T501)", () => {
     expect(result.status).toBe("delegated");
   });
 
-  it("rejects disallowed change classes", () => {
-    const proposal = {
-      changeClasses: ["docs", "dependencies"],
-      changedPaths: [],
+  it("rejects disallowed change classes derived from paths", () => {
+    // Classes are derived ONLY from operator-owned path rules; the caller's
+    // changeClasses are ignored as untrusted input. A candidate that touches a
+    // security-kernel path is classified security-kernel; if that class is not
+    // in the operator allowlist, the proposal is disallowed.
+    const proposal: Pick<ChangeProposal, "changeClasses" | "changedPaths" | "authorRunId"> = {
+      changeClasses: ["docs"], // author claim — ignored
+      changedPaths: ["/cand/src/domain/permissions/policy-engine.ts"],
       authorRunId: "run-1",
     };
     const result = classifyProposal(routinePolicy, proposal);
     expect(result.status).toBe("disallowed");
+    if (result.status === "disallowed") {
+      expect(result.disallowedClasses).toContain("security-kernel");
+    }
   });
 
   it("marks security-kernel as protected (even if allowed)", () => {
@@ -60,7 +67,7 @@ describe("classifyProposal (T501)", () => {
       ...routinePolicy,
       allowedChangeClasses: ["docs", "security-kernel"],
     };
-    const proposal = {
+    const proposal: Pick<ChangeProposal, "changeClasses" | "changedPaths" | "authorRunId"> = {
       changeClasses: ["security-kernel"],
       changedPaths: ["/cand/policy-engine.ts"],
       authorRunId: "run-1",
@@ -76,7 +83,7 @@ describe("classifyProposal (T501)", () => {
       ...routinePolicy,
       activationRules: [],
     };
-    const proposal = {
+    const proposal: Pick<ChangeProposal, "changeClasses" | "changedPaths" | "authorRunId"> = {
       changeClasses: ["application-code"],
       changedPaths: ["/cand/x.ts"],
       authorRunId: "run-1",

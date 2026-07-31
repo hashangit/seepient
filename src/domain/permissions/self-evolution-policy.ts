@@ -70,9 +70,11 @@ export function classifyProposal(
     "changeClasses" | "changedPaths" | "authorRunId"
   >,
 ): ClassificationResult {
-  // D47: Automatically derive canonical change classes from changedPaths
-  const derivedClasses = classifyPathsToChangeClasses(proposal.changedPaths ?? []);
-  const effectiveClasses = Array.from(new Set([...proposal.changeClasses, ...derivedClasses]));
+  // D47: Change classes are derived ONLY from the operator-owned path rules,
+  // never accepted from the author. The author cannot influence (in particular
+  // cannot downgrade) its own classification — `proposal.changeClasses` is
+  // ignored as untrusted input and kept only for audit display.
+  const effectiveClasses = classifyPathsToChangeClasses(proposal.changedPaths ?? []);
   // Disallowed: any class outside the operator allowlist.
   const allowed = new Set(policy.allowedChangeClasses);
   const disallowed = effectiveClasses.filter((c) => !allowed.has(c));
@@ -89,11 +91,19 @@ export function classifyProposal(
   }
 
   // Delegated: an activation rule covers every class and permits automatic
-  // submission with delegated authority.
+  // submission with delegated authority. Do NOT delegate when any changed path
+  // matched no operator rule — an unclassified path must not be auto-activated,
+  // and an empty path set must not satisfy `every()` vacuously (a proposal that
+  // changes nothing has nothing to delegate).
+  const paths = proposal.changedPaths ?? [];
+  const allPathsClassified =
+    paths.length > 0 &&
+    paths.every((p) => classifyPathsToChangeClasses([p]).length > 0);
   const matchingRule = policy.activationRules.find((r) =>
     effectiveClasses.every((c) => r.changeClasses.includes(c)),
   );
   if (
+    allPathsClassified &&
     matchingRule &&
     matchingRule.automaticSubmission &&
     matchingRule.requiredAuthority === "delegated-service"
@@ -130,6 +140,9 @@ export function attestationMatches(
     candidateArtifactDigest: string;
     expiresAt: number;
     signature: string;
+    signer?: string;
+    imageDigest?: string;
+    commandDigest?: string;
   },
   proposal: { proposalId: string; candidateArtifactDigest: string },
   now: number,
@@ -147,10 +160,24 @@ export function attestationMatches(
     return false;
   }
   try {
-    const payload = `${attestation.proposalId}:${attestation.candidateArtifactDigest}:${attestation.expiresAt}`;
+    const payload6 = [
+      attestation.proposalId,
+      attestation.candidateArtifactDigest,
+      attestation.imageDigest ?? "",
+      attestation.commandDigest ?? "",
+      attestation.signer ?? "",
+      attestation.expiresAt,
+    ].join(":");
+    const payload3 = `${attestation.proposalId}:${attestation.candidateArtifactDigest}:${attestation.expiresAt}`;
+
     const verifier = createVerify("SHA256");
-    verifier.update(payload);
-    return verifier.verify(publicKeyPem, attestation.signature, "hex");
+    verifier.update(payload6);
+    if (verifier.verify(publicKeyPem, attestation.signature, "hex")) {
+      return true;
+    }
+    const verifier3 = createVerify("SHA256");
+    verifier3.update(payload3);
+    return verifier3.verify(publicKeyPem, attestation.signature, "hex");
   } catch {
     return false;
   }

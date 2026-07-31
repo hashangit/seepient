@@ -49,6 +49,18 @@ export interface VerificationResult {
   evidenceDigest: string;
   workerId: string;
   completedAt: number;
+  /**
+   * The actual image digest the check ran in. Mandatory (spec 008 / Blocker 2):
+   * evidence must bind to the real executor image, the command that ran, and
+   * the key that signed it — not just an opaque `evidenceDigest`. The operator
+   * policy's `VerificationCheck.executorImageDigest`/`commandDigest` are
+   * verified against these before an attestation is accepted.
+   */
+  executorImageDigest: string;
+  commandDigest: string;
+  signingKeyId: string;
+  /** Signature over the bound evidence (proposalId+checkId+image+command+state). */
+  evidenceSignature: string;
 }
 
 /** Operator-owned policy governing candidate creation and activation. */
@@ -80,6 +92,9 @@ export interface ActivationAttestation {
   candidateArtifactDigest: string;
   verifierId: string;
   authorityId: string;
+  signer?: string;
+  imageDigest?: string;
+  commandDigest?: string;
   issuedAt: number;
   expiresAt: number;
   signature: string;

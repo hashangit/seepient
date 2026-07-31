@@ -46,23 +46,76 @@ export interface CandidateWorkspace {
   authorRunId: string;
 }
 
-/** Digest every file under a directory recursively (content-addressed). */
+/**
+ * Digest every file under a directory recursively (content-addressed), WITHOUT
+ * following links. Per spec 008 (T502) and the data-model "candidate escape
+ * rejection" rules, the verifier MUST treat the candidate tree as untrusted:
+ * symlinks, hardlinks, special files, and any traversal/read error are
+ * rejection, not silently skipped. A candidate that disappears mid-walk is also
+ * rejection — a missing tree is not "no violations".
+ */
 async function digestTree(root: string): Promise<{ digest: string; paths: string[] }> {
-  const { glob } = await import("node:fs/promises");
-  void glob;
   const paths: string[] = [];
   const hashes: string[] = [];
+  // Integrity-check the root itself BEFORE walking: `fs.readdir(root)` follows
+  // a symlink transparently when `root` is the path argument, so the per-entry
+  // Dirent.isSymbolicLink() check would not protect a root that was replaced
+  // with a symlink. lstat does not follow the final component.
+  let rootStat: import("node:fs").Stats;
+  try {
+    rootStat = await fs.lstat(root);
+  } catch (err) {
+    throw new CandidateIntegrityError(
+      `candidate root inaccessible: ${(err as Error).message}`,
+    );
+  }
+  if (rootStat.isSymbolicLink()) {
+    throw new CandidateIntegrityError(`candidate root is a symlink: ${root}`);
+  }
+  if (!rootStat.isDirectory()) {
+    throw new CandidateIntegrityError(`candidate root is not a plain directory: ${root}`);
+  }
   const walk = async (dir: string): Promise<void> => {
-    const entries = await fs.readdir(dir, { withFileTypes: true });
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch (err) {
+      // Traversal error or vanished candidate → reject (never silently skip).
+      throw new CandidateIntegrityError(
+        `candidate tree read failed at ${dir}: ${(err as Error).message}`,
+      );
+    }
     for (const e of entries) {
       const full = path.join(dir, e.name);
+      if (e.isSymbolicLink()) {
+        // No symlink is followed into the digest — every symlink is a rejection
+        // (nested or top-level), since a link can escape the candidate root.
+        throw new CandidateIntegrityError(`symlink forbidden in candidate tree: ${full}`);
+      }
       if (e.isDirectory()) {
         await walk(full);
-      } else if (e.isFile()) {
-        const bytes = await fs.readFile(full);
-        paths.push(path.relative(root, full));
-        hashes.push(createHash("sha256").update(bytes).digest("hex"));
+        continue;
       }
+      if (!e.isFile()) {
+        // Block devices, FIFOs, sockets — not a legitimate source artifact.
+        throw new CandidateIntegrityError(`special file forbidden in candidate tree: ${full}`);
+      }
+      // Hardlink check: nlink > 1 means the inode is shared outside this file,
+      // which can be a write into a protected root aliased into the candidate.
+      let stat: import("node:fs").Stats;
+      try {
+        stat = await fs.stat(full);
+      } catch (err) {
+        throw new CandidateIntegrityError(
+          `candidate file stat failed at ${full}: ${(err as Error).message}`,
+        );
+      }
+      if (stat.nlink > 1) {
+        throw new CandidateIntegrityError(`hardlink forbidden in candidate tree (nlink=${stat.nlink}): ${full}`);
+      }
+      const bytes = await fs.readFile(full);
+      paths.push(path.relative(root, full));
+      hashes.push(createHash("sha256").update(bytes).digest("hex"));
     }
   };
   await walk(root);
@@ -74,6 +127,14 @@ async function digestTree(root: string): Promise<{ digest: string; paths: string
     digest: createHash("sha256").update(combined, "utf8").digest("hex"),
     paths,
   };
+}
+
+/** Raised when the candidate tree fails an integrity check (link/special/traversal). */
+export class CandidateIntegrityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CandidateIntegrityError";
+  }
 }
 
 /**
@@ -189,10 +250,16 @@ export async function submitForActivation(opts: {
 
 /**
  * Prove executors cannot mutate protected assets (T506). Returns the set of
- * protected paths that the candidate attempted to write, if any. Active
- * executable/image, release credentials, activation identities, supervisor
- * config, and the policy store's own directory must all be immutable to the
- * candidate.
+ * candidate paths that are links into a protected root, or special/hardlinked
+ * files. Active executable/image, release credentials, activation identities,
+ * supervisor config, and the policy store's own directory must all be immutable
+ * to the candidate.
+ *
+ * Walks the WHOLE candidate tree (not just top level) so nested symlinks,
+ * hardlinks, and special files are detected. A vanished or unreadable
+ * candidate root is reported as a violation rather than silently ignored —
+ * `detectProtectedWrites` plus `digestTree` together enforce that a candidate
+ * which cannot be fully inspected is rejected.
  */
 export async function detectProtectedWrites(opts: {
   candidate: CandidateWorkspace;
@@ -202,23 +269,69 @@ export async function detectProtectedWrites(opts: {
   const protectedRoots = [
     ...opts.policy.immutableAssets,
     ...(opts.policyStoreDir ? [opts.policyStoreDir] : []),
-  ];
+  ].map((r) => path.resolve(r));
   const violations: string[] = [];
-  // A candidate can only write under its own root. Any symlink or hardlink
-  // into a protected asset is a violation.
+  // Integrity-check the root itself before walking (mirrors digestTree): a
+  // symlinked root would be followed transparently by readdir, bypassing the
+  // per-entry symlink detection below.
   try {
-    const entries = await fs.readdir(opts.candidate.root, { withFileTypes: true });
+    const rootStat = await fs.lstat(opts.candidate.root);
+    if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
+      return [`${opts.candidate.root} (root is not a plain directory)`];
+    }
+  } catch (err) {
+    return [`${opts.candidate.root} (unreadable root: ${(err as Error).message})`];
+  }
+  const walk = async (dir: string): Promise<void> => {
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch (err) {
+      // Unreadable or vanished candidate → violation (fail closed).
+      violations.push(`${dir} (unreadable: ${(err as Error).message})`);
+      return;
+    }
     for (const e of entries) {
+      const full = path.join(dir, e.name);
       if (e.isSymbolicLink()) {
-        const target = await fs.readlink(path.join(opts.candidate.root, e.name));
-        if (protectedRoots.some((r) => target.startsWith(r))) {
-          violations.push(path.join(opts.candidate.root, e.name));
+        let target: string;
+        try {
+          target = path.resolve(path.dirname(full), await fs.readlink(full));
+        } catch {
+          violations.push(full);
+          continue;
         }
+        if (protectedRoots.some((r) => target === r || target.startsWith(r + path.sep))) {
+          violations.push(full);
+        } else {
+          // Even a symlink to a non-protected target is suspicious in a
+          // candidate tree; report it so `digestTree`'s stricter rejection
+          // stays the authoritative gate.
+          violations.push(full);
+        }
+        continue;
+      }
+      if (e.isDirectory()) {
+        await walk(full);
+        continue;
+      }
+      if (e.isFile()) {
+        try {
+          const stat = await fs.stat(full);
+          if (stat.nlink > 1) {
+            violations.push(`${full} (hardlink, nlink=${stat.nlink})`);
+          }
+        } catch {
+          violations.push(full);
+        }
+      } else {
+        // Special files (block/char device, FIFO, socket) are not legitimate
+        // source artifacts — flag them, matching digestTree's rejection.
+        violations.push(`${full} (special file: ${e.isFile() ? "file" : "non-regular"})`);
       }
     }
-  } catch {
-    /* candidate root gone — no violations */
-  }
+  };
+  await walk(opts.candidate.root);
   return violations;
 }
 
