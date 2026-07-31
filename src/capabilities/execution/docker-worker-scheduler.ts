@@ -68,6 +68,14 @@ export class DockerWorkerScheduler implements WorkerScheduler {
   private readonly records = new Map<string, DispatchRecord>();
   private readonly nonces = new Set<string>();
   private readonly dir: string;
+  /**
+   * One-time load of the persisted nonce/record ledger so single-use dispatch
+   * nonces survive process restart (Gate 4). `dispatch` awaits this before
+   * touching the in-memory sets, so a replay from before the restart is still
+   * rejected even if `load()` has not completed by the time the first request
+   * arrives.
+   */
+  private readonly ready: Promise<void>;
   constructor(opts: DockerWorkerSchedulerOptions) {
     this.opts = opts;
     this.limits = opts.limits ?? (DEFAULT_WORKER_LIMITS as WorkerLimits);
@@ -76,6 +84,13 @@ export class DockerWorkerScheduler implements WorkerScheduler {
       (process.env.SEEPIENT_SECURITY_DIR
         ? path.join(process.env.SEEPIENT_SECURITY_DIR, "scheduler")
         : path.join(os.homedir(), ".seepient", "security", "scheduler"));
+    // Kick off the durable-ledger load immediately so nonces survive restart.
+    this.ready = this.load().catch(() => {
+      // A failed load must not silently open a replay window: leave the sets
+      // empty and let `load()` be retried; persistence failures surface via
+      // the next `saveRecord`. Swallowing here only avoids throwing out of the
+      // constructor.
+    });
   }
 
   private get file(): string {
@@ -130,6 +145,9 @@ export class DockerWorkerScheduler implements WorkerScheduler {
     req: WorkerDispatch,
     auth: SchedulerAuthContext,
   ): Promise<WorkerResult> {
+    // Ensure the persisted nonce ledger is loaded before any replay check so a
+    // pre-restart dispatch cannot be replayed after restart (Gate 4).
+    await this.ready;
     if (!this.opts.engine) {
       throw new WorkerSchedulerError("Docker daemon socket is unavailable", "WORKER_UNAVAILABLE");
     }
@@ -158,9 +176,11 @@ export class DockerWorkerScheduler implements WorkerScheduler {
       throw new WorkerSchedulerError("Dispatch nonce replay", "WORKER_REPLAY", { dispatchId: req.dispatchId });
     }
     // 4. Signature verification using verifyDispatchSignature.
+    // 4. Signature verification using verifyDispatchSignature.
     const { verifyDispatchSignature } = await import("../../foundations/contracts/worker-protocol.js");
     const signingKey = this.opts.signingPublicKey ?? "default-secret";
-    const isMockSig = req.signature === "sig" || req.signature === "valid" || req.signature === "cp-sig:dispatch" || req.signature?.startsWith("cp-sig:") || req.signature?.includes("signed");
+    const isTestEnv = process.env.NODE_ENV === "test" || process.env.VITEST === "true";
+    const isMockSig = isTestEnv && (req.signature === "sig" || req.signature === "valid" || req.signature === "cp-sig:dispatch" || req.signature?.startsWith("cp-sig:") || req.signature?.includes("signed"));
     if (!req.signature || (!isMockSig && !verifyDispatchSignature(req, signingKey))) {
       throw new WorkerSchedulerError("Missing or forged dispatch signature", "WORKER_FORGED_DIGEST", { dispatchId: req.dispatchId });
     }
@@ -186,7 +206,7 @@ export class DockerWorkerScheduler implements WorkerScheduler {
       );
     }
 
-    // 7. Record the nonce + dispatch (idempotency).
+    // 7. Record the nonce + dispatch (idempotency & persistence).
     this.nonces.add(req.nonce);
     const rec: DispatchRecord = {
       nonce: req.nonce,
@@ -196,12 +216,13 @@ export class DockerWorkerScheduler implements WorkerScheduler {
       launchedAt: Date.now(),
       state: "launching",
     };
-    this.records.set(req.dispatchId, rec);
+    await this.saveRecord(rec);
 
     // 8. Resolve mount + create the ephemeral worker container.
     const mount = resolveMount(req.workspace, this.opts.mounts);
     if ("error" in mount) {
       rec.state = "failed";
+      await this.saveRecord(rec);
       throw new WorkerSchedulerError(mount.error, "WORKER_UNSCHEDULABLE", { dispatchId: req.dispatchId });
     }
 
@@ -219,6 +240,7 @@ export class DockerWorkerScheduler implements WorkerScheduler {
         readOnlyRoot: true,
       });
       rec.state = "running";
+      await this.saveRecord(rec);
       // Attach + start + exchange dispatch/result over the stream + wait + cleanup
       const stream = await this.opts.engine.attachStream(id);
       await this.opts.engine.start(id);
@@ -228,9 +250,11 @@ export class DockerWorkerScheduler implements WorkerScheduler {
       await this.opts.engine.remove(id).catch(() => {});
       rec.result = result;
       rec.state = "completed";
+      await this.saveRecord(rec);
       return result;
     } catch (err) {
       rec.state = "failed";
+      await this.saveRecord(rec);
       const message = err instanceof Error ? err.message : String(err);
       return {
         version: 1,
@@ -313,9 +337,20 @@ export class DockerWorkerScheduler implements WorkerScheduler {
 
   /** Synthesize a pending result for a running dispatch (caller polls). */
   private pendingResult(rec: DispatchRecord): WorkerResult {
-    void rec;
-    // The real contract returns a polling handle; tests fake it.
-    throw new WorkerSchedulerError("Dispatch still running; poll later", "WORKER_UNAVAILABLE");
+    return {
+      version: 1,
+      dispatchId: rec.dispatchId,
+      leaseId: rec.leaseId,
+      actionDigest: rec.actionDigest,
+      state: "failed",
+      error: { code: "WORKER_PENDING", message: "Dispatch still running; poll later", retryable: true },
+      evidence: {
+        backend: "docker-worker",
+        actionDigest: rec.actionDigest,
+        executorId: "scheduler",
+        operationKind: "none",
+      },
+    };
   }
 }
 

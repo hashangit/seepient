@@ -130,10 +130,18 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
   // PolicyStore at construction (snapshotted for the agent's lifetime per the
   // spec's "policy is snapshotted for a run" rule).
   let wiredPipeline: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle | undefined;
+  let auditOutbox: import("../../domain/permissions/audit-recorder.js").TerminalEventOutbox | undefined;
   if (opts.permissionPipeline) {
     const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
     const { legacyApproveToolToBroker } = await import("../legacy-adapter.js");
     const { buildLocalBoundary } = await import("../../capabilities/execution/build-local-boundary.js");
+    const { LocalAuditStore, TerminalEventOutbox, recoverIndeterminateActions } = await import("../../domain/permissions/audit-recorder.js");
+    const auditStore = new LocalAuditStore();
+    auditOutbox = new TerminalEventOutbox(auditStore);
+    await auditOutbox.reload();
+    await auditOutbox.flush().catch(() => {});
+    await recoverIndeterminateActions(auditStore, auditOutbox).catch(() => {});
+
     const broker = legacyApproveToolToBroker(opts.approveTool);
     const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary();
     wiredPipeline = await buildActionLifecycle({
@@ -143,7 +151,9 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
       modelProviderClass: (opts.provider ?? "openai") as string,
       approvalBroker: broker,
       executionBoundary: boundary,
+      approvalMode: opts.approveTool ? "manual" : "never",
       artifacts: sharedArtifacts,
+      terminalOutbox: auditOutbox,
     });
   }
   let activeAbortController: AbortController = new AbortController();
@@ -452,16 +462,24 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
     }
   }
 
-  // ── getHistory() ────────────────────────────────────────────────────────
-
   function getHistory(): Message[] {
     return [...messages];
   }
 
-  // ── getUsage() ──────────────────────────────────────────────────────────
-
   function getUsage(): CumulativeUsage {
     return { ...cumulativeUsage };
+  }
+
+  async function flushAudit(): Promise<number> {
+    if (auditOutbox) {
+      return auditOutbox.flush();
+    }
+    return 0;
+  }
+
+  async function close(): Promise<void> {
+    abort();
+    await flushAudit();
   }
 
   // ── Return the SdkAgent interface ───────────────────────────────────────
@@ -476,5 +494,7 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
     clear,
     getHistory,
     getUsage,
+    flushAudit,
+    close,
   };
 }

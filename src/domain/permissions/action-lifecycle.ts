@@ -260,7 +260,7 @@ export class ActionLifecycle {
       }
 
       // Approved. Reevaluate ONCE with the approved capability added to activeCapabilities.
-      // Approval NEVER mutates or widens principalPolicy, runtimeBaseline, or deploymentCeiling.
+      // Hard rule: Approval NEVER mutates or widens principalPolicy, runtimeBaseline, or deploymentCeiling.
       approval = answer;
       const approved = decision.proposedEnvelope.capabilities;
       const lifetimeKind = answer.lifetime ?? "action";
@@ -268,13 +268,8 @@ export class ActionLifecycle {
         version: 1,
         capabilities: [...this.active.capabilities, ...approved],
       };
-      const reevalPrincipal: CapabilitySet = {
-        version: 1,
-        capabilities: [...this.policyContext.principalPolicy.capabilities, ...approved],
-      };
       const reevalContext: PolicyContext = {
         ...this.policyContext,
-        principalPolicy: reevalPrincipal,
         activeCapabilities: withApproval,
       };
       decision = this.policy.evaluate(action, reevalContext);

@@ -18,6 +18,7 @@ import { PolicyEngine, computePolicyDigest } from "./policy-engine.js";
 import { ActionLifecycle } from "./action-lifecycle.js";
 import { LocalAuditStore } from "./audit-recorder.js";
 import { LocalPolicyStore, computeWorkspaceId } from "./policy-store.js";
+import { setCovers } from "./capability-store.js";
 import { DEFAULT_ANALYZERS } from "./default-analyzers.js";
 import { COMM_ANALYZERS } from "./comm-analyzers.js";
 import type { ToolAnalyzer } from "./default-analyzers.js";
@@ -79,6 +80,18 @@ export interface ActionLifecycleInputs {
   interaction?: PolicyContext["interaction"];
   /** Optional: persisted capability ledger for authority consumption & revocation (T107a). */
   capabilityLedger?: PersistedCapabilityLedger;
+  /**
+   * Optional: a caller-supplied terminal-event outbox. When provided AND the
+   * audit store is a `LocalAuditStore`, the lifecycle uses THIS outbox instead
+   * of creating its own. This is how long-lived composition roots (CLI, SDK,
+   * HTTP server) share ONE outbox across all per-request lifecycles so their
+   * flush timer + recovery operate on the same pending-event set.
+   *
+   * The outbox MUST be backed by the same `LocalAuditStore` instance passed as
+   * `auditStore` (or created by this factory when `auditStore` is omitted); the
+   * caller is responsible for that pairing.
+   */
+  terminalOutbox?: import("./audit-recorder.js").TerminalEventOutbox;
 }
 
 /**
@@ -142,7 +155,7 @@ export async function buildActionLifecycle(
       { kind: "read-root", root },
       { kind: "write-root", root },
       { kind: "process" },
-      { kind: "model-egress", providerClass: inputs.modelProviderClass ?? "normal", dataClasses: ["normal"] },
+      { kind: "model-egress", providerClass: "*", dataClasses: ["normal", "sensitive"] },
     ],
   };
 
@@ -163,19 +176,50 @@ export async function buildActionLifecycle(
     principalPolicy = inputs.principalPolicy ?? deploymentCeiling;
     hasStoredPolicy = Boolean(inputs.principalPolicy);
   }
+  const defaultModelEgressCap: Capability = {
+    kind: "model-egress",
+    providerClass: "*",
+    dataClasses: ["normal", "sensitive"],
+  };
+  const egressCoveredByCeiling = setCovers(deploymentCeiling, defaultModelEgressCap);
+  // Only seed the default model-egress cap for a truly fresh install (no stored
+  // policy AND no caller-supplied principalPolicy). Widening an explicitly
+  // supplied policy/active set would treat the deployment ceiling as an active
+  // grant and violate least privilege — a caller that intentionally omits
+  // model-egress must keep it omitted.
+  const isFreshInstall = !hasStoredPolicy && !inputs.principalPolicy;
+
+  if (isFreshInstall && egressCoveredByCeiling && !principalPolicy.capabilities.some((c) => c.kind === "model-egress")) {
+    principalPolicy = {
+      ...principalPolicy,
+      capabilities: [...principalPolicy.capabilities, defaultModelEgressCap],
+    };
+  }
 
   // Runtime baseline: caller-supplied or pass-through from deploymentCeiling.
   const runtimeBaseline = inputs.runtimeBaseline ?? deploymentCeiling;
 
   // Active session capabilities:
-  // - If caller provided explicit activeCapabilities, use them.
+  // - If caller provided explicit activeCapabilities, use them (no widening).
   // - If a principal policy exists (from policyStore or inputs.principalPolicy), start with those pre-approved capabilities.
   // - Otherwise (fresh install), start with workspace read-root baseline so writes/exec require approval.
-  const activeCapabilities = inputs.activeCapabilities ?? {
-    version: 1 as const,
-    capabilities: hasStoredPolicy
+  const activeCaps: Capability[] = inputs.activeCapabilities
+    ? [...inputs.activeCapabilities.capabilities]
+    : hasStoredPolicy
       ? [...principalPolicy.capabilities]
-      : [{ kind: "read-root", root }],
+      : egressCoveredByCeiling
+        ? [{ kind: "read-root" as const, root }, defaultModelEgressCap]
+        : [{ kind: "read-root" as const, root }];
+
+  // Seed the default cap only on a fresh install; an explicit caller-supplied
+  // activeCapabilities set is preserved as-is.
+  if (isFreshInstall && !inputs.activeCapabilities && egressCoveredByCeiling && !activeCaps.some((c) => c.kind === "model-egress")) {
+    activeCaps.push(defaultModelEgressCap);
+  }
+
+  const activeCapabilities: CapabilitySet = {
+    version: 1 as const,
+    capabilities: activeCaps,
   };
 
   const policyContext: PolicyContext = {
@@ -201,9 +245,14 @@ export async function buildActionLifecycle(
   const auditStore = inputs.auditStore ?? new LocalAuditStore(inputs.auditRoot ? { root: inputs.auditRoot } : undefined);
   const artifacts = inputs.artifacts ?? new InMemoryArtifactStore();
 
+  // Honor a caller-supplied outbox when the audit store is a LocalAuditStore.
+  // Long-lived composition roots (CLI/SDK/HTTP) pass ONE shared outbox so their
+  // flush timer + recovery operate on the same pending-event set as the
+  // per-request lifecycle. When the audit store is not a LocalAuditStore, a
+  // caller outbox cannot apply and is ignored.
   let terminalOutbox: import("./audit-recorder.js").TerminalEventOutbox | undefined;
   if (auditStore instanceof LocalAuditStore) {
-    terminalOutbox = new (await import("./audit-recorder.js")).TerminalEventOutbox(auditStore);
+    terminalOutbox = inputs.terminalOutbox ?? new (await import("./audit-recorder.js")).TerminalEventOutbox(auditStore);
   }
 
   const lifecycle = new ActionLifecycle({
@@ -238,7 +287,7 @@ export async function buildActionLifecycle(
         policyDigest,
       },
       artifacts,
-      modelProviderClass: inputs.modelProviderClass ?? "normal",
+      modelProviderClass: inputs.modelProviderClass ?? "*",
     },
     workspaceId,
   };

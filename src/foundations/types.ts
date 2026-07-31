@@ -284,6 +284,10 @@ export interface SdkAgent {
   clear(): void;
   getHistory(): Message[];
   getUsage(): CumulativeUsage;
+  /** Flush any pending terminal audit events (T109a durability lifecycle). */
+  flushAudit(): Promise<number>;
+  /** Close agent and flush remaining audit records. */
+  close(): Promise<void>;
 }
 
 export interface AgentResponse {

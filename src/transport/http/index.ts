@@ -178,67 +178,98 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
     workspaceRoot: string;
     modelProviderClass: string;
   }) => Promise<import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle>;
+  let outboxFlushTimer: NodeJS.Timeout | undefined;
   let serverPipelineFactory: PipelineFactory | undefined;
   const serverPermissionPipelineEnabled = options?.permissionPipeline !== false && process.env.SEEPIENT_PERMISSION_PIPELINE !== "0";
+  // FROZEN SCOPE (R9.1): the server control plane does NOT execute model-
+  // authored effects. Per the release scope, multi-tenant server/container
+  // execution is DISABLED until the external scheduler is complete; the
+  // process holding provider credentials must not execute model-authored
+  // shell commands (FR-017/FR-018, ARCHITECTURE.md). There is intentionally NO
+  // in-process fallback: a localhost bind or a fallback flag cannot make this
+  // safe, because a loopback server can sit behind a reverse proxy and serve
+  // multiple users. Every effectful operation through the server therefore
+  // returns `backend-unsupported` and is denied before dispatch. Local CLI /
+  // TUI / SDK execution is unaffected — those roots wire the real local
+  // boundary directly, not through the server.
+  if (process.env.SEEPIENT_ALLOW_LOCAL_FALLBACK === "1" || process.env.SEEPIENT_WORKER_SCHEDULER === "1" || process.env.SEEPIENT_WORKER_SCHEDULER_ENDPOINT) {
+    throw new Error(
+      "Server-side effect execution is disabled in this release. The HTTP server " +
+        "never runs model-authored effects in the control plane — a real external " +
+        "Docker worker scheduler (separate process, mTLS) is required and is not " +
+        "yet implemented. Unset SEEPIENT_ALLOW_LOCAL_FALLBACK / " +
+        "SEEPIENT_WORKER_SCHEDULER to start the server in effect-free mode, or use " +
+        "the local CLI/SDK for tool execution.",
+    );
+  }
   if (serverPermissionPipelineEnabled) {
     const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
     const { NoneApprovalBroker } = await import("../approval-brokers.js");
+    const { LocalAuditStore, TerminalEventOutbox, recoverIndeterminateActions } = await import("../../domain/permissions/audit-recorder.js");
+    const rootDir = process.cwd();
+    const serverAuditStore = new LocalAuditStore({ root: rootDir });
+    // The outbox MUST be backed by the SAME LocalAuditStore the per-request
+    // lifecycles use, otherwise the flush timer + recovery operate on a
+    // different pending-event set than the one live requests populate.
+    const serverOutbox = new TerminalEventOutbox(serverAuditStore);
+
+    // The periodic flush timer MUST start regardless of whether the one-time
+    // recovery (reload/flush/recover) succeeds — a recovery failure must not
+    // leave the server running with no drain path. Create it outside the try.
+    try {
+      await serverOutbox.reload();
+      await serverOutbox.flush();
+      await recoverIndeterminateActions(serverAuditStore, serverOutbox);
+    } catch (e) {
+      console.warn("[server] Audit outbox recovery initialization failed:", e instanceof Error ? e.message : String(e));
+    }
+    outboxFlushTimer = setInterval(() => {
+      serverOutbox.flush().catch(() => {});
+    }, 10_000);
+    outboxFlushTimer.unref();
+
+    // A fail-closed boundary: no operation kind is supported, so policy denies
+    // every effectful action with `backend-unsupported` before dispatch. The
+    // server remains useful for chat/planning/effect-free tools; it never
+    // performs a model-authored side effect.
+    const unsupportedBoundary: import("../../foundations/contracts/execution-boundary.js").ExecutionBoundary = {
+      capabilities: {
+        backend: "uncontained",
+        capabilityKinds: [],
+        exactCommit: false,
+        hostFilteredEgress: false,
+        environmentIsolation: false,
+        supportedOperationKinds: [],
+      },
+      async execute() {
+        return {
+          state: "failed" as const,
+          error: {
+            code: "BACKEND_UNSUPPORTED",
+            message: "Server-side effect execution is disabled in this release; use the local CLI/SDK.",
+            retryable: false,
+          },
+          evidence: {
+            backend: "uncontained" as const,
+            actionDigest: "",
+            executorId: "server-unsupported",
+            operationKind: "none" as const,
+          },
+        };
+      },
+    };
+
     serverPipelineFactory = async (identity) => {
-      let boundary: import("../../foundations/contracts/execution-boundary.js").ExecutionBoundary;
-      if (process.env.SEEPIENT_WORKER_SCHEDULER_ENDPOINT) {
-        // T405: control plane delegates to the scheduler. A real deployment
-        // injects a real scheduler client; without one, the boundary reports
-        // backend-unsupported (fail closed) rather than executing in-process.
-        const { WorkerExecutionBoundary } = await import("../../capabilities/execution/worker-execution-boundary.js");
-        boundary = new WorkerExecutionBoundary({
-          scheduler: {
-            async dispatch() {
-              throw new Error("SEEPIENT_WORKER_SCHEDULER_ENDPOINT set but no scheduler client wired — configure one in createServer()");
-            },
-            async cancel() {},
-          },
-          auth: { controlPlaneId: "control-plane-1", authenticatedTransport: "mtls" },
-          signingKeyId: "cp-key-1",
-          sign: (c) => `cp-sig:${c.slice(0, 8)}`,
-          resolveWorkspace: () => ({
-            leaseId: `lease-${identity.runId}`,
-            tenantId: identity.tenantId,
-            sessionId: identity.sessionId,
-            workspaceId: `ws-${identity.tenantId}`,
-            mountTarget: "/workspace",
-            expiresAt: Date.now() + 60_000,
-          }),
-          capabilities: {
-            backend: "docker-worker",
-            capabilityKinds: ["commit-file", "read-file", "process", "model-egress", "network-destination"],
-            exactCommit: true, hostFilteredEgress: true, environmentIsolation: true,
-            supportedOperationKinds: ["none", "read-file", "commit-files", "process", "broker"],
-          },
-        });
-      } else {
-        const { buildLocalBoundary } = await import("../../capabilities/execution/build-local-boundary.js");
-        const localResult = await buildLocalBoundary();
-        boundary = localResult.boundary;
-        return buildActionLifecycle({
-          principalId: identity.principalId,
-          runId: identity.runId,
-          workspaceRoot: identity.workspaceRoot,
-          modelProviderClass: identity.modelProviderClass,
-          approvalBroker: new NoneApprovalBroker(),
-          executionBoundary: boundary,
-          approvalMode: "never",
-          artifacts: localResult.artifacts,
-        });
-      }
-      // Worker path (scheduler configured) — buildActionLifecycle below.
       return buildActionLifecycle({
         principalId: identity.principalId,
         runId: identity.runId,
         workspaceRoot: identity.workspaceRoot,
         modelProviderClass: identity.modelProviderClass,
         approvalBroker: new NoneApprovalBroker(),
-        executionBoundary: boundary,
+        executionBoundary: unsupportedBoundary,
         approvalMode: "never",
+        auditStore: serverAuditStore,
+        terminalOutbox: serverOutbox,
       });
     };
   }
@@ -399,6 +430,7 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
   // Graceful shutdown handler
   const shutdown = () => {
     console.log("[server] Shutting down...");
+    if (outboxFlushTimer) clearInterval(outboxFlushTimer);
     sessionManager.stopCleanup();
     closeWebSocket();
     server.close(() => {

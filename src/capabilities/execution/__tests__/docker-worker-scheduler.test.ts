@@ -6,6 +6,9 @@
  * deadlines, sanitized worker env (no provider/server/release secrets).
  */
 import { describe, it, expect, vi } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DockerWorkerScheduler } from "../docker-worker-scheduler.js";
 import type { DockerEngine, DockerContainerSpec } from "../../../vendors/docker/index.js";
 import type {
@@ -119,12 +122,17 @@ function successResult(): WorkerResult {
 }
 
 function makeScheduler(engine: DockerEngine) {
+  // Each scheduler gets an isolated temp root so the persisted nonce/record
+  // ledger does not leak across tests (a shared ledger would make the second
+  // dispatch short-circuit as an idempotent-retry of the first).
+  const root = mkdtempSync(join(tmpdir(), "seepient-sched-test-"));
   return new DockerWorkerScheduler({
     engine,
     images: { "seepient/worker:latest": "sha256:abc" },
     mounts: { "ws-1": "/var/lib/seepient/workspaces/ws-1" },
     defaultImage: "seepient/worker:latest",
     brokerNetwork: "broker-net",
+    root,
   });
 }
 

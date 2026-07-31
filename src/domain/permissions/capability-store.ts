@@ -114,10 +114,10 @@ export function covers(outer: Capability, inner: Capability): boolean {
       return inner.kind === "secret-ref" && inner.ref === outer.ref;
     case "model-egress": {
       if (inner.kind !== "model-egress") return false;
-      if (outer.providerClass !== inner.providerClass) return false;
+      if (outer.providerClass !== "*" && outer.providerClass !== inner.providerClass) return false;
       // Outer must permit every data class the inner requests.
       const allowed = new Set(outer.dataClasses);
-      return inner.dataClasses.every((c) => allowed.has(c));
+      return inner.dataClasses.every((c) => allowed.has(c) || allowed.has("*"));
     }
     case "trusted-host":
       if (inner.kind !== "trusted-host") return false;
@@ -214,7 +214,7 @@ export function capabilitiesForEffect(req: EffectRequest): Capability[] {
       return [
         {
           kind: "model-egress",
-          providerClass: req.providerClass,
+          providerClass: req.providerClass === "normal" ? "*" : req.providerClass,
           dataClasses: req.dataClasses,
         },
       ];

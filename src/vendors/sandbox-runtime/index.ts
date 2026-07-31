@@ -270,6 +270,7 @@ class AsrtNativeSandbox implements NativeProcessSandbox {
         env: req.env,
         roots: req.roots,
         signal: req.signal,
+        onUpdate: req.onUpdate,
       });
       return {
         exitCode: result.exitCode ?? 0,

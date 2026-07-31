@@ -97,7 +97,10 @@ export class ProcessExecutor implements OperationExecutor {
       roots: operation.roots,
       env,
       signal: opts.signal,
-      onUpdate: (chunk) => opts.onUpdate?.({ message: chunk.message }),
+      onUpdate: (chunk) => {
+        const msg = typeof chunk === "string" ? chunk : (chunk as any)?.message;
+        if (msg) opts.onUpdate?.({ message: msg });
+      },
     });
 
     const evidence = {
