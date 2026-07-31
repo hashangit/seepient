@@ -128,6 +128,8 @@ Current layout of the Obsidian vault (annotated):
 ├── System-Prompts/                   # Prompt engineering references
 ├── Seepientagent-BMI/                # Body-model internal feature work
 └── Todo/                             # Internal todos / scratch
+    ├── deferred-tui-items.md         # TUI backlog
+    └── homebrew-json-gem-fix.md      # Runbook: Homebrew 6.0 + json gem crash fix (arm64)
 ```
 
 **Conventions:**

@@ -70,10 +70,11 @@ pnpm add -g seepient
 ### Homebrew (macOS & Linux)
 ```bash
 brew tap hashangit/seepient
+brew trust hashangit/seepient
 brew install seepient
 ```
 
-> **Note:** Requires [Node.js](https://nodejs.org/) 20 or later.
+> **Note:** Requires [Node.js](https://nodejs.org/) 22 or later. The `brew trust` step is required by Homebrew 6.0+ (third-party taps must be explicitly trusted before their formulas run).
 
 ### Server Binary
 The `seepient-server` binary is included for running the standalone HTTP/WebSocket server:

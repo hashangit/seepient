@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.4.1] - 2026-08-01
+
+**Seepient v0.4.1** is a quick follow-up to v0.4.0. It tightens up how Seepient gets installed, clears out the security warnings that piled up under the hood, and fixes the install docs so new users don't trip on the way in.
+
+If you're already on v0.4.0, this is a safe, low-risk upgrade — no behavior changes, just a cleaner, safer foundation.
+
+---
+
+### 🔧 What's New
+
+#### Smoother, Safer Install
+* **Homebrew 6.0 Support**: Seepient's install steps now include the new `brew trust` step that Homebrew 6.0 requires for third-party taps, so installing from the tap works without surprises.
+* **Correct Node Requirement**: The docs now correctly state that Seepient needs Node.js 22 or later (it was previously listed as Node 20, which crashes at startup). The Homebrew formula was already fixed in v0.4.0; the README now matches.
+
+#### Under-the-Hood Security & Dependency Updates
+* **Security Patching**: Pinned known-vulnerable transitive dependencies (postcss, undici, esbuild, hono, and a few others) to safe versions, clearing the Dependabot alerts flagged on v0.4.0.
+* **Dependency Upgrades**: Bumped several direct dependencies to their latest stable releases (js-yaml, nodemailer, ws, the MCP SDK) to stay current and secure.
+
+#### Documentation
+* Added an internal runbook covering a Homebrew 6.0 + `json` gem crash that can brick `brew` itself on arm64 Macs, so anyone who hits it has a clear fix path.
+
+---
+
+### 🚀 Upgrade
+
+| How you installed | Action |
+| :--- | :--- |
+| npm | `npm install -g seepient@latest` |
+| Homebrew | `brew upgrade seepient` |
+| pnpm | `pnpm add -g seepient` |
+
+No breaking changes. All 925 tests pass on the new dependency set.
+
+---
+
 ## [v0.4.0] - 2026-07-31
 
 Welcome to **Seepient v0.4.0**! This release brings a big upgrade to how Seepient talks to you in the terminal and how it safely gets things done on your system.
