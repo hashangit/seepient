@@ -1,4 +1,4 @@
-# Data Model: TUI Persistent Input Box + Zoe Agent Logo
+# Data Model: TUI Persistent Input Box + Seepient Agent Logo
 
 **Feature**: `003-tui-input-and-logo` | **Date**: 2026-06-15
 

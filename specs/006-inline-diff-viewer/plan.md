@@ -11,7 +11,7 @@ Make `write_file` crash-safe and show what changed. Two coupled changes: (1) a
 failed/crashed write never corrupts a file; (2) an **inline diff viewer** that
 renders the change as a unified diff in the tool-call block. The diff engine is
 the [`diff`](https://www.npmjs.com/package/diff) package (the same engine the Pi
-coding agent uses — see research.md R1); the safe-write is zoe-original (Pi's
+coding agent uses — see research.md R1); the safe-write is seepient-original (Pi's
 `write` is neither atomic nor diff'd).
 
 The load-bearing change is a **tool-result metadata channel** that already

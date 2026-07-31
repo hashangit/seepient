@@ -1,5 +1,5 @@
 ---
-description: "Task list for the Channels Integration feature (2-way messaging on Zoe)"
+description: "Task list for the Channels Integration feature (2-way messaging on Seepient)"
 ---
 
 # Tasks: Channels Integration (2-Way Messaging)
@@ -65,7 +65,7 @@ independently testable.
   touches only the class name + import sites + the one variable; no behavior change.
   The Server history fix is the minimum needed for parity with CLI/SDK.
 - **V. Safe by Default & Verifiable** — Hook errors stay non-fatal. Channel errors
-  surface through the existing `ZoeError` hierarchy with `code` + `retryable`.
+  surface through the existing `SeepientError` hierarchy with `code` + `retryable`.
   Every phase has an explicit verify gate; `pnpm test` is a hard regression gate;
   the failing test is written before the fix for the Server history bug.
 
@@ -185,14 +185,14 @@ is touched. The same `runAgentLoop` powers channels as CLI/SDK/Server
 
 ---
 
-## Phase 4: User Story 2 — `zoe-channels` Binary & Telegram Reference (Priority: P1)
+## Phase 4: User Story 2 — `seepient-channels` Binary & Telegram Reference (Priority: P1)
 
-**Goal**: A runnable `zoe-channels` binary that connects to Telegram via grammY
+**Goal**: A runnable `seepient-channels` binary that connects to Telegram via grammY
 and delivers real 2-way messaging: text in → text out, tool approval via inline
 keyboard, and one proactive scheduled message. Validates the whole vertical against
 a real platform. Per spec §8–9.
 
-**Independent Test**: Configure a real Telegram bot token; run `zoe-channels`;
+**Independent Test**: Configure a real Telegram bot token; run `seepient-channels`;
 send a message from a Telegram client → get a streamed reply; trigger a
 destructive tool → inline ✅/❌ keyboard appears, tapping approves/denies; the
 `schedule_message` tool fires and a message arrives at the scheduled time.
@@ -209,11 +209,11 @@ III (Telegram adapter implements ONLY platform-specific bits — spec §5.2), IV
 - [ ] T029 [P] [US2] Create src/adapters/channels/telegram/normalize.ts — `normalizeUpdate(update: Update): InboundMessage | null` mapping a grammY/Telegram `Update` to the canonical `InboundMessage`: `conversationId = String(chat.id)`, `conversationType = chat.type === "private" ? "dm" : "group"`, `senderId = String(from.id)`, `senderName = from.first_name`, `text = message.text || ""`, `media = []` populated from `message.photo`/`message.voice`/etc, `timestamp = message.date * 1000`, `replyTo` from `message.reply_to_message`. Return `null` for updates with no message text and no media (drops non-text non-media noise).
 - [ ] T030 [P] [US2] Create src/adapters/channels/telegram/deliver.ts — `deliverToTelegram(bot: Bot, conv: ConversationRef, payload: OutboundPayload): Promise<DeliveryReceipt>` that chunks via the formatter (T020), calls `bot.api.sendMessage` (or `sendPhoto`/`sendVoice` for media), respects the Telegram 30-messages-per-minute-to-same-chat rate limit with a minimal per-chat throttle (no library unless needed), returns the `message_id` as the receipt. For streaming edits: a `streamEdit(bot, chatId, messageId, text)` helper that calls `editMessageText` rate-limited.
 - [ ] T031 [US2] Create src/adapters/channels/telegram/adapter.ts — `TelegramChannelAdapter implements ChannelAdapter` per spec §9.1. Constructor takes `{token, webhookUrl|null, config}`. `start(handlers)`: creates a grammY `Bot`, registers an `on("message")` handler that calls `handlers.onInbound(normalizeUpdate(update))`, starts polling OR sets a webhook based on `webhookUrl`. `stop()`: stops the bot. `deliver()`: delegates to deliver.ts. `createApprovalInteraction()`: sends an inline keyboard (✅ Approve / ❌ Deny) via `sendMessage` with `reply_markup`, returns an `ApprovalInteraction` whose `decision` promise resolves on the matching `callback_query` (30s timeout → deny + cleanup). `systemPromptOverride` from config. Platform-specific ONLY — no loop logic (constitution III). (depends on T029, T030)
-- [ ] T032 [US2] Create the `zoe-channels` binary entry at src/adapters/channels/bin.ts per spec §8.2: load merged config (`loadMergedConfig()` — reuse), resolve provider+model (`getProvider()` — reuse), build `ToolsGateway` + `semanticToolMiddleware` (reuse — same as CLI/Server bootstrap), build `PersistenceBackend` (reuse) + `SessionRegistry` (T013) + `IdentityResolver` (T015), instantiate enabled adapters from config (`channels.enabled`), build `ChannelGateway` (T023), `gateway.start()` all adapters, run until SIGINT/SIGTERM → graceful `stop()`. Optional minimal `/_health` HTTP endpoint. Wire it as a `zoe-channels` binary in package.json `bin`.
+- [ ] T032 [US2] Create the `seepient-channels` binary entry at src/adapters/channels/bin.ts per spec §8.2: load merged config (`loadMergedConfig()` — reuse), resolve provider+model (`getProvider()` — reuse), build `ToolsGateway` + `semanticToolMiddleware` (reuse — same as CLI/Server bootstrap), build `PersistenceBackend` (reuse) + `SessionRegistry` (T013) + `IdentityResolver` (T015), instantiate enabled adapters from config (`channels.enabled`), build `ChannelGateway` (T023), `gateway.start()` all adapters, run until SIGINT/SIGTERM → graceful `stop()`. Optional minimal `/_health` HTTP endpoint. Wire it as a `seepient-channels` binary in package.json `bin`.
 - [ ] T033 [US2] Add a Vitest test in src/adapters/channels/telegram/__tests__/normalize.test.ts covering: private chat → `conversationType:"dm"`; group chat → `"group"`; media extraction from photo/voice updates; `null` return for empty updates. Use canned Telegram `Update` fixtures (no network).
-- [ ] T034 [US2] Verify (manual gate): with a real Telegram bot token in settings, run `zoe-channels`; send a text message from Telegram → streamed reply arrives (sendMessage then editMessageText); a destructive-tool prompt shows the inline keyboard, ✅ approves and ❌ denies; `schedule_message` delivers a message at the scheduled time; a two-turn conversation on Telegram retains context (history threaded via the SessionRegistry, not the Phase 1 bug); `pnpm test` green.
+- [ ] T034 [US2] Verify (manual gate): with a real Telegram bot token in settings, run `seepient-channels`; send a text message from Telegram → streamed reply arrives (sendMessage then editMessageText); a destructive-tool prompt shows the inline keyboard, ✅ approves and ❌ denies; `schedule_message` delivers a message at the scheduled time; a two-turn conversation on Telegram retains context (history threaded via the SessionRegistry, not the Phase 1 bug); `pnpm test` green.
 
-**Checkpoint**: `zoe-channels` runs Telegram 2-way end-to-end. The whole
+**Checkpoint**: `seepient-channels` runs Telegram 2-way end-to-end. The whole
 vertical — binary → gateway → resolver → registry → `runAgentLoop` → adapter →
 Telegram API — is proven against a real platform. Acceptance criteria #1 (spec
 §14) met.
@@ -256,7 +256,7 @@ exercised on a real platform. Voice synthesis (outbound voice) remains out of sc
 resolver. Proves the interface generalizes. Per spec §10. Acceptance criterion #2
 (spec §14).
 
-**Independent Test**: Run `zoe-channels` with `channels.enabled: ["telegram",
+**Independent Test**: Run `seepient-channels` with `channels.enabled: ["telegram",
 "discord"]`; both platforms work concurrently; a Discord DM and a Discord channel
 both reach the agent; tool approval via Discord button components; no code changes
 to `ChannelAdapter`/`ChannelGateway`/core. `pnpm test` green.
@@ -272,7 +272,7 @@ platform-specific bits implemented), IV (no changes to shared machinery).
 - [ ] T043 [P] [US4] Create src/adapters/channels/discord/deliver.ts — `deliverToDiscord(channel, payload)` that chunks to the Discord 2000-char limit (via formatter T020), sends as `channel.send(text)` or rich embeds for media, returns the message id. Discord supports Markdown natively — no stripping.
 - [ ] T044 [US4] Create src/adapters/channels/discord/adapter.ts — `DiscordChannelAdapter implements ChannelAdapter`. `start()`: creates a discord.js `Client`, registers `client.on("messageCreate")` → `handlers.onInbound(normalize(message))`, logs in with the token. `stop()`: destroys the client. `deliver()`: delegates to deliver.ts. `createApprovalInteraction()`: sends a message with ✅/❌ button components (`ActionRowBuilder`+`ButtonBuilder`), listens for `interactionCreate` on those custom ids, 30s timeout → deny. NO changes to `ChannelAdapter`/`ChannelGateway`/core — if a change is needed, STOP and propose an interface revision instead of forking (constitution II). (depends on T042, T043)
 - [ ] T045 [US4] Wire the Discord adapter into the binary in src/adapters/channels/bin.ts: when `channels.enabled` includes `"discord"`, instantiate `DiscordChannelAdapter` from config and pass to `createChannelGateway`. Reuse ALL existing bootstrap (provider, registry, resolver, outbox).
-- [ ] T046 [US4] Verify (manual gate): run `zoe-channels` with both Telegram and Discord enabled; both work concurrently; Discord DM and channel both reach the agent with history threaded; tool approval via Discord buttons; proactive scheduled message delivered to Discord; NO changes were needed to `ChannelAdapter`/`ChannelGateway`/`SessionRegistry`/`IdentityResolver` (grep the diff to confirm); `pnpm test` green.
+- [ ] T046 [US4] Verify (manual gate): run `seepient-channels` with both Telegram and Discord enabled; both work concurrently; Discord DM and channel both reach the agent with history threaded; tool approval via Discord buttons; proactive scheduled message delivered to Discord; NO changes were needed to `ChannelAdapter`/`ChannelGateway`/`SessionRegistry`/`IdentityResolver` (grep the diff to confirm); `pnpm test` green.
 
 **Checkpoint**: A second platform ships behind the unchanged interface. Acceptance
 criterion #2 (spec §14) met. The architecture is proven to generalize.
@@ -283,11 +283,11 @@ criterion #2 (spec §14) met. The architecture is proven to generalize.
 
 **Purpose**: Hardening that spans all user stories. Per spec §12–14.
 
-- [ ] T047 [P] Add a CI assertion that `zoe-channels` does not leak platform SDKs into headless/server builds when channels are disabled — assert `dist/adapters/cli/repl.js` and `dist/adapters/server/index.js` contain no `grammy`/`discord.js` reference (mirror the T055 JSX-leak assertion from spec 001). Add to the GitHub Actions workflow file.
+- [ ] T047 [P] Add a CI assertion that `seepient-channels` does not leak platform SDKs into headless/server builds when channels are disabled — assert `dist/adapters/cli/repl.js` and `dist/adapters/server/index.js` contain no `grammy`/`discord.js` reference (mirror the T055 JSX-leak assertion from spec 001). Add to the GitHub Actions workflow file.
 - [ ] T048 [P] Add per-conversation rate limiting to the proactive outbox in src/adapters/channels/outbox.ts — a per-`conversationRef` token bucket (configurable via `channels.outbox.maxPerConversationPerMin`, default 10) to prevent agent-initiated spam. Admin-gated tools already (T026); this is defense-in-depth (constitution V). Log every outbox fire for observability.
 - [ ] T049 [P] Update ARCHITECTURE.md to (a) rename the Gateway section to "Tools Gateway" and use `ToolsGateway`/`semanticToolMiddleware` terminology throughout; (b) add Channels as a fourth Runtime Adapter family with a diagram; (c) document the `SessionRegistry` + `IdentityResolver` in the Core layer; (d) note the memory-layer compatibility (the 5 decisions from spec §4.2).
 - [ ] T050 [P] Update AGENTS.md "Adapters" section to add Channels as a fourth runtime adapter, and update the "Known Gaps" / architectural notes to reflect the Tools Gateway rename and the new identity/session types.
-- [ ] T051 [P] Add VitePress docs in docs/ for channels: a getting-started guide (configure `channels.telegram.token`, run `zoe-channels`), a per-platform page for Telegram, and an architecture page summarizing the ChannelAdapter contract + ChannelGateway.
+- [ ] T051 [P] Add VitePress docs in docs/ for channels: a getting-started guide (configure `channels.telegram.token`, run `seepient-channels`), a per-platform page for Telegram, and an architecture page summarizing the ChannelAdapter contract + ChannelGateway.
 - [ ] T052 Run the full `pnpm test` suite; confirm all pre-existing (161+) plus new Phase 2–6 tests pass. Run `pnpm build` and confirm zero type errors.
 - [ ] T053 Run the spec.md acceptance scenarios (spec §14) as a final validation pass: (1) Telegram 2-way + approval + proactive with history threaded; (2) Discord ships behind the unchanged interface; (3) `Message.authorId` + `SessionData.{platform,conversationId,userId}` queryable via `SessionRegistry.sessionsForUser()`; (4) CLI/SDK/Server unchanged; (5) "gateway" terminology unambiguous.
 

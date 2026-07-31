@@ -1,8 +1,8 @@
 # =============================================================================
-# Zoe Docker Compose — Server Mode
+# Seepient Docker Compose — Server Mode
 # =============================================================================
 # Start:     docker compose up -d
-# Logs:      docker compose logs -f zoe
+# Logs:      docker compose logs -f seepient
 # Stop:      docker compose down
 # Rebuild:  docker compose up -d --build
 #
@@ -10,12 +10,12 @@
 # =============================================================================
 
 services:
-  zoe:
+  seepient:
     build:
       context: .
       dockerfile: Dockerfile
-    image: zoe:latest
-    container_name: zoe-server
+    image: seepient:latest
+    container_name: seepient-server
     restart: unless-stopped
 
     # Load environment variables from .env file
@@ -25,8 +25,8 @@ services:
 
     # Runtime environment overrides
     environment:
-      - ZOE_SHELL_APPROVE=auto   # auto-approve shell commands in container
-      - ZOE_SESSION_DIR=/data/sessions
+      - SEEPIENT_SHELL_APPROVE=auto   # auto-approve shell commands in container
+      - SEEPIENT_SESSION_DIR=/data/sessions
 
     # Port mapping — server listens on 7337 by default
     ports:
@@ -35,7 +35,7 @@ services:
     # Persistent volume mounts
     volumes:
       # Session data persists across restarts
-      - zoe-sessions:/data/sessions
+      - seepient-sessions:/data/sessions
       # Mount custom skills into the container
       - ./skills:/mnt/skills:ro
       # Working directory for agent file operations
@@ -68,5 +68,5 @@ services:
           memory: 256M
 
 volumes:
-  zoe-sessions:
+  seepient-sessions:
     driver: local

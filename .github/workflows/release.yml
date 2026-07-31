@@ -64,22 +64,22 @@ jobs:
       - name: Fetch npm tarball and compute SHA256
         id: sha
         run: |
-          curl -fsSL "https://registry.npmjs.org/zoe-agent/-/zoe-agent-${{ steps.ver.outputs.version }}.tgz" -o pkg.tgz
+          curl -fsSL "https://registry.npmjs.org/seepient/-/seepient-${{ steps.ver.outputs.version }}.tgz" -o pkg.tgz
           echo "sha256=$(sha256sum pkg.tgz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Bump tap formula
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
-          git clone https://x-access-token:${GH_TOKEN}@github.com/hashangit/homebrew-zoe.git tap
+          git clone https://x-access-token:${GH_TOKEN}@github.com/hashangit/homebrew-seepient.git tap
           cd tap
-          F="Formula/zoe-agent.rb"
-          sed -i "s|^  url .*|  url \"https://registry.npmjs.org/zoe-agent/-/zoe-agent-${{ steps.ver.outputs.version }}.tgz\"|" "$F"
+          F="Formula/seepient.rb"
+          sed -i "s|^  url .*|  url \"https://registry.npmjs.org/seepient/-/seepient-${{ steps.ver.outputs.version }}.tgz\"|" "$F"
           sed -i "s|^  sha256 .*|  sha256 \"${{ steps.sha.outputs.sha256 }}\"|" "$F"
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "$F"
-          git commit -m "zoe-agent ${{ steps.ver.outputs.version }}" || echo "no changes"
+          git commit -m "seepient ${{ steps.ver.outputs.version }}" || echo "no changes"
           git push
 
   github-release:

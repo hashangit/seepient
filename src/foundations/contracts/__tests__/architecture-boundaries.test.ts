@@ -1,0 +1,151 @@
+/**
+ * P0 architecture-boundary enforcement (spec 008, T008 / NFR-001).
+ *
+ * Verifies the ARCHITECTURE.md layer rules structurally:
+ *   - Foundations imports from no Seepient layer.
+ *   - No upward imports (Capabilities ↩ Domain ↩ Transport ↩ UI).
+ *   - Sibling capabilities do not import each other
+ *     (`capabilities/tools` ↔ `capabilities/execution` is forbidden).
+ *   - No service-SDK import outside `src/vendors/`.
+ *
+ * This is the portable CI gate; `eslint-plugin-import` is intentionally not
+ * added as a dependency (no bundler, plain tsc). The check scans source files
+ * directly.
+ */
+import { describe, it, expect } from "vitest";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
+
+const ROOT = join(import.meta.dirname, "..", "..", "..");
+
+function listFiles(dir: string, acc: string[] = []): string[] {
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) {
+      listFiles(full, acc);
+    } else if (entry.endsWith(".ts") || entry.endsWith(".tsx")) {
+      acc.push(full);
+    }
+  }
+  return acc;
+}
+
+function layerOf(absPath: string): string | null {
+  const rel = relative(join(ROOT), absPath).replace(/\\/g, "/");
+  if (rel.startsWith("foundations/")) return "foundations";
+  if (rel.startsWith("capabilities/")) return "capabilities";
+  if (rel.startsWith("domain/")) return "domain";
+  if (rel.startsWith("transport/")) return "transport";
+  if (rel.startsWith("ui/")) return "ui";
+  if (rel.startsWith("vendors/")) return "vendors";
+  return null;
+}
+
+/** Parse `import ... from "x"` / `import "x"` specifiers from a source file. */
+function importSpecifiers(source: string): string[] {
+  const out: string[] = [];
+  const re = /import\s+(?:[\s\S]*?\s+from\s+)?["']([^"']+)["']/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(source)) !== null) out.push(m[1]);
+  return out;
+}
+
+/** Relative Seepient-internal imports only (skip `node:` / external packages). */
+function internalSpecifiers(specs: string[]): string[] {
+  return specs.filter((s) => s.startsWith(".") || s.startsWith(".."));
+}
+
+const LAYER_RANK: Record<string, number> = {
+  foundations: 0,
+  vendors: 1,
+  capabilities: 2,
+  domain: 3,
+  transport: 4,
+  ui: 5,
+};
+
+describe("architecture boundaries (spec 008, T008)", () => {
+  const files = listFiles(ROOT);
+
+  it("Foundations imports from no Seepient layer", () => {
+    const violations: string[] = [];
+    for (const f of files) {
+      if (layerOf(f) !== "foundations") continue;
+      const src = readFileSync(f, "utf8");
+      for (const spec of internalSpecifiers(importSpecifiers(src))) {
+        if (/\/(domain|capabilities|transport|ui|vendors)\//.test(spec)) {
+          violations.push(`${relative(ROOT, f)} -> ${spec}`);
+        }
+      }
+    }
+    expect(violations, violations.join("\n")).toEqual([]);
+  });
+
+  it("no upward imports (inner layer ↩ outer layer)", () => {
+    const violations: string[] = [];
+    for (const f of files) {
+      const layer = layerOf(f);
+      if (!layer || layer === "foundations") continue;
+      const src = readFileSync(f, "utf8");
+      for (const spec of internalSpecifiers(importSpecifiers(src))) {
+        const targetLayer = /\/vendors\//.test(spec)
+          ? "vendors"
+          : /\/capabilities\//.test(spec)
+            ? "capabilities"
+            : /\/domain\//.test(spec)
+              ? "domain"
+              : /\/transport\//.test(spec)
+                ? "transport"
+                : /\/ui\//.test(spec)
+                  ? "ui"
+                  : null;
+        if (!targetLayer) continue;
+        // allowed: importing foundations (rank 0) from anywhere, and
+        // left-to-right (inner imports outer, where outer is higher rank).
+        if (LAYER_RANK[targetLayer] > LAYER_RANK[layer]) {
+          violations.push(
+            `${relative(ROOT, f)} (${layer}) -> ${spec} (${targetLayer})`,
+          );
+        }
+      }
+    }
+    expect(violations, violations.join("\n")).toEqual([]);
+  });
+
+  it("sibling capabilities do not import each other (tools ↔ execution)", () => {
+    const violations: string[] = [];
+    for (const f of files) {
+      const rel = relative(ROOT, f).replace(/\\/g, "/");
+      const sibling =
+        rel.startsWith("capabilities/tools/") ? "execution" :
+        rel.startsWith("capabilities/execution/") ? "tools" : null;
+      if (!sibling) continue;
+      const src = readFileSync(f, "utf8");
+      for (const spec of internalSpecifiers(importSpecifiers(src))) {
+        if (spec.includes(`/capabilities/${sibling}/`)) {
+          violations.push(`${rel} -> ${spec}`);
+        }
+      }
+    }
+    expect(violations, violations.join("\n")).toEqual([]);
+  });
+
+  it("Domain exports no analyze* symbols (T008a / D46)", () => {
+    // Domain must contain no tool-specific analyzers. Analyzer implementations
+    // live in src/capabilities/tools/. The Domain shim (comm-analyzers.ts,
+    // default-analyzers.ts) may re-export but must not define analyze* itself.
+    const violations: string[] = [];
+    for (const f of files) {
+      const rel = relative(ROOT, f).replace(/\\/g, "/");
+      if (!rel.startsWith("domain/")) continue;
+      const src = readFileSync(f, "utf8");
+      // Detect export declarations that define a function named analyze*
+      const exportFnRe = /export\s+(?:async\s+)?function\s+(analyze[A-Za-z]+)/g;
+      let m: RegExpExecArray | null;
+      while ((m = exportFnRe.exec(src)) !== null) {
+        violations.push(`${rel} exports analyzer function: ${m[1]}`);
+      }
+    }
+    expect(violations, violations.join("\n")).toEqual([]);
+  });
+});

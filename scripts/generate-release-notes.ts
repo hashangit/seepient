@@ -1,5 +1,5 @@
 /**
- * Generate release notes for a zoe-agent release using zoe-agent itself (dogfooding).
+ * Generate release notes for a seepient release using seepient itself (dogfooding).
  *
  * Gathers commits + merged PRs since the last tag, feeds them to the SDK's
  * generateText(), and formats output per Keep a Changelog.
@@ -9,8 +9,8 @@
  *   npx tsx scripts/generate-release-notes.ts 0.3.1
  *   npx tsx scripts/generate-release-notes.ts 0.3.1 --stdout   # print, don't write
  *
- * Reads provider config from ~/.zoe/setting.json + .zoe/setting.json + env,
- * exactly like the CLI does. Your existing zoe-agent setup just works.
+ * Reads provider config from ~/.seepient/setting.json + .seepient/setting.json + env,
+ * exactly like the CLI does. Your existing seepient setup just works.
  */
 import { generateText } from "../src/adapters/sdk/index.js";
 import { configureProviders } from "../src/core/provider-resolver.js";
@@ -66,7 +66,7 @@ try {
 const today = new Date().toISOString().slice(0, 10);
 
 // --- the prompt -----------------------------------------------------------
-const prompt = `You are generating release notes for version ${VERSION} of zoe-agent, a headless AI agent framework.
+const prompt = `You are generating release notes for version ${VERSION} of seepient, a headless AI agent framework.
 
 Below is the raw data of changes since the previous release (${prevTag}):
 

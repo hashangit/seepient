@@ -341,7 +341,7 @@ All three adapters delegate to a single `runAgentLoop` in `src/core/agent-loop.t
 | Hooks | `src/core/hooks.ts` | Safe executor — errors never crash the loop |
 | Middleware | `src/core/middleware.ts` | `PipelineContext`, `Middleware` type, `compose()` chain |
 | Built-in middleware | `src/core/middleware/` | `logging`, `rate-limit`, `auth` |
-| Errors | `src/core/errors.ts` | `ZoeError` hierarchy with `code` + `retryable` |
+| Errors | `src/core/errors.ts` | `SeepientError` hierarchy with `code` + `retryable` |
 | Stream manager | `src/core/stream-manager.ts` | Shared streaming queue, async iterables, SSE for SDK and agent |
 | Session store | `src/core/session-store.ts` | `PersistenceBackend` factory + registry, file & memory backends |
 | Config loading | `src/core/config.ts` | Shared config utilities (`loadMergedConfig`, `loadJsonConfig`, `applyEnvOverrides`) — chalk-free, used by SDK and CLI |
@@ -380,7 +380,7 @@ Custom tools: `tool({ description, parameters, execute })` → `ToolModule` regi
 
 ## Skills
 
-File-based plugin system. YAML frontmatter + body. Skills can specify allowed tools, preferred provider/model, and template args. Discovery from multiple sources with priority (last wins): built-in → `~/.zoe/skills/` → `.zoe/skills/` → `ZOE_SKILLS_PATH`.
+File-based plugin system. YAML frontmatter + body. Skills can specify allowed tools, preferred provider/model, and template args. Discovery from multiple sources with priority (last wins): built-in → `~/.seepient/skills/` → `.seepient/skills/` → `SEEPIENT_SKILLS_PATH`.
 
 ## Adapters
 
@@ -398,16 +398,16 @@ HTTP + WebSocket standalone server. REST endpoints for generate/stream/agent/set
 
 ## Configuration
 
-Multi-layer merge (highest wins): env vars → local `.zoe/setting.json` → global `~/.zoe/setting.json` → defaults.
+Multi-layer merge (highest wins): env vars → local `.seepient/setting.json` → global `~/.seepient/setting.json` → defaults.
 
 Env vars per provider: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GLM_API_KEY`, `OPENAI_COMPAT_API_KEY` + `OPENAI_COMPAT_BASE_URL`. General: `LLM_PROVIDER`, `LLM_MODEL`. Legacy vars work with deprecation warnings.
 
 ## Conventions
 
 - **No bundler** — plain `tsc` to ES2022 NodeNext. Dev via `tsx`.
-- **Package exports** — `zoe` (SDK), `zoe/server`. Binaries: `zoe` (CLI), `zoe-server`.
+- **Package exports** — `seepient` (SDK), `seepient/server`. Binaries: `seepient` (CLI), `seepient-server`.
 - **Vitest test suite (partial)** — 161 tests across 10 files covering P0/P1 areas; CI gates publish on test pass
-- **Errors carry metadata** — `code` (machine-readable) + `retryable` flag on all `ZoeError` subclasses.
+- **Errors carry metadata** — `code` (machine-readable) + `retryable` flag on all `SeepientError` subclasses.
 - **Hook errors are non-fatal** — never crash the agent loop.
 - **Dynamic provider imports** — unused provider SDKs stay out of memory.
 
@@ -497,14 +497,20 @@ Keep `CONTEXT.md` under 20 lines total. Do NOT summarize the full conversation �
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-- **ACTIVE PLAN**: `specs/006-inline-diff-viewer/plan.md` — T051 inline diff
-  viewer + safe atomic `write_file` (diff via the `diff` pkg, learned from Pi;
-  safe-write zoe-original). Phase artifacts ready; run `/speckit-tasks` next.
+- **ACTIVE PLAN**: `specs/007-tui-parity-upgrade/plan.md` — TUI parity & generative
+  widget upgrade. Five phased tracks: T0 streaming polish (30fps throttle, memo,
+  cursor hide); T4-1/T4-2 ChatBlock lifecycle + widget host; T1 generative widgets
+  (L1 declarative palette, action round-trip, no L3 model code); T3 hash-anchored
+  edits (hashline patcher, SnapshotStore, `edit_file` — highest leverage, independent);
+  T2 + T4 remainder (rich markdown, streaming commit gate, multiline editor, thinking
+  indicator, parity components). Stays on Ink (renderer port deferred). 005 stays
+  reverted (no alt-buffer / mouse capture). Phase artifacts ready; run `/speckit-tasks`
+  to refine, then implement per phase.
+- `specs/006-inline-diff-viewer/` — ✅ IMPLEMENTED. Inline diff + safe atomic
+  `write_file`. The metadata-passthrough contract 007 builds on.
 - `specs/003-tui-input-and-logo/` — ✅ IMPLEMENTED. Bordered persistent input +
-  Zoe Agent figlet logo, on the `<Static>` + `ink-reset` foundation (native
-  terminal scroll; no full-screen / mouse capture).
+  Seepient Agent figlet logo, on the `<Static>` + `ink-reset` foundation.
 - `specs/005-fullscreen-tui/` — ⚠️ SUPERSEDED (reverted). Decision record only;
   do not implement.
 - Next (separate sessions): `specs/002-channels-integration/` (2-way messaging).
-  (The Zoe → Zoe Agent rename refactor is now complete.)
 <!-- SPECKIT END -->

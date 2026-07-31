@@ -1,4 +1,4 @@
-# Implementation Plan: TUI Persistent Input Box + Zoe Agent Logo
+# Implementation Plan: TUI Persistent Input Box + Seepient Agent Logo
 
 **Branch**: `003-tui-input-and-logo` (currently on `feature/tui-upgrade-prd`)
 | **Date**: 2026-06-15 (revised post-scrutinize) | **Spec**: [spec.md](./spec.md)
@@ -23,7 +23,7 @@ Two pure-presentation additions in the CLI adapter layer:
    open **or** a permission prompt is pending; the spinner sits **above** the box.
    Fixes the "not clearly visible / vanishes" complaint and preserves the
    overlays' exclusive-stdin contract.
-2. **A Zoe Agent logo** — a large Tokyo Night rainbow gradient banner
+2. **A Seepient Agent logo** — a large Tokyo Night rainbow gradient banner
    (`red→…→purple`, 45° axis, **HSL** hue rotation) shown on launch as a real
    feed entry (`kind: 'logo'`) so it scrolls away as the user chats. Pure
    `rainbow45` over the existing `theme.ts` palette — no new dependency.
@@ -79,7 +79,7 @@ budget.
 | II. Single Source of Truth | ✅ Compliant | `theme.ts` is the only palette. `app.tsx` remains the single owner of `input`/`isRunning`/`overlay`/`pendingPermission`; `InputBox.disabled` is *composed* from them, not duplicated. `FeedEntry` (one owner: `tui/types.ts`) gains the logo variant. |
 | III. Simplicity First | ✅ Compliant | No new dependency. No transition state machine (banner scrolls via `<Static>`). Input logic reused. The composite disable (`isRunning‖overlay‖permission`) is one boolean expression, not a state machine. Wordmark deferred rather than force-fit. |
 | IV. Surgical Changes | ✅ Compliant | `text-input.tsx` +1 optional prop; `prompt-area.tsx` forwards it; `types.ts`/`message-area.tsx` add one union variant + one switch case; `app.tsx` reorders the live region and seeds one feed entry. Headless/SDK/Server/`repl.ts` untouched. |
-| V. Safe by Default & Verifiable | ✅ Compliant | Every `quickstart.md` scenario is a Verify gate. `pnpm test` baseline holds; gradient fn unit-tested (with a saturation guard). Non-interactive `zoe -n`/piped/`--docker` stay byte-identical. |
+| V. Safe by Default & Verifiable | ✅ Compliant | Every `quickstart.md` scenario is a Verify gate. `pnpm test` baseline holds; gradient fn unit-tested (with a saturation guard). Non-interactive `seepient -n`/piped/`--docker` stay byte-identical. |
 
 *Post-Phase-1 re-check*: compliant — no schema, no new state owner, no boundary
 handler, no long-running work. The scrutinize pass corrected the inaccurate

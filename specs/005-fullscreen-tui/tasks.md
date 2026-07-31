@@ -66,10 +66,10 @@ is a windowed region showing the latest slice; the input area + footer are pinne
 to the viewport bottom on every frame; resize reflows; exit/crash restores the
 terminal. (No scrolling yet — offset is fixed at 0.)
 
-**Independent Test** (quickstart S1, S2, S4, S6, S7): `zoe` → fills terminal,
+**Independent Test** (quickstart S1, S2, S4, S6, S7): `seepient` → fills terminal,
 input+footer on the bottom rows even on a fresh session; long feed scrolls inside
 its region while the pinned region never moves; resize reflows + re-pins; exit
-restores the prior screen; `zoe -n` unchanged.
+restores the prior screen; `seepient -n` unchanged.
 
 ### Implementation for User Story 1
 
@@ -107,7 +107,7 @@ Page Down returns; `j`/`k` line-scroll; new output while scrolled up holds posit
 
 ## Phase 5: Polish & Cross-Cutting
 
-- [ ] T014 [P] Verify the lazy-load invariant: `echo hi | zoe`, `zoe -n "hi"`, `zoe --docker …` never enter the alt buffer and never statically import `src/adapters/cli/tui/fullscreen/*`. Run any existing CI guard.
+- [ ] T014 [P] Verify the lazy-load invariant: `echo hi | seepient`, `seepient -n "hi"`, `seepient --docker …` never enter the alt buffer and never statically import `src/adapters/cli/tui/fullscreen/*`. Run any existing CI guard.
 - [ ] T015 Run `specs/005-fullscreen-tui/quickstart.md` S1–S8 in a real TTY: full-screen + bottom-pinned (S1); feed scrolls inside, pinned region still (S2); PageUp/Down + j/k + sticky + indicator (S3); resize reflow + clamp (S4); streaming + tool blocks under windowing (S5); exit/SIGTERM restore (S6); non-interactive parity (S7). Fix flicker/clip/edge cases (tiny terminals).
 - [ ] T016 Run `pnpm test` (baseline count still passes **plus** T002/T003/T011) and `pnpm build`.
 

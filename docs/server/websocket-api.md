@@ -1,6 +1,6 @@
 ---
 title: WebSocket API Reference
-description: Full Zoe Agent WebSocket protocol reference for real-time streaming conversations.
+description: Full Seepient Agent WebSocket protocol reference for real-time streaming conversations.
 ---
 
 # WebSocket API Reference
@@ -12,14 +12,14 @@ The WebSocket endpoint enables real-time, bidirectional communication for stream
 ### Endpoint
 
 ```
-ws://localhost:7337/ws?token=sk_zoe_...
+ws://localhost:7337/ws?token=sk_seepient_...
 ```
 
 Authentication is performed via the `token` query parameter. The server validates the API key during the HTTP upgrade. If the key is invalid, the upgrade is rejected with `401 Unauthorized`.
 
 ### Upgrade lifecycle
 
-1. Client initiates a WebSocket upgrade to `/ws?token=sk_zoe_...`
+1. Client initiates a WebSocket upgrade to `/ws?token=sk_seepient_...`
 2. Server validates the API key
 3. On success, the connection is established and ready for messages
 4. On failure, the socket is destroyed with a `401` response
@@ -133,7 +133,7 @@ Change the active provider and/or model for subsequent messages on this connecti
 
 ### `list_models`
 
-Request the list of models available from your configured inference providers. Zoe Agent does not host models — it forwards requests to your provider APIs. The server replies with `models_list`.
+Request the list of models available from your configured inference providers. Seepient Agent does not host models — it forwards requests to your provider APIs. The server replies with `models_list`.
 
 ```json
 {
@@ -428,7 +428,7 @@ Response to `reconnect`. Contains messages the client may have missed.
 ### JavaScript / TypeScript (browser)
 
 ```typescript
-const ws = new WebSocket("ws://localhost:7337/ws?token=sk_zoe_...");
+const ws = new WebSocket("ws://localhost:7337/ws?token=sk_seepient_...");
 
 ws.onopen = () => {
   // Start a chat
@@ -486,7 +486,7 @@ import uuid
 from websockets import connect
 
 async def chat():
-    uri = "ws://localhost:7337/ws?token=sk_zoe_..."
+    uri = "ws://localhost:7337/ws?token=sk_seepient_..."
 
     async with connect(uri) as ws:
         # Send a chat message

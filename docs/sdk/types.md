@@ -1,14 +1,14 @@
 ---
 title: Types Reference
-description: Complete TypeScript types reference for the Zoe Agent SDK.
+description: Complete TypeScript types reference for the Seepient Agent SDK.
 ---
 
 # Types Reference
 
-Complete TypeScript type definitions for the Zoe Agent SDK. All types are exported from `"zoe-agent"`.
+Complete TypeScript type definitions for the Seepient Agent SDK. All types are exported from `"seepient"`.
 
 ```typescript
-import type { Message, GenerateTextResult, SdkAgent } from "zoe-agent";
+import type { Message, GenerateTextResult, SdkAgent } from "seepient";
 ```
 
 ## Core Types
@@ -200,7 +200,7 @@ interface StreamTextOptions extends GenerateTextOptions {
   /** Called for every agent loop step. */
   onStep?: (step: StepResult) => void;
   /** Called if an error occurs during execution. */
-  onError?: (error: ZoeError) => void;
+  onError?: (error: SeepientError) => void;
 }
 ```
 
@@ -412,7 +412,7 @@ interface Hooks {
   onStep?: (step: StepResult) => void | Promise<void>;
 
   /** Called when an error occurs. */
-  onError?: (error: ZoeError) => void | Promise<void>;
+  onError?: (error: SeepientError) => void | Promise<void>;
 
   /** Called when the agent loop finishes. */
   onFinish?: (result: GenerateTextResult) => void | Promise<void>;
@@ -421,12 +421,12 @@ interface Hooks {
 
 ## Error Types
 
-### ZoeError
+### SeepientError
 
-Base class for all Zoe Agent errors:
+Base class for all Seepient Agent errors:
 
 ```typescript
-class ZoeError extends Error {
+class SeepientError extends Error {
   /** Machine-readable error code. */
   code: string;
   /** Whether the operation can be retried. */
@@ -437,7 +437,7 @@ class ZoeError extends Error {
 ### ProviderError
 
 ```typescript
-class ProviderError extends ZoeError {
+class ProviderError extends SeepientError {
   code: "PROVIDER_ERROR";
   retryable: true;
   /** The provider name that produced the error. */
@@ -448,7 +448,7 @@ class ProviderError extends ZoeError {
 ### ToolError
 
 ```typescript
-class ToolError extends ZoeError {
+class ToolError extends SeepientError {
   code: "TOOL_FAILED";
   retryable: true;
   /** The tool name that produced the error. */
@@ -459,7 +459,7 @@ class ToolError extends ZoeError {
 ### MaxStepsError
 
 ```typescript
-class MaxStepsError extends ZoeError {
+class MaxStepsError extends SeepientError {
   code: "MAX_STEPS";
   retryable: false;
   /** The number of steps that were executed. */
@@ -470,7 +470,7 @@ class MaxStepsError extends ZoeError {
 ### AbortedError
 
 ```typescript
-class AbortedError extends ZoeError {
+class AbortedError extends SeepientError {
   code: "ABORTED";
   retryable: false;
 }
@@ -857,8 +857,8 @@ const DEFAULT_SKILL_BODY_WARN_CHARS = 8_000;
 
 /** Resolved skill body limits from environment variables. */
 function getSkillBodyLimits(): {
-  maxChars: number;  // ZOE_SKILL_BODY_MAX_CHARS (default: 32000)
-  warnChars: number; // ZOE_SKILL_BODY_WARN_CHARS (default: 8000)
+  maxChars: number;  // SEEPIENT_SKILL_BODY_MAX_CHARS (default: 32000)
+  warnChars: number; // SEEPIENT_SKILL_BODY_WARN_CHARS (default: 8000)
 };
 
 /** Enforce size limits on a skill body. Fail-soft: never throws. */

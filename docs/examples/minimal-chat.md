@@ -1,16 +1,16 @@
 ---
 title: Minimal Chat Example
-description: The simplest possible Zoe Agent chat examples with one-shot, streaming, and tool-using variants.
+description: The simplest possible Seepient Agent chat examples with one-shot, streaming, and tool-using variants.
 ---
 
 # Minimal Chat Example
 
-The simplest way to use Zoe Agent. Each variant shows a different mode of operation.
+The simplest way to use Seepient Agent. Each variant shows a different mode of operation.
 
 ## Prerequisites
 
 ```bash
-npm install zoe-agent
+npm install seepient
 ```
 
 Set at least one provider API key:
@@ -24,7 +24,7 @@ export OPENAI_API_KEY=sk-...
 The most basic usage: send a prompt, get a response.
 
 ```typescript
-import { generateText } from "zoe-agent";
+import { generateText } from "seepient";
 
 const { text } = await generateText("Hello, what can you do?");
 console.log(text);
@@ -35,7 +35,7 @@ console.log(text);
 Stream text as it is generated using async iterables:
 
 ```typescript
-import { streamText } from "zoe-agent";
+import { streamText } from "seepient";
 
 const stream = await streamText("Explain quantum computing in simple terms", {
   onText: (delta) => process.stdout.write(delta),
@@ -51,7 +51,7 @@ console.log(`Tokens: ${(await stream.usage).totalTokens}`);
 Enable built-in tools by name:
 
 ```typescript
-import { generateText } from "zoe-agent";
+import { generateText } from "seepient";
 
 const result = await generateText(
   "What files are in the current directory?",
@@ -76,7 +76,7 @@ for (const call of result.toolCalls) {
 Use group names to include entire categories:
 
 ```typescript
-import { generateText } from "zoe-agent";
+import { generateText } from "seepient";
 
 const result = await generateText(
   "Search for the latest TypeScript release and email a summary to dev@team.com",
@@ -95,7 +95,7 @@ console.log(`Cost: $${result.usage.cost.toFixed(4)}`);
 Define and use a custom tool inline:
 
 ```typescript
-import { generateText, tool } from "zoe-agent";
+import { generateText, tool } from "seepient";
 import { z } from "zod";
 
 const diceTool = tool({
@@ -122,7 +122,7 @@ console.log(result.text);
 Handle provider errors and tool failures gracefully:
 
 ```typescript
-import { generateText } from "zoe-agent";
+import { generateText } from "seepient";
 
 try {
   const result = await generateText("Analyze this dataset", {
@@ -145,7 +145,7 @@ try {
 Cancel a long-running generation:
 
 ```typescript
-import { generateText } from "zoe-agent";
+import { generateText } from "seepient";
 
 const controller = new AbortController();
 

@@ -1,6 +1,6 @@
 ---
 title: React Hook (useChat)
-description: React hook for building chat interfaces with SSE streaming, tool call tracking, and Zoe Agent backend integration.
+description: React hook for building chat interfaces with SSE streaming, tool call tracking, and Seepient Agent backend integration.
 ---
 
 # React Hook (useChat)
@@ -10,7 +10,7 @@ The `useChat` hook provides a complete chat interface for React applications wit
 ## Import
 
 ```typescript
-import createUseChat from "zoe-agent/react";
+import createUseChat from "seepient/react";
 
 // createUseChat is an async factory -- call it once to get the useChat hook
 const useChat = await createUseChat();
@@ -19,13 +19,13 @@ const useChat = await createUseChat();
 Or use the named export:
 
 ```typescript
-import { createUseChat } from "zoe-agent/react";
+import { createUseChat } from "seepient/react";
 
 const useChat = await createUseChat();
 ```
 
 ::: info
-The React hook is available from the `zoe-agent/react` subpath import. `createUseChat` is an async factory that returns the `useChat` hook. Ensure your bundler supports package `exports` field.
+The React hook is available from the `seepient/react` subpath import. `createUseChat` is an async factory that returns the `useChat` hook. Ensure your bundler supports package `exports` field.
 :::
 
 ## Interface
@@ -96,7 +96,7 @@ interface UseChatReturn {
 ## Quick example
 
 ```tsx
-import createUseChat from "zoe-agent/react";
+import createUseChat from "seepient/react";
 
 const useChat = await createUseChat();
 
@@ -133,7 +133,7 @@ function ChatPage() {
 
 `useChat` connects to your backend via Server-Sent Events (SSE). The response streams in real time -- the assistant message updates progressively as tokens arrive.
 
-The hook expects the backend to return an SSE stream using Zoe Agent's `streamText().toResponse()` format:
+The hook expects the backend to return an SSE stream using Seepient Agent's `streamText().toResponse()` format:
 
 ```
 event: text
@@ -225,7 +225,7 @@ function ChatWithTools() {
 A production-ready chat component with streaming, tool display, error handling, and abort support:
 
 ```tsx
-import createUseChat from "zoe-agent/react";
+import createUseChat from "seepient/react";
 
 const useChat = await createUseChat();
 
@@ -332,7 +332,7 @@ export default ChatApp;
 
 ```typescript
 import express from "express";
-import { streamText } from "zoe-agent";
+import { streamText } from "seepient";
 
 const app = express();
 app.use(express.json());
@@ -358,7 +358,7 @@ app.listen(3000);
 
 ```typescript
 import { Hono } from "hono";
-import { streamText } from "zoe-agent";
+import { streamText } from "seepient";
 
 const app = new Hono();
 
@@ -390,7 +390,7 @@ For multi-turn conversations, create a persistent agent and map sessions to user
 
 ```typescript
 import express from "express";
-import { createAgent } from "zoe-agent";
+import { createAgent } from "seepient";
 
 const app = express();
 app.use(express.json());

@@ -1,10 +1,10 @@
 # Installation
 
-Get Zoe Agent up and running in your environment. Choose the installation method that fits your workflow.
+Get Seepient Agent up and running in your environment. Choose the installation method that fits your workflow.
 
 ## Prerequisites
 
-Before installing Zoe Agent, ensure you have:
+Before installing Seepient Agent, ensure you have:
 
 - **Node.js 18+** installed ([download here](https://nodejs.org/))
 - **npm**, **pnpm**, or **bun** as your package manager
@@ -16,24 +16,24 @@ We recommend using **pnpm** for faster installs and better disk space efficiency
 
 ## Install as an SDK
 
-Use Zoe Agent as a library in your Node.js projects.
+Use Seepient Agent as a library in your Node.js projects.
 
 ### npm
 
 ```bash
-npm install zoe-agent
+npm install seepient
 ```
 
 ### pnpm
 
 ```bash
-pnpm add zoe-agent
+pnpm add seepient
 ```
 
 ### bun
 
 ```bash
-bun add zoe-agent
+bun add seepient
 ```
 
 ### Verify Installation
@@ -41,9 +41,9 @@ bun add zoe-agent
 Create a file called `test.js`:
 
 ```javascript
-import { generateText } from 'zoe-agent'
+import { generateText } from 'seepient'
 
-const result = await generateText('Hello, Zoe Agent!', {
+const result = await generateText('Hello, Seepient Agent!', {
   provider: 'openai',
   model: 'gpt-5.4'
 })
@@ -58,43 +58,43 @@ OPENAI_API_KEY=your-key node test.js
 ```
 
 ::: info TypeScript Support
-Zoe Agent is written in TypeScript and includes full type definitions. No additional `@types` package needed.
+Seepient Agent is written in TypeScript and includes full type definitions. No additional `@types` package needed.
 :::
 
 ## Install as a CLI
 
-Install Zoe Agent globally to use the command-line interface.
+Install Seepient Agent globally to use the command-line interface.
 
 ### npm
 
 ```bash
-npm install -g zoe-agent
+npm install -g seepient
 ```
 
 ### pnpm
 
 ```bash
-pnpm add -g zoe-agent
+pnpm add -g seepient
 ```
 
 ### Verify CLI Installation
 
 ```bash
-zoe-agent --version
+seepient --version
 ```
 
 You should see the version number printed.
 
 ## Use with Docker
 
-Zoe Agent includes a Dockerfile in the repository. Build the image and run the server or CLI without a local Node.js installation.
+Seepient Agent includes a Dockerfile in the repository. Build the image and run the server or CLI without a local Node.js installation.
 
 ### Build the Image
 
 ```bash
-git clone https://github.com/hashangit/zoe.git
-cd zoe
-docker build -t zoe-server .
+git clone https://github.com/hashangit/seepient.git
+cd seepient
+docker build -t seepient-server .
 ```
 
 ### Run the Server
@@ -102,7 +102,7 @@ docker build -t zoe-server .
 ```bash
 docker run -p 7337:7337 \
   -e OPENAI_API_KEY=your-key \
-  zoe-server
+  seepient-server
 ```
 
 The server will start on `http://localhost:7337`.
@@ -110,29 +110,29 @@ The server will start on `http://localhost:7337`.
 ### Generate an API Key
 
 ```bash
-docker exec -it <container-name> zoe server --generate-api-key
+docker exec -it <container-name> seepient server --generate-api-key
 ```
 
 ### Run the CLI
 
 ```bash
 docker run -it -e OPENAI_API_KEY=your-key \
-  zoe-server \
-  zoe chat
+  seepient-server \
+  seepient chat
 ```
 
 ## Deploy to Cloud Run
 
-Deploy Zoe Agent to Google Cloud Run in one command:
+Deploy Seepient Agent to Google Cloud Run in one command:
 
 ```bash
 # First, push the image to a registry (e.g., Artifact Registry)
-docker tag zoe-server us-central1-docker.pkg.dev/YOUR_PROJECT/repo/zoe:latest
-docker push us-central1-docker.pkg.dev/YOUR_PROJECT/repo/zoe:latest
+docker tag seepient-server us-central1-docker.pkg.dev/YOUR_PROJECT/repo/seepient:latest
+docker push us-central1-docker.pkg.dev/YOUR_PROJECT/repo/seepient:latest
 
 # Deploy to Cloud Run
-gcloud run deploy zoe \
-  --image us-central1-docker.pkg.dev/YOUR_PROJECT/repo/zoe:latest \
+gcloud run deploy seepient \
+  --image us-central1-docker.pkg.dev/YOUR_PROJECT/repo/seepient:latest \
   --platform managed \
   --region us-central1 \
   --allow-unauthenticated \
@@ -145,12 +145,12 @@ For production, use Secret Manager or a similar service to store your API keys s
 
 ## Development Setup
 
-If you want to contribute to Zoe Agent or run it from source:
+If you want to contribute to Seepient Agent or run it from source:
 
 ```bash
 # Clone the repository
-git clone https://github.com/hashangit/zoe.git
-cd zoe
+git clone https://github.com/hashangit/seepient.git
+cd seepient
 
 # Install dependencies
 pnpm install
@@ -171,5 +171,5 @@ After installation:
 3. Explore the [SDK Reference](/sdk/overview) for advanced usage
 
 ::: info Troubleshooting
-If you encounter any issues during installation, check our [GitHub Issues](https://github.com/zoe/zoe/issues) or join our community discussions.
+If you encounter any issues during installation, check our [GitHub Issues](https://github.com/seepient/seepient/issues) or join our community discussions.
 :::

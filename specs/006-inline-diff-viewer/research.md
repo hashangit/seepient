@@ -23,7 +23,7 @@ learn from Pi's engine choice without importing its code.
 coupled to Pi's *edit* tool — fuzzy oldText matching, BOM stripping, CRLF
 normalization for locating search text — none of which `write_file` needs
 (write_file already has both full old+new contents). Importing would drag in
-`typebox`, `proper-lockfile`, `@earendil-works/pi-tui`, and lock zoe to
+`typebox`, `proper-lockfile`, `@earendil-works/pi-tui`, and lock seepient to
 another product's private internals. Constitution §II (single source of truth)
 and the "don't wrap third-party internals" rule forbid it.
 
@@ -73,7 +73,7 @@ branches), all assigning to the same local `output`. One import site. Contained.
 **Rationale**: A crash between (2) and (3) orphans a temp file but leaves the
 original intact. A failed temp write never reaches (3), so the original is never
 partial. This is the corruption-prevention guarantee the current blind overwrite
-lacks. Pi's `write` tool does **not** do this (plain `writeFile`) — zoe-original.
+lacks. Pi's `write` tool does **not** do this (plain `writeFile`) — seepient-original.
 
 **No `.bak` in v1**: the old content lives in step metadata (for the diff) for
 the session. Persistent disk rollback is deferred (spec "Out of scope").
@@ -99,7 +99,7 @@ in domain-adjacent code; this is an infrastructure edge effect, acceptable).
   expand affordance.
 
 **Rationale**: Pi's `generateDiffString` proves the context-collapse UX reads
-well for source. zoe's viewer reuses the idea (not the code).
+well for source. seepient's viewer reuses the idea (not the code).
 
 ## R5 — CRLF handling: normalize for comparison
 

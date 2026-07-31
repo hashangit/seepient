@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+.pnpm-store/
 
 # Build output
 dist/
@@ -42,5 +43,5 @@ docs/.vitepress/cache/
 .zflow/
 .dual-graph-context/
 
-# Local Zoe config (per-user settings, sessions, keys)
-.zoe/
+# Local Seepient config (per-user settings, sessions, keys)
+.seepient/

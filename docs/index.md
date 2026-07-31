@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: Zoe Agent
+  name: Seepient Agent
   tagline: Headless AI agent framework with multi-provider LLM support
   actions:
     - theme: brand
@@ -10,7 +10,7 @@ hero:
       link: /getting-started/installation
     - theme: alt
       text: View on GitHub
-      link: https://github.com/hashangit/zoe
+      link: https://github.com/hashangit/seepient
 
 features:
   - icon: ⚡
@@ -35,18 +35,18 @@ features:
 
 # Build AI Agents with Confidence
 
-Zoe Agent is a headless AI agent framework that gives you the power to build intelligent, tool-capable agents with full control over your stack.
+Seepient Agent is a headless AI agent framework that gives you the power to build intelligent, tool-capable agents with full control over your stack.
 
-## Why Zoe Agent?
+## Why Seepient Agent?
 
 ::: tip Developer Experience First
-Zoe Agent is designed for developers who want full control over their AI agent architecture. No black boxes, no vendor lock-in, just clean, composable APIs.
+Seepient Agent is designed for developers who want full control over their AI agent architecture. No black boxes, no vendor lock-in, just clean, composable APIs.
 :::
 
 ## Quick Look
 
 ```typescript
-import { generateText } from 'zoe-agent'
+import { generateText } from 'seepient'
 
 const result = await generateText('What is the capital of France?', {
   provider: 'openai',
@@ -61,7 +61,7 @@ console.log(result.text) // "The capital of France is Paris."
 ### As an SDK
 
 ```bash
-npm install zoe-agent
+npm install seepient
 ```
 
 Build AI-powered features directly into your Node.js applications with full TypeScript support.
@@ -69,7 +69,7 @@ Build AI-powered features directly into your Node.js applications with full Type
 ### As a CLI
 
 ```bash
-npx zoe-agent chat
+npx seepient chat
 ```
 
 Interact with AI agents from your terminal with the included command-line interface.
@@ -77,7 +77,7 @@ Interact with AI agents from your terminal with the included command-line interf
 ### As a Server
 
 ```bash
-docker run -p 7337:7337 zoe/server
+docker run -p 7337:7337 seepient/server
 ```
 
 Deploy as a container with WebSocket + REST API for production workloads.
@@ -85,7 +85,7 @@ Deploy as a container with WebSocket + REST API for production workloads.
 ## What's Next?
 
 ::: info Choose Your Path
-- **New to Zoe Agent?** Start with the [Installation Guide](/getting-started/installation)
+- **New to Seepient Agent?** Start with the [Installation Guide](/getting-started/installation)
 - **Building an app?** Check out the [SDK Reference](/sdk/overview)
 - **Deploying to production?** See the [Server API](/server/overview)
 - **Looking for inspiration?** Browse our [Guides](/guides/build-your-own-ui)

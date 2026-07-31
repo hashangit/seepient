@@ -18,7 +18,7 @@ This feature delivers two tightly-coupled improvements:
 
 The diff is computed with the [`diff`](https://www.npmjs.com/package/diff) npm
 package — the same engine the Pi coding agent uses. The safe-write (atomic +
-old-content capture) is zoe-original; Pi's `write` tool is neither atomic nor
+old-content capture) is seepient-original; Pi's `write` tool is neither atomic nor
 diff'd. See `research.md`.
 
 ## User Stories

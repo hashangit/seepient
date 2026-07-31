@@ -107,7 +107,7 @@ When the wizard writes a setting:
 ## SDK: Programmatic API
 
 ```typescript
-import { settings } from 'zoe'
+import { settings } from 'seepient'
 
 // Read
 settings.get('provider')           // → 'anthropic'
@@ -131,7 +131,7 @@ settings.reset('model')            // → reset one key
 settings.resetAll()                 // → reset everything
 ```
 
-All write operations validate against the schema and throw `ZoeError` on invalid values. Secrets are masked in `get()` and `list()` output.
+All write operations validate against the schema and throw `SeepientError` on invalid values. Secrets are masked in `get()` and `list()` output.
 
 ## Server: REST API
 
@@ -176,7 +176,7 @@ src/adapters/server/settings.ts ← REST routes
 
 Singleton per process. Responsibilities:
 
-1. **Load** — reads merged config (env vars > project `.zoe/setting.json` > global `~/.zoe/setting.json` > schema defaults)
+1. **Load** — reads merged config (env vars > project `.seepient/setting.json` > global `~/.seepient/setting.json` > schema defaults)
 2. **Get/Set** — validates against schema, applies change, persists to appropriate config file
 3. **Hot-apply** — fires `settings:changed` event for running session to pick up
 4. **Mask** — returns secrets as `***` or `sk-...abc` in all output
@@ -214,7 +214,7 @@ User changes setting (wizard / SDK / REST)
 
 ### Persistence
 
-- Writes to the same `.zoe/setting.json` format (no new config format)
+- Writes to the same `.seepient/setting.json` format (no new config format)
 - Respects the existing merge chain — writes go to the most specific file (project config if it exists, otherwise global)
 - File permissions: 0600 (owner read/write only)
 - In-memory state persists even if file write fails (warn but don't crash)
@@ -231,7 +231,7 @@ Serial write queue — last-write-wins. Read operations are lock-free.
 | File permission error | Warn, keep in-memory state, don't crash |
 | Concurrent writes | Serial queue, last-write-wins |
 | Missing setting key | Return `undefined` for `get()`, error for `set()` with unknown key |
-| Schema validation failure | `ZoeError` with `code: 'SETTINGS_INVALID'` |
+| Schema validation failure | `SeepientError` with `code: 'SETTINGS_INVALID'` |
 
 ## What's Out of Scope
 

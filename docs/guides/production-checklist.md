@@ -1,11 +1,11 @@
 ---
 title: Production Checklist
-description: Pre-deployment checklist for running Zoe Agent in production.
+description: Pre-deployment checklist for running Seepient Agent in production.
 ---
 
 # Production Checklist
 
-Use this checklist before deploying Zoe Agent to production. Each item links to the relevant documentation or configuration.
+Use this checklist before deploying Seepient Agent to production. Each item links to the relevant documentation or configuration.
 
 ## Authentication and Access
 
@@ -25,7 +25,7 @@ Use this checklist before deploying Zoe Agent to production. Each item links to 
 
 ## Session and State Management
 
-- [ ] **Session directory configured** (`ZOE_SESSION_DIR`) -- use a persistent volume for Cloud Run or multi-instance deployments
+- [ ] **Session directory configured** (`SEEPIENT_SESSION_DIR`) -- use a persistent volume for Cloud Run or multi-instance deployments
 - [ ] **Session cleanup schedule verified** -- ensure expired sessions are cleaned up
 - [ ] **WebSocket heartbeat configured** (30s interval recommended)
 
@@ -43,7 +43,7 @@ Use this checklist before deploying Zoe Agent to production. Each item links to 
 - [ ] **Health check endpoint monitored** (`GET /v1/health`) with alerting
 - [ ] **Error alerting configured** for 5xx responses and provider failures
 - [ ] **Cost tracking enabled** -- aggregate `usage.cost` from responses
-- [ ] **Log aggregation set up** -- Zoe Agent outputs structured JSON logs to stdout
+- [ ] **Log aggregation set up** -- Seepient Agent outputs structured JSON logs to stdout
 - [ ] **Token usage monitored** -- track `usage.totalTokens` to detect runaway loops
 
 ## Reliability
@@ -59,7 +59,7 @@ Use this checklist before deploying Zoe Agent to production. Each item links to 
 - [ ] **Container runs as non-root user** in production
 - [ ] **Network policies restrict outbound access** where possible
 - [ ] **Input validation** on all user-supplied messages before sending to the LLM
-- [ ] **File path references restricted** -- Zoe Agent validates `@path` references are within allowed directories
+- [ ] **File path references restricted** -- Seepient Agent validates `@path` references are within allowed directories
 
 ## Quick Reference: Critical Environment Variables
 
@@ -72,9 +72,9 @@ Use this checklist before deploying Zoe Agent to production. Each item links to 
 | `OPENAI_MODEL` | No | Default OpenAI model (default: `gpt-5.4`) |
 | `ANTHROPIC_MODEL` | No | Default Anthropic model (default: `claude-sonnet-4-6-20260320`) |
 | `GLM_MODEL` | No | Default GLM model (default: `opus`) |
-| `ZOE_PORT` | No | Server port (default: 7337) |
-| `ZOE_SESSION_DIR` | No | Session storage directory (default: `./.zoe/sessions`) |
-| `ZOE_SESSION_TTL` | No | Session TTL in seconds (default: `86400`) |
+| `SEEPIENT_PORT` | No | Server port (default: 7337) |
+| `SEEPIENT_SESSION_DIR` | No | Session storage directory (default: `./.seepient/sessions`) |
+| `SEEPIENT_SESSION_TTL` | No | Session TTL in seconds (default: `86400`) |
 | `TAVILY_API_KEY` | If using search | Tavily search API key |
 | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` | If using email | SMTP configuration |
 

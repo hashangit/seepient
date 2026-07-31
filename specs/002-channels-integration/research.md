@@ -126,7 +126,7 @@ interfaces, dispatching each routed message to the Agent runtime.
 
 ### 3.1 What we adopt from each
 
-- **From OpenClaw:** the explicit typed Channel interface (matches Zoe's
+- **From OpenClaw:** the explicit typed Channel interface (matches Seepient's
   TypeScript-first, interface-driven style); the channel-agnostic runtime
   principle; the `src/channels/` directory layout.
 - **From Hermes:** the single long-lived gateway process model (one process, many
@@ -153,14 +153,14 @@ solve. They drive the `ChannelAdapter` interface design in `spec.md` §5.
 Plus cross-cutting: media (voice memos, images), tool-approval UX (inline buttons
 where supported), proactive outbound (agent-initiated, not just replies).
 
-## 5. How this maps onto Zoe
+## 5. How this maps onto Seepient
 
-Zoe's existing adapter architecture already centralizes the agent loop in one
+Seepient's existing adapter architecture already centralizes the agent loop in one
 `runAgentLoop` consumed by three runtime adapters (CLI, SDK, Server). Adding
 messaging channels is a natural fourth adapter family — they all consume the same
 core contract.
 
-The two things Zoe must add that its current adapters don't need:
+The two things Seepient must add that its current adapters don't need:
 
 1. **A shared `ChannelGateway` runtime** that owns the 5 invariant concerns once,
    so each platform adapter only implements the genuinely platform-specific bits.
@@ -206,6 +206,6 @@ the concrete design.
 > may be speculative or community-generated rather than authoritative. The official
 > docs.openclaw.ai links and the Substack/Medium architecture overviews are the
 > most reliable; specific code-path details should be verified against the
-> OpenClaw source before being relied upon. For Zoe's purposes the *architectural
+> OpenClaw source before being relied upon. For Seepient's purposes the *architectural
 > patterns* (channel-agnostic runtime, unified message model, per-channel
 > allowlist) are well-corroborated across sources and are what we adopted.

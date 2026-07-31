@@ -1,10 +1,10 @@
 ---
-description: "Design spec for 2-way messaging channels (WhatsApp, Telegram, Slack, Discord, Teams) on Zoe"
+description: "Design spec for 2-way messaging channels (WhatsApp, Telegram, Slack, Discord, Teams) on Seepient"
 status: draft
 round_deliverable: "Design spec only — no implementation this round. tasks.md follows after approval."
 ---
 
-# 002 — Channels Integration: 2-Way Messaging for Zoe
+# 002 — Channels Integration: 2-Way Messaging for Seepient
 
 **Status:** Draft
 **Date:** 2026-06-14
@@ -17,7 +17,7 @@ round_deliverable: "Design spec only — no implementation this round. tasks.md 
 |---|---|
 | Deliverable this round | **Design spec only** (no code; `tasks.md` is a follow-up) |
 | Reference platform | **Telegram** (grammY) |
-| Deploy model | **Single `zoe-channels` binary** runs all enabled platforms |
+| Deploy model | **Single `seepient-channels` binary** runs all enabled platforms |
 | 2-way comms scope | **Full** — text + media + tool approval + proactive outbound |
 | Session model | **B+C** — typed identity in core + `IdentityResolver` |
 
@@ -25,16 +25,16 @@ round_deliverable: "Design spec only — no implementation this round. tasks.md 
 
 ## 0. Executive summary
 
-Zoe today has three **runtime adapters** (CLI, SDK, Server) that all delegate to one `runAgentLoop`. This spec adds a fourth adapter family — **Channels** — bringing 2-way messaging to WhatsApp, Telegram, Slack, Discord, and Microsoft Teams, including proactive (agent-initiated) outbound.
+Seepient today has three **runtime adapters** (CLI, SDK, Server) that all delegate to one `runAgentLoop`. This spec adds a fourth adapter family — **Channels** — bringing 2-way messaging to WhatsApp, Telegram, Slack, Discord, and Microsoft Teams, including proactive (agent-initiated) outbound.
 
 The work decomposes into four tracks, ordered by dependency:
 
 1. **Cleanup & prerequisites** — fix a Server history bug; rename overloaded "gateway" terminology so the architecture is legible before we extend it.
 2. **Identity & session foundation (B+C)** — typed identity on `Message`/`SessionData` plus `SessionRegistry` and `IdentityResolver` in core. The foundation for both Channels and the future memory layer.
 3. **ChannelAdapter interface + ChannelGateway runtime** — the shared machinery every platform adapter reuses.
-4. **Telegram reference adapter + `zoe-channels` binary** — validates the whole vertical with one working platform.
+4. **Telegram reference adapter + `seepient-channels` binary** — validates the whole vertical with one working platform.
 
-End state: `zoe-channels` runs Telegram 2-way (text + tool approval + proactive) with conversation history threaded; a second platform ships behind the same interface with no interface/core changes; CLI/SDK/Server are unchanged; no persisted-session migration.
+End state: `seepient-channels` runs Telegram 2-way (text + tool approval + proactive) with conversation history threaded; a second platform ships behind the same interface with no interface/core changes; CLI/SDK/Server are unchanged; no persisted-session migration.
 
 ---
 
@@ -54,9 +54,9 @@ Both independently arrived at the same architecture:
 
 ### 1.2 Where they differ (shapes our design)
 
-| Dimension | Hermes | OpenClaw | Zoe choice |
+| Dimension | Hermes | OpenClaw | Seepient choice |
 |---|---|---|---|
-| Adapter contract | Implicit (config-driven) | **Explicit typed `Channel` interface** in plugin-SDK | **OpenClaw's model** — matches Zoe's TypeScript-first, interface-driven style |
+| Adapter contract | Implicit (config-driven) | **Explicit typed `Channel` interface** in plugin-SDK | **OpenClaw's model** — matches Seepient's TypeScript-first, interface-driven style |
 | Identity | Home channel + allowlist | `allow-from.ts` hash-based sender identity per channel | **Typed `IdentityResolver`** (richer than both — B+C) |
 | Message lifecycle | Per-channel inbound/reply helpers | Refactoring toward one durable unified pipeline | **`ChannelGateway` owns one inbound pipeline + one outbox** |
 | Multi-persona | `channel_prompt` per platform | Per-channel persona config | Per-channel `systemPromptOverride` on `ChannelAdapter` |
@@ -67,7 +67,7 @@ These are invariant across all 5 target platforms and drive the interface design
 
 1. **Inbound normalization** — platform event → canonical `InboundMessage`.
 2. **Sender authorization** — allowlist/role check per channel.
-3. **Conversation → session mapping** — platform chat/thread ID → Zoe session + identity.
+3. **Conversation → session mapping** — platform chat/thread ID → Seepient session + identity.
 4. **Outbound delivery** — agent response → platform API (chunking, format adaptation, rate-limit handling).
 5. **Lifecycle** — connect/disconnect/reconnect; long-lived; graceful shutdown.
 
@@ -177,7 +177,7 @@ Sessions stay separate (each conversation its own `SessionData`); memory reads a
 | Aspect | Mechanism |
 |---|---|
 | Interface | `PersistenceBackend`: `save(id, data)`, `load(id)`, `delete(id)`, `list()` — pure key-value |
-| File backend | `~/.zoe/sessions/{sessionId}.json`, atomic writes (temp+rename). Default path. |
+| File backend | `~/.seepient/sessions/{sessionId}.json`, atomic writes (temp+rename). Default path. |
 | Memory backend | `Map<string, SessionData>` |
 | Session ID | Opaque UUID string, validated `/^[a-zA-Z0-9-]+$/` (no colons/slashes) |
 | Indexing | **None.** `list()` returns all filenames. No query by user/platform/conversation. |
@@ -216,7 +216,7 @@ The `PersistenceBackend` interface is **unchanged**. The file backend is **uncha
 ┌──────────────────────────────────────────────────────────────┐
 │  PersistenceBackend (EXISTING — UNCHANGED)                   │
 │  ─ KV: save(id, SessionData) / load(id) / delete / list      │
-│  ─ file (~/.zoe/sessions/{id}.json) + memory backends      │
+│  ─ file (~/.seepient/sessions/{id}.json) + memory backends      │
 │  ─ remains the transcript source of truth                    │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -453,7 +453,7 @@ Everything else — allowlist, session resolution, loop invocation, streaming, a
 
 ## 6. Track 3 — ChannelGateway runtime (`src/adapters/channels/gateway.ts`)
 
-The shared machinery. One instance per `zoe-channels` process.
+The shared machinery. One instance per `seepient-channels` process.
 
 ### 6.1 Responsibilities (written once, reused by all adapters)
 
@@ -507,11 +507,11 @@ Exercises the outbound path independent of inbound (proving `deliver()` works st
 
 ---
 
-## 8. Track 4 — `zoe-channels` binary
+## 8. Track 4 — `seepient-channels` binary
 
 ### 8.1 Deploy model (decided)
 
-**Single channels binary** — one `zoe-channels` process runs all enabled platforms concurrently, sharing one `SessionRegistry`, one `IdentityResolver`, one `PersistenceBackend`, one outbox. This is the Hermes/OpenClaw model and matches the "platforms as adapters" framing: a fourth sibling binary alongside `zoe` (CLI) and `zoe-server`.
+**Single channels binary** — one `seepient-channels` process runs all enabled platforms concurrently, sharing one `SessionRegistry`, one `IdentityResolver`, one `PersistenceBackend`, one outbox. This is the Hermes/OpenClaw model and matches the "platforms as adapters" framing: a fourth sibling binary alongside `seepient` (CLI) and `seepient-server`.
 
 Rejected alternatives:
 - **Per-platform processes** — more ops overhead, no benefit given the shared registry.
@@ -589,7 +589,7 @@ This spec is design-only. A `specs/002-channels-integration/tasks.md` (mirroring
 - **Phase 1 — Cleanup & prerequisites (Track 1):** Tools Gateway rename; `semanticToolMiddleware` rename; Server history bug fix. Each independently shippable. Verify: `pnpm test` green, no behavior change except the bug fix.
 - **Phase 2 — Identity & session foundation (Track 2):** `Message`/`SessionData` schema additions (additive); `SessionRegistry`; `IdentityResolver` + `AllowlistIdentityResolver` + registry. Core only — no adapters yet. Verify: new unit tests; existing tests unchanged (additive fields).
 - **Phase 3 — ChannelAdapter interface + ChannelGateway (Track 3):** `types.ts`, `gateway.ts`, `formatter.ts`, `outbox.ts`, scheduler, `send_message` tool. No platform yet — tested with a mock adapter. Verify: mock adapter round-trips a conversation end-to-end.
-- **Phase 4 — `zoe-channels` binary + Telegram (Track 4):** binary bootstrap; Telegram adapter; settings keys. Verify: real Telegram bot 2-way conversation incl. tool approval + one proactive scheduled message.
+- **Phase 4 — `seepient-channels` binary + Telegram (Track 4):** binary bootstrap; Telegram adapter; settings keys. Verify: real Telegram bot 2-way conversation incl. tool approval + one proactive scheduled message.
 - **Phase 5 — Platform expansion:** Discord, Slack, WhatsApp, Teams, each independently shippable behind the validated interface.
 
 Each phase is independently testable. Phase 2 is the riskiest (touches core types) and gets the most scrutiny; Phases 4-5 are mechanical given the contract.
@@ -628,7 +628,7 @@ Each phase is independently testable. Phase 2 is the riskiest (touches core type
 
 ## 14. Acceptance criteria (end state of the full effort)
 
-1. `zoe-channels` binary runs Telegram 2-way: text in → text out, tool approval via inline buttons, one proactive scheduled message — all with conversation history threaded (not the Server bug).
+1. `seepient-channels` binary runs Telegram 2-way: text in → text out, tool approval via inline buttons, one proactive scheduled message — all with conversation history threaded (not the Server bug).
 2. A second platform (Discord or Slack) ships behind the same `ChannelAdapter` interface with no changes to the interface or core.
 3. `Message.authorId` and `SessionData.{platform, conversationId, userId}` are populated and queryable via `SessionRegistry.sessionsForUser()` — proving the memory-layer join key exists.
 4. Existing CLI/SDK/Server behavior unchanged; `pnpm test` green throughout; no persisted-session migration required.

@@ -170,7 +170,7 @@ scroll-window feed (separate decision). **Recommend: land after A.**
   message as it types.
 - A non-streaming provider falls back to `chat()` — no regression, output
   identical to today.
-- `zoe -n` / SDK / Server unaffected; `pnpm test` green; headless build still
+- `seepient -n` / SDK / Server unaffected; `pnpm test` green; headless build still
   has no `jsx-runtime`.
 
 ## Sequencing

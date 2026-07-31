@@ -1,6 +1,6 @@
 ---
 title: Skills
-description: Discover, load, and create reusable skill packages that extend Zoe Agent's capabilities.
+description: Discover, load, and create reusable skill packages that extend Seepient Agent's capabilities.
 ---
 
 # Skills
@@ -44,7 +44,7 @@ See [Two invocation paths](#two-invocation-paths) for a detailed walkthrough of 
 Skills are loaded automatically when you specify skill names:
 
 ```typescript
-import { generateText } from "zoe-agent";
+import { generateText } from "seepient";
 
 const result = await generateText("Deploy the staging environment", {
   skills: ["docker-ops"],
@@ -55,7 +55,7 @@ const result = await generateText("Deploy the staging environment", {
 ### With createAgent
 
 ```typescript
-import { createAgent } from "zoe-agent";
+import { createAgent } from "seepient";
 
 const agent = await createAgent({
   skills: ["docker-ops", "code-review"],
@@ -70,24 +70,24 @@ const reply = await agent.chat("Review my latest commit");
 Bootstraps the skill registry by scanning skill directories. This is the public API for initializing skills programmatically:
 
 ```typescript
-import { initializeSkillRegistry } from "zoe-agent";
+import { initializeSkillRegistry } from "seepient";
 
 // Scan the current working directory and configured paths for skills
 await initializeSkillRegistry(process.cwd());
 ```
 
-Call this at application startup to ensure skills are discovered before the first agent invocation. Zoe Agent calls this automatically when you pass `skills` to `generateText()` or `createAgent()`, but you may call it explicitly to pre-load skills or inspect the registry.
+Call this at application startup to ensure skills are discovered before the first agent invocation. Seepient Agent calls this automatically when you pass `skills` to `generateText()` or `createAgent()`, but you may call it explicitly to pre-load skills or inspect the registry.
 
 ## Skill search paths
 
-Zoe Agent searches for skills in the following locations, in priority order:
+Seepient Agent searches for skills in the following locations, in priority order:
 
 | Priority | Path                            | Source                        |
 | -------- | ------------------------------- | ----------------------------- |
-| 1        | `ZOE_SKILLS_PATH` env var     | Colon-separated custom paths  |
-| 2        | `.zoe/skills/`                | Project-level skills          |
+| 1        | `SEEPIENT_SKILLS_PATH` env var     | Colon-separated custom paths  |
+| 2        | `.seepient/skills/`                | Project-level skills          |
 | 3        | `/mnt/skills/`                  | Docker volume mount           |
-| 4        | Bundled `skills/` directory     | Shipped with Zoe Agent            |
+| 4        | Bundled `skills/` directory     | Shipped with Seepient Agent            |
 
 Higher-priority paths override skills with the same name from lower-priority paths.
 
@@ -95,13 +95,41 @@ Higher-priority paths override skills with the same name from lower-priority pat
 
 ```bash
 # Multiple paths, colon-separated
-export ZOE_SKILLS_PATH=/opt/skills:/home/user/my-skills
+export SEEPIENT_SKILLS_PATH=/opt/skills:/home/user/my-skills
 ```
 
 ```bash
 # Disable bundled skills
-export ZOE_NO_BUNDLED_SKILLS=1
+export SEEPIENT_NO_BUNDLED_SKILLS=1
 ```
+
+## Bundled skills
+
+Seepient ships skills in the bundled `skills/` directory. They are discovered automatically (lowest priority, so project/user skills of the same name override them).
+
+| Skill | Purpose |
+| -------- | --------------------------------------------- |
+| `design` | Entry point for **all** design work. A router that classifies the request, fetches the matching skill from the upstream [OpenDesign](https://github.com/nexu-io/open-design/tree/main/skills) catalogue, maps its tools to Seepient's, and follows it. Use for UI/UX, mockups, prototypes, branding, slides/decks, image generation/editing, video/motion, design systems, Figma work, and design review. |
+| `docker-ops` | Docker container and image operations |
+| `k8s-deploy` | Kubernetes deployment operations |
+| `log-analyzer` | Log file analysis and triage |
+| `speckit-*` | SpecKit spec-driven workflow (`analyze`, `checklist`, `clarify`, `constitution`, `implement`, `plan`, `specify`, `tasks`, `taskstoissues`) |
+
+Activate any of them by name:
+
+```typescript
+import { generateText } from "seepient";
+
+// Route any design request through the OpenDesign catalogue
+await generateText("Design a dark-mode login screen for a fintech app", {
+  skills: ["design"],
+  tools: ["core", "comm", "advanced"],
+});
+```
+
+:::info
+`design` does not ship design procedures of its own. It fetches the upstream skill over the network on each invocation (sending the request externally), so it needs `read_website` available and outbound network access.
+:::
 
 ## Skill metadata
 
@@ -263,7 +291,7 @@ Supported patterns:
 | Pattern                 | Resolves to                               |
 | ----------------------- | ----------------------------------------- |
 | `@path/to/file`        | Relative to project root (`process.cwd()`) |
-| `@zoe_documents/file` | `~/zoe_documents/file`                  |
+| `@seepient_documents/file` | `~/seepient_documents/file`                  |
 | `@~/path/to/file`      | Explicit home directory path              |
 
 Files are inlined with syntax highlighting. Limits:
@@ -281,7 +309,7 @@ When the cumulative total exceeds 2 MB, remaining references are skipped with a 
 ```
 
 :::warning
-All resolved paths must fall within the project root, `~/zoe_documents/`, or `~/.zoe/`. References outside these boundaries are rejected with an access-denied error.
+All resolved paths must fall within the project root, `~/seepient_documents/`, or `~/.seepient/`. References outside these boundaries are rejected with an access-denied error.
 :::
 
 ## Lazy body loading
@@ -350,7 +378,7 @@ Consider trimming below 8000 chars for optimal context usage.
 
 ```
 [... Skill body truncated: 45000 chars total, 32000 shown.
-Reduce skill body size or set ZOE_SKILL_BODY_MAX_CHARS to increase the limit. ...]
+Reduce skill body size or set SEEPIENT_SKILL_BODY_MAX_CHARS to increase the limit. ...]
 ```
 
 The function returns a `TruncationResult` with metadata about original and final sizes:
@@ -374,8 +402,8 @@ The `@path` resolver stops inlining files when the cumulative resolved content w
 
 | Environment variable              | Default  | Description                  |
 | --------------------------------- | -------- | ---------------------------- |
-| `ZOE_SKILL_BODY_MAX_CHARS`      | `32000`  | Hard truncation limit        |
-| `ZOE_SKILL_BODY_WARN_CHARS`     | `8000`   | Soft warning threshold       |
+| `SEEPIENT_SKILL_BODY_MAX_CHARS`      | `32000`  | Hard truncation limit        |
+| `SEEPIENT_SKILL_BODY_WARN_CHARS`     | `8000`   | Soft warning threshold       |
 
 :::tip
 If a skill is being truncated, split it into multiple smaller skills or use `@path` references to load instructions from separate files instead of embedding everything in the body.
@@ -402,7 +430,7 @@ When a skill with a `model.provider` field is invoked, `createSkillProviderSwitc
 3. After the skill execution completes, restores the original provider in a `finally` block.
 
 ```typescript
-import { createSkillProviderSwitcher } from "zoe-agent";
+import { createSkillProviderSwitcher } from "seepient";
 
 const switcher = createSkillProviderSwitcher({
   provider: currentProvider,

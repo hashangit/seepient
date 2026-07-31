@@ -11,7 +11,7 @@
 
 ### 1.1 Problem
 
-Zoe Agent exposes 50+ configuration properties across providers, tools, agent behavior, and services. Today, users must edit JSON files by hand or rerun the full setup wizard to change a single value. The `/models` command proves runtime config editing is viable for provider settings, but there is no equivalent for the remaining categories (email, search, notifications, permissions, image generation, etc.).
+Seepient Agent exposes 50+ configuration properties across providers, tools, agent behavior, and services. Today, users must edit JSON files by hand or rerun the full setup wizard to change a single value. The `/models` command proves runtime config editing is viable for provider settings, but there is no equivalent for the remaining categories (email, search, notifications, permissions, image generation, etc.).
 
 Users have no way to:
 - View which settings are active and where they come from (global, project, env var).
@@ -186,7 +186,7 @@ agent.autoConfirm                → config.autoConfirm
 **REQ-4.1.2:** The `get` subcommand for a secret field MUST print:
 ```
 providers.openai.apiKey = sk-...4kQ8
-  Source: project config (.zoe/setting.json)
+  Source: project config (.seepient/setting.json)
 ```
 
 **REQ-4.1.3:** The `export` subcommand MUST mask all secret fields. Plaintext export is not supported in v1.
@@ -207,8 +207,8 @@ providers.openai.apiKey = sk-...4kQ8
 | Origin | Label | Priority |
 |---|---|---|
 | Env var | `env: <VAR_NAME>` | Highest |
-| Project config | `project config (.zoe/setting.json)` | High |
-| Global config | `global config (~/.zoe/setting.json)` | Medium |
+| Project config | `project config (.seepient/setting.json)` | High |
+| Global config | `global config (~/.seepient/setting.json)` | Medium |
 | Default | `default` | Lowest |
 
 **REQ-4.2.2:** The origin is resolved by checking sources in priority order:
@@ -237,7 +237,7 @@ providers.openai.apiKey = sk-...4kQ8
 ```
 agent.permissionLevel = strict
   Default: moderate
-  Source: env: ZOE_PERMISSION
+  Source: env: SEEPIENT_PERMISSION
 ```
 
 ### 4.4 Restart Indicators
@@ -350,7 +350,7 @@ All settings listed in Section 2.3's mapping table are editable. This covers:
   ── Runtime State (read-only) ──
   Active Provider: openai-compatible
   Active Model: gpt-4o
-  Config File (effective): .zoe/setting.json
+  Config File (effective): .seepient/setting.json
   Session Mode: interactive
 ```
 
@@ -437,7 +437,7 @@ ctx.config.smtpHost = 'smtp.gmail.com';
 
 **REQ-8.2.4:** If the config file has overly permissive permissions (not `0o600`), `/settings list` SHOULD print a one-time warning:
 ```
-  Warning: ~/.zoe/setting.json has permissions 0644. Recommended: 0600.
+  Warning: ~/.seepient/setting.json has permissions 0644. Recommended: 0600.
 ```
 
 ### 8.3 Backward Compatibility
@@ -456,12 +456,12 @@ ctx.config.smtpHost = 'smtp.gmail.com';
 
 **REQ-8.4.2 — Invalid JSON:** If a config file contains malformed JSON, print:
 ```
-  Error: Failed to parse config at ~/.zoe/setting.json. Fix the JSON syntax or run /settings wizard.
+  Error: Failed to parse config at ~/.seepient/setting.json. Fix the JSON syntax or run /settings wizard.
 ```
 
 **REQ-8.4.3 — Permission denied:** If `set` cannot write to the config file:
 ```
-  Error: Permission denied writing to ~/.zoe/setting.json. Check file permissions.
+  Error: Permission denied writing to ~/.seepient/setting.json. Check file permissions.
 ```
 
 **REQ-8.4.4 — Validation failure:** Invalid values are rejected before any file write. The error message specifies the expected type/values.

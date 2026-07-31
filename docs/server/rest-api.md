@@ -1,6 +1,6 @@
 ---
 title: REST API Reference
-description: Complete reference for all Zoe Agent Server REST endpoints with request/response examples.
+description: Complete reference for all Seepient Agent Server REST endpoints with request/response examples.
 ---
 
 # REST API Reference
@@ -18,11 +18,11 @@ http://localhost:7337
 Pass your API key in one of two ways:
 
 ```
-X-Zoe-API-Key: sk_zoe_...
+X-Seepient-API-Key: sk_seepient_...
 ```
 
 ```
-Authorization: Bearer sk_zoe_...
+Authorization: Bearer sk_seepient_...
 ```
 
 See [Authentication](/server/authentication) for key generation and scopes.
@@ -54,7 +54,7 @@ curl http://localhost:7337/v1/health
 | Field | Type | Description |
 |---|---|---|
 | `status` | `string` | Always `"ok"` when the server is running |
-| `version` | `string` | Zoe Agent package version |
+| `version` | `string` | Seepient Agent package version |
 | `uptime` | `number` | Seconds since server started |
 
 ---
@@ -63,13 +63,13 @@ curl http://localhost:7337/v1/health
 
 ### `GET /v1/models`
 
-Returns all available models from your configured inference providers (OpenAI, Anthropic, GLM). Zoe Agent does not host these models — it forwards requests to the provider APIs. **Requires a valid API key.**
+Returns all available models from your configured inference providers (OpenAI, Anthropic, GLM). Seepient Agent does not host these models — it forwards requests to the provider APIs. **Requires a valid API key.**
 
 #### Example
 
 ```bash
 curl http://localhost:7337/v1/models \
-  -H "X-Zoe-API-Key: sk_zoe_..."
+  -H "X-Seepient-API-Key: sk_seepient_..."
 ```
 
 #### Response
@@ -101,7 +101,7 @@ Returns metadata for all registered skills. **Requires a valid API key.**
 
 ```bash
 curl http://localhost:7337/v1/skills \
-  -H "X-Zoe-API-Key: sk_zoe_..."
+  -H "X-Seepient-API-Key: sk_seepient_..."
 ```
 
 #### Response
@@ -154,7 +154,7 @@ Execute a one-shot agent interaction. **Requires API key with `agent:run` scope.
 ```bash
 curl -X POST http://localhost:7337/v1/chat \
   -H "Content-Type: application/json" \
-  -H "X-Zoe-API-Key: sk_zoe_..." \
+  -H "X-Seepient-API-Key: sk_seepient_..." \
   -d '{
     "message": "What files are in the current directory?",
     "provider": "anthropic",
@@ -225,7 +225,7 @@ Retrieve a session by its ID. **Requires API key with `agent:read` scope.**
 
 ```bash
 curl http://localhost:7337/v1/sessions/550e8400-e29b-41d4-a716-446655440000 \
-  -H "X-Zoe-API-Key: sk_zoe_..."
+  -H "X-Seepient-API-Key: sk_seepient_..."
 ```
 
 #### Success response (200)

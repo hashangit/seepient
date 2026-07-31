@@ -51,7 +51,7 @@ idle, `/exit`, crash) restores the previous terminal state.
 floats the input near the top on short sessions. Full-screen + bottom-pinning is
 the foundation; everything else (003, scroll polish) builds on it.
 
-**Independent Test**: run `zoe` on a fresh session → the input + footer sit at
+**Independent Test**: run `seepient` on a fresh session → the input + footer sit at
 the **bottom row(s)** of the terminal, not floating mid-screen. Resize the window
 → regions reflow, input stays at the bottom. Exit → you're back in your shell
 with the prior screen intact (not scrolled junk).
@@ -180,7 +180,7 @@ scrolled up → the view holds (sticky-off) until you scroll back to the bottom.
 - **SC-003**: Page Up/Down + j/k navigate history in-app; sticky-bottom follows
   new output.
 - **SC-004**: Exit/crash restores the terminal cleanly.
-- **SC-005**: `zoe -n`, SDK, Server, and `pnpm test` unaffected.
+- **SC-005**: `seepient -n`, SDK, Server, and `pnpm test` unaffected.
 
 ## Assumptions
 

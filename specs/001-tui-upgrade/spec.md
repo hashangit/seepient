@@ -13,10 +13,10 @@ user stories for task generation).
 
 ### User Story 1 - Interactive TUI Shell & Streaming (Priority: P1)
 
-Launch the agent with plain `zoe` in a TTY and get a full-screen Ink/React app
+Launch the agent with plain `seepient` in a TTY and get a full-screen Ink/React app
 that streams the assistant's response live, renders every tool execution as a
 bordered block with live output, and asks for tool approval inline — while
-`zoe -n`, piped stdin, `--docker`, and SDK/Server modes behave byte-identically
+`seepient -n`, piped stdin, `--docker`, and SDK/Server modes behave byte-identically
 to before.
 
 **Why this priority**: This is the MVP. Without it the interactive CLI is still
@@ -26,15 +26,15 @@ builds on (PRD line 275: the loop's existing `onStep` callback is sufficient for
 Phase 1 — no new engine API). The PRD scopes Phase 1 to 7 components + 2 hooks;
 `Agent.chatStream()` is deferred to US2, where token-level streaming justifies it.
 
-**Independent Test**: Run `zoe` in a TTY, submit a prompt that triggers a shell
+**Independent Test**: Run `seepient` in a TTY, submit a prompt that triggers a shell
 command — the tool block renders with streaming output and the assistant
-response streams in. Run `zoe -n` and confirm the readline path is unchanged.
+response streams in. Run `seepient -n` and confirm the readline path is unchanged.
 Run `pnpm test` and confirm all pre-existing tests still pass after the tsconfig
 JSX change.
 
 **Acceptance Scenarios**:
 
-1. **Given** a TTY terminal, **When** the user runs `zoe`, **Then** an Ink
+1. **Given** a TTY terminal, **When** the user runs `seepient`, **Then** an Ink
    full-screen app renders (`<MessageArea>` + `<PromptArea>`), not the readline
    prompt.
 2. **Given** the TUI is open, **When** the user submits a prompt that triggers a
@@ -72,7 +72,7 @@ destructive tool renders an inline permission prompt.
 
 1. **Given** the prompt is focused, **When** the user types `/`, **Then** a
    dropdown of slash commands appears, fuzzy-filtered as they type. Sources: the
-   built-in command registry + skill names (a `.zoe/commands/` custom-command
+   built-in command registry + skill names (a `.seepient/commands/` custom-command
    loader is added only if that mechanism is introduced).
 2. **Given** the prompt is focused, **When** the user types `@`, **Then** a
    fuzzy file-search dropdown appears (project files; `@alias/` scopes to a root).
@@ -169,7 +169,7 @@ pending/done glyphs. Open the session selector → list/preview/resume. Edit a f
   `resolveLaunchMode(options) === 'interactive'` — the SAME function that selects
   the system prompt — so launch mode and UI mode can never diverge. This composes
   `options.interactive !== false && !isNonInteractive()` (TTY + `--no-interactive`
-  + piped stdin + `--docker` + `ZOE_NO_INTERACTIVE`); all non-interactive launch
+  + piped stdin + `--docker` + `SEEPIENT_NO_INTERACTIVE`); all non-interactive launch
   paths MUST use the unchanged readline path.
 - **FR-002**: The TUI MUST obtain responses through the shared `runAgentLoop` and
   MUST NOT bypass the engine. US1 uses the existing `Agent.chat({ onStep,

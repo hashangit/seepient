@@ -1,8 +1,8 @@
 #!/bin/bash
-echo "Installing Zoe Agent dependencies..."
+echo "Installing Seepient Agent dependencies..."
 pnpm install
 
-echo "Building Zoe Agent..."
+echo "Building Seepient Agent..."
 pnpm run build
 
 echo ""

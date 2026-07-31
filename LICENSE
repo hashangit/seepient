@@ -3,9 +3,9 @@ Business Source License 1.1
 Parameters
 
 Licensor:             Hashan Wickramasinghe
-Licensed Work:        Zoe Agent — the `zoe-agent` npm package and the
+Licensed Work:        Seepient Agent — the `seepient` npm package and the
                       corresponding source code in this repository, including
-                      the CLI (`zoe`, `zoe-server`), the SDK (`zoe-agent`),
+                      the CLI (`seepient`, `seepient-server`), the SDK (`seepient`),
                       the server adapter, built-in tools, and skills.
                       The Licensed Work does not include separate third-party
                       software modules distributed under their own licenses.

@@ -1,42 +1,44 @@
 {
-  "name": "zoe-agent",
+  "name": "seepient",
   "version": "0.3.2",
   "type": "module",
-  "main": "dist/adapters/cli/index.js",
+  "main": "dist/ui/cli/index.js",
   "exports": {
     ".": {
-      "import": "./dist/adapters/sdk/index.js",
-      "types": "./dist/adapters/sdk/index.d.ts"
+      "import": "./dist/transport/sdk/index.js",
+      "types": "./dist/transport/sdk/index.d.ts"
     },
     "./server": {
-      "import": "./dist/adapters/server/index.js",
-      "types": "./dist/adapters/server/index.d.ts"
+      "import": "./dist/transport/http/index.js",
+      "types": "./dist/transport/http/index.d.ts"
     }
   },
-  "types": "./dist/adapters/sdk/index.d.ts",
+  "types": "./dist/transport/sdk/index.d.ts",
   "bin": {
-    "zoe": "dist/adapters/cli/index.js",
-    "zoe-server": "dist/adapters/server/standalone.js"
+    "seepient": "dist/ui/cli/index.js",
+    "seepient-server": "dist/transport/http/standalone.js"
   },
   "scripts": {
     "build": "tsc",
-    "start": "node dist/adapters/cli/index.js",
-    "server": "node dist/adapters/server/standalone.js",
-    "dev": "tsx src/adapters/cli/index.ts",
-    "dev:server": "tsx src/adapters/server/standalone.ts",
-    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
+    "start": "node dist/ui/cli/index.js",
+    "server": "node dist/transport/http/standalone.js",
+    "dev": "tsx src/ui/cli/index.ts",
+    "dev:server": "tsx src/transport/http/standalone.ts",
+    "test": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && vitest run",
+    "test:unit": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "prepublishOnly": "pnpm run build"
   },
   "files": [
-    "dist/core",
-    "dist/adapters",
-    "dist/providers",
-    "dist/tools",
-    "dist/skills",
-    "dist/gateway",
-    "dist/models-catalog.js",
+    "dist/foundations",
+    "dist/capabilities",
+    "dist/domain",
+    "dist/transport",
+    "dist/ui",
+    "dist/vendors",
     "skills",
     "README.md",
     "CHANGELOG.md",
@@ -68,14 +70,15 @@
   "license": "BUSL-1.1",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/hashangit/zoe.git"
+    "url": "git+https://github.com/hashangit/seepient.git"
   },
   "bugs": {
-    "url": "https://github.com/hashangit/zoe/issues"
+    "url": "https://github.com/hashangit/seepient/issues"
   },
-  "homepage": "https://hashangit.github.io/zoe/",
-  "description": "Zoe — your AI person. A skill-driven AI agent with CLI, SDK, and server adapters; multi-provider LLM support and Docker-native deployment. Coding is one of the things she does.",
+  "homepage": "https://hashangit.github.io/seepient/",
+  "description": "Seepient — your AI person. A skill-driven AI agent with CLI, SDK, and server adapters; multi-provider LLM support and Docker-native deployment. Coding is one of the things she does.",
   "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "0.0.67",
     "@anthropic-ai/sdk": "^0.52.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@mozilla/readability": "^0.6.0",
@@ -85,6 +88,7 @@
     "dotenv": "^16.4.7",
     "figlet": "^1.11.0",
     "get-east-asian-width": "^1.6.0",
+    "gpt-tokenizer": "^3.4.0",
     "ink": "6.6.0",
     "ink-select-input": "^6.2.0",
     "ink-spinner": "^5.0.0",

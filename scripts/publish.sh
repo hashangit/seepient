@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Publish zoe-agent: bump version, tag, and push to trigger the release workflow.
+# Publish seepient: bump version, tag, and push to trigger the release workflow.
 #
 # The release workflow (.github/workflows/release.yml) then publishes to:
-#   1. npm (zoe-agent)
-#   2. the hashangit/homebrew-zoe tap (formula auto-bumped)
+#   1. npm (seepient)
+#   2. the hashangit/homebrew-seepient tap (formula auto-bumped)
 #   3. a GitHub Release
 #
 # Usage:
@@ -46,7 +46,7 @@ for arg in "$@"; do
 done
 
 # --- preflight checks -----------------------------------------------------
-[[ -f package.json ]] || die "Not in zoe-agent repo: no package.json at $REPO_ROOT"
+[[ -f package.json ]] || die "Not in seepient repo: no package.json at $REPO_ROOT"
 
 command -v git >/dev/null || die "git is required"
 command -v gh  >/dev/null || die "gh CLI is required (https://cli.github.com)"
@@ -54,7 +54,7 @@ command -v jq  >/dev/null || die "jq is required"
 gh auth status >/dev/null 2>&1 || die "gh CLI is not authenticated. Run: gh auth login"
 
 PKG_NAME=$(jq -r .name package.json)
-[[ "$PKG_NAME" == "zoe-agent" ]] || die "Unexpected package name: $PKG_NAME"
+[[ "$PKG_NAME" == "seepient" ]] || die "Unexpected package name: $PKG_NAME"
 
 CURRENT_VERSION=$(jq -r .version package.json)
 DEFAULT_BRANCH="main"
@@ -167,9 +167,9 @@ read -r -p "Publish $TARGET_VERSION? [y/N] " confirm </dev/tty
 
 # --- run tests -------------------------------------------------------------
 info "Running tests (pnpm test)..."
-if ! pnpm test >/tmp/zoe-publish-test.log 2>&1; then
-  err "Tests failed. See /tmp/zoe-publish-test.log"
-  tail -20 /tmp/zoe-publish-test.log
+if ! pnpm test >/tmp/seepient-publish-test.log 2>&1; then
+  err "Tests failed. See /tmp/seepient-publish-test.log"
+  tail -20 /tmp/seepient-publish-test.log
   die "Aborting release."
 fi
 ok "Tests passed"
@@ -182,9 +182,9 @@ if [[ "$BUMP" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   npm version "$TARGET_VERSION" --no-git-tag-version --silent >/dev/null
 fi
 
-# --- generate release notes via zoe-agent SDK (dogfooding) ---------------------
+# --- generate release notes via seepient SDK (dogfooding) ---------------------
 NOTES_FILE="RELEASE_NOTES-v$TARGET_VERSION.md"
-info "Generating release notes (zoe-agent SDK, Keep a Changelog format)..."
+info "Generating release notes (seepient SDK, Keep a Changelog format)..."
 if pnpm exec tsx scripts/generate-release-notes.ts "$TARGET_VERSION" 2>&1 \
     | sed 's/^/    /'; then
   if [[ -f "$NOTES_FILE" ]]; then
@@ -227,10 +227,10 @@ if gh run list --workflow=release.yml --limit=1 --json databaseId,status -q '.[0
   ok "${BOLD}Release workflow succeeded.${RESET}"
   echo
   echo "  ${DIM}npm:${RESET}      https://www.npmjs.com/package/$PKG_NAME"
-  echo "  ${DIM}homebrew:${RESET} https://github.com/hashangit/homebrew-zoe/commit/main"
-  echo "  ${DIM}release:${RESET}  https://github.com/hashangit/zoe/releases/tag/v$TARGET_VERSION"
+  echo "  ${DIM}homebrew:${RESET} https://github.com/hashangit/homebrew-seepient/commit/main"
+  echo "  ${DIM}release:${RESET}  https://github.com/hashangit/seepient/releases/tag/v$TARGET_VERSION"
   echo
-  echo "  Install via:  ${CYAN}brew install hashangit/zoe/zoe-agent${RESET}"
+  echo "  Install via:  ${CYAN}brew install hashangit/seepient/seepient${RESET}"
   echo "                ${CYAN}npm i -g $PKG_NAME@$TARGET_VERSION${RESET}"
   exit 0
 else
