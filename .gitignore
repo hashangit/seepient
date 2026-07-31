@@ -2,6 +2,10 @@
 node_modules/
 .pnpm-store/
 
+# Per-machine pnpm config (e.g. absolute store-dir). Must never be committed —
+# machine-specific paths break CI runners (EACCES on Linux).
+.npmrc
+
 # Build output
 dist/
 
