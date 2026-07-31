@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.4.2] - 2026-08-01
+
+**Seepient v0.4.2** is a quick fix for the Homebrew install. v0.4.1 bumped `js-yaml` to a version that was published just hours before release, which Homebrew's freshness check (`--min-release-age`) rejected — so `brew install seepient` failed for everyone on v0.4.1.
+
+This release pins `js-yaml` to an older, stable version so the Homebrew install works cleanly. Nothing else changed.
+
+---
+
+### 🔧 What's New
+
+#### Fixed
+* **Homebrew Install Broken in v0.4.1**: Pinned `js-yaml` to `4.3.0` (released 2026-06-26). v0.4.1 allowed `^4.3.1`, but `4.3.1` was only hours old — too fresh for Homebrew's minimum-release-age filter, which caused `brew install seepient` to fail with `ETARGET: No matching version found for js-yaml@^4.3.1`. The pin resolves both the Homebrew failure and the project's own supply-chain policy.
+
+---
+
+### 🚀 Upgrade
+
+| How you installed | Action |
+| :--- | :--- |
+| npm | `npm install -g seepient@latest` |
+| Homebrew | `brew upgrade seepient` |
+| pnpm | `pnpm add -g seepient` |
+
+If you were stuck on v0.4.1's failed Homebrew install, this fixes it.
+
+---
+
 ## [v0.4.1] - 2026-08-01
 
 **Seepient v0.4.1** is a quick follow-up to v0.4.0. It tightens up how Seepient gets installed, clears out the security warnings that piled up under the hood, and fixes the install docs so new users don't trip on the way in.
