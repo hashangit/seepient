@@ -26,6 +26,7 @@ import type {
   PolicyContext,
   PermissionDecision,
   PermissionRequest,
+  TuiApprovalSelection,
 } from "../../foundations/contracts/permission-policy.js";
 import type { PreparedToolAction } from "../../foundations/contracts/prepared-action.js";
 import type {
@@ -142,7 +143,7 @@ describe("cross-surface outcome conformance (T309)", () => {
     const active = set({ kind: "commit-file", path: "/p/a.txt" });
     const presenter: InlineApprovalPresenter = {
       async prompt(req) {
-        return approved(req);
+        return selection(req);
       },
     };
     const inline = await runWith(
@@ -164,7 +165,7 @@ describe("cross-surface outcome conformance (T309)", () => {
   });
 
   it("when the capability is MISSING, inline+callback reach needs-approval but none denies", async () => {
-    const presenter: InlineApprovalPresenter = { async prompt(req) { return approved(req); } };
+    const presenter: InlineApprovalPresenter = { async prompt(req) { return selection(req); } };
     const inline = await runWith(
       new InlineApprovalBroker(presenter, { deadlineMs: 5000 }),
       { mode: "inline" },
@@ -204,6 +205,7 @@ describe("cross-surface outcome conformance (T309)", () => {
           approved: true,
           requestId: req.requestId,
           actionDigest: "wrong-digest",
+          optionId: "opt-1",
           lifetime: "action",
           actorId: "u",
           decidedAt: 0,
@@ -220,8 +222,17 @@ function approved(req: PermissionRequest): PermissionDecision {
     approved: true,
     requestId: req.requestId,
     actionDigest: req.actionDigest,
+    optionId: req.approvalOptions[0]?.optionId ?? "opt-1",
     lifetime: "action",
     actorId: "u",
     decidedAt: 0,
+  };
+}
+
+function selection(req: PermissionRequest): TuiApprovalSelection {
+  return {
+    approved: true,
+    optionId: req.approvalOptions[0]?.optionId ?? "opt-1",
+    lifetime: "action",
   };
 }

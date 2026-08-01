@@ -16,7 +16,7 @@ import type { Message, StepResult, Usage, ToolCall, ApproveToolFn, PermissionLev
 import { persistSession } from '../../domain/sessions/session-store.js';
 import type { GrantStore } from '../../domain/grants.js';
 import type { Middleware } from '../../foundations/contracts/middleware.js';
-import type { Capability, CapabilitySet } from '../../foundations/contracts/permission-policy.js';
+import type { ApprovalBroker, Capability, CapabilitySet, PermissionRequest } from '../../foundations/contracts/permission-policy.js';
 import type { PolicyStore } from '../../foundations/contracts/execution-brokers.js';
 import type { PolicySnapshot } from '../../foundations/contracts/execution-brokers.js';
 
@@ -183,12 +183,20 @@ export class Agent {
     // `NoneApprovalBroker` auto-deny as `user-denied`).
     const liveBroker = {
       mode: "inline" as const,
-      request: async (req: any, opts2: any) => {
+      request: async (
+        req: PermissionRequest,
+        opts2: { signal?: AbortSignal },
+      ) => {
+        // Native typed bridge first (TUI); then the legacy approveTool seam
+        // (REPL); otherwise the request fails as approval-unavailable.
+        if (this._pipelineApprovalBroker) {
+          return this._pipelineApprovalBroker.request(req, opts2);
+        }
         if (this._pipelineApproveTool) {
           const lb = legacyApproveToolToBroker(this._pipelineApproveTool);
           return lb.request(req, opts2);
         }
-        throw new Error("approval-unavailable: no approveTool wired for this chat()");
+        throw new Error("approval-unavailable: no approval broker wired for this chat()");
       },
     };
     // Build the REAL typed-executor boundary — NOT the legacy handler.
@@ -245,6 +253,19 @@ export class Agent {
   }
 
   private _pipelineApproveTool: ApproveToolFn | undefined;
+
+  private _pipelineApprovalBroker: ApprovalBroker | undefined;
+
+  /**
+   * Spec 011 (T002): install the native typed TUI approval broker. The TUI
+   * hook installs this before each chat and clears it when the TUI unmounts.
+   * When set, the pipeline consults it FIRST; when missing, the pipeline
+   * falls back to the legacy approveTool seam (REPL) or denies as
+   * `approval-unavailable` — it never falls back to the legacy prompt.
+   */
+  setPipelineApprovalBroker(broker: ApprovalBroker | undefined): void {
+    this._pipelineApprovalBroker = broker;
+  }
 
   /** Whether the spec-008 pipeline is active for this agent. */
   isPermissionPipelineEnabled(): boolean {

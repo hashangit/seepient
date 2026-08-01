@@ -9,12 +9,16 @@
  *  - audit is idempotent on `<actionId>:<state>`
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ActionLifecycle } from "../action-lifecycle.js";
 import { PolicyEngine } from "../policy-engine.js";
 import { LocalAuditStore, idempotencyKey } from "../audit-recorder.js";
+import { buildActionLifecycle } from "../action-lifecycle-factory.js";
+import { PersistedCapabilityLedger } from "../persisted-capability-ledger.js";
+import { InMemoryArtifactStore } from "../../../capabilities/execution/in-memory-artifact-store.js";
+import { buildLocalBoundary } from "../../../capabilities/execution/build-local-boundary.js";
 import type {
   ApprovalBroker,
   Capability,
@@ -170,13 +174,29 @@ function fakeBoundary(result: ToolResult, opts?: { throwOnExec?: boolean }): Exe
   };
 }
 
-function approved(req: PermissionRequest, actor = "user"): PermissionDecision {
+function approved(req: PermissionRequest, actor = "user", lifetime: "action" | "run" | "session" = "action"): PermissionDecision {
   return {
     approved: true,
     requestId: req.requestId,
     actionDigest: req.actionDigest,
-    lifetime: "action",
+    // Spec 011: an approved decision must name a policy-issued option.
+    optionId: req.approvalOptions[0]?.optionId ?? "opt-1",
+    lifetime,
     actorId: actor,
+    decidedAt: Date.now(),
+  };
+}
+
+/** Approve the SECOND (bounded) option — the exact option is always first. */
+function approvedBounded(req: PermissionRequest): PermissionDecision {
+  const option = req.approvalOptions.find((o) => o.kind === "bounded");
+  return {
+    approved: true,
+    requestId: req.requestId,
+    actionDigest: req.actionDigest,
+    optionId: option?.optionId ?? req.approvalOptions[0]?.optionId ?? "opt-1",
+    lifetime: "action",
+    actorId: "user",
     decidedAt: Date.now(),
   };
 }
@@ -299,6 +319,7 @@ describe("ActionLifecycle (T110)", () => {
           approved: true,
           requestId: req.requestId,
           actionDigest: "wrong-digest",
+          optionId: req.approvalOptions[0]?.optionId ?? "opt-1",
           lifetime: "action",
           actorId: "u",
           decidedAt: Date.now(),
@@ -337,6 +358,456 @@ describe("ActionLifecycle (T110)", () => {
     expect(second).toBe("duplicate");
     const terminal = await audit.getTerminal("aX");
     expect(terminal?.state).toBe("succeeded");
+  });
+
+  // ── Spec 011 (T009/T019): selection validation, envelope issuance, and
+  //    authority integrity ────────────────────────────────────────────────
+
+  function processAction(actionDigest = "d-proc"): PreparedToolAction {
+    return {
+      version: 1,
+      actionId: "a-proc",
+      runId: "r1",
+      toolCallId: "c1",
+      toolName: "execute_shell_command",
+      principalId: "user",
+      argsDigest: "args",
+      actionDigest,
+      risk: "destructive",
+      effects: [
+        {
+          kind: "process-exec",
+          command: { executable: "/bin/sh", argv: ["-c", "npm test"], cwd: "/p" },
+          requestedRoots: [],
+        },
+      ],
+      display: {
+        title: "run",
+        summary: "npm test",
+        canonicalTargets: [],
+        effects: ["process-exec"],
+      },
+      operation: {
+        kind: "process",
+        command: { executable: "/bin/sh", argv: ["-c", "npm test"], cwd: "/p" },
+        roots: [],
+      },
+    };
+  }
+
+  it("issues an envelope with the SELECTED option's capabilities exactly (bounded)", async () => {
+    const audit = new LocalAuditStore({ root: dir });
+    let issued: CapabilityEnvelope | undefined;
+    const recordingBoundary: ExecutionBoundary = {
+      capabilities: LOCAL_BACKEND,
+      async execute(_a, envelope) {
+        issued = envelope;
+        return {
+          state: "succeeded",
+          result: { output: "ok", success: true },
+          evidence: {
+            backend: "local-native",
+            actionDigest: _a.actionDigest,
+            executorId: "test",
+            operationKind: _a.operation.kind,
+          },
+        };
+      },
+    };
+    const ctx = policyCtx({
+      deploymentCeiling: set({ kind: "process" }),
+      principalPolicy: set({ kind: "process" }),
+      runtimeBaseline: set({ kind: "process" }),
+      activeCapabilities: set(),
+    });
+    const broker: ApprovalBroker = {
+      mode: "inline",
+      async request(req) {
+        return approvedBounded(req);
+      },
+    };
+    const lifecycle = new ActionLifecycle({
+      policy: new PolicyEngine("digest"),
+      policyContext: ctx,
+      broker,
+      boundary: recordingBoundary,
+      audit,
+      activeCapabilities: { capabilities: [] },
+    });
+    const result = await lifecycle.run(processAction());
+    expect(result.outcome.state).toBe("succeeded");
+    expect(issued).toBeDefined();
+    // The final envelope carries the bounded option's capabilities exactly —
+    // never the action's narrower required set, never a wider fallback.
+    expect(issued!.capabilities).toEqual([
+      { kind: "process", executable: "/bin/sh" },
+    ]);
+    expect(issued!.lifetime.kind).toBe("action");
+  });
+
+  it("action-lifetime approval is consumed once: a matching later action asks again", async () => {
+    const audit = new LocalAuditStore({ root: dir });
+    let requestCount = 0;
+    const broker: ApprovalBroker = {
+      mode: "inline",
+      async request(req) {
+        requestCount++;
+        return approved(req);
+      },
+    };
+    const lifecycle = new ActionLifecycle({
+      policy: new PolicyEngine("digest"),
+      policyContext: policyCtx({ activeCapabilities: set() }),
+      broker,
+      boundary: fakeBoundary({ output: "ok", success: true }),
+      audit,
+      activeCapabilities: { capabilities: [] },
+    });
+    const first = await lifecycle.run(writeAction());
+    expect(first.outcome.state).toBe("succeeded");
+    expect(requestCount).toBe(1);
+    // Same action again: Allow Once must NOT be retained as session authority.
+    const second = await lifecycle.run(writeAction());
+    expect(second.outcome.state).toBe("succeeded");
+    expect(requestCount).toBe(2);
+    // The action-scoped capability was not retained in the active set.
+    expect(lifecycle.getActiveCapabilities()).toEqual([]);
+  });
+
+  it("session-lifetime approval IS retained: a matching later action does not ask again", async () => {
+    const audit = new LocalAuditStore({ root: dir });
+    let requestCount = 0;
+    const broker: ApprovalBroker = {
+      mode: "inline",
+      async request(req) {
+        requestCount++;
+        return approved(req, "user", "session");
+      },
+    };
+    const lifecycle = new ActionLifecycle({
+      policy: new PolicyEngine("digest"),
+      policyContext: policyCtx({
+        sessionId: "sess-1",
+        activeCapabilities: set(),
+      }),
+      broker,
+      boundary: fakeBoundary({ output: "ok", success: true }),
+      audit,
+      activeCapabilities: { capabilities: [] },
+      sessionId: "sess-1",
+    });
+    const first = await lifecycle.run(writeAction());
+    expect(first.outcome.state).toBe("succeeded");
+    expect(requestCount).toBe(1);
+    const second = await lifecycle.run(writeAction());
+    expect(second.outcome.state).toBe("succeeded");
+    expect(requestCount).toBe(1); // no repeat prompt
+  });
+
+  it("forged option ID denies with invalid-approval-response", async () => {
+    const audit = new LocalAuditStore({ root: dir });
+    const broker: ApprovalBroker = {
+      mode: "inline",
+      async request(req) {
+        return {
+          approved: true,
+          requestId: req.requestId,
+          actionDigest: req.actionDigest,
+          optionId: "forged-option",
+          lifetime: "action",
+          actorId: "u",
+          decidedAt: Date.now(),
+        };
+      },
+    };
+    const lifecycle = new ActionLifecycle({
+      policy: new PolicyEngine("digest"),
+      policyContext: policyCtx({ activeCapabilities: set() }),
+      broker,
+      boundary: fakeBoundary({ output: "x", success: true }),
+      audit,
+      activeCapabilities: { capabilities: [] },
+    });
+    const result = await lifecycle.run(writeAction());
+    expect(result.outcome.state).toBe("denied");
+    expect(result.outcome.denial).toBe("invalid-approval-response");
+  });
+
+  it("unsupported lifetime denies with invalid-approval-response", async () => {
+    const audit = new LocalAuditStore({ root: dir });
+    const broker: ApprovalBroker = {
+      mode: "inline",
+      async request(req) {
+        // Session is not offered: no session identity in the context.
+        return approved(req, "user", "session");
+      },
+    };
+    const lifecycle = new ActionLifecycle({
+      policy: new PolicyEngine("digest"),
+      policyContext: policyCtx({ activeCapabilities: set() }),
+      broker,
+      boundary: fakeBoundary({ output: "x", success: true }),
+      audit,
+      activeCapabilities: { capabilities: [] },
+    });
+    const result = await lifecycle.run(writeAction());
+    expect(result.outcome.state).toBe("denied");
+    expect(result.outcome.denial).toBe("invalid-approval-response");
+  });
+
+  it("expired request denies with approval-expired even when the broker approves", async () => {
+    const audit = new LocalAuditStore({ root: dir });
+    const broker: ApprovalBroker = {
+      mode: "inline",
+      async request(req) {
+        return approved(req);
+      },
+    };
+    const lifecycle = new ActionLifecycle({
+      policy: new PolicyEngine("digest"),
+      policyContext: policyCtx({ activeCapabilities: set() }),
+      broker,
+      boundary: fakeBoundary({ output: "x", success: true }),
+      audit,
+      activeCapabilities: { capabilities: [] },
+      // The request was created with a 30s deadline; run 40s later.
+      now: () => Date.now() + 40_000,
+    });
+    const result = await lifecycle.run(writeAction());
+    expect(result.outcome.state).toBe("denied");
+    expect(result.outcome.denial).toBe("approval-expired");
+  });
+
+  it("revoked session denies a session approval with capability-revoked", async () => {
+    const ledger = new PersistedCapabilityLedger({ root: dir });
+    await ledger.load();
+    await ledger.revoke({ sessionId: "sess-revoked" });
+    const audit = new LocalAuditStore({ root: dir });
+    const broker: ApprovalBroker = {
+      mode: "inline",
+      async request(req) {
+        return approved(req, "user", "session");
+      },
+    };
+    const lifecycle = new ActionLifecycle({
+      policy: new PolicyEngine("digest"),
+      policyContext: policyCtx({
+        sessionId: "sess-revoked",
+        activeCapabilities: set(),
+      }),
+      broker,
+      boundary: fakeBoundary({ output: "x", success: true }),
+      audit,
+      activeCapabilities: { capabilities: [] },
+      capabilityLedger: ledger,
+      sessionId: "sess-revoked",
+    });
+    const result = await lifecycle.run(writeAction());
+    expect(result.outcome.state).toBe("denied");
+    expect(result.outcome.denial).toBe("capability-revoked");
+  });
+
+  it("inline approval writes no grants or protected-policy files", async () => {
+    const artifacts = new InMemoryArtifactStore();
+    const { boundary } = await buildLocalBoundary({ artifacts, allowFallback: true });
+
+    // The commit-files operation reads its content from the shared artifact
+    // store (the analyzer would have stored it; this test bypasses analysis).
+    const contentRef = await artifacts.put(Buffer.from("hello\n"), "text/plain", "r1");
+    const securityDir = join(dir, "security");
+    const prevEnv = process.env.SEEPIENT_SECURITY_DIR;
+    process.env.SEEPIENT_SECURITY_DIR = securityDir;
+    try {
+      const wired = await buildActionLifecycle({
+        principalId: "u1",
+        runId: "r1",
+        workspaceRoot: dir,
+        modelProviderClass: "openai",
+        // A TUI-shaped broker, faked inline so the Domain test stays inside
+        // the Domain layer (no transport import in this test file).
+        approvalBroker: {
+          mode: "inline",
+          async request(req) {
+            return {
+              approved: true,
+              requestId: req.requestId,
+              actionDigest: req.actionDigest,
+              optionId: req.approvalOptions[0]?.optionId ?? "opt-1",
+              lifetime: "action",
+              actorId: "inline-broker",
+              decidedAt: Date.now(),
+            };
+          },
+        },
+        executionBoundary: boundary,
+        auditRoot: dir,
+        artifacts,
+      });
+      const file = join(dir, "approved.txt");
+      const action: PreparedToolAction = {
+        version: 1,
+        actionId: "a-write",
+        runId: "r1",
+        toolCallId: "c1",
+        toolName: "write_file",
+        principalId: "u1",
+        argsDigest: "a1",
+        actionDigest: "ad-write",
+        risk: "edit",
+        effects: [
+          {
+            kind: "filesystem-write",
+            targets: [
+              {
+                target: {
+                  canonicalPath: file,
+                  canonicalParent: dir,
+                  basename: "approved.txt",
+                  exists: false,
+                  finalSymlink: false,
+                },
+                mode: "create",
+                expected: { exists: false },
+              },
+            ],
+          },
+        ],
+        operation: {
+          kind: "commit-files",
+          commits: [
+            {
+              destination: {
+                canonicalPath: file,
+                canonicalParent: dir,
+                basename: "approved.txt",
+                exists: false,
+                finalSymlink: false,
+              },
+              content: contentRef,
+              expected: { exists: false },
+            },
+          ],
+        },
+        display: {
+          title: "Write file",
+          summary: "Write file",
+          canonicalTargets: [file],
+          effects: ["filesystem-write"],
+        },
+      };
+      const result = await wired.lifecycle.run(action);
+      expect(result.outcome.state).toBe("succeeded");
+      // Inline approval must not write grants files…
+      expect(existsSync(join(dir, "grants.json"))).toBe(false);
+      // …and must not create the protected policy store directory at all.
+      expect(existsSync(join(securityDir, "policies"))).toBe(false);
+    } finally {
+      if (prevEnv === undefined) delete process.env.SEEPIENT_SECURITY_DIR;
+      else process.env.SEEPIENT_SECURITY_DIR = prevEnv;
+    }
+  });
+
+  it("revoked session authority does not authorize later actions (P0 review fix)", async () => {
+    const ledger = new PersistedCapabilityLedger({ root: dir });
+    await ledger.load();
+    const audit = new LocalAuditStore({ root: dir });
+    let requestCount = 0;
+    let dispatchCount = 0;
+    const broker: ApprovalBroker = {
+      mode: "inline",
+      async request(req) {
+        requestCount++;
+        return approved(req, "user", "session");
+      },
+    };
+    const boundary: ExecutionBoundary = {
+      capabilities: LOCAL_BACKEND,
+      async execute(a, _env) {
+        dispatchCount++;
+        return {
+          state: "succeeded",
+          result: { output: "ok", success: true },
+          evidence: {
+            backend: "local-native",
+            actionDigest: a.actionDigest,
+            executorId: "test",
+            operationKind: a.operation.kind,
+          },
+        };
+      },
+    };
+    const lifecycle = new ActionLifecycle({
+      policy: new PolicyEngine("digest"),
+      policyContext: policyCtx({
+        sessionId: "sess-rev-1",
+        activeCapabilities: set(),
+      }),
+      broker,
+      boundary,
+      audit,
+      activeCapabilities: { capabilities: [] },
+      capabilityLedger: ledger,
+      // The actions themselves carry NO sessionId (production analyzers do
+      // not propagate it) — the lifecycle-bound identity must be used.
+      sessionId: "sess-rev-1",
+    });
+
+    const first = await lifecycle.run(writeAction());
+    expect(first.outcome.state).toBe("succeeded");
+    expect(requestCount).toBe(1);
+
+    await ledger.revoke({ sessionId: "sess-rev-1" });
+
+    // A matching later action must fail closed: no repeat prompt, no dispatch.
+    const second = await lifecycle.run(writeAction());
+    expect(second.outcome.state).toBe("denied");
+    expect(second.outcome.denial).toBe("capability-revoked");
+    expect(requestCount).toBe(1);
+    expect(dispatchCount).toBe(1);
+  });
+
+  it("action-lifetime approval never strips pre-existing active authority (review fix)", async () => {
+    const baseline: Capability = {
+      kind: "model-egress",
+      providerClass: "*",
+      dataClasses: ["normal", "sensitive"],
+    };
+    const audit = new LocalAuditStore({ root: dir });
+    const lifecycle = new ActionLifecycle({
+      policy: new PolicyEngine("digest"),
+      policyContext: policyCtx({
+        // The ceilings must cover model-egress for the action's egress
+        // effect; the commit-file is what needs approval.
+        deploymentCeiling: set(baseline, { kind: "commit-file", path: "/p/a.txt" }),
+        principalPolicy: set(baseline, { kind: "commit-file", path: "/p/a.txt" }),
+        runtimeBaseline: set(baseline, { kind: "commit-file", path: "/p/a.txt" }),
+        activeCapabilities: set(baseline),
+      }),
+      broker: {
+        mode: "inline",
+        async request(req) {
+          return approved(req);
+        },
+      },
+      boundary: fakeBoundary({ output: "ok", success: true }),
+      audit,
+      activeCapabilities: { capabilities: [baseline] },
+    });
+    // The action requires filesystem-write AND model-egress (like the real
+    // write_file analyzer); model-egress is covered by the baseline, the
+    // commit-file needs approval.
+    const action: PreparedToolAction = {
+      ...writeAction(),
+      effects: [
+        ...writeAction().effects,
+        { kind: "model-egress", providerClass: "normal", dataClasses: ["normal"], sources: [] },
+      ],
+    };
+    const result = await lifecycle.run(action);
+    expect(result.outcome.state).toBe("succeeded");
+    // The baseline model-egress authority must survive the action approval
+    // (Allow Once is consumed once; it never removes what already existed).
+    expect(lifecycle.getActiveCapabilities()).toEqual([baseline]);
   });
 
   it("pre-dispatch audit failure denies effectful execution", async () => {

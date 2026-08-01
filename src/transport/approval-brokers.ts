@@ -21,6 +21,7 @@ import type {
   ApprovalBroker,
   PermissionDecision,
   PermissionRequest,
+  TuiApprovalSelection,
 } from "../foundations/contracts/permission-policy.js";
 
 /** Callback shape for the SDK callback broker. */
@@ -86,12 +87,17 @@ export class CallbackApprovalBroker implements ApprovalBroker {
 /**
  * Inline (TUI/CLI) broker presenter contract. The UI implements this; the
  * broker owns the deadline + abort handling so the UI stays pure rendering.
+ *
+ * Spec 011 (T002): the presenter returns the transient `TuiApprovalSelection`
+ * (option ID + lifetime only). The broker adds the trusted request ID, action
+ * digest, actor identity, and decision time to produce the shared
+ * `PermissionDecision` — the prompt never supplies authority metadata.
  */
 export interface InlineApprovalPresenter {
   prompt(
     req: PermissionRequest,
     opts: { signal?: AbortSignal },
-  ): Promise<PermissionDecision>;
+  ): Promise<TuiApprovalSelection>;
 }
 
 /**
@@ -113,6 +119,10 @@ export class InlineApprovalBroker implements ApprovalBroker {
     req: PermissionRequest,
     opts: { signal?: AbortSignal },
   ): Promise<PermissionDecision> {
+    // A request that expired while queued/displayed can never be approved.
+    if (req.expiresAt < Date.now()) {
+      return this.denial(req, "approval-expired");
+    }
     // Compose the caller's signal with a deadline signal.
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.deadlineMs);
@@ -120,38 +130,94 @@ export class InlineApprovalBroker implements ApprovalBroker {
     opts.signal?.addEventListener("abort", onParentAbort, { once: true });
 
     try {
-      const decision = await this.presenter.prompt(req, {
-        signal: controller.signal,
-      });
-      // Ensure the decision references the correct request (defensive).
-      if (
-        decision.requestId !== req.requestId ||
-        decision.actionDigest !== req.actionDigest
-      ) {
-        return {
-          approved: false,
-          requestId: req.requestId,
-          actionDigest: req.actionDigest,
-          actorId: "inline-broker",
-          reason: "presenter returned a decision for a different request",
-          decidedAt: Date.now(),
-        };
+      // Race the presenter against the deadline: a presenter that ignores
+      // the abort signal must not hang the lifecycle forever (spec 011
+      // review fix). The selection contract only carries
+      // user-denied/approval-unavailable, so deadline and abort are
+      // distinguished here, on the trusted side.
+      const selection = await Promise.race([
+        this.presenter.prompt(req, { signal: controller.signal }),
+        new Promise<TuiApprovalSelection>((resolve) => {
+          controller.signal.addEventListener(
+            "abort",
+            () => resolve({ approved: false, reason: "approval-unavailable" }),
+            { once: true },
+          );
+        }),
+      ]);
+      if (controller.signal.aborted) {
+        // Deadline (request expired) vs parent abort (user cancelled) are
+        // distinct typed reasons; the lifecycle maps them to the audit.
+        return this.denial(
+          req,
+          opts.signal?.aborted ? "user-denied" : "approval-expired",
+        );
       }
-      return decision;
+      return this.enrich(req, selection);
     } catch {
       // Timeout, abort, or closed UI → safe denial.
-      return {
-        approved: false,
-        requestId: req.requestId,
-        actionDigest: req.actionDigest,
-        actorId: "inline-broker",
-        reason: "prompt aborted, timed out, or UI closed",
-        decidedAt: Date.now(),
-      };
+      return this.denial(
+        req,
+        "approval-expired",
+        "prompt aborted, timed out, or UI closed",
+      );
     } finally {
       clearTimeout(timer);
       opts.signal?.removeEventListener("abort", onParentAbort);
     }
+  }
+
+  /**
+   * Turn a transient `TuiApprovalSelection` into the shared
+   * `PermissionDecision`, binding it to THIS request. The broker is the only
+   * place that supplies actor identity and decision time (FR-004).
+   */
+  private enrich(
+    req: PermissionRequest,
+    selection: TuiApprovalSelection,
+  ): PermissionDecision {
+    if (!selection.approved) {
+      return this.denial(req, selection.reason ?? "user-denied");
+    }
+    // The selection must name a policy-issued option and an offered lifetime;
+    // anything else is an invalid response, never a fallback option.
+    const option = req.approvalOptions.find(
+      (o) => o.optionId === selection.optionId,
+    );
+    if (!option) {
+      return this.denial(req, "invalid-approval-response");
+    }
+    if (
+      !option.supportedLifetimes.includes(selection.lifetime) ||
+      !req.offeredLifetimes.includes(selection.lifetime) ||
+      (selection.lifetime === "session" && !req.sessionId)
+    ) {
+      return this.denial(req, "invalid-approval-response");
+    }
+    return {
+      approved: true,
+      requestId: req.requestId,
+      actionDigest: req.actionDigest,
+      optionId: selection.optionId,
+      lifetime: selection.lifetime,
+      actorId: "inline-broker",
+      decidedAt: Date.now(),
+    };
+  }
+
+  private denial(
+    req: PermissionRequest,
+    reason: string,
+    message?: string,
+  ): PermissionDecision {
+    return {
+      approved: false,
+      requestId: req.requestId,
+      actionDigest: req.actionDigest,
+      actorId: "inline-broker",
+      reason: message ?? reason,
+      decidedAt: Date.now(),
+    };
   }
 }
 

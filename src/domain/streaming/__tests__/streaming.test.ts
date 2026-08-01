@@ -117,6 +117,7 @@ describe('runAgentLoop streaming', () => {
           approved: true,
           requestId: req.requestId,
           actionDigest: req.actionDigest,
+          optionId: req.approvalOptions[0]?.optionId ?? 'opt-1',
           lifetime: 'action',
           actorId: 'autoConfirm',
           decidedAt: Date.now(),

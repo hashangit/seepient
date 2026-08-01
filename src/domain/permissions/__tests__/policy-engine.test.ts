@@ -113,15 +113,89 @@ describe("PolicyEngine (T106/T110)", () => {
     expect(d.decision).toBe("allow");
   });
 
-  it("needs-approval when capability missing but within ceiling", () => {
+  it("needs-approval carries policy-issued options, not a proposed envelope", () => {
     const engine = new PolicyEngine("digest");
     const d = engine.evaluate(writeAction("/proj/a.txt"), context());
     expect(d.decision).toBe("needs-approval");
     if (d.decision === "needs-approval") {
       expect(d.request.actionDigest).toBe("d-/proj/a.txt");
-      expect(d.proposedEnvelope.capabilities).toEqual([
+      expect("proposedEnvelope" in d).toBe(false);
+      // The backend cannot enforce root-shaped writes, so exactly ONE
+      // (exact) option is issued — never a tool-wide or raw fallback.
+      expect(d.request.approvalOptions).toHaveLength(1);
+      const [opt] = d.request.approvalOptions;
+      expect(opt.kind).toBe("exact");
+      expect(opt.actionDigest).toBe("d-/proj/a.txt");
+      expect(opt.capabilities).toEqual([
         { kind: "commit-file", path: "/proj/a.txt" },
       ]);
+      expect(opt.supportedLifetimes).toEqual(["action", "run"]);
+      expect(d.request.offeredLifetimes).toEqual(["action", "run"]);
+    }
+  });
+
+  it("offers the session lifetime only when a stable session identity exists", () => {
+    const engine = new PolicyEngine("digest");
+    const d = engine.evaluate(writeAction("/proj/a.txt"), context({ sessionId: "sess-1" }));
+    expect(d.decision).toBe("needs-approval");
+    if (d.decision === "needs-approval") {
+      expect(d.request.sessionId).toBe("sess-1");
+      expect(d.request.offeredLifetimes).toContain("session");
+      for (const opt of d.request.approvalOptions) {
+        expect(opt.supportedLifetimes).toContain("session");
+      }
+    }
+  });
+
+  it("offers an exact + bounded pair for process actions the backend enforces", () => {
+    const engine = new PolicyEngine("digest");
+    const action: PreparedToolAction = {
+      version: 1,
+      actionId: "a1",
+      runId: "r1",
+      toolCallId: "c1",
+      toolName: "execute_shell_command",
+      principalId: "user",
+      argsDigest: "x",
+      actionDigest: "d-proc",
+      risk: "destructive",
+      effects: [
+        {
+          kind: "process-exec",
+          command: { executable: "/bin/sh", argv: ["-c", "npm test"], cwd: "/proj" },
+          requestedRoots: [],
+        },
+      ],
+      display: {
+        title: "run",
+        summary: "npm test",
+        canonicalTargets: [],
+        effects: ["process-exec"],
+      },
+      operation: { kind: "process", command: { executable: "/bin/sh", argv: ["-c", "npm test"], cwd: "/proj" }, roots: [] },
+    };
+    const ctx = context({
+      deploymentCeiling: set({ kind: "process" }),
+      principalPolicy: set({ kind: "process" }),
+      runtimeBaseline: set({ kind: "process" }),
+    });
+    const d = engine.evaluate(action, ctx);
+    expect(d.decision).toBe("needs-approval");
+    if (d.decision === "needs-approval") {
+      const kinds = d.request.approvalOptions.map((o) => o.kind);
+      // Narrowest first: exact, then the executable-bound bounded option.
+      expect(kinds).toEqual(["exact", "bounded"]);
+      const exact = d.request.approvalOptions[0];
+      const bounded = d.request.approvalOptions[1];
+      expect(exact.capabilities).toEqual([
+        { kind: "process", executable: "/bin/sh", argvPrefix: ["-c", "npm test"] },
+      ]);
+      expect(bounded.capabilities).toEqual([
+        { kind: "process", executable: "/bin/sh" },
+      ]);
+      // Option IDs are stable within the request and bound to the digest.
+      expect(exact.optionId).toContain("d-proc");
+      expect(exact.optionId).not.toBe(bounded.optionId);
     }
   });
 

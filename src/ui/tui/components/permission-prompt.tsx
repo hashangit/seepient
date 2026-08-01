@@ -1,10 +1,249 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { useTheme } from '../hooks/use-theme.js';
 import { extractPattern } from '../../../foundations/grant-pattern.js';
+import type {
+  ApprovalOption,
+  PermissionRequest,
+  TuiApprovalSelection,
+} from '../../../foundations/contracts/permission-policy.js';
 import type { ApprovalContext, ApprovalDecision, GrantScope } from '../../../foundations/types.js';
 
-interface PermissionPromptProps {
+// ══════════════════════════════════════════════════════════════════════════
+// Native (spec 011) prompt — typed PermissionRequest flow
+// ══════════════════════════════════════════════════════════════════════════
+
+export type PromptTab = 'scope' | 'duration';
+
+/**
+ * The MVP offers only `action`/`session` durations, supported by both the
+ * request and the selected option (FR-010).
+ */
+export function visibleLifetimes(
+  option: ApprovalOption,
+  request?: PermissionRequest,
+): Array<'action' | 'session'> {
+  return option.supportedLifetimes.filter(
+    (l): l is 'action' | 'session' =>
+      (l === 'action' || l === 'session') &&
+      (request === undefined || request.offeredLifetimes.includes(l)),
+  );
+}
+
+/** Least-privilege default scope: exact when offered, else narrowest option. */
+export function defaultScopeIndex(options: ApprovalOption[]): number {
+  const exact = options.findIndex((o) => o.kind === 'exact');
+  return exact >= 0 ? exact : 0;
+}
+
+/** Least-privilege default duration: Allow Once when offered. */
+export function defaultLifetimeIndex(lifetimes: Array<'action' | 'session'>): number {
+  const action = lifetimes.indexOf('action');
+  return action >= 0 ? action : 0;
+}
+
+/**
+ * Build the strict `TuiApprovalSelection` from the visible pair. Stale or
+ * out-of-range indices are clamped to the visible set; a request with no
+ * representable options can only deny as unavailable (FR-005).
+ */
+export function buildSelection(
+  request: PermissionRequest,
+  scopeIdx: number,
+  lifetimeIdx: number,
+): TuiApprovalSelection {
+  const options = request.approvalOptions;
+  if (options.length === 0) return { approved: false, reason: 'approval-unavailable' };
+  const option = options[Math.min(Math.max(scopeIdx, 0), options.length - 1)];
+  const lifetimes = visibleLifetimes(option, request);
+  if (lifetimes.length === 0) return { approved: false, reason: 'approval-unavailable' };
+  const lifetime = lifetimes[Math.min(Math.max(lifetimeIdx, 0), lifetimes.length - 1)];
+  return { approved: true, optionId: option.optionId, lifetime };
+}
+
+/** Pure: move within the visible list without wrapping (FR-015). */
+export function clampMove(idx: number, delta: 1 | -1, size: number): number {
+  if (size <= 1) return 0;
+  return Math.min(Math.max(idx + delta, 0), size - 1);
+}
+
+const DURATION_LABELS: Record<'action' | 'session', string> = {
+  action: 'Allow Once',
+  session: 'This Session',
+};
+
+interface NativePermissionPromptProps {
+  /** Immutable policy-issued request; the prompt renders it as-is. */
+  request: PermissionRequest;
+  /** Called once with the transient selection or denial. */
+  onResolve: (selection: TuiApprovalSelection) => void;
+}
+
+/**
+ * Native inline tool-approval widget (spec 011). Two tabs — Scope (policy-
+ * issued exact/bounded options) and Duration (Allow Once / This Session) —
+ * with keyboard navigation, least-privilege defaults, and a visible summary
+ * of the selected pair. The component owns ONLY transient tab/selection
+ * state; it emits the strict `TuiApprovalSelection` and never invents
+ * authority from raw tool arguments.
+ */
+export function PermissionPrompt({ request, onResolve }: NativePermissionPromptProps) {
+  const theme = useTheme();
+  const options = request.approvalOptions;
+  // State mirrors through refs (CLAUDE.md §6): the useInput handler is
+  // long-lived across renders, so it must read the CURRENT selection — a
+  // stale closure could submit the wrong pair under rapid keypresses.
+  const [tab, setTabState] = useState<PromptTab>('scope');
+  const tabRef = useRef<PromptTab>('scope');
+  const [scopeIdx, setScopeIdxState] = useState(() => defaultScopeIndex(options));
+  const scopeIdxRef = useRef(scopeIdx);
+  const [lifetimeIdx, setLifetimeIdxState] = useState(() => {
+    const first = options[defaultScopeIndex(options)];
+    return defaultLifetimeIndex(first ? visibleLifetimes(first, request) : []);
+  });
+  const lifetimeIdxRef = useRef(lifetimeIdx);
+
+  const setTab = (t: PromptTab): void => {
+    tabRef.current = t;
+    setTabState(t);
+  };
+  const setScopeIdx = (i: number): void => {
+    scopeIdxRef.current = i;
+    setScopeIdxState(i);
+  };
+  const setLifetimeIdx = (i: number): void => {
+    lifetimeIdxRef.current = i;
+    setLifetimeIdxState(i);
+  };
+
+  // Current visible pair — clamped so a stale index (new request or a
+  // narrower option) can never select a nonexistent item.
+  const option = options[Math.min(Math.max(scopeIdx, 0), options.length - 1)];
+  const lifetimes = option ? visibleLifetimes(option, request) : [];
+  const lifetime = lifetimes[Math.min(Math.max(lifetimeIdx, 0), lifetimes.length - 1)];
+
+  useInput((input, key) => {
+    // Tab / Shift+Tab (key.tab with key.shift) and Left/Right switch tabs
+    // (FR-014). With two tabs, direction is symmetric.
+    const currentTab = tabRef.current;
+    if (key.tab || key.rightArrow || key.leftArrow) {
+      setTab(currentTab === 'scope' ? 'duration' : 'scope');
+    } else if (key.upArrow) {
+      if (currentTab === 'scope') setScopeIdx(clampMove(scopeIdxRef.current, -1, options.length));
+      else setLifetimeIdx(clampMove(lifetimeIdxRef.current, -1, lifetimes.length));
+    } else if (key.downArrow) {
+      if (currentTab === 'scope') setScopeIdx(clampMove(scopeIdxRef.current, 1, options.length));
+      else setLifetimeIdx(clampMove(lifetimeIdxRef.current, 1, lifetimes.length));
+    } else if (key.return) {
+      onResolve(buildSelection(request, scopeIdxRef.current, lifetimeIdxRef.current));
+    } else if (key.escape || input === 'q') {
+      onResolve({ approved: false, reason: 'user-denied' });
+    } else if (/^[0-9]$/.test(input)) {
+      const n = parseInt(input, 10);
+      if (currentTab === 'scope' && n >= 1 && n <= options.length) {
+        setScopeIdx(n - 1);
+      } else if (currentTab === 'duration' && n >= 1 && n <= lifetimes.length) {
+        setLifetimeIdx(n - 1);
+      }
+    }
+    // Unsupported keys have no effect.
+  });
+
+  const scopeColor = tab === 'scope' ? theme.yellow : theme.fgGutter;
+  const durationColor = tab === 'duration' ? theme.yellow : theme.fgGutter;
+
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor={theme.yellow} paddingX={1}>
+      {/* Title row — request identity + action summary (tamper-proof). */}
+      <Box>
+        <Text color={theme.yellow} bold>◆ </Text>
+        <Text color={theme.fg} bold>{request.action.title}</Text>
+        <Text color={theme.fgDim}> ── {request.action.effects.join(', ') || 'no effects'}</Text>
+      </Box>
+      <Box>
+        <Text color={theme.cyan}>  Request </Text>
+        <Text color={theme.fg}>{request.requestId.slice(0, 8)}…</Text>
+        <Text color={theme.fgDim}>
+          {' '}· expires {new Date(request.expiresAt).toLocaleTimeString()}
+        </Text>
+      </Box>
+      {request.action.summary ? (
+        <Box>
+          <Text color={theme.cyan}>  Summary </Text>
+          <Text color={theme.fg}>{truncate(request.action.summary, 100)}</Text>
+        </Box>
+      ) : null}
+
+      {/* Tabs */}
+      <Box marginTop={1}>
+        <Text color={scopeColor} bold>
+          {tab === 'scope' ? '▸' : ' '} [1] Scope
+        </Text>
+        <Text>  </Text>
+        <Text color={durationColor} bold>
+          {tab === 'duration' ? '▸' : ' '} [2] Duration
+        </Text>
+      </Box>
+
+      {/* Scope tab — only the options supplied by Domain. */}
+      {tab === 'scope' ? (
+        <Box flexDirection="column" marginTop={1}>
+          {options.map((opt, i) => {
+            const isSel = i === scopeIdx;
+            const accent = opt.kind === 'exact' ? theme.green : theme.blue;
+            return (
+              <Box key={opt.optionId} borderStyle={isSel ? 'round' : 'single'} borderColor={isSel ? accent : theme.fgGutter}>
+                <Text color={accent} bold>{i + 1} </Text>
+                <Text bold color={isSel ? accent : theme.fg}>
+                  {isSel ? '✓ ' : '  '}
+                  <Text color={theme.fgDim}>{opt.kind === 'exact' ? '[exact]' : '[bounded]'} </Text>
+                  {truncate(opt.label, 90)}
+                </Text>
+              </Box>
+            );
+          })}
+        </Box>
+      ) : (
+        <Box flexDirection="column" marginTop={1}>
+          {lifetimes.map((l, i) => {
+            const isSel = i === lifetimeIdx;
+            const accent = theme.green;
+            return (
+              <Box key={l} borderStyle={isSel ? 'round' : 'single'} borderColor={isSel ? accent : theme.fgGutter}>
+                <Text color={accent} bold>{i + 1} </Text>
+                <Text bold color={isSel ? accent : theme.fg}>
+                  {isSel ? '✓ ' : '  '}
+                  {DURATION_LABELS[l]}
+                  {l === 'session' ? ' (until the app session ends)' : ' (this one action)'}
+                </Text>
+              </Box>
+            );
+          })}
+        </Box>
+      )}
+
+      {/* Summary of the selected pair — always visible. */}
+      <Box marginTop={1}>
+        <Text color={theme.cyan}>  Selected </Text>
+        <Text color={theme.fg}>{option ? truncate(option.label, 60) : '—'}</Text>
+        <Text color={theme.fgDim}> · </Text>
+        <Text color={theme.fg}>{lifetime ? DURATION_LABELS[lifetime] : '—'}</Text>
+      </Box>
+
+      <Box marginTop={1}>
+        <Text color={theme.fgDim}>
+          {' '}tab/←→ switch · ↑↓ move · 1-{Math.max(options.length, lifetimes.length)} select · enter approve · esc/q deny
+        </Text>
+      </Box>
+    </Box>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Legacy (flag-off) prompt — unchanged behavior, not part of 011 evidence
+// ══════════════════════════════════════════════════════════════════════════
+
+interface LegacyPermissionPromptProps {
   toolName: string;
   args: Record<string, unknown>;
   /** LLM-authored gate context (title/description + per-scope implications). */
@@ -43,13 +282,13 @@ export function cycleSelection(idx: number, delta: 1 | -1): number {
 function defaultImplication(scope: GrantScope | 'once', pattern?: string): string {
   const toolRef = pattern ? `"${pattern}"` : 'this action';
   switch (scope) {
-    case 'once': 
+    case 'once':
       return `Run ${toolRef} this one time, then ask again next time`;
-    case 'session': 
+    case 'session':
       return `Remember for now: auto-run ${toolRef} until you restart the app`;
-    case 'project': 
+    case 'project':
       return `Trust in this project: auto-run ${toolRef} anywhere here (revoke in /permissions)`;
-    case 'global': 
+    case 'global':
       return `Trust everywhere: auto-run ${toolRef} in any project (revoke in /permissions)`;
   }
 }
@@ -63,13 +302,11 @@ function formatActual(toolName: string, args: Record<string, unknown>): string {
 }
 
 /**
- * Inline tool-approval widget rendered in the feed while the agent is paused
- * on `approveTool`. Shows the LLM-authored title + description, the actual
- * command/path (tamper-proof), and five bordered option rows — one per
- * scope — each with its implication. Stays within Ink's input handling — no
- * stdin mode switch.
+ * Legacy inline tool-approval widget — the `--permission-pipeline`-off
+ * fallback. Kept byte-for-byte behavior; it is not part of 011's acceptance
+ * evidence (spec 011 scope & boundary).
  */
-export function PermissionPrompt({ toolName, args, approvalContext, onResolve }: PermissionPromptProps) {
+export function LegacyPermissionPrompt({ toolName, args, approvalContext, onResolve }: LegacyPermissionPromptProps) {
   const theme = useTheme();
   const [selected, setSelected] = useState(0);
 

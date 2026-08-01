@@ -366,7 +366,7 @@ describe("R9.1 Integration Wiring Verification", () => {
       runId: "r1",
       sessionId: "session-A",
       workspaceRoot: tmpDir,
-      approvalBroker: { mode: "inline", request: async (req) => ({ approved: true, requestId: req.requestId, actionDigest: req.actionDigest, lifetime: "session", actorId: "u", decidedAt: Date.now() }) },
+      approvalBroker: { mode: "inline", request: async (req) => ({ approved: true, requestId: req.requestId, actionDigest: req.actionDigest, lifetime: "session", actorId: "u", optionId: req.approvalOptions[0]?.optionId ?? "opt-1", decidedAt: Date.now() }) },
       executionBoundary: boundary,
       artifacts,
     });
@@ -453,6 +453,7 @@ describe("R9.1 Integration Wiring Verification", () => {
       actionDigest: "ad1",
       action: { title: "Test", summary: "Test", canonicalTargets: [], effects: [] },
       requestedCapabilities: [],
+      approvalOptions: [],
       offeredLifetimes: ["action"],
       createdAt: Date.now(),
       expiresAt: Date.now() + 60000,
@@ -464,6 +465,7 @@ describe("R9.1 Integration Wiring Verification", () => {
       approved: true,
       requestId: "req-1",
       actionDigest: "ad1",
+      optionId: "opt-1",
       lifetime: "action",
       actorId: "u1",
       decidedAt: Date.now(),
@@ -572,7 +574,7 @@ describe("R9.1 Integration Wiring Verification", () => {
           { kind: "model-egress", providerClass: "openai", dataClasses: ["secret"] },
         ],
       },
-      approvalBroker: { mode: "inline", request: async (req) => ({ approved: true, requestId: req.requestId, actionDigest: req.actionDigest, lifetime: "action", actorId: "u", decidedAt: Date.now() }) },
+      approvalBroker: { mode: "inline", request: async (req) => ({ approved: true, requestId: req.requestId, actionDigest: req.actionDigest, lifetime: "action", actorId: "u", optionId: req.approvalOptions[0]?.optionId ?? "opt-1", decidedAt: Date.now() }) },
       executionBoundary: boundary,
       artifacts,
     });

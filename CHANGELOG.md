@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+* **TUI permission scope and lifetime UX (spec 011)**: under the existing
+  `--permission-pipeline` switch, the TUI approval prompt now renders the
+  policy-issued scope options (Exact / Bounded) and lifetimes (Allow Once /
+  This Session) instead of a raw tool name and legacy duration list. The
+  typed `PermissionRequest` flows through a native approval bridge
+  (`setPipelineApprovalBroker`) into the prompt, which returns only the
+  selected option ID and lifetime; the broker adds actor identity and
+  decision time, and `ActionLifecycle` validates the selection before issuing
+  the final envelope with the selected option's capabilities exactly. Allow
+  Once is consumed once and never retained; This Session stays in the
+  long-lived active set until revocation. Forged, stale, expired, or revoked
+  selections fail closed, and inline approval performs no grants or
+  protected-policy writes. The flag-off legacy prompt is unchanged.
+
 ## [v0.4.2] - 2026-08-01
 
 **Seepient v0.4.2** is a quick fix for the Homebrew install. v0.4.1 bumped `js-yaml` to a version that was published just hours before release, which Homebrew's freshness check (`--min-release-age`) rejected — so `brew install seepient` failed for everyone on v0.4.1.

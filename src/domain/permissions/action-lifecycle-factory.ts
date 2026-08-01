@@ -234,6 +234,9 @@ export async function buildActionLifecycle(
       deadlineMs: 30_000,
     },
     backendCapabilities: inputs.executionBoundary.capabilities,
+    // Spec 011 (T008): preserve the stable session identity so PolicyEngine
+    // can offer the `session` lifetime on TUI requests.
+    sessionId: inputs.sessionId,
   };
 
   const capabilityLedger = inputs.capabilityLedger ?? new PersistedCapabilityLedger(inputs.auditRoot ? { root: path.join(inputs.auditRoot, "caps") } : undefined);

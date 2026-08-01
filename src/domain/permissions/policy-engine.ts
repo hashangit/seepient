@@ -17,6 +17,7 @@
  */
 import type {
   ApprovalBroker,
+  ApprovalOption,
   Capability,
   CapabilityEnvelope,
   CapabilityLifetime,
@@ -40,6 +41,7 @@ import {
   setCovers,
 } from "./capability-store.js";
 import type { PersistedCapabilityLedger } from "./persisted-capability-ledger.js";
+import { buildApprovalOptions } from "./approval-options.js";
 
 /** Trace helpers keep the policy layer auditable without secret values. */
 function emptyTrace(policyDigest: string): PolicyTrace {
@@ -86,18 +88,28 @@ function buildPermissionRequest(
   action: PreparedToolAction,
   missing: Capability[],
   context: PolicyContext,
+  approvalOptions: ApprovalOption[],
 ): PermissionRequest {
   const now = Date.now();
   const deadlineMs = context.interaction.deadlineMs ?? 30_000;
+  // Spec 011: the request keeps the stable session identity so the bridge can
+  // offer `session`; `session` is offered only when that identity exists.
+  const sessionId = action.sessionId ?? context.sessionId;
   return {
     requestId: generateId(),
     principalId: action.principalId,
     runId: action.runId,
+    sessionId,
     toolCallId: action.toolCallId,
     actionDigest: action.actionDigest,
     action: action.display,
     requestedCapabilities: missing,
-    offeredLifetimes: ["action", "run"],
+    approvalOptions,
+    offeredLifetimes: [
+      "action",
+      "run",
+      ...(sessionId ? (["session"] as const) : []),
+    ],
     createdAt: now,
     expiresAt: now + deadlineMs,
   };
@@ -323,12 +335,38 @@ export class PolicyEngine implements PolicyEngineContract {
     }
 
     pushLayer(trace, "backend", "allow");
-    const proposedEnvelope = buildEnvelope(action, missing, this.policyDigest);
-    const request = buildPermissionRequest(action, missing, context);
+    // Spec 011 (T005): the request carries policy-issued exact/bounded options.
+    // If filtering leaves no representable option, deny as unavailable rather
+    // than sending an empty prompt (FR-001).
+    const sessionId = action.sessionId ?? context.sessionId;
+    const offeredLifetimes: Array<"action" | "run" | "session"> = [
+      "action",
+      "run",
+      ...(sessionId ? (["session"] as const) : []),
+    ];
+    const approvalOptions = buildApprovalOptions({
+      action,
+      missing,
+      context,
+      offeredLifetimes,
+    });
+    if (!approvalOptions) {
+      pushLayer(trace, "backend", "deny");
+      return deny(
+        "approval-unavailable",
+        "No representable approval option remains after policy and backend filtering",
+        trace,
+      );
+    }
+    const request = buildPermissionRequest(
+      action,
+      missing,
+      context,
+      approvalOptions,
+    );
     return {
       decision: "needs-approval",
       request,
-      proposedEnvelope,
       trace,
     };
   }

@@ -23,6 +23,7 @@ import type {
   ApprovalBroker,
   Capability,
   CapabilityEnvelope,
+  CapabilityLifetime,
   CapabilitySet,
   PermissionDecision,
   PermissionDenyReason,
@@ -43,6 +44,7 @@ import type { ToolResult } from "../../foundations/types.js";
 import type { PolicyEngine } from "./policy-engine.js";
 import { generateId } from "../../foundations/id.js";
 import { idempotencyKey } from "./audit-recorder.js";
+import { setCovers } from "./capability-store.js";
 import type { PersistedCapabilityLedger } from "./persisted-capability-ledger.js";
 
 /**
@@ -101,6 +103,35 @@ export interface LifecycleResult {
 /** Build a structured tool result string for a denial. */
 function denialOutput(reason: PermissionDenyReason, message: string): string {
   return `Tool execution denied (${reason}): ${message}`;
+}
+
+/** Keep in sync with `PermissionDenyReason` in permission-policy.ts. */
+const KNOWN_DENY_REASONS = new Set<string>([
+  "immutable-deny",
+  "outside-ceiling",
+  "outside-principal",
+  "outside-runtime-baseline",
+  "backend-unsupported",
+  "approval-unavailable",
+  "approval-denied",
+  "approval-expired",
+  "invalid-approval-response",
+  "user-denied",
+  "audit-unavailable",
+  "model-egress-denied",
+  "secret-denied",
+  "security-activation-required",
+  "policy-conflict",
+  "unknown-tool",
+  "capability-expired",
+  "capability-revoked",
+]);
+
+/** Map a broker-supplied reason to a typed deny reason (user-denied default). */
+function typedDenyReason(reason: string | undefined): PermissionDenyReason {
+  return reason !== undefined && KNOWN_DENY_REASONS.has(reason)
+    ? (reason as PermissionDenyReason)
+    : "user-denied";
 }
 
 /**
@@ -180,7 +211,12 @@ export class ActionLifecycle {
           };
         }
       }
-      if (action.sessionId && this.capabilityLedger.isSessionRevoked(action.sessionId)) {
+      // Session revocation is checked against the lifecycle-bound session
+      // identity — analyzer-produced actions do not reliably carry
+      // `action.sessionId`, so relying on it alone would let revoked session
+      // authority keep authorizing later actions (spec 011 review fix).
+      const boundSessionId = action.sessionId ?? this.sessionId;
+      if (boundSessionId && this.capabilityLedger.isSessionRevoked(boundSessionId)) {
         const outcome = this.toOutcome(action, "denied", undefined, "capability-revoked");
         await this.record(action, "denied", "capability-revoked");
         return {
@@ -245,7 +281,9 @@ export class ActionLifecycle {
       }
 
       if (!answer.approved) {
-        const reason: PermissionDenyReason = "user-denied";
+        // A broker that observed expiry/abort supplies a machine-readable
+        // reason; anything else is a plain user denial (spec 011 edge cases).
+        const reason: PermissionDenyReason = typedDenyReason(answer.reason);
         const outcome = this.toOutcome(action, "denied", undefined, reason);
         await this.record(action, "denied", reason);
         return {
@@ -259,11 +297,123 @@ export class ActionLifecycle {
         };
       }
 
-      // Approved. Reevaluate ONCE with the approved capability added to activeCapabilities.
-      // Hard rule: Approval NEVER mutates or widens principalPolicy, runtimeBaseline, or deploymentCeiling.
-      approval = answer;
-      const approved = decision.proposedEnvelope.capabilities;
+      // Approved. Spec 011 (T007): validate the selection against the ORIGINAL
+      // request before issuing any envelope — expiry, option membership, and
+      // lifetime support. A forged/stale/expired selection fails closed and
+      // never chooses another option.
+      // Hard rule: Approval NEVER mutates or widens principalPolicy,
+      // runtimeBaseline, or deploymentCeiling.
+      if (decision.request.expiresAt < this.now()) {
+        const outcome = this.toOutcome(action, "denied", undefined, "approval-expired");
+        await this.record(action, "denied", "approval-expired");
+        return {
+          decision,
+          approval: answer,
+          outcome,
+          toolResult: {
+            output: denialOutput(
+              "approval-expired",
+              "Approval request expired before a decision was recorded",
+            ),
+            success: false,
+          },
+        };
+      }
+      const option = decision.request.approvalOptions.find(
+        (o) => o.optionId === answer.optionId,
+      );
+      if (!option) {
+        const outcome = this.toOutcome(action, "denied", undefined, "invalid-approval-response");
+        await this.record(action, "denied", "invalid-approval-response");
+        return {
+          decision,
+          approval: answer,
+          outcome,
+          toolResult: {
+            output: denialOutput(
+              "invalid-approval-response",
+              "Approval named an option that is not part of the request",
+            ),
+            success: false,
+          },
+        };
+      }
       const lifetimeKind = answer.lifetime ?? "action";
+      if (
+        !option.supportedLifetimes.includes(lifetimeKind) ||
+        !decision.request.offeredLifetimes.includes(lifetimeKind)
+      ) {
+        const outcome = this.toOutcome(action, "denied", undefined, "invalid-approval-response");
+        await this.record(action, "denied", "invalid-approval-response");
+        return {
+          decision,
+          approval: answer,
+          outcome,
+          toolResult: {
+            output: denialOutput(
+              "invalid-approval-response",
+              "Approval lifetime is not offered by the request or the selected option",
+            ),
+            success: false,
+          },
+        };
+      }
+      // Resolve the typed lifetime. A session lifetime requires a bound
+      // session identity and fails closed on revocation before issuance.
+      let envelopeLifetime: CapabilityLifetime;
+      if (lifetimeKind === "action") {
+        envelopeLifetime = {
+          kind: "action",
+          actionDigest: action.actionDigest,
+          consumeOnce: true,
+        };
+      } else if (lifetimeKind === "run") {
+        envelopeLifetime = {
+          kind: "run",
+          runId: action.runId,
+          expiresAt: this.now() + 86400000,
+        };
+      } else {
+        const sessionId = action.sessionId ?? this.sessionId;
+        if (!sessionId) {
+          const outcome = this.toOutcome(action, "denied", undefined, "invalid-approval-response");
+          await this.record(action, "denied", "invalid-approval-response");
+          return {
+            decision,
+            approval: answer,
+            outcome,
+            toolResult: {
+              output: denialOutput(
+                "invalid-approval-response",
+                "Session approval requires a bound session identity",
+              ),
+              success: false,
+            },
+          };
+        }
+        if (this.capabilityLedger?.isSessionRevoked(sessionId)) {
+          const outcome = this.toOutcome(action, "denied", undefined, "capability-revoked");
+          await this.record(action, "denied", "capability-revoked");
+          return {
+            decision,
+            approval: answer,
+            outcome,
+            toolResult: {
+              output: denialOutput("capability-revoked", "Session capability was revoked"),
+              success: false,
+            },
+          };
+        }
+        envelopeLifetime = { kind: "session", sessionId };
+      }
+
+      approval = answer;
+      const approved = option.capabilities;
+      // Reevaluate ONCE with the approved capability added to a TEMPORARY
+      // active-capability copy. The long-lived active set is committed only
+      // for session (or shared-contract run) lifetimes below (spec 011 D8) —
+      // an action approval is consumed once and never retained as session
+      // authority.
       const withApproval: CapabilitySet = {
         version: 1,
         capabilities: [...this.active.capabilities, ...approved],
@@ -274,20 +424,23 @@ export class ActionLifecycle {
       };
       decision = this.policy.evaluate(action, reevalContext);
       if (decision.decision === "allow") {
-        decision.envelope.lifetime = {
-          kind: lifetimeKind,
-          actionDigest: action.actionDigest,
-          consumeOnce: lifetimeKind === "action" ? (true as const) : undefined,
-          runId: action.runId,
-          sessionId: action.sessionId ?? this.sessionId,
-          expiresAt: (answer as any).expiresAt ?? (lifetimeKind === "run" ? this.now() + 86400000 : undefined),
-        } as any;
-        if ((answer as any).expiresAt) {
-          decision.envelope.expiresAt = (answer as any).expiresAt;
-        }
+        // The final envelope carries the SELECTED option's capabilities
+        // exactly (FR-012), PLUS the action-required capabilities that were
+        // already authorized before this approval (e.g. a pre-covered
+        // model-egress). The envelope is the complete authority record for
+        // this action; the model-egress and broker gates check it as a whole.
+        const requiredCaps = decision.envelope.capabilities;
+        const optionSet = { version: 1 as const, capabilities: approved };
+        const alreadyAuthorized = requiredCaps.filter(
+          (c) => !setCovers(optionSet, c),
+        );
+        decision.envelope.capabilities = [...approved, ...alreadyAuthorized];
+        decision.envelope.lifetime = envelopeLifetime;
       }
-      this.active.capabilities.push(...approved);
-      this.policyContext.activeCapabilities.capabilities = this.active.capabilities;
+      if (lifetimeKind !== "action") {
+        this.active.capabilities.push(...approved);
+        this.policyContext.activeCapabilities.capabilities = this.active.capabilities;
+      }
     }
 
     // 4. Deny path — one terminal denial, no afterToolCall.
@@ -436,19 +589,12 @@ export class ActionLifecycle {
           : "failed";
     await this.recordTerminal(action, terminalState);
 
-    // 8. Remove action-scoped capabilities from activeCapabilities after terminal
-    //    audit event (T107a hard rule: consumed caps don't persist).
-    if (decision.decision === "allow" && decision.envelope.lifetime.kind === "action") {
-      const envelopedIds = new Set(
-        decision.envelope.capabilities.map((c) => JSON.stringify(c)),
-      );
-      const remaining = this.active.capabilities.filter(
-        (c) => !envelopedIds.has(JSON.stringify(c)),
-      );
-      this.active.capabilities.length = 0;
-      this.active.capabilities.push(...remaining);
-      this.policyContext.activeCapabilities.capabilities = this.active.capabilities;
-    }
+    // 8. Action-scoped capabilities are NOT removed here: since spec 011 D8
+    //    they are never added to the long-lived active set in the first place
+    //    (the approval path commits only session/run authority), so there is
+    //    nothing to clean up. A removal pass over the envelope would wrongly
+    //    strip pre-existing active authority (e.g. a baseline model-egress cap
+    //    that the envelope also carries) — review fix.
     const outcome = this.toOutcome(
       action,
       terminalState,
@@ -463,6 +609,11 @@ export class ActionLifecycle {
           };
 
     return { decision, approval, outcome, execution, toolResult };
+  }
+
+  /** Read-only view of the long-lived active capability set (test seam). */
+  getActiveCapabilities(): Capability[] {
+    return [...this.active.capabilities];
   }
 
   private toOutcome(

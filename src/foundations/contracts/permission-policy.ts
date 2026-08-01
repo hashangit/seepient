@@ -19,7 +19,7 @@
  * Foundations imports no Seepient layer.
  */
 
-import type { PreparedToolAction } from "./prepared-action.js";
+import type { ActionDisplay, PreparedToolAction } from "./prepared-action.js";
 import type {
   ExecutionBackendCapabilities,
   ExecutionBoundary,
@@ -120,6 +120,9 @@ export interface PolicyContext {
    *  operations within this root even when the ceiling is empty. Paths
    *  OUTSIDE this root are outside-ceiling (deny). */
   workspaceRoot?: string;
+  /** Stable application-session identity. When set, PolicyEngine may offer
+   *  the `session` lifetime for TUI approval (spec 011). */
+  sessionId?: string;
 }
 
 export interface PolicyTrace {
@@ -161,15 +164,17 @@ export type PermissionDenyReason =
   | "capability-revoked";
 
 /**
- * Closed decision union. `needs-approval` carries the proposed envelope to
- * issue on approval; approval never widens the requested capability.
+ * Closed decision union. `needs-approval` carries the immutable request and
+ * its policy-issued options — there is no single unconditional proposed
+ * envelope, because the final capability set and lifetime are chosen only
+ * after the broker response is validated (spec 011, D4). Approval never
+ * widens the requested capability.
  */
 export type PolicyDecision =
   | { decision: "allow"; envelope: CapabilityEnvelope; trace: PolicyTrace }
   | {
       decision: "needs-approval";
       request: PermissionRequest;
-      proposedEnvelope: CapabilityEnvelope;
       trace: PolicyTrace;
     }
   | {
@@ -185,15 +190,48 @@ export interface PolicyEngine {
 
 // ── Approval ────────────────────────────────────────────────────────────
 
+/**
+ * Policy-issued capability choice the TUI may offer. The capability set,
+ * not the label, is authoritative: labels are display data and are never
+ * parsed to recover authority (spec 011 FR-007).
+ */
+export type ApprovalOptionKind = "exact" | "bounded";
+
+export interface ApprovalOption {
+  /** Stable within the request; derived from canonical option data. */
+  optionId: string;
+  /** Must equal the parent request digest. */
+  actionDigest: string;
+  kind: ApprovalOptionKind;
+  /** Plain-language display text; never parsed as authority. */
+  label: string;
+  /** Canonical, backend-enforceable, policy-approved capabilities. */
+  capabilities: Capability[];
+  /** Non-empty subset of the parent request's offered lifetimes. */
+  supportedLifetimes: Array<"action" | "run" | "session">;
+}
+
+/**
+ * Transient UI selection — NOT an authority decision. The prompt emits only
+ * the selected option ID and lifetime; the trusted broker supplies request
+ * identity, actor, and decision time (spec 011 FR-004).
+ */
+export type TuiApprovalSelection =
+  | { approved: true; optionId: string; lifetime: "action" | "session" }
+  | { approved: false; reason?: "user-denied" | "approval-unavailable" };
+
 export interface PermissionRequest {
   requestId: string;
   principalId: string;
   runId: string;
+  /** Present only when a stable session identity can bind a session lifetime. */
   sessionId?: string;
   toolCallId: string;
   actionDigest: string;
-  action: import("./prepared-action.js").ActionDisplay;
+  action: ActionDisplay;
   requestedCapabilities: Capability[];
+  /** Policy-issued options; a request with no options cannot be approved. */
+  approvalOptions: ApprovalOption[];
   offeredLifetimes: Array<"action" | "run" | "session">;
   createdAt: number;
   expiresAt: number;
@@ -204,6 +242,8 @@ export type PermissionDecision =
       approved: true;
       requestId: string;
       actionDigest: string;
+      /** Names one option in the answered request (spec 011 FR-003). */
+      optionId: string;
       lifetime: "action" | "run" | "session";
       actorId: string;
       decidedAt: number;

@@ -22,6 +22,7 @@ import type {
   PolicyContext,
   PermissionDecision,
   PermissionRequest,
+  TuiApprovalSelection,
 } from "../../foundations/contracts/permission-policy.js";
 import type { PreparedToolAction } from "../../foundations/contracts/prepared-action.js";
 import type { ExecutionBackendCapabilities } from "../../foundations/contracts/execution-boundary.js";
@@ -108,7 +109,7 @@ describe("cross-surface decision conformance (T309)", () => {
     // The broker only resolves the approval; the underlying policy decision
     // is independent of which broker is wired.
     const engine = new PolicyEngine("dig");
-    const inline = new InlineApprovalBroker({ async prompt() { return approvedStub(); } });
+    const inline = new InlineApprovalBroker({ async prompt() { return { approved: true, optionId: "opt-1", lifetime: "action" }; } });
     const callback = new CallbackApprovalBroker(async () => approvedStub());
     const none = new NoneApprovalBroker();
     expect(inline.mode).toBe("inline");
@@ -132,6 +133,7 @@ describe("NoneApprovalBroker (headless, T301)", () => {
       actionDigest: "d1",
       action: action().display,
       requestedCapabilities: [{ kind: "commit-file", path: "/p/a.txt" }],
+      approvalOptions: [],
       offeredLifetimes: ["action", "run"],
       createdAt: 0,
       expiresAt: 1,
@@ -159,6 +161,7 @@ describe("CallbackApprovalBroker (SDK, T301/QS-3.4)", () => {
       actionDigest: "d1",
       action: action().display,
       requestedCapabilities: [],
+      approvalOptions: [],
       offeredLifetimes: ["action"],
       createdAt: 0,
       expiresAt: Date.now() + 1000,
@@ -173,6 +176,7 @@ describe("CallbackApprovalBroker (SDK, T301/QS-3.4)", () => {
       approved: true,
       requestId: req.requestId,
       actionDigest: "different",
+      optionId: req.approvalOptions[0]?.optionId ?? "opt-1",
       lifetime: "action" as const,
       actorId: "u",
       decidedAt: 0,
@@ -185,6 +189,7 @@ describe("CallbackApprovalBroker (SDK, T301/QS-3.4)", () => {
       actionDigest: "d1",
       action: action().display,
       requestedCapabilities: [],
+      approvalOptions: [],
       offeredLifetimes: ["action"],
       createdAt: 0,
       expiresAt: 1,
@@ -209,6 +214,7 @@ describe("CallbackApprovalBroker (SDK, T301/QS-3.4)", () => {
         actionDigest: "d1",
         action: action().display,
         requestedCapabilities: [],
+        approvalOptions: [],
         offeredLifetimes: ["action"],
         createdAt: 0,
         expiresAt: 1,
@@ -225,7 +231,7 @@ describe("InlineApprovalBroker (T301/QS-3.1)", () => {
     const presenter: InlineApprovalPresenter = {
       async prompt(req) {
         prompts++;
-        return approvedStub(req);
+        return { approved: true, optionId: req.approvalOptions[0]?.optionId ?? "opt-1", lifetime: "action" };
       },
     };
     const broker = new InlineApprovalBroker(presenter, { deadlineMs: 1000 });
@@ -237,6 +243,16 @@ describe("InlineApprovalBroker (T301/QS-3.1)", () => {
       actionDigest: "d1",
       action: action().display,
       requestedCapabilities: [],
+      approvalOptions: [
+        {
+          optionId: "opt-1",
+          actionDigest: "d1",
+          kind: "exact",
+          label: "Exact",
+          capabilities: [],
+          supportedLifetimes: ["action"],
+        },
+      ],
       offeredLifetimes: ["action"],
       createdAt: 0,
       expiresAt: Date.now() + 1000,
@@ -250,7 +266,7 @@ describe("InlineApprovalBroker (T301/QS-3.1)", () => {
     const presenter: InlineApprovalPresenter = {
       async prompt(_req, opts) {
         // Never resolves; wait for the abort signal.
-        return new Promise<PermissionDecision>((_resolve, reject) => {
+        return new Promise<TuiApprovalSelection>((_resolve, reject) => {
           opts.signal?.addEventListener("abort", () =>
             reject(new Error("aborted")),
           );
@@ -267,6 +283,7 @@ describe("InlineApprovalBroker (T301/QS-3.1)", () => {
         actionDigest: "d1",
         action: action().display,
         requestedCapabilities: [],
+        approvalOptions: [],
         offeredLifetimes: ["action"],
         createdAt: 0,
         expiresAt: 1,
@@ -275,6 +292,35 @@ describe("InlineApprovalBroker (T301/QS-3.1)", () => {
     );
     expect(d.approved).toBe(false);
   });
+
+  it("deadline settles the prompt even when the presenter ignores the signal (review fix)", async () => {
+    // A presenter that never resolves AND never listens to the abort signal
+    // must not hang the broker: the deadline race settles a typed denial.
+    const presenter: InlineApprovalPresenter = {
+      async prompt() {
+        return new Promise<TuiApprovalSelection>(() => {});
+      },
+    };
+    const broker = new InlineApprovalBroker(presenter, { deadlineMs: 20 });
+    const d = await broker.request(
+      {
+        requestId: "r1",
+        principalId: "u",
+        runId: "run",
+        toolCallId: "c1",
+        actionDigest: "d1",
+        action: action().display,
+        requestedCapabilities: [],
+        approvalOptions: [],
+        offeredLifetimes: ["action"],
+        createdAt: 0,
+        expiresAt: Date.now() + 1000,
+      },
+      {},
+    );
+    expect(d.approved).toBe(false);
+    if (!d.approved) expect(d.reason).toContain("expired");
+  });
 });
 
 function approvedStub(req?: PermissionRequest): PermissionDecision {
@@ -282,6 +328,7 @@ function approvedStub(req?: PermissionRequest): PermissionDecision {
     approved: true,
     requestId: req?.requestId ?? "r1",
     actionDigest: req?.actionDigest ?? "d1",
+    optionId: req?.approvalOptions?.[0]?.optionId ?? "opt-1",
     lifetime: "action",
     actorId: "u",
     decidedAt: 0,

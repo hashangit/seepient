@@ -29,6 +29,10 @@ import type {
   ConnectionState,
 } from "./ws-types.js";
 import type { PermissionLevel } from "../../foundations/types.js";
+import type {
+  PermissionDecision,
+  PermissionRequest,
+} from "../../foundations/contracts/permission-policy.js";
 import type { SettingsHandlerContext } from "../http/settings-handlers.js";
 import { handleWsGetSettings, handleWsUpdateSettings } from "../http/settings-handlers.js";
 
@@ -396,6 +400,10 @@ export function createServerApproveTool(ws: WebSocket): import("../../foundation
         actionDigest: callId,
         action: { title: call.name, summary: call.name, canonicalTargets: [], effects: [] },
         requestedCapabilities: [],
+        // Legacy server surface: the durable record carries the shared
+        // contract field; no policy-issued options exist on this path, so an
+        // approval cannot be bound to an option (spec 011 T022).
+        approvalOptions: [],
         offeredLifetimes: ["action"],
         createdAt: Date.now(),
         expiresAt: Date.now() + APPROVAL_TIMEOUT_MS,
@@ -446,19 +454,61 @@ async function handleToolApprovalResponse(
     return;
   }
 
-  const decision: import("../../foundations/contracts/permission-policy.js").PermissionDecision = msg.approved
-    ? { approved: true, requestId: msg.callId, actionDigest: msg.callId, lifetime: "action", actorId: "ws-user", decidedAt: Date.now() }
-    : { approved: false, requestId: msg.callId, actionDigest: msg.callId, actorId: "ws-user", decidedAt: Date.now() };
+  // Spec 011 (T022): an approved legacy response must bind to the request's
+  // narrowest policy-issued option; with no options the approval cannot be
+  // represented and is denied as unavailable.
+  const rec = durableApprovalStore.get(pending.continuationId);
+  const decision = wsApprovalDecision(msg, rec?.request);
 
   const result = await durableApprovalStore.cas(pending.continuationId, 1, decision);
   clearTimeout(pending.timer);
   pendingApprovals.delete(msg.callId);
 
+  // Execution MUST follow the validated typed decision: when the request had
+  // no representable policy option, the approval was persisted as denied and
+  // the tool must NOT run (spec 011 review fix). The durable record and the
+  // resolved callback never disagree.
   if (result.status === "transitioned") {
-    pending.resolve(msg.approved);
+    pending.resolve(decision.approved);
   } else {
     pending.resolve(false);
   }
+}
+
+/**
+ * Build the strict typed decision for a WS approval response (spec 011
+ * T022). An approved response is bound to the request's narrowest
+ * policy-issued option; a request with no representable option can only be
+ * denied as `approval-unavailable`, and the caller must let execution follow
+ * this decision. Pure and exported for conformance tests.
+ */
+export function wsApprovalDecision(
+  msg: ToolApprovalResponse,
+  request: PermissionRequest | undefined,
+  now = Date.now(),
+): PermissionDecision {
+  const option = request?.approvalOptions[0];
+  if (msg.approved && option) {
+    return {
+      approved: true,
+      requestId: msg.callId,
+      actionDigest: msg.callId,
+      optionId: option.optionId,
+      lifetime: "action",
+      actorId: "ws-user",
+      decidedAt: now,
+    };
+  }
+  return {
+    approved: false,
+    requestId: msg.callId,
+    actionDigest: msg.callId,
+    actorId: "ws-user",
+    reason: msg.approved
+      ? "approval-unavailable: request has no representable option"
+      : undefined,
+    decidedAt: now,
+  };
 }
 
 // ── Resume handler ───────────────────────────────────────────────────
