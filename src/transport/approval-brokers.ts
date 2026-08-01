@@ -123,6 +123,13 @@ export class InlineApprovalBroker implements ApprovalBroker {
     if (req.expiresAt < Date.now()) {
       return this.denial(req, "approval-expired");
     }
+    // An ALREADY-aborted signal must deny immediately — registering a
+    // listener on an aborted signal never fires it, so without this check
+    // a cancellation would stall until the full deadline (spec 011 review
+    // fix).
+    if (opts.signal?.aborted) {
+      return this.denial(req, "user-denied");
+    }
     // Compose the caller's signal with a deadline signal.
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.deadlineMs);

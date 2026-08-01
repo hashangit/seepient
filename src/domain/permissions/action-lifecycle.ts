@@ -135,6 +135,21 @@ function typedDenyReason(reason: string | undefined): PermissionDenyReason {
 }
 
 /**
+ * Deep-freeze a plain-data value (permission requests are JSON-serializable).
+ * Used to give brokers a read-only view so a mutation attempt fails loudly
+ * instead of silently widening an approval.
+ */
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const key of Object.keys(value as Record<string, unknown>)) {
+      deepFreeze((value as Record<string, unknown>)[key]);
+    }
+  }
+  return value;
+}
+
+/**
  * Validate that an approval decision actually matches the request it claims to
  * answer. Mismatched requestId/actionDigest → invalid-approval-response.
  */
@@ -235,7 +250,13 @@ export class ActionLifecycle {
 
       let answer: PermissionDecision;
       try {
-        answer = await this.broker.request(decision.request, { signal });
+        // Spec 011 review fix (P0): Domain must validate against a TRUSTED
+        // snapshot of the request, and the broker must never be able to
+        // widen an approval by mutating the request it receives. The broker
+        // gets a deeply frozen clone — a mutation attempt throws and can
+        // never affect the pristine `decision.request` used below.
+        const brokerRequest = deepFreeze(structuredClone(decision.request));
+        answer = await this.broker.request(brokerRequest, { signal });
       } catch {
         const outcome = this.toOutcome(
           action,

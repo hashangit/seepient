@@ -7,7 +7,7 @@
  * so the durable record and the executed outcome never disagree.
  */
 import { describe, it, expect } from "vitest";
-import { wsApprovalDecision } from "../ws-handlers.js";
+import { wsApprovalDecision, wsLegacyApprovalRequest } from "../ws-handlers.js";
 import type { PermissionRequest } from "../../../foundations/contracts/permission-policy.js";
 
 function requestWithOptions(): PermissionRequest {
@@ -76,5 +76,29 @@ describe("wsApprovalDecision (T022)", () => {
     );
     expect(decision.approved).toBe(false);
     expect(decision.requestId).toBe("c-1");
+  });
+
+  it("production WS requests carry a representable exact option, so approvals can succeed (review fix)", () => {
+    // The production request constructor must never produce an option-less
+    // request: that would silently turn every client approval into
+    // approval-unavailable (record/execution would agree, but the WS
+    // approval surface would be dead).
+    const request = wsLegacyApprovalRequest("call-9", "write_file", 0);
+    expect(request.approvalOptions.length).toBe(1);
+    expect(request.approvalOptions[0].kind).toBe("exact");
+    expect(request.approvalOptions[0].actionDigest).toBe("call-9");
+    // No authority is invented: the legacy surface's own loop remains the
+    // authority, the option only makes the approval representable.
+    expect(request.approvalOptions[0].capabilities).toEqual([]);
+
+    const decision = wsApprovalDecision(
+      { type: "tool_approval_response", callId: "call-9", name: "write_file", approved: true },
+      request,
+      0,
+    );
+    expect(decision.approved).toBe(true);
+    if (decision.approved) {
+      expect(decision.optionId).toBe("ws-exact-call-9");
+    }
   });
 });

@@ -382,6 +382,44 @@ function handleAbort(
 const APPROVAL_TIMEOUT_MS = 30_000; // 30 seconds
 
 /**
+ * Build the durable-store request record for the WS legacy surface (spec 011
+ * T022 review fix). The legacy server loop has no Domain policy evaluation on
+ * this path, so the record carries ONE exact-for-this-call option: its
+ * capabilities are empty (no authority is invented — the legacy loop remains
+ * the sole authority) and the option only makes the approval representable so
+ * the durable record and the executed outcome stay consistent. When the P4
+ * server split wires the real pipeline, engine-issued options replace this.
+ */
+export function wsLegacyApprovalRequest(
+  callId: string,
+  callName: string,
+  now = Date.now(),
+): PermissionRequest {
+  return {
+    requestId: callId,
+    principalId: "ws-user",
+    runId: "ws-run",
+    toolCallId: callId,
+    actionDigest: callId,
+    action: { title: callName, summary: callName, canonicalTargets: [], effects: [] },
+    requestedCapabilities: [],
+    approvalOptions: [
+      {
+        optionId: `ws-exact-${callId}`,
+        actionDigest: callId,
+        kind: "exact",
+        label: `Exact — ${callName} (legacy server surface)`,
+        capabilities: [],
+        supportedLifetimes: ["action"],
+      },
+    ],
+    offeredLifetimes: ["action"],
+    createdAt: now,
+    expiresAt: now + APPROVAL_TIMEOUT_MS,
+  };
+}
+
+/**
  * Create an `approveTool` callback for the server adapter.
  * Sends a `tool_approval_request` to the client and waits for a
  * `tool_approval_response`. Falls back to auto-deny on timeout.
@@ -392,22 +430,7 @@ export function createServerApproveTool(ws: WebSocket): import("../../foundation
     const continuationId = `cont-${callId}`;
 
     durableApprovalStore.create({
-      request: {
-        requestId: callId,
-        principalId: "ws-user",
-        runId: "ws-run",
-        toolCallId: callId,
-        actionDigest: callId,
-        action: { title: call.name, summary: call.name, canonicalTargets: [], effects: [] },
-        requestedCapabilities: [],
-        // Legacy server surface: the durable record carries the shared
-        // contract field; no policy-issued options exist on this path, so an
-        // approval cannot be bound to an option (spec 011 T022).
-        approvalOptions: [],
-        offeredLifetimes: ["action"],
-        createdAt: Date.now(),
-        expiresAt: Date.now() + APPROVAL_TIMEOUT_MS,
-      },
+      request: wsLegacyApprovalRequest(callId, call.name),
       tenantId: "default",
       sessionId: "ws-session",
       continuationId,

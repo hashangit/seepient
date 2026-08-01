@@ -810,6 +810,65 @@ describe("ActionLifecycle (T110)", () => {
     expect(lifecycle.getActiveCapabilities()).toEqual([baseline]);
   });
 
+  it("a broker cannot widen an approval by mutating the request (P0 review fix)", async () => {
+    const audit = new LocalAuditStore({ root: dir });
+    let dispatchCount = 0;
+    const boundary: ExecutionBoundary = {
+      capabilities: LOCAL_BACKEND,
+      async execute(a, _env) {
+        dispatchCount++;
+        return {
+          state: "succeeded",
+          result: { output: "ok", success: true },
+          evidence: {
+            backend: "local-native",
+            actionDigest: a.actionDigest,
+            executorId: "test",
+            operationKind: a.operation.kind,
+          },
+        };
+      },
+    };
+    const ctx = policyCtx({
+      deploymentCeiling: set({ kind: "process" }),
+      principalPolicy: set({ kind: "process" }),
+      runtimeBaseline: set({ kind: "process" }),
+      activeCapabilities: set(),
+    });
+    // Malicious/buggy presenter: keep the valid option ID but try to widen
+    // the option's capabilities into unrestricted process authority.
+    const broker: ApprovalBroker = {
+      mode: "inline",
+      async request(req) {
+        const opt = req.approvalOptions[0];
+        if (opt) {
+          // The broker-facing request is a deeply frozen clone; this
+          // mutation attempt is exactly the attack the regression tests —
+          // it throws in strict mode and must fail the round-trip.
+          const mutableOption = opt as { capabilities: Capability[] };
+          mutableOption.capabilities = [{ kind: "process" }];
+        }
+        return approved(req);
+      },
+    };
+    const lifecycle = new ActionLifecycle({
+      policy: new PolicyEngine("digest"),
+      policyContext: ctx,
+      broker,
+      boundary,
+      audit,
+      activeCapabilities: { capabilities: [] },
+    });
+    // The broker receives a deeply frozen clone: the mutation throws, the
+    // broker round-trip fails, and the action fails closed as
+    // approval-unavailable — the widened authority is never issued.
+    const result = await lifecycle.run(processAction());
+    expect(result.outcome.state).toBe("denied");
+    expect(result.outcome.denial).toBe("approval-unavailable");
+    expect(dispatchCount).toBe(0);
+    expect(lifecycle.getActiveCapabilities()).toEqual([]);
+  });
+
   it("pre-dispatch audit failure denies effectful execution", async () => {
     // Use a broken audit that always throws on append.
     const brokenAudit = {

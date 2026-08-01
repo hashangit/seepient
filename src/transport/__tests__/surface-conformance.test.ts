@@ -321,6 +321,40 @@ describe("InlineApprovalBroker (T301/QS-3.1)", () => {
     expect(d.approved).toBe(false);
     if (!d.approved) expect(d.reason).toContain("expired");
   });
+
+  it("an ALREADY-aborted signal denies immediately, not at the deadline (review fix)", async () => {
+    // The presenter never resolves; the deadline is far longer than the test
+    // would survive. Only the pre-abort check can settle this promptly.
+    const presenter: InlineApprovalPresenter = {
+      async prompt() {
+        return new Promise<TuiApprovalSelection>(() => {});
+      },
+    };
+    const broker = new InlineApprovalBroker(presenter, { deadlineMs: 60_000 });
+    const controller = new AbortController();
+    controller.abort(); // aborted BEFORE request() is called
+    const started = Date.now();
+    const d = await broker.request(
+      {
+        requestId: "r1",
+        principalId: "u",
+        runId: "run",
+        toolCallId: "c1",
+        actionDigest: "d1",
+        action: action().display,
+        requestedCapabilities: [],
+        approvalOptions: [],
+        offeredLifetimes: ["action"],
+        createdAt: 0,
+        expiresAt: Date.now() + 1000,
+      },
+      { signal: controller.signal },
+    );
+    expect(d.approved).toBe(false);
+    if (!d.approved) expect(d.reason).toBe("user-denied");
+    // Settled immediately — not after the 60s deadline.
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
 });
 
 function approvedStub(req?: PermissionRequest): PermissionDecision {
