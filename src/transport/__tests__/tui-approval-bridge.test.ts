@@ -253,22 +253,25 @@ describe("native TUI bridge (T015)", () => {
       },
     };
     const broker = new InlineApprovalBroker(presenter);
-    const req: PermissionRequest = {
-      requestId: "r1",
-      principalId: "u1",
-      runId: "r1",
-      toolCallId: "c1",
-      actionDigest: "ad-bridge",
-      action: { title: "t", summary: "s", canonicalTargets: [], effects: [] },
-      requestedCapabilities: [],
-      approvalOptions: [],
-      approvalChoices: [],
-      offeredLifetimes: ["action"],
-      createdAt: Date.now(),
-      expiresAt: Date.now() + 600_000,
-    };
     vi.useFakeTimers();
     try {
+      // Build the fixture AFTER installing fake timers so the expiry is
+      // exactly 600s from the fake clock (a real-now gap would shave the
+      // cutoff and flake the boundary assertion under load).
+      const req: PermissionRequest = {
+        requestId: "r1",
+        principalId: "u1",
+        runId: "r1",
+        toolCallId: "c1",
+        actionDigest: "ad-bridge",
+        action: { title: "t", summary: "s", canonicalTargets: [], effects: [] },
+        requestedCapabilities: [],
+        approvalOptions: [],
+        approvalChoices: [],
+        offeredLifetimes: ["action"],
+        createdAt: Date.now(),
+        expiresAt: Date.now() + 600_000,
+      };
       const pending = broker.request(req, {});
       let settled = false;
       pending.then(() => {

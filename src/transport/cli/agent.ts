@@ -19,6 +19,7 @@ import type { Middleware } from '../../foundations/contracts/middleware.js';
 import type { ApprovalBroker, Capability, CapabilitySet, PermissionRequest } from '../../foundations/contracts/permission-policy.js';
 import type { PolicyStore } from '../../foundations/contracts/execution-brokers.js';
 import type { PolicySnapshot } from '../../foundations/contracts/execution-brokers.js';
+import { GLOBAL_WORKSPACE_ID } from '../../domain/permissions/policy-store.js';
 
 /**
  * Outcome of a single `Agent.chat()` turn. Returned so non-readline callers
@@ -206,8 +207,22 @@ export class Agent {
     };
     // Build the REAL typed-executor boundary — NOT the legacy handler.
     // Writes go through FileCommitBroker; shell through ProcessExecutor.
+    // Host callbacks are built HERE (transport may import Domain) and
+    // handed down, so Capabilities never imports Domain (AGENTS.md
+    // dependency direction — review finding).
     const { buildLocalBoundary } = await import("../../capabilities/execution/build-local-boundary.js");
-    const { boundary: realBoundary, artifacts: sharedArtifacts } = await buildLocalBoundary({ allowFallback: opts.allowFallback });
+    const { getAllToolModules } = await import("../../domain/tool-executor.js");
+    const hostCallbacks = new Map<string, (args: unknown) => Promise<unknown>>();
+    for (const tool of getAllToolModules()) {
+      const fnName = tool.definition.function.name;
+      hostCallbacks.set(fnName, async (args: unknown) => {
+        return tool.handler(args as never);
+      });
+    }
+    const { boundary: realBoundary, artifacts: sharedArtifacts } = await buildLocalBoundary({
+      allowFallback: opts.allowFallback,
+      hostCallbacks,
+    });
     // Spec 011 (T032/FR-019): containment preflight at startup. The status is
     // surfaced (TUI/status surfaces) so approval choices are disabled before
     // an action begins when the backend is missing — PolicyEngine enforces
@@ -327,6 +342,11 @@ export class Agent {
     return this._policyStore;
   }
 
+  /** The workspace identity the protected policy store is keyed by. */
+  getPolicyWorkspaceId(): string | null {
+    return this._workspaceId;
+  }
+
   /** Stage an inert capability proposal (does NOT touch active policy). */
   async stagePolicyProposal(capability: Capability): Promise<string> {
     const id = generateId().slice(0, 8);
@@ -364,10 +384,32 @@ export class Agent {
 
   /** Revoke the capability at an index in the active policy. */
   async revokePolicyCapability(index: number): Promise<PolicySnapshot> {
+    if (!this._workspaceId) {
+      throw new Error('Protected policy store not configured');
+    }
+    return this.casRemoveCapability(this._workspaceId, index);
+  }
+
+  /**
+   * Revoke the capability at an index in the GLOBAL protected policy
+   * (spec 011 persistent choices: "Allow always" grants are written there;
+   * this is their administrative removal path).
+   */
+  async revokeGlobalPolicyCapability(index: number): Promise<PolicySnapshot> {
+    if (!this._policyStore) {
+      throw new Error('Protected policy store not configured');
+    }
+    return this.casRemoveCapability(GLOBAL_WORKSPACE_ID, index);
+  }
+
+  private async casRemoveCapability(
+    workspaceId: string,
+    index: number,
+  ): Promise<PolicySnapshot> {
     if (!this._policyStore || !this._workspaceId) {
       throw new Error('Protected policy store not configured');
     }
-    const current = await this._policyStore.read(this._workspaceId);
+    const current = await this._policyStore.read(workspaceId);
     if (index < 0 || index >= current.policy.capabilities.length) {
       throw new Error(`Index ${index} out of range (0..${current.policy.capabilities.length - 1})`);
     }
@@ -376,7 +418,7 @@ export class Agent {
       capabilities: current.policy.capabilities.filter((_, i) => i !== index),
     };
     return this._policyStore.compareAndSet(
-      this._workspaceId,
+      workspaceId,
       current.version,
       next,
       { kind: 'human', authorityId: 'operator', authenticatedBy: 'cli' },

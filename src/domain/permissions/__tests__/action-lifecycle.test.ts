@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { ActionLifecycle } from "../action-lifecycle.js";
 import { PolicyEngine } from "../policy-engine.js";
 import { LocalAuditStore, idempotencyKey } from "../audit-recorder.js";
+import { LocalPolicyStore, GLOBAL_WORKSPACE_ID } from "../policy-store.js";
 import { buildActionLifecycle } from "../action-lifecycle-factory.js";
 import { PersistedCapabilityLedger } from "../persisted-capability-ledger.js";
 import { InMemoryArtifactStore } from "../../../capabilities/execution/in-memory-artifact-store.js";
@@ -174,7 +175,7 @@ function fakeBoundary(result: ToolResult, opts?: { throwOnExec?: boolean }): Exe
   };
 }
 
-function approved(req: PermissionRequest, actor = "user", lifetime: "action" | "run" | "session" = "action", optionId?: string): PermissionDecision {
+function approved(req: PermissionRequest, actor = "user", lifetime: "action" | "run" | "session" | "project" | "global" = "action", optionId?: string): PermissionDecision {
   return {
     approved: true,
     requestId: req.requestId,
@@ -948,5 +949,128 @@ describe("ActionLifecycle (T110)", () => {
     });
     // The lifecycle records "prepared" first; a broken audit throws there.
     await expect(lifecycle.run(writeAction())).rejects.toThrow();
+  });
+});
+
+describe("persistent approval choices (spec 011 project/global)", () => {
+  /** Force a needs-approval request: empty ACTIVE set, principal already
+   *  covers the approvable cap (the engine intersects principal with active,
+   *  so the empty active set gates the prompt and the approval unblocks it). */
+  function approvalContext(workspaceId?: string): PolicyContext {
+    return policyCtx({
+      deploymentCeiling: set({ kind: "commit-file", path: "/p/a.txt" }),
+      principalPolicy: set({ kind: "commit-file", path: "/p/a.txt" }),
+      activeCapabilities: set(),
+      workspaceId,
+    });
+  }
+
+  it("project approval persists to the protected store via compare-and-set and runs", async () => {
+    const store = new LocalPolicyStore({ root: dir });
+    const lifecycle = new ActionLifecycle({
+      policy: new PolicyEngine("digest"),
+      policyContext: approvalContext("ws-1"),
+      broker: {
+        mode: "inline",
+        request: async (req) => approved(req, "user", "project"),
+      },
+      boundary: fakeBoundary({ output: "ok", success: true }),
+      audit: new LocalAuditStore({ root: dir }),
+      activeCapabilities: { capabilities: [] },
+      policyStore: store,
+      workspaceId: "ws-1",
+    });
+    const result = await lifecycle.run(writeAction());
+    expect(result.outcome.state).toBe("succeeded");
+    // The capability landed in the PROJECT protected policy, outside
+    // executor roots, via the same CAS flow /permissions approve uses.
+    const snap = await store.read("ws-1");
+    expect(snap.policy.capabilities).toEqual([{ kind: "commit-file", path: "/p/a.txt" }]);
+    // Retained in the long-lived active set for the rest of the session.
+    expect(lifecycle.getActiveCapabilities()).toEqual([{ kind: "commit-file", path: "/p/a.txt" }]);
+  });
+
+  it("global approval persists under the global workspace identity", async () => {
+    const store = new LocalPolicyStore({ root: dir });
+    const lifecycle = new ActionLifecycle({
+      policy: new PolicyEngine("digest"),
+      policyContext: approvalContext("ws-1"),
+      broker: {
+        mode: "inline",
+        request: async (req) => approved(req, "user", "global"),
+      },
+      boundary: fakeBoundary({ output: "ok", success: true }),
+      audit: new LocalAuditStore({ root: dir }),
+      activeCapabilities: { capabilities: [] },
+      policyStore: store,
+      workspaceId: "ws-1",
+    });
+    const result = await lifecycle.run(writeAction());
+    expect(result.outcome.state).toBe("succeeded");
+    const snap = await store.read(GLOBAL_WORKSPACE_ID);
+    expect(snap.policy.capabilities).toEqual([{ kind: "commit-file", path: "/p/a.txt" }]);
+    // The project store stays untouched.
+    const projectSnap = await store.read("ws-1");
+    expect(projectSnap.policy.capabilities).toEqual([]);
+  });
+
+  it("a persistent selection without the protected store is denied, zero dispatches", async () => {
+    let dispatched = false;
+    const lifecycle = new ActionLifecycle({
+      policy: new PolicyEngine("digest"),
+      policyContext: approvalContext("ws-1"),
+      broker: {
+        mode: "inline",
+        request: async (req) => approved(req, "user", "project"),
+      },
+      boundary: {
+        capabilities: LOCAL_BACKEND,
+        async execute() {
+          dispatched = true;
+          return { state: "succeeded", result: { output: "x", success: true }, evidence: { backend: "local-native", actionDigest: "d", executorId: "t", operationKind: "commit-files" } };
+        },
+      },
+      audit: new LocalAuditStore({ root: dir }),
+      activeCapabilities: { capabilities: [] },
+      // No policyStore on purpose.
+    });
+    const result = await lifecycle.run(writeAction());
+    expect(result.outcome.state).toBe("denied");
+    expect(result.decision.decision).toBe("needs-approval");
+    expect(dispatched).toBe(false);
+  });
+
+  it("a store write failure denies with approval-unavailable, zero dispatches", async () => {
+    let dispatched = false;
+    const brokenStore: import("../../../foundations/contracts/execution-brokers.js").PolicyStore = {
+      async read() {
+        throw new Error("store unavailable");
+      },
+      async compareAndSet() {
+        throw new Error("never reached");
+      },
+    };
+    const lifecycle = new ActionLifecycle({
+      policy: new PolicyEngine("digest"),
+      policyContext: approvalContext("ws-1"),
+      broker: {
+        mode: "inline",
+        request: async (req) => approved(req, "user", "global"),
+      },
+      boundary: {
+        capabilities: LOCAL_BACKEND,
+        async execute() {
+          dispatched = true;
+          return { state: "succeeded", result: { output: "x", success: true }, evidence: { backend: "local-native", actionDigest: "d", executorId: "t", operationKind: "commit-files" } };
+        },
+      },
+      audit: new LocalAuditStore({ root: dir }),
+      activeCapabilities: { capabilities: [] },
+      policyStore: brokenStore,
+      workspaceId: "ws-1",
+    });
+    const result = await lifecycle.run(writeAction());
+    expect(result.outcome.state).toBe("denied");
+    expect(dispatched).toBe(false);
   });
 });

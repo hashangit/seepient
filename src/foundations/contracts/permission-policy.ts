@@ -123,6 +123,12 @@ export interface PolicyContext {
   /** Stable application-session identity. When set, PolicyEngine may offer
    *  the `session` lifetime for TUI approval (spec 011). */
   sessionId?: string;
+  /**
+   * Protected-policy workspace identity (project scope). When set, the
+   * engine may offer persistent `project`/`global` approval choices — they
+   * are recorded through `PolicyStore.compareAndSet`, never grants files.
+   */
+  workspaceId?: string;
 }
 
 export interface PolicyTrace {
@@ -208,7 +214,7 @@ export interface ApprovalOption {
   /** Canonical, backend-enforceable, policy-approved capabilities. */
   capabilities: Capability[];
   /** Non-empty subset of the parent request's offered lifetimes. */
-  supportedLifetimes: Array<"action" | "run" | "session">;
+  supportedLifetimes: Array<"action" | "run" | "session" | "project" | "global">;
 }
 
 /**
@@ -232,8 +238,12 @@ export interface ApprovalChoice {
   choiceId: string;
   /** Names one option in the same request. */
   optionId: string;
-  /** MVP: action or session. Bounded/action is never issued (FR-010). */
-  lifetime: "action" | "session";
+  /**
+   * MVP: action or session; project/global are persistent choices that
+   * write the PROTECTED policy store via compare-and-set (never grants
+   * files). Bounded/action is never issued (FR-010).
+   */
+  lifetime: "action" | "session" | "project" | "global";
   /** Short consent headline, e.g. "Allow this action once". */
   title: string;
   /** What Seepient will ask again or remember (plain language). */
@@ -261,7 +271,13 @@ export interface PermissionRequest {
    * cannot be approved — the surface fails as `approval-unavailable`.
    */
   approvalChoices: ApprovalChoice[];
-  offeredLifetimes: Array<"action" | "run" | "session">;
+  offeredLifetimes: Array<"action" | "run" | "session" | "project" | "global">;
+  /**
+   * The protected-policy workspace identity. Present on interactive CLI
+   * requests so project/global (persistent) choices can be issued and
+   * recorded via `PolicyStore.compareAndSet`.
+   */
+  workspaceId?: string;
   createdAt: number;
   expiresAt: number;
 }
@@ -273,7 +289,7 @@ export type PermissionDecision =
       actionDigest: string;
       /** Names one option in the answered request (spec 011 FR-003). */
       optionId: string;
-      lifetime: "action" | "run" | "session";
+      lifetime: "action" | "run" | "session" | "project" | "global";
       actorId: string;
       decidedAt: number;
     }

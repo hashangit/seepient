@@ -55,15 +55,30 @@ describe("AsrtSandbox (SDK 0.0.67 SandboxManager adapter)", () => {
     const result = await sandbox.exec(execRequest);
     expect(result.isolated).toBe(true);
     expect(result.stdout).toContain("adapter-ok");
-    // Session init ran once with a deny-all base config.
+    // Session init ran once with a DENY-BY-DEFAULT base config: deny "/"
+    // reads, re-allow only system runtime deps + non-secret user config
+    // (review P0 — allowRead alone re-allows inside denyRead, so an empty
+    // denyRead used to mean allow-all reads).
     expect(fakeManager.initialize).toHaveBeenCalledTimes(1);
-    expect(fakeManager.initialize.mock.calls[0][0]).toEqual({
-      network: { allowedDomains: [], deniedDomains: ["*"] },
-      filesystem: { denyRead: [], allowWrite: [], denyWrite: [] },
-    });
-    // Per-exec roots mapped onto the SRT filesystem config.
+    const initConfig = fakeManager.initialize.mock.calls[0][0] as {
+      network: { allowedDomains: string[]; deniedDomains: string[] };
+      filesystem: { denyRead: string[]; allowRead?: string[]; allowWrite: string[]; denyWrite: string[] };
+    };
+    expect(initConfig.network).toEqual({ allowedDomains: [], deniedDomains: ["*"] });
+    expect(initConfig.filesystem.denyRead[0]).toBe("/");
+    expect(initConfig.filesystem.denyRead).toContain(`${process.env.HOME}/.ssh`);
+    expect(initConfig.filesystem.denyRead).toContain(`${process.env.HOME}/.seepient`);
+    expect(initConfig.filesystem.allowRead).toContain("/usr");
+    expect(initConfig.filesystem.allowWrite).toEqual([]);
+    // Per-exec customConfig REPLACES the session filesystem, so it carries
+    // the SAME deny-by-default base plus this command's approved roots.
     const wrapArgs = fakeManager.wrapWithSandboxArgv.mock.calls[0];
-    expect(wrapArgs[2]).toEqual({ filesystem: { allowRead: ["/work"], allowWrite: ["/work"] } });
+    const perExecFs = wrapArgs[2] as {
+      filesystem: { denyRead: string[]; allowRead: string[]; allowWrite: string[]; denyWrite: string[] };
+    };
+    expect(perExecFs.filesystem.denyRead[0]).toBe("/");
+    expect(perExecFs.filesystem.allowRead).toContain("/work");
+    expect(perExecFs.filesystem.allowWrite).toEqual(["/work"]);
     // The sanitized env is baked into the wrapped command line (T207: the
     // child never sees ambient process env), shell-quoted safely.
     const commandLine = wrapArgs[0] as string;
@@ -71,6 +86,43 @@ describe("AsrtSandbox (SDK 0.0.67 SandboxManager adapter)", () => {
     expect(commandLine).toContain("'/bin/echo' 'adapter-ok'");
     // Cleanup runs after the command.
     expect(fakeManager.cleanupAfterCommand).toHaveBeenCalled();
+  });
+
+  it("drops environment keys that are not POSIX names — never interpolates (review P1 shell model)", async () => {
+    const sandbox = await createNativeProcessSandbox();
+    const evil = "X=1; rm -rf /tmp/owned";
+    await sandbox.exec({
+      ...execRequest,
+      env: { GOOD_KEY: "ok", [evil]: "value" },
+    });
+    const commandLine = fakeManager.wrapWithSandboxArgv.mock.calls[0][0] as string;
+    expect(commandLine).toContain("GOOD_KEY='ok'");
+    // The injection-shaped key never appears in the wrapped command.
+    expect(commandLine).not.toContain("rm -rf");
+    expect(commandLine).not.toContain(evil);
+  });
+
+  it("spawn failures are typed results without the wrapped command or credentials (review P1)", async () => {
+    fakeManager.wrapWithSandboxArgv.mockResolvedValueOnce({
+      argv: ["/nonexistent-wrapper-binary", "-c", "env ASRT_PROXY_TOKEN=sekrit true"],
+      env: {},
+    });
+    const sandbox = await createNativeProcessSandbox();
+    const result = await sandbox.exec(execRequest);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("Failed to start sandboxed process");
+    // No proxy credential or wrapped argv in the surfaced error.
+    expect(result.stderr).not.toContain("sekrit");
+    expect(result.stderr).not.toContain("ASRT_PROXY_TOKEN");
+  });
+
+  it("a pre-aborted signal settles immediately as cancelled (review P1)", async () => {
+    const sandbox = await createNativeProcessSandbox();
+    const controller = new AbortController();
+    controller.abort();
+    const result = await sandbox.exec({ ...execRequest, signal: controller.signal });
+    expect(result.signal).toBeDefined();
+    expect(fakeManager.wrapWithSandboxArgv).not.toHaveBeenCalled();
   });
 
   it("fails closed to UncontainedSandbox when session initialize fails", async () => {

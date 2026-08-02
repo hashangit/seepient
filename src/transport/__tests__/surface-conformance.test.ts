@@ -323,6 +323,66 @@ describe("InlineApprovalBroker (T301/QS-3.1)", () => {
     expect(d.approved).toBe(false);
   });
 
+  it("resolves a persistent project choice only when the request carries a workspace identity", async () => {
+    const presenter: InlineApprovalPresenter = {
+      async prompt() {
+        return { approved: true, choiceId: "opt-1::project" };
+      },
+    };
+    const broker = new InlineApprovalBroker(presenter, { deadlineMs: 1000 });
+    const base: PermissionRequest = {
+      requestId: "r1",
+      principalId: "u",
+      runId: "run",
+      toolCallId: "c1",
+      actionDigest: "d1",
+      action: action().display,
+      requestedCapabilities: [],
+      approvalOptions: [
+        {
+          optionId: "opt-1",
+          actionDigest: "d1",
+          kind: "exact",
+          label: "Exact",
+          capabilities: [],
+          supportedLifetimes: ["action", "project", "global"],
+        },
+      ],
+      approvalChoices: [
+        {
+          choiceId: "opt-1::action",
+          optionId: "opt-1",
+          lifetime: "action",
+          title: "Allow this action once",
+          description: "",
+          authoritySummary: [],
+          recommended: true,
+        },
+        {
+          choiceId: "opt-1::project",
+          optionId: "opt-1",
+          lifetime: "project",
+          title: "Allow in this project",
+          description: "",
+          authoritySummary: [],
+          recommended: false,
+        },
+      ],
+      offeredLifetimes: ["action", "project", "global"],
+      createdAt: 0,
+      expiresAt: Date.now() + 1000,
+    };
+    const ok = await broker.request({ ...base, workspaceId: "ws-1" }, {});
+    expect(ok.approved).toBe(true);
+    if (ok.approved) expect(ok.lifetime).toBe("project");
+
+    // Same choice ID against a request WITHOUT a workspace identity is an
+    // invalid response — the broker never fabricates persistent authority.
+    const denied = await broker.request(base, {});
+    expect(denied.approved).toBe(false);
+    if (!denied.approved) expect(denied.reason).toBe("invalid-approval-response");
+  });
+
   it("deadline settles the prompt even when the presenter ignores the signal (review fix)", async () => {
     // A presenter that never resolves AND never listens to the abort signal
     // must not hang the broker: the deadline race settles a typed denial.

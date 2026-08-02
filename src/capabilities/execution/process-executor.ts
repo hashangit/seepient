@@ -113,6 +113,20 @@ export class ProcessExecutor implements OperationExecutor {
     };
     void envelope;
 
+    // A signal-terminated child is a CANCELLED execution — the audit must
+    // never record an aborted command as succeeded (review P1).
+    if (result.signal) {
+      return {
+        state: "cancelled",
+        error: {
+          code: "PROCESS_CANCELLED",
+          message: `terminated by ${result.signal}`,
+          retryable: false,
+        },
+        evidence,
+      };
+    }
+
     if (result.exitCode === 0) {
       return {
         state: "succeeded",

@@ -86,7 +86,7 @@ function build(
     } as PreparedToolAction,
     missing,
     context: ctx(overrides),
-    offeredLifetimes: ["action", "run", "session"],
+    offeredLifetimes: ["action", "run", "session", "project", "global"],
   });
 }
 
@@ -98,7 +98,7 @@ describe("exact option invariants", () => {
     expect(opt!.kind).toBe("exact");
     expect(opt!.actionDigest).toBe(DIGEST);
     expect(opt!.capabilities).toEqual(missing);
-    expect(opt!.supportedLifetimes).toEqual(["action", "run", "session"]);
+    expect(opt!.supportedLifetimes).toEqual(["action", "run", "session", "project", "global"]);
   });
 
   it("produces stable request-bound IDs; distinct capability sets differ", () => {
@@ -325,6 +325,38 @@ describe("complete approval choices (T027)", () => {
     expect(choices).toHaveLength(1);
     expect(choices[0].lifetime).toBe("action");
     expect(choices[0].choiceId).toBe("opt-exact::action");
+  });
+
+  it("exact options offer project and global choices when a workspace identity exists", () => {
+    const options = build([{ kind: "commit-file" as const, path: "/proj/a.txt" }])!;
+    const choices = buildApprovalChoices(options, "sess-1", "ws-1");
+    const exact = options.find((o) => o.kind === "exact")!;
+    const exactChoices = choices.filter((c) => c.optionId === exact.optionId);
+    const lifetimes = exactChoices.map((c) => c.lifetime);
+    expect(lifetimes).toEqual(["action", "session", "project", "global"]);
+    const project = exactChoices.find((c) => c.lifetime === "project")!;
+    expect(project.title).toBe("Allow in this project");
+    expect(project.description).toBe("Seepient will remember this permission for this project.");
+    const global = exactChoices.find((c) => c.lifetime === "global")!;
+    expect(global.title).toBe("Allow always");
+    expect(global.description).toBe("Seepient will remember this permission for all projects.");
+    expect(project.choiceId).toBe(`${exact.optionId}::project`);
+    expect(global.choiceId).toBe(`${exact.optionId}::global`);
+  });
+
+  it("bounded options never receive persistent choices — exact-capability grants only", () => {
+    const options = build([{ kind: "read-file" as const, path: "/proj/a.txt" }])!;
+    const bounded = options.find((o) => o.kind === "bounded")!;
+    expect(bounded).toBeDefined();
+    const choices = buildApprovalChoices(options, "sess-1", "ws-1");
+    const boundedChoices = choices.filter((c) => c.optionId === bounded.optionId);
+    expect(boundedChoices.map((c) => c.lifetime)).toEqual(["session"]);
+  });
+
+  it("no workspace identity means no persistent choices", () => {
+    const options = build([{ kind: "commit-file" as const, path: "/proj/a.txt" }])!;
+    const choices = buildApprovalChoices(options, "sess-1");
+    expect(choices.every((c) => c.lifetime === "action" || c.lifetime === "session")).toBe(true);
   });
 });
 

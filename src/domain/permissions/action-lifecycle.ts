@@ -38,12 +38,15 @@ import type {
 } from "../../foundations/contracts/execution-boundary.js";
 import type {
   AuditStore,
+  PolicyStore,
   ToolOutcome,
 } from "../../foundations/contracts/execution-brokers.js";
 import type { ToolResult } from "../../foundations/types.js";
 import type { PolicyEngine } from "./policy-engine.js";
 import { generateId } from "../../foundations/id.js";
 import { idempotencyKey } from "./audit-recorder.js";
+import { PolicyConflictError } from "../../foundations/errors.js";
+import { GLOBAL_WORKSPACE_ID } from "./policy-store.js";
 import { setCovers } from "./capability-store.js";
 import type { PersistedCapabilityLedger } from "./persisted-capability-ledger.js";
 
@@ -74,6 +77,15 @@ export interface ActionLifecycleOptions {
    */
   capabilityLedger?: PersistedCapabilityLedger;
   sessionId?: string;
+  /**
+   * Protected policy store + workspace identity for persistent
+   * (`project`/`global`) approvals (spec 011). When present, a persistent
+   * selection records the capability through `compareAndSet` — the same
+   * trusted flow `/permissions approve` uses — before the envelope is
+   * issued. When absent, persistent selections are denied.
+   */
+  policyStore?: PolicyStore;
+  workspaceId?: string;
   /** Now-injectable for deterministic tests. */
   now?: () => number;
 }
@@ -179,6 +191,8 @@ export class ActionLifecycle {
   private readonly active: MutableCapabilitySet;
   private readonly now: () => number;
   private readonly sessionId?: string;
+  private readonly policyStore?: PolicyStore;
+  private readonly workspaceId?: string;
 
   private readonly terminalOutbox?: { enqueue: (event: import("../../foundations/contracts/execution-brokers.js").ActionAuditEvent, idempotencyKey: string) => void };
   private readonly capabilityLedger?: PersistedCapabilityLedger;
@@ -189,6 +203,8 @@ export class ActionLifecycle {
     this.broker = opts.broker;
     this.boundary = opts.boundary;
     this.sessionId = opts.sessionId;
+    this.policyStore = opts.policyStore;
+    this.workspaceId = opts.workspaceId;
     this.audit = opts.audit;
     const baseActive = (opts.activeCapabilities?.capabilities.length ?? 0) > 0
       ? opts.activeCapabilities!
@@ -427,7 +443,7 @@ export class ActionLifecycle {
           runId: action.runId,
           expiresAt: this.now() + 86400000,
         };
-      } else {
+      } else if (lifetimeKind === "session") {
         const sessionId = action.sessionId ?? this.sessionId;
         if (!sessionId) {
           const outcome = this.toOutcome(action, "denied", undefined, "invalid-approval-response");
@@ -459,6 +475,87 @@ export class ActionLifecycle {
           };
         }
         envelopeLifetime = { kind: "session", sessionId };
+      } else {
+        // Persistent approval (project/global, spec 011). The capability is
+        // recorded through the PROTECTED policy store via compare-and-set —
+        // the same trusted flow `/permissions approve` uses — BEFORE the
+        // envelope is issued. A grant that cannot be written must not
+        // execute (fail closed; never a silent session-only fallback).
+        // Exact capabilities only: the choice projection never offers a
+        // bounded persistent choice.
+        const targetWorkspaceId =
+          lifetimeKind === "project"
+            ? (decision.request.workspaceId ?? this.workspaceId)
+            : GLOBAL_WORKSPACE_ID;
+        if (!this.policyStore || !targetWorkspaceId) {
+          const outcome = this.toOutcome(action, "denied", undefined, "invalid-approval-response");
+          await this.record(action, "denied", "invalid-approval-response");
+          return {
+            decision,
+            approval: answer,
+            outcome,
+            toolResult: {
+              output: denialOutput(
+                "invalid-approval-response",
+                "Persistent approval requires the protected policy store and a workspace identity",
+              ),
+              success: false,
+            },
+          };
+        }
+        try {
+          // Retry once on a concurrent-writer conflict (stale version).
+          let persisted = false;
+          for (let attempt = 0; attempt < 2 && !persisted; attempt++) {
+            const current = await this.policyStore.read(targetWorkspaceId);
+            const fresh = option.capabilities.filter(
+              (c) => !setCovers(current.policy, c),
+            );
+            if (fresh.length === 0) {
+              persisted = true; // already granted — nothing to write
+              break;
+            }
+            try {
+              await this.policyStore.compareAndSet(
+                targetWorkspaceId,
+                current.version,
+                {
+                  version: 1 as const,
+                  capabilities: [...current.policy.capabilities, ...fresh],
+                },
+                {
+                  kind: "human",
+                  authorityId: "inline-approval",
+                  authenticatedBy: "tui",
+                },
+              );
+              persisted = true;
+            } catch (err) {
+              if (!(err instanceof PolicyConflictError) || attempt === 1) {
+                throw err;
+              }
+            }
+          }
+        } catch {
+          const outcome = this.toOutcome(action, "denied", undefined, "approval-unavailable");
+          await this.record(action, "denied", "approval-unavailable");
+          return {
+            decision,
+            approval: answer,
+            outcome,
+            toolResult: {
+              output: denialOutput(
+                "approval-unavailable",
+                "Persistent approval could not be recorded in the protected policy store",
+              ),
+              success: false,
+            },
+          };
+        }
+        envelopeLifetime =
+          lifetimeKind === "project"
+            ? { kind: "project", workspaceId: targetWorkspaceId }
+            : { kind: "global" };
       }
 
       approval = answer;

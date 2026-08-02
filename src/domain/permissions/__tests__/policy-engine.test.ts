@@ -237,6 +237,48 @@ describe("PolicyEngine (T106/T110)", () => {
     }
   });
 
+  it("offers project/global persistent choices only when a workspace identity exists", () => {
+    const engine = new PolicyEngine("digest");
+    const base = {
+      sessionId: "sess-1",
+      deploymentCeiling: set({ kind: "process" }),
+      principalPolicy: set({ kind: "process" }),
+      runtimeBaseline: set({ kind: "process" }),
+    };
+    // No workspace identity: session only, no persistent choices.
+    const noWs = engine.evaluate(processAction(), context({ ...base }));
+    expect(noWs.decision).toBe("needs-approval");
+    if (noWs.decision === "needs-approval") {
+      expect(noWs.request.workspaceId).toBeUndefined();
+      expect(noWs.request.offeredLifetimes).not.toContain("project");
+      expect(noWs.request.offeredLifetimes).not.toContain("global");
+      expect(noWs.request.approvalChoices.every((c) => c.lifetime === "action" || c.lifetime === "session")).toBe(true);
+    }
+    // With a workspace identity: project + global choices for the EXACT
+    // option only (bounded stays session-only).
+    const withWs = engine.evaluate(processAction(), context({ ...base, workspaceId: "ws-1" }));
+    expect(withWs.decision).toBe("needs-approval");
+    if (withWs.decision === "needs-approval") {
+      const { request } = withWs;
+      expect(request.workspaceId).toBe("ws-1");
+      expect(request.offeredLifetimes).toContain("project");
+      expect(request.offeredLifetimes).toContain("global");
+      const exact = request.approvalOptions.find((o) => o.kind === "exact")!;
+      const exactLifetimes = request.approvalChoices
+        .filter((c) => c.optionId === exact.optionId)
+        .map((c) => c.lifetime);
+      expect(exactLifetimes).toContain("action");
+      expect(exactLifetimes).toContain("session");
+      expect(exactLifetimes).toContain("project");
+      expect(exactLifetimes).toContain("global");
+      const bounded = request.approvalOptions.find((o) => o.kind === "bounded")!;
+      const boundedLifetimes = request.approvalChoices
+        .filter((c) => c.optionId === bounded.optionId)
+        .map((c) => c.lifetime);
+      expect(boundedLifetimes).toEqual(["session"]);
+    }
+  });
+
   it("containment preflight denies process actions on non-isolated backends before prompting", () => {
     const engine = new PolicyEngine("digest");
     const ctx = context({

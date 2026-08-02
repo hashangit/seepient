@@ -29,6 +29,14 @@ import type {
 } from "../../foundations/contracts/execution-brokers.js";
 import { PolicyConflictError } from "../../foundations/errors.js";
 
+/**
+ * Stable workspace identity for GLOBAL protected policy (spec 011 persistent
+ * choices). A literal sentinel (not a path digest) so every workspace reads
+ * the same global store; stored as
+ * `~/.seepient/security/policies/global.json`.
+ */
+export const GLOBAL_WORKSPACE_ID = "global";
+
 /** Versioned digest of canonical real path; stable across alias/mount. */
 export function computeWorkspaceId(canonicalRoot: string): string {
   const input = `v1:${canonicalRoot}`;

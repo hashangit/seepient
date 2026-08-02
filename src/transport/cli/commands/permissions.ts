@@ -29,6 +29,8 @@ import chalk from 'chalk';
 import type { GrantScope } from '../../../foundations/types.js';
 import type { CommandHandler } from './registry.js';
 import type { Capability, CapabilitySet } from '../../../foundations/contracts/permission-policy.js';
+import type { PolicyStore } from '../../../foundations/contracts/execution-brokers.js';
+import { GLOBAL_WORKSPACE_ID } from '../../../domain/permissions/policy-store.js';
 
 const SCOPES: GrantScope[] = ['session', 'project', 'global'];
 
@@ -47,6 +49,7 @@ function usage(): string {
     `  ${chalk.green('/permissions review')}            List pending proposals`,
     `  ${chalk.green('/permissions approve')} ${chalk.dim('<id>')}     Approve a proposal (writes protected policy)`,
     `  ${chalk.green('/permissions revoke-cap')} ${chalk.dim('<id>')}  Revoke an approved capability`,
+    `  ${chalk.green('/permissions revoke-global')} ${chalk.dim('<idx>')}  Revoke a global ("Allow always") capability`,
     `  ${chalk.green('/permissions help')}           Show this help`,
     '',
     chalk.dim('Proposals are inactive. Approval writes active policy outside executor roots'),
@@ -111,11 +114,12 @@ export const permissionsHandler: CommandHandler = async (ctx) => {
   // a worktree file. Requires the protected policy store to be configured.
   if (sub === 'status') {
     return {
-      output: renderStatus(
+      output: await renderStatus(
         store,
         policyStore,
         ctx.agent.getContainmentStatus?.(),
         ctx.agent.getActiveCapabilities?.(),
+        ctx.agent.getPolicyWorkspaceId?.(),
       ),
     };
   }
@@ -179,6 +183,18 @@ ${chalk.dim('Effective on the next evaluation. Stored outside executor roots.')}
     }
   }
 
+  if (sub === 'revoke-global') {
+    if (!policyStore) return noPolicyStore();
+    const idx = parts[1];
+    if (!idx) return { output: chalk.red('Usage: /permissions revoke-global <index>') };
+    try {
+      const snap = await ctx.agent.revokeGlobalPolicyCapability?.(Number(idx));
+      return { output: chalk.green(`Revoked GLOBAL capability at index ${idx} → version ${snap?.version ?? "?"}.`) };
+    } catch (err) {
+      return { output: chalk.red(`Revoke failed: ${(err as Error).message}`) };
+    }
+  }
+
   if (!store) {
     return { output: chalk.yellow('No grant store available (grants are CLI-only).') };
   }
@@ -230,12 +246,13 @@ function noPolicyStore(): { output: string } {
   };
 }
 
-function renderStatus(
+async function renderStatus(
   store: { list(): Array<{ scope: string }> } | null | undefined,
-  policyStore: unknown | null | undefined,
+  policyStore: PolicyStore | null | undefined,
   containment: import("../../../capabilities/execution/containment-preflight.js").ContainmentPreflightResult | undefined,
   active: Capability[] | undefined,
-): string {
+  agentWorkspaceId: string | null | undefined,
+): Promise<string> {
   const lines: string[] = [chalk.bold.cyan('Permission Status (spec 008)'), ''];
   lines.push(`${chalk.bold('Containment (spec 011 preflight):')}`);
   if (containment?.ok) {
@@ -246,6 +263,9 @@ function renderStatus(
   } else if (containment) {
     lines.push(chalk.yellow(`  unavailable (${containment.reason})`));
     lines.push(chalk.dim(`  ${containment.setupHint}`));
+    if (process.env.SEEPIENT_UNCONTAINED === '1') {
+      lines.push(chalk.dim('  NOTE: SEEPIENT_UNCONTAINED=1 is set — process actions run UNCONTAINED with explicit operator opt-in (audit records isolated:false).'));
+    }
   } else {
     lines.push(chalk.dim('  (pipeline not enabled on this surface)'));
   }
@@ -272,6 +292,25 @@ function renderStatus(
   lines.push(`${chalk.bold('Protected policy:')}`);
   if (policyStore) {
     lines.push(chalk.dim('  configured — use /permissions review for proposals'));
+    if (agentWorkspaceId) {
+      const projectSnap = await policyStore.read(agentWorkspaceId).catch(() => null);
+      if (projectSnap && projectSnap.policy.capabilities.length > 0) {
+        lines.push(chalk.bold('  Project policy:'));
+        for (const cap of projectSnap.policy.capabilities) {
+          lines.push(`    ${chalk.green(describeCapability(cap))}`);
+        }
+      }
+    }
+    const globalSnap = await policyStore.read(GLOBAL_WORKSPACE_ID).catch(() => null);
+    if (globalSnap && globalSnap.policy.capabilities.length > 0) {
+      lines.push(chalk.bold('  Global policy ("Allow always" grants):'));
+      for (const cap of globalSnap.policy.capabilities) {
+        lines.push(`    ${chalk.green(describeCapability(cap))}`);
+      }
+      lines.push(chalk.dim('    Revoke: /permissions revoke-global <index>'));
+    } else {
+      lines.push(chalk.dim('  Global policy: (none)'));
+    }
   } else {
     lines.push(chalk.dim('  (not configured — protected policy is opt-in)'));
   }

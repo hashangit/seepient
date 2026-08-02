@@ -23,6 +23,12 @@
  */
 import type { CommandDescriptor, RootRequest } from "../../foundations/contracts/tool-effects.js";
 import { spawn } from "node:child_process";
+// Type-only imports from the pinned SDK (0.0.67). `ISandboxManager` is not
+// re-exported from the package index, so it is imported from the deep
+// declaration; both are erased at compile time, keeping the optional peer
+// dep out of the runtime module graph.
+import type { FilesystemConfig } from "@anthropic-ai/sandbox-runtime";
+import type { ISandboxManager } from "@anthropic-ai/sandbox-runtime/dist/sandbox/sandbox-manager.js";
 
 /** Result of the sandbox startup probe. */
 export interface SandboxProbe {
@@ -49,6 +55,12 @@ export interface SandboxExecResult {
   stderr: string;
   /** True iff the sandbox actually enforced isolation (not a passthrough). */
   isolated: boolean;
+  /**
+   * Set when the child was terminated by a signal (abort/cancel) — the
+   * executor must record `cancelled`, never success (review P1: a
+   * signal-terminated child reports exitCode null, which must not become 0).
+   */
+  signal?: NodeJS.Signals;
 }
 
 /**
@@ -212,13 +224,28 @@ export class UncontainedSandbox implements NativeProcessSandbox {
  *
  * The dynamic import keeps unused SDK out of memory and isolates the
  * optional peer dep from the module graph when not installed.
+ *
+ * CONTAINMENT MODEL (review P0 fix): SRT 0.0.67 treats `allowRead` as a
+ * re-allow list INSIDE `denyRead`. The adapter therefore initializes
+ * deny-by-default reads — `denyRead: ["/"]` plus immutable protected-path
+ * exclusions (SSH/GPG/AWS/Seepient stores) — and re-allows only the
+ * per-exec roots plus an explicit system runtime-dependency set. A command
+ * approved for one directory can no longer read arbitrary user files.
+ *
+ * SHELL MODEL (review P1 fix): the SDK's only argv path is
+ * `wrapWithSandboxArgv`, which emits `[shell, -c, wrapped]` — argument-array
+ * exec is not offered by the SDK. The adapter therefore enforces a strict
+ * shell-quoting model: every argv token is single-quoted with `'\''`
+ * escaping, and environment KEYS are validated against a POSIX name regex
+ * (invalid keys are dropped, never interpolated). Environment values are
+ * always shell-quoted. This is documented in the 008 sandbox contract.
  */
 export class AsrtSandbox implements NativeProcessSandbox {
   readonly probe: SandboxProbe;
-  private readonly manager: SrtSandboxManager;
+  private readonly manager: ISandboxManager;
   private initPromise: Promise<boolean> | undefined;
 
-  private constructor(probe: SandboxProbe, manager: SrtSandboxManager) {
+  private constructor(probe: SandboxProbe, manager: ISandboxManager) {
     this.probe = probe;
     this.manager = manager;
   }
@@ -236,7 +263,7 @@ export class AsrtSandbox implements NativeProcessSandbox {
     try {
       // Optional peer dep — dynamic import keeps it out of memory when absent.
       const sdk = (await import("@anthropic-ai/sandbox-runtime" as string)) as {
-        SandboxManager?: SrtSandboxManager;
+        SandboxManager?: ISandboxManager;
       };
       const manager = sdk.SandboxManager;
       if (
@@ -257,8 +284,9 @@ export class AsrtSandbox implements NativeProcessSandbox {
   /**
    * Session-scoped SDK initialization. Idempotent: SRT's singleton is
    * process-wide, so a second boundary reuses the same session. Deny-all
-   * network and empty filesystem grants at the session level — the per-exec
-   * roots travel in the per-call customConfig.
+   * network and deny-by-default reads at the session level; the per-exec
+   * roots travel in the per-call customConfig (which REPLACES the session
+   * filesystem, so it carries the same deny base).
    */
   private async init(): Promise<boolean> {
     this.initPromise ??= this.doInit();
@@ -269,7 +297,7 @@ export class AsrtSandbox implements NativeProcessSandbox {
     try {
       await this.manager.initialize({
         network: { allowedDomains: [], deniedDomains: ["*"] },
-        filesystem: { denyRead: [], allowWrite: [], denyWrite: [] },
+        filesystem: denyByDefaultFilesystem(),
       });
       return this.manager.isSandboxingEnabled();
     } catch {
@@ -284,12 +312,21 @@ export class AsrtSandbox implements NativeProcessSandbox {
         code: "ISOLATION_UNAVAILABLE",
       });
     }
+    // Pre-aborted signal: settle as cancelled immediately — a dead prompt
+    // must not start a process (review P1).
+    if (req.signal?.aborted) {
+      return { exitCode: 0, stdout: "", stderr: "", isolated: true, signal: "SIGTERM" };
+    }
     try {
       // The sanitized env (T207: no ambient secrets) is baked into the
       // wrapped command line; SRT's wrapper runs `env <SRT vars> <cmd>` and
       // the SDK returns `process.env` for spawning, so the child must spawn
       // with the SANITIZED env, not the SDK's, or secrets would re-enter.
+      // Environment KEYS are validated (POSIX names only) and VALUES are
+      // always shell-quoted — an injection attempt is dropped, never
+      // interpolated (review P1 shell model).
       const envPairs = Object.entries(req.env)
+        .filter(([k]) => ENV_KEY_PATTERN.test(k))
         .map(([k, v]) => `${k}=${shellQuote(v)}`)
         .join(" ");
       const args = req.command.argv.map(shellQuote).join(" ");
@@ -308,93 +345,199 @@ export class AsrtSandbox implements NativeProcessSandbox {
   }
 }
 
+/** POSIX environment-variable name — anything else is dropped, never interpolated. */
+const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 /** Shell-quote one token for the `bash -c` line SRT wraps. */
 function shellQuote(token: string): string {
   return `'${token.replace(/'/g, "'\\''")}'`;
 }
 
-/** Map boundary root requests onto the SRT filesystem config. */
-function filesystemConfigFor(
-  roots: RootRequest[],
-): { allowRead?: string[]; allowWrite?: string[] } {
-  const allowRead = new Set<string>();
+/**
+ * Immutable protected paths: user credential stores that stay denied even
+ * when the workspace (or an allowed root) would cover them. SRT re-emits
+ * literal denyRead entries nested inside allowRead subpaths LAST, so these
+ * exclusions win over any re-allow. Includes git credential stores — the
+ * gitconfig allow below is config only.
+ */
+function protectedReadPaths(): string[] {
+  const home = process.env.HOME;
+  if (!home) return [];
+  return [
+    `${home}/.ssh`,
+    `${home}/.gnupg`,
+    `${home}/.aws`,
+    `${home}/.seepient`,
+    `${home}/.git-credentials`,
+    `${home}/.config/git/credentials`,
+  ];
+}
+
+/**
+ * Explicit runtime read dependencies: the minimal system paths a sandboxed
+ * command needs to exec and load libraries. Deny-by-default reads deny "/";
+ * without this set every command would fail at dyld/bwrap setup. Deliberately
+ * NARROW: no /var (covers /var/folders user temp and /var/root on Linux),
+ * no /Users, no /home — anything user-owned outside the approved roots is
+ * unreadable.
+ */
+function systemReadDeps(platform: NodeJS.Platform): string[] {
+  if (platform === "linux") {
+    return [
+      "/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc", "/dev", "/proc",
+      "/sys", "/tmp", "/run", "/opt", "/nix", "/root/.cache",
+    ];
+  }
+  return [
+    "/usr", "/bin", "/sbin", "/System", "/Library", "/opt",
+    "/private/etc", "/etc", "/dev", "/tmp", "/private/tmp",
+  ];
+}
+
+/**
+ * Non-secret user config the runtime legitimately reads (git includeIf
+ * chains). Credential stores are NOT here — they are in protectedReadPaths.
+ */
+function userConfigReadPaths(home: string | undefined): string[] {
+  if (!home) return [];
+  return [`${home}/.gitconfig*`];
+}
+
+/**
+ * Deny-by-default filesystem base: deny ALL reads, re-allow only system
+ * runtime deps + non-secret user config. Per-exec roots are added on top by
+ * `filesystemConfigFor`. Per-exec customConfig REPLACES this base, so it is
+ * recomputed there with the same contents plus the roots.
+ */
+function denyByDefaultFilesystem(): FilesystemConfig {
+  const home = process.env.HOME;
+  return {
+    denyRead: ["/", ...protectedReadPaths()],
+    allowRead: [...systemReadDeps(process.platform), ...userConfigReadPaths(home)],
+    allowWrite: [],
+    denyWrite: [],
+  };
+}
+
+/**
+ * Map boundary root requests onto the SRT filesystem config: the full
+ * deny-by-default base PLUS this command's approved roots (reads for every
+ * root, writes only for write-access roots).
+ */
+function filesystemConfigFor(roots: RootRequest[]): FilesystemConfig {
+  const base = denyByDefaultFilesystem();
+  const allowRead = new Set<string>(base.allowRead ?? []);
   const allowWrite = new Set<string>();
   for (const r of roots) {
     allowRead.add(r.canonicalRoot);
     if (r.access === "write") allowWrite.add(r.canonicalRoot);
   }
   return {
-    ...(allowRead.size > 0 ? { allowRead: [...allowRead] } : {}),
-    ...(allowWrite.size > 0 ? { allowWrite: [...allowWrite] } : {}),
+    denyRead: base.denyRead,
+    allowRead: [...allowRead],
+    allowWrite: [...allowWrite],
+    denyWrite: [],
   };
 }
 
-/** Spawn the SRT-wrapped argv and accumulate the child result. */
+/**
+ * Spawn the SRT-wrapped argv and accumulate the child result. Handles
+ * spawn failures as TYPED results (never an uncaught event that would dump
+ * the wrapped command + proxy credential), and cancellation: pre-abort is
+ * checked by the caller, the process TREE is terminated via its own
+ * process group, the abort listener is removed on settle, and a
+ * signal-terminated child is reported with `signal` so the executor can
+ * record `cancelled`, never success.
+ */
 function spawnSandboxed(
   wrapped: { argv: string[]; env: NodeJS.ProcessEnv },
   req: SandboxExecRequest,
 ): Promise<SandboxExecResult> {
-  return new Promise((resolve) => {
-    const child = spawn(wrapped.argv[0], wrapped.argv.slice(1), {
-      cwd: req.command.cwd,
-      env: req.env,
-      shell: false,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    let lastFlushedLen = 0;
-
-    const emitProgress = (chunk: string): void => {
-      if (chunk.length > 0) req.onUpdate?.({ message: chunk });
-    };
-
-    child.stdout?.on("data", (b: Buffer) => {
-      const chunk = b.toString();
-      stdout += chunk;
-      lastFlushedLen = stdout.length;
-      emitProgress(chunk);
-    });
-    child.stderr?.on("data", (b: Buffer) => (stderr += b.toString()));
-
-    let exitCode = 0;
-    let closed = false;
-    let stdoutEnded = !child.stdout;
-
-    const checkDone = (): void => {
-      if (closed && stdoutEnded) {
-        if (stdout.length > lastFlushedLen) {
-          emitProgress(stdout.slice(lastFlushedLen));
-        }
-        resolve({ exitCode, stdout, stderr, isolated: true });
-      }
-    };
-
-    child.stdout?.on("end", () => {
-      stdoutEnded = true;
-      checkDone();
-    });
-    child.on("close", (code) => {
-      exitCode = code ?? 0;
-      closed = true;
-      checkDone();
-    });
-    req.signal?.addEventListener("abort", () => child.kill("SIGTERM"));
+  const { promise, resolve } = Promise.withResolvers<SandboxExecResult>();
+  let settled = false;
+  const settle = (result: SandboxExecResult): void => {
+    if (settled) return;
+    settled = true;
+    req.signal?.removeEventListener("abort", onAbort);
+    resolve(result);
+  };
+  const child = spawn(wrapped.argv[0], wrapped.argv.slice(1), {
+    cwd: req.command.cwd,
+    env: req.env,
+    shell: false,
+    detached: true,
+    stdio: ["ignore", "pipe", "pipe"],
   });
-}
+  let stdout = "";
+  let stderr = "";
+  let lastFlushedLen = 0;
 
-/** The subset of the SRT SandboxManager API this adapter consumes. */
-export interface SrtSandboxManager {
-  initialize(config: unknown, askCallback?: unknown, enableLogMonitor?: boolean): Promise<void>;
-  isSandboxingEnabled(): boolean;
-  wrapWithSandboxArgv(
-    command: string,
-    binShell?: string,
-    customConfig?: { filesystem?: { allowRead?: string[]; allowWrite?: string[] } },
-    abortSignal?: AbortSignal,
-    cwd?: string,
-  ): Promise<{ argv: string[]; env: NodeJS.ProcessEnv }>;
-  cleanupAfterCommand(): Promise<void> | void;
+  const emitProgress = (chunk: string): void => {
+    if (chunk.length > 0) req.onUpdate?.({ message: chunk });
+  };
+
+  child.stdout?.on("data", (b: Buffer) => {
+    const chunk = b.toString();
+    stdout += chunk;
+    lastFlushedLen = stdout.length;
+    emitProgress(chunk);
+  });
+  child.stderr?.on("data", (b: Buffer) => (stderr += b.toString()));
+
+  let exitCode = 0;
+  let signal: NodeJS.Signals | undefined;
+  let closed = false;
+  let stdoutEnded = !child.stdout;
+
+  const checkDone = (): void => {
+    if (!closed || !stdoutEnded) return;
+    if (stdout.length > lastFlushedLen) {
+      emitProgress(stdout.slice(lastFlushedLen));
+    }
+    // A signal-terminated child is a CANCELLED execution, never success
+    // (exitCode is null in that case; reporting 0 would let the audit
+    // record an aborted command as succeeded — review P1).
+    settle({ exitCode, stdout, stderr, isolated: true, signal });
+  };
+
+  // Spawn failures (missing cwd, ENOENT binary) are typed results with a
+  // GENERIC message — never the wrapped argv or the ASRT proxy credential
+  // (review P1).
+  child.on("error", (err) => {
+    const code = (err as NodeJS.ErrnoException).code ?? "spawn-error";
+    settle({
+      exitCode: 1,
+      stdout: "",
+      stderr: `Failed to start sandboxed process: ${code}`,
+      isolated: true,
+    });
+  });
+
+  child.stdout?.on("end", () => {
+    stdoutEnded = true;
+    checkDone();
+  });
+  child.on("close", (code, closeSignal) => {
+    exitCode = code ?? 0;
+    signal = closeSignal ?? undefined;
+    closed = true;
+    checkDone();
+  });
+  const onAbort = (): void => {
+    // Kill the whole process group (detached), not just the bash wrapper,
+    // so descendant processes cannot outlive the cancellation.
+    if (child.pid !== undefined) {
+      try {
+        process.kill(-child.pid, "SIGTERM");
+        return;
+      } catch {
+        /* fall through to single-process kill */
+      }
+    }
+    child.kill("SIGTERM");
+  };
+  req.signal?.addEventListener("abort", onAbort);
+  return promise;
 }
 
 /**

@@ -342,7 +342,7 @@ export interface ApprovalOptionInput {
   missing: Capability[];
   context: PolicyContext;
   /** Offered lifetimes of the parent request (session only when bound). */
-  offeredLifetimes: Array<"action" | "run" | "session">;
+  offeredLifetimes: Array<"action" | "run" | "session" | "project" | "global">;
 }
 
 /**
@@ -428,7 +428,10 @@ export function buildApprovalOptions(
 // ── Complete approval choices (spec 011 T026/T027) ───────────────────────
 
 /** Stable, request-bound choice ID derived from the option ID + lifetime. */
-export function choiceIdFor(optionId: string, lifetime: "action" | "session"): string {
+export function choiceIdFor(
+  optionId: string,
+  lifetime: "action" | "session" | "project" | "global",
+): string {
   return `${optionId}::${lifetime}`;
 }
 
@@ -495,21 +498,29 @@ function boundedTitle(caps: Capability[]): string {
 }
 
 /**
- * Build the complete choices for the request: the only meaningful pairs are
- * exact/action, exact/session, and bounded/session (FR-010). Bounded/action
- * is never issued — it widens authority without a reuse benefit. The
- * least-privileged choice (exact/action) is marked Recommended; the TUI
- * never preselects it.
+ * Build the complete choices for the request. The meaningful pairs are
+ * exact/action, exact/session, exact/project, exact/global, and
+ * bounded/session (FR-010). Bounded/action and BOUNDED persistent choices
+ * are never issued — persistent authority is exact-capability only, because
+ * a widened root/prefix grant written to the protected store would be a
+ * silent policy change. Persistent choices require a workspace identity;
+ * session choices require a stable session identity. The least-privileged
+ * choice (exact/action) is marked Recommended; the TUI never preselects it.
  */
 export function buildApprovalChoices(
   options: ApprovalOption[],
   sessionId?: string,
+  workspaceId?: string,
 ): ApprovalChoice[] {
   const choices: ApprovalChoice[] = [];
   for (const option of options) {
-    const lifetimes: Array<"action" | "session"> =
+    const lifetimes: Array<"action" | "session" | "project" | "global"> =
       option.kind === "exact"
-        ? ["action", ...(sessionId ? (["session"] as const) : [])]
+        ? [
+            "action",
+            ...(sessionId ? (["session"] as const) : []),
+            ...(workspaceId ? (["project", "global"] as const) : []),
+          ]
         : sessionId
           ? (["session"] as const)
           : [];
@@ -519,16 +530,15 @@ export function buildApprovalChoices(
         choiceId: choiceIdFor(option.optionId, lifetime),
         optionId: option.optionId,
         lifetime,
-        title:
-          option.kind === "exact"
-            ? lifetime === "action"
-              ? "Allow this action once"
-              : "Allow this exact action until I close Seepient"
-            : boundedTitle(option.capabilities),
+        title: choiceTitle(option, lifetime),
         description:
           lifetime === "action"
             ? "You'll be asked again next time."
-            : "Seepient will remember this permission until you close it.",
+            : lifetime === "session"
+              ? "Seepient will remember this permission until you close it."
+              : lifetime === "project"
+                ? "Seepient will remember this permission for this project."
+                : "Seepient will remember this permission for all projects.",
         authoritySummary: authoritySummary(option.capabilities),
         recommended: false,
       });
@@ -541,4 +551,22 @@ export function buildApprovalChoices(
     );
   }
   return choices;
+}
+
+/** Plain-language headline for a choice, from its lifetime. */
+function choiceTitle(
+  option: ApprovalOption,
+  lifetime: "action" | "session" | "project" | "global",
+): string {
+  if (option.kind !== "exact") return boundedTitle(option.capabilities);
+  switch (lifetime) {
+    case "action":
+      return "Allow this action once";
+    case "session":
+      return "Allow this exact action until I close Seepient";
+    case "project":
+      return "Allow in this project";
+    case "global":
+      return "Allow always";
+  }
 }

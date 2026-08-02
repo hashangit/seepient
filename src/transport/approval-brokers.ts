@@ -217,7 +217,8 @@ export class InlineApprovalBroker implements ApprovalBroker {
     if (
       !option.supportedLifetimes.includes(choice.lifetime) ||
       !req.offeredLifetimes.includes(choice.lifetime) ||
-      (choice.lifetime === "session" && !req.sessionId)
+      (choice.lifetime === "session" && !req.sessionId) ||
+      (choice.lifetime === "project" && !req.workspaceId)
     ) {
       return this.denial(req, "invalid-approval-response");
     }

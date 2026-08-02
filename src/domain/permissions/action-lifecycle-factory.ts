@@ -17,7 +17,7 @@
 import { PolicyEngine, computePolicyDigest } from "./policy-engine.js";
 import { ActionLifecycle } from "./action-lifecycle.js";
 import { LocalAuditStore } from "./audit-recorder.js";
-import { LocalPolicyStore, computeWorkspaceId } from "./policy-store.js";
+import { LocalPolicyStore, computeWorkspaceId, GLOBAL_WORKSPACE_ID } from "./policy-store.js";
 import { setCovers } from "./capability-store.js";
 import { DEFAULT_ANALYZERS } from "./default-analyzers.js";
 import { COMM_ANALYZERS } from "./comm-analyzers.js";
@@ -182,6 +182,23 @@ export async function buildActionLifecycle(
     principalPolicy = inputs.principalPolicy ?? deploymentCeiling;
     hasStoredPolicy = Boolean(inputs.principalPolicy);
   }
+  // Global protected policy applies to every workspace (spec 011 persistent
+  // choices: "Allow always"): union it into the principal policy so global
+  // grants survive restarts and seed the active set. Caps already covered by
+  // the workspace policy are not duplicated.
+  try {
+    const globalSnap = await policyStore.read(GLOBAL_WORKSPACE_ID);
+    if (globalSnap.policy.capabilities.length > 0) {
+      const union: Capability[] = [...principalPolicy.capabilities];
+      for (const cap of globalSnap.policy.capabilities) {
+        if (!setCovers(principalPolicy, cap)) union.push(cap);
+      }
+      principalPolicy = { version: 1 as const, capabilities: union };
+      hasStoredPolicy = true;
+    }
+  } catch {
+    /* no global policy yet — fresh install continues below */
+  }
   const defaultModelEgressCap: Capability = {
     kind: "model-egress",
     providerClass: "*",
@@ -246,6 +263,9 @@ export async function buildActionLifecycle(
     // Spec 011 (T008): preserve the stable session identity so PolicyEngine
     // can offer the `session` lifetime on TUI requests.
     sessionId: inputs.sessionId,
+    // Spec 011 (persistent choices): the protected-policy workspace identity
+    // so the engine can offer `project`/`global` approval choices.
+    workspaceId,
   };
 
   const capabilityLedger = inputs.capabilityLedger ?? new PersistedCapabilityLedger(inputs.auditRoot ? { root: path.join(inputs.auditRoot, "caps") } : undefined);
@@ -277,6 +297,10 @@ export async function buildActionLifecycle(
     terminalOutbox,
     capabilityLedger,
     sessionId: inputs.sessionId,
+    // Persistent (`project`/`global`) approvals write the protected store
+    // through compare-and-set, the same trusted flow /permissions uses.
+    policyStore,
+    workspaceId,
   });
 
   return {

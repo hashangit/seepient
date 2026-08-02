@@ -37,7 +37,13 @@ export interface BuildLocalBoundaryResult {
  */
 export async function buildLocalBoundary(opts?: {
   artifacts?: InMemoryArtifactStore;
-  customToolCallbacks?: Map<string, (args: unknown) => Promise<string>>;
+  /**
+   * Host-callback map for `trusted-host` tools. The composition root (which
+   * may import Domain) supplies it; Capabilities must not import Domain
+   * (AGENTS.md dependency direction) — the previous `getAllToolModules`
+   * import from here violated that rule.
+   */
+  hostCallbacks?: Map<string, (args: unknown) => Promise<unknown>>;
   unsafeUncontained?: boolean;
   allowFallback?: boolean;
 }): Promise<BuildLocalBoundaryResult> {
@@ -57,27 +63,21 @@ export async function buildLocalBoundary(opts?: {
     network: new NodeNetworkAdapter(),
   });
 
-  // Host callbacks map for built-in and custom tools (consults tool registry)
-  const hostCallbacks = new Map<string, (args: unknown) => Promise<unknown>>();
-  const { getAllToolModules } = await import("../../domain/tool-executor.js");
-  for (const tool of getAllToolModules()) {
-    const fnName = tool.definition.function.name;
-    hostCallbacks.set(fnName, async (args: unknown) => {
-      return tool.handler(args as any);
-    });
-  }
-  if (opts?.customToolCallbacks) {
-    for (const [k, v] of opts.customToolCallbacks.entries()) {
-      hostCallbacks.set(k, v);
-    }
-  }
+  // Host callbacks map for built-in and custom tools (consulted by the
+  // TrustedHostExecutor). The composition root owns building this map —
+  // Capabilities does not import Domain (AGENTS.md).
+  const hostCallbacks = opts?.hostCallbacks ?? new Map<string, (args: unknown) => Promise<unknown>>();
 
   const registry = new OperationExecutorRegistry();
   registry.register(new NoneExecutor());
   registry.register(new ReadFileExecutor({ artifacts }));
   registry.register(new CommitFilesExecutor({ broker: commitBroker, artifacts, useNative: probe.available, allowFallback: opts?.allowFallback ?? false }));
-  const uncontainedOpt = opts?.unsafeUncontained ?? (process.env.SEEPIENT_UNCONTAINED === "1");
-  registry.register(new ProcessExecutor({ sandbox, unsafeUncontained: uncontainedOpt }));
+  // SEEPIENT_UNCONTAINED=1 is the environment form of the explicit opt-out;
+  // the SAME value must drive both the executor (which honors it) and the
+  // advertised environmentIsolation capability (which policy reads), so an
+  // operator who follows the setup message can actually run (review P1).
+  const unsafeUncontained = opts?.unsafeUncontained ?? process.env.SEEPIENT_UNCONTAINED === "1";
+  registry.register(new ProcessExecutor({ sandbox, unsafeUncontained }));
   registry.register(new BrokerExecutor({ broker: effectBroker }));
   registry.register(new TrustedHostExecutor(hostCallbacks));
 
@@ -85,7 +85,7 @@ export async function buildLocalBoundary(opts?: {
     registry,
     exactCommit: probe.available,
     hostFilteredEgress: true,
-    environmentIsolation: sandbox.probe.backend !== "none" || (opts?.unsafeUncontained ?? false),
+    environmentIsolation: sandbox.probe.backend !== "none" || unsafeUncontained,
   });
 
   return { boundary, artifacts };

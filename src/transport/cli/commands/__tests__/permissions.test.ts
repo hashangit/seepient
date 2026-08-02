@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { permissionsHandler } from "../permissions.js";
 import { Agent } from "../../agent.js";
-import { LocalPolicyStore, computeWorkspaceId } from "../../../../domain/permissions/policy-store.js";
+import { LocalPolicyStore, computeWorkspaceId, GLOBAL_WORKSPACE_ID } from "../../../../domain/permissions/policy-store.js";
 import { createSnapshotStore } from "../../../../foundations/hashline/snapshot-store.js";
 import type { LLMProvider } from "../../../../foundations/contracts/llm.js";
 
@@ -106,6 +106,27 @@ describe("/permissions protected-policy (T307, QS-3.3)", () => {
     // because no session approval happened) and the containment backend.
     expect(res.output).toContain("Active session authority");
     expect(res.output).toContain("Containment");
+  });
+
+  it("status lists global policy and revoke-global removes it (spec 011 persistent choices)", async () => {
+    const agent = makeAgent();
+    const store = agent.getPolicyStore()!;
+    // Simulate an "Allow always" grant written by the inline approval path.
+    const current = await store.read(GLOBAL_WORKSPACE_ID);
+    await store.compareAndSet(
+      GLOBAL_WORKSPACE_ID,
+      current.version,
+      { version: 1, capabilities: [{ kind: "commit-file", path: "/proj/a.txt" }] },
+      { kind: "human", authorityId: "inline-approval", authenticatedBy: "tui" },
+    );
+    const status = await run(agent, "status");
+    expect(status.output).toContain("Global policy");
+    expect(status.output).toContain("revoke-global");
+
+    const revoked = await run(agent, "revoke-global 0");
+    expect(revoked.output).toContain("Revoked GLOBAL capability");
+    const after = await store.read(GLOBAL_WORKSPACE_ID);
+    expect(after.policy.capabilities).toHaveLength(0);
   });
 
   it("invalid capability kind is rejected at propose", async () => {

@@ -100,12 +100,17 @@ function buildPermissionRequest(
   const deadlineMs = context.interaction.deadlineMs ?? 600_000;
   // Spec 011: the request keeps the stable session identity so the bridge can
   // offer `session`; `session` is offered only when that identity exists.
+  // Persistent `project`/`global` choices require a workspace identity
+  // (interactive CLI surfaces) — they are recorded through the protected
+  // policy store, never grants files.
   const sessionId = action.sessionId ?? context.sessionId;
+  const workspaceId = context.workspaceId;
   return {
     requestId: generateId(),
     principalId: action.principalId,
     runId: action.runId,
     sessionId,
+    workspaceId,
     toolCallId: action.toolCallId,
     actionDigest: action.actionDigest,
     action: action.display,
@@ -116,6 +121,7 @@ function buildPermissionRequest(
       "action",
       "run",
       ...(sessionId ? (["session"] as const) : []),
+      ...(workspaceId ? (["project", "global"] as const) : []),
     ],
     createdAt: now,
     expiresAt: now + deadlineMs,
@@ -364,10 +370,11 @@ export class PolicyEngine implements PolicyEngineContract {
     // choice, deny as unavailable rather than sending an empty prompt
     // (FR-001).
     const sessionId = action.sessionId ?? context.sessionId;
-    const offeredLifetimes: Array<"action" | "run" | "session"> = [
+    const offeredLifetimes: Array<"action" | "run" | "session" | "project" | "global"> = [
       "action",
       "run",
       ...(sessionId ? (["session"] as const) : []),
+      ...(context.workspaceId ? (["project", "global"] as const) : []),
     ];
     const approvalOptions = buildApprovalOptions({
       action,
@@ -383,7 +390,11 @@ export class PolicyEngine implements PolicyEngineContract {
         trace,
       );
     }
-    const approvalChoices = buildApprovalChoices(approvalOptions, sessionId);
+    const approvalChoices = buildApprovalChoices(
+      approvalOptions,
+      sessionId,
+      context.workspaceId,
+    );
     if (approvalChoices.length === 0) {
       pushLayer(trace, "backend", "deny");
       return deny(
