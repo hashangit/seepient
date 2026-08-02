@@ -250,6 +250,15 @@ export interface ActionAuditEvent {
   policyBeforeVersion?: number;
   policyAfterVersion?: number;
   grantedWorkspaceId?: string;
+  /**
+   * Set on the durable OUTBOX INTENT enqueued BEFORE the policy compare-and-
+   * set (review round 4 P0): the WAL record that guarantees a persistent
+   * grant can never be installed without its forensic record. When true,
+   * `policyAfterVersion` is absent — the mutation had not happened yet at
+   * enqueue time. A flushed intent whose CAS never completed is reconciled
+   * by the accompanying `denied` event.
+   */
+  grantIntent?: boolean;
 }
 
 /**

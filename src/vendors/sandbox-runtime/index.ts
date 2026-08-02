@@ -300,7 +300,14 @@ export class AsrtSandbox implements NativeProcessSandbox {
       const envPairs = [
         `TMPDIR=${shellQuote(scratch)}`,
         ...Object.entries(req.env)
-          .filter(([k]) => ENV_KEY_PATTERN.test(k))
+          // Round 4 P1: the controlled scratch TMPDIR must be AUTHORITATIVE.
+          // `env` later-assignments win, so ambient TMPDIR/TMP/TEMP from the
+          // sanitized production environment are filtered out — otherwise
+          // the child would follow an ambient TMPDIR it cannot access.
+          .filter(
+            ([k]) =>
+              ENV_KEY_PATTERN.test(k) && k !== "TMPDIR" && k !== "TMP" && k !== "TEMP",
+          )
           .map(([k, v]) => `${k}=${shellQuote(v)}`),
       ].join(" ");
       const args = req.command.argv.map(shellQuote).join(" ");
@@ -314,8 +321,13 @@ export class AsrtSandbox implements NativeProcessSandbox {
       );
       return await spawnSandboxed(wrapped, req);
     } finally {
-      await this.manager.cleanupAfterCommand();
-      rmSync(scratch, { recursive: true, force: true });
+      try {
+        await this.manager.cleanupAfterCommand();
+      } finally {
+        // Round 4 P1: the scratch must be removed even when the sandbox
+        // cleanup itself throws.
+        rmSync(scratch, { recursive: true, force: true });
+      }
     }
   }
 }

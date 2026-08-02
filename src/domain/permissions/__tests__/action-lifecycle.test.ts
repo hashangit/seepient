@@ -1212,3 +1212,96 @@ describe("active-authority revocation (P1 review fix)", () => {
     expect(lifecycle.getActiveCapabilities()).toEqual([{ kind: "commit-file", path: "/p/other.txt" }]);
   });
 });
+
+describe("persistent grant WAL (round 4 P0 review fix)", () => {
+  it("audit AND outbox double failure denies with NOTHING installed", async () => {
+    const store = new LocalPolicyStore({ root: dir });
+    const audit: import("../../../foundations/contracts/execution-brokers.js").AuditStore = {
+      async append(event) {
+        if (event.state === "policy-granted") throw new Error("audit down");
+        return "written";
+      },
+      async getTerminal() {
+        return undefined;
+      },
+    };
+    const outbox: { enqueue: () => Promise<void> } = {
+      async enqueue() {
+        throw new Error("outbox disk full");
+      },
+    };
+    const lifecycle = new ActionLifecycle({
+      policy: new PolicyEngine("digest"),
+      policyContext: policyCtx({
+        deploymentCeiling: set({ kind: "commit-file", path: "/p/a.txt" }),
+        principalPolicy: set({ kind: "commit-file", path: "/p/a.txt" }),
+        activeCapabilities: set(),
+        workspaceId: "ws-1",
+      }),
+      broker: {
+        mode: "inline",
+        request: async (req) => approved(req, "user", "project"),
+      },
+      boundary: fakeBoundary({ output: "ok", success: true }),
+      audit,
+      activeCapabilities: { capabilities: [] },
+      policyStore: store,
+      workspaceId: "ws-1",
+      terminalOutbox: outbox,
+    });
+    const result = await lifecycle.run(writeAction());
+    expect(result.outcome.state).toBe("denied");
+    // The reviewer's probe: denial must NOT leave authority installed.
+    const snap = await store.read("ws-1");
+    expect(snap.policy.capabilities).toEqual([]);
+    expect(snap.version).toBe(0);
+  });
+
+  it("a post-CAS audit failure REVERTS the grant so no authority survives", async () => {
+    const store = new LocalPolicyStore({ root: dir });
+    const audit: import("../../../foundations/contracts/execution-brokers.js").AuditStore = {
+      async append(event) {
+        // approved succeeds; policy-granted fails; the pre-CAS durable
+        // intent is enqueued (outbox works), so the WAL covers the record
+        // even though the direct append fails.
+        if (event.state === "policy-granted") throw new Error("audit down");
+        return "written";
+      },
+      async getTerminal() {
+        return undefined;
+      },
+    };
+    let enqueued = 0;
+    const outbox: { enqueue: () => Promise<void> } = {
+      async enqueue() {
+        enqueued++;
+      },
+    };
+    const lifecycle = new ActionLifecycle({
+      policy: new PolicyEngine("digest"),
+      policyContext: policyCtx({
+        deploymentCeiling: set({ kind: "commit-file", path: "/p/a.txt" }),
+        principalPolicy: set({ kind: "commit-file", path: "/p/a.txt" }),
+        activeCapabilities: set(),
+        workspaceId: "ws-1",
+      }),
+      broker: {
+        mode: "inline",
+        request: async (req) => approved(req, "user", "project"),
+      },
+      boundary: fakeBoundary({ output: "ok", success: true }),
+      audit,
+      activeCapabilities: { capabilities: [] },
+      policyStore: store,
+      workspaceId: "ws-1",
+      terminalOutbox: outbox,
+    });
+    const result = await lifecycle.run(writeAction());
+    // The durable intent was written (WAL) before the CAS: execution
+    // proceeds and the outbox delivers the forensic record.
+    expect(enqueued).toBe(1);
+    expect(result.outcome.state).toBe("succeeded");
+    const snap = await store.read("ws-1");
+    expect(snap.policy.capabilities).toEqual([{ kind: "commit-file", path: "/p/a.txt" }]);
+  });
+});

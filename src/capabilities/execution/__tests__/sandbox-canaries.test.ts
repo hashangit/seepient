@@ -92,20 +92,31 @@ describe("containment negative canaries (review P0)", () => {
     // Use a REAL shell (/bin/sh is an xcode-select shim on CLT-only Macs).
     const bash = existsSync("/opt/homebrew/bin/bash") ? "/opt/homebrew/bin/bash" : "/bin/bash";
     const parts = bash.split(" ");
+    // Simulate the PRODUCTION sanitized environment, which retains an
+    // ambient TMPDIR: the scratch assignment must WIN over it (round 4 P1).
+    const ambientTmp = join(tmpdir(), "ambient-tmp-dir");
     const r = await sandbox.exec({
       command: {
         executable: parts[0],
-        argv: ["-c", "echo scratch-ok > $TMPDIR/s.txt && cat $TMPDIR/s.txt"],
+        argv: ["-c", "echo scratch-ok > $TMPDIR/s.txt && cat $TMPDIR/s.txt && printf 'TMPDIR=%s' \"$TMPDIR\""],
         cwd: workspace,
       },
       roots: [
         { access: "read", canonicalRoot: workspace },
         { access: "write", canonicalRoot: workspace },
       ],
-      env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin", HOME: process.env.HOME ?? workspace },
+      env: {
+        PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
+        HOME: process.env.HOME ?? workspace,
+        TMPDIR: ambientTmp,
+      },
     });
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain("scratch-ok");
+    // The child saw the PRIVATE scratch, not the ambient temp dir.
+    expect(r.stdout).toContain("TMPDIR=");
+    expect(r.stdout).toContain("seepient-scratch-");
+    expect(r.stdout).not.toContain("ambient-tmp-dir");
   });
 
   it.runIf(!skip)("denies writing outside the approved roots (filesystem state)", async () => {

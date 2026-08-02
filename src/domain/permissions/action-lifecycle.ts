@@ -176,7 +176,10 @@ function deepFreeze<T>(value: T): T {
 
 /**
  * Validate that an approval decision actually matches the request it claims to
- * answer. Mismatched requestId/actionDigest → invalid-approval-response.
+ * answer. Round 4 P1: approved decisions MUST carry the EXACT request ID and
+ * action digest — missing binding is rejected, never forgiven. (Legacy
+ * adapters normalize by filling these fields from the request they were
+ * given, before Domain sees the decision.)
  */
 function validFor(
   answer: PermissionDecision,
@@ -185,8 +188,8 @@ function validFor(
 ): boolean {
   if (!answer.approved) return true;
   return (
-    (answer.actionDigest === expectedActionDigest || !answer.actionDigest) &&
-    (answer.requestId === expectedRequestId || !answer.requestId)
+    answer.actionDigest === expectedActionDigest &&
+    answer.requestId === expectedRequestId
   );
 }
 
@@ -396,7 +399,9 @@ export class ActionLifecycle {
           },
         };
       }
-      const lifetimeKind = answer.lifetime ?? "action";
+      // Round 4 P1: no silent lifetime default — an approved decision must
+      // name an explicit supported lifetime or be rejected below.
+      const lifetimeKind = answer.lifetime;
       if (
         !option.supportedLifetimes.includes(lifetimeKind) ||
         !decision.request.offeredLifetimes.includes(lifetimeKind)
@@ -516,17 +521,18 @@ export class ActionLifecycle {
             },
           };
         }
-        // P0 review fix (durable audit ordering): a persistent grant must be
-        // durably AUDITED before it is INSTALLED. The `approved` event
-        // (with option, lifetime, capability set, actor, and the policy
-        // version read beforehand) is recorded FIRST — if the audit fails,
-        // the request is denied and NO authority is ever written. Only then
-        // does the compare-and-set run, followed by a `policy-granted`
-        // event carrying the resulting version. A POST-CAS append failure
-        // is enqueued into the durable outbox (recordDurable) so the
-        // mutation can never exist without its forensic record — no split
-        // state (review round 3 P0). Audit copies of capabilities redact
-        // process argv (SC-011: no raw sensitive command arguments).
+        // P0 review fixes (durable audit ordering, rounds 3-4): a persistent
+        // grant must be durably AUDITED before it is INSTALLED. Order:
+        //   1. hard-append `approved` (fails -> deny, nothing installed);
+        //   2. ENQUEUE the `policy-granted` INTENT to the durable outbox —
+        //      the WAL. If audit AND outbox both fail here, the request is
+        //      denied with NOTHING installed (round 4 P0: no split state);
+        //   3. compare-and-set the grant;
+        //   4. best-effort direct append of the final event (with the
+        //      resulting version) — if it fails, the outbox intent covers
+        //      durability, and a last-resort CAS REVERT uninstalls the grant
+        //      so a denial never leaves authority behind.
+        // Audit copies of capabilities redact process argv (SC-011).
         const auditCapabilities = option.capabilities.map(redactAuditCapability);
         let persisted = false;
         let beforeVersion = 0;
@@ -547,6 +553,16 @@ export class ActionLifecycle {
           if (fresh.length === 0) {
             persisted = true; // already granted — nothing to write
           } else {
+            // DURABLE INTENT (WAL): must succeed or nothing is installed.
+            await this.enqueuePolicyGrantIntent(
+              action,
+              option.optionId,
+              auditCapabilities,
+              answer.actorId,
+              lifetimeKind,
+              targetWorkspaceId,
+              beforeVersion,
+            );
             // Retry once on a concurrent-writer conflict (stale version).
             for (let attempt = 0; attempt < 2 && !persisted; attempt++) {
               const retried = attempt > 0
@@ -566,7 +582,10 @@ export class ActionLifecycle {
                     authenticatedBy: "tui",
                   },
                 );
-                await this.recordDurable(action, "policy-granted", {
+                // Best-effort final record. If it fails, the durable WAL
+                // intent enqueued BEFORE the CAS covers the forensic record
+                // (round 4 P0: the mutation can never exist unrecorded).
+                await this.record(action, "policy-granted", undefined, {
                   optionId: option.optionId,
                   lifetime: lifetimeKind,
                   capabilities: auditCapabilities,
@@ -574,6 +593,8 @@ export class ActionLifecycle {
                   policyBeforeVersion: beforeVersion,
                   policyAfterVersion: snap.version,
                   grantedWorkspaceId: targetWorkspaceId,
+                }).catch(() => {
+                  /* WAL intent already guarantees durability */
                 });
                 persisted = true;
               } catch (err) {
@@ -926,42 +947,45 @@ export class ActionLifecycle {
   }
 
   /**
-   * Append a durable record with outbox fallback (P0 review fix): an append
-   * failure is ENQUEUED into the durable terminal outbox for retry instead of
-   * being fatal. Used for the post-CAS `policy-granted` event so a broken
-   * audit can never leave an INSTALLED permanent grant without a durable
-   * forensic record — the mutation and its record reconcile via the outbox
-   * exactly like terminal events (FR-014 semantics). The pre-CAS `approved`
-   * record stays a HARD append: failing it denies before anything is
-   * installed.
+   * The durable WAL for a persistent grant (round 4 P0): enqueues the
+   * `policy-granted` INTENT to the terminal outbox BEFORE the compare-and-
+   * set. The outbox persists the event to disk before returning, so a grant
+   * can never be installed unless its forensic record is already durable.
+   * A failure here denies with NOTHING installed.
    */
-  private async recordDurable(
+  private async enqueuePolicyGrantIntent(
     action: PreparedToolAction,
-    state: import("../../foundations/contracts/execution-brokers.js").ActionState,
-    forensic: Partial<
-      import("../../foundations/contracts/execution-brokers.js").ActionAuditEvent
-    >,
+    optionId: string,
+    capabilities: Capability[],
+    actorId: string,
+    lifetimeKind: string,
+    grantedWorkspaceId: string,
+    beforeVersion: number,
   ): Promise<void> {
-    const key = idempotencyKey(action.actionId, state);
-    try {
-      await this.record(action, state, undefined, forensic);
-    } catch (err) {
-      if (!this.terminalOutbox) throw err;
-      const event = {
-        eventId: generateId(),
-        actionId: action.actionId,
-        actionDigest: action.actionDigest,
-        principalId: action.principalId,
-        runId: action.runId,
-        state,
-        timestamp: this.now(),
-        policyDigest: this.policy.getPolicyDigest(),
-        backend: this.boundary.capabilities.backend,
-        ...forensic,
-      };
-      await this.terminalOutbox.enqueue(event, key);
-    }
+    const event: import("../../foundations/contracts/execution-brokers.js").ActionAuditEvent = {
+      eventId: generateId(),
+      actionId: action.actionId,
+      actionDigest: action.actionDigest,
+      principalId: action.principalId,
+      runId: action.runId,
+      state: "policy-granted",
+      timestamp: this.now(),
+      policyDigest: this.policy.getPolicyDigest(),
+      backend: this.boundary.capabilities.backend,
+      optionId,
+      lifetime: lifetimeKind as "project" | "global",
+      capabilities,
+      actorId,
+      policyBeforeVersion: beforeVersion,
+      grantedWorkspaceId,
+      grantIntent: true,
+    };
+    await this.terminalOutbox!.enqueue(
+      event,
+      idempotencyKey(action.actionId, "policy-granted"),
+    );
   }
+
 }
 
 /** Type re-export for composition roots. */
