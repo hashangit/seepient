@@ -10,18 +10,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 * **TUI permission scope and lifetime UX (spec 011)**: under the existing
-  `--permission-pipeline` switch, the TUI approval prompt now renders the
-  policy-issued scope options (Exact / Bounded) and lifetimes (Allow Once /
-  This Session) instead of a raw tool name and legacy duration list. The
-  typed `PermissionRequest` flows through a native approval bridge
-  (`setPipelineApprovalBroker`) into the prompt, which returns only the
-  selected option ID and lifetime; the broker adds actor identity and
-  decision time, and `ActionLifecycle` validates the selection before issuing
-  the final envelope with the selected option's capabilities exactly. Allow
-  Once is consumed once and never retained; This Session stays in the
-  long-lived active set until revocation. Forged, stale, expired, or revoked
-  selections fail closed, and inline approval performs no grants or
-  protected-policy writes. The flag-off legacy prompt is unchanged.
+  `--permission-pipeline` switch, the TUI approval prompt now shows one
+  screen of complete, Domain-issued approval choices — Allow this action
+  once, Allow this exact action until I close Seepient, and a safely
+  bounded session choice when one is enforceable (bounded/action is never
+  offered). The typed `PermissionRequest` (options + complete choices)
+  flows through a native approval bridge (`setPipelineApprovalBroker`) into
+  the prompt, which returns only a choice ID; the broker resolves it and
+  adds actor identity and decision time, and `ActionLifecycle` validates
+  the option/lifetime pair before issuing the final envelope with the
+  selected option's capabilities exactly. Each choice carries a
+  plain-language authority summary covering the complete capability delta,
+  including mixed-capability actions. Bounded process choices use
+  executable + subcommand matchers only — shells, interpreters, package
+  managers, and build drivers never receive an executable-wide session
+  choice — and candidates are ordered by authority containment (never
+  capability count); incomparable candidates are omitted rather than
+  silently picked. The least-privilege choice is marked Recommended but is
+  never pre-approved; one explicit Enter approves the focused row. Local
+  prompts get a five-minute default deadline (immediate settlement on
+  parent abort, session close, request replacement, or digest change), and
+  a containment preflight fails `approval-unavailable` with a setup message
+  before a prompt is shown when the platform sandbox is missing (visible
+  in `/permissions status`). Action approvals are consumed once and never
+  retained; session choices stay in the long-lived active set until
+  revocation. Forged, stale, expired, or revoked selections fail closed,
+  and inline approval performs no grants or protected-policy writes. The
+  flag-off legacy prompt is unchanged.
 
 ## [v0.4.2] - 2026-08-01
 

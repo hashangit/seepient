@@ -29,6 +29,17 @@ function requestWithOptions(): PermissionRequest {
         supportedLifetimes: ["action"],
       },
     ],
+    approvalChoices: [
+      {
+        choiceId: "opt-exact::action",
+        optionId: "opt-exact",
+        lifetime: "action",
+        title: "Allow this action once",
+        description: "You'll be asked again next time.",
+        authoritySummary: [],
+        recommended: true,
+      },
+    ],
     offeredLifetimes: ["action"],
     createdAt: 0,
     expiresAt: Date.now() + 60_000,

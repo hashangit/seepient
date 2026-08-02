@@ -1,9 +1,8 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { useTheme } from '../hooks/use-theme.js';
 import { extractPattern } from '../../../foundations/grant-pattern.js';
 import type {
-  ApprovalOption,
   PermissionRequest,
   TuiApprovalSelection,
 } from '../../../foundations/contracts/permission-policy.js';
@@ -13,64 +12,11 @@ import type { ApprovalContext, ApprovalDecision, GrantScope } from '../../../fou
 // Native (spec 011) prompt — typed PermissionRequest flow
 // ══════════════════════════════════════════════════════════════════════════
 
-export type PromptTab = 'scope' | 'duration';
-
-/**
- * The MVP offers only `action`/`session` durations, supported by both the
- * request and the selected option (FR-010).
- */
-export function visibleLifetimes(
-  option: ApprovalOption,
-  request?: PermissionRequest,
-): Array<'action' | 'session'> {
-  return option.supportedLifetimes.filter(
-    (l): l is 'action' | 'session' =>
-      (l === 'action' || l === 'session') &&
-      (request === undefined || request.offeredLifetimes.includes(l)),
-  );
-}
-
-/** Least-privilege default scope: exact when offered, else narrowest option. */
-export function defaultScopeIndex(options: ApprovalOption[]): number {
-  const exact = options.findIndex((o) => o.kind === 'exact');
-  return exact >= 0 ? exact : 0;
-}
-
-/** Least-privilege recommended duration: Just this time when offered. */
-export function defaultLifetimeIndex(lifetimes: Array<'action' | 'session'>): number {
-  const action = lifetimes.indexOf('action');
-  return action >= 0 ? action : 0;
-}
-
-/**
- * Build the strict `TuiApprovalSelection` from the visible pair. Stale or
- * out-of-range indices are clamped to the visible set; a request with no
- * representable options can only deny as unavailable (FR-005).
- */
-export function buildSelection(
-  request: PermissionRequest,
-  scopeIdx: number,
-  lifetimeIdx: number,
-): TuiApprovalSelection {
-  const options = request.approvalOptions;
-  if (options.length === 0) return { approved: false, reason: 'approval-unavailable' };
-  const option = options[Math.min(Math.max(scopeIdx, 0), options.length - 1)];
-  const lifetimes = visibleLifetimes(option, request);
-  if (lifetimes.length === 0) return { approved: false, reason: 'approval-unavailable' };
-  const lifetime = lifetimes[Math.min(Math.max(lifetimeIdx, 0), lifetimes.length - 1)];
-  return { approved: true, optionId: option.optionId, lifetime };
-}
-
-/** Pure: move within the visible list without wrapping (FR-015). */
+/** Pure: move within the visible list without wrapping (FR-014). */
 export function clampMove(idx: number, delta: 1 | -1, size: number): number {
   if (size <= 1) return 0;
   return Math.min(Math.max(idx + delta, 0), size - 1);
 }
-
-const DURATION_LABELS: Record<'action' | 'session', { headline: string; detail: string }> = {
-  action: { headline: 'Just this time', detail: "You'll be asked again next time." },
-  session: { headline: 'Until I close Seepient', detail: 'Remember this permission for this session.' },
-};
 
 interface NativePermissionPromptProps {
   /** Immutable policy-issued request; the prompt renders it as-is. */
@@ -80,129 +26,85 @@ interface NativePermissionPromptProps {
 }
 
 /**
- * Native inline tool-approval widget (spec 011). Two tabs — Scope (policy-
- * issued exact/bounded options) and Duration (Just this time / Until I close
- * Seepient) — with keyboard navigation and a two-step consent flow:
+ * Native inline tool-approval widget (spec 011, T028). ONE screen of
+ * complete Domain-issued choices — the UI never combines scope and lifetime
+ * itself (FR-006). Each row is a finished decision (exact/action,
+ * exact/session, or bounded/session); Enter approves the focused row, Escape
+ * and `q` deny.
  *
- *   1. Nothing is preselected; the least-privilege defaults are marked
- *      "Recommended" (FR-011 is a recommendation, not a silent approval).
- *   2. Enter on Scope commits the focused option and advances to Duration.
- *   3. Enter on Duration commits the focused duration AND submits the pair —
- *      approval stays disabled until BOTH are explicitly chosen (product
- *      acceptance feedback).
- *
- * The component owns ONLY transient tab/selection state; it emits the strict
- * `TuiApprovalSelection` and never invents authority from raw tool arguments.
+ * Focus begins on the least-privilege choice WITHOUT pre-approving it
+ * (FR-011); one explicit Enter is required. The component owns ONLY
+ * transient focus state; it emits `{ approved: true, choiceId }` and never
+ * invents authority from raw tool arguments.
  */
 export function PermissionPrompt({ request, onResolve }: NativePermissionPromptProps) {
   const theme = useTheme();
-  const options = request.approvalOptions;
-  // Focus (arrows/digits move it) vs committed selection (Enter fixes it).
-  // State mirrors through refs (CLAUDE.md §6): the useInput handler is
-  // long-lived across renders, so it must read CURRENT values — a stale
-  // closure could submit the wrong pair under rapid keypresses.
-  const [tab, setTabState] = useState<PromptTab>('scope');
-  const tabRef = useRef<PromptTab>('scope');
-  const [scopeFocus, setScopeFocusState] = useState(() => defaultScopeIndex(options));
-  const scopeFocusRef = useRef(scopeFocus);
-  const [lifetimeFocus, setLifetimeFocusState] = useState(() => {
-    const first = options[defaultScopeIndex(options)];
-    return defaultLifetimeIndex(first ? visibleLifetimes(first, request) : []);
-  });
-  const lifetimeFocusRef = useRef(lifetimeFocus);
-  const [selectedScope, setSelectedScopeState] = useState<number | null>(null);
-  const selectedScopeRef = useRef<number | null>(null);
-  const [selectedLifetime, setSelectedLifetimeState] = useState<number | null>(null);
-  const selectedLifetimeRef = useRef<number | null>(null);
-
-  const setTab = (t: PromptTab): void => {
-    tabRef.current = t;
-    setTabState(t);
-  };
-  const setScopeFocus = (i: number): void => {
-    scopeFocusRef.current = i;
-    setScopeFocusState(i);
-  };
-  const setLifetimeFocus = (i: number): void => {
-    lifetimeFocusRef.current = i;
-    setLifetimeFocusState(i);
-  };
-  const commitScope = (i: number): void => {
-    selectedScopeRef.current = i;
-    setSelectedScopeState(i);
-  };
-  const commitLifetime = (i: number): void => {
-    selectedLifetimeRef.current = i;
-    setSelectedLifetimeState(i);
+  const choices = request.approvalChoices;
+  const [focus, setFocusState] = useState(0);
+  const focusRef = useRef(0);
+  const resolvedRef = useRef(false);
+  const setFocus = (i: number): void => {
+    focusRef.current = i;
+    setFocusState(i);
   };
 
-  // Current visible pair — clamped so a stale index (new request or a
-  // narrower option) can never select a nonexistent item.
-  const option = options[Math.min(Math.max(scopeFocus, 0), options.length - 1)];
-  const lifetimes = option ? visibleLifetimes(option, request) : [];
-  const lifetime = lifetimes[Math.min(Math.max(lifetimeFocus, 0), lifetimes.length - 1)];
+  // Defensive: a request without Domain choices is not actionable. Deny as
+  // unavailable immediately rather than hanging until the broker deadline
+  // (FR-001).
+  useEffect(() => {
+    if (choices.length === 0 && !resolvedRef.current) {
+      resolvedRef.current = true;
+      onResolve({ approved: false, reason: "approval-unavailable" });
+    }
+  }, [choices.length, onResolve]);
 
-  const recommendedScope = defaultScopeIndex(options);
-  const recommendedLifetime = defaultLifetimeIndex(
-    option ? visibleLifetimes(option, request) : [],
-  );
-
+  // CLAUDE.md §6: the useInput handler is long-lived across renders, so it
+  // must read CURRENT values through refs — a stale closure could submit the
+  // wrong choice under rapid keypresses.
   useInput((input, key) => {
-    // Tab / Shift+Tab (key.tab with key.shift) and Left/Right switch tabs
-    // (FR-014). With two tabs, direction is symmetric.
-    const currentTab = tabRef.current;
-    if (key.tab || key.rightArrow || key.leftArrow) {
-      setTab(currentTab === 'scope' ? 'duration' : 'scope');
-    } else if (key.upArrow) {
-      if (currentTab === 'scope') setScopeFocus(clampMove(scopeFocusRef.current, -1, options.length));
-      else setLifetimeFocus(clampMove(lifetimeFocusRef.current, -1, lifetimes.length));
+    if (resolvedRef.current) return;
+    const n = choices.length;
+    if (key.upArrow) {
+      setFocus(clampMove(focusRef.current, -1, n));
     } else if (key.downArrow) {
-      if (currentTab === 'scope') setScopeFocus(clampMove(scopeFocusRef.current, 1, options.length));
-      else setLifetimeFocus(clampMove(lifetimeFocusRef.current, 1, lifetimes.length));
+      setFocus(clampMove(focusRef.current, 1, n));
     } else if (key.return) {
-      if (currentTab === 'scope') {
-        // Commit the focused scope, then let the user choose the duration.
-        commitScope(scopeFocusRef.current);
-        setTab('duration');
-      } else if (selectedScopeRef.current === null) {
-        // Approval stays disabled until BOTH are explicitly chosen: guide
-        // the user back to the Scope tab instead of submitting.
-        setTab('scope');
-      } else {
-        commitLifetime(lifetimeFocusRef.current);
-        onResolve(buildSelection(request, selectedScopeRef.current, lifetimeFocusRef.current));
+      const choice = choices[Math.min(Math.max(focusRef.current, 0), n - 1)];
+      if (choice) {
+        resolvedRef.current = true;
+        onResolve({ approved: true, choiceId: choice.choiceId });
       }
-    } else if (key.escape || input === 'q') {
-      onResolve({ approved: false, reason: 'user-denied' });
+    } else if (key.escape || input === "q") {
+      resolvedRef.current = true;
+      onResolve({ approved: false, reason: "user-denied" });
     } else if (/^[0-9]$/.test(input)) {
-      const n = parseInt(input, 10);
-      if (currentTab === 'scope' && n >= 1 && n <= options.length) {
-        setScopeFocus(n - 1);
-      } else if (currentTab === 'duration' && n >= 1 && n <= lifetimes.length) {
-        setLifetimeFocus(n - 1);
-      }
+      const idx = parseInt(input, 10) - 1;
+      if (idx >= 0 && idx < n) setFocus(idx);
     }
     // Unsupported keys have no effect.
   });
 
-  const scopeColor = tab === 'scope' ? theme.yellow : theme.fgGutter;
-  const durationColor = tab === 'duration' ? theme.yellow : theme.fgGutter;
-  const selectedOption = selectedScope !== null
-    ? options[Math.min(Math.max(selectedScope, 0), options.length - 1)]
-    : undefined;
-  const selectedDuration = selectedLifetime !== null && selectedOption
-    ? visibleLifetimes(selectedOption, request)[
-        Math.min(Math.max(selectedLifetime, 0), visibleLifetimes(selectedOption, request).length - 1)
-      ]
-    : undefined;
+  if (choices.length === 0) {
+    return (
+      <Box flexDirection="column" borderStyle="round" borderColor={theme.yellow} paddingX={1}>
+        <Text color={theme.yellow} bold>◆ </Text>
+        <Text color={theme.fg}>Permission needed</Text>
+        <Text color={theme.fgDim}>
+          {"  No approval choices are available for this request. It will be denied as unavailable."}
+        </Text>
+      </Box>
+    );
+  }
+
+  const focused = choices[Math.min(Math.max(focus, 0), choices.length - 1)];
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={theme.yellow} paddingX={1}>
       {/* Title row — request identity + action summary (tamper-proof). */}
       <Box>
         <Text color={theme.yellow} bold>◆ </Text>
-        <Text color={theme.fg} bold>{request.action.title}</Text>
-        <Text color={theme.fgDim}> ── {request.action.effects.join(', ') || 'no effects'}</Text>
+        <Text color={theme.fg} bold>Permission needed</Text>
+        <Text color={theme.fgDim}> ── {request.action.title}</Text>
       </Box>
       <Box>
         <Text color={theme.cyan}>  Request </Text>
@@ -218,78 +120,54 @@ export function PermissionPrompt({ request, onResolve }: NativePermissionPromptP
         </Box>
       ) : null}
 
-      {/* Tabs */}
+      {/* One list of complete choices — only what Domain issued. */}
       <Box marginTop={1}>
-        <Text color={scopeColor} bold>
-          {tab === 'scope' ? '▸' : ' '} [1] Scope
-        </Text>
-        <Text>  </Text>
-        <Text color={durationColor} bold>
-          {tab === 'duration' ? '▸' : ' '} [2] Duration
-        </Text>
+        <Text color={theme.cyan}>  Choose one:</Text>
+      </Box>
+      <Box flexDirection="column">
+        {choices.map((choice, i) => {
+          const isFocus = i === focus;
+          const accent = theme.green;
+          return (
+            <Box
+              key={choice.choiceId}
+              borderStyle={isFocus ? "round" : "single"}
+              borderColor={isFocus ? accent : theme.fgGutter}
+            >
+              <Text color={accent} bold>{i + 1} </Text>
+              <Text bold color={isFocus ? accent : theme.fg}>
+                {isFocus ? "▸ " : "  "}
+                {choice.title}
+              </Text>
+              <Text color={theme.fgDim}> — {choice.description}</Text>
+              {choice.recommended ? (
+                <Text color={theme.fgDim}>  (recommended)</Text>
+              ) : null}
+            </Box>
+          );
+        })}
       </Box>
 
-      {/* Scope tab — only the options supplied by Domain. */}
-      {tab === 'scope' ? (
-        <Box flexDirection="column" marginTop={1}>
-          {options.map((opt, i) => {
-            const isFocus = i === scopeFocus;
-            const isCommitted = i === selectedScope;
-            const isRecommended = i === recommendedScope;
-            const accent = theme.green;
-            return (
-              <Box key={opt.optionId} borderStyle={isFocus ? 'round' : 'single'} borderColor={isFocus ? accent : theme.fgGutter}>
-                <Text color={accent} bold>{i + 1} </Text>
-                <Text bold color={isFocus ? accent : theme.fg}>
-                  {isCommitted ? '✓ ' : (isFocus ? '▸ ' : '  ')}
-                  {truncate(opt.label, 110)}
-                </Text>
-                {isRecommended ? (
-                  <Text color={theme.fgDim}>  (recommended)</Text>
-                ) : null}
-              </Box>
-            );
-          })}
-        </Box>
-      ) : (
-        <Box flexDirection="column" marginTop={1}>
-          {lifetimes.map((l, i) => {
-            const isFocus = i === lifetimeFocus;
-            const isCommitted = i === selectedLifetime;
-            const isRecommended = i === recommendedLifetime;
-            const accent = theme.green;
-            return (
-              <Box key={l} borderStyle={isFocus ? 'round' : 'single'} borderColor={isFocus ? accent : theme.fgGutter}>
-                <Text color={accent} bold>{i + 1} </Text>
-                <Text bold color={isFocus ? accent : theme.fg}>
-                  {isCommitted ? '✓ ' : (isFocus ? '▸ ' : '  ')}
-                  {DURATION_LABELS[l].headline}
-                </Text>
-                <Text color={theme.fgDim}> — {DURATION_LABELS[l].detail}</Text>
-                {isRecommended ? (
-                  <Text color={theme.fgDim}>  (recommended)</Text>
-                ) : null}
-              </Box>
-            );
-          })}
-        </Box>
-      )}
-
-      {/* Summary of the committed pair — visible at all times. */}
+      {/* Full authority delta of the FOCUSED choice, before submission (FR-016). */}
       <Box marginTop={1}>
-        <Text color={theme.cyan}>  Selected </Text>
-        {selectedOption && selectedDuration ? (
-          <Text color={theme.fg}>
-            {truncate(selectedOption.label, 60)} · {DURATION_LABELS[selectedDuration].headline}
-          </Text>
+        <Text color={theme.cyan}>  What this allows </Text>
+      </Box>
+      <Box flexDirection="column" paddingLeft={2}>
+        {focused.authoritySummary.length > 0 ? (
+          focused.authoritySummary.map((line) => (
+            <Text key={line} color={theme.fg}>• {line}</Text>
+          ))
         ) : (
-          <Text color={theme.fgDim}>— choose a scope, then a duration (both are required)</Text>
+          <Text color={theme.fgDim}>— no additional authority</Text>
         )}
+      </Box>
+      <Box>
+        <Text color={theme.fgDim}>  Remembered: {focused.description}</Text>
       </Box>
 
       <Box marginTop={1}>
         <Text color={theme.fgDim}>
-          {' '}tab/←→ switch · ↑↓ move · 1-{Math.max(options.length, lifetimes.length)} focus · enter select/confirm · esc/q deny
+          {' '}↑↓ move · 1-{choices.length} focus · enter approve · esc/q deny
         </Text>
       </Box>
     </Box>

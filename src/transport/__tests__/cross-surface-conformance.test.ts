@@ -232,7 +232,9 @@ function approved(req: PermissionRequest): PermissionDecision {
 function selection(req: PermissionRequest): TuiApprovalSelection {
   return {
     approved: true,
-    optionId: req.approvalOptions[0]?.optionId ?? "opt-1",
-    lifetime: "action",
+    choiceId:
+      req.approvalChoices.find((c) => c.lifetime === "action")?.choiceId ??
+      req.approvalChoices[0]?.choiceId ??
+      "opt-1::action",
   };
 }

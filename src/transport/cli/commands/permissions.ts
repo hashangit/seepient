@@ -110,7 +110,7 @@ export const permissionsHandler: CommandHandler = async (ctx) => {
   // through PolicyStore.compareAndSet — never through an effectful tool or
   // a worktree file. Requires the protected policy store to be configured.
   if (sub === 'status') {
-    return { output: renderStatus(store, policyStore) };
+    return { output: renderStatus(store, policyStore, ctx.agent.getContainmentStatus?.()) };
   }
 
   if (sub === 'propose') {
@@ -226,8 +226,22 @@ function noPolicyStore(): { output: string } {
 function renderStatus(
   store: { list(): Array<{ scope: string }> } | null | undefined,
   policyStore: unknown | null | undefined,
+  containment: import("../../../capabilities/execution/containment-preflight.js").ContainmentPreflightResult | undefined,
 ): string {
   const lines: string[] = [chalk.bold.cyan('Permission Status (spec 008)'), ''];
+  lines.push(`${chalk.bold('Containment (spec 011 preflight):')}`);
+  if (containment?.ok) {
+    lines.push(`  ${chalk.green('active')} — backend ${chalk.cyan(containment.backend)}`);
+    if (containment.workspaceRoot) {
+      lines.push(`  writable workspace root: ${chalk.cyan(containment.workspaceRoot)}`);
+    }
+  } else if (containment) {
+    lines.push(chalk.yellow(`  unavailable (${containment.reason})`));
+    lines.push(chalk.dim(`  ${containment.setupHint}`));
+  } else {
+    lines.push(chalk.dim('  (pipeline not enabled on this surface)'));
+  }
+  lines.push('');
   lines.push(`${chalk.bold('Legacy grants:')}`);
   if (store) {
     const counts: Record<string, number> = { session: 0, project: 0, global: 0 };

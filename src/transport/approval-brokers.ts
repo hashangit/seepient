@@ -112,7 +112,11 @@ export class InlineApprovalBroker implements ApprovalBroker {
 
   constructor(presenter: InlineApprovalPresenter, opts?: { deadlineMs?: number }) {
     this.presenter = presenter;
-    this.deadlineMs = opts?.deadlineMs ?? 30_000;
+    // Spec 011 (FR-020): a five-minute default deadline — a local prompt
+    // containing an unfamiliar command or filesystem scope needs human
+    // reading time. Shorter deadlines may be supplied for remote/headless
+    // transports.
+    this.deadlineMs = opts?.deadlineMs ?? 300_000;
   }
 
   async request(
@@ -186,18 +190,28 @@ export class InlineApprovalBroker implements ApprovalBroker {
     if (!selection.approved) {
       return this.denial(req, selection.reason ?? "user-denied");
     }
-    // The selection must name a policy-issued option and an offered lifetime;
-    // anything else is an invalid response, never a fallback option.
+    // Spec 011 (T030): the selection must name a Domain-issued COMPLETE
+    // choice; the broker resolves it against the frozen request. The prompt
+    // never supplies an option/lifetime pair, so a forged choice ID cannot
+    // recombine fields into a new authority.
+    const choice = req.approvalChoices.find(
+      (c) => c.choiceId === selection.choiceId,
+    );
+    if (!choice) {
+      return this.denial(req, "invalid-approval-response");
+    }
+    // Defense in depth: the choice's option must exist and the pair must be
+    // offered by both the option and the request.
     const option = req.approvalOptions.find(
-      (o) => o.optionId === selection.optionId,
+      (o) => o.optionId === choice.optionId,
     );
     if (!option) {
       return this.denial(req, "invalid-approval-response");
     }
     if (
-      !option.supportedLifetimes.includes(selection.lifetime) ||
-      !req.offeredLifetimes.includes(selection.lifetime) ||
-      (selection.lifetime === "session" && !req.sessionId)
+      !option.supportedLifetimes.includes(choice.lifetime) ||
+      !req.offeredLifetimes.includes(choice.lifetime) ||
+      (choice.lifetime === "session" && !req.sessionId)
     ) {
       return this.denial(req, "invalid-approval-response");
     }
@@ -205,8 +219,8 @@ export class InlineApprovalBroker implements ApprovalBroker {
       approved: true,
       requestId: req.requestId,
       actionDigest: req.actionDigest,
-      optionId: selection.optionId,
-      lifetime: selection.lifetime,
+      optionId: choice.optionId,
+      lifetime: choice.lifetime,
       actorId: "inline-broker",
       decidedAt: Date.now(),
     };

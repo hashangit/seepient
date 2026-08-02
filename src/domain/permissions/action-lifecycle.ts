@@ -387,6 +387,31 @@ export class ActionLifecycle {
           },
         };
       }
+      // Defense in depth (spec 011 T030): when the request carries complete
+      // Domain-issued choices, the approved option/lifetime pair must be one
+      // of them — a decision that cannot be expressed as a choice cannot
+      // come from a compliant surface.
+      if (decision.request.approvalChoices.length > 0) {
+        const matchesChoice = decision.request.approvalChoices.some(
+          (c) => c.optionId === option.optionId && c.lifetime === lifetimeKind,
+        );
+        if (!matchesChoice) {
+          const outcome = this.toOutcome(action, "denied", undefined, "invalid-approval-response");
+          await this.record(action, "denied", "invalid-approval-response");
+          return {
+            decision,
+            approval: answer,
+            outcome,
+            toolResult: {
+              output: denialOutput(
+                "invalid-approval-response",
+                "Approval option/lifetime pair is not a Domain-issued choice",
+              ),
+              success: false,
+            },
+          };
+        }
+      }
       // Resolve the typed lifetime. A session lifetime requires a bound
       // session identity and fails closed on revocation before issuance.
       let envelopeLifetime: CapabilityLifetime;

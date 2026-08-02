@@ -413,6 +413,17 @@ export function wsLegacyApprovalRequest(
         supportedLifetimes: ["action"],
       },
     ],
+    approvalChoices: [
+      {
+        choiceId: `ws-exact-${callId}::action`,
+        optionId: `ws-exact-${callId}`,
+        lifetime: "action",
+        title: "Allow this action once",
+        description: "You'll be asked again next time.",
+        authoritySummary: [`Approve the tool call shown (${callName})`],
+        recommended: true,
+      },
+    ],
     offeredLifetimes: ["action"],
     createdAt: now,
     expiresAt: now + APPROVAL_TIMEOUT_MS,

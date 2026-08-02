@@ -45,7 +45,13 @@ describe("REAL tool execution through the new pipeline (reviewer fix #2)", () =>
     // Approve via inline broker
     const presenter: InlineApprovalPresenter = {
       async prompt(req) {
-        return { approved: true, optionId: req.approvalOptions[0]?.optionId ?? "opt-1", lifetime: "action" };
+        return {
+          approved: true,
+          choiceId:
+            req.approvalChoices.find((c) => c.lifetime === "action")?.choiceId ??
+            req.approvalChoices[0]?.choiceId ??
+            "opt-1::action",
+        };
       },
     };
     const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary({ allowFallback: true });
@@ -119,7 +125,20 @@ describe("REAL tool execution through the new pipeline (reviewer fix #2)", () =>
       runId: "r1",
       workspaceRoot: dir,
       modelProviderClass: "openai",
-      approvalBroker: new InlineApprovalBroker({ async prompt(req) { return { approved: true, optionId: req.approvalOptions[0]?.optionId ?? "opt-1", lifetime: "action" }; } }, { deadlineMs: 5000 }),
+      approvalBroker: new InlineApprovalBroker(
+        {
+          async prompt(req) {
+            return {
+              approved: true,
+              choiceId:
+                req.approvalChoices.find((c) => c.lifetime === "action")?.choiceId ??
+                req.approvalChoices[0]?.choiceId ??
+                "opt-1::action",
+            };
+          },
+        },
+        { deadlineMs: 5000 },
+      ),
       executionBoundary: boundary,
       auditRoot: dir,
       artifacts: sharedArtifacts,

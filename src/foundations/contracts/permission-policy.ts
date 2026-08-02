@@ -213,12 +213,36 @@ export interface ApprovalOption {
 
 /**
  * Transient UI selection — NOT an authority decision. The prompt emits only
- * the selected option ID and lifetime; the trusted broker supplies request
- * identity, actor, and decision time (spec 011 FR-004).
+ * the selected choice ID; the trusted broker resolves it against the
+ * immutable request and supplies request identity, actor, and decision time
+ * (spec 011 FR-004). The UI never combines scope and lifetime itself.
  */
 export type TuiApprovalSelection =
-  | { approved: true; optionId: string; lifetime: "action" | "session" }
+  | { approved: true; choiceId: string }
   | { approved: false; reason?: "user-denied" | "approval-unavailable" };
+
+/**
+ * A complete, Domain-issued approval outcome: one scope option paired with
+ * one lifetime, plus end-user copy derived from the option's capability
+ * delta (spec 011 FR-007/FR-010). The TUI selects a choice; it never
+ * constructs one.
+ */
+export interface ApprovalChoice {
+  /** Stable within the request; derived from option ID + lifetime. */
+  choiceId: string;
+  /** Names one option in the same request. */
+  optionId: string;
+  /** MVP: action or session. Bounded/action is never issued (FR-010). */
+  lifetime: "action" | "session";
+  /** Short consent headline, e.g. "Allow this action once". */
+  title: string;
+  /** What Seepient will ask again or remember (plain language). */
+  description: string;
+  /** One plain-language line per material authority in the delta. */
+  authoritySummary: string[];
+  /** Least-privileged valid choice (exact/action). Never preselected. */
+  recommended: boolean;
+}
 
 export interface PermissionRequest {
   requestId: string;
@@ -232,6 +256,11 @@ export interface PermissionRequest {
   requestedCapabilities: Capability[];
   /** Policy-issued options; a request with no options cannot be approved. */
   approvalOptions: ApprovalOption[];
+  /**
+   * Complete Domain-issued choices. A native request with no choices
+   * cannot be approved — the surface fails as `approval-unavailable`.
+   */
+  approvalChoices: ApprovalChoice[];
   offeredLifetimes: Array<"action" | "run" | "session">;
   createdAt: number;
   expiresAt: number;

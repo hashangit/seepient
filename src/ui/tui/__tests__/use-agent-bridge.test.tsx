@@ -15,6 +15,7 @@ import type { FeedApi } from "../hooks/use-feed.js";
 import type { Agent } from "../../../transport/cli/agent.js";
 import type {
   ApprovalBroker,
+  PermissionDecision,
   PermissionRequest,
   TuiApprovalSelection,
 } from "../../../foundations/contracts/permission-policy.js";
@@ -64,6 +65,29 @@ function fakeRequest(): PermissionRequest {
         supportedLifetimes: ["action", "session"],
       },
     ],
+    // Spec 011 (T026/T027): one complete choice per option/lifetime pair.
+    // The exact option supports action + session (sessionId present), so
+    // both are issued; the least-privileged exact/action is recommended.
+    approvalChoices: [
+      {
+        choiceId: "opt-1::action",
+        optionId: "opt-1",
+        lifetime: "action",
+        title: "Allow this action once",
+        description: "You'll be asked again next time.",
+        authoritySummary: ["Write `/p/a.txt`"],
+        recommended: true,
+      },
+      {
+        choiceId: "opt-1::session",
+        optionId: "opt-1",
+        lifetime: "session",
+        title: "Allow this exact action until I close Seepient",
+        description: "Seepient will remember this permission until you close it.",
+        authoritySummary: ["Write `/p/a.txt`"],
+        recommended: false,
+      },
+    ],
     offeredLifetimes: ["action", "session"],
     createdAt: 0,
     expiresAt: Date.now() + 60_000,
@@ -73,6 +97,9 @@ function fakeRequest(): PermissionRequest {
 interface FakeAgent extends Agent {
   getInstalledBroker(): ApprovalBroker | undefined;
   clearCount(): number;
+  /** Last decision the broker returned for a chat — lets tests assert the
+   *  enriched optionId/lifetime the broker resolved from a choice ID. */
+  lastDecision: PermissionDecision | null;
 }
 
 function fakePipelineAgent(): FakeAgent {
@@ -95,6 +122,7 @@ function fakePipelineAgent(): FakeAgent {
     ) => {
       // The agent loop consults the INSTALLED broker for needs-approval.
       const decision = await installed!.request(fakeRequest(), { signal });
+      agent.lastDecision = decision;
       onStep?.({
         type: "tool_call",
         content: "",
@@ -111,7 +139,8 @@ function fakePipelineAgent(): FakeAgent {
         usage: { promptTokens: 1, completionTokens: 1, cost: 0 },
       };
     },
-  } as unknown as Agent;
+    lastDecision: null as PermissionDecision | null,
+  } as unknown as FakeAgent;
   return Object.assign(agent, {
     getInstalledBroker: () => installed,
     clearCount: () => clears,
@@ -139,7 +168,8 @@ function fakeLegacyAgent(): FakeAgent {
         legacyDecision: decision,
       };
     },
-  } as unknown as Agent;
+    lastDecision: null as PermissionDecision | null,
+  } as unknown as FakeAgent;
   return Object.assign(agent, {
     getInstalledBroker: () => undefined,
     clearCount: () => clears,
@@ -184,7 +214,50 @@ function fakeAbortingAgent(): FakeAgent {
         decision,
       };
     },
-  } as unknown as Agent;
+    lastDecision: null as PermissionDecision | null,
+  } as unknown as FakeAgent;
+  return Object.assign(agent, {
+    getInstalledBroker: () => installed,
+    clearCount: () => clears,
+  }) as unknown as FakeAgent;
+}
+
+/**
+ * FR-020: a second approval request fired while the first prompt is still
+ * open replaces it — the presenter settles the FIRST prompt immediately with
+ * approval-unavailable instead of waiting for the broker deadline.
+ */
+function fakeReplacingAgent(): FakeAgent {
+  let installed: ApprovalBroker | undefined;
+  let clears = 0;
+  const agent = {
+    createAbortSignal: () => new AbortController().signal,
+    isPermissionPipelineEnabled: () => true,
+    setPipelineApprovalBroker: (b?: ApprovalBroker) => {
+      installed = b;
+      if (b === undefined) clears++;
+    },
+    abort: () => {},
+    chat: async (_input: string) => {
+      // First request: its prompt stays open (no selection, no abort).
+      const first = installed!.request(fakeRequest(), {});
+      // A second request fires while the first prompt is pending (FR-020).
+      // The presenter settles the first synchronously inside this call.
+      const secondSignal = new AbortController();
+      const second = installed!.request(fakeRequest(), { signal: secondSignal.signal });
+      agent.lastDecision = await first;
+      // Settle the second prompt (abort path) so the chat can complete.
+      setTimeout(() => secondSignal.abort(), 10);
+      const secondDecision = await second;
+      return {
+        finishReason: "success",
+        usage: { promptTokens: 1, completionTokens: 1, cost: 0 },
+        firstDecision: agent.lastDecision,
+        secondDecision,
+      };
+    },
+    lastDecision: null as PermissionDecision | null,
+  } as unknown as FakeAgent;
   return Object.assign(agent, {
     getInstalledBroker: () => installed,
     clearCount: () => clears,
@@ -210,13 +283,25 @@ describe("use-agent native bridge (T010)", () => {
     // The broker is installed while the prompt is visible.
     expect(agent.getInstalledBroker()).toBeDefined();
 
-    // The user submits a transient selection; the broker enriches it.
-    const selection: TuiApprovalSelection = { approved: true, optionId: "opt-1", lifetime: "action" };
+    // The user submits a transient CHOICE-ID selection (spec 011: the UI
+    // never recombines option/lifetime itself); the broker enriches it.
+    const selection: TuiApprovalSelection = { approved: true, choiceId: "opt-1::action" };
     api()!.resolvePermission(selection);
     await submitPromise;
     await waitFor(() => api()!.pendingPermission === null, "pending cleared");
 
     expect(api()!.pendingPermission).toBeNull();
+    // The broker resolves the choice ID back to the option/lifetime pair on
+    // the shared PermissionDecision (FR-004 enrichment).
+    expect(agent.lastDecision).toEqual({
+      approved: true,
+      requestId: "req-hook",
+      actionDigest: "ad-1",
+      optionId: "opt-1",
+      lifetime: "action",
+      actorId: "inline-broker",
+      decidedAt: expect.any(Number),
+    });
     // The seam is cleared when the chat completes.
     expect(agent.clearCount()).toBeGreaterThan(0);
     unmount();
@@ -254,6 +339,51 @@ describe("use-agent native bridge (T010)", () => {
     await waitFor(() => api()!.pendingPermission === null, "pending cleared on abort");
     expect(api()!.pendingPermission).toBeNull();
     unmount();
+  });
+
+  it("a second approval request settles the first pending prompt as approval-unavailable (FR-020)", async () => {
+    const agent = fakeReplacingAgent();
+    const { api, unmount } = mountHook(agent as unknown as Agent);
+    await tick();
+
+    const submitPromise = api()!.submit("write the file");
+    await waitFor(() => api()!.pendingPermission !== null, "pending permission set");
+
+    // The second request fires while the first prompt is still open: the
+    // presenter settles the first immediately — the chat must complete long
+    // before the 5-minute broker deadline.
+    await submitPromise;
+    expect(agent.lastDecision).toEqual({
+      approved: false,
+      requestId: "req-hook",
+      actionDigest: "ad-1",
+      actorId: "inline-broker",
+      reason: "approval-unavailable",
+      decidedAt: expect.any(Number),
+    });
+    unmount();
+  });
+
+  it("unmounting the TUI settles a pending prompt as approval-unavailable (FR-020)", async () => {
+    const agent = fakePipelineAgent();
+    const { api, unmount } = mountHook(agent as unknown as Agent);
+    await tick();
+
+    const submitPromise = api()!.submit("write the file");
+    await waitFor(() => api()!.pendingPermission !== null, "pending permission set");
+
+    // Tear the TUI down while the prompt is still open: the pending prompt
+    // must settle immediately instead of hanging until the broker deadline.
+    unmount();
+    await submitPromise;
+    expect(agent.lastDecision).toEqual({
+      approved: false,
+      requestId: "req-hook",
+      actionDigest: "ad-1",
+      actorId: "inline-broker",
+      reason: "approval-unavailable",
+      decidedAt: expect.any(Number),
+    });
   });
 
   it("legacy (flag-off) path keeps raw tool name/arguments and legacy decisions", async () => {

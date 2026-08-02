@@ -174,13 +174,13 @@ function fakeBoundary(result: ToolResult, opts?: { throwOnExec?: boolean }): Exe
   };
 }
 
-function approved(req: PermissionRequest, actor = "user", lifetime: "action" | "run" | "session" = "action"): PermissionDecision {
+function approved(req: PermissionRequest, actor = "user", lifetime: "action" | "run" | "session" = "action", optionId?: string): PermissionDecision {
   return {
     approved: true,
     requestId: req.requestId,
     actionDigest: req.actionDigest,
     // Spec 011: an approved decision must name a policy-issued option.
-    optionId: req.approvalOptions[0]?.optionId ?? "opt-1",
+    optionId: optionId ?? req.approvalOptions[0]?.optionId ?? "opt-1",
     lifetime,
     actorId: actor,
     decidedAt: Date.now(),
@@ -377,19 +377,19 @@ describe("ActionLifecycle (T110)", () => {
       effects: [
         {
           kind: "process-exec",
-          command: { executable: "/bin/sh", argv: ["-c", "npm test"], cwd: "/p" },
+          command: { executable: "/usr/bin/git", argv: ["status", "--porcelain"], cwd: "/p" },
           requestedRoots: [],
         },
       ],
       display: {
         title: "run",
-        summary: "npm test",
+        summary: "git status",
         canonicalTargets: [],
         effects: ["process-exec"],
       },
       operation: {
         kind: "process",
-        command: { executable: "/bin/sh", argv: ["-c", "npm test"], cwd: "/p" },
+        command: { executable: "/usr/bin/git", argv: ["status", "--porcelain"], cwd: "/p" },
         roots: [],
       },
     };
@@ -415,15 +415,19 @@ describe("ActionLifecycle (T110)", () => {
       },
     };
     const ctx = policyCtx({
+      sessionId: "sess-1",
       deploymentCeiling: set({ kind: "process" }),
       principalPolicy: set({ kind: "process" }),
       runtimeBaseline: set({ kind: "process" }),
       activeCapabilities: set(),
     });
+    // The bounded option is session-only (FR-010): approve bounded/session,
+    // the only Domain-issued choice for it.
     const broker: ApprovalBroker = {
       mode: "inline",
       async request(req) {
-        return approvedBounded(req);
+        const bounded = req.approvalOptions.find((o) => o.kind === "bounded");
+        return approved(req, "user", "session", bounded?.optionId);
       },
     };
     const lifecycle = new ActionLifecycle({
@@ -433,6 +437,7 @@ describe("ActionLifecycle (T110)", () => {
       boundary: recordingBoundary,
       audit,
       activeCapabilities: { capabilities: [] },
+      sessionId: "sess-1",
     });
     const result = await lifecycle.run(processAction());
     expect(result.outcome.state).toBe("succeeded");
@@ -440,9 +445,9 @@ describe("ActionLifecycle (T110)", () => {
     // The final envelope carries the bounded option's capabilities exactly —
     // never the action's narrower required set, never a wider fallback.
     expect(issued!.capabilities).toEqual([
-      { kind: "process", executable: "/bin/sh" },
+      { kind: "process", executable: "/usr/bin/git", argvPrefix: ["status"] },
     ]);
-    expect(issued!.lifetime.kind).toBe("action");
+    expect(issued!.lifetime.kind).toBe("session");
   });
 
   it("action-lifetime approval is consumed once: a matching later action asks again", async () => {
@@ -531,6 +536,58 @@ describe("ActionLifecycle (T110)", () => {
     const result = await lifecycle.run(writeAction());
     expect(result.outcome.state).toBe("denied");
     expect(result.outcome.denial).toBe("invalid-approval-response");
+  });
+
+  it("approved decision whose option/lifetime pair is not a Domain-issued choice denies (T030)", async () => {
+    const audit = new LocalAuditStore({ root: dir });
+    let dispatchCount = 0;
+    const boundary: ExecutionBoundary = {
+      capabilities: LOCAL_BACKEND,
+      async execute(a, _env) {
+        dispatchCount++;
+        return {
+          state: "succeeded",
+          result: { output: "should-not-run", success: true },
+          evidence: {
+            backend: "local-native",
+            actionDigest: a.actionDigest,
+            executorId: "test",
+            operationKind: a.operation.kind,
+          },
+        };
+      },
+    };
+    // A session identity exists, so the request offers exact/action,
+    // exact/session, and bounded/session — bounded/action is never a
+    // Domain-issued choice (FR-010). The broker names the bounded option
+    // with an action lifetime: the pair is individually offered but is NOT
+    // one of the request's complete choices (T030 defense in depth).
+    const ctx = policyCtx({
+      sessionId: "sess-1",
+      deploymentCeiling: set({ kind: "process" }),
+      principalPolicy: set({ kind: "process" }),
+      runtimeBaseline: set({ kind: "process" }),
+      activeCapabilities: set(),
+    });
+    const broker: ApprovalBroker = {
+      mode: "inline",
+      async request(req) {
+        return approvedBounded(req); // bounded option + action lifetime
+      },
+    };
+    const lifecycle = new ActionLifecycle({
+      policy: new PolicyEngine("digest"),
+      policyContext: ctx,
+      broker,
+      boundary,
+      audit,
+      activeCapabilities: { capabilities: [] },
+      sessionId: "sess-1",
+    });
+    const result = await lifecycle.run(processAction());
+    expect(result.outcome.state).toBe("denied");
+    expect(result.outcome.denial).toBe("invalid-approval-response");
+    expect(dispatchCount).toBe(0);
   });
 
   it("unsupported lifetime denies with invalid-approval-response", async () => {

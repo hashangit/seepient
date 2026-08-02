@@ -12,7 +12,7 @@
  *    approval-unavailable at the engine.
  */
 import { describe, it, expect } from "vitest";
-import { buildApprovalOptions } from "../approval-options.js";
+import { buildApprovalChoices, buildApprovalOptions } from "../approval-options.js";
 import type {
   ApprovalOption,
   Capability,
@@ -132,15 +132,17 @@ describe("exact option invariants", () => {
 });
 
 describe("bounded shape validation (backend enforcement)", () => {
-  it("widens process argv to executable-bound for backends enforcing process", () => {
+  it("widens process to an executable + FIRST-argv matcher (FR-009)", () => {
     const missing = [
-      { kind: "process" as const, executable: "/bin/sh", argvPrefix: ["-c", "npm test"] },
+      { kind: "process" as const, executable: "/usr/bin/git", argvPrefix: ["status", "--porcelain"] },
     ];
     const options = build(missing);
     const bounded = options!.find((o) => o.kind === "bounded");
     expect(bounded).toBeDefined();
+    // The bounded matcher pins the executable AND the first argv token —
+    // never the full argv, never an executable-only widening.
     expect(bounded!.capabilities).toEqual([
-      { kind: "process", executable: "/bin/sh" },
+      { kind: "process", executable: "/usr/bin/git", argvPrefix: ["status"] },
     ]);
   });
 
@@ -204,6 +206,126 @@ describe("bounded shape validation (backend enforcement)", () => {
     // by the engine before needs-approval is ever offered.
     expect(options!.map((o) => o.kind)).toEqual(["exact"]);
   });
+  it("never offers a bounded option for general executors (FR-009)", () => {
+    // bash -c is arbitrary execution; pinning a subcommand matcher on a
+    // general executor still permits anything, so the widening is omitted.
+    const missing = [
+      { kind: "process" as const, executable: "/bin/bash", argvPrefix: ["-c", "ls"] },
+    ];
+    const options = build(missing);
+    expect(options!.map((o) => o.kind)).toEqual(["exact"]);
+  });
+
+  it("keeps the NARROWEST candidate when bounded candidates are comparable", () => {
+    // Two widening shapes are representable: [git status, read-file exact]
+    // and [git status, read-root /proj]. The read-root candidate COVERS the
+    // other (its root contains the exact read-file), so containment ordering
+    // drops the covering candidate and keeps the narrowest — the bounded
+    // option is least privilege, never the broader shape (product
+    // acceptance).
+    const missing = [
+      { kind: "read-file" as const, path: "/proj/a.txt" },
+      { kind: "process" as const, executable: "/usr/bin/git", argvPrefix: ["status"] },
+    ];
+    const options = build(missing);
+    expect(options).not.toBeNull();
+    const bounded = options!.find((o) => o.kind === "bounded");
+    expect(bounded).toBeDefined();
+    // Same capability SET as the process-widened candidate: git subcommand
+    // matcher + the exact read-file (no read-root widening).
+    expect(bounded!.capabilities).toHaveLength(2);
+    expect(bounded!.capabilities).toEqual(
+      expect.arrayContaining([
+        { kind: "process", executable: "/usr/bin/git", argvPrefix: ["status"] },
+        { kind: "read-file", path: "/proj/a.txt" },
+      ]),
+    );
+  });
+
+  it("omits the bounded choice when candidates are incomparable (never guesses)", () => {
+    // Process-widened candidate: [read-file /proj/a.txt, git status].
+    // Read-root candidate: [git status --porcelain, read-root /proj].
+    // Neither candidate's caps cover the other's (git status does not cover
+    // the longer git status --porcelain pin), so the bounded choice is
+    // omitted rather than silently picking a widening.
+    const missing = [
+      { kind: "read-file" as const, path: "/proj/a.txt" },
+      { kind: "process" as const, executable: "/usr/bin/git", argvPrefix: ["status", "--porcelain"] },
+    ];
+    const options = build(missing);
+    expect(options).not.toBeNull();
+    expect(options!.map((o) => o.kind)).toEqual(["exact"]);
+  });
+});
+
+describe("complete approval choices (T027)", () => {
+  it("exact-only requests offer exact/action + exact/session when a session identity exists", () => {
+    const missing = [{ kind: "commit-file" as const, path: "/proj/a.txt" }];
+    const options = build(missing)!;
+    expect(options.map((o) => o.kind)).toEqual(["exact"]);
+    const choices = buildApprovalChoices(options, "sess-1");
+    expect(choices).toHaveLength(2);
+    const [action, session] = choices;
+    expect(action.choiceId).toBe(`${options[0].optionId}::action`);
+    expect(action.optionId).toBe(options[0].optionId);
+    expect(action.lifetime).toBe("action");
+    expect(action.recommended).toBe(true);
+    expect(session.choiceId).toBe(`${options[0].optionId}::session`);
+    expect(session.optionId).toBe(options[0].optionId);
+    expect(session.lifetime).toBe("session");
+    expect(session.recommended).toBe(false);
+  });
+
+  it("without a session identity only the action choice is issued", () => {
+    const missing = [{ kind: "commit-file" as const, path: "/proj/a.txt" }];
+    const options = build(missing)!;
+    const choices = buildApprovalChoices(options);
+    expect(choices).toHaveLength(1);
+    expect(choices[0].lifetime).toBe("action");
+    expect(choices[0].choiceId).toBe(`${options[0].optionId}::action`);
+    expect(choices[0].recommended).toBe(true);
+  });
+
+  it("bounded options are session-only: bounded/action is never issued (FR-010)", () => {
+    const missing = [{ kind: "read-file" as const, path: "/proj/a.txt" }];
+    const options = build(missing)!;
+    const bounded = options.find((o) => o.kind === "bounded");
+    expect(bounded).toBeDefined();
+    const choices = buildApprovalChoices(options, "sess-1");
+    const boundedChoices = choices.filter((c) => c.optionId === bounded!.optionId);
+    expect(boundedChoices).toHaveLength(1);
+    expect(boundedChoices[0].lifetime).toBe("session");
+    expect(boundedChoices[0].choiceId).toBe(`${bounded!.optionId}::session`);
+  });
+
+  it("mixed capabilities produce one authority bullet per capability", () => {
+    const missing = [
+      { kind: "process" as const, executable: "/usr/bin/git", argvPrefix: ["status"] },
+      { kind: "read-file" as const, path: "/proj/a.txt" },
+    ];
+    const options = build(missing)!;
+    const choices = buildApprovalChoices(options, "sess-1");
+    const exactAction = choices.find((c) => c.lifetime === "action");
+    expect(exactAction).toBeDefined();
+    expect(exactAction!.authoritySummary).toHaveLength(2);
+    expect(exactAction!.authoritySummary[0]).toMatch(/^Run `/);
+    expect(exactAction!.authoritySummary[1]).toMatch(/^Read `/);
+  });
+
+  it("an option whose supportedLifetimes lacks session never gets a session choice", () => {
+    const option: ApprovalOption = {
+      optionId: "opt-exact",
+      actionDigest: "d",
+      kind: "exact",
+      label: "Only this file",
+      capabilities: [{ kind: "commit-file", path: "/proj/a.txt" }],
+      supportedLifetimes: ["action"],
+    };
+    const choices = buildApprovalChoices([option], "sess-1");
+    expect(choices).toHaveLength(1);
+    expect(choices[0].lifetime).toBe("action");
+    expect(choices[0].choiceId).toBe("opt-exact::action");
+  });
 });
 
 describe("plain-language labels (product acceptance)", () => {
@@ -217,9 +339,10 @@ describe("plain-language labels (product acceptance)", () => {
 
   it("bounded process options name the program in plain words", () => {
     const missing = [
-      { kind: "process" as const, executable: "/bin/sh", argvPrefix: ["-c", "npm test"] },
+      { kind: "process" as const, executable: "/usr/bin/git", argvPrefix: ["status", "--porcelain"] },
     ];
     const bounded = build(missing)!.find((o) => o.kind === "bounded");
+    expect(bounded).toBeDefined();
     expect(bounded!.label).toBe(
       "Other commands using this program — allows other commands through this program during the chosen time.",
     );

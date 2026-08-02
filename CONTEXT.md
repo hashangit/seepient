@@ -1,35 +1,36 @@
 # Context
 
-**Current Task**: Spec 011 (tui-permission-scope-ux) — implemented, three
-review rounds fixed, on branch `011-tui-permission-scope-ux`.
+**Current Task**: Spec 011 (tui-permission-scope-ux) — production-hardening
+pivot implemented (T026–T035), on branch `011-tui-permission-scope-ux`.
 
 ## Status
-- 24/25 tasks complete. T025 (quickstart manual scenarios S1–S5) is PENDING:
-  it requires a human-driven interactive TUI session with a real provider.
-- 969/969 tests (100 files), both strict typechecks, release build — green.
-- Product acceptance (round 3) implemented:
-  - Consent-style copy: "Only this command" / "Other commands using this
-    program" / "Only this file" / "Other files in this folder"; durations
-    "Just this time" / "Until I close Seepient". No [exact]/[bounded] tags,
-    no "exact arguments", no raw executable paths in labels.
-  - Two-step consent: nothing preselected; least-privilege pair marked
-    "Recommended"; Enter on Scope commits + advances; Enter on Duration
-    submits only after BOTH are committed.
-  - Scope tab guaranteed at most two options (exact + ONE bounded).
-  - Expiry messages no longer say "User denied"; typed reasons map to
-    matching copy.
-  - Spec/contracts/plan/research/data-model updated to match.
-- Earlier review fixes still in place: frozen broker request clone + trusted
-  snapshot (P0), revocation bound to lifecycle session, WS record/execution
-  consistency with a representable legacy option, pre-abort denial, deadline
-  race, no-strip action cleanup.
+- One-screen complete-choice model shipped: Domain emits `ApprovalChoice`
+  rows (exact/action recommended, exact/session, bounded/session; bounded/
+  action never), the prompt returns only `choiceId`, the broker resolves it,
+  and ActionLifecycle validates the option/lifetime pair against the
+  request's choices.
+- Bounded process matchers are executable + first-argv-token only; general
+  executors (shells/interpreters/package managers/build drivers) get no
+  bounded choice; bounded candidates ordered by authority containment,
+  incomparable → omitted.
+- Capability-derived authority summaries cover every family (mixed actions
+  get one bullet per capability).
+- Containment preflight (T032): `containment-preflight.ts` + policy denial
+  before prompting when `environmentIsolation` is false for process actions;
+  agent `getContainmentStatus()`; `/permissions status` shows backend + root.
+- Local deadline 5 min default (T033); immediate settle on parent abort,
+  request replacement, TUI unmount (FR-020) — two hook bugs found by
+  subagent tests and fixed (resolverRef wiring, unmount pre-null guard).
+- 979/979 tests (101 files), both strict tsc gates, release build — green.
 
 ## Not Done (honest record)
-- T025: interactive quickstart S1–S5 not executed (needs a terminal + real
-  provider). Every behavior has an automated equivalent test.
-- Manual feedback note: manual write tests must target the workspace
-  (e.g. seepient-test-env/fixtures/), not /tmp — /tmp paths are outside the
-  workspace root by design.
+- T025 + T037–T040 (manual quickstart S1–S8, platform runs, 5-user pass,
+  audit redaction check, go/no-go review): require a real provider session /
+  human users; not executable in this environment. Automated equivalents
+  cover every scenario.
+- CodeRabbit review not run (signed out).
 
 ## Next Steps
-- Run quickstart S1–S5 manually; mark T025 complete; then merge.
+- Run quickstart S1–S8 manually with a real provider on macOS + Linux;
+- 5-person usability pass (S2/S5);
+- then merge `011-tui-permission-scope-ux` to `main`.

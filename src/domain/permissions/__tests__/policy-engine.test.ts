@@ -46,6 +46,35 @@ function context(overrides: Partial<PolicyContext> = {}): PolicyContext {
   };
 }
 
+/** Process action with a subcommand matcher (FR-009: bounded needs argv). */
+function processAction(actionDigest = "d-proc"): PreparedToolAction {
+  return {
+    version: 1,
+    actionId: "a1",
+    runId: "r1",
+    toolCallId: "c1",
+    toolName: "execute_shell_command",
+    principalId: "user",
+    argsDigest: "x",
+    actionDigest,
+    risk: "destructive",
+    effects: [
+      {
+        kind: "process-exec",
+        command: { executable: "/usr/bin/git", argv: ["status", "--porcelain"], cwd: "/proj" },
+        requestedRoots: [],
+      },
+    ],
+    display: {
+      title: "run",
+      summary: "git status",
+      canonicalTargets: [],
+      effects: ["process-exec"],
+    },
+    operation: { kind: "process", command: { executable: "/usr/bin/git", argv: ["status", "--porcelain"], cwd: "/proj" }, roots: [] },
+  };
+}
+
 function writeAction(path: string): PreparedToolAction {
   return {
     version: 1,
@@ -149,54 +178,88 @@ describe("PolicyEngine (T106/T110)", () => {
 
   it("offers an exact + bounded pair for process actions the backend enforces", () => {
     const engine = new PolicyEngine("digest");
-    const action: PreparedToolAction = {
-      version: 1,
-      actionId: "a1",
-      runId: "r1",
-      toolCallId: "c1",
-      toolName: "execute_shell_command",
-      principalId: "user",
-      argsDigest: "x",
-      actionDigest: "d-proc",
-      risk: "destructive",
-      effects: [
-        {
-          kind: "process-exec",
-          command: { executable: "/bin/sh", argv: ["-c", "npm test"], cwd: "/proj" },
-          requestedRoots: [],
-        },
-      ],
-      display: {
-        title: "run",
-        summary: "npm test",
-        canonicalTargets: [],
-        effects: ["process-exec"],
-      },
-      operation: { kind: "process", command: { executable: "/bin/sh", argv: ["-c", "npm test"], cwd: "/proj" }, roots: [] },
-    };
     const ctx = context({
       deploymentCeiling: set({ kind: "process" }),
       principalPolicy: set({ kind: "process" }),
       runtimeBaseline: set({ kind: "process" }),
     });
-    const d = engine.evaluate(action, ctx);
+    const d = engine.evaluate(processAction(), ctx);
     expect(d.decision).toBe("needs-approval");
     if (d.decision === "needs-approval") {
       const kinds = d.request.approvalOptions.map((o) => o.kind);
-      // Narrowest first: exact, then the executable-bound bounded option.
+      // Narrowest first: exact, then the executable+subcommand bounded option.
       expect(kinds).toEqual(["exact", "bounded"]);
       const exact = d.request.approvalOptions[0];
       const bounded = d.request.approvalOptions[1];
       expect(exact.capabilities).toEqual([
-        { kind: "process", executable: "/bin/sh", argvPrefix: ["-c", "npm test"] },
+        { kind: "process", executable: "/usr/bin/git", argvPrefix: ["status", "--porcelain"] },
       ]);
+      // FR-009: the bounded matcher pins the executable AND the FIRST argv token.
       expect(bounded.capabilities).toEqual([
-        { kind: "process", executable: "/bin/sh" },
+        { kind: "process", executable: "/usr/bin/git", argvPrefix: ["status"] },
       ]);
       // Option IDs are stable within the request and bound to the digest.
       expect(exact.optionId).toContain("d-proc");
       expect(exact.optionId).not.toBe(bounded.optionId);
     }
+  });
+
+  it("needs-approval carries complete approval choices resolved from options (T027)", () => {
+    const engine = new PolicyEngine("digest");
+    const ctx = context({
+      sessionId: "sess-1",
+      deploymentCeiling: set({ kind: "process" }),
+      principalPolicy: set({ kind: "process" }),
+      runtimeBaseline: set({ kind: "process" }),
+    });
+    const d = engine.evaluate(processAction(), ctx);
+    expect(d.decision).toBe("needs-approval");
+    if (d.decision === "needs-approval") {
+      const { approvalOptions, approvalChoices } = d.request;
+      expect(approvalChoices.length).toBeGreaterThan(0);
+      const optionIds = new Set(approvalOptions.map((o) => o.optionId));
+      for (const choice of approvalChoices) {
+        expect(optionIds.has(choice.optionId)).toBe(true);
+        expect(choice.choiceId).toBe(`${choice.optionId}::${choice.lifetime}`);
+      }
+      // Bounded options are session-only (FR-010): bounded/action is never
+      // a Domain-issued choice.
+      const bounded = approvalOptions.find((o) => o.kind === "bounded");
+      expect(bounded).toBeDefined();
+      const boundedChoices = approvalChoices.filter((c) => c.optionId === bounded!.optionId);
+      expect(boundedChoices).toHaveLength(1);
+      expect(boundedChoices[0].lifetime).toBe("session");
+      // Exactly one recommended choice: exact/action.
+      const recommended = approvalChoices.filter((c) => c.recommended);
+      expect(recommended).toHaveLength(1);
+      expect(recommended[0].optionId).toBe(approvalOptions[0].optionId);
+      expect(recommended[0].lifetime).toBe("action");
+    }
+  });
+
+  it("containment preflight denies process actions on non-isolated backends before prompting", () => {
+    const engine = new PolicyEngine("digest");
+    const ctx = context({
+      deploymentCeiling: set({ kind: "process" }),
+      principalPolicy: set({ kind: "process" }),
+      runtimeBaseline: set({ kind: "process" }),
+      backendCapabilities: { ...LOCAL_BACKEND, environmentIsolation: false },
+    });
+    const d = engine.evaluate(processAction(), ctx);
+    expect(d.decision).toBe("deny");
+    if (d.decision === "deny") {
+      expect(d.reason).toBe("approval-unavailable");
+      expect(d.message).toMatch(/containment/i);
+    }
+  });
+
+  it("file-only missing capabilities still reach needs-approval without process containment", () => {
+    const engine = new PolicyEngine("digest");
+    const ctx = context({
+      backendCapabilities: { ...LOCAL_BACKEND, environmentIsolation: false },
+    });
+    const d = engine.evaluate(writeAction("/proj/a.txt"), ctx);
+    expect(d.decision).toBe("needs-approval");
   });
 
   it("denies outside-ceiling when path is beyond deployment", () => {

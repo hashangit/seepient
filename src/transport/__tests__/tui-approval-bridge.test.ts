@@ -11,7 +11,7 @@
  * `legacyApproveToolToBroker`, and that a missing native broker fails as
  * `approval-unavailable` instead of falling back to the legacy prompt.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -106,8 +106,10 @@ describe("native TUI bridge (T015)", () => {
         received.push(req);
         return {
           approved: true,
-          optionId: req.approvalOptions[0]?.optionId ?? "opt-1",
-          lifetime: "action",
+          choiceId:
+            req.approvalChoices.find((c) => c.lifetime === "action")?.choiceId ??
+            req.approvalChoices[0]?.choiceId ??
+            "opt-1::action",
         };
       },
     };
@@ -238,5 +240,97 @@ describe("native TUI bridge (T015)", () => {
     const messages = agent.getMessages();
     const lastTool = [...messages].reverse().find((m) => m.role === "tool");
     expect(lastTool?.content ?? "").toContain("approval-unavailable");
+  });
+
+  it("defaults to a five-minute deadline (FR-020)", async () => {
+    // No deadlineMs supplied: the broker must apply the 300_000 ms default
+    // and settle a typed denial when the presenter never answers.
+    const presenter: InlineApprovalPresenter = {
+      async prompt() {
+        return new Promise<TuiApprovalSelection>(() => {});
+      },
+    };
+    const broker = new InlineApprovalBroker(presenter);
+    const req: PermissionRequest = {
+      requestId: "r1",
+      principalId: "u1",
+      runId: "r1",
+      toolCallId: "c1",
+      actionDigest: "ad-bridge",
+      action: { title: "t", summary: "s", canonicalTargets: [], effects: [] },
+      requestedCapabilities: [],
+      approvalOptions: [],
+      approvalChoices: [],
+      offeredLifetimes: ["action"],
+      createdAt: 0,
+      expiresAt: Date.now() + 600_000, // far beyond the 5-minute deadline
+    };
+    vi.useFakeTimers();
+    try {
+      const pending = broker.request(req, {});
+      let settled = false;
+      pending.then(() => {
+        settled = true;
+      });
+      // One millisecond before the deadline: still pending.
+      await vi.advanceTimersByTimeAsync(299_999);
+      expect(settled).toBe(false);
+      // Crossing the deadline settles the denial.
+      await vi.advanceTimersByTimeAsync(1);
+      const d = await pending;
+      expect(d.approved).toBe(false);
+      if (!d.approved) expect(d.reason).toBe("approval-expired");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("parent abort denies as user-denied — before start and after start", async () => {
+    const neverResolves: InlineApprovalPresenter = {
+      async prompt() {
+        return new Promise<TuiApprovalSelection>(() => {});
+      },
+    };
+    function req(): PermissionRequest {
+      return {
+        requestId: "r1",
+        principalId: "u1",
+        runId: "r1",
+        toolCallId: "c1",
+        actionDigest: "ad-bridge",
+        action: { title: "t", summary: "s", canonicalTargets: [], effects: [] },
+        requestedCapabilities: [],
+        approvalOptions: [],
+        approvalChoices: [],
+        offeredLifetimes: ["action"],
+        createdAt: 0,
+        expiresAt: Date.now() + 600_000,
+      };
+    }
+
+    // Pre-abort: the signal is already aborted when request() is called —
+    // the broker must deny immediately, never prompting.
+    const pre = new AbortController();
+    pre.abort();
+    const preDecision = await new InlineApprovalBroker(neverResolves, {
+      deadlineMs: 60_000,
+    }).request(req(), { signal: pre.signal });
+    expect(preDecision.approved).toBe(false);
+    if (!preDecision.approved) {
+      expect(preDecision.reason).toBe("user-denied");
+    }
+
+    // Post-abort: abort after request() started with a never-resolving
+    // presenter — the broker must settle as user-denied, not hang.
+    const post = new AbortController();
+    const pending = new InlineApprovalBroker(neverResolves, {
+      deadlineMs: 60_000,
+    }).request(req(), { signal: post.signal });
+    post.abort();
+    const postDecision = await pending;
+    expect(postDecision.approved).toBe(false);
+    if (!postDecision.approved) {
+      expect(postDecision.reason).toBe("user-denied");
+    }
   });
 });

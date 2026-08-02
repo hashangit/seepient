@@ -17,6 +17,7 @@
  */
 import type {
   ApprovalBroker,
+  ApprovalChoice,
   ApprovalOption,
   Capability,
   CapabilityEnvelope,
@@ -41,7 +42,7 @@ import {
   setCovers,
 } from "./capability-store.js";
 import type { PersistedCapabilityLedger } from "./persisted-capability-ledger.js";
-import { buildApprovalOptions } from "./approval-options.js";
+import { buildApprovalChoices, buildApprovalOptions } from "./approval-options.js";
 
 /** Trace helpers keep the policy layer auditable without secret values. */
 function emptyTrace(policyDigest: string): PolicyTrace {
@@ -89,6 +90,7 @@ function buildPermissionRequest(
   missing: Capability[],
   context: PolicyContext,
   approvalOptions: ApprovalOption[],
+  approvalChoices: ApprovalChoice[],
 ): PermissionRequest {
   const now = Date.now();
   const deadlineMs = context.interaction.deadlineMs ?? 30_000;
@@ -105,6 +107,7 @@ function buildPermissionRequest(
     action: action.display,
     requestedCapabilities: missing,
     approvalOptions,
+    approvalChoices,
     offeredLifetimes: [
       "action",
       "run",
@@ -335,9 +338,27 @@ export class PolicyEngine implements PolicyEngineContract {
     }
 
     pushLayer(trace, "backend", "allow");
-    // Spec 011 (T005): the request carries policy-issued exact/bounded options.
-    // If filtering leaves no representable option, deny as unavailable rather
-    // than sending an empty prompt (FR-001).
+    // Spec 011 (FR-019): containment preflight — a process action can only be
+    // presented for approval when the backend can actually isolate it. If the
+    // sandbox is missing (and the operator did not opt into explicitly
+    // uncontained execution), fail BEFORE the prompt with the actionable
+    // setup message instead of letting every approved action fail at
+    // dispatch (product acceptance).
+    if (
+      missing.some((c) => c.kind === "process") &&
+      !context.backendCapabilities.environmentIsolation
+    ) {
+      pushLayer(trace, "backend", "deny");
+      return deny(
+        "approval-unavailable",
+        "Process containment is not available on this system. Install the platform sandbox (macOS: sandbox-exec is bundled with macOS; Linux: install Bubblewrap, e.g. `apt install bubblewrap` or `brew install bwrap`) or run with SEEPIENT_UNCONTAINED=1 to explicitly disable containment.",
+        trace,
+      );
+    }
+    // Spec 011 (T005): the request carries policy-issued exact/bounded options
+    // and complete choices. If filtering leaves no representable option or
+    // choice, deny as unavailable rather than sending an empty prompt
+    // (FR-001).
     const sessionId = action.sessionId ?? context.sessionId;
     const offeredLifetimes: Array<"action" | "run" | "session"> = [
       "action",
@@ -358,11 +379,21 @@ export class PolicyEngine implements PolicyEngineContract {
         trace,
       );
     }
+    const approvalChoices = buildApprovalChoices(approvalOptions, sessionId);
+    if (approvalChoices.length === 0) {
+      pushLayer(trace, "backend", "deny");
+      return deny(
+        "approval-unavailable",
+        "No representable approval choice remains after policy and backend filtering",
+        trace,
+      );
+    }
     const request = buildPermissionRequest(
       action,
       missing,
       context,
       approvalOptions,
+      approvalChoices,
     );
     return {
       decision: "needs-approval",

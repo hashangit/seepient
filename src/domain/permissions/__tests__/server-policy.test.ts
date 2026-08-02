@@ -107,6 +107,7 @@ describe("PendingApprovalStore (T407/T408, QS-4.5)", () => {
       action: { title: "t", summary: "s", canonicalTargets: [], effects: [] },
       requestedCapabilities: [{ kind: "commit-file", path: "/p/a.txt" }],
       approvalOptions: [],
+      approvalChoices: [],
       offeredLifetimes: ["action"],
       createdAt: 0,
       expiresAt: Date.now() + 60_000,

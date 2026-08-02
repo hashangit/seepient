@@ -454,6 +454,7 @@ describe("R9.1 Integration Wiring Verification", () => {
       action: { title: "Test", summary: "Test", canonicalTargets: [], effects: [] },
       requestedCapabilities: [],
       approvalOptions: [],
+      approvalChoices: [],
       offeredLifetimes: ["action"],
       createdAt: Date.now(),
       expiresAt: Date.now() + 60000,

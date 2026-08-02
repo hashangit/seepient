@@ -1,15 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { render } from "ink-testing-library";
 import React from "react";
-import {
-  PermissionPrompt,
-  buildSelection,
-  clampMove,
-  defaultLifetimeIndex,
-  defaultScopeIndex,
-  visibleLifetimes,
-} from "../components/permission-prompt.js";
+import { PermissionPrompt, clampMove } from "../components/permission-prompt.js";
 import type {
+  ApprovalChoice,
+  ApprovalOption,
   PermissionRequest,
   TuiApprovalSelection,
 } from "../../../foundations/contracts/permission-policy.js";
@@ -27,7 +22,6 @@ function renderPrompt(overrides: Partial<PermissionRequest> = {}) {
 }
 
 const ENTER = "\r";
-const TAB = "\t";
 
 /** Let React commit the state change from a key press before the next key. */
 const tick = (): Promise<void> => {
@@ -36,26 +30,34 @@ const tick = (): Promise<void> => {
   return promise;
 };
 
-/** The two-step consent flow: Enter on Scope, then Enter on Duration. */
-async function approvePair(stdin: { write: (s: string) => void }, scopeKey?: string, durationKey?: string): Promise<void> {
-  if (scopeKey) { stdin.write(scopeKey); await tick(); }
-  stdin.write(ENTER);
-  await tick();
-  if (durationKey) { stdin.write(durationKey); await tick(); }
-  stdin.write(ENTER);
-  await tick();
-}
-
-function option(kind: "exact" | "bounded", optionId: string, label: string, supportedLifetimes: Array<"action" | "session"> = ["action", "session"]) {
+function option(kind: "exact" | "bounded", optionId: string, caps: Array<{ kind: "read-root"; root: string } | { kind: "read-file"; path: string } | { kind: "process"; executable: string; argvPrefix?: string[] }>, supportedLifetimes: Array<"action" | "session"> = ["action", "session"]): ApprovalOption {
   return {
     optionId,
     actionDigest: "d1",
     kind,
-    label,
-    capabilities: [],
+    label: `${kind} option`,
+    capabilities: caps,
     supportedLifetimes,
   };
 }
+
+function choice(optionId: string, lifetime: "action" | "session", title: string, authoritySummary: string[], recommended = false): ApprovalChoice {
+  return {
+    choiceId: `${optionId}::${lifetime}`,
+    optionId,
+    lifetime,
+    title,
+    description:
+      lifetime === "action"
+        ? "You'll be asked again next time."
+        : "Seepient will remember this permission until you close it.",
+    authoritySummary,
+    recommended,
+  };
+}
+
+const EXACT_CAPS = [{ kind: "read-file" as const, path: "/proj/a.txt" }];
+const BOUNDED_CAPS = [{ kind: "read-root" as const, root: "/proj" }];
 
 function request(overrides: Partial<PermissionRequest> = {}): PermissionRequest {
   const base: PermissionRequest = {
@@ -71,12 +73,17 @@ function request(overrides: Partial<PermissionRequest> = {}): PermissionRequest 
       canonicalTargets: ["/proj/a.txt"],
       effects: ["filesystem-write"],
     },
-    requestedCapabilities: [{ kind: "commit-file", path: "/proj/a.txt" }],
+    requestedCapabilities: EXACT_CAPS,
     approvalOptions: [
-      option("exact", "opt-exact", "Only this file — changes exactly what's shown. Any change will ask again."),
-      option("bounded", "opt-bounded", "Other files in this folder — allows other files in this folder during the chosen time."),
+      option("exact", "opt-exact", EXACT_CAPS),
+      option("bounded", "opt-bounded", BOUNDED_CAPS),
     ],
-    offeredLifetimes: ["action", "session"],
+    approvalChoices: [
+      choice("opt-exact", "action", "Allow this action once", ["Read `/proj/a.txt`"], true),
+      choice("opt-exact", "session", "Allow this exact action until I close Seepient", ["Read `/proj/a.txt`"]),
+      choice("opt-bounded", "session", "Allow other files in this folder until I close Seepient", ["Read files under `/proj`"]),
+    ],
+    offeredLifetimes: ["action", "run", "session"],
     createdAt: 0,
     expiresAt: Date.now() + 60_000,
   };
@@ -87,216 +94,153 @@ function compactFrame(frame: string): string {
   return frame.toLowerCase().replace(/\s+/g, " ");
 }
 
-// ── Pure selection/default logic ─────────────────────────────────────────
+// ── Pure helpers ────────────────────────────────────────────────────────
 
-describe("defaults (FR-011 recommendation)", () => {
-  it("recommended scope is the exact option when offered, else the narrowest", () => {
-    const opts = request().approvalOptions;
-    expect(defaultScopeIndex(opts)).toBe(0);
-    expect(defaultScopeIndex([opts[1]])).toBe(0);
-    expect(defaultScopeIndex([])).toBe(0);
-  });
-
-  it("recommended duration is Just this time when offered, else Until I close Seepient", () => {
-    expect(defaultLifetimeIndex(["action", "session"])).toBe(0);
-    expect(defaultLifetimeIndex(["session"])).toBe(0);
-    expect(defaultLifetimeIndex([])).toBe(0);
-  });
-
-  it("visibleLifetimes exposes only action/session offered by both", () => {
-    const opts = request().approvalOptions;
-    expect(visibleLifetimes(opts[0])).toEqual(["action", "session"]);
-    expect(
-      visibleLifetimes({ ...opts[0], supportedLifetimes: ["action", "run", "session"] }),
-    ).toEqual(["action", "session"]);
-    expect(visibleLifetimes({ ...opts[0], supportedLifetimes: ["run"] })).toEqual([]);
-    // request-level offered lifetimes narrow the option's list
-    expect(
-      visibleLifetimes(opts[0], { ...request(), offeredLifetimes: ["action"] }),
-    ).toEqual(["action"]);
-  });
-
-  it("clampMove never wraps at the ends (FR-015)", () => {
+describe("clampMove (FR-014)", () => {
+  it("never wraps at the ends", () => {
     expect(clampMove(0, -1, 3)).toBe(0);
     expect(clampMove(2, 1, 3)).toBe(2);
     expect(clampMove(1, -1, 3)).toBe(0);
     expect(clampMove(1, 1, 3)).toBe(2);
     expect(clampMove(0, 1, 1)).toBe(0);
   });
-
-  it("buildSelection returns only the selected option ID and lifetime", () => {
-    expect(buildSelection(request(), 1, 1)).toEqual({
-      approved: true,
-      optionId: "opt-bounded",
-      lifetime: "session",
-    });
-  });
-
-  it("buildSelection clamps stale indices to the visible set", () => {
-    const r = request({ approvalOptions: [option("exact", "opt-exact", "Only this file")] });
-    expect(buildSelection(r, 99, 5)).toEqual({
-      approved: true,
-      optionId: "opt-exact",
-      lifetime: "session",
-    });
-  });
-
-  it("buildSelection with no representable options denies as unavailable", () => {
-    expect(buildSelection(request({ approvalOptions: [] }), 0, 0)).toEqual({
-      approved: false,
-      reason: "approval-unavailable",
-    });
-  });
 });
 
-// ── Rendering (T014) ─────────────────────────────────────────────────────
+// ── Rendering (T028/T029) ───────────────────────────────────────────────
 
-describe("PermissionPrompt rendering (T014)", () => {
-  it("renders only the options supplied by Domain, in plain language", () => {
+describe("PermissionPrompt rendering (T028)", () => {
+  it("shows one screen of complete Domain choices — no tabs, no pairs", () => {
     const { lastFrame } = renderPrompt();
     const compact = compactFrame(lastFrame()!);
-    expect(compact).toContain("only this file");
-    expect(compact).toContain("any change will ask again");
-    expect(compact).toContain("other files in this folder");
-    // No policy jargon, no invented scope kinds.
-    expect(compact).not.toContain("[exact]");
-    expect(compact).not.toContain("[bounded]");
+    expect(compact).toContain("permission needed");
+    expect(compact).toContain("write file");
+    expect(compact).toContain("allow this action once");
+    // Rows wrap at terminal width; assert wrap-stable title prefixes.
+    expect(compact).toContain("allow this exact action until i close");
+    expect(compact).toContain("allow other files in this folder until i");
+    // No scope/duration matrix, no invented choices.
+    expect(compact).not.toContain("[1] scope");
+    expect(compact).not.toContain("duration");
+    expect(compact).not.toContain("bounded/action");
     expect(compact).not.toContain("exact arguments");
-    expect(compact).not.toContain("globally");
-    expect(compact).not.toContain("in this project");
+    // Domain labels are not the consent copy; choice titles are.
+    expect(compact).not.toContain("exact option");
   });
 
-  it("shows the action summary and request identity", () => {
+  it("marks the least-privilege choice Recommended without pre-approving", () => {
+    const { lastFrame } = renderPrompt();
+    const compact = compactFrame(lastFrame()!);
+    expect(compact).toContain("(recommended)");
+    // The recommendation sits on the exact/action row.
+    const actionIdx = compact.indexOf("allow this action once");
+    const recommendedIdx = compact.indexOf("(recommended)");
+    expect(recommendedIdx).toBeGreaterThan(actionIdx);
+    expect(recommendedIdx).toBeLessThan(compact.indexOf("allow this exact action until i close"));
+  });
+
+  it("shows the authority delta of the focused choice (FR-016)", () => {
+    const { stdin, lastFrame } = renderPrompt();
+    stdin.write("\u001B[B"); // down → exact/session
+    return tick().then(() => {
+      const frame = lastFrame()!;
+      expect(frame).toContain("Read `/proj/a.txt`");
+      expect(frame).toContain("Seepient will remember this permission until you close it.");
+    });
+  });
+
+  it("shows the request identity and expiry", () => {
     const { lastFrame } = renderPrompt();
     const frame = lastFrame()!;
-    expect(frame).toContain("Write file");
     expect(frame).toContain("req-1");
+    expect(frame).toMatch(/expires/);
   });
 
-  it("marks the least-privilege defaults as Recommended without selecting them", async () => {
-    const { lastFrame, stdin, getCaptured } = renderPrompt();
+  it("renders only the choices the request carries", () => {
+    const r = request({
+      approvalChoices: [
+        choice("opt-exact", "action", "Allow this action once", ["Read `/proj/a.txt`"], true),
+      ],
+    });
+    const { lastFrame } = renderPrompt(r);
     const compact = compactFrame(lastFrame()!);
-    // Recommended markers exist…
-    expect(compact).toMatch(/recommended/);
-    // …but nothing is selected yet: Enter on Scope must not approve.
-    stdin.write(ENTER);
-    await tick();
-    expect(getCaptured()).toBeNull();
-  });
-
-  it("one option: no additional scope option is created (FR-006)", async () => {
-    const r = request({ approvalOptions: [option("exact", "opt-exact", "Only this file — changes exactly what's shown. Any change will ask again.")] });
-    const { stdin, lastFrame, getCaptured } = renderPrompt(r);
-    const compact = compactFrame(lastFrame()!);
-    expect(compact).toContain("only this file");
+    expect(compact).toContain("allow this action once");
+    expect(compact).not.toContain("until i close seepient");
     expect(compact).not.toContain("other files in this folder");
-    expect(compact).not.toContain("globally");
-    // Two-step approval with the single option.
-    await approvePair(stdin);
-    expect(getCaptured()).toEqual({ approved: true, optionId: "opt-exact", lifetime: "action" });
   });
 
-  it("shows the plain-language duration choices with explanations", async () => {
-    const { stdin, lastFrame } = renderPrompt();
-    stdin.write(TAB);
+  it("a request with no choices denies as unavailable immediately", async () => {
+    const { getCaptured } = renderPrompt({ approvalChoices: [] });
     await tick();
-    const frame = lastFrame()!;
-    expect(frame).toContain("Just this time");
-    expect(frame).toContain("You'll be asked again next time");
-    expect(frame).toContain("Until I close Seepient");
-    expect(frame).toContain("Remember this permission for this session");
-  });
-
-  it("shows the committed pair in the summary once both are chosen", async () => {
-    const { stdin, lastFrame, getCaptured } = renderPrompt();
-    await approvePair(stdin);
-    expect(getCaptured()).toEqual({ approved: true, optionId: "opt-exact", lifetime: "action" });
-    const compact = compactFrame(lastFrame()!);
-    expect(compact).toContain("only this file");
-    expect(compact).toContain("just this time");
+    expect(getCaptured()).toEqual({ approved: false, reason: "approval-unavailable" });
   });
 });
 
-// ── Submission and keyboard (T014/T018) ──────────────────────────────────
+// ── Submission and keyboard (T028/T029) ─────────────────────────────────
 
-describe("PermissionPrompt two-step submit + keyboard (T014/T018)", () => {
-  it("Enter on Scope does NOT approve — it commits the scope and advances to Duration", async () => {
+describe("PermissionPrompt submission + keyboard (T028)", () => {
+  it("one Enter approves the focused (recommended) choice — no second step", async () => {
     const { stdin, getCaptured } = renderPrompt();
     stdin.write(ENTER);
     await tick();
-    // Nothing submitted yet — approval stays disabled until BOTH are chosen.
-    expect(getCaptured()).toBeNull();
-    stdin.write(ENTER);
-    await tick();
-    expect(getCaptured()).toEqual({ approved: true, optionId: "opt-exact", lifetime: "action" });
+    expect(getCaptured()).toEqual({ approved: true, choiceId: "opt-exact::action" });
   });
 
-  it("Enter on Duration without a committed scope returns to Scope — never submits", async () => {
+  it("Enter approves whatever choice is focused", async () => {
     const { stdin, getCaptured } = renderPrompt();
-    stdin.write(TAB); // jump straight to Duration
+    stdin.write("2");
     await tick();
     stdin.write(ENTER);
     await tick();
-    expect(getCaptured()).toBeNull();
-    // We were guided back to the Scope tab: Enter commits + advances, the
-    // next Enter on Duration submits.
-    stdin.write(ENTER);
+    expect(getCaptured()).toEqual({ approved: true, choiceId: "opt-exact::session" });
+    const { stdin: s2, getCaptured: g2 } = renderPrompt();
+    s2.write("\u001B[B"); // down → exact/session
     await tick();
-    stdin.write(ENTER);
+    s2.write("\u001B[B"); // down → bounded/session
     await tick();
-    expect(getCaptured()).toEqual({ approved: true, optionId: "opt-exact", lifetime: "action" });
+    s2.write(ENTER);
+    await tick();
+    expect(g2()).toEqual({ approved: true, choiceId: "opt-bounded::session" });
   });
 
-  it("number keys move focus; the committed pair is what submits", async () => {
+  it("Up/Down move without wrapping past the ends (FR-014)", async () => {
     const { stdin, getCaptured } = renderPrompt();
-    stdin.write("2"); // focus bounded
+    stdin.write("\u001B[A"); // up at the top → stays
     await tick();
-    stdin.write(ENTER); // commit bounded, advance
+    stdin.write(ENTER);
     await tick();
-    stdin.write("2"); // focus session
+    expect(getCaptured()).toEqual({ approved: true, choiceId: "opt-exact::action" });
+    const { stdin: s2, getCaptured: g2 } = renderPrompt();
+    s2.write("\u001B[B"); // down → exact/session
     await tick();
-    stdin.write(ENTER); // commit + submit
+    s2.write("\u001B[B"); // down → bounded/session
     await tick();
-    expect(getCaptured()).toEqual({ approved: true, optionId: "opt-bounded", lifetime: "session" });
+    s2.write("\u001B[B"); // down at the bottom → stays
+    await tick();
+    s2.write(ENTER);
+    await tick();
+    expect(g2()).toEqual({ approved: true, choiceId: "opt-bounded::session" });
   });
 
-  it("unsupported numbers do nothing", async () => {
+  it("unsupported numbers do nothing (FR-014)", async () => {
     const { stdin, getCaptured } = renderPrompt();
     stdin.write("9");
     await tick();
-    expect(getCaptured()).toBeNull();
-    stdin.write(ENTER);
+    stdin.write("0");
     await tick();
     stdin.write(ENTER);
     await tick();
-    // Still the recommended pair — the unsupported key changed nothing.
-    expect(getCaptured()).toEqual({ approved: true, optionId: "opt-exact", lifetime: "action" });
+    expect(getCaptured()).toEqual({ approved: true, choiceId: "opt-exact::action" });
   });
 
   it("unsupported keys do nothing", async () => {
     const { stdin, getCaptured } = renderPrompt();
     stdin.write("x");
     await tick();
-    expect(getCaptured()).toBeNull();
-    stdin.write(ENTER);
+    stdin.write("\t");
     await tick();
     stdin.write(ENTER);
     await tick();
-    expect(getCaptured()).toEqual({ approved: true, optionId: "opt-exact", lifetime: "action" });
-  });
-
-  it("Tab switches to the Duration tab and back without changing the selection", async () => {
-    const { stdin, getCaptured } = renderPrompt();
-    stdin.write(TAB);
-    await tick();
-    stdin.write(TAB);
-    await tick();
-    stdin.write(ENTER);
-    await tick();
-    stdin.write(ENTER);
-    await tick();
-    // Switching tabs never changed the committed values (US2.1).
-    expect(getCaptured()).toEqual({ approved: true, optionId: "opt-exact", lifetime: "action" });
+    expect(getCaptured()).toEqual({ approved: true, choiceId: "opt-exact::action" });
   });
 
   it("q denies without executing", () => {
@@ -311,70 +255,12 @@ describe("PermissionPrompt two-step submit + keyboard (T014/T018)", () => {
     expect(getCaptured()).toEqual({ approved: false, reason: "user-denied" });
   });
 
-  it("Left/Right switch tabs without changing either committed value (FR-014)", async () => {
+  it("one prompt resolves at most once — late keys after Enter are ignored", async () => {
     const { stdin, getCaptured } = renderPrompt();
-    stdin.write("\u001B[C"); // right → Duration
-    await tick();
-    stdin.write("2"); // focus session
-    await tick();
-    stdin.write("\u001B[D"); // left → Scope
-    await tick();
-    stdin.write("2"); // focus bounded
-    await tick();
-    stdin.write(ENTER); // commit bounded, advance to Duration
-    await tick();
-    stdin.write(ENTER); // commit session + submit
-    await tick();
-    expect(getCaptured()).toEqual({ approved: true, optionId: "opt-bounded", lifetime: "session" });
-  });
-
-  it("Shift+Tab switches tabs (FR-014)", async () => {
-    const { stdin, getCaptured } = renderPrompt();
-    stdin.write("\u001B[Z"); // shift-tab → Duration
-    await tick();
-    stdin.write("\u001B[D"); // left → Scope
-    await tick();
-    stdin.write(ENTER); // commit scope → advances to Duration
-    await tick();
-    stdin.write(ENTER); // commit duration + submit
-    await tick();
-    expect(getCaptured()).toEqual({ approved: true, optionId: "opt-exact", lifetime: "action" });
-  });
-
-  it("Up/Down move within the active tab and stop at the ends (FR-015)", async () => {
-    const { stdin, getCaptured } = renderPrompt();
-    // Scope tab: down to the last option, then beyond (no wrap).
-    stdin.write("\u001B[B"); // down → bounded
-    await tick();
-    stdin.write("\u001B[B"); // down → stuck at bounded
-    await tick();
-    stdin.write("\u001B[A"); // up → exact
-    await tick();
-    stdin.write("\u001B[A"); // up → stuck at exact (no wrap)
-    await tick();
     stdin.write(ENTER);
     await tick();
-    stdin.write(ENTER);
+    stdin.write("q");
     await tick();
-    expect(getCaptured()).toEqual({ approved: true, optionId: "opt-exact", lifetime: "action" });
-  });
-
-  it("a duration the selected option does not support is never offered", async () => {
-    const r = request({
-      approvalOptions: [option("exact", "opt-exact", "Only this file", ["action"])],
-    });
-    const { stdin, lastFrame, getCaptured } = renderPrompt(r);
-    stdin.write(TAB);
-    await tick();
-    const frame = lastFrame()!;
-    expect(frame).toContain("Just this time");
-    expect(frame).not.toContain("Until I close Seepient");
-    stdin.write("\u001B[D"); // left → Scope
-    await tick();
-    stdin.write(ENTER); // commit scope → advances to Duration
-    await tick();
-    stdin.write(ENTER); // commit duration + submit
-    await tick();
-    expect(getCaptured()).toEqual({ approved: true, optionId: "opt-exact", lifetime: "action" });
+    expect(getCaptured()).toEqual({ approved: true, choiceId: "opt-exact::action" });
   });
 });

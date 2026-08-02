@@ -106,6 +106,10 @@ export function useAgent({ agent, feed, permissionLevel, widgetHost }: UseAgentA
   // transient selection. The broker enriches the selection into the shared
   // PermissionDecision (actor + timestamp) before the lifecycle validates it.
   const nativeBrokerRef = useRef<InlineApprovalBroker | null>(null);
+  // The pending native presenter promise, if any. Settled immediately on
+  // request replacement or TUI unmount (FR-020: the prompt must never hang
+  // until the broker deadline for a prompt that is no longer visible).
+  const pendingNativeRef = useRef<{ settle: (s: TuiApprovalSelection) => void } | null>(null);
   const getNativeBroker = useCallback((): InlineApprovalBroker => {
     let broker = nativeBrokerRef.current;
     if (!broker) {
@@ -113,27 +117,44 @@ export function useAgent({ agent, feed, permissionLevel, widgetHost }: UseAgentA
         prompt: (request: PermissionRequest, opts) => {
           setPendingPermission({ kind: 'native', request });
           return new Promise<TuiApprovalSelection>((resolve) => {
-            // Promise resolvers accept PromiseLike; the shared ref may also
-            // carry the abort/unblock denial. Anything that is not an
-            // approved transient selection (no optionId) denies safely.
-            const onSelection = (value: TuiApprovalSelection | ApprovalDecision): void => {
+            const settle = (value: TuiApprovalSelection): void => {
+              // Idempotent: only the CURRENT prompt may settle; a replaced
+              // or already-settled prompt ignores late calls.
+              if (pendingNativeRef.current !== current) return;
+              if (resolverRef.current === onSelection) resolverRef.current = null;
               opts.signal?.removeEventListener('abort', onAbort);
-              if (typeof value !== 'boolean' && 'optionId' in value) {
-                resolve(value);
+              pendingNativeRef.current = null;
+              resolve(value);
+            };
+            // User path: an Enter/Esc/q selection (or a legacy-style denial)
+            // settles this prompt.
+            const onSelection = (value: TuiApprovalSelection | ApprovalDecision): void => {
+              // Anything that is not an approved choice-ID selection denies
+              // safely.
+              if (typeof value !== 'boolean' && 'choiceId' in value) {
+                settle(value);
               } else {
-                resolve({ approved: false, reason: 'user-denied' });
+                settle({ approved: false, reason: 'user-denied' });
               }
             };
-            // The broker's deadline (or an abort) must settle the prompt: the
-            // broker races the presenter, so an unresponsive UI cannot hang
-            // the lifecycle forever (spec 011 review fix).
+            // System path: broker deadline, parent abort, request replacement,
+            // or TUI unmount must settle the prompt immediately (FR-020).
             const onAbort = (): void => {
-              if (resolverRef.current === onSelection) {
-                resolverRef.current = null;
-                setPendingPermission(null);
-              }
-              resolve({ approved: false, reason: 'approval-unavailable' });
+              setPendingPermission(null);
+              settle({ approved: false, reason: 'approval-unavailable' });
             };
+            // A NEW request replacing a still-open prompt settles the old one
+            // immediately: one action produces at most one prompt. `settle`
+            // nulls the ref via its own guard path.
+            const previous = pendingNativeRef.current;
+            if (previous) {
+              previous.settle({ approved: false, reason: 'approval-unavailable' });
+            }
+            const current = { settle };
+            pendingNativeRef.current = current;
+            // The app's `resolvePermission` bridge and the abort/error paths
+            // route through `resolverRef`; register the user path there too
+            // (legacy approveTool only sets it when the pipeline is off).
             resolverRef.current = onSelection;
             opts.signal?.addEventListener('abort', onAbort, { once: true });
           });
@@ -146,10 +167,17 @@ export function useAgent({ agent, feed, permissionLevel, widgetHost }: UseAgentA
   }, []);
 
   // The seam must not outlive the TUI: clear it on unmount so a pending
-  // prompt can never resolve through a dead surface.
+  // prompt can never resolve through a dead surface, and settle a still-open
+  // prompt immediately (FR-020).
   useEffect(() => {
     return () => {
       agent.setPipelineApprovalBroker(undefined);
+      const pending = pendingNativeRef.current;
+      if (pending) {
+        // `settle` nulls the ref itself via its guard path; a pre-null
+        // would make the guard bail and leave the prompt unresolved.
+        pending.settle({ approved: false, reason: 'approval-unavailable' });
+      }
     };
   }, [agent]);
   const streamingTextRef = useRef('');

@@ -203,6 +203,14 @@ export class Agent {
     // Writes go through FileCommitBroker; shell through ProcessExecutor.
     const { buildLocalBoundary } = await import("../../capabilities/execution/build-local-boundary.js");
     const { boundary: realBoundary, artifacts: sharedArtifacts } = await buildLocalBoundary({ allowFallback: opts.allowFallback });
+    // Spec 011 (T032/FR-019): containment preflight at startup. The status is
+    // surfaced (TUI/status surfaces) so approval choices are disabled before
+    // an action begins when the backend is missing — PolicyEngine enforces
+    // the same rule via `environmentIsolation` before prompting.
+    const { preflightContainment } = await import("../../capabilities/execution/containment-preflight.js");
+    this._containmentStatus = await preflightContainment({
+      workspaceRoot: opts.workspaceRoot ?? process.cwd(),
+    });
     this._wiredPipeline = await buildActionLifecycle({
       principalId: "cli-user",
       runId: this.sessionId,
@@ -255,6 +263,20 @@ export class Agent {
   private _pipelineApproveTool: ApproveToolFn | undefined;
 
   private _pipelineApprovalBroker: ApprovalBroker | undefined;
+
+  private _containmentStatus:
+    | import("../../capabilities/execution/containment-preflight.js").ContainmentPreflightResult
+    | undefined;
+
+  /**
+   * Spec 011 (T032): the containment preflight result captured at pipeline
+   * startup — the active sandbox backend and writable workspace root, or the
+   * actionable setup message when the backend is missing. Undefined until
+   * `enablePermissionPipeline()` completes.
+   */
+  getContainmentStatus(): import("../../capabilities/execution/containment-preflight.js").ContainmentPreflightResult | undefined {
+    return this._containmentStatus;
+  }
 
   /**
    * Spec 011 (T002): install the native typed TUI approval broker. The TUI

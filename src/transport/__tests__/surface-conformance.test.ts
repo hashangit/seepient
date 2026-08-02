@@ -109,7 +109,16 @@ describe("cross-surface decision conformance (T309)", () => {
     // The broker only resolves the approval; the underlying policy decision
     // is independent of which broker is wired.
     const engine = new PolicyEngine("dig");
-    const inline = new InlineApprovalBroker({ async prompt() { return { approved: true, optionId: "opt-1", lifetime: "action" }; } });
+    const inline = new InlineApprovalBroker({
+      async prompt(req) {
+        return {
+          approved: true,
+          choiceId:
+            req.approvalChoices.find((c) => c.optionId === "opt-1")?.choiceId ??
+            "opt-1::action",
+        };
+      },
+    });
     const callback = new CallbackApprovalBroker(async () => approvedStub());
     const none = new NoneApprovalBroker();
     expect(inline.mode).toBe("inline");
@@ -134,6 +143,7 @@ describe("NoneApprovalBroker (headless, T301)", () => {
       action: action().display,
       requestedCapabilities: [{ kind: "commit-file", path: "/p/a.txt" }],
       approvalOptions: [],
+      approvalChoices: [],
       offeredLifetimes: ["action", "run"],
       createdAt: 0,
       expiresAt: 1,
@@ -162,6 +172,7 @@ describe("CallbackApprovalBroker (SDK, T301/QS-3.4)", () => {
       action: action().display,
       requestedCapabilities: [],
       approvalOptions: [],
+      approvalChoices: [],
       offeredLifetimes: ["action"],
       createdAt: 0,
       expiresAt: Date.now() + 1000,
@@ -190,6 +201,7 @@ describe("CallbackApprovalBroker (SDK, T301/QS-3.4)", () => {
       action: action().display,
       requestedCapabilities: [],
       approvalOptions: [],
+      approvalChoices: [],
       offeredLifetimes: ["action"],
       createdAt: 0,
       expiresAt: 1,
@@ -215,6 +227,7 @@ describe("CallbackApprovalBroker (SDK, T301/QS-3.4)", () => {
         action: action().display,
         requestedCapabilities: [],
         approvalOptions: [],
+        approvalChoices: [],
         offeredLifetimes: ["action"],
         createdAt: 0,
         expiresAt: 1,
@@ -231,7 +244,12 @@ describe("InlineApprovalBroker (T301/QS-3.1)", () => {
     const presenter: InlineApprovalPresenter = {
       async prompt(req) {
         prompts++;
-        return { approved: true, optionId: req.approvalOptions[0]?.optionId ?? "opt-1", lifetime: "action" };
+        return {
+          approved: true,
+          choiceId:
+            req.approvalChoices.find((c) => c.optionId === "opt-1")?.choiceId ??
+            "opt-1::action",
+        };
       },
     };
     const broker = new InlineApprovalBroker(presenter, { deadlineMs: 1000 });
@@ -251,6 +269,17 @@ describe("InlineApprovalBroker (T301/QS-3.1)", () => {
           label: "Exact",
           capabilities: [],
           supportedLifetimes: ["action"],
+        },
+      ],
+      approvalChoices: [
+        {
+          choiceId: "opt-1::action",
+          optionId: "opt-1",
+          lifetime: "action",
+          title: "Allow this action once",
+          description: "You'll be asked again next time.",
+          authoritySummary: [],
+          recommended: true,
         },
       ],
       offeredLifetimes: ["action"],
@@ -284,6 +313,7 @@ describe("InlineApprovalBroker (T301/QS-3.1)", () => {
         action: action().display,
         requestedCapabilities: [],
         approvalOptions: [],
+        approvalChoices: [],
         offeredLifetimes: ["action"],
         createdAt: 0,
         expiresAt: 1,
@@ -312,6 +342,7 @@ describe("InlineApprovalBroker (T301/QS-3.1)", () => {
         action: action().display,
         requestedCapabilities: [],
         approvalOptions: [],
+        approvalChoices: [],
         offeredLifetimes: ["action"],
         createdAt: 0,
         expiresAt: Date.now() + 1000,
@@ -344,6 +375,7 @@ describe("InlineApprovalBroker (T301/QS-3.1)", () => {
         action: action().display,
         requestedCapabilities: [],
         approvalOptions: [],
+        approvalChoices: [],
         offeredLifetimes: ["action"],
         createdAt: 0,
         expiresAt: Date.now() + 1000,

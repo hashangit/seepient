@@ -1,19 +1,28 @@
 /**
- * Approval-option construction — Domain (spec 011, T004/T005).
+ * Approval-option and choice construction — Domain (spec 011, T004/T005,
+ * T026/T027/T031).
  *
- * Builds the exact/bounded capability choices PolicyEngine attaches to a
- * `PermissionRequest`. Every visible choice originates HERE, from the
- * prepared action's required capabilities — never from raw tool arguments or
- * prompt text (FR-006/FR-009). Each candidate is filtered against the
- * deployment ceiling (or workspace root), immutable denies, and the selected
- * backend's enforcement shape before it enters the request.
+ * Builds the exact/bounded capability options and complete approval choices
+ * PolicyEngine attaches to a `PermissionRequest`. Every visible choice
+ * originates HERE, from the prepared action's required capabilities — never
+ * from raw tool arguments or prompt text (FR-006/FR-009). Each candidate is
+ * filtered against the deployment ceiling (or workspace root), immutable
+ * denies, and the selected backend's enforcement shape before it enters the
+ * request.
  *
  * Bounded candidates are offered only for typed capability shapes the
  * selected backend can enforce:
- *   - `process` → executable-bound (`{ kind: "process", executable }`),
- *     offered when the backend advertises `process`;
+ *   - `process` → executable + first-argument matcher
+ *     (`{ kind: "process", executable, argvPrefix: [subcommand] }`), only
+ *     for non-general executors (FR-009: shells, interpreters, package
+ *     managers, and build drivers never receive an executable-wide session
+ *     choice; an executable-only widening is not an enforceable matcher);
  *   - `read-file` → canonical-parent root (`{ kind: "read-root", root }`),
  *     offered when the backend advertises `read-root`.
+ *
+ * Bounded candidates are ordered by actual authority containment, never by
+ * capability count; when passing candidates are incomparable, the bounded
+ * choice is omitted rather than silently picking one (product acceptance).
  *
  * Root-shaped WRITE authority is NOT offered in this MVP: the local commit
  * broker enforces exact `commit-file` capabilities only, so a `write-root`
@@ -22,9 +31,10 @@
  */
 
 import { createHash } from "node:crypto";
-import { dirname } from "node:path";
+import { basename, dirname } from "node:path";
 import { realpathSync } from "node:fs";
 import type {
+  ApprovalChoice,
   ApprovalOption,
   Capability,
   DenyRule,
@@ -32,7 +42,7 @@ import type {
 } from "../../foundations/contracts/permission-policy.js";
 import type { PreparedToolAction } from "../../foundations/contracts/prepared-action.js";
 import type { ToolEffectKind } from "../../foundations/contracts/tool-effects.js";
-import { isDeniedByRule, setCovers } from "./capability-store.js";
+import { covers, isDeniedByRule, setCovers } from "./capability-store.js";
 
 /** Path-segment containment mirroring capability-store (incl. /private/). */
 function normalizePathForComparison(p: string): string {
@@ -199,23 +209,61 @@ function eligible(cap: Capability, context: PolicyContext): boolean {
 // ── Bounded candidate widening ───────────────────────────────────────────
 
 /**
- * Executable-bound process candidate: keep the exact executable, drop the
- * argv constraint. One option per distinct executable in the request.
+ * Executables that never receive a bounded process choice (FR-009). A
+ * subcommand matcher on these is still effectively arbitrary execution:
+ * `bash -c`, `python -c`, `npm run`, `make -f …`, and so on are general
+ * executors, not constrained tools.
+ */
+const GENERAL_EXECUTORS: Record<string, true> = {
+  // shells
+  sh: true, bash: true, zsh: true, fish: true, dash: true, ksh: true,
+  tcsh: true, csh: true, ash: true,
+  // interpreters
+  python: true, python2: true, python3: true, node: true, nodejs: true,
+  deno: true, bun: true, ruby: true, perl: true, php: true, lua: true,
+  pwsh: true, powershell: true,
+  // package managers
+  npm: true, npx: true, yarn: true, pnpm: true, bunx: true, pip: true,
+  pip2: true, pip3: true, pipx: true, uv: true, uvx: true, poetry: true,
+  pipenv: true, conda: true, mamba: true, brew: true, apt: true,
+  "apt-get": true, dnf: true, yum: true, pacman: true, apk: true,
+  snap: true, flatpak: true,
+  // build drivers that execute arbitrary project scripts
+  cargo: true, go: true, make: true, cmake: true, ninja: true, meson: true,
+  gradle: true, mvn: true, ant: true, composer: true, gem: true,
+  bundle: true, rake: true,
+};
+
+function isGeneralExecutor(executable: string): boolean {
+  return GENERAL_EXECUTORS[basename(executable)] === true;
+}
+
+/**
+ * Bounded process candidate: keep the executable and the FIRST argv token
+ * (subcommand) as the matcher — strictly narrower than the executable
+ * (FR-009, product acceptance). Executable-wide widening is never offered;
+ * general executors and argv-less process caps (no subcommand to pin) are
+ * skipped. Non-process missing capabilities stay exact inside the candidate.
  */
 function processBoundedCandidates(missing: Capability[]): Capability[][] {
-  const executables = new Set<string>();
+  const widened = new Map<string, Capability>();
   for (const c of missing) {
-    if (c.kind === "process" && c.executable !== undefined) {
-      executables.add(c.executable);
+    if (c.kind !== "process") continue;
+    if (c.executable === undefined || isGeneralExecutor(c.executable)) continue;
+    const argv = c.argvPrefix ?? [];
+    if (argv.length === 0) continue; // no subcommand matcher possible
+    const key = `${c.executable}\u0000${argv[0]}`;
+    if (!widened.has(key)) {
+      widened.set(key, {
+        kind: "process" as const,
+        executable: c.executable,
+        argvPrefix: [argv[0]],
+      });
     }
   }
-  if (executables.size === 0) return [];
-  const widened = [...executables].map((exe) => ({
-    kind: "process" as const,
-    executable: exe,
-  }));
+  if (widened.size === 0) return [];
   const rest = missing.filter((c) => c.kind !== "process");
-  return [dedupe([...rest, ...widened])];
+  return [dedupe([...rest, ...widened.values()])];
 }
 
 /**
@@ -330,13 +378,16 @@ export function buildApprovalOptions(
     candidates.push(...readRootBoundedCandidates(exact));
   }
 
-  // MVP shape: the Scope tab shows at most ONE bounded option next to the
-  // exact option (product acceptance: two options per tab maximum). The
-  // narrowest passing candidate wins; the rest are not offered.
+  // The prompt offers AT MOST ONE bounded option next to the exact option
+  // (product acceptance: a bounded choice is a single widening decision).
   const passing: Array<{ caps: Capability[]; key: string }> = [];
+  const seenKeys = new Set<string>();
   for (const caps of candidates) {
     const deduped = dedupe(caps);
     if (deduped.length === 0) continue;
+    const key = canonicalCaps(deduped);
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
     // Every capability in the candidate must be eligible, backend-enforceable,
     // and not immutable-denied. A single failure drops the whole candidate.
     const pass = deduped.every(
@@ -345,27 +396,149 @@ export function buildApprovalOptions(
         !deniedForCap(context.immutableDenies, c) &&
         eligible(c, context),
     );
-    if (pass) passing.push({ caps: deduped, key: canonicalCaps(deduped) });
+    if (pass) passing.push({ caps: deduped, key });
   }
-  // Narrowest bounded candidate first: fewer capabilities, then canonical
-  // shape (deterministic tie-break).
-  passing.sort((a, b) => {
-    if (a.caps.length !== b.caps.length) {
-      return a.caps.length - b.caps.length;
-    }
-    return a.key.localeCompare(b.key);
-  });
-  const narrowestBounded = passing[0];
-  if (narrowestBounded) {
+  // Order candidates by ACTUAL authority containment, not capability count
+  // (product acceptance): drop any candidate that covers another — the
+  // narrowest surviving candidate is the least privilege. When the remaining
+  // candidates are incomparable, the bounded choice is omitted entirely
+  // rather than silently picking one — Domain never guesses which widening
+  // the user wanted.
+  const coversSet = (outer: Capability[], inner: Capability[]): boolean =>
+    inner.every((ic) => outer.some((oc) => covers(oc, ic)));
+  const minimal = passing.filter(
+    (p) =>
+      !passing.some((q) => q.key !== p.key && coversSet(p.caps, q.caps)),
+  );
+  const boundedCandidate = minimal.length === 1 ? minimal[0] : undefined;
+  if (boundedCandidate) {
     options.push({
-      optionId: optionIdFor(action.actionDigest, "bounded", narrowestBounded.caps),
+      optionId: optionIdFor(action.actionDigest, "bounded", boundedCandidate.caps),
       actionDigest: action.actionDigest,
       kind: "bounded",
-      label: boundedLabel(narrowestBounded.caps),
-      capabilities: narrowestBounded.caps,
+      label: boundedLabel(boundedCandidate.caps),
+      capabilities: boundedCandidate.caps,
       supportedLifetimes: [...offeredLifetimes],
     });
   }
 
   return options;
+}
+
+// ── Complete approval choices (spec 011 T026/T027) ───────────────────────
+
+/** Stable, request-bound choice ID derived from the option ID + lifetime. */
+export function choiceIdFor(optionId: string, lifetime: "action" | "session"): string {
+  return `${optionId}::${lifetime}`;
+}
+
+/**
+ * One plain-language line per material authority in the capability delta
+ * (product acceptance: a mixed-capability action is never hidden behind a
+ * single family label). Secret VALUES never appear — refs are identifiers.
+ */
+export function capabilityBullet(cap: Capability): string {
+  switch (cap.kind) {
+    case "process": {
+      const exe = cap.executable ? basename(cap.executable) : "the program";
+      const argv = cap.argvPrefix?.length ? ` ${cap.argvPrefix.join(" ")}` : "";
+      return `Run \`${exe}${argv}\``;
+    }
+    case "read-file":
+      return `Read \`${cap.path}\``;
+    case "read-root":
+      return `Read files under \`${cap.root}\``;
+    case "commit-file":
+      return `Write \`${cap.path}\``;
+    case "write-root":
+      return `Write files under \`${cap.root}\``;
+    case "network-destination": {
+      const scheme = `${cap.scheme}://`;
+      const port = cap.port !== undefined ? `:${cap.port}` : "";
+      return `Connect to \`${scheme}${cap.host}${port}\``;
+    }
+    case "external-recipient":
+      return `Send to \`${cap.recipient}\` via ${cap.service}`;
+    case "secret-ref":
+      return `Use the stored secret \`${cap.ref}\``;
+    case "model-egress":
+      return `Send ${cap.dataClasses.join(", ")} to the ${cap.providerClass} model`;
+    case "activate-change-class":
+      return `Apply a ${cap.changeClass} policy change`;
+    case "trusted-host":
+      return cap.registrationId
+        ? `Allow callbacks from the registered host \`${cap.registrationId}\``
+        : "Allow callbacks from a registered host";
+  }
+}
+
+/** Full authority summary for a capability set — one bullet per capability. */
+export function authoritySummary(caps: Capability[]): string[] {
+  return caps.map(capabilityBullet);
+}
+
+/** Plain-language title for a bounded choice, from its matcher shape. */
+function boundedTitle(caps: Capability[]): string {
+  const processCaps = caps.filter((c) => c.kind === "process");
+  if (processCaps.length > 0) {
+    const matchers = processCaps
+      .filter((c) => c.executable !== undefined && (c.argvPrefix?.length ?? 0) > 0)
+      .map((c) => `\`${basename(c.executable as string)} ${(c.argvPrefix as string[]).join(" ")} …\``);
+    if (matchers.length > 0) {
+      return `Allow matching ${matchers.join(" and ")} commands until I close Seepient`;
+    }
+  }
+  if (caps.some((c) => c.kind === "read-root")) {
+    return "Allow other files in this folder until I close Seepient";
+  }
+  return "Allow similar actions until I close Seepient";
+}
+
+/**
+ * Build the complete choices for the request: the only meaningful pairs are
+ * exact/action, exact/session, and bounded/session (FR-010). Bounded/action
+ * is never issued — it widens authority without a reuse benefit. The
+ * least-privileged choice (exact/action) is marked Recommended; the TUI
+ * never preselects it.
+ */
+export function buildApprovalChoices(
+  options: ApprovalOption[],
+  sessionId?: string,
+): ApprovalChoice[] {
+  const choices: ApprovalChoice[] = [];
+  for (const option of options) {
+    const lifetimes: Array<"action" | "session"> =
+      option.kind === "exact"
+        ? ["action", ...(sessionId ? (["session"] as const) : [])]
+        : sessionId
+          ? (["session"] as const)
+          : [];
+    for (const lifetime of lifetimes) {
+      if (!option.supportedLifetimes.includes(lifetime)) continue;
+      choices.push({
+        choiceId: choiceIdFor(option.optionId, lifetime),
+        optionId: option.optionId,
+        lifetime,
+        title:
+          option.kind === "exact"
+            ? lifetime === "action"
+              ? "Allow this action once"
+              : "Allow this exact action until I close Seepient"
+            : boundedTitle(option.capabilities),
+        description:
+          lifetime === "action"
+            ? "You'll be asked again next time."
+            : "Seepient will remember this permission until you close it.",
+        authoritySummary: authoritySummary(option.capabilities),
+        recommended: false,
+      });
+    }
+  }
+  const recommended = choices.find((c) => c.lifetime === "action");
+  if (recommended) {
+    return choices.map((c) =>
+      c.choiceId === recommended.choiceId ? { ...c, recommended: true } : c,
+    );
+  }
+  return choices;
 }
