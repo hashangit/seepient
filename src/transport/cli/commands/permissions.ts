@@ -110,7 +110,14 @@ export const permissionsHandler: CommandHandler = async (ctx) => {
   // through PolicyStore.compareAndSet — never through an effectful tool or
   // a worktree file. Requires the protected policy store to be configured.
   if (sub === 'status') {
-    return { output: renderStatus(store, policyStore, ctx.agent.getContainmentStatus?.()) };
+    return {
+      output: renderStatus(
+        store,
+        policyStore,
+        ctx.agent.getContainmentStatus?.(),
+        ctx.agent.getActiveCapabilities?.(),
+      ),
+    };
   }
 
   if (sub === 'propose') {
@@ -227,6 +234,7 @@ function renderStatus(
   store: { list(): Array<{ scope: string }> } | null | undefined,
   policyStore: unknown | null | undefined,
   containment: import("../../../capabilities/execution/containment-preflight.js").ContainmentPreflightResult | undefined,
+  active: Capability[] | undefined,
 ): string {
   const lines: string[] = [chalk.bold.cyan('Permission Status (spec 008)'), ''];
   lines.push(`${chalk.bold('Containment (spec 011 preflight):')}`);
@@ -240,6 +248,16 @@ function renderStatus(
     lines.push(chalk.dim(`  ${containment.setupHint}`));
   } else {
     lines.push(chalk.dim('  (pipeline not enabled on this surface)'));
+  }
+  lines.push('');
+  lines.push(`${chalk.bold('Active session authority (spec 011):')}`);
+  if (active && active.length > 0) {
+    for (const cap of active) {
+      lines.push(`  ${chalk.green(describeCapability(cap))}`);
+    }
+    lines.push(chalk.dim('  Session approvals are held in memory for this session; they are not grants.'));
+  } else {
+    lines.push(chalk.dim('  (none — action approvals are consumed once; session approvals appear here)'));
   }
   lines.push('');
   lines.push(`${chalk.bold('Legacy grants:')}`);
@@ -262,7 +280,8 @@ function renderStatus(
 
 function renderGrants(grants: { id: string; tool: string; pattern?: string; scope: string; createdAt: number }[]): string {
   if (grants.length === 0) {
-    return chalk.dim('No permission grants. Approve a tool with a scope beyond "once" to create one.');
+    return `${chalk.dim('No permission grants. Approve a tool with a scope beyond "once" to create one.')}
+${chalk.dim('Note: native pipeline session approvals are NOT stored as grants — run /permissions status to see active session authority.')}`;
   }
 
   const lines: string[] = [chalk.bold.cyan('Permission Grants'), ''];

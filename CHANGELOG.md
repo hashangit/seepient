@@ -28,7 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   capability count); incomparable candidates are omitted rather than
   silently picked. The least-privilege choice is marked Recommended but is
   never pre-approved; one explicit Enter approves the focused row. Local
-  prompts get a five-minute default deadline (immediate settlement on
+  prompts get a ten-minute default deadline — configurable via the
+  `permissions.approvalTimeoutMs` setting (immediate settlement on
   parent abort, session close, request replacement, or digest change), and
   a containment preflight fails `approval-unavailable` with a setup message
   before a prompt is shown when the platform sandbox is missing (visible
@@ -36,7 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retained; session choices stay in the long-lived active set until
   revocation. Forged, stale, expired, or revoked selections fail closed,
   and inline approval performs no grants or protected-policy writes. The
-  flag-off legacy prompt is unchanged.
+  flag-off legacy prompt is unchanged. `/permissions status` shows the
+  containment backend, writable root, and the live active-session authority
+  set (session approvals are held in memory and never written as legacy
+  grants).
 
 ## [v0.4.2] - 2026-08-01
 

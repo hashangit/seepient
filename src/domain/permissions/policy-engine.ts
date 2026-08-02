@@ -93,7 +93,11 @@ function buildPermissionRequest(
   approvalChoices: ApprovalChoice[],
 ): PermissionRequest {
   const now = Date.now();
-  const deadlineMs = context.interaction.deadlineMs ?? 30_000;
+  // Spec 011: the request expiry IS the approval deadline. The factory
+  // supplies the configured value (`permissions.approvalTimeoutMs`, default
+  // ten minutes); this fallback only guards callers that build contexts by
+  // hand.
+  const deadlineMs = context.interaction.deadlineMs ?? 600_000;
   // Spec 011: the request keeps the stable session identity so the bridge can
   // offer `session`; `session` is offered only when that identity exists.
   const sessionId = action.sessionId ?? context.sessionId;

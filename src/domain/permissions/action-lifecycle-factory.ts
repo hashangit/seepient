@@ -78,6 +78,12 @@ export interface ActionLifecycleInputs {
   approvalMode?: "manual" | "balanced" | "never";
   /** Interaction contract — derived from the broker by default. */
   interaction?: PolicyContext["interaction"];
+  /**
+   * Local approval deadline in ms (spec 011 T033 + settings). Default ten
+   * minutes; `permissions.approvalTimeoutMs` overrides it. Only used when
+   * `interaction` is not supplied.
+   */
+  approvalDeadlineMs?: number;
   /** Optional: persisted capability ledger for authority consumption & revocation (T107a). */
   capabilityLedger?: PersistedCapabilityLedger;
   /**
@@ -231,7 +237,10 @@ export async function buildActionLifecycle(
     approvalMode: inputs.approvalMode ?? "manual",
     interaction: inputs.interaction ?? {
       mode: inputs.approvalBroker.mode,
-      deadlineMs: 30_000,
+      // Spec 011 (T033 + settings): the local approval deadline. Default ten
+      // minutes; `permissions.approvalTimeoutMs` overrides it. The request
+      // expiry and the inline broker's cutoff both derive from this value.
+      deadlineMs: inputs.approvalDeadlineMs ?? 600_000,
     },
     backendCapabilities: inputs.executionBoundary.capabilities,
     // Spec 011 (T008): preserve the stable session identity so PolicyEngine

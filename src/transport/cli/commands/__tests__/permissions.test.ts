@@ -102,6 +102,10 @@ describe("/permissions protected-policy (T307, QS-3.3)", () => {
     expect(res.output).toContain("Legacy grants");
     expect(res.output).toContain("Protected policy");
     expect(res.output).toContain("configured");
+    // Spec 011: the status also shows active session authority (empty here
+    // because no session approval happened) and the containment backend.
+    expect(res.output).toContain("Active session authority");
+    expect(res.output).toContain("Containment");
   });
 
   it("invalid capability kind is rejected at propose", async () => {

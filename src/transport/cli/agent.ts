@@ -166,6 +166,11 @@ export class Agent {
     modelProviderClass?: string;
     auditRoot?: string;
     allowFallback?: boolean;
+    /**
+     * Local approval deadline in ms (spec 011 T033). Defaults to ten
+     * minutes; the CLI bootstrap passes `permissions.approvalTimeoutMs`.
+     */
+    approvalDeadlineMs?: number;
   }): Promise<void> {
     const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
     const { legacyApproveToolToBroker } = await import("../legacy-adapter.js");
@@ -218,6 +223,7 @@ export class Agent {
       workspaceRoot: opts.workspaceRoot ?? process.cwd(),
       modelProviderClass: opts.modelProviderClass ?? "openai",
       approvalBroker: liveBroker,
+      approvalDeadlineMs: opts.approvalDeadlineMs,
       executionBoundary: realBoundary,
       policyStore: this._policyStore ?? undefined,
       auditRoot: opts.auditRoot,
@@ -276,6 +282,18 @@ export class Agent {
    */
   getContainmentStatus(): import("../../capabilities/execution/containment-preflight.js").ContainmentPreflightResult | undefined {
     return this._containmentStatus;
+  }
+
+  /**
+   * Live active-session capability set (spec 011). Session-lifetime
+   * approvals are retained here for the rest of the session; action
+   * approvals are consumed and never appear. Exposed for `/permissions` so
+   * the user can see what the current session remembers — inline approval
+   * never writes legacy grants (FR-018), so the grants list stays empty by
+   * design.
+   */
+  getActiveCapabilities(): import("../../foundations/contracts/permission-policy.js").Capability[] {
+    return this._wiredPipeline?.lifecycle.getActiveCapabilities() ?? [];
   }
 
   /**

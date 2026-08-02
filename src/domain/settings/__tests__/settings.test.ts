@@ -86,15 +86,27 @@ describe('settings-schema', () => {
     const permKeys = getSettingsByCategory('permissions');
     expect(permKeys).toContain('agent.permissionLevel');
     expect(permKeys).toContain('agent.autoConfirm');
+    expect(permKeys).toContain('permissions.approvalTimeoutMs');
 
     const providerKeys = getSettingsByCategory('providers');
     expect(providerKeys.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it('permissions.approvalTimeoutMs defaults to ten minutes and validates bounds', () => {
+    const schema = getSettingSchema('permissions.approvalTimeoutMs');
+    expect(schema).toBeDefined();
+    expect(schema!.type).toBe('number');
+    expect(schema!.default).toBe(600_000);
+    expect(schema!.min).toBe(10_000);
+    expect(schema!.max).toBe(3_600_000);
+    expect(getSettingEntry('permissions.approvalTimeoutMs')!.category).toBe('permissions');
   });
 
   it('ENV_VAR_MAP has entries for settings with env var overrides', () => {
     expect(ENV_VAR_MAP.get('providers.openai.apiKey')).toBe('OPENAI_API_KEY');
     expect(ENV_VAR_MAP.get('smtp.host')).toBe('SMTP_HOST');
     expect(ENV_VAR_MAP.get('agent.permissionLevel')).toBe('SEEPIENT_PERMISSION');
+    expect(ENV_VAR_MAP.get('permissions.approvalTimeoutMs')).toBe('SEEPIENT_APPROVAL_TIMEOUT_MS');
   });
 
   it('provider dot-keys map to correct AppConfig paths', () => {

@@ -242,9 +242,11 @@ describe("native TUI bridge (T015)", () => {
     expect(lastTool?.content ?? "").toContain("approval-unavailable");
   });
 
-  it("defaults to a five-minute deadline (FR-020)", async () => {
-    // No deadlineMs supplied: the broker must apply the 300_000 ms default
-    // and settle a typed denial when the presenter never answers.
+  it("derives its deadline from the policy-issued request expiry (FR-020)", async () => {
+    // No deadlineMs supplied: the broker must cut off at the REQUEST expiry
+    // (the settings-driven value baked into expiresAt by PolicyEngine), so a
+    // prompt can never outlive the request it answers. Explicit deadlines
+    // still override for remote/headless transports.
     const presenter: InlineApprovalPresenter = {
       async prompt() {
         return new Promise<TuiApprovalSelection>(() => {});
@@ -262,8 +264,8 @@ describe("native TUI bridge (T015)", () => {
       approvalOptions: [],
       approvalChoices: [],
       offeredLifetimes: ["action"],
-      createdAt: 0,
-      expiresAt: Date.now() + 600_000, // far beyond the 5-minute deadline
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 600_000,
     };
     vi.useFakeTimers();
     try {
@@ -272,10 +274,10 @@ describe("native TUI bridge (T015)", () => {
       pending.then(() => {
         settled = true;
       });
-      // One millisecond before the deadline: still pending.
-      await vi.advanceTimersByTimeAsync(299_999);
+      // One millisecond before the request expiry: still pending.
+      await vi.advanceTimersByTimeAsync(599_999);
       expect(settled).toBe(false);
-      // Crossing the deadline settles the denial.
+      // Crossing the request expiry settles the denial.
       await vi.advanceTimersByTimeAsync(1);
       const d = await pending;
       expect(d.approved).toBe(false);

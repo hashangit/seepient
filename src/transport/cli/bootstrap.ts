@@ -178,9 +178,21 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
       const policyStore = new LocalPolicyStore();
       const workspaceId = computeWorkspaceId(process.cwd());
       agent.setPolicyStore(policyStore, workspaceId);
+      // Spec 011 (T033 + settings): the approval deadline comes from
+      // `permissions.approvalTimeoutMs` (default ten minutes). Read it here
+      // so the request expiry and the inline broker cutoff both honor it.
+      const deadlineSettings = new SettingsManager({
+        config: applyEnvOverrides(loadMergedConfig()),
+        projectConfigPath: LOCAL_CONFIG_FILE,
+        globalConfigPath: GLOBAL_CONFIG_FILE,
+      });
+      const approvalDeadlineMs = deadlineSettings.get(
+        'permissions.approvalTimeoutMs',
+      ).value as number;
       await agent.enablePermissionPipeline({
         workspaceRoot: process.cwd(),
         modelProviderClass: activeProviderType ?? 'openai',
+        approvalDeadlineMs,
       });
     } catch {
       // Policy store / pipeline is best-effort; fallback to default loop pipeline.

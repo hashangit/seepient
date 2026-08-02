@@ -108,15 +108,18 @@ export interface InlineApprovalPresenter {
 export class InlineApprovalBroker implements ApprovalBroker {
   readonly mode = "inline" as const;
   private readonly presenter: InlineApprovalPresenter;
-  private readonly deadlineMs: number;
+  private readonly deadlineMs: number | undefined;
 
   constructor(presenter: InlineApprovalPresenter, opts?: { deadlineMs?: number }) {
     this.presenter = presenter;
-    // Spec 011 (FR-020): a five-minute default deadline — a local prompt
-    // containing an unfamiliar command or filesystem scope needs human
-    // reading time. Shorter deadlines may be supplied for remote/headless
-    // transports.
-    this.deadlineMs = opts?.deadlineMs ?? 300_000;
+    // Spec 011 (FR-020/T033): the broker's cutoff IS the policy-issued
+    // request expiry (ten minutes by default, configurable via
+    // `permissions.approvalTimeoutMs`) unless an explicit deadline is
+    // supplied — remote/headless transports may set shorter ones. Deriving
+    // from the request keeps the prompt and the request lifecycle aligned;
+    // a fixed broker default shorter than the request would falsely expire
+    // valid approvals.
+    this.deadlineMs = opts?.deadlineMs;
   }
 
   async request(
@@ -134,9 +137,12 @@ export class InlineApprovalBroker implements ApprovalBroker {
     if (opts.signal?.aborted) {
       return this.denial(req, "user-denied");
     }
-    // Compose the caller's signal with a deadline signal.
+    // Compose the caller's signal with the deadline signal. The cutoff is
+    // the policy-issued request expiry (or an explicit constructor deadline)
+    // so the prompt cannot outlive the request it answers.
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.deadlineMs);
+    const cutoffMs = this.deadlineMs ?? Math.max(req.expiresAt - Date.now(), 1_000);
+    const timer = setTimeout(() => controller.abort(), cutoffMs);
     const onParentAbort = () => controller.abort();
     opts.signal?.addEventListener("abort", onParentAbort, { once: true });
 
