@@ -16,7 +16,8 @@
  */
 import { PolicyEngine, computePolicyDigest } from "./policy-engine.js";
 import { ActionLifecycle } from "./action-lifecycle.js";
-import { LocalAuditStore } from "./audit-recorder.js";
+import { LocalAuditStore, idempotencyKey } from "./audit-recorder.js";
+import { generateId } from "../../foundations/id.js";
 import { LocalPolicyStore, computeWorkspaceId, GLOBAL_WORKSPACE_ID } from "./policy-store.js";
 import { setCovers } from "./capability-store.js";
 import { DEFAULT_ANALYZERS } from "./default-analyzers.js";
@@ -317,6 +318,17 @@ export async function buildActionLifecycle(
     workspaceId,
   });
 
+  // Round 5 P0: reconcile unresolved persistent-grant WAL intents. A crash
+  // between the policy compare-and-set and the committed audit append leaves
+  // an intent without its committed record; if the store actually contains
+  // the grant, append the missing committed record. Best-effort — never
+  // blocks startup on a broken store.
+  try {
+    await reconcilePolicyGrantIntents(auditStore, policyStore);
+  } catch {
+    /* reconciliation is best-effort; the intent record remains as the trail */
+  }
+
   return {
     lifecycle,
     boundary: inputs.executionBoundary,
@@ -356,3 +368,65 @@ export function resolveAnalyzer(
 }
 
 export type { PreparedToolAction, ExecutionBackendCapabilities };
+
+/**
+ * Round 5 P0: reconcile unresolved persistent-grant WAL intents. A crash (or
+ * a failed committed append) between the policy compare-and-set and the
+ * `policy-granted` record leaves only the durable `policy-grant-intent`.
+ * For each intent without a committed sibling, consult the policy store: if
+ * the store version advanced past the intent's before-version AND the
+ * granted capabilities are present, the mutation DID commit — durably
+ * append the missing committed record (idempotent key, so a racing flush
+ * cannot duplicate it). If the store never advanced, the intent was never
+ * committed and stays provisional. Only LocalAuditStore is enumerable; other
+ * stores have their own durability contracts.
+ */
+async function reconcilePolicyGrantIntents(
+  auditStore: AuditStore,
+  policyStore: PolicyStore,
+): Promise<void> {
+  if (!(auditStore instanceof LocalAuditStore)) return;
+  const events = await auditStore.listEvents();
+  const committedByAction = new Set(
+    events.filter((e) => e.state === "policy-granted").map((e) => e.actionId),
+  );
+  const intents = events.filter(
+    (e) => e.state === "policy-grant-intent" && e.grantedWorkspaceId !== undefined,
+  );
+  for (const intent of intents) {
+    if (committedByAction.has(intent.actionId)) continue;
+    const snap = await policyStore
+      .read(intent.grantedWorkspaceId!)
+      .catch(() => null);
+    if (!snap) continue;
+    const granted = (intent.capabilities ?? []).every((c) =>
+      setCovers(snap.policy, c),
+    );
+    if (snap.version <= (intent.policyBeforeVersion ?? -1) || !granted) continue;
+    await auditStore
+      .append(
+        {
+          eventId: generateId(),
+          actionId: intent.actionId,
+          actionDigest: intent.actionDigest,
+          principalId: intent.principalId,
+          runId: intent.runId,
+          state: "policy-granted",
+          timestamp: Date.now(),
+          policyDigest: intent.policyDigest,
+          optionId: intent.optionId,
+          lifetime: intent.lifetime,
+          capabilities: intent.capabilities,
+          actorId: intent.actorId,
+          policyBeforeVersion: intent.policyBeforeVersion,
+          policyAfterVersion: snap.version,
+          grantedWorkspaceId: intent.grantedWorkspaceId,
+          backend: intent.backend,
+        },
+        { idempotencyKey: idempotencyKey(intent.actionId, "policy-granted") },
+      )
+      .catch(() => {
+        /* best-effort: the intent remains as the provisional trail */
+      });
+  }
+}

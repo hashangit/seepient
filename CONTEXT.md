@@ -15,4 +15,5 @@
   redaction + go/no-go (need real sessions/platforms).
 
 ## Next
-- Full suite + commit; manual quickstart macOS + Linux; merge.
+- Manual quickstart macOS + Linux (T025/T037); 5-user pass (T038); audit
+  redaction review (T039); go/no-go (T040); then merge.

@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ActionLifecycle } from "../action-lifecycle.js";
 import { PolicyEngine } from "../policy-engine.js";
-import { LocalAuditStore, idempotencyKey } from "../audit-recorder.js";
+import { LocalAuditStore, TerminalEventOutbox, idempotencyKey } from "../audit-recorder.js";
 import { LocalPolicyStore, GLOBAL_WORKSPACE_ID } from "../policy-store.js";
 import { buildActionLifecycle } from "../action-lifecycle-factory.js";
 import { PersistedCapabilityLedger } from "../persisted-capability-ledger.js";
@@ -1257,7 +1257,7 @@ describe("persistent grant WAL (round 4 P0 review fix)", () => {
     expect(snap.version).toBe(0);
   });
 
-  it("a post-CAS audit failure REVERTS the grant so no authority survives", async () => {
+  it("a post-CAS audit failure is covered by the durable WAL intent", async () => {
     const store = new LocalPolicyStore({ root: dir });
     const audit: import("../../../foundations/contracts/execution-brokers.js").AuditStore = {
       async append(event) {
@@ -1303,5 +1303,221 @@ describe("persistent grant WAL (round 4 P0 review fix)", () => {
     expect(result.outcome.state).toBe("succeeded");
     const snap = await store.read("ws-1");
     expect(snap.policy.capabilities).toEqual([{ kind: "commit-file", path: "/p/a.txt" }]);
+  });
+});
+
+describe("persistent grant WAL — concurrent flush, CAS failure, recovery (round 5 P0)", () => {
+  /** Persistent-grant lifecycle over the REAL outbox + audit store. */
+  function walLifecycle(opts: {
+    store: LocalPolicyStore;
+    audit: LocalAuditStore;
+    outbox: TerminalEventOutbox;
+    lifetime: "project" | "global";
+  }): ActionLifecycle {
+    return new ActionLifecycle({
+      policy: new PolicyEngine("digest"),
+      policyContext: policyCtx({
+        deploymentCeiling: set({ kind: "commit-file", path: "/p/a.txt" }),
+        principalPolicy: set({ kind: "commit-file", path: "/p/a.txt" }),
+        activeCapabilities: set(),
+        workspaceId: "ws-1",
+      }),
+      broker: {
+        mode: "inline",
+        request: async (req) => approved(req, "user", opts.lifetime),
+      },
+      boundary: fakeBoundary({ output: "ok", success: true }),
+      audit: opts.audit,
+      activeCapabilities: { capabilities: [] },
+      policyStore: opts.store,
+      workspaceId: "ws-1",
+      terminalOutbox: opts.outbox,
+    });
+  }
+
+  it("a concurrent outbox flush between intent and CAS produces BOTH records (no duplicate collision)", async () => {
+    const audit = new LocalAuditStore({ root: dir });
+    const outbox = new TerminalEventOutbox(audit);
+    const store = new LocalPolicyStore({ root: join(dir, "policy") });
+    // Simulate the reviewer's race: the shared background outbox flushes the
+    // intent BEFORE the CAS completes.
+    const originalCas = store.compareAndSet.bind(store);
+    store.compareAndSet = (async (...args: Parameters<LocalPolicyStore["compareAndSet"]>) => {
+      await outbox.flush();
+      return originalCas(...args);
+    }) as LocalPolicyStore["compareAndSet"];
+    const lifecycle = walLifecycle({ store, audit, outbox, lifetime: "project" });
+    const result = await lifecycle.run(writeAction());
+    expect(result.outcome.state).toBe("succeeded");
+    await outbox.flush();
+    const events = await audit.listEvents();
+    // Distinct states and distinct idempotency keys: the flushed intent and
+    // the committed record coexist; the committed record has the version.
+    const intents = events.filter((e) => e.state === "policy-grant-intent");
+    const committed = events.filter((e) => e.state === "policy-granted");
+    expect(intents).toHaveLength(1);
+    expect(intents[0].policyAfterVersion).toBeUndefined();
+    expect(committed).toHaveLength(1);
+    expect(committed[0].policyAfterVersion).toBe(1);
+    const snap = await store.read("ws-1");
+    expect(snap.policy.capabilities).toEqual([{ kind: "commit-file", path: "/p/a.txt" }]);
+  });
+
+  it("a CAS failure leaves a provisional intent and denies with nothing installed", async () => {
+    const audit = new LocalAuditStore({ root: dir });
+    const outbox = new TerminalEventOutbox(audit);
+    const store = new LocalPolicyStore({ root: join(dir, "policy") });
+    const originalCas = store.compareAndSet.bind(store);
+    let calls = 0;
+    store.compareAndSet = (async (...args: Parameters<LocalPolicyStore["compareAndSet"]>) => {
+      calls++;
+      throw new Error("policy store down");
+    }) as LocalPolicyStore["compareAndSet"];
+    void originalCas;
+    const lifecycle = walLifecycle({ store, audit, outbox, lifetime: "global" });
+    const result = await lifecycle.run(writeAction());
+    expect(result.outcome.state).toBe("denied");
+    expect(calls).toBeGreaterThan(0);
+    const snap = await store.read(GLOBAL_WORKSPACE_ID);
+    expect(snap.policy.capabilities).toEqual([]);
+    // The durable intent remains as the provisional trail; reconciliation
+    // will see the store never advanced and leave it as-is.
+    await outbox.flush();
+    const events = await audit.listEvents();
+    expect(events.filter((e) => e.state === "policy-grant-intent")).toHaveLength(1);
+    expect(events.filter((e) => e.state === "policy-granted")).toHaveLength(0);
+  });
+});
+
+describe("WAL startup reconciliation (round 5 P0)", () => {
+  it("an intent whose CAS committed is completed with the missing committed record", async () => {
+    const audit = new LocalAuditStore({ root: dir });
+    const store = new LocalPolicyStore({ root: join(dir, "policy") });
+    // Simulate a crash AFTER the CAS but BEFORE the committed append: the
+    // store already contains the grant and the audit holds only the intent.
+    await store.compareAndSet(
+      "ws-1",
+      0,
+      { version: 1, capabilities: [{ kind: "commit-file", path: "/p/a.txt" }] },
+      { kind: "human", authorityId: "inline-approval", authenticatedBy: "tui" },
+    );
+    await audit.append(
+      {
+        eventId: "intent-1",
+        actionId: "a1",
+        actionDigest: "d1",
+        principalId: "user",
+        runId: "r1",
+        state: "policy-grant-intent",
+        timestamp: 1,
+        policyDigest: "digest",
+        optionId: "opt-1",
+        lifetime: "project",
+        capabilities: [{ kind: "commit-file", path: "/p/a.txt" }],
+        actorId: "user",
+        policyBeforeVersion: 0,
+        grantedWorkspaceId: "ws-1",
+      },
+      { idempotencyKey: "a1:policy-grant-intent" },
+    );
+    // Rebuilding the pipeline runs the reconciliation.
+    await buildActionLifecycle({
+      principalId: "user",
+      runId: "r1",
+      sessionId: "s1",
+      workspaceRoot: dir,
+      approvalBroker: { mode: "none" as const, request: async () => ({ approved: false, requestId: "x", actionDigest: "y", actorId: "u", decidedAt: 0 }) },
+      executionBoundary: fakeBoundary({ output: "ok", success: true }),
+      auditStore: audit,
+      policyStore: store,
+    });
+    const events = await audit.listEvents();
+    const committed = events.filter((e) => e.state === "policy-granted" && e.actionId === "a1");
+    expect(committed).toHaveLength(1);
+    expect(committed[0].policyAfterVersion).toBe(1);
+    expect(committed[0].policyBeforeVersion).toBe(0);
+  });
+
+  it("an intent whose CAS never committed stays provisional", async () => {
+    const audit = new LocalAuditStore({ root: dir });
+    const store = new LocalPolicyStore({ root: join(dir, "policy") });
+    // Intent only — the store never advanced.
+    await audit.append(
+      {
+        eventId: "intent-2",
+        actionId: "a2",
+        actionDigest: "d2",
+        principalId: "user",
+        runId: "r1",
+        state: "policy-grant-intent",
+        timestamp: 1,
+        policyDigest: "digest",
+        optionId: "opt-1",
+        lifetime: "project",
+        capabilities: [{ kind: "commit-file", path: "/p/a.txt" }],
+        actorId: "user",
+        policyBeforeVersion: 0,
+        grantedWorkspaceId: "ws-1",
+      },
+      { idempotencyKey: "a2:policy-grant-intent" },
+    );
+    await buildActionLifecycle({
+      principalId: "user",
+      runId: "r1",
+      sessionId: "s1",
+      workspaceRoot: dir,
+      approvalBroker: { mode: "none" as const, request: async () => ({ approved: false, requestId: "x", actionDigest: "y", actorId: "u", decidedAt: 0 }) },
+      executionBoundary: fakeBoundary({ output: "ok", success: true }),
+      auditStore: audit,
+      policyStore: store,
+    });
+    const events = await audit.listEvents();
+    expect(events.filter((e) => e.state === "policy-granted" && e.actionId === "a2")).toHaveLength(0);
+    expect(events.filter((e) => e.state === "policy-grant-intent" && e.actionId === "a2")).toHaveLength(1);
+  });
+});
+
+describe("strict request binding (round 4/5 P1/P2)", () => {
+  const makeLifecycle = (decision: (req: PermissionRequest) => PermissionDecision): ActionLifecycle => {
+    return new ActionLifecycle({
+      policy: new PolicyEngine("digest"),
+      policyContext: policyCtx({
+        deploymentCeiling: set({ kind: "commit-file", path: "/p/a.txt" }),
+        principalPolicy: set({ kind: "commit-file", path: "/p/a.txt" }),
+        activeCapabilities: set(),
+      }),
+      broker: { mode: "inline", request: async (req) => decision(req) },
+      boundary: fakeBoundary({ output: "ok", success: true }),
+      audit: new LocalAuditStore({ root: dir }),
+      activeCapabilities: { capabilities: [] },
+    });
+  };
+
+  it("an approved decision WITHOUT requestId is rejected", async () => {
+    const lifecycle = makeLifecycle((req) => {
+      const d = approved(req, "user", "action");
+      return { ...d, requestId: undefined as never };
+    });
+    const result = await lifecycle.run(writeAction());
+    expect(result.outcome.state).toBe("denied");
+    expect(result.approval?.approved).toBe(true);
+  });
+
+  it("an approved decision WITHOUT actionDigest is rejected", async () => {
+    const lifecycle = makeLifecycle((req) => {
+      const d = approved(req, "user", "action");
+      return { ...d, actionDigest: undefined as never };
+    });
+    const result = await lifecycle.run(writeAction());
+    expect(result.outcome.state).toBe("denied");
+  });
+
+  it("an approved decision WITHOUT an explicit lifetime is rejected (no silent action default)", async () => {
+    const lifecycle = makeLifecycle((req) => {
+      const d = approved(req, "user", "action");
+      return { ...d, lifetime: undefined as never };
+    });
+    const result = await lifecycle.run(writeAction());
+    expect(result.outcome.state).toBe("denied");
   });
 });

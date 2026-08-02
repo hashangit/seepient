@@ -582,9 +582,11 @@ export class ActionLifecycle {
                     authenticatedBy: "tui",
                   },
                 );
-                // Best-effort final record. If it fails, the durable WAL
-                // intent enqueued BEFORE the CAS covers the forensic record
-                // (round 4 P0: the mutation can never exist unrecorded).
+                // Best-effort committed record with its own state/key. If
+                // this append fails (or the process crashes here), the
+                // durable intent (flushed or pending) is reconciled at
+                // startup by reconciling unresolved intents against the
+                // policy store (round 5 P0).
                 await this.record(action, "policy-granted", undefined, {
                   optionId: option.optionId,
                   lifetime: lifetimeKind,
@@ -962,13 +964,18 @@ export class ActionLifecycle {
     grantedWorkspaceId: string,
     beforeVersion: number,
   ): Promise<void> {
+    // The intent uses its OWN state (round 5 P0): the shared outbox may
+    // flush it at any time, and it must never be mistaken for a committed
+    // grant. The committed record uses `policy-granted` with a different
+    // idempotency key, so a concurrent flush cannot turn the final record
+    // into a duplicate.
     const event: import("../../foundations/contracts/execution-brokers.js").ActionAuditEvent = {
       eventId: generateId(),
       actionId: action.actionId,
       actionDigest: action.actionDigest,
       principalId: action.principalId,
       runId: action.runId,
-      state: "policy-granted",
+      state: "policy-grant-intent",
       timestamp: this.now(),
       policyDigest: this.policy.getPolicyDigest(),
       backend: this.boundary.capabilities.backend,
@@ -978,11 +985,10 @@ export class ActionLifecycle {
       actorId,
       policyBeforeVersion: beforeVersion,
       grantedWorkspaceId,
-      grantIntent: true,
     };
     await this.terminalOutbox!.enqueue(
       event,
-      idempotencyKey(action.actionId, "policy-granted"),
+      idempotencyKey(action.actionId, "policy-grant-intent"),
     );
   }
 

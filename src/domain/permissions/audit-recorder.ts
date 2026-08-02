@@ -205,6 +205,51 @@ export class LocalAuditStore implements AuditStoreContract {
     return undefined;
   }
 
+  /**
+   * Enumerate every persisted audit event across all workspaces (round 5 P0:
+   * used by the persistent-grant WAL reconciliation at startup). Recovery
+   * only — never the hot path.
+   */
+  async listEvents(): Promise<ActionAuditEvent[]> {
+    const events: ActionAuditEvent[] = [];
+    try {
+      const entries = await fs.readdir(this.dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue; // e.g. a policy store file sharing the root
+        const file = this.eventsFile(entry.name);
+        let raw: string;
+        try {
+          raw = await fs.readFile(file, "utf8");
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
+          throw err;
+        }
+        for (const line of raw.split("\n")) {
+          if (!line.trim()) continue;
+          try {
+            const parsed = JSON.parse(line) as unknown;
+            if (parsed === null || typeof parsed !== "object") continue;
+            // Lines are stored as { event, idempotencyKey } envelopes; older
+            // files may hold bare events.
+            const envelope = parsed as { event?: ActionAuditEvent };
+            if (envelope.event !== undefined) {
+              events.push(envelope.event);
+            } else if ("state" in envelope) {
+              events.push(envelope as ActionAuditEvent);
+            }
+          } catch {
+            /* skip a corrupt line — other events remain readable */
+          }
+        }
+      }
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") return events;
+      throw err;
+    }
+    return events;
+  }
+
   private async hasKey(file: string, key: string): Promise<boolean> {
     try {
       const raw = await fs.readFile(file, "utf8");
@@ -481,6 +526,20 @@ export class TerminalEventOutbox {
         await handle.close();
       }
       await fs.rename(tmp, this.outboxFile);
+      // Round 5 P0: the file fsync alone does not guarantee the DIRECTORY
+      // entry survived a crash — fsync the parent directory after rename so
+      // the WAL rename is durable before the caller proceeds to the policy
+      // mutation. (fsync on a directory fd is supported on macOS/Linux.)
+      try {
+        const dirHandle = await fs.open(dir, "r");
+        try {
+          await dirHandle.sync();
+        } finally {
+          await dirHandle.close();
+        }
+      } catch {
+        /* directory fsync is best-effort on filesystems that reject it */
+      }
     } catch (err) {
       await fs.unlink(tmp).catch(() => {});
       // Preserve the lock-timeout AuditError; wrap unexpected fs failures
