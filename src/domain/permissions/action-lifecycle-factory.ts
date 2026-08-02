@@ -167,11 +167,15 @@ export async function buildActionLifecycle(
 
   // When no policy exists yet (fresh install), the principal policy defaults
   // to the deployment ceiling so the operator's ceiling IS the starting maximum authority.
+  // Freshness is determined by SNAPSHOT VERSION, not capability count (review
+  // P0): a versioned EMPTY policy — e.g. after revoking the final capability —
+  // is a deliberate state and must NOT resurrect the ceiling baselines on
+  // restart.
   let principalPolicy: CapabilitySet;
   let hasStoredPolicy = false;
   try {
     const snap = await policyStore.read(workspaceId);
-    if (snap.policy.capabilities.length > 0) {
+    if (snap.version > 0 || snap.policy.capabilities.length > 0) {
       principalPolicy = snap.policy;
       hasStoredPolicy = true;
     } else {

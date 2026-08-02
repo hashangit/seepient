@@ -9,30 +9,23 @@
  * This module is pure data — it does not spawn. The native sandbox and
  * worker image builders consume its output.
  */
-import * as os from "node:os";
-import * as path from "node:path";
-
 /**
- * The canonical path of the Seepient security directory. No executor
- * read/write root may include or overlap with this path (T108a).
+ * Sanitized process environment — Capabilities (spec 008, T206, FR-008/FR-013).
+ *
+ * Tool workers receive a minimal allowlisted environment. Provider keys,
+ * SMTP credentials, server API keys, release credentials, policy paths, and
+ * unrelated user environment values are absent. Only explicit safe values
+ * (PATH/HOME replacement, etc.) are passed through.
+ *
+ * This module is pure data — it does not spawn. The native sandbox and
+ * worker image builders consume its output.
  */
-export const SECURITY_DIR_CANONICAL: string = path.join(
-  os.homedir(),
-  ".seepient",
-  "security",
-);
 
-/**
- * Returns true if `p` is equal to or a descendant of SECURITY_DIR_CANONICAL.
- * Applies to commit targets, read targets, and process cwd values.
- */
-export function isSecurityPath(p: string): boolean {
-  const normalized = path.normalize(p);
-  return (
-    normalized === SECURITY_DIR_CANONICAL ||
-    normalized.startsWith(SECURITY_DIR_CANONICAL + path.sep)
-  );
-}
+// Security-path protection lives in Foundations — the ONE canonical source
+// both Capabilities and Vendors may import (security-paths.ts) — so the
+// SEEPIENT_SECURITY_DIR override is enforced by every surface, not only the
+// default ~/.seepient/security (review P0).
+export { isSecurityPath } from "../../foundations/security-paths.js";
 
 /**
  * Environment variable prefixes that MUST NOT cross the execution boundary.

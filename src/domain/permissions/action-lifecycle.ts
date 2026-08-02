@@ -117,6 +117,19 @@ function denialOutput(reason: PermissionDenyReason, message: string): string {
   return `Tool execution denied (${reason}): ${message}`;
 }
 
+/**
+ * Audit-copy of a capability: process argv is REDACTED (SC-011: the audit
+ * never stores raw sensitive command arguments). The capability's kind,
+ * executable, and shape remain for forensics; enforcement uses the exact
+ * capabilities, never this copy.
+ */
+function redactAuditCapability(cap: Capability): Capability {
+  if (cap.kind === "process") {
+    return { ...cap, argvPrefix: undefined };
+  }
+  return cap;
+}
+
 /** Keep in sync with `PermissionDenyReason` in permission-policy.ts. */
 const KNOWN_DENY_REASONS = new Set<string>([
   "immutable-deny",
@@ -487,7 +500,7 @@ export class ActionLifecycle {
           lifetimeKind === "project"
             ? (decision.request.workspaceId ?? this.workspaceId)
             : GLOBAL_WORKSPACE_ID;
-        if (!this.policyStore || !targetWorkspaceId) {
+        if (!this.policyStore || !targetWorkspaceId || !this.terminalOutbox) {
           const outcome = this.toOutcome(action, "denied", undefined, "invalid-approval-response");
           await this.record(action, "denied", "invalid-approval-response");
           return {
@@ -497,7 +510,7 @@ export class ActionLifecycle {
             toolResult: {
               output: denialOutput(
                 "invalid-approval-response",
-                "Persistent approval requires the protected policy store and a workspace identity",
+                "Persistent approval requires the protected policy store, a workspace identity, and a durable audit outbox",
               ),
               success: false,
             },
@@ -509,9 +522,12 @@ export class ActionLifecycle {
         // version read beforehand) is recorded FIRST — if the audit fails,
         // the request is denied and NO authority is ever written. Only then
         // does the compare-and-set run, followed by a `policy-granted`
-        // event carrying the resulting version. A later dispatch failure can
-        // never leave an unrecorded permanent grant, and "who granted what
-        // at which version" is reconstructable from the audit trail.
+        // event carrying the resulting version. A POST-CAS append failure
+        // is enqueued into the durable outbox (recordDurable) so the
+        // mutation can never exist without its forensic record — no split
+        // state (review round 3 P0). Audit copies of capabilities redact
+        // process argv (SC-011: no raw sensitive command arguments).
+        const auditCapabilities = option.capabilities.map(redactAuditCapability);
         let persisted = false;
         let beforeVersion = 0;
         try {
@@ -523,7 +539,7 @@ export class ActionLifecycle {
           await this.record(action, "approved", undefined, {
             optionId: option.optionId,
             lifetime: lifetimeKind,
-            capabilities: option.capabilities,
+            capabilities: auditCapabilities,
             actorId: answer.actorId,
             policyBeforeVersion: beforeVersion,
             grantedWorkspaceId: targetWorkspaceId,
@@ -550,10 +566,10 @@ export class ActionLifecycle {
                     authenticatedBy: "tui",
                   },
                 );
-                await this.record(action, "policy-granted", undefined, {
+                await this.recordDurable(action, "policy-granted", {
                   optionId: option.optionId,
                   lifetime: lifetimeKind,
-                  capabilities: option.capabilities,
+                  capabilities: auditCapabilities,
                   actorId: answer.actorId,
                   policyBeforeVersion: beforeVersion,
                   policyAfterVersion: snap.version,
@@ -655,6 +671,23 @@ export class ActionLifecycle {
         const { checkRunLifetime, checkSessionLifetime } = await import("./persisted-capability-ledger.js");
 
         if (envelope.lifetime.kind === "action") {
+          if (envelope.actionDigest === undefined) {
+            // Fail closed: an action envelope without a digest cannot be
+            // bound or consumed safely (custom analyzers that skip digest
+            // computation would otherwise collide on a single undefined
+            // ledger key). Production analyzers always set it.
+            const outcome = this.toOutcome(action, "denied", undefined, "invalid-approval-response");
+            await this.record(action, "denied", "invalid-approval-response");
+            return {
+              decision,
+              approval,
+              outcome,
+              toolResult: {
+                output: denialOutput("invalid-approval-response", "Action envelope is missing its action digest"),
+                success: false,
+              },
+            };
+          }
           const consumed = await this.capabilityLedger.consume(
             envelope.envelopeId,
             envelope.actionDigest,
@@ -889,6 +922,44 @@ export class ActionLifecycle {
         // No outbox wired — surface the failure (default behavior pre-outbox).
         throw err;
       }
+    }
+  }
+
+  /**
+   * Append a durable record with outbox fallback (P0 review fix): an append
+   * failure is ENQUEUED into the durable terminal outbox for retry instead of
+   * being fatal. Used for the post-CAS `policy-granted` event so a broken
+   * audit can never leave an INSTALLED permanent grant without a durable
+   * forensic record — the mutation and its record reconcile via the outbox
+   * exactly like terminal events (FR-014 semantics). The pre-CAS `approved`
+   * record stays a HARD append: failing it denies before anything is
+   * installed.
+   */
+  private async recordDurable(
+    action: PreparedToolAction,
+    state: import("../../foundations/contracts/execution-brokers.js").ActionState,
+    forensic: Partial<
+      import("../../foundations/contracts/execution-brokers.js").ActionAuditEvent
+    >,
+  ): Promise<void> {
+    const key = idempotencyKey(action.actionId, state);
+    try {
+      await this.record(action, state, undefined, forensic);
+    } catch (err) {
+      if (!this.terminalOutbox) throw err;
+      const event = {
+        eventId: generateId(),
+        actionId: action.actionId,
+        actionDigest: action.actionDigest,
+        principalId: action.principalId,
+        runId: action.runId,
+        state,
+        timestamp: this.now(),
+        policyDigest: this.policy.getPolicyDigest(),
+        backend: this.boundary.capabilities.backend,
+        ...forensic,
+      };
+      await this.terminalOutbox.enqueue(event, key);
     }
   }
 }

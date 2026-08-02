@@ -202,17 +202,25 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
         approvalDeadlineMs,
       });
     } catch (err) {
-      // P1 review fix: a pipeline-init failure must not vanish into the
-      // legacy path silently — surface it prominently and record it so
-      // /permissions status can report why protected policy is absent.
+      // P0 review fix (fail closed): when the protected pipeline was
+      // REQUESTED (default), an initialization failure must NOT fall back to
+      // the legacy execution path — a warning does not close the bypass.
+      // Terminate startup unless the operator explicitly selected legacy
+      // mode (--no-permission-pipeline / SEEPIENT_PERMISSION_PIPELINE=0).
       const message = err instanceof Error ? err.message : String(err);
       console.error(
-        chalk.yellow(`[permissions] Permission pipeline failed to initialize: ${message}`),
-      );
-      console.error(
-        chalk.yellow('[permissions] Running WITHOUT the protected policy pipeline. Actions will use the legacy approval path.'),
+        chalk.red(`[permissions] Permission pipeline failed to initialize: ${message}`),
       );
       agent.setPipelineInitError?.(message);
+      if (options.permissionPipeline !== false && process.env.SEEPIENT_PERMISSION_PIPELINE !== '0') {
+        console.error(
+          chalk.red('[permissions] Refusing to start: the protected permission pipeline was requested but could not be initialized.'),
+        );
+        console.error(
+          chalk.red('[permissions] Fix the error above, or restart with --no-permission-pipeline (or SEEPIENT_PERMISSION_PIPELINE=0) to explicitly use the legacy approval path.'),
+        );
+        process.exit(1);
+      }
     }
   }
 

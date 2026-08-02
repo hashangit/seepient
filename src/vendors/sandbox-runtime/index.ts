@@ -23,6 +23,10 @@
  */
 import type { CommandDescriptor, RootRequest } from "../../foundations/contracts/tool-effects.js";
 import { spawn } from "node:child_process";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { securityStoreRoots } from "../../foundations/security-paths.js";
 // Type-only imports from the pinned SDK (0.0.67). `ISandboxManager` is not
 // re-exported from the package index, so it is imported from the deep
 // declaration; both are erased at compile time, keeping the optional peer
@@ -279,6 +283,12 @@ export class AsrtSandbox implements NativeProcessSandbox {
     if (req.signal?.aborted) {
       return { exitCode: 0, stdout: "", stderr: "", isolated: true, signal: "SIGTERM" };
     }
+    // Per-exec scratch directory — the ONLY temp path the command may read
+    // or write (review P0: global /tmp exposes other processes' temporary
+    // data). Created under the CANONICAL tempdir (realpath'd, so the
+    // /var -> /private/var alias matches the profile's canonical allows),
+    // injected as TMPDIR, and removed after the command settles.
+    const scratch = mkdtempSync(join(realpathSync(tmpdir()), "seepient-scratch-"));
     try {
       // The sanitized env (T207: no ambient secrets) is baked into the
       // wrapped command line; SRT's wrapper runs `env <SRT vars> <cmd>` and
@@ -287,22 +297,25 @@ export class AsrtSandbox implements NativeProcessSandbox {
       // Environment KEYS are validated (POSIX names only) and VALUES are
       // always shell-quoted — an injection attempt is dropped, never
       // interpolated (review P1 shell model).
-      const envPairs = Object.entries(req.env)
-        .filter(([k]) => ENV_KEY_PATTERN.test(k))
-        .map(([k, v]) => `${k}=${shellQuote(v)}`)
-        .join(" ");
+      const envPairs = [
+        `TMPDIR=${shellQuote(scratch)}`,
+        ...Object.entries(req.env)
+          .filter(([k]) => ENV_KEY_PATTERN.test(k))
+          .map(([k, v]) => `${k}=${shellQuote(v)}`),
+      ].join(" ");
       const args = req.command.argv.map(shellQuote).join(" ");
       const commandLine = `${envPairs} ${shellQuote(req.command.executable)}${args ? ` ${args}` : ""}`;
       const wrapped = await this.manager.wrapWithSandboxArgv(
         commandLine,
         undefined,
-        { filesystem: filesystemConfigFor(req.roots) },
+        { filesystem: filesystemConfigFor(req.roots, scratch) },
         req.signal,
         req.command.cwd,
       );
       return await spawnSandboxed(wrapped, req);
     } finally {
       await this.manager.cleanupAfterCommand();
+      rmSync(scratch, { recursive: true, force: true });
     }
   }
 }
@@ -320,19 +333,23 @@ function shellQuote(token: string): string {
  * when the workspace (or an allowed root) would cover them. SRT re-emits
  * literal denyRead entries nested inside allowRead subpaths LAST, so these
  * exclusions win over any re-allow. Includes git credential stores — the
- * gitconfig allow below is config only.
+ * gitconfig allow below is config only. The security STORE roots come from
+ * the canonical Foundations source so the SEEPIENT_SECURITY_DIR override
+ * is protected for READS as well as writes (review P0).
  */
 function protectedReadPaths(): string[] {
   const home = process.env.HOME;
-  if (!home) return [];
-  return [
-    `${home}/.ssh`,
-    `${home}/.gnupg`,
-    `${home}/.aws`,
-    `${home}/.seepient`,
-    `${home}/.git-credentials`,
-    `${home}/.config/git/credentials`,
-  ];
+  const out: string[] = securityStoreRoots();
+  if (home) {
+    out.push(
+      `${home}/.ssh`,
+      `${home}/.gnupg`,
+      `${home}/.aws`,
+      `${home}/.git-credentials`,
+      `${home}/.config/git/credentials`,
+    );
+  }
+  return out;
 }
 
 /**
@@ -348,10 +365,9 @@ function protectedReadPaths(): string[] {
  */
 function protectedWritePaths(): string[] {
   const home = process.env.HOME;
-  const out: string[] = [];
+  const out: string[] = securityStoreRoots();
   if (home) {
     out.push(
-      `${home}/.seepient`,
       `${home}/.ssh`,
       `${home}/.gnupg`,
       `${home}/.aws`,
@@ -359,8 +375,6 @@ function protectedWritePaths(): string[] {
       `${home}/.config/git/credentials`,
     );
   }
-  const securityDir = process.env.SEEPIENT_SECURITY_DIR;
-  if (securityDir) out.push(securityDir);
   out.push("/etc/ssh", "/etc/ssl/private");
   return out;
 }
@@ -370,19 +384,20 @@ function protectedWritePaths(): string[] {
  * command needs to exec and load libraries. Deny-by-default reads deny "/";
  * without this set every command would fail at dyld/bwrap setup. Deliberately
  * NARROW: no /var (covers /var/folders user temp and /var/root on Linux),
- * no /Users, no /home — anything user-owned outside the approved roots is
- * unreadable.
+ * no /Users, no /home, and NO global temp directories — the per-exec scratch
+ * directory is the only temp path a command may read or write (review P0:
+ * global /tmp exposes other processes' temporary data).
  */
 function systemReadDeps(platform: NodeJS.Platform): string[] {
   if (platform === "linux") {
     return [
       "/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc", "/dev", "/proc",
-      "/sys", "/tmp", "/run", "/opt", "/nix", "/root/.cache",
+      "/sys", "/run", "/opt", "/nix", "/root/.cache",
     ];
   }
   return [
     "/usr", "/bin", "/sbin", "/System", "/Library", "/opt",
-    "/private/etc", "/etc", "/dev", "/tmp", "/private/tmp",
+    "/private/etc", "/etc", "/dev",
   ];
 }
 
@@ -414,17 +429,27 @@ function denyByDefaultFilesystem(): FilesystemConfig {
 /**
  * Map boundary root requests onto the SRT filesystem config: the full
  * deny-by-default base PLUS this command's approved roots (reads for every
- * root, writes only for write-access roots). Protected stores stay
- * write-denied even under an ancestor root (P0 review fix).
+ * root, writes only for write-access roots) and the per-exec scratch
+ * directory (the ONLY temp path the command may touch — review P0).
+ * Protected stores stay write-denied even under an ancestor root.
  */
-function filesystemConfigFor(roots: RootRequest[]): FilesystemConfig {
+function filesystemConfigFor(roots: RootRequest[], scratch: string): FilesystemConfig {
   const base = denyByDefaultFilesystem();
+  const protectedRoots = new Set<string>([...protectedReadPaths(), ...protectedWritePaths()]);
   const allowRead = new Set<string>(base.allowRead ?? []);
   const allowWrite = new Set<string>();
   for (const r of roots) {
+    // A root that IS a protected store is never granted — approving the
+    // security directory itself must not make it readable (deny==allow
+    // would otherwise lose by rule order; review round 3 P0). Ancestor
+    // roots remain approvable and the nested-deny re-emission keeps the
+    // store denied inside them.
+    if (protectedRoots.has(r.canonicalRoot)) continue;
     allowRead.add(r.canonicalRoot);
     if (r.access === "write") allowWrite.add(r.canonicalRoot);
   }
+  allowRead.add(scratch);
+  allowWrite.add(scratch);
   return {
     denyRead: base.denyRead,
     allowRead: [...allowRead],

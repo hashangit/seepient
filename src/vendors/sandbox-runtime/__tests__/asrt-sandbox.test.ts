@@ -71,17 +71,23 @@ describe("AsrtSandbox (SDK 0.0.67 SandboxManager adapter)", () => {
     expect(initConfig.filesystem.allowRead).toContain("/usr");
     expect(initConfig.filesystem.allowWrite).toEqual([]);
     // Per-exec customConfig REPLACES the session filesystem, so it carries
-    // the SAME deny-by-default base plus this command's approved roots.
+    // the SAME deny-by-default base plus this command's approved roots and
+    // the per-exec scratch directory.
     const wrapArgs = fakeManager.wrapWithSandboxArgv.mock.calls[0];
     const perExecFs = wrapArgs[2] as {
       filesystem: { denyRead: string[]; allowRead: string[]; allowWrite: string[]; denyWrite: string[] };
     };
     expect(perExecFs.filesystem.denyRead[0]).toBe("/");
     expect(perExecFs.filesystem.allowRead).toContain("/work");
-    expect(perExecFs.filesystem.allowWrite).toEqual(["/work"]);
+    expect(perExecFs.filesystem.allowRead).toContain(perExecFs.filesystem.allowWrite.find((p) => p.includes("seepient-scratch-"))!);
+    expect(perExecFs.filesystem.allowWrite).toContain("/work");
     // The sanitized env is baked into the wrapped command line (T207: the
-    // child never sees ambient process env), shell-quoted safely.
+    // child never sees ambient process env), shell-quoted safely, and the
+    // per-exec scratch is injected as TMPDIR (review round 3 P0: the only
+    // temp path the command may touch).
     const commandLine = wrapArgs[0] as string;
+    expect(commandLine).toContain("TMPDIR='");
+    expect(commandLine).toContain("seepient-scratch-");
     expect(commandLine).toContain("TEST_VAR='a b'\\''c'");
     expect(commandLine).toContain("'/bin/echo' 'adapter-ok'");
     // Cleanup runs after the command.

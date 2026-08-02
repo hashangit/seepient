@@ -10,43 +10,49 @@ import type { NativeProcessSandbox, SandboxExecResult } from "../../../vendors/s
  * REAL containment negative canaries (review P0, release gate): against the
  * actual Seatbelt/Bubblewrap backend, a command approved for one directory
  * must NOT be able to read or write outside its roots, must NOT reach the
- * network, and MUST still run normal commands. Backend-unavailable platforms
- * show these as SKIPPED (explicit platform gate), never as vacuous passes.
+ * network, and MUST still run normal commands.
  *
- * Causality rules (review round 2): the outside secret lives OUTSIDE every
- * runtime dependency of both platforms (homedir, not tmpdir — /tmp and
- * /var/folders are runtime deps), the network canary uses a LOCAL listener
- * the test controls (no external connectivity involved), and every write
- * canary asserts FILESYSTEM STATE, not just exit codes.
+ * Causality rules (review rounds 2-3): the outside secret lives OUTSIDE every
+ * runtime dependency of both platforms (homedir, not tmpdir — /tmp is not a
+ * runtime dep anymore), the network canary asserts the local listener was
+ * NEVER contacted, and every write canary asserts FILESYSTEM STATE.
+ *
+ * The backend probe runs at MODULE LOAD (top-level await), BEFORE test
+ * registration, so `it.runIf(!skip)` is correct — backend-unavailable
+ * platforms show explicit SKIPPED gates, never vacuous passes (P1 fix).
  */
+const probe = await createNativeProcessSandbox();
+const skip = !probe.probe.available || probe.probe.backend === "none";
+if (skip) {
+  console.warn(
+    `[canary] containment backend unavailable (${probe.probe.reason ?? "none"}) — canaries SKIPPED`,
+  );
+}
+
 describe("containment negative canaries (review P0)", () => {
   let sandbox: NativeProcessSandbox;
   let workspace: string;
   let outsideSecret: string;
-  let skip = false;
+  let tmpSecret: string;
 
   beforeAll(async () => {
     sandbox = await createNativeProcessSandbox();
-    if (!sandbox.probe.available || sandbox.probe.backend === "none") {
-      skip = true;
-      console.warn(
-        `[canary] containment backend unavailable (${sandbox.probe.reason ?? "none"}) — canaries SKIPPED`,
-      );
-      return;
-    }
     workspace = mkdtempSync(join(tmpdir(), "seepient-canary-ws-"));
     // OUTSIDE the runtime deps of both platforms: homedir (deps only cover
-    // ~/.gitconfig* and ~/.config/git on macOS; nothing under ~ on Linux
-    // except /root/.cache). tmpdir() would be INSIDE /tmp (/var/folders)
-    // which is a runtime dependency — a secret there would defeat the test.
+    // ~/.gitconfig* on macOS; nothing under ~ on Linux except /root/.cache).
     outsideSecret = join(process.env.HOME ?? workspace, `.seepient-canary-outside-${process.pid}.txt`);
     writeFileSync(outsideSecret, "canary-secret-content-must-not-leak");
+    // A GLOBAL-TEMP secret: /tmp must NOT be readable without approval
+    // (review round 3 P0 — the old allowlists exposed all of /tmp).
+    tmpSecret = join(tmpdir(), `.seepient-canary-tmp-${process.pid}.txt`);
+    writeFileSync(tmpSecret, "tmp-secret-must-not-leak");
     writeFileSync(join(workspace, "inside.txt"), "inside-content");
   });
 
   afterAll(() => {
     if (workspace) rmSync(workspace, { recursive: true, force: true });
     if (outsideSecret) rmSync(outsideSecret, { force: true });
+    if (tmpSecret) rmSync(tmpSecret, { force: true });
   });
 
   const run = async (command: string): Promise<SandboxExecResult> => {
@@ -74,6 +80,34 @@ describe("containment negative canaries (review P0)", () => {
     expect(r.stdout).not.toContain("canary-secret-content-must-not-leak");
   });
 
+  it.runIf(!skip)("denies reading unapproved GLOBAL TEMP files (review round 3 P0)", async () => {
+    const r = await run(`cat ${tmpSecret}`);
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stdout).not.toContain("tmp-secret-must-not-leak");
+  });
+
+  it.runIf(!skip)("the per-exec scratch directory is usable by the command", async () => {
+    // The adapter provisions a per-action scratch and sets TMPDIR to it;
+    // a command that writes and re-reads its own scratch must succeed.
+    // Use a REAL shell (/bin/sh is an xcode-select shim on CLT-only Macs).
+    const bash = existsSync("/opt/homebrew/bin/bash") ? "/opt/homebrew/bin/bash" : "/bin/bash";
+    const parts = bash.split(" ");
+    const r = await sandbox.exec({
+      command: {
+        executable: parts[0],
+        argv: ["-c", "echo scratch-ok > $TMPDIR/s.txt && cat $TMPDIR/s.txt"],
+        cwd: workspace,
+      },
+      roots: [
+        { access: "read", canonicalRoot: workspace },
+        { access: "write", canonicalRoot: workspace },
+      ],
+      env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin", HOME: process.env.HOME ?? workspace },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain("scratch-ok");
+  });
+
   it.runIf(!skip)("denies writing outside the approved roots (filesystem state)", async () => {
     const target = join(process.env.HOME ?? workspace, `.seepient-canary-write-${process.pid}.txt`);
     const r = await run(`touch ${target}`);
@@ -95,6 +129,33 @@ describe("containment negative canaries (review P0)", () => {
     if (!existsSync(sshDir)) return; // nothing to protect on this machine
     const r = await run(`ls ${sshDir}`);
     expect(r.exitCode).not.toBe(0);
+  });
+
+  it.runIf(!skip)("denies reads of the SEEPIENT_SECURITY_DIR override (review round 3 P0)", async () => {
+    const realHome = process.env.HOME;
+    const realSecurityDir = process.env.SEEPIENT_SECURITY_DIR;
+    // The reviewer's scenario: the override store lives under an APPROVED
+    // ANCESTOR root (the real home); the store itself must stay unreadable.
+    const overrideRoot = join(realHome ?? "/tmp", ".seepient-canary-secdir-3", `${process.pid}`);
+    const storeDir = join(overrideRoot, "policies");
+    mkdirSync(storeDir, { recursive: true });
+    writeFileSync(join(storeDir, "policy.json"), '{"secret":true}');
+    try {
+      process.env.SEEPIENT_SECURITY_DIR = overrideRoot;
+      const r = await sandbox.exec({
+        command: { executable: "/bin/cat", argv: [join(storeDir, "policy.json")], cwd: realHome ?? "/tmp" },
+        roots: [{ access: "read", canonicalRoot: realHome ?? "/tmp" }],
+        env: { PATH: "/usr/bin:/bin", HOME: realHome ?? "/tmp" },
+      });
+      expect(r.exitCode).not.toBe(0);
+      expect(r.stdout).not.toContain("secret");
+    } finally {
+      if (realSecurityDir === undefined) delete process.env.SEEPIENT_SECURITY_DIR;
+      else process.env.SEEPIENT_SECURITY_DIR = realSecurityDir;
+      if (realHome === undefined) delete process.env.HOME;
+      else process.env.HOME = realHome;
+      rmSync(overrideRoot, { recursive: true, force: true });
+    }
   });
 
   it.runIf(!skip)(
@@ -154,8 +215,10 @@ describe("containment negative canaries (review P0)", () => {
         expect(ok.exitCode).toBe(0);
         expect(existsSync(join(tempHome, "ok.txt"))).toBe(true);
       } finally {
-        process.env.HOME = realHome;
-        process.env.SEEPIENT_SECURITY_DIR = realSecurityDir;
+        if (realSecurityDir === undefined) delete process.env.SEEPIENT_SECURITY_DIR;
+        else process.env.SEEPIENT_SECURITY_DIR = realSecurityDir;
+        if (realHome === undefined) delete process.env.HOME;
+        else process.env.HOME = realHome;
         rmSync(tempHome, { recursive: true, force: true });
       }
     },
@@ -165,11 +228,16 @@ describe("containment negative canaries (review P0)", () => {
     "blocks outbound network — deterministic local listener (no external connectivity)",
     async () => {
       // A listener WE control: if the sandbox allowed egress, the sandboxed
-      // curl would reach it and return the banner. SRT's deny-all proxy must
-      // stop it regardless of the machine's external connectivity.
-      const banner = "canary-network-leak";
+      // curl would reach it. SRT's deny-all proxy must stop it regardless of
+      // the machine's external connectivity — and we assert the server was
+      // NEVER contacted (not just that curl exited nonzero, which an HTTP
+      // parse error could also satisfy — review round 3 P1).
+      let contacted = false;
       const { port, close } = await new Promise<{ port: number; close: () => void }>((resolve) => {
-        const server = createServer((socket) => socket.end(banner));
+        const server = createServer((socket) => {
+          contacted = true;
+          socket.end("canary-network-leak");
+        });
         server.listen(0, "127.0.0.1", () => {
           const address = server.address();
           resolve({
@@ -181,7 +249,7 @@ describe("containment negative canaries (review P0)", () => {
       try {
         const r = await run(`curl -sS -m 8 http://127.0.0.1:${port}/`);
         expect(r.exitCode).not.toBe(0);
-        expect(r.stdout).not.toContain(banner);
+        expect(contacted).toBe(false);
       } finally {
         close();
       }

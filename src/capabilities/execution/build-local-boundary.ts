@@ -24,7 +24,6 @@ import { FileCommitBroker } from "./file-commit-broker.js";
 import { EffectBroker, NodeNetworkAdapter } from "./effect-broker.js";
 import { createNativeProcessSandbox } from "../../vendors/sandbox-runtime/index.js";
 import { probeCommitHelper, PackagedCommitHelper } from "../../vendors/native-fs-commit/index.js";
-import { builtInTools } from "../tools/index.js";
 import type { ExecutionBoundary } from "../../foundations/contracts/execution-boundary.js";
 
 export interface BuildLocalBoundaryResult {

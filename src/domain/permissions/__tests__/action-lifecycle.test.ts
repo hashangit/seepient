@@ -979,6 +979,7 @@ describe("persistent approval choices (spec 011 project/global)", () => {
       activeCapabilities: { capabilities: [] },
       policyStore: store,
       workspaceId: "ws-1",
+      terminalOutbox: { enqueue: async () => {} },
     });
     const result = await lifecycle.run(writeAction());
     expect(result.outcome.state).toBe("succeeded");
@@ -1004,6 +1005,7 @@ describe("persistent approval choices (spec 011 project/global)", () => {
       activeCapabilities: { capabilities: [] },
       policyStore: store,
       workspaceId: "ws-1",
+      terminalOutbox: { enqueue: async () => {} },
     });
     const result = await lifecycle.run(writeAction());
     expect(result.outcome.state).toBe("succeeded");
@@ -1105,6 +1107,7 @@ describe("persistent approval audit ordering (P0 review fix)", () => {
       activeCapabilities: { capabilities: [] },
       policyStore: store,
       workspaceId: "ws-1",
+      terminalOutbox: { enqueue: async () => {} },
     });
     const result = await lifecycle.run(writeAction());
     expect(result.outcome.state).toBe("succeeded");
@@ -1158,6 +1161,7 @@ describe("persistent approval audit ordering (P0 review fix)", () => {
       activeCapabilities: { capabilities: [] },
       policyStore: store,
       workspaceId: "ws-1",
+      terminalOutbox: { enqueue: async () => {} },
     });
     const result = await lifecycle.run(writeAction());
     expect(result.outcome.state).toBe("denied");

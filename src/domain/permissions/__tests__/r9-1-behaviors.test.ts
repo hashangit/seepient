@@ -103,13 +103,29 @@ describe("PermissionDenyReason includes T107d variants", () => {
 // ── T108a: security path denial ──────────────────────────────────────────
 
 describe("isSecurityPath (T108a)", () => {
-  it("rejects paths under ~/.seepient/security/", async () => {
-    const { isSecurityPath, SECURITY_DIR_CANONICAL } = await import(
+  it("rejects paths under ~/.seepient/security/ and the SEEPIENT_SECURITY_DIR override", async () => {
+    const { isSecurityPath } = await import(
       "../../../capabilities/execution/environment-policy.js"
     );
-    expect(isSecurityPath(SECURITY_DIR_CANONICAL)).toBe(true);
-    expect(isSecurityPath(SECURITY_DIR_CANONICAL + "/audit/principal/events.ndjson")).toBe(true);
-    expect(isSecurityPath(SECURITY_DIR_CANONICAL + "/replay/ledger.ndjson")).toBe(true);
+    const { securityDirectories } = await import(
+      "../../../foundations/security-paths.js"
+    );
+    const canonical = securityDirectories().find((d) => d.includes(".seepient/security"))!;
+    expect(isSecurityPath(canonical)).toBe(true);
+    expect(isSecurityPath(canonical + "/audit/principal/events.ndjson")).toBe(true);
+    expect(isSecurityPath(canonical + "/replay/ledger.ndjson")).toBe(true);
+    // The override directory is protected even when the default exists.
+    const realHome = process.env.HOME;
+    const override = "/tmp/override-security-" + process.pid;
+    try {
+      process.env.SEEPIENT_SECURITY_DIR = override;
+      expect(isSecurityPath(override)).toBe(true);
+      expect(isSecurityPath(override + "/policies/ws.json")).toBe(true);
+    } finally {
+      process.env.SEEPIENT_SECURITY_DIR = undefined as never;
+      delete process.env.SEEPIENT_SECURITY_DIR;
+      process.env.HOME = realHome;
+    }
   });
 
   it("allows paths outside the security directory", async () => {
@@ -313,7 +329,7 @@ describe("R9.1 Integration Wiring Verification", () => {
   it("ProcessExecutor denies security path cwd or roots (T108a)", async () => {
     const { ProcessExecutor } = await import("../../../capabilities/execution/process-executor.js");
     const { UncontainedSandbox } = await import("../../../vendors/sandbox-runtime/index.js");
-    const { SECURITY_DIR_CANONICAL } = await import("../../../capabilities/execution/environment-policy.js");
+    const { securityDirectories } = await import("../../../foundations/security-paths.js");
 
     const executor = new ProcessExecutor({ sandbox: new UncontainedSandbox() });
     const action = {
@@ -329,7 +345,7 @@ describe("R9.1 Integration Wiring Verification", () => {
       effects: [],
       operation: {
         kind: "process" as const,
-        command: { executable: "/bin/ls", argv: [] as string[], cwd: SECURITY_DIR_CANONICAL },
+        command: { executable: "/bin/ls", argv: [] as string[], cwd: securityDirectories()[0] },
         roots: [],
       },
       display: { title: "ls", summary: "ls", canonicalTargets: [], effects: [] },
@@ -568,6 +584,10 @@ describe("R9.1 Integration Wiring Verification", () => {
       principalId: "u1",
       runId: "r1",
       workspaceRoot: tmpDir,
+      // Per-test audit root: the capability ledger must not be the shared
+      // default (~/.seepient/security/caps) — every run consumes the action
+      // digest, which would replay-deny the next run (self-pollution).
+      auditRoot: tmpDir,
       modelProviderClass: "openai",
       deploymentCeiling: {
         version: 1,
@@ -587,6 +607,10 @@ describe("R9.1 Integration Wiring Verification", () => {
       toolCallId: "c1",
       toolName: "secret_tool",
       principalId: "u1",
+      // Production analyzers always compute this (digestAction); the custom
+      // fixture must too — an undefined digest would collide in the shared
+      // capability ledger (one undefined key replays forever).
+      actionDigest: "egress-a1",
       argsDigest: "x",
       operation: { kind: "none" as const, result: { output: "benign secret content", success: true } },
       risk: "read" as const,
