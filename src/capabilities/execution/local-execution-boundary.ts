@@ -31,6 +31,8 @@ export interface LocalExecutionBoundaryOptions {
   hostFilteredEgress?: boolean;
   /** Honest advertisement of process containment availability. */
   environmentIsolation?: boolean;
+  /** Operator opt-in to uncontained process execution (P1 review fix). */
+  uncontainedOptIn?: boolean;
 }
 
 /**
@@ -48,6 +50,7 @@ export class LocalExecutionBoundary implements ExecutionBoundary {
       exactCommit: opts.exactCommit ?? false,
       hostFilteredEgress: opts.hostFilteredEgress ?? false,
       environmentIsolation: opts.environmentIsolation,
+      uncontainedOptIn: opts.uncontainedOptIn,
     });
   }
 

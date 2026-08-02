@@ -3,15 +3,13 @@
 **Task**: Spec 011 (tui-permission-scope-ux), branch `011-tui-permission-scope-ux`.
 
 ## Status
-- Review fixes on the ASRT adapter (commit 7af5989): deny-by-default reads
-  (`denyRead ["/"]`, system deps, protected paths — live-verified), typed
-  spawn errors, cancelled-on-abort, process-tree kill, SEEPIENT_UNCONTAINED
-  consistency, env-key validation, SDK types, host-callbacks at composition
-  root. macOS negative canaries pass.
-- Persistent project/global choices (exact-only, PolicyStore.compareAndSet),
-  global store + /permissions status + revoke-global, 10-min configurable
-  timeout, /permissions session-authority view.
-- Gates: 982+ tests, strict tsc, build green (full re-run before commit).
+- Round-2 review fixes: denyWrite protected stores (incl. SEEPIENT_SECURITY_DIR
+  — found + fixed a real write-denial gap), durable pre-CAS audit with actor
+  and policy versions, exact-argv coverage (argvExact), immediate revocation,
+  uncontained opt-in semantics (environmentIsolation honest), timeout clamp +
+  restart-required, fail-closed policy reads, pipeline-init error surfaced.
+  Canaries: real macOS negative tests incl. disposable-HOME ancestor-write.
+- 1000+ tests, strict tsc, build green (full re-run before commit).
 
 ## Not Done
 - T025/T037–T040: manual quickstart + platform runs + 5-user pass + audit

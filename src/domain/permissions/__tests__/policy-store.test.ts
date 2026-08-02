@@ -96,3 +96,28 @@ describe("LocalPolicyStore (T108)", () => {
     expect(computeWorkspaceId("/proj")).toMatch(/^[0-9a-f]{32}$/);
   });
 });
+
+describe("compare-and-set provenance (P0 review fix)", () => {
+  it("persists the actor and timestamp of every mutation", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "seepient-policy-provenance-"));
+    try {
+      const store = new LocalPolicyStore({ root: dir });
+      const before = await store.read("ws-1");
+      const actor = { kind: "human" as const, authorityId: "inline-approval", authenticatedBy: "tui" };
+      const snap = await store.compareAndSet(
+        "ws-1",
+        before.version,
+        { version: 1, capabilities: [{ kind: "commit-file", path: "/p/a.txt" }] },
+        actor,
+      );
+      expect(snap.grantedBy).toEqual(actor);
+      expect(snap.grantedAt).toBeTypeOf("number");
+      const reread = await store.read("ws-1");
+      expect(reread.grantedBy?.authorityId).toBe("inline-approval");
+      // The policy digest is unaffected by provenance fields.
+      expect(reread.policyDigest).toBe(snap.policyDigest);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

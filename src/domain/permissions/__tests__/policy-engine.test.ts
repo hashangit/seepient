@@ -191,12 +191,14 @@ describe("PolicyEngine (T106/T110)", () => {
       expect(kinds).toEqual(["exact", "bounded"]);
       const exact = d.request.approvalOptions[0];
       const bounded = d.request.approvalOptions[1];
-      expect(exact.capabilities).toEqual([
-        { kind: "process", executable: "/usr/bin/git", argvPrefix: ["status", "--porcelain"] },
-      ]);
       // FR-009: the bounded matcher pins the executable AND the FIRST argv token.
       expect(bounded.capabilities).toEqual([
         { kind: "process", executable: "/usr/bin/git", argvPrefix: ["status"] },
+      ]);
+      // The EXACT option carries argvExact (P0 review fix): it covers only
+      // the identical command, never trailing extra arguments.
+      expect(exact.capabilities).toEqual([
+        { kind: "process", executable: "/usr/bin/git", argvPrefix: ["status", "--porcelain"], argvExact: true },
       ]);
       // Option IDs are stable within the request and bound to the digest.
       expect(exact.optionId).toContain("d-proc");
@@ -407,5 +409,40 @@ describe("policy digest deep-canonicalization (reviewer fix #7)", () => {
       deploymentCeiling: base.deploymentCeiling,
     };
     expect(computePolicyDigest(base)).toBe(computePolicyDigest(reordered as never));
+  });
+});
+
+describe("uncontained opt-in (P1 review fix)", () => {
+  it("process approvals are permitted when the operator explicitly opted into uncontained execution", () => {
+    const engine = new PolicyEngine("digest");
+    const ctx = context({
+      deploymentCeiling: set({ kind: "process" }),
+      principalPolicy: set({ kind: "process" }),
+      runtimeBaseline: set({ kind: "process" }),
+      backendCapabilities: {
+        ...LOCAL_BACKEND,
+        environmentIsolation: false,
+        uncontainedOptIn: true,
+      },
+    });
+    const d = engine.evaluate(processAction(), ctx);
+    // NOT the containment denial: the opt-in permits the prompt.
+    expect(d.decision).toBe("needs-approval");
+  });
+
+  it("process approvals stay denied without isolation AND without the opt-in", () => {
+    const engine = new PolicyEngine("digest");
+    const ctx = context({
+      deploymentCeiling: set({ kind: "process" }),
+      principalPolicy: set({ kind: "process" }),
+      runtimeBaseline: set({ kind: "process" }),
+      backendCapabilities: {
+        ...LOCAL_BACKEND,
+        environmentIsolation: false,
+      },
+    });
+    const d = engine.evaluate(processAction(), ctx);
+    expect(d.decision).toBe("deny");
+    if (d.decision === "deny") expect(d.reason).toBe("approval-unavailable");
   });
 });

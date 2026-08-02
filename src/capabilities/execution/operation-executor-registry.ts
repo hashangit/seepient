@@ -90,7 +90,18 @@ export class OperationExecutorRegistry {
 export function registryCapabilities(
   registry: OperationExecutorRegistry,
   backend: ExecutionBackendCapabilities["backend"],
-  opts: { exactCommit?: boolean; hostFilteredEgress?: boolean; environmentIsolation?: boolean } = {},
+  opts: {
+    exactCommit?: boolean;
+    hostFilteredEgress?: boolean;
+    /**
+     * True ONLY when a real containment backend is operational. When
+     * uncontained execution is explicitly opted into, this stays false and
+     * `uncontainedOptIn` is set instead — policy consults both, and status
+     * never advertises isolation that does not exist (P1 review fix).
+     */
+    environmentIsolation?: boolean;
+    uncontainedOptIn?: boolean;
+  } = {},
 ): ExecutionBackendCapabilities {
   return {
     backend,
@@ -98,6 +109,7 @@ export function registryCapabilities(
     exactCommit: opts.exactCommit ?? false,
     hostFilteredEgress: opts.hostFilteredEgress ?? false,
     environmentIsolation: opts.environmentIsolation ?? (backend !== "uncontained"),
+    uncontainedOptIn: opts.uncontainedOptIn,
     supportedOperationKinds: registry.supportedKinds(),
   };
 }

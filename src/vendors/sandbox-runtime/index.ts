@@ -158,57 +158,19 @@ export class UncontainedSandbox implements NativeProcessSandbox {
   async exec(req: SandboxExecRequest): Promise<SandboxExecResult> {
     // Spawn directly with no profile/namespace. Caller MUST label this in
     // audit as uncontained; the boundary never claims path/network containment.
-    const { spawn } = await import("node:child_process");
-    return new Promise((resolve) => {
-      const child = spawn(req.command.executable, req.command.argv, {
-        cwd: req.command.cwd,
-        env: req.env,
-        shell: false,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      let stdout = "";
-      let stderr = "";
-      let lastFlushedLen = 0;
-
-      const emitProgress = (chunk: string) => {
-        if (chunk.length > 0) {
-          req.onUpdate?.({ message: chunk });
-        }
-      };
-
-      child.stdout?.on("data", (b: Buffer) => {
-        const chunk = b.toString();
-        stdout += chunk;
-        lastFlushedLen = stdout.length;
-        emitProgress(chunk);
-      });
-      child.stderr?.on("data", (b: Buffer) => (stderr += b.toString()));
-
-      let exitCode = 0;
-      let closed = false;
-      let stdoutEnded = !child.stdout;
-
-      const checkDone = () => {
-        if (closed && stdoutEnded) {
-          if (stdout.length > lastFlushedLen) {
-            const remaining = stdout.slice(lastFlushedLen);
-            emitProgress(remaining);
-          }
-          resolve({ exitCode, stdout, stderr, isolated: false });
-        }
-      };
-
-      child.stdout?.on("end", () => {
-        stdoutEnded = true;
-        checkDone();
-      });
-
-      child.on("close", (code) => {
-        exitCode = code ?? 0;
-        closed = true;
-        checkDone();
-      });
-      req.signal?.addEventListener("abort", () => child.kill("SIGTERM"));
+    // Shares the contained path's defensive process lifecycle: typed spawn
+    // errors, pre-abort handling, process-group termination, listener cleanup,
+    // and cancelled-not-success results (P1 review fix).
+    if (req.signal?.aborted) {
+      return { exitCode: 0, stdout: "", stderr: "", isolated: false, signal: "SIGTERM" };
+    }
+    return spawnProcessTree({
+      argv: [req.command.executable, ...req.command.argv],
+      cwd: req.command.cwd,
+      env: req.env,
+      signal: req.signal,
+      onUpdate: req.onUpdate,
+      isolated: false,
     });
   }
 }
@@ -374,6 +336,36 @@ function protectedReadPaths(): string[] {
 }
 
 /**
+ * Immutable WRITE-denied paths (P0 review fix): the protected security
+ * stores must not be modifiable even when an approved write root is an
+ * ancestor (e.g. HOME). SRT's denyWrite takes precedence over allowWrite,
+ * so these stay read-only under any approved root. Covers the default
+ * policy/audit root (~/.seepient), the SEEPIENT_SECURITY_DIR override,
+ * and system credential stores — BOTH store locations are always denied;
+ * the env override must never drop the home store (the reviewer's repro:
+ * with SEEPIENT_SECURITY_DIR set, ~/.seepient was writable through an
+ * approved ancestor root).
+ */
+function protectedWritePaths(): string[] {
+  const home = process.env.HOME;
+  const out: string[] = [];
+  if (home) {
+    out.push(
+      `${home}/.seepient`,
+      `${home}/.ssh`,
+      `${home}/.gnupg`,
+      `${home}/.aws`,
+      `${home}/.git-credentials`,
+      `${home}/.config/git/credentials`,
+    );
+  }
+  const securityDir = process.env.SEEPIENT_SECURITY_DIR;
+  if (securityDir) out.push(securityDir);
+  out.push("/etc/ssh", "/etc/ssl/private");
+  return out;
+}
+
+/**
  * Explicit runtime read dependencies: the minimal system paths a sandboxed
  * command needs to exec and load libraries. Deny-by-default reads deny "/";
  * without this set every command would fail at dyld/bwrap setup. Deliberately
@@ -415,14 +407,15 @@ function denyByDefaultFilesystem(): FilesystemConfig {
     denyRead: ["/", ...protectedReadPaths()],
     allowRead: [...systemReadDeps(process.platform), ...userConfigReadPaths(home)],
     allowWrite: [],
-    denyWrite: [],
+    denyWrite: protectedWritePaths(),
   };
 }
 
 /**
  * Map boundary root requests onto the SRT filesystem config: the full
  * deny-by-default base PLUS this command's approved roots (reads for every
- * root, writes only for write-access roots).
+ * root, writes only for write-access roots). Protected stores stay
+ * write-denied even under an ancestor root (P0 review fix).
  */
 function filesystemConfigFor(roots: RootRequest[]): FilesystemConfig {
   const base = denyByDefaultFilesystem();
@@ -436,34 +429,38 @@ function filesystemConfigFor(roots: RootRequest[]): FilesystemConfig {
     denyRead: base.denyRead,
     allowRead: [...allowRead],
     allowWrite: [...allowWrite],
-    denyWrite: [],
+    denyWrite: protectedWritePaths(),
   };
 }
 
 /**
- * Spawn the SRT-wrapped argv and accumulate the child result. Handles
+ * Spawn a process tree and accumulate the child result — shared by the
+ * sandboxed (wrapped-argv) and uncontained paths (P1 review fix). Handles
  * spawn failures as TYPED results (never an uncaught event that would dump
- * the wrapped command + proxy credential), and cancellation: pre-abort is
- * checked by the caller, the process TREE is terminated via its own
- * process group, the abort listener is removed on settle, and a
- * signal-terminated child is reported with `signal` so the executor can
- * record `cancelled`, never success.
+ * the wrapped command + proxy credential), cancellation: the process TREE is
+ * terminated via its own process group, the abort listener is removed on
+ * settle, and a signal-terminated child is reported with `signal` so the
+ * executor can record `cancelled`, never success.
  */
-function spawnSandboxed(
-  wrapped: { argv: string[]; env: NodeJS.ProcessEnv },
-  req: SandboxExecRequest,
-): Promise<SandboxExecResult> {
+function spawnProcessTree(args: {
+  argv: string[];
+  cwd: string;
+  env: Record<string, string>;
+  signal?: AbortSignal;
+  onUpdate?: (chunk: { message: string }) => void;
+  isolated: boolean;
+}): Promise<SandboxExecResult> {
   const { promise, resolve } = Promise.withResolvers<SandboxExecResult>();
   let settled = false;
   const settle = (result: SandboxExecResult): void => {
     if (settled) return;
     settled = true;
-    req.signal?.removeEventListener("abort", onAbort);
+    args.signal?.removeEventListener("abort", onAbort);
     resolve(result);
   };
-  const child = spawn(wrapped.argv[0], wrapped.argv.slice(1), {
-    cwd: req.command.cwd,
-    env: req.env,
+  const child = spawn(args.argv[0], args.argv.slice(1), {
+    cwd: args.cwd,
+    env: args.env,
     shell: false,
     detached: true,
     stdio: ["ignore", "pipe", "pipe"],
@@ -473,7 +470,7 @@ function spawnSandboxed(
   let lastFlushedLen = 0;
 
   const emitProgress = (chunk: string): void => {
-    if (chunk.length > 0) req.onUpdate?.({ message: chunk });
+    if (chunk.length > 0) args.onUpdate?.({ message: chunk });
   };
 
   child.stdout?.on("data", (b: Buffer) => {
@@ -497,7 +494,7 @@ function spawnSandboxed(
     // A signal-terminated child is a CANCELLED execution, never success
     // (exitCode is null in that case; reporting 0 would let the audit
     // record an aborted command as succeeded — review P1).
-    settle({ exitCode, stdout, stderr, isolated: true, signal });
+    settle({ exitCode, stdout, stderr, isolated: args.isolated, signal });
   };
 
   // Spawn failures (missing cwd, ENOENT binary) are typed results with a
@@ -509,7 +506,7 @@ function spawnSandboxed(
       exitCode: 1,
       stdout: "",
       stderr: `Failed to start sandboxed process: ${code}`,
-      isolated: true,
+      isolated: args.isolated,
     });
   });
 
@@ -524,7 +521,7 @@ function spawnSandboxed(
     checkDone();
   });
   const onAbort = (): void => {
-    // Kill the whole process group (detached), not just the bash wrapper,
+    // Kill the whole process group (detached), not just the wrapper,
     // so descendant processes cannot outlive the cancellation.
     if (child.pid !== undefined) {
       try {
@@ -536,8 +533,23 @@ function spawnSandboxed(
     }
     child.kill("SIGTERM");
   };
-  req.signal?.addEventListener("abort", onAbort);
+  args.signal?.addEventListener("abort", onAbort);
   return promise;
+}
+
+/** Spawn the SRT-wrapped argv through the shared process-tree lifecycle. */
+function spawnSandboxed(
+  wrapped: { argv: string[]; env: NodeJS.ProcessEnv },
+  req: SandboxExecRequest,
+): Promise<SandboxExecResult> {
+  return spawnProcessTree({
+    argv: wrapped.argv,
+    cwd: req.command.cwd,
+    env: req.env,
+    signal: req.signal,
+    onUpdate: req.onUpdate,
+    isolated: true,
+  });
 }
 
 /**

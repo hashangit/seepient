@@ -347,6 +347,18 @@ export class Agent {
     return this._workspaceId;
   }
 
+  private _pipelineInitError: string | undefined;
+
+  /** Record why the permission pipeline failed to initialize (P1 fix). */
+  setPipelineInitError(message: string): void {
+    this._pipelineInitError = message;
+  }
+
+  /** Why the pipeline is unavailable, if initialization failed. */
+  getPipelineInitError(): string | undefined {
+    return this._pipelineInitError;
+  }
+
   /** Stage an inert capability proposal (does NOT touch active policy). */
   async stagePolicyProposal(capability: Capability): Promise<string> {
     const id = generateId().slice(0, 8);
@@ -409,20 +421,30 @@ export class Agent {
     if (!this._policyStore || !this._workspaceId) {
       throw new Error('Protected policy store not configured');
     }
+    // P1 review fix: NaN and fractional indices must never report success.
+    if (!Number.isInteger(index) || index < 0) {
+      throw new Error(`Index ${index} is not a valid non-negative integer`);
+    }
     const current = await this._policyStore.read(workspaceId);
-    if (index < 0 || index >= current.policy.capabilities.length) {
+    if (index >= current.policy.capabilities.length) {
       throw new Error(`Index ${index} out of range (0..${current.policy.capabilities.length - 1})`);
     }
+    const removed = current.policy.capabilities[index];
     const next: CapabilitySet = {
       version: 1,
       capabilities: current.policy.capabilities.filter((_, i) => i !== index),
     };
-    return this._policyStore.compareAndSet(
+    const snap = await this._policyStore.compareAndSet(
       workspaceId,
       current.version,
       next,
       { kind: 'human', authorityId: 'operator', authenticatedBy: 'cli' },
     );
+    // P1 review fix: revocation must take effect IMMEDIATELY — strip the
+    // revoked authority from the live session's active set, not only from
+    // the persisted store (which would leave it usable until restart).
+    this._wiredPipeline?.lifecycle.revokeActiveCapabilities([removed]);
+    return snap;
   }
 
   async chat(

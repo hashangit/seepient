@@ -65,6 +65,11 @@ interface StoredSnapshot {
   version: number;
   policyDigest: string;
   policy: CapabilitySet;
+  /** Forensic record (P0 review fix): who performed the last mutation and
+   *  when — persisted so the store itself carries provenance, not only the
+   *  action audit trail. Optional for legacy snapshots. */
+  grantedBy?: DecisionAuthority;
+  grantedAt?: number;
 }
 
 /**
@@ -183,6 +188,9 @@ export class LocalPolicyStore implements PolicyStoreContract {
         version: current.version + 1,
         policyDigest: computePolicyDigest(next),
         policy: next,
+        // P0 review fix: the compare-and-set actor was previously ignored.
+        grantedBy: _actor,
+        grantedAt: Date.now(),
       };
 
       // Atomic replace: write temp in same dir, fsync, rename.

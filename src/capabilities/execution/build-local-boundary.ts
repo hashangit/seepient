@@ -85,7 +85,12 @@ export async function buildLocalBoundary(opts?: {
     registry,
     exactCommit: probe.available,
     hostFilteredEgress: true,
-    environmentIsolation: sandbox.probe.backend !== "none" || unsafeUncontained,
+    // environmentIsolation is TRUE ONLY when a real backend exists — the
+    // uncontained opt-in is advertised separately so policy can permit the
+    // explicitly-uncontained path without ever claiming isolation exists
+    // (P1 review fix).
+    environmentIsolation: sandbox.probe.backend !== "none",
+    uncontainedOptIn: unsafeUncontained,
   });
 
   return { boundary, artifacts };

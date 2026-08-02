@@ -47,7 +47,7 @@ import { generateId } from "../../foundations/id.js";
 import { idempotencyKey } from "./audit-recorder.js";
 import { PolicyConflictError } from "../../foundations/errors.js";
 import { GLOBAL_WORKSPACE_ID } from "./policy-store.js";
-import { setCovers } from "./capability-store.js";
+import { covers, setCovers } from "./capability-store.js";
 import type { PersistedCapabilityLedger } from "./persisted-capability-ledger.js";
 
 /**
@@ -503,42 +503,73 @@ export class ActionLifecycle {
             },
           };
         }
+        // P0 review fix (durable audit ordering): a persistent grant must be
+        // durably AUDITED before it is INSTALLED. The `approved` event
+        // (with option, lifetime, capability set, actor, and the policy
+        // version read beforehand) is recorded FIRST — if the audit fails,
+        // the request is denied and NO authority is ever written. Only then
+        // does the compare-and-set run, followed by a `policy-granted`
+        // event carrying the resulting version. A later dispatch failure can
+        // never leave an unrecorded permanent grant, and "who granted what
+        // at which version" is reconstructable from the audit trail.
+        let persisted = false;
+        let beforeVersion = 0;
         try {
-          // Retry once on a concurrent-writer conflict (stale version).
-          let persisted = false;
-          for (let attempt = 0; attempt < 2 && !persisted; attempt++) {
-            const current = await this.policyStore.read(targetWorkspaceId);
-            const fresh = option.capabilities.filter(
-              (c) => !setCovers(current.policy, c),
-            );
-            if (fresh.length === 0) {
-              persisted = true; // already granted — nothing to write
-              break;
-            }
-            try {
-              await this.policyStore.compareAndSet(
-                targetWorkspaceId,
-                current.version,
-                {
-                  version: 1 as const,
-                  capabilities: [...current.policy.capabilities, ...fresh],
-                },
-                {
-                  kind: "human",
-                  authorityId: "inline-approval",
-                  authenticatedBy: "tui",
-                },
-              );
-              persisted = true;
-            } catch (err) {
-              if (!(err instanceof PolicyConflictError) || attempt === 1) {
-                throw err;
+          const current = await this.policyStore.read(targetWorkspaceId);
+          beforeVersion = current.version;
+          const fresh = option.capabilities.filter(
+            (c) => !setCovers(current.policy, c),
+          );
+          await this.record(action, "approved", undefined, {
+            optionId: option.optionId,
+            lifetime: lifetimeKind,
+            capabilities: option.capabilities,
+            actorId: answer.actorId,
+            policyBeforeVersion: beforeVersion,
+            grantedWorkspaceId: targetWorkspaceId,
+          });
+          if (fresh.length === 0) {
+            persisted = true; // already granted — nothing to write
+          } else {
+            // Retry once on a concurrent-writer conflict (stale version).
+            for (let attempt = 0; attempt < 2 && !persisted; attempt++) {
+              const retried = attempt > 0
+                ? await this.policyStore.read(targetWorkspaceId)
+                : current;
+              try {
+                const snap = await this.policyStore.compareAndSet(
+                  targetWorkspaceId,
+                  retried.version,
+                  {
+                    version: 1 as const,
+                    capabilities: [...retried.policy.capabilities, ...fresh],
+                  },
+                  {
+                    kind: "human",
+                    authorityId: "inline-approval",
+                    authenticatedBy: "tui",
+                  },
+                );
+                await this.record(action, "policy-granted", undefined, {
+                  optionId: option.optionId,
+                  lifetime: lifetimeKind,
+                  capabilities: option.capabilities,
+                  actorId: answer.actorId,
+                  policyBeforeVersion: beforeVersion,
+                  policyAfterVersion: snap.version,
+                  grantedWorkspaceId: targetWorkspaceId,
+                });
+                persisted = true;
+              } catch (err) {
+                if (!(err instanceof PolicyConflictError) || attempt === 1) {
+                  throw err;
+                }
               }
             }
           }
         } catch {
           const outcome = this.toOutcome(action, "denied", undefined, "approval-unavailable");
-          await this.record(action, "denied", "approval-unavailable");
+          await this.record(action, "denied", "approval-unavailable").catch(() => {});
           return {
             decision,
             approval: answer,
@@ -546,7 +577,7 @@ export class ActionLifecycle {
             toolResult: {
               output: denialOutput(
                 "approval-unavailable",
-                "Persistent approval could not be recorded in the protected policy store",
+                "Persistent approval could not be durably recorded and installed",
               ),
               success: false,
             },
@@ -767,6 +798,23 @@ export class ActionLifecycle {
     return [...this.active.capabilities];
   }
 
+  /**
+   * Revoke active-session authority covered by the given capabilities
+   * (P1 review fix: /permissions revoke-* must take effect immediately, not
+   * only after restart). Removes matching capabilities from the long-lived
+   * active set AND the policy context's view of it, so the next evaluation
+   * in this session fails closed until the store grant is re-approved.
+   */
+  revokeActiveCapabilities(revoked: Capability[]): void {
+    if (revoked.length === 0) return;
+    const remaining = this.active.capabilities.filter(
+      (c) => !revoked.some((r) => covers(r, c)),
+    );
+    if (remaining.length === this.active.capabilities.length) return;
+    this.active.capabilities = remaining;
+    this.policyContext.activeCapabilities.capabilities = remaining;
+  }
+
   private toOutcome(
     action: PreparedToolAction,
     state: ToolOutcome["state"],
@@ -786,6 +834,9 @@ export class ActionLifecycle {
     action: PreparedToolAction,
     state: import("../../foundations/contracts/execution-brokers.js").ActionState,
     reason?: PermissionDenyReason,
+    forensic?: Partial<
+      import("../../foundations/contracts/execution-brokers.js").ActionAuditEvent
+    >,
   ): Promise<void> {
     const event = {
       eventId: generateId(),
@@ -798,6 +849,7 @@ export class ActionLifecycle {
       policyDigest: this.policy.getPolicyDigest(),
       reason,
       backend: this.boundary.capabilities.backend,
+      ...forensic,
     };
     await this.audit.append(event, {
       idempotencyKey: idempotencyKey(action.actionId, state),

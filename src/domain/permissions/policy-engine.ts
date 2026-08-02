@@ -349,14 +349,14 @@ export class PolicyEngine implements PolicyEngineContract {
 
     pushLayer(trace, "backend", "allow");
     // Spec 011 (FR-019): containment preflight — a process action can only be
-    // presented for approval when the backend can actually isolate it. If the
-    // sandbox is missing (and the operator did not opt into explicitly
-    // uncontained execution), fail BEFORE the prompt with the actionable
-    // setup message instead of letting every approved action fail at
-    // dispatch (product acceptance).
+    // presented for approval when the backend can actually isolate it OR the
+    // operator explicitly opted into uncontained execution. If neither is
+    // true, fail BEFORE the prompt with the actionable setup message instead
+    // of letting every approved action fail at dispatch (product acceptance).
     if (
       missing.some((c) => c.kind === "process") &&
-      !context.backendCapabilities.environmentIsolation
+      !context.backendCapabilities.environmentIsolation &&
+      !context.backendCapabilities.uncontainedOptIn
     ) {
       pushLayer(trace, "backend", "deny");
       return deny(

@@ -178,9 +178,19 @@ export async function buildActionLifecycle(
       principalPolicy = inputs.principalPolicy ?? deploymentCeiling;
       hasStoredPolicy = Boolean(inputs.principalPolicy);
     }
-  } catch {
-    principalPolicy = inputs.principalPolicy ?? deploymentCeiling;
-    hasStoredPolicy = Boolean(inputs.principalPolicy);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      // No policy file yet — fresh install; the ceiling is the starting maximum.
+      principalPolicy = inputs.principalPolicy ?? deploymentCeiling;
+      hasStoredPolicy = Boolean(inputs.principalPolicy);
+    } else {
+      // P1 review fix (fail closed on corruption): a read error (digest
+      // mismatch, permissions, IO) must NOT fall back to the deployment
+      // ceiling — that would BROADEN authority on a corrupt store. Deny
+      // everything instead; the operator must repair or clear the store.
+      principalPolicy = { version: 1 as const, capabilities: [] };
+      hasStoredPolicy = true;
+    }
   }
   // Global protected policy applies to every workspace (spec 011 persistent
   // choices: "Allow always"): union it into the principal policy so global

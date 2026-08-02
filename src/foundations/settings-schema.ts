@@ -190,7 +190,7 @@ const schemaEntries: [string, SettingsSchemaEntry][] = [
   // Agent
   ['agent.permissionLevel', { type: 'enum', secret: false, enumValues: ['strict', 'moderate', 'permissive'], default: 'moderate', restartRequired: false, envVar: 'SEEPIENT_PERMISSION' }],
   ['agent.autoConfirm', { type: 'boolean', secret: false, default: false, restartRequired: false }],
-  ['permissions.approvalTimeoutMs', { type: 'number', secret: false, default: 600000, min: 10000, max: 3600000, restartRequired: false, envVar: 'SEEPIENT_APPROVAL_TIMEOUT_MS' }],
+  ['permissions.approvalTimeoutMs', { type: 'number', secret: false, default: 600000, min: 10000, max: 3600000, restartRequired: true, envVar: 'SEEPIENT_APPROVAL_TIMEOUT_MS' }],
 
   // Gateway
   ['gateway.enabled', { type: 'boolean', secret: false, default: true, restartRequired: true, envVar: 'SEEPIENT_GATEWAY_ENABLED' }],

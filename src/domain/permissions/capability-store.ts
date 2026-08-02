@@ -101,12 +101,19 @@ export function covers(outer: Capability, inner: Capability): boolean {
     case "process": {
       if (inner.kind !== "process") return false;
       if (outer.executable !== undefined && outer.executable !== inner.executable) return false;
-      if (outer.argvPrefix !== undefined) {
-        const innerArgv = inner.argvPrefix ?? [];
-        if (outer.argvPrefix.length > innerArgv.length) return false;
-        for (let i = 0; i < outer.argvPrefix.length; i++) {
-          if (outer.argvPrefix[i] !== innerArgv[i]) return false;
-        }
+      const outerArgv = outer.argvPrefix ?? [];
+      const innerArgv = inner.argvPrefix ?? [];
+      if (outerArgv.length > innerArgv.length) return false;
+      for (let i = 0; i < outerArgv.length; i++) {
+        if (outerArgv[i] !== innerArgv[i]) return false;
+      }
+      // EXACT argv (P0 review fix): an exact capability means "exactly this
+      // command" — a request with ADDITIONAL trailing arguments is NOT
+      // covered. Prefix matching is reserved for explicitly bounded options
+      // (which omit `argvExact`). Without this, an approved "rm safe.txt"
+      // would also authorize "rm safe.txt other.txt".
+      if (outer.argvExact === true && outerArgv.length !== innerArgv.length) {
+        return false;
       }
       return true;
     }
@@ -184,6 +191,11 @@ export function capabilitiesForEffect(req: EffectRequest): Capability[] {
           kind: "process",
           executable: req.command.executable,
           argvPrefix: req.command.argv,
+          // The requested command IS the exact command: coverage must be
+          // equal-length, never prefix (P0 review fix — "rm safe.txt" must
+          // not authorize "rm safe.txt other.txt"). Bounded options omit
+          // this flag and keep prefix semantics.
+          argvExact: true,
         },
         ...req.requestedRoots.map((r) => ({
           kind: r.access === "read" ? ("read-root" as const) : ("write-root" as const),

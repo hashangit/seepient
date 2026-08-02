@@ -183,6 +183,10 @@ export interface PolicySnapshot {
   version: number;
   policyDigest: string;
   policy: CapabilitySet;
+  /** Forensic record (P0 review fix): who performed the last mutation and
+   *  when. Populated by LocalPolicyStore on every compare-and-set. */
+  grantedBy?: import("./permission-policy.js").DecisionAuthority;
+  grantedAt?: number;
 }
 
 /**
@@ -210,6 +214,7 @@ export type ActionState =
   | "denied"
   | "awaiting-approval"
   | "approved"
+  | "policy-granted"
   | "approval-denied"
   | "approval-expired"
   | "dispatched"
@@ -230,6 +235,21 @@ export interface ActionAuditEvent {
   envelopeId?: string;
   reason?: PermissionDenyReason;
   backend?: import("./execution-boundary.js").ExecutionBackendCapabilities["backend"];
+  /** Forensic fields for approvals (spec 011): the selected option/lifetime,
+   *  the granting actor, the granted capability set, and — for persistent
+   *  project/global choices — the protected-policy versions before and after
+   *  the compare-and-set mutation and the workspace the grant targets.
+   *  The pre-CAS `approved` event carries `policyBeforeVersion`; the
+   *  post-CAS `policy-granted` event carries `policyAfterVersion` and the
+   *  granted workspace. This makes "who granted what, when, at which policy
+   *  version" durably reconstructable even if a later dispatch fails. */
+  optionId?: string;
+  lifetime?: "action" | "run" | "session" | "project" | "global";
+  capabilities?: import("./permission-policy.js").Capability[];
+  actorId?: string;
+  policyBeforeVersion?: number;
+  policyAfterVersion?: number;
+  grantedWorkspaceId?: string;
 }
 
 /**

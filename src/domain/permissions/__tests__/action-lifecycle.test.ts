@@ -1074,3 +1074,137 @@ describe("persistent approval choices (spec 011 project/global)", () => {
     expect(dispatched).toBe(false);
   });
 });
+
+describe("persistent approval audit ordering (P0 review fix)", () => {
+  it("durably records approved + policy-granted BEFORE the grant is usable, with versions and actor", async () => {
+    const store = new LocalPolicyStore({ root: dir });
+    const events: import("../../../foundations/contracts/execution-brokers.js").ActionAuditEvent[] = [];
+    const recordingAudit: import("../../../foundations/contracts/execution-brokers.js").AuditStore = {
+      async append(event) {
+        events.push(event);
+        return "written";
+      },
+      async getTerminal() {
+        return undefined;
+      },
+    };
+    const lifecycle = new ActionLifecycle({
+      policy: new PolicyEngine("digest"),
+      policyContext: policyCtx({
+        deploymentCeiling: set({ kind: "commit-file", path: "/p/a.txt" }),
+        principalPolicy: set({ kind: "commit-file", path: "/p/a.txt" }),
+        activeCapabilities: set(),
+        workspaceId: "ws-1",
+      }),
+      broker: {
+        mode: "inline",
+        request: async (req) => approved(req, "user-42", "project"),
+      },
+      boundary: fakeBoundary({ output: "ok", success: true }),
+      audit: recordingAudit,
+      activeCapabilities: { capabilities: [] },
+      policyStore: store,
+      workspaceId: "ws-1",
+    });
+    const result = await lifecycle.run(writeAction());
+    expect(result.outcome.state).toBe("succeeded");
+    const approvedEvent = events.find((e) => e.state === "approved");
+    expect(approvedEvent).toBeDefined();
+    expect(approvedEvent!.actorId).toBe("user-42");
+    expect(approvedEvent!.optionId).toBeDefined();
+    expect(approvedEvent!.lifetime).toBe("project");
+    expect(approvedEvent!.capabilities).toEqual([{ kind: "commit-file", path: "/p/a.txt" }]);
+    expect(approvedEvent!.policyBeforeVersion).toBe(0);
+    expect(approvedEvent!.grantedWorkspaceId).toBe("ws-1");
+    const grantedEvent = events.find((e) => e.state === "policy-granted");
+    expect(grantedEvent).toBeDefined();
+    expect(grantedEvent!.policyAfterVersion).toBe(1);
+    // The approved event precedes the policy-granted event.
+    expect(events.indexOf(approvedEvent!)).toBeLessThan(events.indexOf(grantedEvent!));
+    const snap = await store.read("ws-1");
+    expect(snap.version).toBe(1);
+    expect(snap.grantedBy?.authorityId).toBe("inline-approval");
+  });
+
+  it("an audit failure BEFORE the CAS installs NO authority", async () => {
+    const store = new LocalPolicyStore({ root: dir });
+    const brokenAudit: import("../../../foundations/contracts/execution-brokers.js").AuditStore = {
+      async append(event) {
+        // Fail ONLY on the grant records — prepared/awaiting/denied must
+        // succeed so the failure lands exactly at the pre-CAS audit.
+        if (event.state === "approved" || event.state === "policy-granted") {
+          throw new Error("audit down");
+        }
+        return "written";
+      },
+      async getTerminal() {
+        return undefined;
+      },
+    };
+    const lifecycle = new ActionLifecycle({
+      policy: new PolicyEngine("digest"),
+      policyContext: policyCtx({
+        deploymentCeiling: set({ kind: "commit-file", path: "/p/a.txt" }),
+        principalPolicy: set({ kind: "commit-file", path: "/p/a.txt" }),
+        activeCapabilities: set(),
+        workspaceId: "ws-1",
+      }),
+      broker: {
+        mode: "inline",
+        request: async (req) => approved(req, "user", "global"),
+      },
+      boundary: fakeBoundary({ output: "ok", success: true }),
+      audit: brokenAudit,
+      activeCapabilities: { capabilities: [] },
+      policyStore: store,
+      workspaceId: "ws-1",
+    });
+    const result = await lifecycle.run(writeAction());
+    expect(result.outcome.state).toBe("denied");
+    // Nothing was installed — the global store is untouched.
+    const snap = await store.read(GLOBAL_WORKSPACE_ID);
+    expect(snap.policy.capabilities).toEqual([]);
+    expect(snap.version).toBe(0);
+  });
+});
+
+describe("active-authority revocation (P1 review fix)", () => {
+  it("revokeActiveCapabilities removes matching authority from the live set immediately", () => {
+    const lifecycle = new ActionLifecycle({
+      policy: new PolicyEngine("digest"),
+      policyContext: policyCtx({
+        deploymentCeiling: set({ kind: "commit-file", path: "/p/a.txt" }),
+        principalPolicy: set({ kind: "commit-file", path: "/p/a.txt" }),
+        activeCapabilities: set({ kind: "commit-file", path: "/p/a.txt" }),
+        workspaceId: "ws-1",
+      }),
+      broker: fakeBroker({ approved: false, requestId: "", actionDigest: "", actorId: "u", decidedAt: 0 }),
+      boundary: fakeBoundary({ output: "ok", success: true }),
+      audit: new LocalAuditStore({ root: dir }),
+      activeCapabilities: { capabilities: [{ kind: "commit-file", path: "/p/a.txt" }] },
+    });
+    expect(lifecycle.getActiveCapabilities()).toHaveLength(1);
+    lifecycle.revokeActiveCapabilities([{ kind: "commit-file", path: "/p/a.txt" }]);
+    expect(lifecycle.getActiveCapabilities()).toEqual([]);
+    // The policy context's view is the same live set.
+    expect(lifecycle.getActiveCapabilities()).toEqual([]);
+  });
+
+  it("revokeActiveCapabilities leaves unrelated authority untouched", () => {
+    const lifecycle = new ActionLifecycle({
+      policy: new PolicyEngine("digest"),
+      policyContext: policyCtx({
+        deploymentCeiling: set({ kind: "commit-file", path: "/p/a.txt" }),
+        principalPolicy: set({ kind: "commit-file", path: "/p/a.txt" }),
+        activeCapabilities: set(),
+        workspaceId: "ws-1",
+      }),
+      broker: fakeBroker({ approved: false, requestId: "", actionDigest: "", actorId: "u", decidedAt: 0 }),
+      boundary: fakeBoundary({ output: "ok", success: true }),
+      audit: new LocalAuditStore({ root: dir }),
+      activeCapabilities: { capabilities: [{ kind: "commit-file", path: "/p/a.txt" }, { kind: "commit-file", path: "/p/other.txt" }] },
+    });
+    lifecycle.revokeActiveCapabilities([{ kind: "commit-file", path: "/p/a.txt" }]);
+    expect(lifecycle.getActiveCapabilities()).toEqual([{ kind: "commit-file", path: "/p/other.txt" }]);
+  });
+});

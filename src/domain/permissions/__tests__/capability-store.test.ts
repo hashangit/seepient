@@ -259,3 +259,21 @@ describe("path-segment containment (reviewer fix #6)", () => {
     expect(isDeniedByRule(rules, "filesystem-read", "/etc/secure/key")?.ruleId).toBe("r1");
   });
 });
+
+describe("exact vs prefix argv coverage (P0 review fix)", () => {
+  it("an EXACT process capability does not cover requests with extra trailing args", () => {
+    const exact = { kind: "process" as const, executable: "/bin/rm", argvPrefix: ["safe.txt"], argvExact: true };
+    expect(covers(exact, { kind: "process", executable: "/bin/rm", argvPrefix: ["safe.txt"], argvExact: true })).toBe(true);
+    // The exact approval must NOT authorize "rm safe.txt other.txt".
+    expect(covers(exact, { kind: "process", executable: "/bin/rm", argvPrefix: ["safe.txt", "other.txt"], argvExact: true })).toBe(false);
+    // A shorter inner argv is not covered either.
+    expect(covers(exact, { kind: "process", executable: "/bin/rm", argvPrefix: [], argvExact: true })).toBe(false);
+  });
+
+  it("a BOUNDED prefix capability still covers exact requests with more args", () => {
+    const bounded = { kind: "process" as const, executable: "/usr/bin/git", argvPrefix: ["status"] };
+    expect(covers(bounded, { kind: "process", executable: "/usr/bin/git", argvPrefix: ["status", "--porcelain"], argvExact: true })).toBe(true);
+    // ...but not a different subcommand.
+    expect(covers(bounded, { kind: "process", executable: "/usr/bin/git", argvPrefix: ["log"], argvExact: true })).toBe(false);
+  });
+});

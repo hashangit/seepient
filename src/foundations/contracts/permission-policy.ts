@@ -45,7 +45,18 @@ export type Capability =
       port?: number;
     }
   | { kind: "external-recipient"; service: string; recipient: string }
-  | { kind: "process"; executable?: string; argvPrefix?: string[] }
+  | {
+      kind: "process";
+      executable?: string;
+      argvPrefix?: string[];
+      /**
+       * Exact-argv mode (P0 review fix): when true, coverage requires the
+       * SAME token count and tokens — an approval for `rm safe.txt` must not
+       * cover `rm safe.txt other.txt`. Bounded/prefix options omit this flag.
+       * Analyzer-emitted required process capabilities always set it.
+       */
+      argvExact?: boolean;
+    }
   | { kind: "secret-ref"; ref: string }
   | { kind: "model-egress"; providerClass: string; dataClasses: string[] }
   | { kind: "activate-change-class"; changeClass: import("./self-evolution.js").SelfEvolutionChangeClass }

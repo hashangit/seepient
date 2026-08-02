@@ -186,16 +186,33 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
         projectConfigPath: LOCAL_CONFIG_FILE,
         globalConfigPath: GLOBAL_CONFIG_FILE,
       });
-      const approvalDeadlineMs = deadlineSettings.get(
+      // The value is captured when the pipeline is constructed (restart to
+      // change, per the settings metadata), so clamp any out-of-range input
+      // here — env overrides bypass the SettingsManager set() validation
+      // (P1 review fix).
+      const rawDeadline = deadlineSettings.get(
         'permissions.approvalTimeoutMs',
       ).value as number;
+      const approvalDeadlineMs = Number.isFinite(rawDeadline)
+        ? Math.min(Math.max(rawDeadline, 10_000), 3_600_000)
+        : 600_000;
       await agent.enablePermissionPipeline({
         workspaceRoot: process.cwd(),
         modelProviderClass: activeProviderType ?? 'openai',
         approvalDeadlineMs,
       });
-    } catch {
-      // Policy store / pipeline is best-effort; fallback to default loop pipeline.
+    } catch (err) {
+      // P1 review fix: a pipeline-init failure must not vanish into the
+      // legacy path silently — surface it prominently and record it so
+      // /permissions status can report why protected policy is absent.
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(
+        chalk.yellow(`[permissions] Permission pipeline failed to initialize: ${message}`),
+      );
+      console.error(
+        chalk.yellow('[permissions] Running WITHOUT the protected policy pipeline. Actions will use the legacy approval path.'),
+      );
+      agent.setPipelineInitError?.(message);
     }
   }
 

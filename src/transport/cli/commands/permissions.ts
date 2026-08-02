@@ -31,6 +31,7 @@ import type { CommandHandler } from './registry.js';
 import type { Capability, CapabilitySet } from '../../../foundations/contracts/permission-policy.js';
 import type { PolicyStore } from '../../../foundations/contracts/execution-brokers.js';
 import { GLOBAL_WORKSPACE_ID } from '../../../domain/permissions/policy-store.js';
+import type { ContainmentPreflightResult } from '../../../capabilities/execution/containment-preflight.js';
 
 const SCOPES: GrantScope[] = ['session', 'project', 'global'];
 
@@ -120,6 +121,7 @@ export const permissionsHandler: CommandHandler = async (ctx) => {
         ctx.agent.getContainmentStatus?.(),
         ctx.agent.getActiveCapabilities?.(),
         ctx.agent.getPolicyWorkspaceId?.(),
+        ctx.agent,
       ),
     };
   }
@@ -173,10 +175,10 @@ ${chalk.dim('Effective on the next evaluation. Stored outside executor roots.')}
 
   if (sub === 'revoke-cap') {
     if (!policyStore) return noPolicyStore();
-    const idx = parts[1];
-    if (!idx) return { output: chalk.red('Usage: /permissions revoke-cap <index>') };
+    const idx = Number(parts[1]);
+    if (!Number.isInteger(idx) || idx < 0) return { output: chalk.red('Usage: /permissions revoke-cap <non-negative-index>') };
     try {
-      const snap = await ctx.agent.revokePolicyCapability?.(Number(idx));
+      const snap = await ctx.agent.revokePolicyCapability?.(idx);
       return { output: chalk.green(`Revoked capability at index ${idx} → version ${snap?.version ?? "?"}.`) };
     } catch (err) {
       return { output: chalk.red(`Revoke failed: ${(err as Error).message}`) };
@@ -185,10 +187,10 @@ ${chalk.dim('Effective on the next evaluation. Stored outside executor roots.')}
 
   if (sub === 'revoke-global') {
     if (!policyStore) return noPolicyStore();
-    const idx = parts[1];
-    if (!idx) return { output: chalk.red('Usage: /permissions revoke-global <index>') };
+    const idx = Number(parts[1]);
+    if (!Number.isInteger(idx) || idx < 0) return { output: chalk.red('Usage: /permissions revoke-global <non-negative-index>') };
     try {
-      const snap = await ctx.agent.revokeGlobalPolicyCapability?.(Number(idx));
+      const snap = await ctx.agent.revokeGlobalPolicyCapability?.(idx);
       return { output: chalk.green(`Revoked GLOBAL capability at index ${idx} → version ${snap?.version ?? "?"}.`) };
     } catch (err) {
       return { output: chalk.red(`Revoke failed: ${(err as Error).message}`) };
@@ -249,9 +251,10 @@ function noPolicyStore(): { output: string } {
 async function renderStatus(
   store: { list(): Array<{ scope: string }> } | null | undefined,
   policyStore: PolicyStore | null | undefined,
-  containment: import("../../../capabilities/execution/containment-preflight.js").ContainmentPreflightResult | undefined,
+  containment: ContainmentPreflightResult | undefined,
   active: Capability[] | undefined,
   agentWorkspaceId: string | null | undefined,
+  agent: { getPipelineInitError?: () => string | undefined },
 ): Promise<string> {
   const lines: string[] = [chalk.bold.cyan('Permission Status (spec 008)'), ''];
   lines.push(`${chalk.bold('Containment (spec 011 preflight):')}`);
@@ -296,23 +299,27 @@ async function renderStatus(
       const projectSnap = await policyStore.read(agentWorkspaceId).catch(() => null);
       if (projectSnap && projectSnap.policy.capabilities.length > 0) {
         lines.push(chalk.bold('  Project policy:'));
-        for (const cap of projectSnap.policy.capabilities) {
-          lines.push(`    ${chalk.green(describeCapability(cap))}`);
-        }
+        projectSnap.policy.capabilities.forEach((cap, i) => {
+          lines.push(`    [${i}] ${chalk.green(describeCapability(cap))}`);
+        });
       }
     }
     const globalSnap = await policyStore.read(GLOBAL_WORKSPACE_ID).catch(() => null);
     if (globalSnap && globalSnap.policy.capabilities.length > 0) {
       lines.push(chalk.bold('  Global policy ("Allow always" grants):'));
-      for (const cap of globalSnap.policy.capabilities) {
-        lines.push(`    ${chalk.green(describeCapability(cap))}`);
-      }
+      globalSnap.policy.capabilities.forEach((cap, i) => {
+        lines.push(`    [${i}] ${chalk.green(describeCapability(cap))}`);
+      });
       lines.push(chalk.dim('    Revoke: /permissions revoke-global <index>'));
     } else {
       lines.push(chalk.dim('  Global policy: (none)'));
     }
   } else {
     lines.push(chalk.dim('  (not configured — protected policy is opt-in)'));
+  }
+  const initError = agent.getPipelineInitError?.();
+  if (initError) {
+    lines.push(chalk.yellow(`  Pipeline init failed: ${initError} — the legacy approval path is active.`));
   }
   return lines.join('\n');
 }
