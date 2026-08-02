@@ -8,8 +8,13 @@
  * `backendCapabilities.environmentIsolation` before a prompt is issued;
  * this module is the composition-root surface that produces the status line
  * and the actionable setup message.
+ *
+ * The probe goes through the SAME factory the execution boundary uses
+ * (`createNativeProcessSandbox`), so the status can never claim containment
+ * while the boundary runs uncontained: a missing SDK or failed session init
+ * is reported exactly like a missing binary (T213).
  */
-import { probeSandbox } from "../../vendors/sandbox-runtime/index.js";
+import { createNativeProcessSandbox } from "../../vendors/sandbox-runtime/index.js";
 
 export type ContainmentPreflightResult =
   | {
@@ -27,25 +32,19 @@ export type ContainmentPreflightResult =
 export async function preflightContainment(opts?: {
   workspaceRoot?: string;
 }): Promise<ContainmentPreflightResult> {
-  const probe = await probeSandbox();
-  if (!probe.available) {
+  const sandbox = await createNativeProcessSandbox();
+  const probe = sandbox.probe;
+  if (!probe.available || probe.backend === "none") {
     const setupHint =
       probe.platform === "darwin"
-        ? "Seatbelt (sandbox-exec) is missing — expected at /usr/bin/sandbox-exec. Reinstall macOS system tools, or run with SEEPIENT_UNCONTAINED=1 to explicitly disable containment."
+        ? "Seatbelt (sandbox-exec) is missing, or the sandbox runtime SDK failed to initialize — verify /usr/bin/sandbox-exec exists and that @anthropic-ai/sandbox-runtime is installed (run pnpm install). Run with SEEPIENT_UNCONTAINED=1 to explicitly disable containment."
         : probe.platform === "linux"
-          ? "Bubblewrap (bwrap) is not installed. Install it with your package manager (e.g. `sudo apt install bubblewrap` or `brew install bwrap`), or run with SEEPIENT_UNCONTAINED=1 to explicitly disable containment."
+          ? "Bubblewrap (bwrap) is not installed, or the sandbox runtime SDK failed to initialize. Install it with your package manager (e.g. `sudo apt install bubblewrap` or `brew install bwrap`), run pnpm install, or run with SEEPIENT_UNCONTAINED=1 to explicitly disable containment."
           : "Containment is not supported on this platform. Run with SEEPIENT_UNCONTAINED=1 to explicitly disable containment.";
     return {
       ok: false,
       reason: probe.reason ?? "binary-missing",
       setupHint,
-    };
-  }
-  if (probe.backend === "none") {
-    return {
-      ok: false,
-      reason: "primitive-unsupported",
-      setupHint: "Containment primitives are not available on this system. Run with SEEPIENT_UNCONTAINED=1 to explicitly disable containment.",
     };
   }
   return {

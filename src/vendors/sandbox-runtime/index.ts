@@ -22,6 +22,7 @@
  * not installed.
  */
 import type { CommandDescriptor, RootRequest } from "../../foundations/contracts/tool-effects.js";
+import { spawn } from "node:child_process";
 
 /** Result of the sandbox startup probe. */
 export interface SandboxProbe {
@@ -201,25 +202,31 @@ export class UncontainedSandbox implements NativeProcessSandbox {
 }
 
 /**
- * ASRT-backed sandbox. Dynamically imports `@anthropic-ai/sandbox-runtime`
- * and delegates to the SDK. If the package is absent or the probe failed,
- * falls back to UncontainedSandbox and sets isolated:false (T207a).
+ * ASRT-backed sandbox (SDK 0.0.67 API). Dynamically imports
+ * `@anthropic-ai/sandbox-runtime` and drives its session-scoped
+ * `SandboxManager` singleton: `initialize()` once (platform + dependency
+ * check), then `wrapWithSandboxArgv()` per command so the spawned argv runs
+ * under a Seatbelt/Bubblewrap profile. If the package is absent, the API
+ * changed, or initialization fails, falls back to UncontainedSandbox and
+ * sets isolated:false (T207a).
  *
- * The dynamic import keeps unused SDK out of memory and isolates the optional
- * peer dep from the module graph when not installed.
+ * The dynamic import keeps unused SDK out of memory and isolates the
+ * optional peer dep from the module graph when not installed.
  */
 export class AsrtSandbox implements NativeProcessSandbox {
   readonly probe: SandboxProbe;
-  private readonly inner: NativeProcessSandbox;
+  private readonly manager: SrtSandboxManager;
+  private initPromise: Promise<boolean> | undefined;
 
-  private constructor(probe: SandboxProbe, inner: NativeProcessSandbox) {
+  private constructor(probe: SandboxProbe, manager: SrtSandboxManager) {
     this.probe = probe;
-    this.inner = inner;
+    this.manager = manager;
   }
 
   /**
-   * Factory: probes the platform and attempts to import the ASRT SDK.
-   * Returns an AsrtSandbox on success, or UncontainedSandbox on failure.
+   * Factory: probes the platform, imports the SDK, and verifies the
+   * SandboxManager API + a successful session initialize. Returns an
+   * AsrtSandbox on success, or UncontainedSandbox on any failure.
    */
   static async create(): Promise<NativeProcessSandbox> {
     const probe = await probeSandbox();
@@ -228,63 +235,166 @@ export class AsrtSandbox implements NativeProcessSandbox {
     }
     try {
       // Optional peer dep — dynamic import keeps it out of memory when absent.
-      const asrt = await import("@anthropic-ai/sandbox-runtime" as string);
-      // Verify the SDK exposes the expected execute API.
-      if (typeof (asrt as any).createSandbox !== "function" && typeof (asrt as any).Sandbox !== "function") {
-        throw new Error("ASRT SDK missing createSandbox/Sandbox export");
+      const sdk = (await import("@anthropic-ai/sandbox-runtime" as string)) as {
+        SandboxManager?: SrtSandboxManager;
+      };
+      const manager = sdk.SandboxManager;
+      if (
+        typeof manager?.initialize !== "function" ||
+        typeof manager.wrapWithSandboxArgv !== "function"
+      ) {
+        throw new Error("ASRT SDK missing SandboxManager API");
       }
-      return new AsrtSandbox(probe, new AsrtNativeSandbox(probe, asrt));
+      const sandbox = new AsrtSandbox(probe, manager);
+      const ready = await sandbox.init();
+      return ready ? sandbox : new UncontainedSandbox();
     } catch {
       // ASRT SDK not installed or incompatible — fail closed to uncontained.
-      const uncontained = new UncontainedSandbox();
-      return uncontained;
+      return new UncontainedSandbox();
+    }
+  }
+
+  /**
+   * Session-scoped SDK initialization. Idempotent: SRT's singleton is
+   * process-wide, so a second boundary reuses the same session. Deny-all
+   * network and empty filesystem grants at the session level — the per-exec
+   * roots travel in the per-call customConfig.
+   */
+  private async init(): Promise<boolean> {
+    this.initPromise ??= this.doInit();
+    return this.initPromise;
+  }
+
+  private async doInit(): Promise<boolean> {
+    try {
+      await this.manager.initialize({
+        network: { allowedDomains: [], deniedDomains: ["*"] },
+        filesystem: { denyRead: [], allowWrite: [], denyWrite: [] },
+      });
+      return this.manager.isSandboxingEnabled();
+    } catch {
+      return false;
     }
   }
 
   async exec(req: SandboxExecRequest): Promise<SandboxExecResult> {
-    return this.inner.exec(req);
+    const ready = await this.init();
+    if (!ready) {
+      throw Object.assign(new Error("Sandbox runtime not operational"), {
+        code: "ISOLATION_UNAVAILABLE",
+      });
+    }
+    try {
+      // The sanitized env (T207: no ambient secrets) is baked into the
+      // wrapped command line; SRT's wrapper runs `env <SRT vars> <cmd>` and
+      // the SDK returns `process.env` for spawning, so the child must spawn
+      // with the SANITIZED env, not the SDK's, or secrets would re-enter.
+      const envPairs = Object.entries(req.env)
+        .map(([k, v]) => `${k}=${shellQuote(v)}`)
+        .join(" ");
+      const args = req.command.argv.map(shellQuote).join(" ");
+      const commandLine = `${envPairs} ${shellQuote(req.command.executable)}${args ? ` ${args}` : ""}`;
+      const wrapped = await this.manager.wrapWithSandboxArgv(
+        commandLine,
+        undefined,
+        { filesystem: filesystemConfigFor(req.roots) },
+        req.signal,
+        req.command.cwd,
+      );
+      return await spawnSandboxed(wrapped, req);
+    } finally {
+      await this.manager.cleanupAfterCommand();
+    }
   }
 }
 
-/** Internal: delegates to the actual ASRT SDK when available. */
-class AsrtNativeSandbox implements NativeProcessSandbox {
-  readonly probe: SandboxProbe;
-  private readonly sdk: any;
+/** Shell-quote one token for the `bash -c` line SRT wraps. */
+function shellQuote(token: string): string {
+  return `'${token.replace(/'/g, "'\\''")}'`;
+}
 
-  constructor(probe: SandboxProbe, sdk: any) {
-    this.probe = probe;
-    this.sdk = sdk;
+/** Map boundary root requests onto the SRT filesystem config. */
+function filesystemConfigFor(
+  roots: RootRequest[],
+): { allowRead?: string[]; allowWrite?: string[] } {
+  const allowRead = new Set<string>();
+  const allowWrite = new Set<string>();
+  for (const r of roots) {
+    allowRead.add(r.canonicalRoot);
+    if (r.access === "write") allowWrite.add(r.canonicalRoot);
   }
+  return {
+    ...(allowRead.size > 0 ? { allowRead: [...allowRead] } : {}),
+    ...(allowWrite.size > 0 ? { allowWrite: [...allowWrite] } : {}),
+  };
+}
 
-  async exec(req: SandboxExecRequest): Promise<SandboxExecResult> {
-    try {
-      // The ASRT SDK API varies by version — we use a best-effort adapter.
-      // The exact API is resolved via dynamic reflection to stay compatible
-      // with multiple SDK versions. If the call fails, we surface
-      // ISOLATION_UNAVAILABLE as a structured error.
-      const SandboxCtor = this.sdk.Sandbox ?? this.sdk.createSandbox;
-      const result = await SandboxCtor({
-        command: req.command.executable,
-        args: req.command.argv,
-        cwd: req.command.cwd,
-        env: req.env,
-        roots: req.roots,
-        signal: req.signal,
-        onUpdate: req.onUpdate,
-      });
-      return {
-        exitCode: result.exitCode ?? 0,
-        stdout: result.stdout ?? "",
-        stderr: result.stderr ?? "",
-        isolated: true,
-      };
-    } catch (err) {
-      throw Object.assign(
-        new Error(`ASRT execution failed: ${(err as Error).message}`),
-        { code: "ISOLATION_UNAVAILABLE" },
-      );
-    }
-  }
+/** Spawn the SRT-wrapped argv and accumulate the child result. */
+function spawnSandboxed(
+  wrapped: { argv: string[]; env: NodeJS.ProcessEnv },
+  req: SandboxExecRequest,
+): Promise<SandboxExecResult> {
+  return new Promise((resolve) => {
+    const child = spawn(wrapped.argv[0], wrapped.argv.slice(1), {
+      cwd: req.command.cwd,
+      env: req.env,
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let lastFlushedLen = 0;
+
+    const emitProgress = (chunk: string): void => {
+      if (chunk.length > 0) req.onUpdate?.({ message: chunk });
+    };
+
+    child.stdout?.on("data", (b: Buffer) => {
+      const chunk = b.toString();
+      stdout += chunk;
+      lastFlushedLen = stdout.length;
+      emitProgress(chunk);
+    });
+    child.stderr?.on("data", (b: Buffer) => (stderr += b.toString()));
+
+    let exitCode = 0;
+    let closed = false;
+    let stdoutEnded = !child.stdout;
+
+    const checkDone = (): void => {
+      if (closed && stdoutEnded) {
+        if (stdout.length > lastFlushedLen) {
+          emitProgress(stdout.slice(lastFlushedLen));
+        }
+        resolve({ exitCode, stdout, stderr, isolated: true });
+      }
+    };
+
+    child.stdout?.on("end", () => {
+      stdoutEnded = true;
+      checkDone();
+    });
+    child.on("close", (code) => {
+      exitCode = code ?? 0;
+      closed = true;
+      checkDone();
+    });
+    req.signal?.addEventListener("abort", () => child.kill("SIGTERM"));
+  });
+}
+
+/** The subset of the SRT SandboxManager API this adapter consumes. */
+export interface SrtSandboxManager {
+  initialize(config: unknown, askCallback?: unknown, enableLogMonitor?: boolean): Promise<void>;
+  isSandboxingEnabled(): boolean;
+  wrapWithSandboxArgv(
+    command: string,
+    binShell?: string,
+    customConfig?: { filesystem?: { allowRead?: string[]; allowWrite?: string[] } },
+    abortSignal?: AbortSignal,
+    cwd?: string,
+  ): Promise<{ argv: string[]; env: NodeJS.ProcessEnv }>;
+  cleanupAfterCommand(): Promise<void> | void;
 }
 
 /**
