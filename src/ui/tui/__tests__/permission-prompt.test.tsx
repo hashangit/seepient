@@ -36,6 +36,16 @@ const tick = (): Promise<void> => {
   return promise;
 };
 
+/** The two-step consent flow: Enter on Scope, then Enter on Duration. */
+async function approvePair(stdin: { write: (s: string) => void }, scopeKey?: string, durationKey?: string): Promise<void> {
+  if (scopeKey) { stdin.write(scopeKey); await tick(); }
+  stdin.write(ENTER);
+  await tick();
+  if (durationKey) { stdin.write(durationKey); await tick(); }
+  stdin.write(ENTER);
+  await tick();
+}
+
 function option(kind: "exact" | "bounded", optionId: string, label: string, supportedLifetimes: Array<"action" | "session"> = ["action", "session"]) {
   return {
     optionId,
@@ -63,8 +73,8 @@ function request(overrides: Partial<PermissionRequest> = {}): PermissionRequest 
     },
     requestedCapabilities: [{ kind: "commit-file", path: "/proj/a.txt" }],
     approvalOptions: [
-      option("exact", "opt-exact", "Exact — write /proj/a.txt"),
-      option("bounded", "opt-bounded", "Bounded — write anything under /proj"),
+      option("exact", "opt-exact", "Only this file — changes exactly what's shown. Any change will ask again."),
+      option("bounded", "opt-bounded", "Other files in this folder — allows other files in this folder during the chosen time."),
     ],
     offeredLifetimes: ["action", "session"],
     createdAt: 0,
@@ -79,15 +89,15 @@ function compactFrame(frame: string): string {
 
 // ── Pure selection/default logic ─────────────────────────────────────────
 
-describe("defaults (FR-011 least privilege)", () => {
-  it("default scope is the exact option when offered, else the narrowest", () => {
+describe("defaults (FR-011 recommendation)", () => {
+  it("recommended scope is the exact option when offered, else the narrowest", () => {
     const opts = request().approvalOptions;
     expect(defaultScopeIndex(opts)).toBe(0);
     expect(defaultScopeIndex([opts[1]])).toBe(0);
     expect(defaultScopeIndex([])).toBe(0);
   });
 
-  it("default duration is Allow Once when offered, else This Session", () => {
+  it("recommended duration is Just this time when offered, else Until I close Seepient", () => {
     expect(defaultLifetimeIndex(["action", "session"])).toBe(0);
     expect(defaultLifetimeIndex(["session"])).toBe(0);
     expect(defaultLifetimeIndex([])).toBe(0);
@@ -123,7 +133,7 @@ describe("defaults (FR-011 least privilege)", () => {
   });
 
   it("buildSelection clamps stale indices to the visible set", () => {
-    const r = request({ approvalOptions: [option("exact", "opt-exact", "Exact")] });
+    const r = request({ approvalOptions: [option("exact", "opt-exact", "Only this file")] });
     expect(buildSelection(r, 99, 5)).toEqual({
       approved: true,
       optionId: "opt-exact",
@@ -142,12 +152,16 @@ describe("defaults (FR-011 least privilege)", () => {
 // ── Rendering (T014) ─────────────────────────────────────────────────────
 
 describe("PermissionPrompt rendering (T014)", () => {
-  it("renders only the options supplied by Domain, explained in plain language", () => {
+  it("renders only the options supplied by Domain, in plain language", () => {
     const { lastFrame } = renderPrompt();
     const compact = compactFrame(lastFrame()!);
-    expect(compact).toContain("exact — write /proj/a.txt");
-    expect(compact).toContain("bounded — write anything under /proj");
-    // Never invents project/global/tool-wide choices.
+    expect(compact).toContain("only this file");
+    expect(compact).toContain("any change will ask again");
+    expect(compact).toContain("other files in this folder");
+    // No policy jargon, no invented scope kinds.
+    expect(compact).not.toContain("[exact]");
+    expect(compact).not.toContain("[bounded]");
+    expect(compact).not.toContain("exact arguments");
     expect(compact).not.toContain("globally");
     expect(compact).not.toContain("in this project");
   });
@@ -159,42 +173,91 @@ describe("PermissionPrompt rendering (T014)", () => {
     expect(frame).toContain("req-1");
   });
 
-  it("one option: no additional scope option is created (FR-006)", () => {
-    const r = request({ approvalOptions: [option("exact", "opt-exact", "Exact — write /proj/a.txt")] });
+  it("marks the least-privilege defaults as Recommended without selecting them", async () => {
+    const { lastFrame, stdin, getCaptured } = renderPrompt();
+    const compact = compactFrame(lastFrame()!);
+    // Recommended markers exist…
+    expect(compact).toMatch(/recommended/);
+    // …but nothing is selected yet: Enter on Scope must not approve.
+    stdin.write(ENTER);
+    await tick();
+    expect(getCaptured()).toBeNull();
+  });
+
+  it("one option: no additional scope option is created (FR-006)", async () => {
+    const r = request({ approvalOptions: [option("exact", "opt-exact", "Only this file — changes exactly what's shown. Any change will ask again.")] });
     const { stdin, lastFrame, getCaptured } = renderPrompt(r);
     const compact = compactFrame(lastFrame()!);
-    expect(compact).toContain("exact — write /proj/a.txt");
-    expect(compact).not.toContain("bounded");
+    expect(compact).toContain("only this file");
+    expect(compact).not.toContain("other files in this folder");
     expect(compact).not.toContain("globally");
-    // Enter approves the single option with the least-privilege duration.
-    stdin.write(ENTER);
+    // Two-step approval with the single option.
+    await approvePair(stdin);
     expect(getCaptured()).toEqual({ approved: true, optionId: "opt-exact", lifetime: "action" });
   });
 
-  it("shows a summary of the selected scope and duration at all times", () => {
-    const { lastFrame } = renderPrompt();
+  it("shows the plain-language duration choices with explanations", async () => {
+    const { stdin, lastFrame } = renderPrompt();
+    stdin.write(TAB);
+    await tick();
+    const frame = lastFrame()!;
+    expect(frame).toContain("Just this time");
+    expect(frame).toContain("You'll be asked again next time");
+    expect(frame).toContain("Until I close Seepient");
+    expect(frame).toContain("Remember this permission for this session");
+  });
+
+  it("shows the committed pair in the summary once both are chosen", async () => {
+    const { stdin, lastFrame, getCaptured } = renderPrompt();
+    await approvePair(stdin);
+    expect(getCaptured()).toEqual({ approved: true, optionId: "opt-exact", lifetime: "action" });
     const compact = compactFrame(lastFrame()!);
-    expect(compact).toContain("selected");
-    expect(compact).toContain("exact — write /proj/a.txt");
-    expect(compact).toContain("allow once");
+    expect(compact).toContain("only this file");
+    expect(compact).toContain("just this time");
   });
 });
 
 // ── Submission and keyboard (T014/T018) ──────────────────────────────────
 
-describe("PermissionPrompt submit + keyboard (T014/T018)", () => {
-  it("Enter submits the least-privilege default pair (exact + Allow Once)", () => {
+describe("PermissionPrompt two-step submit + keyboard (T014/T018)", () => {
+  it("Enter on Scope does NOT approve — it commits the scope and advances to Duration", async () => {
     const { stdin, getCaptured } = renderPrompt();
     stdin.write(ENTER);
+    await tick();
+    // Nothing submitted yet — approval stays disabled until BOTH are chosen.
+    expect(getCaptured()).toBeNull();
+    stdin.write(ENTER);
+    await tick();
     expect(getCaptured()).toEqual({ approved: true, optionId: "opt-exact", lifetime: "action" });
   });
 
-  it("number keys select the corresponding visible item (scope tab)", async () => {
+  it("Enter on Duration without a committed scope returns to Scope — never submits", async () => {
     const { stdin, getCaptured } = renderPrompt();
-    stdin.write("2");
+    stdin.write(TAB); // jump straight to Duration
     await tick();
     stdin.write(ENTER);
-    expect(getCaptured()).toEqual({ approved: true, optionId: "opt-bounded", lifetime: "action" });
+    await tick();
+    expect(getCaptured()).toBeNull();
+    // We were guided back to the Scope tab: Enter commits + advances, the
+    // next Enter on Duration submits.
+    stdin.write(ENTER);
+    await tick();
+    stdin.write(ENTER);
+    await tick();
+    expect(getCaptured()).toEqual({ approved: true, optionId: "opt-exact", lifetime: "action" });
+  });
+
+  it("number keys move focus; the committed pair is what submits", async () => {
+    const { stdin, getCaptured } = renderPrompt();
+    stdin.write("2"); // focus bounded
+    await tick();
+    stdin.write(ENTER); // commit bounded, advance
+    await tick();
+    stdin.write("2"); // focus session
+    await tick();
+    stdin.write(ENTER); // commit + submit
+    await tick();
+    expect(getCaptured()).toEqual({ approved: true, optionId: "opt-bounded", lifetime: "session" });
   });
 
   it("unsupported numbers do nothing", async () => {
@@ -203,7 +266,10 @@ describe("PermissionPrompt submit + keyboard (T014/T018)", () => {
     await tick();
     expect(getCaptured()).toBeNull();
     stdin.write(ENTER);
-    // Still the default pair — the unsupported key changed nothing.
+    await tick();
+    stdin.write(ENTER);
+    await tick();
+    // Still the recommended pair — the unsupported key changed nothing.
     expect(getCaptured()).toEqual({ approved: true, optionId: "opt-exact", lifetime: "action" });
   });
 
@@ -213,6 +279,9 @@ describe("PermissionPrompt submit + keyboard (T014/T018)", () => {
     await tick();
     expect(getCaptured()).toBeNull();
     stdin.write(ENTER);
+    await tick();
+    stdin.write(ENTER);
+    await tick();
     expect(getCaptured()).toEqual({ approved: true, optionId: "opt-exact", lifetime: "action" });
   });
 
@@ -220,23 +289,14 @@ describe("PermissionPrompt submit + keyboard (T014/T018)", () => {
     const { stdin, getCaptured } = renderPrompt();
     stdin.write(TAB);
     await tick();
-    // Duration rows for the selected option are now visible (asserted via
-    // the duration labels in the frame).
     stdin.write(TAB);
     await tick();
     stdin.write(ENTER);
-    // Switching tabs never changed the selected values (US2.1).
-    expect(getCaptured()).toEqual({ approved: true, optionId: "opt-exact", lifetime: "action" });
-  });
-
-  it("number keys on the Duration tab select the duration", async () => {
-    const { stdin, getCaptured } = renderPrompt();
-    stdin.write(TAB); // to Duration
-    await tick();
-    stdin.write("2"); // This Session
     await tick();
     stdin.write(ENTER);
-    expect(getCaptured()).toEqual({ approved: true, optionId: "opt-exact", lifetime: "session" });
+    await tick();
+    // Switching tabs never changed the committed values (US2.1).
+    expect(getCaptured()).toEqual({ approved: true, optionId: "opt-exact", lifetime: "action" });
   });
 
   it("q denies without executing", () => {
@@ -245,18 +305,26 @@ describe("PermissionPrompt submit + keyboard (T014/T018)", () => {
     expect(getCaptured()).toEqual({ approved: false, reason: "user-denied" });
   });
 
-  it("Left/Right switch tabs without changing either selected value (FR-014)", async () => {
+  it("Escape denies without executing", () => {
+    const { stdin, getCaptured } = renderPrompt();
+    stdin.write("\u001B");
+    expect(getCaptured()).toEqual({ approved: false, reason: "user-denied" });
+  });
+
+  it("Left/Right switch tabs without changing either committed value (FR-014)", async () => {
     const { stdin, getCaptured } = renderPrompt();
     stdin.write("\u001B[C"); // right → Duration
     await tick();
-    stdin.write("2"); // This Session on the Duration tab
+    stdin.write("2"); // focus session
     await tick();
     stdin.write("\u001B[D"); // left → Scope
     await tick();
-    stdin.write("2"); // Bounded on the Scope tab
+    stdin.write("2"); // focus bounded
     await tick();
-    stdin.write(ENTER);
-    // Each tab kept its own selection; the pair is the visible one.
+    stdin.write(ENTER); // commit bounded, advance to Duration
+    await tick();
+    stdin.write(ENTER); // commit session + submit
+    await tick();
     expect(getCaptured()).toEqual({ approved: true, optionId: "opt-bounded", lifetime: "session" });
   });
 
@@ -264,10 +332,13 @@ describe("PermissionPrompt submit + keyboard (T014/T018)", () => {
     const { stdin, getCaptured } = renderPrompt();
     stdin.write("\u001B[Z"); // shift-tab → Duration
     await tick();
-    stdin.write("2"); // This Session
+    stdin.write("\u001B[D"); // left → Scope
     await tick();
-    stdin.write(ENTER);
-    expect(getCaptured()).toEqual({ approved: true, optionId: "opt-exact", lifetime: "session" });
+    stdin.write(ENTER); // commit scope → advances to Duration
+    await tick();
+    stdin.write(ENTER); // commit duration + submit
+    await tick();
+    expect(getCaptured()).toEqual({ approved: true, optionId: "opt-exact", lifetime: "action" });
   });
 
   it("Up/Down move within the active tab and stop at the ends (FR-015)", async () => {
@@ -282,27 +353,28 @@ describe("PermissionPrompt submit + keyboard (T014/T018)", () => {
     stdin.write("\u001B[A"); // up → stuck at exact (no wrap)
     await tick();
     stdin.write(ENTER);
+    await tick();
+    stdin.write(ENTER);
+    await tick();
     expect(getCaptured()).toEqual({ approved: true, optionId: "opt-exact", lifetime: "action" });
-  });
-
-  it("Escape denies without executing", () => {
-    const { stdin, getCaptured } = renderPrompt();
-    stdin.write("\u001B");
-    expect(getCaptured()).toEqual({ approved: false, reason: "user-denied" });
   });
 
   it("a duration the selected option does not support is never offered", async () => {
     const r = request({
-      approvalOptions: [option("exact", "opt-exact", "Exact — write /proj/a.txt", ["action"])],
+      approvalOptions: [option("exact", "opt-exact", "Only this file", ["action"])],
     });
     const { stdin, lastFrame, getCaptured } = renderPrompt(r);
-    // Selected option offers only Allow Once.
     stdin.write(TAB);
     await tick();
     const frame = lastFrame()!;
-    expect(frame).toContain("Allow Once");
-    expect(frame).not.toContain("This Session");
-    stdin.write(ENTER);
+    expect(frame).toContain("Just this time");
+    expect(frame).not.toContain("Until I close Seepient");
+    stdin.write("\u001B[D"); // left → Scope
+    await tick();
+    stdin.write(ENTER); // commit scope → advances to Duration
+    await tick();
+    stdin.write(ENTER); // commit duration + submit
+    await tick();
     expect(getCaptured()).toEqual({ approved: true, optionId: "opt-exact", lifetime: "action" });
   });
 });

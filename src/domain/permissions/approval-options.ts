@@ -240,41 +240,50 @@ function readRootBoundedCandidates(missing: Capability[]): Capability[][] {
   return [dedupe([...rest, ...widened])];
 }
 
-// ── Labels (display data — never parsed as authority) ────────────────────
+// ── Labels (plain-language display data — never parsed as authority) ─────
+//
+// Copy follows the product acceptance feedback: the prompt must read like a
+// consent dialog, not a policy grammar. Headlines name the choice; the
+// explanation says what happens in plain words.
 
-function describeCapability(cap: Capability): string {
-  switch (cap.kind) {
-    case "read-root":
-      return `read anything under ${cap.root}`;
-    case "write-root":
-      return `write anything under ${cap.root}`;
-    case "read-file":
-      return `read ${cap.path}`;
-    case "commit-file":
-      return `write ${cap.path}`;
-    case "process": {
-      const exe = cap.executable ?? "any executable";
-      return cap.argvPrefix && cap.argvPrefix.length > 0
-        ? `run ${exe} with exact arguments`
-        : `run ${exe} with any arguments`;
-    }
-    case "network-destination":
-      return `connect to ${cap.host}`;
-    case "external-recipient":
-      return `send to ${cap.recipient} via ${cap.service}`;
-    case "secret-ref":
-      return `use secret ${cap.ref}`;
-    case "model-egress":
-      return `send model data to ${cap.providerClass}`;
-    case "activate-change-class":
-      return `activate ${cap.changeClass} changes`;
-    case "trusted-host":
-      return `call host callback ${cap.registrationId ?? "(any)"}`;
+function familyOf(caps: Capability[]): "process" | "file" | "other" {
+  if (caps.some((c) => c.kind === "process")) return "process";
+  if (
+    caps.some(
+      (c) =>
+        c.kind === "read-file" ||
+        c.kind === "commit-file" ||
+        c.kind === "read-root" ||
+        c.kind === "write-root",
+    )
+  ) {
+    return "file";
+  }
+  return "other";
+}
+
+/** Exact-option copy: one headline + explanation per capability family. */
+function exactLabel(caps: Capability[]): string {
+  switch (familyOf(caps)) {
+    case "process":
+      return "Only this command — runs exactly the command shown. Any change will ask again.";
+    case "file":
+      return "Only this file — changes exactly what's shown. Any change will ask again.";
+    default:
+      return "Only this action — any change will ask again.";
   }
 }
 
-function describeCapabilities(caps: Capability[]): string {
-  return caps.map(describeCapability).join(", ");
+/** Bounded-option copy: one headline + explanation per capability family. */
+function boundedLabel(caps: Capability[]): string {
+  switch (familyOf(caps)) {
+    case "process":
+      return "Other commands using this program — allows other commands through this program during the chosen time.";
+    case "file":
+      return "Other files in this folder — allows other files in this folder during the chosen time.";
+    default:
+      return "Similar actions — allows similar actions during the chosen time.";
+  }
 }
 
 // ── Public construction ───────────────────────────────────────────────────
@@ -306,7 +315,7 @@ export function buildApprovalOptions(
       optionId: optionIdFor(action.actionDigest, "exact", exact),
       actionDigest: action.actionDigest,
       kind: "exact",
-      label: `Exact — ${describeCapabilities(exact)}`,
+      label: exactLabel(exact),
       capabilities: exact,
       supportedLifetimes: [...offeredLifetimes],
     },
@@ -321,7 +330,10 @@ export function buildApprovalOptions(
     candidates.push(...readRootBoundedCandidates(exact));
   }
 
-  const bounded: ApprovalOption[] = [];
+  // MVP shape: the Scope tab shows at most ONE bounded option next to the
+  // exact option (product acceptance: two options per tab maximum). The
+  // narrowest passing candidate wins; the rest are not offered.
+  const passing: Array<{ caps: Capability[]; key: string }> = [];
   for (const caps of candidates) {
     const deduped = dedupe(caps);
     if (deduped.length === 0) continue;
@@ -333,28 +345,27 @@ export function buildApprovalOptions(
         !deniedForCap(context.immutableDenies, c) &&
         eligible(c, context),
     );
-    if (!pass) continue;
-    bounded.push({
-      optionId: optionIdFor(action.actionDigest, "bounded", deduped),
+    if (pass) passing.push({ caps: deduped, key: canonicalCaps(deduped) });
+  }
+  // Narrowest bounded candidate first: fewer capabilities, then canonical
+  // shape (deterministic tie-break).
+  passing.sort((a, b) => {
+    if (a.caps.length !== b.caps.length) {
+      return a.caps.length - b.caps.length;
+    }
+    return a.key.localeCompare(b.key);
+  });
+  const narrowestBounded = passing[0];
+  if (narrowestBounded) {
+    options.push({
+      optionId: optionIdFor(action.actionDigest, "bounded", narrowestBounded.caps),
       actionDigest: action.actionDigest,
       kind: "bounded",
-      label: `Bounded — ${describeCapabilities(deduped)}`,
-      capabilities: deduped,
+      label: boundedLabel(narrowestBounded.caps),
+      capabilities: narrowestBounded.caps,
       supportedLifetimes: [...offeredLifetimes],
     });
   }
 
-  // Deterministic narrowest→broadest order: exact first, then bounded sorted
-  // by capability count (fewer capabilities = narrower) and canonical shape.
-  bounded.sort((a, b) => {
-    if (a.capabilities.length !== b.capabilities.length) {
-      return a.capabilities.length - b.capabilities.length;
-    }
-    return canonicalCaps(a.capabilities).localeCompare(
-      canonicalCaps(b.capabilities),
-    );
-  });
-  options.push(...bounded);
-
-  return options.length > 0 ? options : null;
+  return options;
 }

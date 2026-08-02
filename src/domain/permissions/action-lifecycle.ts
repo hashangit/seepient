@@ -304,7 +304,15 @@ export class ActionLifecycle {
       if (!answer.approved) {
         // A broker that observed expiry/abort supplies a machine-readable
         // reason; anything else is a plain user denial (spec 011 edge cases).
+        // The message must match the reason — expiry is NOT an explicit user
+        // denial (product acceptance feedback).
         const reason: PermissionDenyReason = typedDenyReason(answer.reason);
+        const message =
+          reason === "approval-expired"
+            ? "The approval request expired before a decision was made."
+            : reason === "approval-unavailable"
+              ? "Approval is unavailable for this request."
+              : "User denied tool execution.";
         const outcome = this.toOutcome(action, "denied", undefined, reason);
         await this.record(action, "denied", reason);
         return {
@@ -312,7 +320,7 @@ export class ActionLifecycle {
           approval: answer,
           outcome,
           toolResult: {
-            output: denialOutput(reason, "User denied tool execution."),
+            output: denialOutput(reason, message),
             success: false,
           },
         };

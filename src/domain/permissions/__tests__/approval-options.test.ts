@@ -114,7 +114,7 @@ describe("exact option invariants", () => {
     expect(otherAction.optionId).not.toBe(a1.optionId);
   });
 
-  it("orders options narrowest first: exact, then bounded by capability count", () => {
+  it("orders options narrowest first with AT MOST one bounded option (MVP shape)", () => {
     const missing = [
       { kind: "read-file" as const, path: "/proj/a.txt" },
       { kind: "process" as const, executable: "/bin/sh", argvPrefix: ["-c", "x"] },
@@ -123,6 +123,10 @@ describe("exact option invariants", () => {
     expect(options).not.toBeNull();
     const kinds = options!.map((o) => o.kind);
     expect(kinds[0]).toBe("exact");
+    // Product acceptance: the Scope tab shows at most two options — the
+    // exact option plus ONE bounded option, even when several widening
+    // shapes would be representable.
+    expect(kinds.length).toBeLessThanOrEqual(2);
     expect(kinds).toContain("bounded");
   });
 });
@@ -199,6 +203,32 @@ describe("bounded shape validation (backend enforcement)", () => {
     // Exact options are not re-filtered here: immutable denies are enforced
     // by the engine before needs-approval is ever offered.
     expect(options!.map((o) => o.kind)).toEqual(["exact"]);
+  });
+});
+
+describe("plain-language labels (product acceptance)", () => {
+  it("exact process options read as consent copy, not policy grammar", () => {
+    const missing = [
+      { kind: "process" as const, executable: "/bin/sh", argvPrefix: ["-c", "npm test"] },
+    ];
+    const [exact] = build(missing) ?? [];
+    expect(exact!.label).toBe("Only this command — runs exactly the command shown. Any change will ask again.");
+  });
+
+  it("bounded process options name the program in plain words", () => {
+    const missing = [
+      { kind: "process" as const, executable: "/bin/sh", argvPrefix: ["-c", "npm test"] },
+    ];
+    const bounded = build(missing)!.find((o) => o.kind === "bounded");
+    expect(bounded!.label).toBe(
+      "Other commands using this program — allows other commands through this program during the chosen time.",
+    );
+  });
+
+  it("exact file options use file wording", () => {
+    const missing = [{ kind: "commit-file" as const, path: "/proj/a.txt" }];
+    const [exact] = build(missing) ?? [];
+    expect(exact!.label).toBe("Only this file — changes exactly what's shown. Any change will ask again.");
   });
 });
 

@@ -408,7 +408,7 @@ export function wsLegacyApprovalRequest(
         optionId: `ws-exact-${callId}`,
         actionDigest: callId,
         kind: "exact",
-        label: `Exact — ${callName} (legacy server surface)`,
+        label: `Only this call — ${callName} (legacy server surface)`,
         capabilities: [],
         supportedLifetimes: ["action"],
       },
