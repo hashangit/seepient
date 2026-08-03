@@ -1521,3 +1521,119 @@ describe("strict request binding (round 4/5 P1/P2)", () => {
     expect(result.outcome.state).toBe("denied");
   });
 });
+
+describe("WAL restart + mutation-ID binding (round 6 P0)", () => {
+  it("a crashed process's PENDING outbox file is reloaded, flushed, and reconciled after restart", async () => {
+    const realSecurityDir = process.env.SEEPIENT_SECURITY_DIR;
+    const securityDir = join(dir, "security-dir");
+    process.env.SEEPIENT_SECURITY_DIR = securityDir;
+    try {
+      const audit = new LocalAuditStore({ root: join(dir, "audit") });
+      const store = new LocalPolicyStore({ root: join(dir, "policy") });
+      // Simulate the crashed process: its outbox enqueued (and PERSISTED to
+      // pending.<pid>.ndjson) the durable intent, and the CAS installed the
+      // grant with the SAME mutation ID — then the process died before the
+      // committed append and before any flush.
+      const crashedOutbox = new TerminalEventOutbox(audit);
+      const mutationId = "mut-crash-1";
+      await crashedOutbox.enqueue(
+        {
+          eventId: "intent-crash-1",
+          actionId: "a-crash",
+          actionDigest: "d-crash",
+          principalId: "user-A",
+          runId: "r1",
+          state: "policy-grant-intent",
+          timestamp: 1,
+          policyDigest: "digest",
+          optionId: "opt-1",
+          lifetime: "project",
+          capabilities: [{ kind: "commit-file", path: "/p/a.txt" }],
+          actorId: "user-A",
+          policyBeforeVersion: 0,
+          grantedWorkspaceId: "ws-1",
+          mutationId,
+        },
+        "a-crash:policy-grant-intent",
+      );
+      await store.compareAndSet(
+        "ws-1",
+        0,
+        { version: 1, capabilities: [{ kind: "commit-file", path: "/p/a.txt" }], mutationId },
+        { kind: "human", authorityId: "inline-approval", authenticatedBy: "tui" },
+      );
+      // "Restart": a fresh pipeline. The factory creates a NEW outbox which
+      // must reload the crashed process's pending file, flush it to the
+      // audit, and reconcile the intent against the store's mutation ID.
+      await buildActionLifecycle({
+        principalId: "user-A",
+        runId: "r1",
+        sessionId: "s1",
+        workspaceRoot: dir,
+        approvalBroker: { mode: "none" as const, request: async () => ({ approved: false, requestId: "x", actionDigest: "y", actorId: "u", decidedAt: 0 }) },
+        executionBoundary: fakeBoundary({ output: "ok", success: true }),
+        auditStore: audit,
+        policyStore: store,
+      });
+      const events = await audit.listEvents();
+      const committed = events.filter((e) => e.state === "policy-granted" && e.actionId === "a-crash");
+      expect(committed).toHaveLength(1);
+      expect(committed[0].mutationId).toBe(mutationId);
+      expect(committed[0].policyAfterVersion).toBe(1);
+    } finally {
+      if (realSecurityDir === undefined) delete process.env.SEEPIENT_SECURITY_DIR;
+      else process.env.SEEPIENT_SECURITY_DIR = realSecurityDir;
+    }
+  });
+
+  it("does NOT fabricate a committed record when a DIFFERENT action granted the same capability", async () => {
+    const audit = new LocalAuditStore({ root: dir });
+    const store = new LocalPolicyStore({ root: join(dir, "policy") });
+    // The store was mutated by action-B with ITS OWN mutation ID.
+    await store.compareAndSet(
+      "ws-1",
+      0,
+      {
+        version: 1,
+        capabilities: [{ kind: "commit-file", path: "/p/a.txt" }],
+        mutationId: "mut-action-B",
+      },
+      { kind: "human", authorityId: "operator", authenticatedBy: "cli" },
+    );
+    // Action-A's intent carries a DIFFERENT mutation ID.
+    await audit.append(
+      {
+        eventId: "intent-A",
+        actionId: "action-A",
+        actionDigest: "dA",
+        principalId: "user-A",
+        runId: "r1",
+        state: "policy-grant-intent",
+        timestamp: 1,
+        policyDigest: "digest",
+        optionId: "opt-1",
+        lifetime: "project",
+        capabilities: [{ kind: "commit-file", path: "/p/a.txt" }],
+        actorId: "user-A",
+        policyBeforeVersion: 0,
+        grantedWorkspaceId: "ws-1",
+        mutationId: "mut-action-A",
+      },
+      { idempotencyKey: "action-A:policy-grant-intent" },
+    );
+    await buildActionLifecycle({
+      principalId: "user-A",
+      runId: "r1",
+      sessionId: "s1",
+      workspaceRoot: dir,
+      approvalBroker: { mode: "none" as const, request: async () => ({ approved: false, requestId: "x", actionDigest: "y", actorId: "u", decidedAt: 0 }) },
+      executionBoundary: fakeBoundary({ output: "ok", success: true }),
+      auditStore: audit,
+      policyStore: store,
+    });
+    const events = await audit.listEvents();
+    // No committed record may be fabricated for action-A.
+    expect(events.filter((e) => e.state === "policy-granted" && e.actionId === "action-A")).toHaveLength(0);
+    expect(events.filter((e) => e.state === "policy-grant-intent" && e.actionId === "action-A")).toHaveLength(1);
+  });
+});

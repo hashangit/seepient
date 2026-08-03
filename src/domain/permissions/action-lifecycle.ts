@@ -553,6 +553,11 @@ export class ActionLifecycle {
           if (fresh.length === 0) {
             persisted = true; // already granted — nothing to write
           } else {
+            // The unique transaction marker for THIS mutation: written into
+            // the stored policy by the same compare-and-set that installs
+            // the grant (round 6 P0). Recovery can then prove WHICH action
+            // performed the mutation.
+            const mutationId = generateId();
             // DURABLE INTENT (WAL): must succeed or nothing is installed.
             await this.enqueuePolicyGrantIntent(
               action,
@@ -562,6 +567,7 @@ export class ActionLifecycle {
               lifetimeKind,
               targetWorkspaceId,
               beforeVersion,
+              mutationId,
             );
             // Retry once on a concurrent-writer conflict (stale version).
             for (let attempt = 0; attempt < 2 && !persisted; attempt++) {
@@ -575,6 +581,8 @@ export class ActionLifecycle {
                   {
                     version: 1 as const,
                     capabilities: [...retried.policy.capabilities, ...fresh],
+                    // Atomic transaction marker (round 6 P0).
+                    mutationId,
                   },
                   {
                     kind: "human",
@@ -595,6 +603,7 @@ export class ActionLifecycle {
                   policyBeforeVersion: beforeVersion,
                   policyAfterVersion: snap.version,
                   grantedWorkspaceId: targetWorkspaceId,
+                  mutationId,
                 }).catch(() => {
                   /* WAL intent already guarantees durability */
                 });
@@ -963,6 +972,7 @@ export class ActionLifecycle {
     lifetimeKind: string,
     grantedWorkspaceId: string,
     beforeVersion: number,
+    mutationId: string,
   ): Promise<void> {
     // The intent uses its OWN state (round 5 P0): the shared outbox may
     // flush it at any time, and it must never be mistaken for a committed
@@ -985,6 +995,7 @@ export class ActionLifecycle {
       actorId,
       policyBeforeVersion: beforeVersion,
       grantedWorkspaceId,
+      mutationId,
     };
     await this.terminalOutbox!.enqueue(
       event,

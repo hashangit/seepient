@@ -526,10 +526,13 @@ export class TerminalEventOutbox {
         await handle.close();
       }
       await fs.rename(tmp, this.outboxFile);
-      // Round 5 P0: the file fsync alone does not guarantee the DIRECTORY
+      // Round 5/6 P0: the file fsync alone does not guarantee the DIRECTORY
       // entry survived a crash — fsync the parent directory after rename so
       // the WAL rename is durable before the caller proceeds to the policy
-      // mutation. (fsync on a directory fd is supported on macOS/Linux.)
+      // mutation. On supported filesystems this FAILS CLOSED: a directory
+      // fsync error is a crash-safety barrier failure, not a best-effort
+      // note. Only filesystems that structurally reject directory fsync
+      // (EINVAL/ENOTSUP/EBADF) are tolerated.
       try {
         const dirHandle = await fs.open(dir, "r");
         try {
@@ -537,8 +540,15 @@ export class TerminalEventOutbox {
         } finally {
           await dirHandle.close();
         }
-      } catch {
-        /* directory fsync is best-effort on filesystems that reject it */
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== "EINVAL" && code !== "ENOTSUP" && code !== "EBADF") {
+          throw new AuditError(
+            `Outbox directory fsync failed: ${(err as Error).message}`,
+            "AUDIT_UNAVAILABLE",
+            { retryable: true },
+          );
+        }
       }
     } catch (err) {
       await fs.unlink(tmp).catch(() => {});

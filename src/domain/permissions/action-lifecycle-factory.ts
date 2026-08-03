@@ -318,11 +318,22 @@ export async function buildActionLifecycle(
     workspaceId,
   });
 
-  // Round 5 P0: reconcile unresolved persistent-grant WAL intents. A crash
+  // Round 6 P0: a crashed process's durable intents live in pending.*.ndjson
+  // outbox files, invisible to the audit store until flushed. Reload them
+  // into the owned outbox and flush to the audit BEFORE reconciliation so
+  // the reconciler can see every unresolved intent. Safe against racing
+  // live processes: the audit store dedups on append.
+  try {
+    await terminalOutbox?.reload();
+    await terminalOutbox?.flush();
+  } catch {
+    /* outbox recovery is best-effort; a later flush retries */
+  }
+  // Round 5/6 P0: reconcile unresolved persistent-grant WAL intents. A crash
   // between the policy compare-and-set and the committed audit append leaves
-  // an intent without its committed record; if the store actually contains
-  // the grant, append the missing committed record. Best-effort — never
-  // blocks startup on a broken store.
+  // an intent without its committed record; if the store's mutation carries
+  // the intent's UNIQUE mutation ID, append the missing committed record.
+  // Best-effort — never blocks startup on a broken store.
   try {
     await reconcilePolicyGrantIntents(auditStore, policyStore);
   } catch {
@@ -402,7 +413,12 @@ async function reconcilePolicyGrantIntents(
     const granted = (intent.capabilities ?? []).every((c) =>
       setCovers(snap.policy, c),
     );
+    // Round 6 P0: the mutation must carry the intent's UNIQUE mutation ID —
+    // version advancement plus capability presence alone can be caused by a
+    // DIFFERENT action granting the same capability, which would fabricate a
+    // committed record for the wrong actor.
     if (snap.version <= (intent.policyBeforeVersion ?? -1) || !granted) continue;
+    if (intent.mutationId !== undefined && snap.policy.mutationId !== intent.mutationId) continue;
     await auditStore
       .append(
         {
@@ -421,6 +437,7 @@ async function reconcilePolicyGrantIntents(
           policyBeforeVersion: intent.policyBeforeVersion,
           policyAfterVersion: snap.version,
           grantedWorkspaceId: intent.grantedWorkspaceId,
+          mutationId: intent.mutationId,
           backend: intent.backend,
         },
         { idempotencyKey: idempotencyKey(intent.actionId, "policy-granted") },

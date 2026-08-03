@@ -251,6 +251,13 @@ export interface ActionAuditEvent {
   policyBeforeVersion?: number;
   policyAfterVersion?: number;
   grantedWorkspaceId?: string;
+  /**
+   * The atomic transaction marker stored in the policy snapshot by the same
+   * compare-and-set that installed the grant (round 6 P0). Startup
+   * reconciliation requires `snap.policy.mutationId === intent.mutationId`
+   * before treating the intent as committed.
+   */
+  mutationId?: string;
 }
 
 /**

@@ -72,6 +72,15 @@ export type CapabilityLifetime =
 export interface CapabilitySet {
   version: 1;
   capabilities: Capability[];
+  /**
+   * Atomic transaction marker (round 6 P0): the persistent-grant WAL writes
+   * a unique mutation ID into the stored policy in the SAME compare-and-set
+   * that installs the capabilities. Startup reconciliation requires this ID
+   * to match the durable intent's ID before treating the intent as
+   * committed — version advancement plus capability presence alone can be
+   * caused by a DIFFERENT action granting the same capability.
+   */
+  mutationId?: string;
 }
 
 export interface DecisionAuthority {
