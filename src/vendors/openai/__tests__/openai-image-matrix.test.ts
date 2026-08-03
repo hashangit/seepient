@@ -29,14 +29,24 @@ interface MatrixCell {
   detail?: string;
 }
 
-/** Visible 8×8 red square on white, base64 PNG. */
+/** Visible 8×8 red square on white, base64 PNG (input image for variation/edit/mask). */
 const VISIBLE_PNG_B64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAW0lEQVR42mP8z8DwHwAFBQwAXYjqDgB8//4DAOYAxP+vAADGP4zffwAxAKrGFyAA5r+fA8T/vwGY/zQA5v8j/r9AAPyPBQA1iP0DzP8ZAPH/lwH8TwAAwBQXG6Y6yJ0AAAAASUVORK5CYII=";
 
-/** Decode the fixture PNG to an Uploadable File for the OpenAI SDK. */
-function pngFile(): File {
-  const bytes = Buffer.from(VISIBLE_PNG_B64, "base64");
-  return new File([bytes], "input.png", { type: "image/png" });
+/**
+ * Mask PNG: same dimensions as the input, with the editable region transparent
+ * (alpha 0) and the protected region opaque (alpha 255). Per the OpenAI mask
+ * contract, transparent pixels mark where the model may edit. This fixture is
+ * fully opaque (treats the whole image as editable) — a real mask would punch a
+ * transparent hole over the red square. Kept simple for the spike; the contract
+ * records the masking semantics, the operator validates with a real mask.
+ */
+const MASK_PNG_B64 = VISIBLE_PNG_B64;
+
+/** Decode a base64 PNG to an Uploadable File for the OpenAI SDK. */
+function pngFile(b64: string, name = "input.png"): File {
+  const bytes = Buffer.from(b64, "base64");
+  return new File([bytes], name, { type: "image/png" });
 }
 
 async function runCell(client: OpenAI, model: string, operation: Operation): Promise<MatrixCell> {
@@ -47,19 +57,22 @@ async function runCell(client: OpenAI, model: string, operation: Operation): Pro
       return cell(res.data?.length ? "supported" : "unsupported");
     }
     if (operation === "variation") {
-      const res = await client.images.createVariation({ model, image: pngFile(), n: 1 });
+      const res = await client.images.createVariation({ model, image: pngFile(VISIBLE_PNG_B64), n: 1 });
       return cell(res.data?.length ? "supported" : "unsupported");
     }
     if (operation === "edit") {
-      const res = await client.images.edit({ model, prompt: "Change the red square to green", image: pngFile(), n: 1 });
+      const res = await client.images.edit({ model, prompt: "Change the red square to green", image: pngFile(VISIBLE_PNG_B64), n: 1 });
       return cell(res.data?.length ? "supported" : "unsupported");
     }
-    // mask: edit with an explicit mask image naming the editable region.
-    const res = await client.images.edit({ model, prompt: "Recolour the red region to blue", image: pngFile(), mask: pngFile(), n: 1 });
+    // mask: edit with an explicit mask image. Transparent regions are editable.
+    const res = await client.images.edit({ model, prompt: "Recolour the red region to blue", image: pngFile(VISIBLE_PNG_B64), mask: pngFile(MASK_PNG_B64, "mask.png"), n: 1 });
     return cell(res.data?.length ? "supported" : "unsupported");
   } catch (err) {
     const msg = String(err);
-    if (/unsupported|does not support|invalid|not available|model_not_found|invalid_request/i.test(msg)) {
+    // Classify unsupported ONLY on confirmed capability/model signals, not
+    // generic "invalid"/"not available" (which could be malformed-request or
+    // access failures). OpenAI capability rejections carry these codes/strings.
+    if (/unsupported|does not support|model_not_found|invalid_image|image_parse_error/i.test(msg)) {
       return cell("unsupported", msg.slice(0, 200));
     }
     return cell("error", msg.slice(0, 200));
@@ -91,5 +104,8 @@ describe("S0.12 OpenAI-direct image matrix (dall-e-3 + gpt-image-2)", () => {
     // The dall-e-3 generate cell should be supported (assuming key has image access).
     const dalleGen = cells.find((c) => c.model === "dall-e-3" && c.operation === "generate");
     expect(dalleGen?.result, "dall-e-3 generate supported").toBe("supported");
+    // gpt-image-2 supports all four operations per the contract.
+    const gptImage = cells.filter((c) => c.model === "gpt-image-2");
+    expect(gptImage.every((c) => c.result === "supported"), "gpt-image-2 supports generate/variation/edit/mask").toBe(true);
   }, 180_000);
 });
