@@ -13,7 +13,7 @@
 # ---------------------------------------------------------------------------
 # Stage 1: Build
 # ---------------------------------------------------------------------------
-FROM node:20-slim AS builder
+FROM node:22.19-slim AS builder
 
 # Install pnpm
 RUN corepack enable && corepack prepare pnpm@latest --activate
@@ -39,7 +39,7 @@ RUN pnpm prune --prod
 # ---------------------------------------------------------------------------
 # Stage 2: Production Runtime
 # ---------------------------------------------------------------------------
-FROM node:20-slim AS production
+FROM node:22.19-slim AS production
 
 # Container metadata
 LABEL org.opencontainers.image.title="Seepient Agent"

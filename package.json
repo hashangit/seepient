@@ -77,11 +77,17 @@
   },
   "homepage": "https://hashangit.github.io/seepient/",
   "description": "Seepient — your AI person. A skill-driven AI agent with CLI, SDK, and server adapters; multi-provider LLM support and Docker-native deployment. Coding is one of the things she does.",
+  "engines": {
+    "node": ">=22.19"
+  },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.67",
     "@anthropic-ai/sdk": "^0.52.0",
+    "@earendil-works/pi-ai": "0.83.0",
+    "@google/genai": "2.15.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@mozilla/readability": "^0.6.0",
+    "ajv": "8.17.1",
     "chalk": "^5.6.2",
     "commander": "^14.0.3",
     "diff": "^9.0.0",
@@ -101,6 +107,7 @@
     "playwright": "^1.58.2",
     "react": "^19.2.7",
     "terminal-link": "^5.0.0",
+    "typebox": "1.3.10",
     "ws": "^8.21.1"
   },
   "optionalDependencies": {

@@ -148,4 +148,33 @@ describe("architecture boundaries (spec 008, T008)", () => {
     }
     expect(violations, violations.join("\n")).toEqual([]);
   });
+
+  it("no service-SDK import outside src/vendors/ (spec 010, S0.3)", () => {
+    // Quarantined SDKs may be imported ONLY from under src/vendors/. This is the
+    // documented-but-previously-unenforced check; spec 010 (S0.3 / P1.6) makes it
+    // a gate now that @earendil-works/pi-ai + @google/genai have landed.
+    const QUARANTINED = [
+      "@earendil-works/pi-ai",
+      "@google/genai",
+      "openai",
+      "@anthropic-ai/sdk",
+      "@modelcontextprotocol/sdk",
+    ];
+    const violations: string[] = [];
+    for (const f of files) {
+      const rel = relative(ROOT, f).replace(/\\/g, "/");
+      if (rel.startsWith("vendors/")) continue; // the quarantine itself
+      if (rel.startsWith("test") || rel.endsWith(".test.ts") || rel.endsWith(".test.tsx")) continue;
+      const src = readFileSync(f, "utf8");
+      for (const spec of importSpecifiers(src)) {
+        const bare = spec.startsWith("@")
+          ? spec
+          : spec.split("/")[0];
+        if (QUARANTINED.includes(bare) || QUARANTINED.includes(spec)) {
+          violations.push(`${rel} -> ${spec}`);
+        }
+      }
+    }
+    expect(violations, violations.join("\n")).toEqual([]);
+  });
 });
