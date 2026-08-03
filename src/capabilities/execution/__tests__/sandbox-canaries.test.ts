@@ -74,6 +74,26 @@ describe("containment negative canaries (review P0)", () => {
     expect(r.isolated).toBe(true);
   });
 
+  it.runIf(!skip)("sandboxed shell spawns with NO dyld select-sh error (macOS exec shim readable)", async () => {
+    // macOS resolves a spawned shell through /private/var/select/sh (arch
+    // selection shim). If it is not in the read allow list, every sandboxed
+    // command run through a shell prints "Error opening
+    // /private/var/select/sh: Operation not permitted" to stderr — exit
+    // code stays 0 via the /bin/sh fallback, so stdout-only assertions miss
+    // it. This canary asserts a shell's stderr is completely clean.
+    const r = await sandbox.exec({
+      command: { executable: "/bin/sh", argv: ["-c", "echo shell-ok"], cwd: workspace },
+      roots: [
+        { access: "read", canonicalRoot: workspace },
+        { access: "write", canonicalRoot: workspace },
+      ],
+      env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin", HOME: process.env.HOME ?? workspace },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain("shell-ok");
+    expect(r.stderr).toBe("");
+  });
+
   it.runIf(!skip)("denies reading a file outside the approved roots", async () => {
     const r = await run(`cat ${outsideSecret}`);
     expect(r.exitCode).not.toBe(0);

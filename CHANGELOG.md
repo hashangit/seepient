@@ -40,7 +40,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flag-off legacy prompt is unchanged. `/permissions status` shows the
   containment backend, writable root, and the live active-session authority
   set (session approvals are held in memory and never written as legacy
-  grants). Persistent project/global grants are written through a
+  grants). The macOS sandbox allow list includes the exec-time shell
+  architecture-selection shim (/private/var/select), eliminating the
+  non-fatal "Error opening /private/var/select/sh: Operation not
+  permitted" dyld noise on every sandboxed shell spawn (regression
+  canary asserts clean stderr). Persistent project/global grants are written through a
   crash-safe WAL: a durable outbox intent precedes the policy mutation
   (per-process pending files are reloaded and reconciled on restart), the
   policy snapshot carries a store-owned append-only per-mutation history

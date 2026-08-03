@@ -410,6 +410,12 @@ function systemReadDeps(platform: NodeJS.Platform): string[] {
   return [
     "/usr", "/bin", "/sbin", "/System", "/Library", "/opt",
     "/private/etc", "/etc", "/dev",
+    // Exec-time shell architecture-selection shim (dyld reads
+    // /private/var/select/sh when a shell is spawned; /var is a symlink so
+    // the canonical form is required). Without it every sandboxed shell
+    // prints "Error opening /private/var/select/sh: Operation not
+    // permitted" to stderr (non-fatal fallback, but noisy and fragile).
+    "/private/var/select",
   ];
 }
 
