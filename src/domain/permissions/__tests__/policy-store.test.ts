@@ -7,6 +7,8 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, readFileSync, chmodSync, writeFileSync } from "node:fs";
+import { writeFile as writeFileP } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LocalPolicyStore, computeWorkspaceId } from "../policy-store.js";
@@ -119,5 +121,63 @@ describe("compare-and-set provenance (P0 review fix)", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("store-owned WAL metadata (round 8 P0)", () => {
+  const cap = { version: 1 as const, capabilities: [{ kind: "commit-file" as const, path: "/p/a.txt" }] };
+  const actor = { kind: "human" as const, authorityId: "inline-approval", authenticatedBy: "tui" };
+
+  it("a mutation CAS appends to the history; an admin CAS preserves it (callers cannot erase)", async () => {
+    const store = new LocalPolicyStore({ root: mkdtempSync(join(tmpdir(), "pol-wal-")) });
+    const ws = "ws-1";
+    await store.compareAndSet(ws, 0, cap, actor, { mutationId: "mut-A" });
+    let snap = await store.read(ws);
+    expect(snap.mutationHistory).toEqual([{ mutationId: "mut-A", version: 1 }]);
+    expect(snap.mutationId).toBe("mut-A");
+    // Second inline grant appends its own entry.
+    await store.compareAndSet(ws, 1, cap, actor, { mutationId: "mut-B" });
+    snap = await store.read(ws);
+    expect(snap.mutationHistory).toEqual([
+      { mutationId: "mut-A", version: 1 },
+      { mutationId: "mut-B", version: 2 },
+    ]);
+    expect(snap.mutationId).toBe("mut-B");
+    // An ADMINISTRATIVE CAS (no mutation arg — the exact shape used by
+    // /permissions approve/revoke) preserves the full history; only the
+    // latest-marker slot is cleared.
+    snap = await store.compareAndSet(
+      ws, 2,
+      { version: 1, capabilities: [] },
+      { kind: "human", authorityId: "operator", authenticatedBy: "cli" },
+    );
+    expect(snap.mutationHistory).toEqual([
+      { mutationId: "mut-A", version: 1 },
+      { mutationId: "mut-B", version: 2 },
+    ]);
+    expect(snap.mutationId).toBeUndefined();
+  });
+
+  it("a legacy round-6 snapshot (marker inside CapabilitySet) is promoted on read", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pol-legacy-"));
+    const store = new LocalPolicyStore({ root });
+    const ws = "ws-1";
+    // Legacy shape: mutationId embedded in the CapabilitySet, digest over
+    // the policy only.
+    const legacyPolicy = { version: 1 as const, capabilities: [{ kind: "commit-file" as const, path: "/p/a.txt" }], mutationId: "mut-legacy" };
+    const legacyDigest = createHash("sha256").update(JSON.stringify(legacyPolicy)).digest("hex");
+    await writeFileP(
+      join(root, `${ws}.json`),
+      JSON.stringify({ workspaceId: ws, version: 1, policyDigest: legacyDigest, policy: legacyPolicy }),
+    );
+    const snap = await store.read(ws);
+    expect(snap.mutationId).toBe("mut-legacy");
+    // And the next CAS keeps it in the store-owned history.
+    const after = await store.compareAndSet(
+      ws, 1,
+      { version: 1, capabilities: [] },
+      { kind: "human", authorityId: "operator", authenticatedBy: "cli" },
+    );
+    expect(after.mutationHistory).toEqual([{ mutationId: "mut-legacy", version: 1 }]);
   });
 });

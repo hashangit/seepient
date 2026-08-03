@@ -1398,13 +1398,9 @@ describe("WAL startup reconciliation (round 5 P0)", () => {
     await store.compareAndSet(
       "ws-1",
       0,
-      {
-        version: 1,
-        capabilities: [{ kind: "commit-file", path: "/p/a.txt" }],
-        mutationId: "mut-1",
-        mutationHistory: [{ mutationId: "mut-1", version: 1 }],
-      },
+      { version: 1, capabilities: [{ kind: "commit-file", path: "/p/a.txt" }] },
       { kind: "human", authorityId: "inline-approval", authenticatedBy: "tui" },
+      { mutationId: "mut-1" },
     );
     await audit.append(
       {
@@ -1565,8 +1561,9 @@ describe("WAL restart + mutation-ID binding (round 6 P0)", () => {
       await store.compareAndSet(
         "ws-1",
         0,
-        { version: 1, capabilities: [{ kind: "commit-file", path: "/p/a.txt" }], mutationId },
+        { version: 1, capabilities: [{ kind: "commit-file", path: "/p/a.txt" }] },
         { kind: "human", authorityId: "inline-approval", authenticatedBy: "tui" },
+        { mutationId },
       );
       // "Restart": a fresh pipeline. The factory creates a NEW outbox which
       // must reload the crashed process's pending file, flush it to the
@@ -1599,12 +1596,9 @@ describe("WAL restart + mutation-ID binding (round 6 P0)", () => {
     await store.compareAndSet(
       "ws-1",
       0,
-      {
-        version: 1,
-        capabilities: [{ kind: "commit-file", path: "/p/a.txt" }],
-        mutationId: "mut-action-B",
-      },
+      { version: 1, capabilities: [{ kind: "commit-file", path: "/p/a.txt" }] },
       { kind: "human", authorityId: "operator", authenticatedBy: "cli" },
+      { mutationId: "mut-action-B" },
     );
     // Action-A's intent carries a DIFFERENT mutation ID.
     await audit.append(
@@ -1673,16 +1667,15 @@ describe("multi-mutation WAL history (round 7 P0)", () => {
     // either committed append.
     await store.compareAndSet(
       "ws-1", 0,
-      { version: 1, capabilities: [cap], mutationId: "mut-A", mutationHistory: [{ mutationId: "mut-A", version: 1 }] },
+      { version: 1, capabilities: [cap] },
       actor,
+      { mutationId: "mut-A" },
     );
     await store.compareAndSet(
       "ws-1", 1,
-      {
-        version: 1, capabilities: [cap], mutationId: "mut-B",
-        mutationHistory: [{ mutationId: "mut-A", version: 1 }, { mutationId: "mut-B", version: 2 }],
-      },
+      { version: 1, capabilities: [cap] },
       actor,
+      { mutationId: "mut-B" },
     );
     await audit.append(intentEvent("A", "action-A", "mut-A", 0), { idempotencyKey: "action-A:policy-grant-intent" });
     await audit.append(intentEvent("B", "action-B", "mut-B", 1), { idempotencyKey: "action-B:policy-grant-intent" });
@@ -1713,8 +1706,9 @@ describe("multi-mutation WAL history (round 7 P0)", () => {
     const store = new LocalPolicyStore({ root: join(dir, "policy") });
     await store.compareAndSet(
       "ws-1", 0,
-      { version: 1, capabilities: [cap], mutationId: "mut-B", mutationHistory: [{ mutationId: "mut-B", version: 1 }] },
+      { version: 1, capabilities: [cap] },
       actor,
+      { mutationId: "mut-B" },
     );
     const legacy = intentEvent("legacy", "action-legacy", "mut-legacy", 0);
     await audit.append({ ...legacy, mutationId: undefined as never }, { idempotencyKey: "action-legacy:policy-grant-intent" });
@@ -1759,3 +1753,4 @@ describe("multi-mutation WAL history (round 7 P0)", () => {
     expect(events.filter((e) => e.state === "policy-granted" && e.actionId === "action-A")).toHaveLength(0);
   });
 });
+

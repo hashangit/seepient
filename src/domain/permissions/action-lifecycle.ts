@@ -581,21 +581,17 @@ export class ActionLifecycle {
                   {
                     version: 1 as const,
                     capabilities: [...retried.policy.capabilities, ...fresh],
-                    // Atomic transaction marker (round 6 P0) + append-only
-                    // per-mutation history (round 7 P0): the store proves
-                    // THIS mutation ran even after later grants overwrite
-                    // the latest marker.
-                    mutationId,
-                    mutationHistory: [
-                      ...(retried.policy.mutationHistory ?? []),
-                      { mutationId, version: retried.version + 1 },
-                    ],
                   },
                   {
                     kind: "human",
                     authorityId: "inline-approval",
                     authenticatedBy: "tui",
                   },
+                  // Round 8 P0: transaction metadata travels SEPARATELY — the
+                  // store appends it to the snapshot's own append-only
+                  // history, so no caller (including the admin flows) can
+                  // erase earlier grants' evidence.
+                  { mutationId },
                 );
                 // Best-effort committed record with its own state/key. If
                 // this append fails (or the process crashes here), the

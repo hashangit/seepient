@@ -187,6 +187,18 @@ export interface PolicySnapshot {
    *  when. Populated by LocalPolicyStore on every compare-and-set. */
   grantedBy?: import("./permission-policy.js").DecisionAuthority;
   grantedAt?: number;
+  /**
+   * STORE-OWNED WAL metadata (round 8 P0): the append-only per-mutation
+   * journal and the latest transaction marker live on the snapshot, never
+   * in the caller-supplied CapabilitySet. The store appends
+   * `{ mutationId, version }` for every compare-and-set that carries a
+   * mutation (persistent inline grants); administrative mutations without
+   * one PRESERVE the existing history. Callers cannot remove or rewrite
+   * historical entries — the history is derived from the current snapshot
+   * plus the mutation argument, and is covered by the policy digest.
+   */
+  mutationId?: string;
+  mutationHistory?: Array<{ mutationId: string; version: number }>;
 }
 
 /**
@@ -204,6 +216,13 @@ export interface PolicyStore {
     expectedVersion: number,
     next: CapabilitySet,
     actor: DecisionAuthority,
+    /**
+     * Optional transaction metadata (round 8 P0): when provided, the store
+     * appends `{ mutationId, version }` to the snapshot's OWN append-only
+     * history in the same atomic write. Administrative mutations omit this
+     * and thereby preserve (never erase) the history of earlier grants.
+     */
+    mutation?: { mutationId: string },
   ): Promise<PolicySnapshot>;
 }
 
@@ -253,9 +272,10 @@ export interface ActionAuditEvent {
   grantedWorkspaceId?: string;
   /**
    * The atomic transaction marker stored in the policy snapshot by the same
-   * compare-and-set that installed the grant (round 6 P0). Startup
-   * reconciliation requires `snap.policy.mutationId === intent.mutationId`
-   * before treating the intent as committed.
+   * compare-and-set that installed the grant (rounds 6-8 P0). Startup
+   * reconciliation requires the marker (or the snapshot's append-only
+   * mutation history) to prove the intent's mutation ran before treating
+   * the intent as committed.
    */
   mutationId?: string;
 }

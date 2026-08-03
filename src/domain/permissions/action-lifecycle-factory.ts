@@ -414,17 +414,21 @@ async function reconcilePolicyGrantIntents(
       .read(intent.grantedWorkspaceId!)
       .catch(() => null);
     if (!snap) continue;
-    const granted = (intent.capabilities ?? []).every((c) =>
-      setCovers(snap.policy, c),
-    );
-    if (snap.version <= (intent.policyBeforeVersion ?? -1) || !granted) continue;
-    // Round 7 P0: the store's append-only mutation HISTORY proves THIS
-    // mutation ran — even when later grants overwrote the latest marker.
-    // The latest `mutationId` is accepted as well (single-mutation case).
-    // Version advancement alone is never sufficient.
-    const history = snap.policy.mutationHistory ?? [];
+    // Round 8 P0: the history entry PROVES the mutation ran — the current
+    // capability state is irrelevant (an administrative revoke after the
+    // grant must not retroactively un-commit it). Version advancement is a
+    // cheap sanity belt: any later mutation or the grant itself advanced
+    // the version beyond the intent's before-version.
+    if (snap.version <= (intent.policyBeforeVersion ?? -1)) continue;
+    // Round 7-8 P0: the store's append-only mutation HISTORY proves THIS
+    // mutation ran — even when later grants or ADMINISTRATIVE mutations
+    // overwrote the latest marker (history is store-owned; administrative
+    // compare-and-sets preserve it). The latest `mutationId` is accepted as
+    // well (single-mutation case). Version advancement alone is never
+    // sufficient.
+    const history = snap.mutationHistory ?? [];
     const histEntry = history.find((h) => h.mutationId === intent.mutationId);
-    const isLatest = snap.policy.mutationId === intent.mutationId;
+    const isLatest = snap.mutationId === intent.mutationId;
     if (!histEntry && !isLatest) continue;
     await auditStore
       .append(
