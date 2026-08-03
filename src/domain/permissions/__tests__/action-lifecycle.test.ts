@@ -1398,7 +1398,12 @@ describe("WAL startup reconciliation (round 5 P0)", () => {
     await store.compareAndSet(
       "ws-1",
       0,
-      { version: 1, capabilities: [{ kind: "commit-file", path: "/p/a.txt" }] },
+      {
+        version: 1,
+        capabilities: [{ kind: "commit-file", path: "/p/a.txt" }],
+        mutationId: "mut-1",
+        mutationHistory: [{ mutationId: "mut-1", version: 1 }],
+      },
       { kind: "human", authorityId: "inline-approval", authenticatedBy: "tui" },
     );
     await audit.append(
@@ -1417,6 +1422,7 @@ describe("WAL startup reconciliation (round 5 P0)", () => {
         actorId: "user",
         policyBeforeVersion: 0,
         grantedWorkspaceId: "ws-1",
+        mutationId: "mut-1",
       },
       { idempotencyKey: "a1:policy-grant-intent" },
     );
@@ -1635,5 +1641,121 @@ describe("WAL restart + mutation-ID binding (round 6 P0)", () => {
     // No committed record may be fabricated for action-A.
     expect(events.filter((e) => e.state === "policy-granted" && e.actionId === "action-A")).toHaveLength(0);
     expect(events.filter((e) => e.state === "policy-grant-intent" && e.actionId === "action-A")).toHaveLength(1);
+  });
+});
+
+describe("multi-mutation WAL history (round 7 P0)", () => {
+  const cap = { kind: "commit-file" as const, path: "/p/a.txt" };
+  const actor = { kind: "human" as const, authorityId: "inline-approval", authenticatedBy: "tui" };
+  const intentEvent = (id: string, actionId: string, mutationId: string, beforeVersion: number) => ({
+    eventId: `intent-${id}`,
+    actionId,
+    actionDigest: `d-${id}`,
+    principalId: `user-${id}`,
+    runId: "r1",
+    state: "policy-grant-intent" as const,
+    timestamp: 1,
+    policyDigest: "digest",
+    optionId: "opt-1",
+    lifetime: "project" as const,
+    capabilities: [cap],
+    actorId: `user-${id}`,
+    policyBeforeVersion: beforeVersion,
+    grantedWorkspaceId: "ws-1",
+    mutationId,
+  });
+
+  it("TWO successful mutations, both missing their committed appends, are BOTH finalized after restart", async () => {
+    const audit = new LocalAuditStore({ root: dir });
+    const store = new LocalPolicyStore({ root: join(dir, "policy") });
+    // Both CAS operations completed (the lifecycle's exact shape: each
+    // appends to the mutation history), but the processes crashed before
+    // either committed append.
+    await store.compareAndSet(
+      "ws-1", 0,
+      { version: 1, capabilities: [cap], mutationId: "mut-A", mutationHistory: [{ mutationId: "mut-A", version: 1 }] },
+      actor,
+    );
+    await store.compareAndSet(
+      "ws-1", 1,
+      {
+        version: 1, capabilities: [cap], mutationId: "mut-B",
+        mutationHistory: [{ mutationId: "mut-A", version: 1 }, { mutationId: "mut-B", version: 2 }],
+      },
+      actor,
+    );
+    await audit.append(intentEvent("A", "action-A", "mut-A", 0), { idempotencyKey: "action-A:policy-grant-intent" });
+    await audit.append(intentEvent("B", "action-B", "mut-B", 1), { idempotencyKey: "action-B:policy-grant-intent" });
+    await buildActionLifecycle({
+      principalId: "user-A",
+      runId: "r1",
+      sessionId: "s1",
+      workspaceRoot: dir,
+      approvalBroker: { mode: "none" as const, request: async () => ({ approved: false, requestId: "x", actionDigest: "y", actorId: "u", decidedAt: 0 }) },
+      executionBoundary: fakeBoundary({ output: "ok", success: true }),
+      auditStore: audit,
+      policyStore: store,
+    });
+    const events = await audit.listEvents();
+    const committedA = events.filter((e) => e.state === "policy-granted" && e.actionId === "action-A");
+    const committedB = events.filter((e) => e.state === "policy-granted" && e.actionId === "action-B");
+    // Both finalized — the mutation history proves each mutation.
+    expect(committedA).toHaveLength(1);
+    expect(committedA[0].mutationId).toBe("mut-A");
+    expect(committedA[0].policyAfterVersion).toBe(1);
+    expect(committedB).toHaveLength(1);
+    expect(committedB[0].mutationId).toBe("mut-B");
+    expect(committedB[0].policyAfterVersion).toBe(2);
+  });
+
+  it("an intent WITHOUT a mutation ID is never auto-committed (stays provisional)", async () => {
+    const audit = new LocalAuditStore({ root: dir });
+    const store = new LocalPolicyStore({ root: join(dir, "policy") });
+    await store.compareAndSet(
+      "ws-1", 0,
+      { version: 1, capabilities: [cap], mutationId: "mut-B", mutationHistory: [{ mutationId: "mut-B", version: 1 }] },
+      actor,
+    );
+    const legacy = intentEvent("legacy", "action-legacy", "mut-legacy", 0);
+    await audit.append({ ...legacy, mutationId: undefined as never }, { idempotencyKey: "action-legacy:policy-grant-intent" });
+    await buildActionLifecycle({
+      principalId: "user-legacy",
+      runId: "r1",
+      sessionId: "s1",
+      workspaceRoot: dir,
+      approvalBroker: { mode: "none" as const, request: async () => ({ approved: false, requestId: "x", actionDigest: "y", actorId: "u", decidedAt: 0 }) },
+      executionBoundary: fakeBoundary({ output: "ok", success: true }),
+      auditStore: audit,
+      policyStore: store,
+    });
+    const events = await audit.listEvents();
+    expect(events.filter((e) => e.state === "policy-granted" && e.actionId === "action-legacy")).toHaveLength(0);
+    expect(events.filter((e) => e.state === "policy-grant-intent" && e.actionId === "action-legacy")).toHaveLength(1);
+  });
+
+  it("a non-journal admin mutation cannot fabricate a committed record for an unrelated intent", async () => {
+    const audit = new LocalAuditStore({ root: dir });
+    const store = new LocalPolicyStore({ root: join(dir, "policy") });
+    // The admin flow's CAS carries NO mutationId and NO history.
+    await store.compareAndSet(
+      "ws-1", 0,
+      { version: 1, capabilities: [cap] },
+      { kind: "human" as const, authorityId: "operator", authenticatedBy: "cli" },
+    );
+    await audit.append(intentEvent("A", "action-A", "mut-A", 0), { idempotencyKey: "action-A:policy-grant-intent" });
+    await buildActionLifecycle({
+      principalId: "user-A",
+      runId: "r1",
+      sessionId: "s1",
+      workspaceRoot: dir,
+      approvalBroker: { mode: "none" as const, request: async () => ({ approved: false, requestId: "x", actionDigest: "y", actorId: "u", decidedAt: 0 }) },
+      executionBoundary: fakeBoundary({ output: "ok", success: true }),
+      auditStore: audit,
+      policyStore: store,
+    });
+    const events = await audit.listEvents();
+    // Version advanced and the capability is present, but the store has no
+    // history entry for mut-A: the intent stays provisional.
+    expect(events.filter((e) => e.state === "policy-granted" && e.actionId === "action-A")).toHaveLength(0);
   });
 });

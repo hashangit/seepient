@@ -75,12 +75,19 @@ export interface CapabilitySet {
   /**
    * Atomic transaction marker (round 6 P0): the persistent-grant WAL writes
    * a unique mutation ID into the stored policy in the SAME compare-and-set
-   * that installs the capabilities. Startup reconciliation requires this ID
-   * to match the durable intent's ID before treating the intent as
-   * committed — version advancement plus capability presence alone can be
-   * caused by a DIFFERENT action granting the same capability.
+   * that installs the capabilities.
    */
   mutationId?: string;
+  /**
+   * Append-only per-mutation journal INSIDE the policy snapshot (round 7
+   * P0): every persistent-grant compare-and-set appends
+   * `{ mutationId, version }` here, so the store itself proves WHICH
+   * mutations were installed — even when later mutations overwrite
+   * `mutationId`. Startup reconciliation requires the intent's ID to appear
+   * in this history (or to be the latest `mutationId`); version-plus-
+   * capability inference is never used.
+   */
+  mutationHistory?: Array<{ mutationId: string; version: number }>;
 }
 
 export interface DecisionAuthority {

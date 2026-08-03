@@ -406,6 +406,10 @@ async function reconcilePolicyGrantIntents(
   );
   for (const intent of intents) {
     if (committedByAction.has(intent.actionId)) continue;
+    // Round 7 P0: an intent without a mutation ID is NEVER auto-committed —
+    // version-plus-capability inference is unsafe and stays provisional for
+    // manual review.
+    if (!intent.mutationId) continue;
     const snap = await policyStore
       .read(intent.grantedWorkspaceId!)
       .catch(() => null);
@@ -413,12 +417,15 @@ async function reconcilePolicyGrantIntents(
     const granted = (intent.capabilities ?? []).every((c) =>
       setCovers(snap.policy, c),
     );
-    // Round 6 P0: the mutation must carry the intent's UNIQUE mutation ID —
-    // version advancement plus capability presence alone can be caused by a
-    // DIFFERENT action granting the same capability, which would fabricate a
-    // committed record for the wrong actor.
     if (snap.version <= (intent.policyBeforeVersion ?? -1) || !granted) continue;
-    if (intent.mutationId !== undefined && snap.policy.mutationId !== intent.mutationId) continue;
+    // Round 7 P0: the store's append-only mutation HISTORY proves THIS
+    // mutation ran — even when later grants overwrote the latest marker.
+    // The latest `mutationId` is accepted as well (single-mutation case).
+    // Version advancement alone is never sufficient.
+    const history = snap.policy.mutationHistory ?? [];
+    const histEntry = history.find((h) => h.mutationId === intent.mutationId);
+    const isLatest = snap.policy.mutationId === intent.mutationId;
+    if (!histEntry && !isLatest) continue;
     await auditStore
       .append(
         {
@@ -435,7 +442,10 @@ async function reconcilePolicyGrantIntents(
           capabilities: intent.capabilities,
           actorId: intent.actorId,
           policyBeforeVersion: intent.policyBeforeVersion,
-          policyAfterVersion: snap.version,
+          // The mutation's OWN version from the history (round 7 P0): with
+          // multiple mutations the snapshot version is the LATEST one, which
+          // would mislabel an earlier grant.
+          policyAfterVersion: histEntry?.version ?? snap.version,
           grantedWorkspaceId: intent.grantedWorkspaceId,
           mutationId: intent.mutationId,
           backend: intent.backend,
