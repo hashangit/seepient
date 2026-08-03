@@ -74,7 +74,7 @@ brew trust hashangit/seepient
 brew install seepient
 ```
 
-> **Note:** Requires [Node.js](https://nodejs.org/) 22 or later. The `brew trust` step is required by Homebrew 6.0+ (third-party taps must be explicitly trusted before their formulas run).
+> **Note:** Requires [Node.js](https://nodejs.org/) 22.19 or later. The `brew trust` step is required by Homebrew 6.0+ (third-party taps must be explicitly trusted before their formulas run).
 
 ### Server Binary
 The `seepient-server` binary is included for running the standalone HTTP/WebSocket server:
@@ -476,7 +476,7 @@ export SEEPIENT_SKILLS_PATH=/path/to/skills:/another/path
 
 ## Docker Support
 
-Seepient Agent includes a production-ready [`Dockerfile`](./Dockerfile) (Node 20 Alpine) and [`docker-compose.yml`](./docker-compose.yml) for containerized deployment.
+Seepient Agent includes a production-ready [`Dockerfile`](./Dockerfile) (Node 22.19 Slim) and [`docker-compose.yml`](./docker-compose.yml) for containerized deployment.
 
 ### Quick Start with Docker
 

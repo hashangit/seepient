@@ -6,7 +6,7 @@ Get Seepient Agent up and running in your environment. Choose the installation m
 
 Before installing Seepient Agent, ensure you have:
 
-- **Node.js 18+** installed ([download here](https://nodejs.org/))
+- **Node.js 22.19+** installed ([download here](https://nodejs.org/))
 - **npm**, **pnpm**, or **bun** as your package manager
 - An API key for your preferred LLM provider (OpenAI, Anthropic, or GLM)
 

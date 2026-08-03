@@ -13,9 +13,11 @@
  * spike proves each source can produce that list from the account's own
  * `/models` endpoint and degrades gracefully on failure.
  *
- * Every live call is gated on its env key and SKIPS without it.
+ * Live probes (OpenAI/Google) are gated on their env keys and skip without them.
+ * The failure-safe rule itself is proven with a mocked rejecting fetch (no key,
+ * no network) so it runs in CI and asserts the contract directly.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { env, requireKey, SPIKE_KEYS } from "./spike-keys.js";
 
 /** Record a discovery probe's outcome (the operator pastes shapes into research.md). */
@@ -27,6 +29,10 @@ interface DiscoveryResult {
   shape?: string;
   error?: string;
 }
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("S0.15 failure-safe shallow discovery", () => {
   it("OpenAI /v1/models — lists model IDs (shape + rate-limit recorded)", async (ctx) => {
@@ -46,7 +52,6 @@ describe("S0.15 failure-safe shallow discovery", () => {
     }
     // eslint-disable-next-line no-console
     console.log("OpenAI /v1/models:", JSON.stringify(result, null, 2));
-    // Rate-limit behavior: 200 → ok; 401 → key bad; 429 → rate-limited (still failure-safe).
     expect([200, 401, 429]).toContain(res.status);
   }, 30_000);
 
@@ -89,21 +94,29 @@ describe("S0.15 failure-safe shallow discovery", () => {
     expect(img.length, "Pi image catalog non-empty").toBeGreaterThan(0);
   });
 
-  it("failure-safe: a discovery probe that fails does NOT throw past the caller", async () => {
-    // Simulate an unreachable endpoint / bad key and confirm the probe degrades
-    // to a recorded error rather than throwing. This is the 010 failure-safe
-    // rule #1: account saving succeeds even if discovery fails.
-    const res = await fetch("https://api.openai.com/v1/models", {
-      headers: { Authorization: "Bearer sk-invalid-key-for-spike" },
-    });
-    // We DO NOT throw on a non-200; we record the failure. The caller stays alive.
-    const recorded: DiscoveryResult = {
-      provider: "openai",
-      ok: false,
-      error: `${res.status} ${res.statusText}`,
-    };
-    expect(recorded.ok).toBe(false);
-    expect([401, 429]).toContain(res.status);
+  it("failure-safe: discovery that fails does NOT throw past the caller (mocked, no key needed)", async () => {
+    // Prove the failure-safe contract directly with a mocked rejecting fetch:
+    // a DiscoverySource wraps the network call and MUST return a recorded
+    // failure rather than propagating the rejection. This is 010 rule #1:
+    // account saving succeeds even if discovery is unavailable.
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new Error("ETIMEDOUT: discovery endpoint unreachable");
+    }));
+
+    // Minimal mirror of the DiscoverySource.discover() failure-safe wrapper.
+    async function discoverSafe(): Promise<DiscoveryResult> {
+      try {
+        const res = await fetch("https://example.invalid/v1/models");
+        return { provider: "openai", ok: res.ok };
+      } catch (err) {
+        // Failure is RECORDED, never thrown past the caller.
+        return { provider: "openai", ok: false, error: String(err) };
+      }
+    }
+
+    const recorded = await discoverSafe();
+    expect(recorded.ok, "failure recorded, not thrown").toBe(false);
+    expect(recorded.error, "error detail captured").toMatch(/ETIMEDOUT/);
     // lastRefreshError would carry this; lastRefreshedAt stays null/stale; cached models retained.
-  }, 30_000);
+  });
 });

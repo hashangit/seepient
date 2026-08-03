@@ -13,10 +13,13 @@
  * Without the key the test SKIPS with a clear message; the suite stays green in
  * CI. Operator runs with keys exported to record the S0 evidence. Results get
  * pasted into research.md §"Probe results".
+ *
+ * Positive-path tests require a `done` terminal event (an `error` event fails
+ * the probe) so a provider regression surfaces instead of being masked.
  */
 import { describe, it, expect } from "vitest";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
-import type { Models, Model, Api, UserMessage, Tool } from "@earendil-works/pi-ai";
+import type { Models, Model, Api, UserMessage, Tool, AssistantMessageEvent } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { env, requireKey, SPIKE_KEYS } from "../../__tests__/spike-keys.js";
 
@@ -37,8 +40,8 @@ function pickModel(m: Models, provider: string, preferredId: string): string {
 }
 
 /** Collect all events from a stream into an array (terminal `done`/`error` ends it). */
-async function collect<T extends { type: string }>(iter: AsyncIterable<T>): Promise<T[]> {
-  const out: T[] = [];
+async function collect(iter: AsyncIterable<AssistantMessageEvent>): Promise<AssistantMessageEvent[]> {
+  const out: AssistantMessageEvent[] = [];
   for await (const ev of iter) {
     out.push(ev);
     if (ev.type === "done" || ev.type === "error") break;
@@ -46,80 +49,80 @@ async function collect<T extends { type: string }>(iter: AsyncIterable<T>): Prom
   return out;
 }
 
+/** Require a successful `done` terminal event; throw a clear message on `error`. */
+function requireDone(events: AssistantMessageEvent[]): Extract<AssistantMessageEvent, { type: "done" }> {
+  const done = events.find((e): e is Extract<AssistantMessageEvent, { type: "done" }> => e.type === "done");
+  const err = events.find((e): e is Extract<AssistantMessageEvent, { type: "error" }> => e.type === "error");
+  if (!done) {
+    const detail = err ? ` (error reason: ${err.reason})` : " (no terminal event)";
+    throw new Error(`expected a successful 'done' terminal event${detail}`);
+  }
+  return done;
+}
+
 describe("S0.7–S0.11 Pi language spike", () => {
   it("OpenAI: streams a text turn with usage (S0.8 + S0.10)", async (ctx) => {
     const key = env(SPIKE_KEYS.openai);
     requireKey(ctx, SPIKE_KEYS.openai, key, "to run the live OpenAI stream");
     const m = models();
-    const modelId = pickModel(m, "openai", "gpt-4.1-mini");
-    const model = m.getModel("openai", modelId) as Model<Api>;
-    const stream = m.stream(model, { messages: [user("Reply with the single word PONG.")] });
-    const events = await collect(stream);
+    const model = m.getModel("openai", pickModel(m, "openai", "gpt-4.1-mini")) as Model<Api>;
+    const events = await collect(m.stream(model, { messages: [user("Reply with the single word PONG.")] }));
     const textDeltas = events.filter((e) => e.type === "text_delta");
-    const terminal = events.find((e) => e.type === "done" || e.type === "error");
     expect(textDeltas.length, "expected at least one text_delta").toBeGreaterThan(0);
-    expect(terminal, "stream must terminate").toBeDefined();
-    if (terminal?.type === "done") {
-      // usage is optional per the contract, but OpenAI normally returns it
-      expect(terminal.message, "done carries the final AssistantMessage").toBeDefined();
-    }
+    const done = requireDone(events);
+    expect(done.message, "done carries the final AssistantMessage").toBeDefined();
   }, 30_000);
 
   it("Anthropic: preserves reasoning + signature (S0.9)", async (ctx) => {
     const key = env(SPIKE_KEYS.anthropic);
     requireKey(ctx, SPIKE_KEYS.anthropic, key, "to run the live Anthropic reasoning stream");
     const m = models();
-    const modelId = pickModel(m, "anthropic", "claude-haiku-4-5");
-    const model = m.getModel("anthropic", modelId) as Model<Api>;
-    const stream = m.stream(model, {
-      messages: [user("Think briefly, then say READY.")],
-      // request reasoning so the thinking_* events fire
-    });
-    const events = await collect(stream);
+    const model = m.getModel("anthropic", pickModel(m, "anthropic", "claude-haiku-4-5")) as Model<Api>;
+    // streamSimple takes SimpleStreamOptions which carries `reasoning: ThinkingLevel`.
+    const events = await collect(
+      m.streamSimple(model, { messages: [user("Think briefly about 17*23, then say READY.")] }, { reasoning: "low" }),
+    );
+    requireDone(events);
+    // Reasoning-capable model with reasoning on MUST emit thinking_delta events.
     const thinking = events.filter((e) => e.type === "thinking_delta");
-    const terminal = events.find((e) => e.type === "done" || e.type === "error");
-    expect(terminal, "stream must terminate").toBeDefined();
-    // Anthropic emits thinking deltas when reasoning is on; record presence (not content).
-    // Signature triple provenance is asserted at the converter level (P3.2); here we only
-    // confirm the thinking_* event family fires on a reasoning-capable model.
-    expect(typeof thinking.length, "thinking_delta events are arrays").toBe("number");
+    expect(thinking.length, "expected thinking_delta events when reasoning is enabled").toBeGreaterThan(0);
+    // A thinking content block carries an opaque signature for multi-turn continuity.
+    const thinkingEnd = events.find((e) => e.type === "thinking_end") as Extract<AssistantMessageEvent, { type: "thinking_end" }> | undefined;
+    expect(thinkingEnd, "expected a thinking_end event").toBeDefined();
+    // Record presence of the signature-bearing content (provenance triple asserted at P3.2).
+    expect(typeof thinkingEnd!.content, "thinking_end carries content").toBe("string");
   }, 60_000);
 
   it("GLM (zai): streams a turn (S0.13)", async (ctx) => {
     const key = env(SPIKE_KEYS.glm);
     requireKey(ctx, SPIKE_KEYS.glm, key, "to run the live GLM stream");
     const m = models();
-    const modelId = pickModel(m, "zai", "glm-4.5-air");
-    const model = m.getModel("zai", modelId) as Model<Api>;
-    const stream = m.stream(model, { messages: [user("Reply with the single word GLM.")] });
-    const events = await collect(stream);
-    const terminal = events.find((e) => e.type === "done" || e.type === "error");
-    expect(terminal, "stream must terminate").toBeDefined();
+    const model = m.getModel("zai", pickModel(m, "zai", "glm-4.5-air")) as Model<Api>;
+    const events = await collect(m.stream(model, { messages: [user("Reply with the single word GLM.")] }));
     expect(events.some((e) => e.type === "text_delta"), "expected at least one text_delta").toBe(true);
+    requireDone(events);
   }, 30_000);
 
   it("OpenAI: tool-call round-trip (S0.7)", async (ctx) => {
     const key = env(SPIKE_KEYS.openai);
     requireKey(ctx, SPIKE_KEYS.openai, key, "to run the live OpenAI tool-call stream");
     const m = models();
-    const modelId = pickModel(m, "openai", "gpt-4.1-mini");
-    const model = m.getModel("openai", modelId) as Model<Api>;
-    const stream = m.stream(model, {
+    const model = m.getModel("openai", pickModel(m, "openai", "gpt-4.1-mini")) as Model<Api>;
+    const events = await collect(m.stream(model, {
       messages: [user("What is the weather in Tokyo? Use the get_weather tool.")],
       tools: [{
         name: "get_weather",
         description: "Get current weather for a city",
         parameters: Type.Object({ city: Type.String() }),
       } satisfies Tool],
-    });
-    const events = await collect(stream);
-    const terminal = events.find((e) => e.type === "done" || e.type === "error");
-    expect(terminal, "stream must terminate").toBeDefined();
-    // A tool-capable model asked to call a tool should produce toolcall_* events OR a plain
-    // text answer; assert the event family is recognized, not the exact path.
-    const toolcallEvents = events.filter((e) => e.type === "toolcall_end");
-    const hasToolCallOrText = toolcallEvents.length > 0 || events.some((e) => e.type === "text_delta");
-    expect(hasToolCallOrText, "expected tool-call or text response").toBe(true);
+    }));
+    const done = requireDone(events);
+    // A tool-capable model asked to call a tool should stop with reason "toolUse".
+    if (done.reason === "toolUse") {
+      const toolcallEnd = events.find((e) => e.type === "toolcall_end");
+      expect(toolcallEnd, "expected a toolcall_end event for a toolUse stop").toBeDefined();
+    }
+    // If it answered in text instead, that is still a valid `done` — recorded, not failed.
   }, 30_000);
 
   it("AbortController aborts the stream cleanly (S0.11)", async (ctx) => {
@@ -128,19 +131,16 @@ describe("S0.7–S0.11 Pi language spike", () => {
     const keyName = env(SPIKE_KEYS.openai) ? SPIKE_KEYS.openai : SPIKE_KEYS.anthropic;
     requireKey(ctx, keyName, key, "to run the live abort spike");
     const m = models();
-    const modelId = pickModel(m, provider, provider === "openai" ? "gpt-4.1-mini" : "claude-haiku-4-5");
-    const model = m.getModel(provider, modelId) as Model<Api>;
+    const model = m.getModel(provider, pickModel(m, provider, provider === "openai" ? "gpt-4.1-mini" : "claude-haiku-4-5")) as Model<Api>;
     const ac = new AbortController();
-    const stream = m.stream(
-      model,
-      { messages: [user("Count slowly from 1 to 100, one per line.")] },
-      { signal: ac.signal },
-    );
-    // Abort after the first delta arrives.
+    const events: AssistantMessageEvent[] = [];
     let aborted = false;
-    const events: { type: string }[] = [];
     try {
-      for await (const ev of stream) {
+      for await (const ev of m.stream(
+        model,
+        { messages: [user("Count slowly from 1 to 100, one per line.")] },
+        { signal: ac.signal },
+      )) {
         events.push(ev);
         if (ev.type === "text_delta" && !aborted) {
           aborted = true;
@@ -149,13 +149,15 @@ describe("S0.7–S0.11 Pi language spike", () => {
         if (ev.type === "done" || ev.type === "error") break;
       }
     } catch (err) {
-      // Abort may surface as a thrown AbortError or as an `error` event — both acceptable.
+      // Abort may surface as a thrown AbortError — acceptable for the clean-abort contract.
+      expect(aborted, "abort was requested before throwing").toBe(true);
       expect(String(err), "abort error should reference abort").toMatch(/abort/i);
       return;
     }
-    // If we reach here, the stream must have terminated with an error/aborted reason.
-    const terminal = events.find((e) => e.type === "error");
+    // If no throw, the stream must have terminated with an `error` (aborted) event.
     expect(aborted, "abort was requested").toBe(true);
-    expect(terminal, "expected an error terminal event after abort").toBeDefined();
+    const err = events.find((e): e is Extract<AssistantMessageEvent, { type: "error" }> => e.type === "error");
+    expect(err, "expected an error terminal event after abort").toBeDefined();
+    expect(err!.reason, "error reason is aborted").toBe("aborted");
   }, 30_000);
 });

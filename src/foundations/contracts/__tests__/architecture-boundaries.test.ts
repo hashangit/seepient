@@ -41,13 +41,41 @@ function layerOf(absPath: string): string | null {
   return null;
 }
 
-/** Parse `import ... from "x"` / `import "x"` specifiers from a source file. */
+/** Parse `import ... from "x"` / `import "x"` specifiers from a source file (static only). */
 function importSpecifiers(source: string): string[] {
   const out: string[] = [];
   const re = /import\s+(?:[\s\S]*?\s+from\s+)?["']([^"']+)["']/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(source)) !== null) out.push(m[1]);
   return out;
+}
+
+/** Parse module specifiers across ALL reference forms — static `import … from`,
+ *  dynamic `import()`, and `require()`. Used by the SDK-quarantine check so a
+ *  vendor SDK can't evade the boundary via `await import("openai")`. */
+function moduleSpecifiers(source: string): string[] {
+  const out: string[] = [];
+  const patterns = [
+    /import\s+(?:[\s\S]*?\s+from\s+)?["']([^"']+)["']/g, // static import
+    /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g,            // dynamic import()
+    /\brequire\s*\(\s*["']([^"']+)["']\s*\)/g,           // require()
+  ];
+  for (const re of patterns) {
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(source)) !== null) out.push(m[1]);
+  }
+  return out;
+}
+
+/** The package name of a bare specifier: "@scope/pkg/sub" → "@scope/pkg";
+ *  "pkg/sub" → "pkg"; relative/absolute specifiers are returned as-is (relative). */
+function packageName(spec: string): string {
+  if (spec.startsWith(".") || spec.startsWith("/")) return spec;
+  if (spec.startsWith("@")) {
+    const segs = spec.split("/");
+    return segs.slice(0, 2).join("/");
+  }
+  return spec.split("/")[0];
 }
 
 /** Relative Seepient-internal imports only (skip `node:` / external packages). */
@@ -166,11 +194,9 @@ describe("architecture boundaries (spec 008, T008)", () => {
       if (rel.startsWith("vendors/")) continue; // the quarantine itself
       if (rel.startsWith("test") || rel.endsWith(".test.ts") || rel.endsWith(".test.tsx")) continue;
       const src = readFileSync(f, "utf8");
-      for (const spec of importSpecifiers(src)) {
-        const bare = spec.startsWith("@")
-          ? spec
-          : spec.split("/")[0];
-        if (QUARANTINED.includes(bare) || QUARANTINED.includes(spec)) {
+      for (const spec of moduleSpecifiers(src)) {
+        const pkg = packageName(spec);
+        if (QUARANTINED.includes(pkg)) {
           violations.push(`${rel} -> ${spec}`);
         }
       }
