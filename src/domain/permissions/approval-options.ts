@@ -31,7 +31,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { basename, dirname } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { realpathSync } from "node:fs";
 import type {
   ApprovalChoice,
@@ -177,20 +177,34 @@ function deniedForCap(denies: DenyRule[], cap: Capability): boolean {
 
 // ── Ceiling / workspace-root eligibility (mirrors policy-engine inCeiling) ─
 
+/**
+ * Canonicalize a path via realpathSync; a not-yet-existing target keeps its
+ * basename but inherits the canonical parent, so a canonicalized root still
+ * prefix-matches (macOS /var -> /private/var). Mirrors policy-engine's
+ * canonicalPath (review round 10).
+ */
+function canonicalTargetPath(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    const parent = dirname(p);
+    if (parent === p) return p;
+    try {
+      return join(realpathSync(parent), basename(p));
+    } catch {
+      return p;
+    }
+  }
+}
+
 function withinWorkspaceRoot(cap: Capability, workspaceRoot?: string): boolean {
   if (!workspaceRoot) return false;
   let p: string | undefined;
   if (cap.kind === "read-root" || cap.kind === "write-root") p = cap.root;
   else if (cap.kind === "read-file" || cap.kind === "commit-file") p = cap.path;
   if (p === undefined) return false;
-  let root = workspaceRoot;
-  let target = p;
-  try {
-    root = realpathSync(root);
-    target = realpathSync(target);
-  } catch {
-    /* keep raw paths */
-  }
+  const root = canonicalTargetPath(workspaceRoot);
+  const target = canonicalTargetPath(p);
   return target === root || pathContains(root, target);
 }
 
@@ -232,6 +246,13 @@ const GENERAL_EXECUTORS: Record<string, true> = {
   cargo: true, go: true, make: true, cmake: true, ninja: true, meson: true,
   gradle: true, mvn: true, ant: true, composer: true, gem: true,
   bundle: true, rake: true,
+  // command wrappers whose FIRST argv token is not the real command —
+  // pinning it still allows arbitrary execution (review round 10)
+  env: true, sudo: true, su: true, doas: true, xargs: true, nohup: true,
+  timeout: true, nice: true, setsid: true, watch: true, ssh: true,
+  parallel: true,
+  // tools with an embedded arbitrary-execution escape hatch (-exec, system())
+  find: true, awk: true,
 };
 
 function isGeneralExecutor(executable: string): boolean {

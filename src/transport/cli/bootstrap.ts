@@ -196,10 +196,14 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
       const approvalDeadlineMs = Number.isFinite(rawDeadline)
         ? Math.min(Math.max(rawDeadline, 10_000), 3_600_000)
         : 600_000;
+      const autonomousMode = deadlineSettings.get(
+        'permissions.autonomousMode',
+      ).value === true;
       await agent.enablePermissionPipeline({
         workspaceRoot: process.cwd(),
         modelProviderClass: activeProviderType ?? 'openai',
         approvalDeadlineMs,
+        approvalMode: autonomousMode ? 'autonomous' : 'manual',
       });
     } catch (err) {
       // P0 review fix (fail closed): when the protected pipeline was

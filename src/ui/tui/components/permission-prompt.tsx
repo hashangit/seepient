@@ -40,8 +40,14 @@ interface NativePermissionPromptProps {
 export function PermissionPrompt({ request, onResolve }: NativePermissionPromptProps) {
   const theme = useTheme();
   const choices = request.approvalChoices;
-  const [focus, setFocusState] = useState(0);
-  const focusRef = useRef(0);
+  // FR-011: focus begins on the Domain-marked Recommended (least-privileged)
+  // choice — looked up, not assumed to be index 0 — WITHOUT pre-approving it.
+  // Both the display state and the submit-path ref start there so the first
+  // Enter can never submit a different row than the one highlighted.
+  const recommendedIndex = choices.findIndex((c) => c.recommended);
+  const initialFocus = recommendedIndex >= 0 ? recommendedIndex : 0;
+  const [focus, setFocusState] = useState(initialFocus);
+  const focusRef = useRef(initialFocus);
   const resolvedRef = useRef(false);
   const setFocus = (i: number): void => {
     focusRef.current = i;

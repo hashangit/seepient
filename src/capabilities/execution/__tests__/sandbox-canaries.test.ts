@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:net";
+import { execFileSync } from "node:child_process";
 import { createNativeProcessSandbox } from "../../../vendors/sandbox-runtime/index.js";
 import type { NativeProcessSandbox, SandboxExecResult } from "../../../vendors/sandbox-runtime/index.js";
 
@@ -47,6 +48,9 @@ describe("containment negative canaries (review P0)", () => {
     tmpSecret = join(tmpdir(), `.seepient-canary-tmp-${process.pid}.txt`);
     writeFileSync(tmpSecret, "tmp-secret-must-not-leak");
     writeFileSync(join(workspace, "inside.txt"), "inside-content");
+    const cltGit = "/Library/Developer/CommandLineTools/usr/bin/git";
+    const gitBin = existsSync(cltGit) ? cltGit : "git";
+    execFileSync(gitBin, ["init", "-q", workspace]);
   });
 
   afterAll(() => {
@@ -288,14 +292,23 @@ describe("containment negative canaries (review P0)", () => {
     30_000,
   );
 
-  it.runIf(!skip)("git still works with non-secret user config (gitconfig allow)", async () => {
-    // /usr/bin/git is an xcode-select shim on CLT-only Macs; its probe of
-    // /var/select/developer_dir cannot be allowed through SRT's path
-    // canonicalization (alias-form read is unmatchable — fails closed, not
-    // a bypass). Use the resolved developer-tools binary when present.
+  it.runIf(!skip)("git status works through the same shell path used by tool execution", async () => {
+    // /usr/bin/git is an xcode-select shim on CLT-only Macs. Production puts
+    // the resolved CLT directory first only when that shim would otherwise be
+    // selected; exercise the same /bin/sh -c path the shell analyzer uses.
     const cltGit = "/Library/Developer/CommandLineTools/usr/bin/git";
-    const gitBin = existsSync(cltGit) ? cltGit : "git";
-    const r = await run(`${gitBin} --version`);
+    const path = existsSync(cltGit)
+      ? `/Library/Developer/CommandLineTools/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin`
+      : "/usr/bin:/bin:/usr/sbin:/sbin";
+    const r = await sandbox.exec({
+      command: { executable: "/bin/sh", argv: ["-c", "git status --short"], cwd: workspace },
+      roots: [
+        { access: "read", canonicalRoot: workspace },
+        { access: "write", canonicalRoot: workspace },
+      ],
+      env: { PATH: path, HOME: process.env.HOME ?? workspace },
+    });
     expect(r.exitCode).toBe(0);
+    expect(r.stderr).toBe("");
   });
 });

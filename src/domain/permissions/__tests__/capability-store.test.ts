@@ -122,6 +122,84 @@ describe("monotonic intersection (T106 property)", () => {
     expect(eff.capabilities[0]).toMatchObject({ path: "/p/a.txt" });
   });
 
+  it("effectiveCapabilities retains an exact process grant under broad ceilings", () => {
+    const broad = set({ kind: "process" });
+    const exact = set({
+      kind: "process",
+      executable: "/bin/sh",
+      argvPrefix: ["-c", "echo hello"],
+      argvExact: true,
+    });
+    expect(effectiveCapabilities(broad, exact, broad, exact)).toEqual(exact);
+  });
+
+  it("network-destination: any-port ceiling plus port grant keeps only the port", () => {
+    const anyPort = set({ kind: "network-destination", scheme: "https", host: "api.example.com" });
+    const port443 = set({
+      kind: "network-destination",
+      scheme: "https",
+      host: "api.example.com",
+      port: 443,
+    });
+    const eff = effectiveCapabilities(anyPort, port443, anyPort, port443);
+    expect(eff.capabilities).toHaveLength(1);
+    expect(eff.capabilities[0]).toEqual({
+      kind: "network-destination",
+      scheme: "https",
+      host: "api.example.com",
+      port: 443,
+    });
+    // The any-port candidate must not survive — it would grant other ports.
+    expect(
+      setCovers(eff, {
+        kind: "network-destination",
+        scheme: "https",
+        host: "api.example.com",
+        port: 8443,
+      }),
+    ).toBe(false);
+  });
+
+  it("generation overflow fails closed for that kind (review round 9)", () => {
+    // 9 distinct process caps per layer → 9^4 = 6561 tuples > bound. The
+    // kind must contribute NOTHING (deny) rather than fall back to
+    // layer-sourced candidates that could carry wildcard dimensions.
+    const caps = Array.from({ length: 9 }, (_, i) => ({
+      kind: "process" as const,
+      executable: `/bin/x${i}`,
+    }));
+    const layer = set(...caps);
+    const eff = effectiveCapabilities(layer, layer, layer, layer);
+    expect(eff.capabilities.filter((c) => c.kind === "process")).toHaveLength(0);
+  });
+
+  it("model-egress: independently constrained fields combine into one intersection", () => {
+    const provider = set({ kind: "model-egress", providerClass: "anthropic", dataClasses: ["*"] });
+    const classes = set({ kind: "model-egress", providerClass: "*", dataClasses: ["user-context"] });
+    const eff = effectiveCapabilities(provider, classes, provider, classes);
+    expect(eff.capabilities).toHaveLength(1);
+    expect(eff.capabilities[0]).toEqual({
+      kind: "model-egress",
+      providerClass: "anthropic",
+      dataClasses: ["user-context"],
+    });
+    // Neither the provider-only nor the class-only candidate may survive.
+    expect(
+      setCovers(eff, {
+        kind: "model-egress",
+        providerClass: "anthropic",
+        dataClasses: ["secret"],
+      }),
+    ).toBe(false);
+    expect(
+      setCovers(eff, {
+        kind: "model-egress",
+        providerClass: "openai",
+        dataClasses: ["user-context"],
+      }),
+    ).toBe(false);
+  });
+
   it("property: intersection result size ≤ inner size", () => {
     // Randomized property check (deterministic seed via fixed inputs).
     const outer = set({ kind: "read-root", root: "/a" });

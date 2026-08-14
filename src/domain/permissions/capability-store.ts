@@ -24,6 +24,35 @@ export const EMPTY_CAPABILITY_SET: CapabilitySet = {
   capabilities: [],
 };
 
+/**
+ * Cap on generated intersection tuples per evaluation. Policy layers are
+ * small in practice; beyond this the layer-sourced candidates keep the
+ * pre-generation behavior (review round 9).
+ */
+const MAX_GENERATION_TUPLES = 4_096;
+
+/**
+ * Stable identity key for a capability (field-order insensitive).
+ */
+export function capabilityKey(cap: Capability): string {
+  return JSON.stringify(cap, Object.keys(cap).sort());
+}
+
+/**
+ * Order-preserving dedupe of identical capabilities.
+ */
+function dedupeCapabilities(caps: Capability[]): Capability[] {
+  const seen = new Set<string>();
+  const out: Capability[] = [];
+  for (const cap of caps) {
+    const key = capabilityKey(cap);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(cap);
+  }
+  return out;
+}
+
 /** Union of the supported capability kinds (mirror of `Capability["kind"]`). */
 type CapKind = Capability["kind"];
 
@@ -162,14 +191,180 @@ export function intersect(outer: CapabilitySet, inner: CapabilitySet): Capabilit
   return { version: 1, capabilities: kept };
 }
 
+/**
+ * Field-wise intersection of two same-kind capabilities (v1). Unset fields
+ * are wildcards, so the intersection carries the narrower value. Returns
+ * `undefined` when the two capabilities constrain an exact field
+ * differently — the intersection is empty.
+ *
+ * Only the multi-dimension kinds (process, model-egress,
+ * network-destination) need this: single-dimension kinds are already
+ * handled by the layer-sourced candidate loop below.
+ */
+function intersectCapabilityFields(a: Capability, b: Capability): Capability | undefined {
+  switch (a.kind) {
+    case "process": {
+      if (b.kind !== "process") return undefined;
+      if (
+        a.executable !== undefined &&
+        b.executable !== undefined &&
+        a.executable !== b.executable
+      ) {
+        return undefined;
+      }
+      const argvA = a.argvPrefix ?? [];
+      const argvB = b.argvPrefix ?? [];
+      const longer = argvA.length >= argvB.length ? argvA : argvB;
+      const shorter = argvA.length >= argvB.length ? argvB : argvA;
+      for (let i = 0; i < shorter.length; i++) {
+        if (shorter[i] !== longer[i]) return undefined;
+      }
+      const executable = a.executable ?? b.executable;
+      const argvPrefix = longer.length > 0 ? longer : undefined;
+      // A layer that pins argvExact narrows the intersection to that exact
+      // length; the every-layer coverage check below rejects the combined
+      // capability when a shorter exact pin and a longer prefix conflict.
+      const argvExact = a.argvExact === true || b.argvExact === true;
+      return {
+        kind: "process",
+        ...(executable !== undefined ? { executable } : {}),
+        ...(argvPrefix !== undefined ? { argvPrefix } : {}),
+        ...(argvExact ? { argvExact: true } : {}),
+      };
+    }
+    case "model-egress": {
+      if (b.kind !== "model-egress") return undefined;
+      const providerClass =
+        a.providerClass === "*"
+          ? b.providerClass
+          : b.providerClass === "*" || b.providerClass === a.providerClass
+            ? a.providerClass
+            : undefined;
+      if (providerClass === undefined) return undefined;
+      // "*" is the universal data class: a wildcard layer lets the other
+      // layer's list through unchanged.
+      const aAll = a.dataClasses.includes("*");
+      const bAll = b.dataClasses.includes("*");
+      const dataClasses = aAll
+        ? b.dataClasses
+        : bAll
+          ? a.dataClasses
+          : a.dataClasses.filter((c) => b.dataClasses.includes(c));
+      if (dataClasses.length === 0) return undefined;
+      return { kind: "model-egress", providerClass, dataClasses };
+    }
+    case "network-destination": {
+      if (b.kind !== "network-destination") return undefined;
+      if (a.host !== b.host || a.scheme !== b.scheme) return undefined;
+      if (a.port !== undefined && b.port !== undefined && a.port !== b.port) {
+        return undefined;
+      }
+      const port = a.port ?? b.port;
+      return {
+        kind: "network-destination",
+        scheme: a.scheme,
+        host: a.host,
+        ...(port !== undefined ? { port } : {}),
+      };
+    }
+    default:
+      return undefined;
+  }
+}
+
 export function effectiveCapabilities(
   deployment: CapabilitySet,
   principal: CapabilitySet,
   runtime: CapabilitySet,
   active: CapabilitySet,
 ): CapabilitySet {
-  const maxAuthority = intersect(intersect(deployment, principal), runtime);
-  return intersect(maxAuthority, active);
+  const layers = [deployment, principal, runtime, active];
+  const effective: Capability[] = [];
+
+  // A candidate is effective only when every layer covers it; the widest
+  // equivalent candidate is retained.
+  const consider = (candidate: Capability): void => {
+    if (candidate.kind === "trusted-host") return;
+    if (!layers.every((layer) => setCovers(layer, candidate))) return;
+    if (effective.some((cap) => covers(cap, candidate))) return;
+    for (let i = effective.length - 1; i >= 0; i--) {
+      if (covers(candidate, effective[i])) effective.splice(i, 1);
+    }
+    effective.push(candidate);
+  };
+
+  // `intersect()` is intentionally directional: it filters capabilities from
+  // its right-hand set through a left-hand ceiling. Chaining it across policy
+  // layers is therefore incorrect when a later layer is broader than an
+  // earlier one (for example, an exact persisted process grant followed by a
+  // broad runtime process ceiling). Build the representable set intersection
+  // from every layer's candidates instead.
+  //
+  // Multi-dimension kinds first (GENERATED intersections): a layer-sourced
+  // candidate is covered by a layer as soon as each WILDCARD dimension of the
+  // candidate is unconstrained on that layer, so independent constraints
+  // defeat the every-layer check. A deployment ceiling "https api.example.com
+  // on any port" plus a grant "…:443" would otherwise retain the any-port
+  // candidate (false grant), and "anthropic on any data class" plus "any
+  // provider, user-context only" yields nothing although "anthropic,
+  // user-context only" is the valid combined intersection (false deny). For
+  // every tuple of same-kind capabilities (one per layer) generate the
+  // field-wise intersection; being the narrowest valid candidate, it replaces
+  // the wider layer-sourced candidates below.
+  const overflowKinds = new Set<Capability["kind"]>();
+  for (const kind of ["process", "model-egress", "network-destination"] as const) {
+    // The enumeration below is the product of the per-layer counts; dedupe
+    // identical capabilities (the same ceiling is commonly repeated across
+    // layers) and fail CLOSED for the kind beyond the bound: the layer-
+    // sourced fallback could retain wildcard-dimension candidates (false
+    // grant), so an oversized kind contributes nothing rather than a
+    // possibly widened one (review round 9).
+    const perLayer = layers.map((layer) =>
+      dedupeCapabilities(layer.capabilities.filter((c) => c.kind === kind)),
+    );
+    if (perLayer.some((caps) => caps.length === 0)) continue;
+    const tupleCount = perLayer.reduce((n, caps) => n * caps.length, 1);
+    if (tupleCount > MAX_GENERATION_TUPLES) {
+      overflowKinds.add(kind);
+      continue;
+    }
+    const generate = (layerIndex: number, acc: Capability | undefined): void => {
+      // `undefined` at a non-first level means the fold already collapsed
+      // (empty intersection) — prune the branch instead of resurrecting it
+      // as a fresh accumulator (review round 9).
+      if (acc === undefined && layerIndex > 0) return;
+      if (layerIndex === layers.length) {
+        if (acc !== undefined) consider(acc);
+        return;
+      }
+      for (const cap of perLayer[layerIndex]) {
+        generate(layerIndex + 1, acc === undefined ? cap : intersectCapabilityFields(acc, cap));
+      }
+    };
+    generate(0, undefined);
+  }
+
+  // Layer-sourced candidates (single-dimension kinds and any multi-dimension
+  // candidate not already superseded by a generated intersection). Kinds
+  // that overflowed the generation bound above are excluded — they fail
+  // closed.
+  for (const candidate of layers.flatMap((layer) => layer.capabilities)) {
+    if (overflowKinds.has(candidate.kind)) continue;
+    consider(candidate);
+  }
+
+  // Trusted host callbacks are registered by the host composition root and
+  // have always been treated as active-set authority outside static ceilings.
+  for (const candidate of active.capabilities) {
+    if (
+      candidate.kind === "trusted-host" &&
+      !effective.some((cap) => covers(cap, candidate))
+    ) {
+      effective.push(candidate);
+    }
+  }
+
+  return { version: 1, capabilities: effective };
 }
 /**
  * Capabilities implied by an `EffectRequest`. Each effect maps to one or more

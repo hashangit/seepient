@@ -5,6 +5,9 @@
  * denies, backend support, monotonic intersection, and headless denial.
  */
 import { describe, it, expect } from "vitest";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PolicyEngine, computePolicyDigest } from "../policy-engine.js";
 import type {
   Capability,
@@ -357,6 +360,63 @@ describe("PolicyEngine (T106/T110)", () => {
     if (d.decision === "deny") expect(d.reason).toBe("approval-unavailable");
   });
 
+  it("autonomous mode allows an in-ceiling action without requesting approval", () => {
+    const engine = new PolicyEngine("digest");
+    const ctx = context({
+      approvalMode: "autonomous",
+      interaction: { mode: "none" },
+      principalPolicy: EMPTY,
+      runtimeBaseline: set({ kind: "commit-file", path: "/proj/a.txt" }),
+    });
+    const d = engine.evaluate(writeAction("/proj/a.txt"), ctx);
+    expect(d.decision).toBe("allow");
+    if (d.decision === "allow") {
+      expect(d.envelope.capabilities).toEqual([
+        { kind: "commit-file", path: "/proj/a.txt" },
+      ]);
+    }
+  });
+
+  it("autonomous mode still denies capabilities outside the deployment ceiling", () => {
+    const engine = new PolicyEngine("digest");
+    const ctx = context({
+      approvalMode: "autonomous",
+      interaction: { mode: "none" },
+      deploymentCeiling: EMPTY,
+      principalPolicy: EMPTY,
+      workspaceRoot: undefined,
+    });
+    const d = engine.evaluate(writeAction("/proj/a.txt"), ctx);
+    expect(d.decision).toBe("deny");
+    if (d.decision === "deny") expect(d.reason).toBe("outside-ceiling");
+  });
+
+  it("autonomous mode still enforces immutable denials", () => {
+    const engine = new PolicyEngine("digest");
+    const ctx = context({
+      approvalMode: "autonomous",
+      immutableDenies: [{ ruleId: "autonomous-deny", effect: "filesystem-write", reason: "immutable-deny" }],
+    });
+    const d = engine.evaluate(writeAction("/proj/a.txt"), ctx);
+    expect(d.decision).toBe("deny");
+    if (d.decision === "deny") expect(d.reason).toBe("immutable-deny");
+  });
+
+  it("autonomous mode still requires process containment", () => {
+    const engine = new PolicyEngine("digest");
+    const processCap: Capability = { kind: "process" };
+    const ctx = context({
+      approvalMode: "autonomous",
+      deploymentCeiling: set(processCap),
+      principalPolicy: EMPTY,
+      runtimeBaseline: set(processCap),
+      backendCapabilities: { ...LOCAL_BACKEND, environmentIsolation: false },
+    });
+    const d = engine.evaluate(processAction(), ctx);
+    expect(d.decision).toBe("deny");
+    if (d.decision === "deny") expect(d.reason).toBe("approval-unavailable");
+  });
+
   it("property: outside-ceiling never becomes needs-approval", () => {
     // A path outside both deployment and principal cannot be rescued by approval.
     const engine = new PolicyEngine("digest");
@@ -444,5 +504,64 @@ describe("uncontained opt-in (P1 review fix)", () => {
     const d = engine.evaluate(processAction(), ctx);
     expect(d.decision).toBe("deny");
     if (d.decision === "deny") expect(d.reason).toBe("approval-unavailable");
+  });
+});
+
+// ── Workspace containment canonicalization (review round 10) ────────────
+//
+// The ceiling check's realpath canonicalization was dead code in ESM
+// (`require("node:fs")` threw ReferenceError inside a swallowed catch), so a
+// symlink inside the workspace pointing outside passed the raw string-prefix
+// containment check and became approvable. These tests pin the fixed
+// behavior with a real filesystem.
+
+describe("workspace containment canonicalization (review round 10)", () => {
+  it("a symlink inside the workspace pointing outside is outside-ceiling", () => {
+    const base = mkdtempSync(join(tmpdir(), "seepient-ceiling-"));
+    try {
+      const workspace = join(base, "workspace");
+      const outside = join(base, "outside");
+      mkdirSync(workspace);
+      mkdirSync(outside);
+      symlinkSync(outside, join(workspace, "link"));
+      // The target must resolve for realpathSync — write through the link.
+      writeFileSync(join(workspace, "link", "escape.txt"), "x");
+
+      const engine = new PolicyEngine("digest");
+      const ctx = context({
+        deploymentCeiling: EMPTY,
+        runtimeBaseline: EMPTY,
+        activeCapabilities: EMPTY,
+        workspaceRoot: workspace,
+      });
+      const d = engine.evaluate(writeAction(join(workspace, "link", "escape.txt")), ctx);
+      expect(d.decision).toBe("deny");
+      if (d.decision === "deny") expect(d.reason).toBe("outside-ceiling");
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it("a plain workspace path stays approvable when realpath fails (new file)", () => {
+    const base = mkdtempSync(join(tmpdir(), "seepient-ceiling-"));
+    try {
+      const workspace = join(base, "workspace");
+      mkdirSync(workspace);
+
+      const engine = new PolicyEngine("digest");
+      const ctx = context({
+        deploymentCeiling: EMPTY,
+        runtimeBaseline: EMPTY,
+        activeCapabilities: EMPTY,
+        workspaceRoot: workspace,
+      });
+      // inside.txt does not exist → realpath falls back to the raw path,
+      // which the string containment still accepts (fail-open only within
+      // the workspace root itself).
+      const d = engine.evaluate(writeAction(join(workspace, "inside.txt")), ctx);
+      expect(d.decision).not.toBe("deny");
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 });

@@ -7,7 +7,7 @@
  * precomputed result.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -176,6 +176,63 @@ describe("UnsupportedExecutor (T212)", () => {
 });
 
 describe("ProcessExecutor (T213)", () => {
+  it("preserves bounded stderr when a process exits nonzero", async () => {
+    const sandbox = {
+      probe: { available: true, platform: "darwin", backend: "seatbelt" },
+      async exec() {
+        return {
+          exitCode: 128,
+          stdout: "",
+          stderr: "fatal: not a git repository",
+          isolated: true,
+        };
+      },
+    };
+    const executor = new ProcessExecutor({ sandbox: sandbox as never });
+    const action: PreparedToolAction = {
+      ...actionWith("process", {}),
+      operation: {
+        kind: "process",
+        command: { executable: "/bin/sh", argv: ["-c", "git status"], cwd: dir },
+        roots: [],
+      },
+    };
+    const result = await executor.execute(action, envelope(dir), asOp(action.operation, "process"), {});
+    expect(result.state).toBe("failed");
+    if (result.state === "failed") {
+      expect(result.error.message).toBe("exit 128: fatal: not a git repository");
+    }
+  });
+
+  it("scrubs control characters from nonzero-exit diagnostics", async () => {
+    const sandbox = {
+      probe: { available: true, platform: "darwin", backend: "seatbelt" },
+      async exec() {
+        return {
+          exitCode: 1,
+          stdout: "",
+          // CR, C1 (NEL), ESC, and NUL must be replaced; the newline survives.
+          stderr: "line1\r\nline2\u0085\u001b[31mred\u0000",
+          isolated: true,
+        };
+      },
+    };
+    const executor = new ProcessExecutor({ sandbox: sandbox as never });
+    const action: PreparedToolAction = {
+      ...actionWith("process", {}),
+      operation: {
+        kind: "process",
+        command: { executable: "/bin/sh", argv: ["-c", "false"], cwd: dir },
+        roots: [],
+      },
+    };
+    const result = await executor.execute(action, envelope(dir), asOp(action.operation, "process"), {});
+    expect(result.state).toBe("failed");
+    if (result.state === "failed") {
+      expect(result.error.message).toBe("exit 1: line1�\nline2��[31mred�");
+    }
+  });
+
   it("sanitizes the env — no ambient secrets reach the child", async () => {
     const artifacts = new InMemoryArtifactStore();
     void artifacts;
@@ -212,6 +269,12 @@ describe("ProcessExecutor (T213)", () => {
     const result = await executor.execute(action, envelope(dir), asOp(action.operation, "process"), {});
     expect(result.state).toBe("succeeded");
     expect(capturedEnv!.OPENAI_API_KEY).toBeUndefined();
+    if (
+      process.platform === "darwin" &&
+      existsSync("/Library/Developer/CommandLineTools/usr/bin/git")
+    ) {
+      expect(capturedEnv!.PATH).toMatch(/^\/Library\/Developer\/CommandLineTools\/usr\/bin:/);
+    }
     if (result.state === "succeeded") expect(result.result.output).toBe("clean");
   });
 

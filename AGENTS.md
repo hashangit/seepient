@@ -255,7 +255,7 @@ Env vars per provider: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GLM_API_KEY`, `OP
 
 - **No bundler** — plain `tsc` to ES2022 NodeNext. Dev via `tsx`.
 - **Package exports** — `seepient` (SDK), `seepient/server`. Binaries: `seepient` (CLI), `seepient-server`.
-- **Vitest test suite** — 532 tests across 52 files; CI gates publish on test pass
+- **Vitest test suite** — 1067 tests across 104 files; CI gates publish on test pass
 - **Errors carry metadata** — `code` (machine-readable) + `retryable` flag on all `SeepientError` subclasses.
 - **Hook errors are non-fatal** — never crash the agent loop.
 - **Dynamic provider imports** — unused provider SDKs stay out of memory.

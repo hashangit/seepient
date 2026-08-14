@@ -152,7 +152,7 @@ describe("administrative mutations preserve WAL history (round 8 P0)", () => {
     const agent = new Agent(mockProvider(), "gpt-test", {}, "sys");
     agent.setPolicyStore(store, "ws-1");
     const before = await store.read("ws-1");
-    const afterRevoke = await agent.revokePolicyCapability(0);
+    const afterRevoke = await agent.revokePolicyCapability(before.policy.capabilities[0], before.version);
     expect(afterRevoke.version).toBe(before.version + 1);
     const snap = await store.read("ws-1");
     expect(snap.mutationHistory).toEqual([{ mutationId: "mut-A", version: 1 }]);
@@ -189,12 +189,34 @@ describe("administrative mutations preserve WAL history (round 8 P0)", () => {
     );
     const agent = new Agent(mockProvider(), "gpt-test", {}, "sys");
     agent.setPolicyStore(store, "ws-1");
-    await agent.revokeGlobalPolicyCapability(0);
+    const globalBefore = await store.read(GLOBAL_WORKSPACE_ID);
+    await agent.revokeGlobalPolicyCapability(globalBefore.policy.capabilities[0], globalBefore.version);
     const snap = await store.read(GLOBAL_WORKSPACE_ID);
     expect(snap.mutationHistory).toEqual([{ mutationId: "mut-A", version: 1 }]);
     await restart(audit, store);
     const committed = (await audit.listEvents()).filter((e) => e.state === "policy-granted" && e.actionId === "action-A");
     expect(committed).toHaveLength(1);
     expect(committed[0].mutationId).toBe("mut-A");
+  });
+
+  it("revoke with a stale listed version is rejected and removes nothing (review round 9)", async () => {
+    const audit = new LocalAuditStore({ root: dir });
+    const store = new LocalPolicyStore({ root: join(dir, "policy") });
+    await store.compareAndSet("ws-1", 0, { version: 1, capabilities: [cap] }, actor, { mutationId: "mut-A" });
+    // The policy moved after the operator saw the list: cap is still there,
+    // but at version 2 with an extra entry.
+    await store.compareAndSet(
+      "ws-1",
+      1,
+      { version: 1, capabilities: [cap, { kind: "commit-file", path: "/p/b.txt" }] },
+      actor,
+    );
+    const agent = new Agent(mockProvider(), "gpt-test", {}, "sys");
+    agent.setPolicyStore(store, "ws-1");
+    await expect(
+      agent.revokePolicyCapability(cap, 1),
+    ).rejects.toThrow(/changed since it was listed/);
+    const snap = await store.read("ws-1");
+    expect(snap.policy.capabilities).toHaveLength(2);
   });
 });

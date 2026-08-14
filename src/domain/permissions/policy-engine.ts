@@ -13,7 +13,9 @@
  * applies immutable denies and backend support, then intersects the ceiling,
  * principal, baseline, and active capabilities.
  *
- * Pure (no I/O). Property-testable.
+ * Pure (no I/O) except best-effort synchronous realpath canonicalization of
+ * workspace containment checks (raw-path fallback when a target does not
+ * resolve). Property-testable.
  */
 import type {
   ApprovalBroker,
@@ -43,6 +45,31 @@ import {
 } from "./capability-store.js";
 import type { PersistedCapabilityLedger } from "./persisted-capability-ledger.js";
 import { buildApprovalChoices, buildApprovalOptions } from "./approval-options.js";
+import { realpathSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
+
+/**
+ * Canonicalize a path via realpathSync; fall back to the raw path when it
+ * does not resolve (e.g. a file that does not exist yet). ESM has no
+ * `require`, so an inline `require("node:fs")` here was dead code that
+ * silently skipped canonicalization (review round 10).
+ */
+const canonicalPath = (p: string): string => {
+  try {
+    return realpathSync(p);
+  } catch {
+    // A not-yet-existing target keeps its basename but inherits the
+    // canonical parent, so a canonicalized root still prefix-matches
+    // (macOS /var -> /private/var).
+    const parent = dirname(p);
+    if (parent === p) return p;
+    try {
+      return join(realpathSync(parent), basename(p));
+    } catch {
+      return p;
+    }
+  }
+};
 
 /** Trace helpers keep the policy layer auditable without secret values. */
 function emptyTrace(policyDigest: string): PolicyTrace {
@@ -266,27 +293,8 @@ export class PolicyEngine implements PolicyEngineContract {
       return { decision: "allow", envelope, trace };
     }
 
-    // 5. needs-approval — only if the interaction mode can represent it.
-    if (context.interaction.mode === "none") {
-      // Headless surfaces: typed denial immediately, never prompt.
-      pushLayer(trace, "backend", "deny");
-      return deny(
-        "approval-unavailable",
-        "Headless surface: missing capability and approval is unavailable",
-        trace,
-      );
-    }
-
-    if (context.approvalMode === "never") {
-      pushLayer(trace, "backend", "deny");
-      return deny(
-        "approval-unavailable",
-        "Approval mode is 'never' and a capability is missing",
-        trace,
-      );
-    }
-
-    // The missing capabilities must be within the DEPLOYMENT ceiling. The
+    // Missing capabilities must be within the DEPLOYMENT ceiling before they
+    // can be approved by a person or admitted by autonomous mode. The
     // deployment ceiling defines what users MAY approve. Principal policy is
     // what /permissions pre-authorizes; an empty principal means "must approve
     // each time," NOT "can never approve." So we check deployment only here.
@@ -301,27 +309,13 @@ export class PolicyEngine implements PolicyEngineContract {
       // Host callbacks registered in the tool registry are within operator ceiling
       if (c.kind === "trusted-host") return true;
       if (context.approvalMode !== "never" && context.workspaceRoot) {
-        let root = context.workspaceRoot;
-        try {
-          const { realpathSync } = require("node:fs");
-          if (root) root = realpathSync(root);
-        } catch {}
-        if ("path" in c && typeof c.path === "string") {
-          let p = c.path;
-          try {
-            const { realpathSync } = require("node:fs");
-            if (p) p = realpathSync(p);
-          } catch {}
-          return p === root || p.startsWith(root.endsWith("/") ? root : root + "/");
-        }
-        if ("root" in c && typeof c.root === "string") {
-          let r = c.root;
-          try {
-            const { realpathSync } = require("node:fs");
-            if (r) r = realpathSync(r);
-          } catch {}
-          return r === root || r.startsWith(root.endsWith("/") ? root : root + "/");
-        }
+        const root = canonicalPath(context.workspaceRoot);
+        const withinRoot = (target: string): boolean => {
+          const t = canonicalPath(target);
+          return t === root || t.startsWith(root.endsWith("/") ? root : root + "/");
+        };
+        if ("path" in c && typeof c.path === "string") return withinRoot(c.path);
+        if ("root" in c && typeof c.root === "string") return withinRoot(c.root);
       }
       return false;
     });
@@ -362,6 +356,38 @@ export class PolicyEngine implements PolicyEngineContract {
       return deny(
         "approval-unavailable",
         "Process containment is not available on this system. Install the platform sandbox (macOS: sandbox-exec is bundled with macOS; Linux: install Bubblewrap, e.g. `apt install bubblewrap` or `brew install bwrap`) or run with SEEPIENT_UNCONTAINED=1 to explicitly disable containment.",
+        trace,
+      );
+    }
+
+    // Autonomous mode removes the human approval round-trip, not the safety
+    // boundary. Immutable denies, the deployment ceiling, backend capability
+    // support, and process containment were all enforced above. The issued
+    // envelope is still exact to this prepared action and action-scoped.
+    if (context.approvalMode === "autonomous") {
+      return {
+        decision: "allow",
+        envelope: buildEnvelope(action, required, this.policyDigest),
+        trace,
+      };
+    }
+
+    // 5. needs-approval — only if the interaction mode can represent it.
+    if (context.interaction.mode === "none") {
+      // Headless surfaces: typed denial immediately, never prompt.
+      pushLayer(trace, "backend", "deny");
+      return deny(
+        "approval-unavailable",
+        "Headless surface: missing capability and approval is unavailable",
+        trace,
+      );
+    }
+
+    if (context.approvalMode === "never") {
+      pushLayer(trace, "backend", "deny");
+      return deny(
+        "approval-unavailable",
+        "Approval mode is 'never' and a capability is missing",
         trace,
       );
     }

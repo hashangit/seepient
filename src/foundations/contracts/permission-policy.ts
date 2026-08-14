@@ -124,7 +124,7 @@ export interface PolicyContext {
   runtimeBaseline: CapabilitySet;
   activeCapabilities: CapabilitySet;
   immutableDenies: DenyRule[];
-  approvalMode: "manual" | "balanced" | "never";
+  approvalMode: "manual" | "balanced" | "never" | "autonomous";
   interaction: InteractionContract;
   backendCapabilities: ExecutionBackendCapabilities;
   /** The workspace root — interactive surfaces let users approve file

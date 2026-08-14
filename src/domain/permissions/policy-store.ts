@@ -20,6 +20,7 @@ import { createHash } from "node:crypto";
 import * as path from "node:path";
 import * as os from "node:os";
 import type {
+  Capability,
   CapabilitySet,
   DecisionAuthority,
 } from "../../foundations/contracts/permission-policy.js";
@@ -36,6 +37,46 @@ import { PolicyConflictError } from "../../foundations/errors.js";
  * `~/.seepient/security/policies/global.json`.
  */
 export const GLOBAL_WORKSPACE_ID = "global";
+
+/**
+ * Stored root placeholder for global capabilities that mean "the canonical
+ * root of whichever workspace is currently active". It is never passed to an
+ * executor; the lifecycle factory binds it to a concrete root before policy
+ * evaluation.
+ */
+export const GLOBAL_WORKSPACE_ROOT = "$SEEPIENT_CURRENT_WORKSPACE";
+
+/** Convert current-workspace roots into a safe global-policy placeholder. */
+export function scopeGlobalPolicyCapabilities(
+  capabilities: Capability[],
+  workspaceRoot: string,
+): Capability[] {
+  return capabilities.map((capability) => {
+    if (
+      (capability.kind === "read-root" || capability.kind === "write-root") &&
+      capability.root === workspaceRoot
+    ) {
+      return { ...capability, root: GLOBAL_WORKSPACE_ROOT };
+    }
+    return capability;
+  });
+}
+
+/** Bind global current-workspace placeholders to one canonical workspace. */
+export function bindGlobalPolicyCapabilities(
+  capabilities: Capability[],
+  workspaceRoot: string,
+): Capability[] {
+  return capabilities.map((capability) => {
+    if (
+      (capability.kind === "read-root" || capability.kind === "write-root") &&
+      capability.root === GLOBAL_WORKSPACE_ROOT
+    ) {
+      return { ...capability, root: workspaceRoot };
+    }
+    return capability;
+  });
+}
 
 /** Versioned digest of canonical real path; stable across alias/mount. */
 export function computeWorkspaceId(canonicalRoot: string): string {

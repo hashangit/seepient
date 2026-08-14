@@ -18,7 +18,12 @@ import { PolicyEngine, computePolicyDigest } from "./policy-engine.js";
 import { ActionLifecycle } from "./action-lifecycle.js";
 import { LocalAuditStore, idempotencyKey } from "./audit-recorder.js";
 import { generateId } from "../../foundations/id.js";
-import { LocalPolicyStore, computeWorkspaceId, GLOBAL_WORKSPACE_ID } from "./policy-store.js";
+import {
+  bindGlobalPolicyCapabilities,
+  LocalPolicyStore,
+  computeWorkspaceId,
+  GLOBAL_WORKSPACE_ID,
+} from "./policy-store.js";
 import { setCovers } from "./capability-store.js";
 import { DEFAULT_ANALYZERS } from "./default-analyzers.js";
 import { COMM_ANALYZERS } from "./comm-analyzers.js";
@@ -76,7 +81,7 @@ export interface ActionLifecycleInputs {
   immutableDenies?: PolicyContext["immutableDenies"];
   /** Optional: active session capabilities baseline. */
   activeCapabilities?: CapabilitySet;
-  approvalMode?: "manual" | "balanced" | "never";
+  approvalMode?: "manual" | "balanced" | "never" | "autonomous";
   /** Interaction contract — derived from the broker by default. */
   interaction?: PolicyContext["interaction"];
   /**
@@ -174,6 +179,7 @@ export async function buildActionLifecycle(
   // restart.
   let principalPolicy: CapabilitySet;
   let hasStoredPolicy = false;
+  let globalCapabilities: Capability[] = [];
   try {
     const snap = await policyStore.read(workspaceId);
     if (snap.version > 0 || snap.policy.capabilities.length > 0) {
@@ -204,12 +210,15 @@ export async function buildActionLifecycle(
   try {
     const globalSnap = await policyStore.read(GLOBAL_WORKSPACE_ID);
     if (globalSnap.policy.capabilities.length > 0) {
+      globalCapabilities = bindGlobalPolicyCapabilities(
+        globalSnap.policy.capabilities,
+        root,
+      );
       const union: Capability[] = [...principalPolicy.capabilities];
-      for (const cap of globalSnap.policy.capabilities) {
+      for (const cap of globalCapabilities) {
         if (!setCovers(principalPolicy, cap)) union.push(cap);
       }
       principalPolicy = { version: 1 as const, capabilities: union };
-      hasStoredPolicy = true;
     }
   } catch {
     /* no global policy yet — fresh install continues below */
@@ -248,6 +257,20 @@ export async function buildActionLifecycle(
       : egressCoveredByCeiling
         ? [{ kind: "read-root" as const, root }, defaultModelEgressCap]
         : [{ kind: "read-root" as const, root }];
+  const persistentBaselineCapabilities =
+    isFreshInstall && !inputs.activeCapabilities ? [...activeCaps] : [];
+
+  // Global grants are additive active authority. Their mere existence must
+  // not make a fresh workspace copy the entire deployment ceiling into its
+  // active set (which would widen one exact global grant into broad process
+  // and write authority).
+  if (!inputs.activeCapabilities) {
+    for (const capability of globalCapabilities) {
+      if (!setCovers({ version: 1, capabilities: activeCaps }, capability)) {
+        activeCaps.push(capability);
+      }
+    }
+  }
 
   // Seed the default cap only on a fresh install; an explicit caller-supplied
   // activeCapabilities set is preserved as-is.
@@ -275,6 +298,7 @@ export async function buildActionLifecycle(
       deadlineMs: inputs.approvalDeadlineMs ?? 600_000,
     },
     backendCapabilities: inputs.executionBoundary.capabilities,
+    workspaceRoot: root,
     // Spec 011 (T008): preserve the stable session identity so PolicyEngine
     // can offer the `session` lifetime on TUI requests.
     sessionId: inputs.sessionId,
@@ -316,6 +340,13 @@ export async function buildActionLifecycle(
     // through compare-and-set, the same trusted flow /permissions uses.
     policyStore,
     workspaceId,
+    // A first inline project/global grant creates the durable snapshot. Keep
+    // the fresh-install read/model baseline explicit in that snapshot so a
+    // restart does not mistake the grant delta for the whole principal
+    // policy. Caller-supplied active authority may be session-only and is
+    // therefore never persisted implicitly.
+    persistentBaselineCapabilities:
+      persistentBaselineCapabilities,
   });
 
   // Round 6 P0: a crashed process's durable intents live in pending.*.ndjson

@@ -408,7 +408,7 @@ export function TuiApp({
       onCycleFocus: onCycleWidgetFocus,
       onEscapeWidget: () => { if (focusedWidgetId) setFocusedWidgetId(null); },
     },
-    { enabled: overlay === null, isRunning },
+    { enabled: overlay === null, isRunning, promptPending: !!pendingPermission },
   );
 
   // T2: stabilize streaming text for live display. While markdown is reflowing

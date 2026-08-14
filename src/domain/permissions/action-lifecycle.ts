@@ -46,7 +46,10 @@ import type { PolicyEngine } from "./policy-engine.js";
 import { generateId } from "../../foundations/id.js";
 import { idempotencyKey } from "./audit-recorder.js";
 import { PolicyConflictError } from "../../foundations/errors.js";
-import { GLOBAL_WORKSPACE_ID } from "./policy-store.js";
+import {
+  GLOBAL_WORKSPACE_ID,
+  scopeGlobalPolicyCapabilities,
+} from "./policy-store.js";
 import { covers, setCovers } from "./capability-store.js";
 import type { PersistedCapabilityLedger } from "./persisted-capability-ledger.js";
 
@@ -86,6 +89,12 @@ export interface ActionLifecycleOptions {
    */
   policyStore?: PolicyStore;
   workspaceId?: string;
+  /**
+   * Capabilities that are already active on a fresh install and must remain
+   * active after the first persistent grant creates the project snapshot.
+   * Callers must not include session-only authority here.
+   */
+  persistentBaselineCapabilities?: Capability[];
   /** Now-injectable for deterministic tests. */
   now?: () => number;
 }
@@ -209,6 +218,7 @@ export class ActionLifecycle {
   private readonly sessionId?: string;
   private readonly policyStore?: PolicyStore;
   private readonly workspaceId?: string;
+  private readonly persistentBaselineCapabilities: Capability[];
 
   private readonly terminalOutbox?: { enqueue: (event: import("../../foundations/contracts/execution-brokers.js").ActionAuditEvent, idempotencyKey: string) => void };
   private readonly capabilityLedger?: PersistedCapabilityLedger;
@@ -221,6 +231,9 @@ export class ActionLifecycle {
     this.sessionId = opts.sessionId;
     this.policyStore = opts.policyStore;
     this.workspaceId = opts.workspaceId;
+    this.persistentBaselineCapabilities = [
+      ...(opts.persistentBaselineCapabilities ?? []),
+    ];
     this.audit = opts.audit;
     const baseActive = (opts.activeCapabilities?.capabilities.length ?? 0) > 0
       ? opts.activeCapabilities!
@@ -532,16 +545,31 @@ export class ActionLifecycle {
         //      resulting version) — if it fails, the outbox intent covers
         //      durability, and a last-resort CAS REVERT uninstalls the grant
         //      so a denial never leaves authority behind.
-        // Audit copies of capabilities redact process argv (SC-011).
-        const auditCapabilities = option.capabilities.map(redactAuditCapability);
         let persisted = false;
         let beforeVersion = 0;
         try {
           const current = await this.policyStore.read(targetWorkspaceId);
           beforeVersion = current.version;
-          const fresh = option.capabilities.filter(
+          const persistentCapabilities =
+            lifetimeKind === "global" && this.policyContext.workspaceRoot
+              ? scopeGlobalPolicyCapabilities(
+                  option.capabilities,
+                  this.policyContext.workspaceRoot,
+                )
+              : option.capabilities;
+          const fresh = persistentCapabilities.filter(
             (c) => !setCovers(current.policy, c),
           );
+          // Audit copies of capabilities redact process argv (SC-011). The
+          // trail must match the full mutation: on a fresh workspace a
+          // project grant also persists the baseline seed, so the baseline
+          // is part of what this approval installs (review round 9).
+          const auditCapabilities = [
+            ...(lifetimeKind === "project" && fresh.length > 0
+              ? this.persistentBaselineCapabilities
+              : []),
+            ...option.capabilities,
+          ].map(redactAuditCapability);
           await this.record(action, "approved", undefined, {
             optionId: option.optionId,
             lifetime: lifetimeKind,
@@ -575,12 +603,29 @@ export class ActionLifecycle {
                 ? await this.policyStore.read(targetWorkspaceId)
                 : current;
               try {
+                const nextCapabilities = [...retried.policy.capabilities];
+                const candidates = [
+                  // Baseline seed authority is part of the project grant and
+                  // must land even when a concurrent writer won the first
+                  // CAS (version > 0 then means OUR baseline never landed);
+                  // setCovers dedup keeps it out when the winner already
+                  // wrote it.
+                  ...(lifetimeKind === "project"
+                    ? this.persistentBaselineCapabilities
+                    : []),
+                  ...fresh,
+                ];
+                for (const capability of candidates) {
+                  if (!setCovers({ version: 1, capabilities: nextCapabilities }, capability)) {
+                    nextCapabilities.push(capability);
+                  }
+                }
                 const snap = await this.policyStore.compareAndSet(
                   targetWorkspaceId,
                   retried.version,
                   {
                     version: 1 as const,
-                    capabilities: [...retried.policy.capabilities, ...fresh],
+                    capabilities: nextCapabilities,
                   },
                   {
                     kind: "human",
@@ -651,8 +696,22 @@ export class ActionLifecycle {
         version: 1,
         capabilities: [...this.active.capabilities, ...approved],
       };
+      // Interactive approval is explicitly allowed to authorize a capability
+      // that is absent from the principal snapshot (provided it remains
+      // inside deployment/runtime/backend limits). Extend the principal for
+      // this one reevaluation; otherwise a narrowed persisted project policy
+      // would remove a valid action/session approval before it can execute.
+      const principalCapabilities = [
+        ...this.policyContext.principalPolicy.capabilities,
+      ];
+      for (const capability of approved) {
+        if (!setCovers({ version: 1, capabilities: principalCapabilities }, capability)) {
+          principalCapabilities.push(capability);
+        }
+      }
       const reevalContext: PolicyContext = {
         ...this.policyContext,
+        principalPolicy: { version: 1, capabilities: principalCapabilities },
         activeCapabilities: withApproval,
       };
       decision = this.policy.evaluate(action, reevalContext);
@@ -673,6 +732,14 @@ export class ActionLifecycle {
       if (lifetimeKind !== "action") {
         this.active.capabilities.push(...approved);
         this.policyContext.activeCapabilities.capabilities = this.active.capabilities;
+        // Session/run/persistent authority must survive later evaluations in
+        // this lifecycle. Active authority remains the execution gate, so
+        // revocation still removes the grant even though this session-local
+        // principal overlay remembers that it was approved.
+        this.policyContext.principalPolicy = {
+          version: 1,
+          capabilities: principalCapabilities,
+        };
       }
     }
 
@@ -864,6 +931,15 @@ export class ActionLifecycle {
   /** Read-only view of the long-lived active capability set (test seam). */
   getActiveCapabilities(): Capability[] {
     return [...this.active.capabilities];
+  }
+
+  /** Change the interactive approval posture for subsequent actions. */
+  setApprovalMode(mode: PolicyContext["approvalMode"]): void {
+    this.policyContext.approvalMode = mode;
+  }
+
+  getApprovalMode(): PolicyContext["approvalMode"] {
+    return this.policyContext.approvalMode;
   }
 
   /**

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { render } from "ink-testing-library";
 import React from "react";
 import { PermissionPrompt, clampMove } from "../components/permission-prompt.js";
+import { useKeybindings } from "../hooks/use-keybindings.js";
 import type {
   ApprovalChoice,
   ApprovalOption,
@@ -185,6 +186,24 @@ describe("PermissionPrompt submission + keyboard (T028)", () => {
     expect(getCaptured()).toEqual({ approved: true, choiceId: "opt-exact::action" });
   });
 
+  it("focus starts on the Recommended choice wherever Domain placed it (FR-011)", async () => {
+    // Recommended is NOT first here — initial focus must find it, not
+    // assume index 0.
+    const req = request({
+      approvalChoices: [
+        choice("opt-exact", "session", "Allow this exact action until I close Seepient", ["Read `/proj/a.txt`"]),
+        choice("opt-exact", "action", "Allow this action once", ["Read `/proj/a.txt`"], true),
+      ],
+    });
+    let captured: TuiApprovalSelection | null = null;
+    const { stdin } = render(
+      <PermissionPrompt request={req} onResolve={(s) => { captured = s; }} />,
+    );
+    stdin.write(ENTER);
+    await tick();
+    expect(captured).toEqual({ approved: true, choiceId: "opt-exact::action" });
+  });
+
   it("Enter approves whatever choice is focused", async () => {
     const { stdin, getCaptured } = renderPrompt();
     stdin.write("2");
@@ -264,3 +283,78 @@ describe("PermissionPrompt submission + keyboard (T028)", () => {
     expect(getCaptured()).toEqual({ approved: true, choiceId: "opt-exact::action" });
   });
 });
+
+// ── Global-keybinding interplay (FR-015 regression) ─────────────────────
+//
+// app.tsx passes promptPending to useKeybindings while the native prompt is
+// open. This mounts BOTH input subscribers the way app.tsx does, proving an
+// Escape denies the request without also aborting the run — while Ctrl+C
+// remains the hard abort.
+
+describe("permission prompt vs global keybindings (FR-015)", () => {
+  it("Escape denies the prompt and does NOT abort the run", async () => {
+    let captured: TuiApprovalSelection | null = null;
+    const events: string[] = [];
+    function Harness() {
+      useKeybindings(
+        {
+          onAbort: () => events.push("abort"),
+          onExit: () => events.push("exit"),
+          onExpandToggle: () => {},
+          onPalette: () => {},
+          onClear: () => {},
+        },
+        { enabled: true, isRunning: true, promptPending: true },
+      );
+      return <PermissionPrompt request={request()} onResolve={(s) => { captured = s; }} />;
+    }
+    const { stdin } = render(<Harness />);
+    stdin.write("\u001B");
+    await tick();
+    expect(captured).toEqual({ approved: false, reason: "user-denied" });
+    expect(events).toEqual([]);
+  });
+
+  it("Ctrl+C still aborts the run while the prompt is open", async () => {
+    const events: string[] = [];
+    function Harness() {
+      useKeybindings(
+        {
+          onAbort: () => events.push("abort"),
+          onExit: () => events.push("exit"),
+          onExpandToggle: () => {},
+          onPalette: () => {},
+          onClear: () => {},
+        },
+        { enabled: true, isRunning: true, promptPending: true },
+      );
+      return <PermissionPrompt request={request()} onResolve={() => {}} />;
+    }
+    const { stdin } = render(<Harness />);
+    stdin.write("\x03");
+    await tick();
+    expect(events).toEqual(["abort"]);
+  });
+
+  it("Escape aborts as usual when no prompt is pending", async () => {
+    const events: string[] = [];
+    function Harness() {
+      useKeybindings(
+        {
+          onAbort: () => events.push("abort"),
+          onExit: () => events.push("exit"),
+          onExpandToggle: () => {},
+          onPalette: () => {},
+          onClear: () => {},
+        },
+        { enabled: true, isRunning: true },
+      );
+      return null;
+    }
+    const { stdin } = render(<Harness />);
+    stdin.write("\u001B");
+    await tick();
+    expect(events).toEqual(["abort"]);
+  });
+});
+

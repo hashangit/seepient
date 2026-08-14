@@ -125,6 +125,7 @@ const entries: [string, SettingsMapEntry][] = [
   // Permissions
   ['agent.permissionLevel', { dotKey: 'agent.permissionLevel', configPath: ['permissionLevel'], category: 'permissions', label: 'Permission Level' }],
   ['agent.autoConfirm', { dotKey: 'agent.autoConfirm', configPath: ['autoConfirm'], category: 'permissions', label: 'Auto-Confirm All Tools' }],
+  ['permissions.autonomousMode', { dotKey: 'permissions.autonomousMode', configPath: ['permissions', 'autonomousMode'], category: 'permissions', label: 'Autonomous Mode (skip approval prompts)' }],
   ['permissions.approvalTimeoutMs', { dotKey: 'permissions.approvalTimeoutMs', configPath: ['approvalTimeoutMs'], category: 'permissions', label: 'Approval Timeout (ms)' }],
 
   // Gateway
@@ -190,6 +191,7 @@ const schemaEntries: [string, SettingsSchemaEntry][] = [
   // Agent
   ['agent.permissionLevel', { type: 'enum', secret: false, enumValues: ['strict', 'moderate', 'permissive'], default: 'moderate', restartRequired: false, envVar: 'SEEPIENT_PERMISSION' }],
   ['agent.autoConfirm', { type: 'boolean', secret: false, default: false, restartRequired: false }],
+  ['permissions.autonomousMode', { type: 'boolean', secret: false, default: false, restartRequired: false }],
   ['permissions.approvalTimeoutMs', { type: 'number', secret: false, default: 600000, min: 10000, max: 3600000, restartRequired: true, envVar: 'SEEPIENT_APPROVAL_TIMEOUT_MS' }],
 
   // Gateway

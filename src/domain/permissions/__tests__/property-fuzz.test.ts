@@ -85,7 +85,7 @@ describe("P6 property: policy monotonicity (T601)", () => {
     }
   });
 
-  it("effectiveCapabilities never exceeds the smallest input", () => {
+  it("effectiveCapabilities is covered by every policy layer", () => {
     const r = rand(99);
     for (let i = 0; i < 100; i++) {
       const a = { version: 1 as const, capabilities: [randomCap(r)] };
@@ -93,9 +93,10 @@ describe("P6 property: policy monotonicity (T601)", () => {
       const c = { version: 1 as const, capabilities: [randomCap(r)] };
       const d = { version: 1 as const, capabilities: [randomCap(r)] };
       const eff = effectiveCapabilities(a, b, c, d);
-      expect(eff.capabilities.length).toBeLessThanOrEqual(
-        Math.min(a.capabilities.length, b.capabilities.length, c.capabilities.length, d.capabilities.length),
-      );
+      for (const capability of eff.capabilities) {
+        if (capability.kind === "trusted-host") continue;
+        expect([a, b, c, d].every((layer) => layer.capabilities.some((outer) => covers(outer, capability)))).toBe(true);
+      }
     }
   });
 

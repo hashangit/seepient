@@ -20,6 +20,7 @@ import type { ApprovalBroker, Capability, CapabilitySet, PermissionRequest } fro
 import type { PolicyStore } from '../../foundations/contracts/execution-brokers.js';
 import type { PolicySnapshot } from '../../foundations/contracts/execution-brokers.js';
 import { GLOBAL_WORKSPACE_ID } from '../../domain/permissions/policy-store.js';
+import { capabilityKey } from '../../domain/permissions/capability-store.js';
 
 /**
  * Outcome of a single `Agent.chat()` turn. Returned so non-readline callers
@@ -52,6 +53,7 @@ export class Agent {
   // Spec 008 protected policy store + pending proposals (T307).
   private _policyStore: PolicyStore | null = null;
   private _workspaceId: string | null = null;
+  private _workspaceRoot: string | null = null;
   private _policyProposals: Array<{ id: string; capability: Capability }> = [];
   private sessionId: string;
 
@@ -172,6 +174,7 @@ export class Agent {
      * minutes; the CLI bootstrap passes `permissions.approvalTimeoutMs`.
      */
     approvalDeadlineMs?: number;
+    approvalMode?: import("../../foundations/contracts/permission-policy.js").PolicyContext["approvalMode"];
   }): Promise<void> {
     const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
     const { legacyApproveToolToBroker } = await import("../legacy-adapter.js");
@@ -228,8 +231,9 @@ export class Agent {
     // an action begins when the backend is missing — PolicyEngine enforces
     // the same rule via `environmentIsolation` before prompting.
     const { preflightContainment } = await import("../../capabilities/execution/containment-preflight.js");
+    this._workspaceRoot = opts.workspaceRoot ?? process.cwd();
     this._containmentStatus = await preflightContainment({
-      workspaceRoot: opts.workspaceRoot ?? process.cwd(),
+      workspaceRoot: this._workspaceRoot,
     });
     this._wiredPipeline = await buildActionLifecycle({
       principalId: "cli-user",
@@ -239,6 +243,7 @@ export class Agent {
       modelProviderClass: opts.modelProviderClass ?? "openai",
       approvalBroker: liveBroker,
       approvalDeadlineMs: opts.approvalDeadlineMs,
+      approvalMode: opts.approvalMode,
       executionBoundary: realBoundary,
       policyStore: this._policyStore ?? undefined,
       auditRoot: opts.auditRoot,
@@ -311,6 +316,23 @@ export class Agent {
     return this._wiredPipeline?.lifecycle.getActiveCapabilities() ?? [];
   }
 
+  /** Enable/disable prompt-free execution without disabling policy safety. */
+  setAutonomousMode(enabled: boolean): void {
+    if (!this._wiredPipeline) {
+      throw new Error('Protected permission pipeline is not enabled');
+    }
+    this._wiredPipeline.lifecycle.setApprovalMode(enabled ? 'autonomous' : 'manual');
+  }
+
+  isAutonomousMode(): boolean {
+    return this._wiredPipeline?.lifecycle.getApprovalMode() === 'autonomous';
+  }
+
+  /** Remove one in-memory permission from the current session immediately. */
+  revokeSessionCapability(capability: Capability): void {
+    this._wiredPipeline?.lifecycle.revokeActiveCapabilities([capability]);
+  }
+
   /**
    * Spec 011 (T002): install the native typed TUI approval broker. The TUI
    * hook installs this before each chat and clears it when the TUI unmounts.
@@ -345,6 +367,41 @@ export class Agent {
   /** The workspace identity the protected policy store is keyed by. */
   getPolicyWorkspaceId(): string | null {
     return this._workspaceId;
+  }
+
+  /** The workspace root the permission pipeline was enabled for. */
+  getWorkspaceRoot(): string | null {
+    return this._workspaceRoot ?? null;
+  }
+
+  // Review round 10: /permissions revoke numbers address the list the
+  // operator last SAW. The rendered key-list is recorded when /permissions
+  // displays it and consumed by the revoke command; a change in between
+  // rejects the revoke instead of removing a shifted entry.
+  private _renderedPermissionKeys: {
+    session: string[];
+    project: string[];
+    global: string[];
+  } | null = null;
+
+  /** Record the permission lists the last /permissions render displayed. */
+  recordRenderedPermissions(view: {
+    session: string[];
+    project: string[];
+    global: string[];
+  }): void {
+    this._renderedPermissionKeys = view;
+  }
+
+  /** Take (and clear) the last rendered lists; null when never rendered. */
+  consumeRenderedPermissions(): {
+    session: string[];
+    project: string[];
+    global: string[];
+  } | null {
+    const view = this._renderedPermissionKeys;
+    this._renderedPermissionKeys = null;
+    return view;
   }
 
   private _pipelineInitError: string | undefined;
@@ -394,40 +451,55 @@ export class Agent {
     return snap;
   }
 
-  /** Revoke the capability at an index in the active policy. */
-  async revokePolicyCapability(index: number): Promise<PolicySnapshot> {
+  /**
+   * Revoke a capability from the active policy. The caller passes the
+   * capability identity and the policy version it was listed at; a policy
+   * that moved since then is rejected instead of removing a shifted index
+   * (review round 9).
+   */
+  async revokePolicyCapability(capability: Capability, expectedVersion: number): Promise<PolicySnapshot> {
     if (!this._workspaceId) {
       throw new Error('Protected policy store not configured');
     }
-    return this.casRemoveCapability(this._workspaceId, index);
+    return this.casRemoveCapability(this._workspaceId, capability, expectedVersion);
   }
 
   /**
-   * Revoke the capability at an index in the GLOBAL protected policy
-   * (spec 011 persistent choices: "Allow always" grants are written there;
-   * this is their administrative removal path).
+   * Revoke a capability from the GLOBAL protected policy (spec 011
+   * persistent choices: "Allow always" grants are written there; this is
+   * their administrative removal path).
    */
-  async revokeGlobalPolicyCapability(index: number): Promise<PolicySnapshot> {
+  async revokeGlobalPolicyCapability(capability: Capability, expectedVersion: number): Promise<PolicySnapshot> {
     if (!this._policyStore) {
       throw new Error('Protected policy store not configured');
     }
-    return this.casRemoveCapability(GLOBAL_WORKSPACE_ID, index);
+    return this.casRemoveCapability(GLOBAL_WORKSPACE_ID, capability, expectedVersion);
   }
 
   private async casRemoveCapability(
     workspaceId: string,
-    index: number,
+    capability: Capability,
+    expectedVersion: number,
   ): Promise<PolicySnapshot> {
     if (!this._policyStore || !this._workspaceId) {
       throw new Error('Protected policy store not configured');
     }
-    // P1 review fix: NaN and fractional indices must never report success.
-    if (!Number.isInteger(index) || index < 0) {
-      throw new Error(`Index ${index} is not a valid non-negative integer`);
-    }
     const current = await this._policyStore.read(workspaceId);
-    if (index >= current.policy.capabilities.length) {
-      throw new Error(`Index ${index} out of range (0..${current.policy.capabilities.length - 1})`);
+    // Review round 9: the list the operator saw may no longer describe this
+    // policy — reject the stale request instead of resolving the index
+    // against a newly loaded policy.
+    if (current.version !== expectedVersion) {
+      throw new Error(
+        `Policy changed since it was listed (version ${expectedVersion} → ${current.version}). Re-run /permissions and try again.`,
+      );
+    }
+    // Remove by identity, never by a positional index captured from another
+    // read — a concurrent writer cannot shift which capability is removed.
+    const index = current.policy.capabilities.findIndex(
+      (c) => capabilityKey(c) === capabilityKey(capability),
+    );
+    if (index === -1) {
+      throw new Error('The permission is no longer present in the policy. Re-run /permissions and try again.');
     }
     const removed = current.policy.capabilities[index];
     const next: CapabilitySet = {
@@ -631,5 +703,3 @@ export class Agent {
     this.abortController = null;
   }
 }
-
-

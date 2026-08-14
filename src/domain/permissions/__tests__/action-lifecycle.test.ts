@@ -14,8 +14,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ActionLifecycle } from "../action-lifecycle.js";
 import { PolicyEngine } from "../policy-engine.js";
+import { PolicyConflictError } from "../../../foundations/errors.js";
 import { LocalAuditStore, TerminalEventOutbox, idempotencyKey } from "../audit-recorder.js";
-import { LocalPolicyStore, GLOBAL_WORKSPACE_ID } from "../policy-store.js";
+import { LocalPolicyStore, computeWorkspaceId, GLOBAL_WORKSPACE_ID } from "../policy-store.js";
 import { buildActionLifecycle } from "../action-lifecycle-factory.js";
 import { PersistedCapabilityLedger } from "../persisted-capability-ledger.js";
 import { InMemoryArtifactStore } from "../../../capabilities/execution/in-memory-artifact-store.js";
@@ -965,6 +966,329 @@ describe("persistent approval choices (spec 011 project/global)", () => {
     });
   }
 
+  it("a project approval survives rebuilding the lifecycle for the same workspace", async () => {
+    const workspace = join(dir, "workspace");
+    const store = new LocalPolicyStore({ root: join(dir, "policies") });
+    const boundary: ExecutionBoundary = {
+      ...fakeBoundary({ output: "hello", success: true }),
+      capabilities: {
+        ...LOCAL_BACKEND,
+        capabilityKinds: [
+          "read-root",
+          "write-root",
+          "process",
+          "model-egress",
+        ],
+      },
+    };
+    const ceiling = set(
+      { kind: "read-root", root: workspace },
+      { kind: "write-root", root: workspace },
+      { kind: "process" },
+      {
+        kind: "model-egress",
+        providerClass: "openai",
+        dataClasses: ["normal", "sensitive"],
+      },
+    );
+    let prompts = 0;
+    let selectedLifetime: "action" | "session" | "project" = "project";
+    const projectBroker: ApprovalBroker = {
+      mode: "inline",
+      async request(req) {
+        prompts += 1;
+        return approved(req, "user", selectedLifetime);
+      },
+    };
+
+    const first = await buildActionLifecycle({
+      principalId: "user",
+      runId: "run-1",
+      sessionId: "session-1",
+      workspaceRoot: workspace,
+      approvalBroker: projectBroker,
+      executionBoundary: boundary,
+      deploymentCeiling: ceiling,
+      policyStore: store,
+      auditRoot: join(dir, "audit-1"),
+      modelProviderClass: "openai",
+    });
+    const firstAction = await first.analyzers.execute_shell_command(
+      { command: "echo hello" },
+      { ...first.analysisContext, toolCallId: "call-1" },
+    );
+    expect((await first.lifecycle.run(firstAction)).outcome.state).toBe("succeeded");
+    expect(prompts).toBe(1);
+
+    const second = await buildActionLifecycle({
+      principalId: "user",
+      runId: "run-2",
+      sessionId: "session-2",
+      workspaceRoot: workspace,
+      approvalBroker: projectBroker,
+      executionBoundary: boundary,
+      deploymentCeiling: ceiling,
+      policyStore: store,
+      auditRoot: join(dir, "audit-2"),
+      modelProviderClass: "openai",
+    });
+    const secondAction = await second.analyzers.execute_shell_command(
+      { command: "echo hello" },
+      { ...second.analysisContext, toolCallId: "call-2" },
+    );
+    const secondResult = await second.lifecycle.run(secondAction);
+    expect(secondResult.outcome.state).toBe("succeeded");
+    expect(prompts).toBe(1);
+
+    selectedLifetime = "session";
+    const sessionAction = await second.analyzers.execute_shell_command(
+      { command: "echo hi" },
+      { ...second.analysisContext, toolCallId: "call-3" },
+    );
+    expect((await second.lifecycle.run(sessionAction)).outcome.state).toBe("succeeded");
+    expect(prompts).toBe(2);
+
+    const repeatedSessionAction = await second.analyzers.execute_shell_command(
+      { command: "echo hi" },
+      { ...second.analysisContext, toolCallId: "call-4" },
+    );
+    expect((await second.lifecycle.run(repeatedSessionAction)).outcome.state).toBe("succeeded");
+    expect(prompts).toBe(2);
+
+    selectedLifetime = "action";
+    const onceAction = await second.analyzers.execute_shell_command(
+      { command: "echo once" },
+      { ...second.analysisContext, toolCallId: "call-5" },
+    );
+    expect((await second.lifecycle.run(onceAction)).outcome.state).toBe("succeeded");
+    expect(prompts).toBe(3);
+
+    const repeatedOnceAction = await second.analyzers.execute_shell_command(
+      { command: "echo once" },
+      { ...second.analysisContext, toolCallId: "call-6" },
+    );
+    expect((await second.lifecycle.run(repeatedOnceAction)).outcome.state).toBe("succeeded");
+    expect(prompts).toBe(4);
+
+    const third = await buildActionLifecycle({
+      principalId: "user",
+      runId: "run-3",
+      sessionId: "session-3",
+      workspaceRoot: workspace,
+      approvalBroker: projectBroker,
+      executionBoundary: boundary,
+      deploymentCeiling: ceiling,
+      policyStore: store,
+      auditRoot: join(dir, "audit-3"),
+      modelProviderClass: "openai",
+    });
+    const expiredSessionAction = await third.analyzers.execute_shell_command(
+      { command: "echo hi" },
+      { ...third.analysisContext, toolCallId: "call-7" },
+    );
+    expect((await third.lifecycle.run(expiredSessionAction)).outcome.state).toBe("succeeded");
+    expect(prompts).toBe(5);
+  });
+
+  it("re-approving a partial project snapshot succeeds and repairs it", async () => {
+    const workspace = join(dir, "workspace");
+    const store = new LocalPolicyStore({ root: join(dir, "policies") });
+    const boundary: ExecutionBoundary = {
+      ...fakeBoundary({ output: "hello", success: true }),
+      capabilities: {
+        ...LOCAL_BACKEND,
+        capabilityKinds: [
+          "read-root",
+          "write-root",
+          "process",
+          "model-egress",
+        ],
+      },
+    };
+    const ceiling = set(
+      { kind: "read-root", root: workspace },
+      { kind: "write-root", root: workspace },
+      { kind: "process" },
+      {
+        kind: "model-egress",
+        providerClass: "*",
+        dataClasses: ["normal", "sensitive"],
+      },
+    );
+    const workspaceId = computeWorkspaceId(workspace);
+    await store.compareAndSet(
+      workspaceId,
+      0,
+      set(
+        {
+          kind: "process",
+          executable: "/bin/sh",
+          argvPrefix: ["-c", "echo hello"],
+          argvExact: true,
+        },
+        { kind: "write-root", root: workspace },
+      ),
+      { kind: "human", authorityId: "legacy-bug", authenticatedBy: "test" },
+    );
+    let prompts = 0;
+    const lifecycle = await buildActionLifecycle({
+      principalId: "user",
+      runId: "repair-run",
+      sessionId: "repair-session",
+      workspaceRoot: workspace,
+      approvalBroker: {
+        mode: "inline",
+        async request(req) {
+          prompts += 1;
+          return approved(req, "user", "project");
+        },
+      },
+      executionBoundary: boundary,
+      deploymentCeiling: ceiling,
+      policyStore: store,
+      auditRoot: join(dir, "repair-audit"),
+      modelProviderClass: "openai",
+    });
+    const action = await lifecycle.analyzers.execute_shell_command(
+      { command: "echo hello" },
+      { ...lifecycle.analysisContext, toolCallId: "repair-call" },
+    );
+    const repairResult = await lifecycle.lifecycle.run(action);
+    expect(repairResult.outcome.state).toBe("succeeded");
+    expect(prompts).toBe(1);
+    expect((await store.read(workspaceId)).policy.capabilities).toContainEqual({
+      kind: "read-root",
+      root: workspace,
+    });
+  });
+
+  it("an exact global grant does not activate the deployment ceiling in a fresh workspace", async () => {
+    const workspace = join(dir, "workspace");
+    const store = new LocalPolicyStore({ root: join(dir, "policies") });
+    await store.compareAndSet(
+      GLOBAL_WORKSPACE_ID,
+      0,
+      set({
+        kind: "process",
+        executable: "/bin/sh",
+        argvPrefix: ["-c", "echo hello"],
+        argvExact: true,
+      }),
+      { kind: "human", authorityId: "global-grant", authenticatedBy: "test" },
+    );
+    const boundary: ExecutionBoundary = {
+      ...fakeBoundary({ output: "hello", success: true }),
+      capabilities: {
+        ...LOCAL_BACKEND,
+        capabilityKinds: [
+          "read-root",
+          "write-root",
+          "process",
+          "model-egress",
+        ],
+      },
+    };
+    const wired = await buildActionLifecycle({
+      principalId: "user",
+      runId: "run",
+      sessionId: "session",
+      workspaceRoot: workspace,
+      approvalBroker: {
+        mode: "inline",
+        request: async (req) => approved(req, "user", "project"),
+      },
+      executionBoundary: boundary,
+      policyStore: store,
+      auditRoot: join(dir, "audit"),
+      modelProviderClass: "openai",
+    });
+    expect(wired.activeCapabilities.capabilities).toContainEqual({
+      kind: "process",
+      executable: "/bin/sh",
+      argvPrefix: ["-c", "echo hello"],
+      argvExact: true,
+    });
+    expect(wired.activeCapabilities.capabilities).not.toContainEqual({
+      kind: "process",
+    });
+    expect(wired.activeCapabilities.capabilities).not.toContainEqual({
+      kind: "write-root",
+      root: workspace,
+    });
+    const projectAction = await wired.analyzers.execute_shell_command(
+      { command: "echo project" },
+      { ...wired.analysisContext, toolCallId: "project-call" },
+    );
+    expect((await wired.lifecycle.run(projectAction)).outcome.state).toBe("succeeded");
+    expect((await store.read(wired.workspaceId)).policy.capabilities).not.toContainEqual({
+      kind: "process",
+      executable: "/bin/sh",
+      argvPrefix: ["-c", "echo hello"],
+      argvExact: true,
+    });
+  });
+
+  it("a global shell approval follows the same exact command across workspaces", async () => {
+    const workspaceA = join(dir, "workspace-a");
+    const workspaceB = join(dir, "workspace-b");
+    const store = new LocalPolicyStore({ root: join(dir, "policies") });
+    const boundary: ExecutionBoundary = {
+      ...fakeBoundary({ output: "hello", success: true }),
+      capabilities: {
+        ...LOCAL_BACKEND,
+        capabilityKinds: [
+          "read-root",
+          "write-root",
+          "process",
+          "model-egress",
+        ],
+      },
+    };
+    let prompts = 0;
+    const broker: ApprovalBroker = {
+      mode: "inline",
+      async request(req) {
+        prompts += 1;
+        return approved(req, "user", "global");
+      },
+    };
+    const first = await buildActionLifecycle({
+      principalId: "user",
+      runId: "global-run-a",
+      sessionId: "global-session-a",
+      workspaceRoot: workspaceA,
+      approvalBroker: broker,
+      executionBoundary: boundary,
+      policyStore: store,
+      auditRoot: join(dir, "global-audit-a"),
+      modelProviderClass: "openai",
+    });
+    const firstAction = await first.analyzers.execute_shell_command(
+      { command: "echo hello" },
+      { ...first.analysisContext, toolCallId: "global-call-a" },
+    );
+    expect((await first.lifecycle.run(firstAction)).outcome.state).toBe("succeeded");
+    expect(prompts).toBe(1);
+
+    const second = await buildActionLifecycle({
+      principalId: "user",
+      runId: "global-run-b",
+      sessionId: "global-session-b",
+      workspaceRoot: workspaceB,
+      approvalBroker: broker,
+      executionBoundary: boundary,
+      policyStore: store,
+      auditRoot: join(dir, "global-audit-b"),
+      modelProviderClass: "openai",
+    });
+    const secondAction = await second.analyzers.execute_shell_command(
+      { command: "echo hello" },
+      { ...second.analysisContext, toolCallId: "global-call-b" },
+    );
+    expect((await second.lifecycle.run(secondAction)).outcome.state).toBe("succeeded");
+    expect(prompts).toBe(1);
+  });
+
   it("project approval persists to the protected store via compare-and-set and runs", async () => {
     const store = new LocalPolicyStore({ root: dir });
     const lifecycle = new ActionLifecycle({
@@ -1313,6 +1637,7 @@ describe("persistent grant WAL — concurrent flush, CAS failure, recovery (roun
     audit: LocalAuditStore;
     outbox: TerminalEventOutbox;
     lifetime: "project" | "global";
+    baseline?: Capability[];
   }): ActionLifecycle {
     return new ActionLifecycle({
       policy: new PolicyEngine("digest"),
@@ -1332,6 +1657,7 @@ describe("persistent grant WAL — concurrent flush, CAS failure, recovery (roun
       policyStore: opts.store,
       workspaceId: "ws-1",
       terminalOutbox: opts.outbox,
+      persistentBaselineCapabilities: opts.baseline,
     });
   }
 
@@ -1386,6 +1712,49 @@ describe("persistent grant WAL — concurrent flush, CAS failure, recovery (roun
     const events = await audit.listEvents();
     expect(events.filter((e) => e.state === "policy-grant-intent")).toHaveLength(1);
     expect(events.filter((e) => e.state === "policy-granted")).toHaveLength(0);
+  });
+
+  it("a retry after a concurrent writer keeps the baseline seed in the grant", async () => {
+    const audit = new LocalAuditStore({ root: dir });
+    const outbox = new TerminalEventOutbox(audit);
+    const store = new LocalPolicyStore({ root: join(dir, "policy") });
+    const baseline: Capability = { kind: "read-root", root: "/p" };
+    const originalCas = store.compareAndSet.bind(store);
+    let calls = 0;
+    store.compareAndSet = (async (...args: Parameters<LocalPolicyStore["compareAndSet"]>) => {
+      calls++;
+      if (calls === 1) {
+        // A concurrent writer installs ITS OWN policy — without the baseline
+        // seed — between the lifecycle's initial read (version 0) and its
+        // first CAS, so our baseline never lands on attempt one.
+        await originalCas(
+          "ws-1",
+          0,
+          { version: 1, capabilities: [{ kind: "commit-file", path: "/p/a.txt" }] },
+          { kind: "human", authorityId: "operator", authenticatedBy: "cli" },
+          { mutationId: "mut-other" },
+        );
+        throw new PolicyConflictError("stale policy version", {
+          workspaceId: "ws-1",
+          expectedVersion: 0,
+          actualVersion: 1,
+        });
+      }
+      return originalCas(...args);
+    }) as LocalPolicyStore["compareAndSet"];
+    const lifecycle = walLifecycle({ store, audit, outbox, lifetime: "project", baseline: [baseline] });
+    const result = await lifecycle.run(writeAction());
+    expect(result.outcome.state).toBe("succeeded");
+    const snap = await store.read("ws-1");
+    // The retry must re-add the baseline seed its own grant depends on.
+    expect(snap.policy.capabilities).toContainEqual(baseline);
+    expect(snap.policy.capabilities).toContainEqual({ kind: "commit-file", path: "/p/a.txt" });
+    // The audit trail matches the full mutation: baseline + grant.
+    await outbox.flush();
+    const events = await audit.listEvents();
+    const granted = events.find((e) => e.state === "policy-granted");
+    expect(granted?.capabilities).toContainEqual(baseline);
+    expect(granted?.capabilities).toContainEqual({ kind: "commit-file", path: "/p/a.txt" });
   });
 });
 
@@ -1753,4 +2122,3 @@ describe("multi-mutation WAL history (round 7 P0)", () => {
     expect(events.filter((e) => e.state === "policy-granted" && e.actionId === "action-A")).toHaveLength(0);
   });
 });
-

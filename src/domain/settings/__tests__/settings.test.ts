@@ -86,6 +86,7 @@ describe('settings-schema', () => {
     const permKeys = getSettingsByCategory('permissions');
     expect(permKeys).toContain('agent.permissionLevel');
     expect(permKeys).toContain('agent.autoConfirm');
+    expect(permKeys).toContain('permissions.autonomousMode');
     expect(permKeys).toContain('permissions.approvalTimeoutMs');
 
     const providerKeys = getSettingsByCategory('providers');
@@ -100,6 +101,15 @@ describe('settings-schema', () => {
     expect(schema!.min).toBe(10_000);
     expect(schema!.max).toBe(3_600_000);
     expect(getSettingEntry('permissions.approvalTimeoutMs')!.category).toBe('permissions');
+  });
+
+  it('permissions.autonomousMode is an explicit boolean startup setting', () => {
+    const schema = getSettingSchema('permissions.autonomousMode');
+    expect(schema).toMatchObject({
+      type: 'boolean',
+      default: false,
+      restartRequired: false,
+    });
   });
 
   it('ENV_VAR_MAP has entries for settings with env var overrides', () => {
@@ -202,6 +212,15 @@ describe('SettingsManager', () => {
     const mgr = createTestManager();
     await mgr.set('agent.autoConfirm', 'true');
     expect(mgr.get('agent.autoConfirm').value).toBe(true);
+  });
+
+  it('autonomous mode cannot bypass its warning through generic settings', async () => {
+    const mgr = createTestManager();
+    await expect(mgr.set('permissions.autonomousMode', 'true')).rejects.toThrow(
+      '/permissions autonomous on',
+    );
+    await mgr.setConfirmedAutonomousMode(true);
+    expect(mgr.get('permissions.autonomousMode').value).toBe(true);
   });
 
   it('set() rejects unknown keys', async () => {

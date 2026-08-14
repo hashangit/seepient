@@ -216,6 +216,31 @@ describe("bounded shape validation (backend enforcement)", () => {
     expect(options!.map((o) => o.kind)).toEqual(["exact"]);
   });
 
+  it("never offers a bounded option for command wrappers (review round 10)", () => {
+    // env/sudo/xargs/nohup/timeout run a FOLLOWING command: their first argv
+    // token is not the real command, so an argv[0] matcher still permits
+    // arbitrary execution. ssh runs arbitrary remote commands on the pinned
+    // host; find -exec and awk system() embed execution escape hatches.
+    const wrappers = [
+      "/usr/bin/env",    // env python …
+      "/usr/bin/sudo",   // sudo apt …
+      "/usr/bin/xargs",  // xargs rm …
+      "/usr/bin/nohup",
+      "/usr/bin/timeout", // timeout 30 <anything>
+      "/usr/bin/nice",
+      "/usr/bin/ssh",    // ssh host <anything>
+      "/usr/bin/find",   // find . -exec <anything>
+      "/usr/bin/awk",    // awk '… system(…)'
+    ];
+    for (const executable of wrappers) {
+      const missing = [
+        { kind: "process" as const, executable, argvPrefix: ["python"] },
+      ];
+      const options = build(missing);
+      expect(options!.map((o) => o.kind), executable).toEqual(["exact"]);
+    }
+  });
+
   it("keeps the NARROWEST candidate when bounded candidates are comparable", () => {
     // Two widening shapes are representable: [git status, read-file exact]
     // and [git status, read-root /proj]. The read-root candidate COVERS the
