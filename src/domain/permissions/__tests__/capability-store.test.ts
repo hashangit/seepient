@@ -122,6 +122,84 @@ describe("monotonic intersection (T106 property)", () => {
     expect(eff.capabilities[0]).toMatchObject({ path: "/p/a.txt" });
   });
 
+  it("effectiveCapabilities retains an exact process grant under broad ceilings", () => {
+    const broad = set({ kind: "process" });
+    const exact = set({
+      kind: "process",
+      executable: "/bin/sh",
+      argvPrefix: ["-c", "echo hello"],
+      argvExact: true,
+    });
+    expect(effectiveCapabilities(broad, exact, broad, exact)).toEqual(exact);
+  });
+
+  it("network-destination: any-port ceiling plus port grant keeps only the port", () => {
+    const anyPort = set({ kind: "network-destination", scheme: "https", host: "api.example.com" });
+    const port443 = set({
+      kind: "network-destination",
+      scheme: "https",
+      host: "api.example.com",
+      port: 443,
+    });
+    const eff = effectiveCapabilities(anyPort, port443, anyPort, port443);
+    expect(eff.capabilities).toHaveLength(1);
+    expect(eff.capabilities[0]).toEqual({
+      kind: "network-destination",
+      scheme: "https",
+      host: "api.example.com",
+      port: 443,
+    });
+    // The any-port candidate must not survive — it would grant other ports.
+    expect(
+      setCovers(eff, {
+        kind: "network-destination",
+        scheme: "https",
+        host: "api.example.com",
+        port: 8443,
+      }),
+    ).toBe(false);
+  });
+
+  it("generation overflow fails closed for that kind (review round 9)", () => {
+    // 9 distinct process caps per layer → 9^4 = 6561 tuples > bound. The
+    // kind must contribute NOTHING (deny) rather than fall back to
+    // layer-sourced candidates that could carry wildcard dimensions.
+    const caps = Array.from({ length: 9 }, (_, i) => ({
+      kind: "process" as const,
+      executable: `/bin/x${i}`,
+    }));
+    const layer = set(...caps);
+    const eff = effectiveCapabilities(layer, layer, layer, layer);
+    expect(eff.capabilities.filter((c) => c.kind === "process")).toHaveLength(0);
+  });
+
+  it("model-egress: independently constrained fields combine into one intersection", () => {
+    const provider = set({ kind: "model-egress", providerClass: "anthropic", dataClasses: ["*"] });
+    const classes = set({ kind: "model-egress", providerClass: "*", dataClasses: ["user-context"] });
+    const eff = effectiveCapabilities(provider, classes, provider, classes);
+    expect(eff.capabilities).toHaveLength(1);
+    expect(eff.capabilities[0]).toEqual({
+      kind: "model-egress",
+      providerClass: "anthropic",
+      dataClasses: ["user-context"],
+    });
+    // Neither the provider-only nor the class-only candidate may survive.
+    expect(
+      setCovers(eff, {
+        kind: "model-egress",
+        providerClass: "anthropic",
+        dataClasses: ["secret"],
+      }),
+    ).toBe(false);
+    expect(
+      setCovers(eff, {
+        kind: "model-egress",
+        providerClass: "openai",
+        dataClasses: ["user-context"],
+      }),
+    ).toBe(false);
+  });
+
   it("property: intersection result size ≤ inner size", () => {
     // Randomized property check (deterministic seed via fixed inputs).
     const outer = set({ kind: "read-root", root: "/a" });
@@ -257,5 +335,23 @@ describe("path-segment containment (reviewer fix #6)", () => {
     }];
     expect(isDeniedByRule(rules, "filesystem-read", "/etc/security/passwords")?.ruleId).toBeUndefined();
     expect(isDeniedByRule(rules, "filesystem-read", "/etc/secure/key")?.ruleId).toBe("r1");
+  });
+});
+
+describe("exact vs prefix argv coverage (P0 review fix)", () => {
+  it("an EXACT process capability does not cover requests with extra trailing args", () => {
+    const exact = { kind: "process" as const, executable: "/bin/rm", argvPrefix: ["safe.txt"], argvExact: true };
+    expect(covers(exact, { kind: "process", executable: "/bin/rm", argvPrefix: ["safe.txt"], argvExact: true })).toBe(true);
+    // The exact approval must NOT authorize "rm safe.txt other.txt".
+    expect(covers(exact, { kind: "process", executable: "/bin/rm", argvPrefix: ["safe.txt", "other.txt"], argvExact: true })).toBe(false);
+    // A shorter inner argv is not covered either.
+    expect(covers(exact, { kind: "process", executable: "/bin/rm", argvPrefix: [], argvExact: true })).toBe(false);
+  });
+
+  it("a BOUNDED prefix capability still covers exact requests with more args", () => {
+    const bounded = { kind: "process" as const, executable: "/usr/bin/git", argvPrefix: ["status"] };
+    expect(covers(bounded, { kind: "process", executable: "/usr/bin/git", argvPrefix: ["status", "--porcelain"], argvExact: true })).toBe(true);
+    // ...but not a different subcommand.
+    expect(covers(bounded, { kind: "process", executable: "/usr/bin/git", argvPrefix: ["log"], argvExact: true })).toBe(false);
   });
 });

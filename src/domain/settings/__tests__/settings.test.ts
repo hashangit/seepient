@@ -86,15 +86,37 @@ describe('settings-schema', () => {
     const permKeys = getSettingsByCategory('permissions');
     expect(permKeys).toContain('agent.permissionLevel');
     expect(permKeys).toContain('agent.autoConfirm');
+    expect(permKeys).toContain('permissions.autonomousMode');
+    expect(permKeys).toContain('permissions.approvalTimeoutMs');
 
     const providerKeys = getSettingsByCategory('providers');
     expect(providerKeys.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it('permissions.approvalTimeoutMs defaults to ten minutes and validates bounds', () => {
+    const schema = getSettingSchema('permissions.approvalTimeoutMs');
+    expect(schema).toBeDefined();
+    expect(schema!.type).toBe('number');
+    expect(schema!.default).toBe(600_000);
+    expect(schema!.min).toBe(10_000);
+    expect(schema!.max).toBe(3_600_000);
+    expect(getSettingEntry('permissions.approvalTimeoutMs')!.category).toBe('permissions');
+  });
+
+  it('permissions.autonomousMode is an explicit boolean startup setting', () => {
+    const schema = getSettingSchema('permissions.autonomousMode');
+    expect(schema).toMatchObject({
+      type: 'boolean',
+      default: false,
+      restartRequired: false,
+    });
   });
 
   it('ENV_VAR_MAP has entries for settings with env var overrides', () => {
     expect(ENV_VAR_MAP.get('providers.openai.apiKey')).toBe('OPENAI_API_KEY');
     expect(ENV_VAR_MAP.get('smtp.host')).toBe('SMTP_HOST');
     expect(ENV_VAR_MAP.get('agent.permissionLevel')).toBe('SEEPIENT_PERMISSION');
+    expect(ENV_VAR_MAP.get('permissions.approvalTimeoutMs')).toBe('SEEPIENT_APPROVAL_TIMEOUT_MS');
   });
 
   it('provider dot-keys map to correct AppConfig paths', () => {
@@ -190,6 +212,15 @@ describe('SettingsManager', () => {
     const mgr = createTestManager();
     await mgr.set('agent.autoConfirm', 'true');
     expect(mgr.get('agent.autoConfirm').value).toBe(true);
+  });
+
+  it('autonomous mode cannot bypass its warning through generic settings', async () => {
+    const mgr = createTestManager();
+    await expect(mgr.set('permissions.autonomousMode', 'true')).rejects.toThrow(
+      '/permissions autonomous on',
+    );
+    await mgr.setConfirmedAutonomousMode(true);
+    expect(mgr.get('permissions.autonomousMode').value).toBe(true);
   });
 
   it('set() rejects unknown keys', async () => {

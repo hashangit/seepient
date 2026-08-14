@@ -53,11 +53,31 @@ export function legacyApproveToolToBroker(
     const approved = typeof decision === "boolean" ? decision : decision.approved;
     const scope = typeof decision === "object" ? decision.scope : undefined;
     if (approved) {
+      // Spec 011 (T022): a legacy approval must bind to the request's
+      // narrowest policy-issued option (Domain orders narrowest first) and an
+      // offered lifetime; it may not invent an option or return an
+      // option-less approval. No option → approval-unavailable.
+      const option = req.approvalOptions[0];
+      if (!option) {
+        return {
+          approved: false,
+          requestId: req.requestId,
+          actionDigest: req.actionDigest,
+          actorId: "legacy-adapter",
+          reason: "approval-unavailable: request has no representable option",
+          decidedAt: Date.now(),
+        };
+      }
+      const wanted = scopeToLifetime(scope);
+      const lifetime = option.supportedLifetimes.includes(wanted)
+        ? wanted
+        : (option.supportedLifetimes[0] ?? "action");
       return {
         approved: true,
         requestId: req.requestId,
         actionDigest: req.actionDigest,
-        lifetime: scopeToLifetime(scope),
+        optionId: option.optionId,
+        lifetime,
         actorId: "legacy-adapter",
         decidedAt: Date.now(),
       };

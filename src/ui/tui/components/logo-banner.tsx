@@ -12,7 +12,7 @@ const WORDMARK = 'Seepient Agent';
 // figlet font (e.g. 'Small Block' = 25 cols pixelated, 'Delta Corps Priest 1' =
 // ~102 cols wide). figlet has no scale option, so the font IS the size.
 const FONT = 'ANSI Compact';
-const VERSION = '0.3.0'; // keep in sync with package.json
+const VERSION = '0.4.3'; // keep in sync with package.json
 
 // Render once at module load; rstrip each line to drop invisible trailing spaces.
 const ART_LINES = figlet

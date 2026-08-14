@@ -183,6 +183,22 @@ export interface PolicySnapshot {
   version: number;
   policyDigest: string;
   policy: CapabilitySet;
+  /** Forensic record (P0 review fix): who performed the last mutation and
+   *  when. Populated by LocalPolicyStore on every compare-and-set. */
+  grantedBy?: import("./permission-policy.js").DecisionAuthority;
+  grantedAt?: number;
+  /**
+   * STORE-OWNED WAL metadata (round 8 P0): the append-only per-mutation
+   * journal and the latest transaction marker live on the snapshot, never
+   * in the caller-supplied CapabilitySet. The store appends
+   * `{ mutationId, version }` for every compare-and-set that carries a
+   * mutation (persistent inline grants); administrative mutations without
+   * one PRESERVE the existing history. Callers cannot remove or rewrite
+   * historical entries — the history is derived from the current snapshot
+   * plus the mutation argument, and is covered by the policy digest.
+   */
+  mutationId?: string;
+  mutationHistory?: Array<{ mutationId: string; version: number }>;
 }
 
 /**
@@ -200,6 +216,13 @@ export interface PolicyStore {
     expectedVersion: number,
     next: CapabilitySet,
     actor: DecisionAuthority,
+    /**
+     * Optional transaction metadata (round 8 P0): when provided, the store
+     * appends `{ mutationId, version }` to the snapshot's OWN append-only
+     * history in the same atomic write. Administrative mutations omit this
+     * and thereby preserve (never erase) the history of earlier grants.
+     */
+    mutation?: { mutationId: string },
   ): Promise<PolicySnapshot>;
 }
 
@@ -210,6 +233,8 @@ export type ActionState =
   | "denied"
   | "awaiting-approval"
   | "approved"
+  | "policy-grant-intent"
+  | "policy-granted"
   | "approval-denied"
   | "approval-expired"
   | "dispatched"
@@ -230,6 +255,29 @@ export interface ActionAuditEvent {
   envelopeId?: string;
   reason?: PermissionDenyReason;
   backend?: import("./execution-boundary.js").ExecutionBackendCapabilities["backend"];
+  /** Forensic fields for approvals (spec 011): the selected option/lifetime,
+   *  the granting actor, the granted capability set, and — for persistent
+   *  project/global choices — the protected-policy versions before and after
+   *  the compare-and-set mutation and the workspace the grant targets.
+   *  The pre-CAS `approved` event carries `policyBeforeVersion`; the
+   *  post-CAS `policy-granted` event carries `policyAfterVersion` and the
+   *  granted workspace. This makes "who granted what, when, at which policy
+   *  version" durably reconstructable even if a later dispatch fails. */
+  optionId?: string;
+  lifetime?: "action" | "run" | "session" | "project" | "global";
+  capabilities?: import("./permission-policy.js").Capability[];
+  actorId?: string;
+  policyBeforeVersion?: number;
+  policyAfterVersion?: number;
+  grantedWorkspaceId?: string;
+  /**
+   * The atomic transaction marker stored in the policy snapshot by the same
+   * compare-and-set that installed the grant (rounds 6-8 P0). Startup
+   * reconciliation requires the marker (or the snapshot's append-only
+   * mutation history) to prove the intent's mutation ran before treating
+   * the intent as committed.
+   */
+  mutationId?: string;
 }
 
 /**

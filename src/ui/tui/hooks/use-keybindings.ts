@@ -12,6 +12,17 @@ export interface KeybindingHandlers {
   onEscapeWidget?: () => void;
 }
 
+export interface KeybindingOptions {
+  enabled: boolean;
+  isRunning: boolean;
+  /**
+   * True while a permission prompt is open. Escape then belongs to the
+   * prompt (deny the request, spec 011 FR-015) and must not also abort the
+   * whole run; Ctrl+C remains the hard abort.
+   */
+  promptPending?: boolean;
+}
+
 /**
  * Global keybindings. Disabled while a modal overlay is open (`enabled: false`)
  * so the overlay owns input. Ctrl+C aborts mid-run or exits when idle.
@@ -19,7 +30,7 @@ export interface KeybindingHandlers {
  */
 export function useKeybindings(
   handlers: KeybindingHandlers,
-  opts: { enabled: boolean; isRunning: boolean },
+  opts: KeybindingOptions,
 ): void {
   useInput((input, key) => {
     if (!opts.enabled) return;
@@ -34,6 +45,10 @@ export function useKeybindings(
       return;
     }
     if (key.escape) {
+      // The permission prompt's own useInput receives the same keypress and
+      // denies the request; a second deny-and-abort here would kill the
+      // run (review round 10, FR-015).
+      if (opts.promptPending) return;
       if (!opts.isRunning && handlers.onEscapeWidget) handlers.onEscapeWidget();
       else handlers.onAbort();
     }

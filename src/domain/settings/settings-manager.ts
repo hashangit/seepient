@@ -130,6 +130,18 @@ export class SettingsManager {
   // ── Write ──────────────────────────────────────────────────────────────
 
   async set(dotKey: string, rawValue: string): Promise<void> {
+    return this.setValue(dotKey, rawValue, false);
+  }
+
+  /**
+   * Trusted write used only after `/permissions autonomous on --confirm` has
+   * displayed and received the dedicated high-risk confirmation.
+   */
+  async setConfirmedAutonomousMode(enabled: boolean): Promise<void> {
+    return this.setValue('permissions.autonomousMode', String(enabled), true);
+  }
+
+  private async setValue(dotKey: string, rawValue: string, confirmed: boolean): Promise<void> {
     const mapEntry = SETTINGS_MAP.get(dotKey);
     if (!mapEntry) {
       throw new SettingsError(`Unknown setting: ${dotKey}. Use /settings list to see available keys.`, 'SETTINGS_INVALID_KEY');
@@ -137,6 +149,12 @@ export class SettingsManager {
 
     const schema = SETTINGS_SCHEMA.get(dotKey);
     const value = this.validateValue(dotKey, rawValue, schema);
+    if (dotKey === 'permissions.autonomousMode' && value === true && !confirmed) {
+      throw new SettingsError(
+        'Autonomous mode can only be enabled through /permissions autonomous on, which displays the required warning.',
+        'SETTINGS_VALIDATION_FAILED',
+      );
+    }
 
     // Determine write target
     const writePath = this.resolveWriteTarget(dotKey);
@@ -150,10 +168,13 @@ export class SettingsManager {
       console.warn(`Note: This key is overridden by env var ${envVar}. Saving to config. The env var takes precedence until unset.`);
     }
 
-    // Read current file, apply change, write
+    // Read current file, apply change, write. Autonomous mode must not
+    // silently change in-memory only: the CLI command rolls back the live
+    // lifecycle when persistence fails (review round 9), so its writes are
+    // strict.
     const fileConfig = await this.readConfigFile(writePath);
     this.applyValueToConfig(fileConfig, mapEntry.configPath, value);
-    await this.persist(writePath, fileConfig);
+    await this.persist(writePath, fileConfig, dotKey === 'permissions.autonomousMode');
 
     // Update in-memory
     this.applyValueToConfig(this.config, mapEntry.configPath, value);
@@ -332,7 +353,7 @@ export class SettingsManager {
     }
   }
 
-  private async persist(configPath: string, data: Record<string, any>): Promise<void> {
+  private async persist(configPath: string, data: Record<string, any>, strict = false): Promise<void> {
     try {
       const dir = path.dirname(configPath);
       await fs.mkdir(dir, { recursive: true });
@@ -347,6 +368,7 @@ export class SettingsManager {
       await fs.writeFile(tmpPath, JSON.stringify(data, null, 2), { mode: 0o600 });
       await fs.rename(tmpPath, configPath);
     } catch (e: any) {
+      if (strict) throw e;
       console.warn(`Warning: could not save to ${configPath}: ${e.message}. Change applied in-memory only.`);
     }
   }

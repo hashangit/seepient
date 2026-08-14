@@ -1,10 +1,190 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { useTheme } from '../hooks/use-theme.js';
 import { extractPattern } from '../../../foundations/grant-pattern.js';
+import type {
+  PermissionRequest,
+  TuiApprovalSelection,
+} from '../../../foundations/contracts/permission-policy.js';
 import type { ApprovalContext, ApprovalDecision, GrantScope } from '../../../foundations/types.js';
 
-interface PermissionPromptProps {
+// ══════════════════════════════════════════════════════════════════════════
+// Native (spec 011) prompt — typed PermissionRequest flow
+// ══════════════════════════════════════════════════════════════════════════
+
+/** Pure: move within the visible list without wrapping (FR-014). */
+export function clampMove(idx: number, delta: 1 | -1, size: number): number {
+  if (size <= 1) return 0;
+  return Math.min(Math.max(idx + delta, 0), size - 1);
+}
+
+interface NativePermissionPromptProps {
+  /** Immutable policy-issued request; the prompt renders it as-is. */
+  request: PermissionRequest;
+  /** Called once with the transient selection or denial. */
+  onResolve: (selection: TuiApprovalSelection) => void;
+}
+
+/**
+ * Native inline tool-approval widget (spec 011, T028). ONE screen of
+ * complete Domain-issued choices — the UI never combines scope and lifetime
+ * itself (FR-006). Each row is a finished decision (exact/action,
+ * exact/session, or bounded/session); Enter approves the focused row, Escape
+ * and `q` deny.
+ *
+ * Focus begins on the least-privilege choice WITHOUT pre-approving it
+ * (FR-011); one explicit Enter is required. The component owns ONLY
+ * transient focus state; it emits `{ approved: true, choiceId }` and never
+ * invents authority from raw tool arguments.
+ */
+export function PermissionPrompt({ request, onResolve }: NativePermissionPromptProps) {
+  const theme = useTheme();
+  const choices = request.approvalChoices;
+  // FR-011: focus begins on the Domain-marked Recommended (least-privileged)
+  // choice — looked up, not assumed to be index 0 — WITHOUT pre-approving it.
+  // Both the display state and the submit-path ref start there so the first
+  // Enter can never submit a different row than the one highlighted.
+  const recommendedIndex = choices.findIndex((c) => c.recommended);
+  const initialFocus = recommendedIndex >= 0 ? recommendedIndex : 0;
+  const [focus, setFocusState] = useState(initialFocus);
+  const focusRef = useRef(initialFocus);
+  const resolvedRef = useRef(false);
+  const setFocus = (i: number): void => {
+    focusRef.current = i;
+    setFocusState(i);
+  };
+
+  // Defensive: a request without Domain choices is not actionable. Deny as
+  // unavailable immediately rather than hanging until the broker deadline
+  // (FR-001).
+  useEffect(() => {
+    if (choices.length === 0 && !resolvedRef.current) {
+      resolvedRef.current = true;
+      onResolve({ approved: false, reason: "approval-unavailable" });
+    }
+  }, [choices.length, onResolve]);
+
+  // CLAUDE.md §6: the useInput handler is long-lived across renders, so it
+  // must read CURRENT values through refs — a stale closure could submit the
+  // wrong choice under rapid keypresses.
+  useInput((input, key) => {
+    if (resolvedRef.current) return;
+    const n = choices.length;
+    if (key.upArrow) {
+      setFocus(clampMove(focusRef.current, -1, n));
+    } else if (key.downArrow) {
+      setFocus(clampMove(focusRef.current, 1, n));
+    } else if (key.return) {
+      const choice = choices[Math.min(Math.max(focusRef.current, 0), n - 1)];
+      if (choice) {
+        resolvedRef.current = true;
+        onResolve({ approved: true, choiceId: choice.choiceId });
+      }
+    } else if (key.escape || input === "q") {
+      resolvedRef.current = true;
+      onResolve({ approved: false, reason: "user-denied" });
+    } else if (/^[0-9]$/.test(input)) {
+      const idx = parseInt(input, 10) - 1;
+      if (idx >= 0 && idx < n) setFocus(idx);
+    }
+    // Unsupported keys have no effect.
+  });
+
+  if (choices.length === 0) {
+    return (
+      <Box flexDirection="column" borderStyle="round" borderColor={theme.yellow} paddingX={1}>
+        <Text color={theme.yellow} bold>◆ </Text>
+        <Text color={theme.fg}>Permission needed</Text>
+        <Text color={theme.fgDim}>
+          {"  No approval choices are available for this request. It will be denied as unavailable."}
+        </Text>
+      </Box>
+    );
+  }
+
+  const focused = choices[Math.min(Math.max(focus, 0), choices.length - 1)];
+
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor={theme.yellow} paddingX={1}>
+      {/* Title row — request identity + action summary (tamper-proof). */}
+      <Box>
+        <Text color={theme.yellow} bold>◆ </Text>
+        <Text color={theme.fg} bold>Permission needed</Text>
+        <Text color={theme.fgDim}> ── {request.action.title}</Text>
+      </Box>
+      <Box>
+        <Text color={theme.cyan}>  Request </Text>
+        <Text color={theme.fg}>{request.requestId.slice(0, 8)}…</Text>
+        <Text color={theme.fgDim}>
+          {' '}· expires {new Date(request.expiresAt).toLocaleTimeString()}
+        </Text>
+      </Box>
+      {request.action.summary ? (
+        <Box>
+          <Text color={theme.cyan}>  Summary </Text>
+          <Text color={theme.fg}>{truncate(request.action.summary, 100)}</Text>
+        </Box>
+      ) : null}
+
+      {/* One list of complete choices — only what Domain issued. */}
+      <Box marginTop={1}>
+        <Text color={theme.cyan}>  Choose one:</Text>
+      </Box>
+      <Box flexDirection="column">
+        {choices.map((choice, i) => {
+          const isFocus = i === focus;
+          const accent = theme.green;
+          return (
+            <Box
+              key={choice.choiceId}
+              borderStyle={isFocus ? "round" : "single"}
+              borderColor={isFocus ? accent : theme.fgGutter}
+            >
+              <Text color={accent} bold>{i + 1} </Text>
+              <Text bold color={isFocus ? accent : theme.fg}>
+                {isFocus ? "▸ " : "  "}
+                {choice.title}
+              </Text>
+              <Text color={theme.fgDim}> — {choice.description}</Text>
+              {choice.recommended ? (
+                <Text color={theme.fgDim}>  (recommended)</Text>
+              ) : null}
+            </Box>
+          );
+        })}
+      </Box>
+
+      {/* Full authority delta of the FOCUSED choice, before submission (FR-016). */}
+      <Box marginTop={1}>
+        <Text color={theme.cyan}>  What this allows </Text>
+      </Box>
+      <Box flexDirection="column" paddingLeft={2}>
+        {focused.authoritySummary.length > 0 ? (
+          focused.authoritySummary.map((line) => (
+            <Text key={line} color={theme.fg}>• {line}</Text>
+          ))
+        ) : (
+          <Text color={theme.fgDim}>— no additional authority</Text>
+        )}
+      </Box>
+      <Box>
+        <Text color={theme.fgDim}>  Remembered: {focused.description}</Text>
+      </Box>
+
+      <Box marginTop={1}>
+        <Text color={theme.fgDim}>
+          {' '}↑↓ move · 1-{choices.length} focus · enter approve · esc/q deny
+        </Text>
+      </Box>
+    </Box>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Legacy (flag-off) prompt — unchanged behavior, not part of 011 evidence
+// ══════════════════════════════════════════════════════════════════════════
+
+interface LegacyPermissionPromptProps {
   toolName: string;
   args: Record<string, unknown>;
   /** LLM-authored gate context (title/description + per-scope implications). */
@@ -43,13 +223,13 @@ export function cycleSelection(idx: number, delta: 1 | -1): number {
 function defaultImplication(scope: GrantScope | 'once', pattern?: string): string {
   const toolRef = pattern ? `"${pattern}"` : 'this action';
   switch (scope) {
-    case 'once': 
+    case 'once':
       return `Run ${toolRef} this one time, then ask again next time`;
-    case 'session': 
+    case 'session':
       return `Remember for now: auto-run ${toolRef} until you restart the app`;
-    case 'project': 
+    case 'project':
       return `Trust in this project: auto-run ${toolRef} anywhere here (revoke in /permissions)`;
-    case 'global': 
+    case 'global':
       return `Trust everywhere: auto-run ${toolRef} in any project (revoke in /permissions)`;
   }
 }
@@ -63,13 +243,11 @@ function formatActual(toolName: string, args: Record<string, unknown>): string {
 }
 
 /**
- * Inline tool-approval widget rendered in the feed while the agent is paused
- * on `approveTool`. Shows the LLM-authored title + description, the actual
- * command/path (tamper-proof), and five bordered option rows — one per
- * scope — each with its implication. Stays within Ink's input handling — no
- * stdin mode switch.
+ * Legacy inline tool-approval widget — the `--permission-pipeline`-off
+ * fallback. Kept byte-for-byte behavior; it is not part of 011's acceptance
+ * evidence (spec 011 scope & boundary).
  */
-export function PermissionPrompt({ toolName, args, approvalContext, onResolve }: PermissionPromptProps) {
+export function LegacyPermissionPrompt({ toolName, args, approvalContext, onResolve }: LegacyPermissionPromptProps) {
   const theme = useTheme();
   const [selected, setSelected] = useState(0);
 

@@ -13,10 +13,14 @@
  * applies immutable denies and backend support, then intersects the ceiling,
  * principal, baseline, and active capabilities.
  *
- * Pure (no I/O). Property-testable.
+ * Pure (no I/O) except best-effort synchronous realpath canonicalization of
+ * workspace containment checks (raw-path fallback when a target does not
+ * resolve). Property-testable.
  */
 import type {
   ApprovalBroker,
+  ApprovalChoice,
+  ApprovalOption,
   Capability,
   CapabilityEnvelope,
   CapabilityLifetime,
@@ -40,6 +44,32 @@ import {
   setCovers,
 } from "./capability-store.js";
 import type { PersistedCapabilityLedger } from "./persisted-capability-ledger.js";
+import { buildApprovalChoices, buildApprovalOptions } from "./approval-options.js";
+import { realpathSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
+
+/**
+ * Canonicalize a path via realpathSync; fall back to the raw path when it
+ * does not resolve (e.g. a file that does not exist yet). ESM has no
+ * `require`, so an inline `require("node:fs")` here was dead code that
+ * silently skipped canonicalization (review round 10).
+ */
+const canonicalPath = (p: string): string => {
+  try {
+    return realpathSync(p);
+  } catch {
+    // A not-yet-existing target keeps its basename but inherits the
+    // canonical parent, so a canonicalized root still prefix-matches
+    // (macOS /var -> /private/var).
+    const parent = dirname(p);
+    if (parent === p) return p;
+    try {
+      return join(realpathSync(parent), basename(p));
+    } catch {
+      return p;
+    }
+  }
+};
 
 /** Trace helpers keep the policy layer auditable without secret values. */
 function emptyTrace(policyDigest: string): PolicyTrace {
@@ -86,18 +116,40 @@ function buildPermissionRequest(
   action: PreparedToolAction,
   missing: Capability[],
   context: PolicyContext,
+  approvalOptions: ApprovalOption[],
+  approvalChoices: ApprovalChoice[],
 ): PermissionRequest {
   const now = Date.now();
-  const deadlineMs = context.interaction.deadlineMs ?? 30_000;
+  // Spec 011: the request expiry IS the approval deadline. The factory
+  // supplies the configured value (`permissions.approvalTimeoutMs`, default
+  // ten minutes); this fallback only guards callers that build contexts by
+  // hand.
+  const deadlineMs = context.interaction.deadlineMs ?? 600_000;
+  // Spec 011: the request keeps the stable session identity so the bridge can
+  // offer `session`; `session` is offered only when that identity exists.
+  // Persistent `project`/`global` choices require a workspace identity
+  // (interactive CLI surfaces) — they are recorded through the protected
+  // policy store, never grants files.
+  const sessionId = action.sessionId ?? context.sessionId;
+  const workspaceId = context.workspaceId;
   return {
     requestId: generateId(),
     principalId: action.principalId,
     runId: action.runId,
+    sessionId,
+    workspaceId,
     toolCallId: action.toolCallId,
     actionDigest: action.actionDigest,
     action: action.display,
     requestedCapabilities: missing,
-    offeredLifetimes: ["action", "run"],
+    approvalOptions,
+    approvalChoices,
+    offeredLifetimes: [
+      "action",
+      "run",
+      ...(sessionId ? (["session"] as const) : []),
+      ...(workspaceId ? (["project", "global"] as const) : []),
+    ],
     createdAt: now,
     expiresAt: now + deadlineMs,
   };
@@ -241,27 +293,8 @@ export class PolicyEngine implements PolicyEngineContract {
       return { decision: "allow", envelope, trace };
     }
 
-    // 5. needs-approval — only if the interaction mode can represent it.
-    if (context.interaction.mode === "none") {
-      // Headless surfaces: typed denial immediately, never prompt.
-      pushLayer(trace, "backend", "deny");
-      return deny(
-        "approval-unavailable",
-        "Headless surface: missing capability and approval is unavailable",
-        trace,
-      );
-    }
-
-    if (context.approvalMode === "never") {
-      pushLayer(trace, "backend", "deny");
-      return deny(
-        "approval-unavailable",
-        "Approval mode is 'never' and a capability is missing",
-        trace,
-      );
-    }
-
-    // The missing capabilities must be within the DEPLOYMENT ceiling. The
+    // Missing capabilities must be within the DEPLOYMENT ceiling before they
+    // can be approved by a person or admitted by autonomous mode. The
     // deployment ceiling defines what users MAY approve. Principal policy is
     // what /permissions pre-authorizes; an empty principal means "must approve
     // each time," NOT "can never approve." So we check deployment only here.
@@ -276,27 +309,13 @@ export class PolicyEngine implements PolicyEngineContract {
       // Host callbacks registered in the tool registry are within operator ceiling
       if (c.kind === "trusted-host") return true;
       if (context.approvalMode !== "never" && context.workspaceRoot) {
-        let root = context.workspaceRoot;
-        try {
-          const { realpathSync } = require("node:fs");
-          if (root) root = realpathSync(root);
-        } catch {}
-        if ("path" in c && typeof c.path === "string") {
-          let p = c.path;
-          try {
-            const { realpathSync } = require("node:fs");
-            if (p) p = realpathSync(p);
-          } catch {}
-          return p === root || p.startsWith(root.endsWith("/") ? root : root + "/");
-        }
-        if ("root" in c && typeof c.root === "string") {
-          let r = c.root;
-          try {
-            const { realpathSync } = require("node:fs");
-            if (r) r = realpathSync(r);
-          } catch {}
-          return r === root || r.startsWith(root.endsWith("/") ? root : root + "/");
-        }
+        const root = canonicalPath(context.workspaceRoot);
+        const withinRoot = (target: string): boolean => {
+          const t = canonicalPath(target);
+          return t === root || t.startsWith(root.endsWith("/") ? root : root + "/");
+        };
+        if ("path" in c && typeof c.path === "string") return withinRoot(c.path);
+        if ("root" in c && typeof c.root === "string") return withinRoot(c.root);
       }
       return false;
     });
@@ -323,12 +342,103 @@ export class PolicyEngine implements PolicyEngineContract {
     }
 
     pushLayer(trace, "backend", "allow");
-    const proposedEnvelope = buildEnvelope(action, missing, this.policyDigest);
-    const request = buildPermissionRequest(action, missing, context);
+    // Spec 011 (FR-019): containment preflight — a process action can only be
+    // presented for approval when the backend can actually isolate it OR the
+    // operator explicitly opted into uncontained execution. If neither is
+    // true, fail BEFORE the prompt with the actionable setup message instead
+    // of letting every approved action fail at dispatch (product acceptance).
+    if (
+      missing.some((c) => c.kind === "process") &&
+      !context.backendCapabilities.environmentIsolation &&
+      !context.backendCapabilities.uncontainedOptIn
+    ) {
+      pushLayer(trace, "backend", "deny");
+      return deny(
+        "approval-unavailable",
+        "Process containment is not available on this system. Install the platform sandbox (macOS: sandbox-exec is bundled with macOS; Linux: install Bubblewrap, e.g. `apt install bubblewrap` or `brew install bwrap`) or run with SEEPIENT_UNCONTAINED=1 to explicitly disable containment.",
+        trace,
+      );
+    }
+
+    // Autonomous mode removes the human approval round-trip, not the safety
+    // boundary. Immutable denies, the deployment ceiling, backend capability
+    // support, and process containment were all enforced above. The issued
+    // envelope is still exact to this prepared action and action-scoped.
+    if (context.approvalMode === "autonomous") {
+      return {
+        decision: "allow",
+        envelope: buildEnvelope(action, required, this.policyDigest),
+        trace,
+      };
+    }
+
+    // 5. needs-approval — only if the interaction mode can represent it.
+    if (context.interaction.mode === "none") {
+      // Headless surfaces: typed denial immediately, never prompt.
+      pushLayer(trace, "backend", "deny");
+      return deny(
+        "approval-unavailable",
+        "Headless surface: missing capability and approval is unavailable",
+        trace,
+      );
+    }
+
+    if (context.approvalMode === "never") {
+      pushLayer(trace, "backend", "deny");
+      return deny(
+        "approval-unavailable",
+        "Approval mode is 'never' and a capability is missing",
+        trace,
+      );
+    }
+    // Spec 011 (T005): the request carries policy-issued exact/bounded options
+    // and complete choices. If filtering leaves no representable option or
+    // choice, deny as unavailable rather than sending an empty prompt
+    // (FR-001).
+    const sessionId = action.sessionId ?? context.sessionId;
+    const offeredLifetimes: Array<"action" | "run" | "session" | "project" | "global"> = [
+      "action",
+      "run",
+      ...(sessionId ? (["session"] as const) : []),
+      ...(context.workspaceId ? (["project", "global"] as const) : []),
+    ];
+    const approvalOptions = buildApprovalOptions({
+      action,
+      missing,
+      context,
+      offeredLifetimes,
+    });
+    if (!approvalOptions) {
+      pushLayer(trace, "backend", "deny");
+      return deny(
+        "approval-unavailable",
+        "No representable approval option remains after policy and backend filtering",
+        trace,
+      );
+    }
+    const approvalChoices = buildApprovalChoices(
+      approvalOptions,
+      sessionId,
+      context.workspaceId,
+    );
+    if (approvalChoices.length === 0) {
+      pushLayer(trace, "backend", "deny");
+      return deny(
+        "approval-unavailable",
+        "No representable approval choice remains after policy and backend filtering",
+        trace,
+      );
+    }
+    const request = buildPermissionRequest(
+      action,
+      missing,
+      context,
+      approvalOptions,
+      approvalChoices,
+    );
     return {
       decision: "needs-approval",
       request,
-      proposedEnvelope,
       trace,
     };
   }

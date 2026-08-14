@@ -264,11 +264,10 @@ describe("E2E: runAgentLoop routes through the wired pipeline", () => {
       async prompt(req) {
         return {
           approved: true,
-          requestId: req.requestId,
-          actionDigest: req.actionDigest,
-          lifetime: "action",
-          actorId: "u",
-          decidedAt: Date.now(),
+          choiceId:
+            req.approvalChoices.find((c) => c.lifetime === "action")?.choiceId ??
+            req.approvalChoices[0]?.choiceId ??
+            "opt-1::action",
         };
       },
     };

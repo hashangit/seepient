@@ -16,8 +16,14 @@
  */
 import { PolicyEngine, computePolicyDigest } from "./policy-engine.js";
 import { ActionLifecycle } from "./action-lifecycle.js";
-import { LocalAuditStore } from "./audit-recorder.js";
-import { LocalPolicyStore, computeWorkspaceId } from "./policy-store.js";
+import { LocalAuditStore, idempotencyKey } from "./audit-recorder.js";
+import { generateId } from "../../foundations/id.js";
+import {
+  bindGlobalPolicyCapabilities,
+  LocalPolicyStore,
+  computeWorkspaceId,
+  GLOBAL_WORKSPACE_ID,
+} from "./policy-store.js";
 import { setCovers } from "./capability-store.js";
 import { DEFAULT_ANALYZERS } from "./default-analyzers.js";
 import { COMM_ANALYZERS } from "./comm-analyzers.js";
@@ -75,9 +81,15 @@ export interface ActionLifecycleInputs {
   immutableDenies?: PolicyContext["immutableDenies"];
   /** Optional: active session capabilities baseline. */
   activeCapabilities?: CapabilitySet;
-  approvalMode?: "manual" | "balanced" | "never";
+  approvalMode?: "manual" | "balanced" | "never" | "autonomous";
   /** Interaction contract — derived from the broker by default. */
   interaction?: PolicyContext["interaction"];
+  /**
+   * Local approval deadline in ms (spec 011 T033 + settings). Default ten
+   * minutes; `permissions.approvalTimeoutMs` overrides it. Only used when
+   * `interaction` is not supplied.
+   */
+  approvalDeadlineMs?: number;
   /** Optional: persisted capability ledger for authority consumption & revocation (T107a). */
   capabilityLedger?: PersistedCapabilityLedger;
   /**
@@ -161,20 +173,55 @@ export async function buildActionLifecycle(
 
   // When no policy exists yet (fresh install), the principal policy defaults
   // to the deployment ceiling so the operator's ceiling IS the starting maximum authority.
+  // Freshness is determined by SNAPSHOT VERSION, not capability count (review
+  // P0): a versioned EMPTY policy — e.g. after revoking the final capability —
+  // is a deliberate state and must NOT resurrect the ceiling baselines on
+  // restart.
   let principalPolicy: CapabilitySet;
   let hasStoredPolicy = false;
+  let globalCapabilities: Capability[] = [];
   try {
     const snap = await policyStore.read(workspaceId);
-    if (snap.policy.capabilities.length > 0) {
+    if (snap.version > 0 || snap.policy.capabilities.length > 0) {
       principalPolicy = snap.policy;
       hasStoredPolicy = true;
     } else {
       principalPolicy = inputs.principalPolicy ?? deploymentCeiling;
       hasStoredPolicy = Boolean(inputs.principalPolicy);
     }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      // No policy file yet — fresh install; the ceiling is the starting maximum.
+      principalPolicy = inputs.principalPolicy ?? deploymentCeiling;
+      hasStoredPolicy = Boolean(inputs.principalPolicy);
+    } else {
+      // P1 review fix (fail closed on corruption): a read error (digest
+      // mismatch, permissions, IO) must NOT fall back to the deployment
+      // ceiling — that would BROADEN authority on a corrupt store. Deny
+      // everything instead; the operator must repair or clear the store.
+      principalPolicy = { version: 1 as const, capabilities: [] };
+      hasStoredPolicy = true;
+    }
+  }
+  // Global protected policy applies to every workspace (spec 011 persistent
+  // choices: "Allow always"): union it into the principal policy so global
+  // grants survive restarts and seed the active set. Caps already covered by
+  // the workspace policy are not duplicated.
+  try {
+    const globalSnap = await policyStore.read(GLOBAL_WORKSPACE_ID);
+    if (globalSnap.policy.capabilities.length > 0) {
+      globalCapabilities = bindGlobalPolicyCapabilities(
+        globalSnap.policy.capabilities,
+        root,
+      );
+      const union: Capability[] = [...principalPolicy.capabilities];
+      for (const cap of globalCapabilities) {
+        if (!setCovers(principalPolicy, cap)) union.push(cap);
+      }
+      principalPolicy = { version: 1 as const, capabilities: union };
+    }
   } catch {
-    principalPolicy = inputs.principalPolicy ?? deploymentCeiling;
-    hasStoredPolicy = Boolean(inputs.principalPolicy);
+    /* no global policy yet — fresh install continues below */
   }
   const defaultModelEgressCap: Capability = {
     kind: "model-egress",
@@ -210,6 +257,20 @@ export async function buildActionLifecycle(
       : egressCoveredByCeiling
         ? [{ kind: "read-root" as const, root }, defaultModelEgressCap]
         : [{ kind: "read-root" as const, root }];
+  const persistentBaselineCapabilities =
+    isFreshInstall && !inputs.activeCapabilities ? [...activeCaps] : [];
+
+  // Global grants are additive active authority. Their mere existence must
+  // not make a fresh workspace copy the entire deployment ceiling into its
+  // active set (which would widen one exact global grant into broad process
+  // and write authority).
+  if (!inputs.activeCapabilities) {
+    for (const capability of globalCapabilities) {
+      if (!setCovers({ version: 1, capabilities: activeCaps }, capability)) {
+        activeCaps.push(capability);
+      }
+    }
+  }
 
   // Seed the default cap only on a fresh install; an explicit caller-supplied
   // activeCapabilities set is preserved as-is.
@@ -231,9 +292,19 @@ export async function buildActionLifecycle(
     approvalMode: inputs.approvalMode ?? "manual",
     interaction: inputs.interaction ?? {
       mode: inputs.approvalBroker.mode,
-      deadlineMs: 30_000,
+      // Spec 011 (T033 + settings): the local approval deadline. Default ten
+      // minutes; `permissions.approvalTimeoutMs` overrides it. The request
+      // expiry and the inline broker's cutoff both derive from this value.
+      deadlineMs: inputs.approvalDeadlineMs ?? 600_000,
     },
     backendCapabilities: inputs.executionBoundary.capabilities,
+    workspaceRoot: root,
+    // Spec 011 (T008): preserve the stable session identity so PolicyEngine
+    // can offer the `session` lifetime on TUI requests.
+    sessionId: inputs.sessionId,
+    // Spec 011 (persistent choices): the protected-policy workspace identity
+    // so the engine can offer `project`/`global` approval choices.
+    workspaceId,
   };
 
   const capabilityLedger = inputs.capabilityLedger ?? new PersistedCapabilityLedger(inputs.auditRoot ? { root: path.join(inputs.auditRoot, "caps") } : undefined);
@@ -265,7 +336,40 @@ export async function buildActionLifecycle(
     terminalOutbox,
     capabilityLedger,
     sessionId: inputs.sessionId,
+    // Persistent (`project`/`global`) approvals write the protected store
+    // through compare-and-set, the same trusted flow /permissions uses.
+    policyStore,
+    workspaceId,
+    // A first inline project/global grant creates the durable snapshot. Keep
+    // the fresh-install read/model baseline explicit in that snapshot so a
+    // restart does not mistake the grant delta for the whole principal
+    // policy. Caller-supplied active authority may be session-only and is
+    // therefore never persisted implicitly.
+    persistentBaselineCapabilities:
+      persistentBaselineCapabilities,
   });
+
+  // Round 6 P0: a crashed process's durable intents live in pending.*.ndjson
+  // outbox files, invisible to the audit store until flushed. Reload them
+  // into the owned outbox and flush to the audit BEFORE reconciliation so
+  // the reconciler can see every unresolved intent. Safe against racing
+  // live processes: the audit store dedups on append.
+  try {
+    await terminalOutbox?.reload();
+    await terminalOutbox?.flush();
+  } catch {
+    /* outbox recovery is best-effort; a later flush retries */
+  }
+  // Round 5/6 P0: reconcile unresolved persistent-grant WAL intents. A crash
+  // between the policy compare-and-set and the committed audit append leaves
+  // an intent without its committed record; if the store's mutation carries
+  // the intent's UNIQUE mutation ID, append the missing committed record.
+  // Best-effort — never blocks startup on a broken store.
+  try {
+    await reconcilePolicyGrantIntents(auditStore, policyStore);
+  } catch {
+    /* reconciliation is best-effort; the intent record remains as the trail */
+  }
 
   return {
     lifecycle,
@@ -306,3 +410,85 @@ export function resolveAnalyzer(
 }
 
 export type { PreparedToolAction, ExecutionBackendCapabilities };
+
+/**
+ * Round 5 P0: reconcile unresolved persistent-grant WAL intents. A crash (or
+ * a failed committed append) between the policy compare-and-set and the
+ * `policy-granted` record leaves only the durable `policy-grant-intent`.
+ * For each intent without a committed sibling, consult the policy store: if
+ * the store version advanced past the intent's before-version AND the
+ * granted capabilities are present, the mutation DID commit — durably
+ * append the missing committed record (idempotent key, so a racing flush
+ * cannot duplicate it). If the store never advanced, the intent was never
+ * committed and stays provisional. Only LocalAuditStore is enumerable; other
+ * stores have their own durability contracts.
+ */
+async function reconcilePolicyGrantIntents(
+  auditStore: AuditStore,
+  policyStore: PolicyStore,
+): Promise<void> {
+  if (!(auditStore instanceof LocalAuditStore)) return;
+  const events = await auditStore.listEvents();
+  const committedByAction = new Set(
+    events.filter((e) => e.state === "policy-granted").map((e) => e.actionId),
+  );
+  const intents = events.filter(
+    (e) => e.state === "policy-grant-intent" && e.grantedWorkspaceId !== undefined,
+  );
+  for (const intent of intents) {
+    if (committedByAction.has(intent.actionId)) continue;
+    // Round 7 P0: an intent without a mutation ID is NEVER auto-committed —
+    // version-plus-capability inference is unsafe and stays provisional for
+    // manual review.
+    if (!intent.mutationId) continue;
+    const snap = await policyStore
+      .read(intent.grantedWorkspaceId!)
+      .catch(() => null);
+    if (!snap) continue;
+    // Round 8 P0: the history entry PROVES the mutation ran — the current
+    // capability state is irrelevant (an administrative revoke after the
+    // grant must not retroactively un-commit it). Version advancement is a
+    // cheap sanity belt: any later mutation or the grant itself advanced
+    // the version beyond the intent's before-version.
+    if (snap.version <= (intent.policyBeforeVersion ?? -1)) continue;
+    // Round 7-8 P0: the store's append-only mutation HISTORY proves THIS
+    // mutation ran — even when later grants or ADMINISTRATIVE mutations
+    // overwrote the latest marker (history is store-owned; administrative
+    // compare-and-sets preserve it). The latest `mutationId` is accepted as
+    // well (single-mutation case). Version advancement alone is never
+    // sufficient.
+    const history = snap.mutationHistory ?? [];
+    const histEntry = history.find((h) => h.mutationId === intent.mutationId);
+    const isLatest = snap.mutationId === intent.mutationId;
+    if (!histEntry && !isLatest) continue;
+    await auditStore
+      .append(
+        {
+          eventId: generateId(),
+          actionId: intent.actionId,
+          actionDigest: intent.actionDigest,
+          principalId: intent.principalId,
+          runId: intent.runId,
+          state: "policy-granted",
+          timestamp: Date.now(),
+          policyDigest: intent.policyDigest,
+          optionId: intent.optionId,
+          lifetime: intent.lifetime,
+          capabilities: intent.capabilities,
+          actorId: intent.actorId,
+          policyBeforeVersion: intent.policyBeforeVersion,
+          // The mutation's OWN version from the history (round 7 P0): with
+          // multiple mutations the snapshot version is the LATEST one, which
+          // would mislabel an earlier grant.
+          policyAfterVersion: histEntry?.version ?? snap.version,
+          grantedWorkspaceId: intent.grantedWorkspaceId,
+          mutationId: intent.mutationId,
+          backend: intent.backend,
+        },
+        { idempotencyKey: idempotencyKey(intent.actionId, "policy-granted") },
+      )
+      .catch(() => {
+        /* best-effort: the intent remains as the provisional trail */
+      });
+  }
+}

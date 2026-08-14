@@ -20,6 +20,7 @@ import { createHash } from "node:crypto";
 import * as path from "node:path";
 import * as os from "node:os";
 import type {
+  Capability,
   CapabilitySet,
   DecisionAuthority,
 } from "../../foundations/contracts/permission-policy.js";
@@ -29,14 +30,73 @@ import type {
 } from "../../foundations/contracts/execution-brokers.js";
 import { PolicyConflictError } from "../../foundations/errors.js";
 
+/**
+ * Stable workspace identity for GLOBAL protected policy (spec 011 persistent
+ * choices). A literal sentinel (not a path digest) so every workspace reads
+ * the same global store; stored as
+ * `~/.seepient/security/policies/global.json`.
+ */
+export const GLOBAL_WORKSPACE_ID = "global";
+
+/**
+ * Stored root placeholder for global capabilities that mean "the canonical
+ * root of whichever workspace is currently active". It is never passed to an
+ * executor; the lifecycle factory binds it to a concrete root before policy
+ * evaluation.
+ */
+export const GLOBAL_WORKSPACE_ROOT = "$SEEPIENT_CURRENT_WORKSPACE";
+
+/** Convert current-workspace roots into a safe global-policy placeholder. */
+export function scopeGlobalPolicyCapabilities(
+  capabilities: Capability[],
+  workspaceRoot: string,
+): Capability[] {
+  return capabilities.map((capability) => {
+    if (
+      (capability.kind === "read-root" || capability.kind === "write-root") &&
+      capability.root === workspaceRoot
+    ) {
+      return { ...capability, root: GLOBAL_WORKSPACE_ROOT };
+    }
+    return capability;
+  });
+}
+
+/** Bind global current-workspace placeholders to one canonical workspace. */
+export function bindGlobalPolicyCapabilities(
+  capabilities: Capability[],
+  workspaceRoot: string,
+): Capability[] {
+  return capabilities.map((capability) => {
+    if (
+      (capability.kind === "read-root" || capability.kind === "write-root") &&
+      capability.root === GLOBAL_WORKSPACE_ROOT
+    ) {
+      return { ...capability, root: workspaceRoot };
+    }
+    return capability;
+  });
+}
+
 /** Versioned digest of canonical real path; stable across alias/mount. */
 export function computeWorkspaceId(canonicalRoot: string): string {
   const input = `v1:${canonicalRoot}`;
   return createHash("sha256").update(input, "utf8").digest("hex").slice(0, 32);
 }
 
-/** Stable digest of the serialized policy (tamper-evident snapshots). */
-function computePolicyDigest(policy: CapabilitySet): string {
+/**
+ * Stable digest of the serialized policy INCLUDING the store-owned WAL
+ * metadata (tamper-evident snapshots; round 8 P0 — the mutation history is
+ * covered so it cannot be edited without breaking verification).
+ */
+function computePolicyDigest(policy: CapabilitySet, metadata?: { mutationId?: string; mutationHistory?: Array<{ mutationId: string; version: number }> }): string {
+  const canonical = JSON.stringify({ policy, mutationId: metadata?.mutationId, mutationHistory: metadata?.mutationHistory });
+  return createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+
+/** Round 6/7 digest formula: hash of the bare CapabilitySet (marker inside
+ *  it). Accepted on read for legacy files; rewritten on the next CAS. */
+function computeLegacyPolicyDigest(policy: CapabilitySet): string {
   const canonical = JSON.stringify(policy);
   return createHash("sha256").update(canonical, "utf8").digest("hex");
 }
@@ -57,6 +117,14 @@ interface StoredSnapshot {
   version: number;
   policyDigest: string;
   policy: CapabilitySet;
+  /** Forensic record (P0 review fix): who performed the last mutation and
+   *  when — persisted so the store itself carries provenance, not only the
+   *  action audit trail. Optional for legacy snapshots. */
+  grantedBy?: DecisionAuthority;
+  grantedAt?: number;
+  /** Store-owned WAL metadata (round 8 P0) — see PolicySnapshot. */
+  mutationId?: string;
+  mutationHistory?: Array<{ mutationId: string; version: number }>;
 }
 
 /**
@@ -135,13 +203,38 @@ export class LocalPolicyStore implements PolicyStoreContract {
     try {
       const raw = await fs.readFile(file, "utf8");
       const parsed = JSON.parse(raw) as StoredSnapshot;
-      // Tamper-evidence: recompute the digest and reject on mismatch.
-      const expected = computePolicyDigest(parsed.policy);
-      if (expected !== parsed.policyDigest) {
+      // Tamper-evidence: recompute the digest (policy + WAL metadata) and
+      // reject on mismatch. Legacy round-6/7 files used the bare-policy
+      // formula (marker inside the CapabilitySet) — accept either.
+      const expected = computePolicyDigest(parsed.policy, {
+        mutationId: parsed.mutationId,
+        mutationHistory: parsed.mutationHistory,
+      });
+      if (expected !== parsed.policyDigest && computeLegacyPolicyDigest(parsed.policy) !== parsed.policyDigest) {
         throw new PolicyConflictError(
           `Policy file for ${workspaceId} failed digest verification`,
           { workspaceId },
         );
+      }
+      // Round 8 cutover: pre-round-8 snapshots carried the WAL marker inside
+      // the CapabilitySet. Promote it to store-owned metadata so legacy
+      // stores keep their evidence (the stored digest covered policy only,
+      // so verification above still passes).
+      if (parsed.mutationId === undefined || parsed.mutationHistory === undefined) {
+        const legacy = parsed.policy as unknown as {
+          mutationId?: string;
+          mutationHistory?: Array<{ mutationId: string; version: number }>;
+        };
+        parsed.mutationId = parsed.mutationId ?? legacy.mutationId;
+        // Round-6 files carried only the latest marker (no history): promote
+        // it as the single entry at this snapshot's version so later CASes
+        // preserve the evidence in store-owned form.
+        parsed.mutationHistory =
+          parsed.mutationHistory ??
+          legacy.mutationHistory ??
+          (legacy.mutationId
+            ? [{ mutationId: legacy.mutationId, version: parsed.version }]
+            : undefined);
       }
       return parsed;
     } catch (err) {
@@ -156,6 +249,7 @@ export class LocalPolicyStore implements PolicyStoreContract {
     expectedVersion: number,
     next: CapabilitySet,
     _actor: DecisionAuthority,
+    mutation?: { mutationId: string },
   ): Promise<PolicySnapshot> {
     return this.withLock(workspaceId, async () => {
       const current = await this.read(workspaceId);
@@ -170,11 +264,28 @@ export class LocalPolicyStore implements PolicyStoreContract {
         );
       }
 
+      // Round 8 P0: append-only WAL metadata derived from the CURRENT
+      // snapshot plus this mutation — callers can never supply, remove, or
+      // rewrite the history. A mutation with no ID is structurally
+      // impossible (the caller provides the whole metadata object or none).
+      const mutationId = mutation?.mutationId;
+      const mutationHistory = mutation
+        ? [
+            ...(current.mutationHistory ?? []),
+            { mutationId: mutation.mutationId, version: current.version + 1 },
+          ]
+        : current.mutationHistory;
+
       const nextSnapshot: StoredSnapshot = {
         workspaceId,
         version: current.version + 1,
-        policyDigest: computePolicyDigest(next),
+        policyDigest: computePolicyDigest(next, { mutationId, mutationHistory }),
         policy: next,
+        // P0 review fix: the compare-and-set actor was previously ignored.
+        grantedBy: _actor,
+        grantedAt: Date.now(),
+        mutationId,
+        mutationHistory,
       };
 
       // Atomic replace: write temp in same dir, fsync, rename.
@@ -191,7 +302,13 @@ export class LocalPolicyStore implements PolicyStoreContract {
       // Post-write digest verification (read back what we wrote).
       const verifyRaw = await fs.readFile(tmp, "utf8");
       const verifyParsed = JSON.parse(verifyRaw) as StoredSnapshot;
-      if (verifyParsed.policyDigest !== computePolicyDigest(verifyParsed.policy)) {
+      if (
+        verifyParsed.policyDigest !==
+        computePolicyDigest(verifyParsed.policy, {
+          mutationId: verifyParsed.mutationId,
+          mutationHistory: verifyParsed.mutationHistory,
+        })
+      ) {
         await fs.unlink(tmp).catch(() => {});
         throw new PolicyConflictError("Post-write policy digest mismatch", { workspaceId });
       }

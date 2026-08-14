@@ -19,7 +19,7 @@
  * Foundations imports no Seepient layer.
  */
 
-import type { PreparedToolAction } from "./prepared-action.js";
+import type { ActionDisplay, PreparedToolAction } from "./prepared-action.js";
 import type {
   ExecutionBackendCapabilities,
   ExecutionBoundary,
@@ -45,7 +45,18 @@ export type Capability =
       port?: number;
     }
   | { kind: "external-recipient"; service: string; recipient: string }
-  | { kind: "process"; executable?: string; argvPrefix?: string[] }
+  | {
+      kind: "process";
+      executable?: string;
+      argvPrefix?: string[];
+      /**
+       * Exact-argv mode (P0 review fix): when true, coverage requires the
+       * SAME token count and tokens — an approval for `rm safe.txt` must not
+       * cover `rm safe.txt other.txt`. Bounded/prefix options omit this flag.
+       * Analyzer-emitted required process capabilities always set it.
+       */
+      argvExact?: boolean;
+    }
   | { kind: "secret-ref"; ref: string }
   | { kind: "model-egress"; providerClass: string; dataClasses: string[] }
   | { kind: "activate-change-class"; changeClass: import("./self-evolution.js").SelfEvolutionChangeClass }
@@ -113,13 +124,22 @@ export interface PolicyContext {
   runtimeBaseline: CapabilitySet;
   activeCapabilities: CapabilitySet;
   immutableDenies: DenyRule[];
-  approvalMode: "manual" | "balanced" | "never";
+  approvalMode: "manual" | "balanced" | "never" | "autonomous";
   interaction: InteractionContract;
   backendCapabilities: ExecutionBackendCapabilities;
   /** The workspace root — interactive surfaces let users approve file
    *  operations within this root even when the ceiling is empty. Paths
    *  OUTSIDE this root are outside-ceiling (deny). */
   workspaceRoot?: string;
+  /** Stable application-session identity. When set, PolicyEngine may offer
+   *  the `session` lifetime for TUI approval (spec 011). */
+  sessionId?: string;
+  /**
+   * Protected-policy workspace identity (project scope). When set, the
+   * engine may offer persistent `project`/`global` approval choices — they
+   * are recorded through `PolicyStore.compareAndSet`, never grants files.
+   */
+  workspaceId?: string;
 }
 
 export interface PolicyTrace {
@@ -161,15 +181,17 @@ export type PermissionDenyReason =
   | "capability-revoked";
 
 /**
- * Closed decision union. `needs-approval` carries the proposed envelope to
- * issue on approval; approval never widens the requested capability.
+ * Closed decision union. `needs-approval` carries the immutable request and
+ * its policy-issued options — there is no single unconditional proposed
+ * envelope, because the final capability set and lifetime are chosen only
+ * after the broker response is validated (spec 011, D4). Approval never
+ * widens the requested capability.
  */
 export type PolicyDecision =
   | { decision: "allow"; envelope: CapabilityEnvelope; trace: PolicyTrace }
   | {
       decision: "needs-approval";
       request: PermissionRequest;
-      proposedEnvelope: CapabilityEnvelope;
       trace: PolicyTrace;
     }
   | {
@@ -185,16 +207,88 @@ export interface PolicyEngine {
 
 // ── Approval ────────────────────────────────────────────────────────────
 
+/**
+ * Policy-issued capability choice the TUI may offer. The capability set,
+ * not the label, is authoritative: labels are display data and are never
+ * parsed to recover authority (spec 011 FR-007).
+ */
+export type ApprovalOptionKind = "exact" | "bounded";
+
+export interface ApprovalOption {
+  /** Stable within the request; derived from canonical option data. */
+  optionId: string;
+  /** Must equal the parent request digest. */
+  actionDigest: string;
+  kind: ApprovalOptionKind;
+  /** Plain-language display text; never parsed as authority. */
+  label: string;
+  /** Canonical, backend-enforceable, policy-approved capabilities. */
+  capabilities: Capability[];
+  /** Non-empty subset of the parent request's offered lifetimes. */
+  supportedLifetimes: Array<"action" | "run" | "session" | "project" | "global">;
+}
+
+/**
+ * Transient UI selection — NOT an authority decision. The prompt emits only
+ * the selected choice ID; the trusted broker resolves it against the
+ * immutable request and supplies request identity, actor, and decision time
+ * (spec 011 FR-004). The UI never combines scope and lifetime itself.
+ */
+export type TuiApprovalSelection =
+  | { approved: true; choiceId: string }
+  | { approved: false; reason?: "user-denied" | "approval-unavailable" };
+
+/**
+ * A complete, Domain-issued approval outcome: one scope option paired with
+ * one lifetime, plus end-user copy derived from the option's capability
+ * delta (spec 011 FR-007/FR-010). The TUI selects a choice; it never
+ * constructs one.
+ */
+export interface ApprovalChoice {
+  /** Stable within the request; derived from option ID + lifetime. */
+  choiceId: string;
+  /** Names one option in the same request. */
+  optionId: string;
+  /**
+   * MVP: action or session; project/global are persistent choices that
+   * write the PROTECTED policy store via compare-and-set (never grants
+   * files). Bounded/action is never issued (FR-010).
+   */
+  lifetime: "action" | "session" | "project" | "global";
+  /** Short consent headline, e.g. "Allow this action once". */
+  title: string;
+  /** What Seepient will ask again or remember (plain language). */
+  description: string;
+  /** One plain-language line per material authority in the delta. */
+  authoritySummary: string[];
+  /** Least-privileged valid choice (exact/action). Never preselected. */
+  recommended: boolean;
+}
+
 export interface PermissionRequest {
   requestId: string;
   principalId: string;
   runId: string;
+  /** Present only when a stable session identity can bind a session lifetime. */
   sessionId?: string;
   toolCallId: string;
   actionDigest: string;
-  action: import("./prepared-action.js").ActionDisplay;
+  action: ActionDisplay;
   requestedCapabilities: Capability[];
-  offeredLifetimes: Array<"action" | "run" | "session">;
+  /** Policy-issued options; a request with no options cannot be approved. */
+  approvalOptions: ApprovalOption[];
+  /**
+   * Complete Domain-issued choices. A native request with no choices
+   * cannot be approved — the surface fails as `approval-unavailable`.
+   */
+  approvalChoices: ApprovalChoice[];
+  offeredLifetimes: Array<"action" | "run" | "session" | "project" | "global">;
+  /**
+   * The protected-policy workspace identity. Present on interactive CLI
+   * requests so project/global (persistent) choices can be issued and
+   * recorded via `PolicyStore.compareAndSet`.
+   */
+  workspaceId?: string;
   createdAt: number;
   expiresAt: number;
 }
@@ -204,7 +298,9 @@ export type PermissionDecision =
       approved: true;
       requestId: string;
       actionDigest: string;
-      lifetime: "action" | "run" | "session";
+      /** Names one option in the answered request (spec 011 FR-003). */
+      optionId: string;
+      lifetime: "action" | "run" | "session" | "project" | "global";
       actorId: string;
       decidedAt: number;
     }

@@ -23,6 +23,7 @@ import type {
   ApprovalBroker,
   Capability,
   CapabilityEnvelope,
+  CapabilityLifetime,
   CapabilitySet,
   PermissionDecision,
   PermissionDenyReason,
@@ -37,12 +38,19 @@ import type {
 } from "../../foundations/contracts/execution-boundary.js";
 import type {
   AuditStore,
+  PolicyStore,
   ToolOutcome,
 } from "../../foundations/contracts/execution-brokers.js";
 import type { ToolResult } from "../../foundations/types.js";
 import type { PolicyEngine } from "./policy-engine.js";
 import { generateId } from "../../foundations/id.js";
 import { idempotencyKey } from "./audit-recorder.js";
+import { PolicyConflictError } from "../../foundations/errors.js";
+import {
+  GLOBAL_WORKSPACE_ID,
+  scopeGlobalPolicyCapabilities,
+} from "./policy-store.js";
+import { covers, setCovers } from "./capability-store.js";
 import type { PersistedCapabilityLedger } from "./persisted-capability-ledger.js";
 
 /**
@@ -72,6 +80,21 @@ export interface ActionLifecycleOptions {
    */
   capabilityLedger?: PersistedCapabilityLedger;
   sessionId?: string;
+  /**
+   * Protected policy store + workspace identity for persistent
+   * (`project`/`global`) approvals (spec 011). When present, a persistent
+   * selection records the capability through `compareAndSet` — the same
+   * trusted flow `/permissions approve` uses — before the envelope is
+   * issued. When absent, persistent selections are denied.
+   */
+  policyStore?: PolicyStore;
+  workspaceId?: string;
+  /**
+   * Capabilities that are already active on a fresh install and must remain
+   * active after the first persistent grant creates the project snapshot.
+   * Callers must not include session-only authority here.
+   */
+  persistentBaselineCapabilities?: Capability[];
   /** Now-injectable for deterministic tests. */
   now?: () => number;
 }
@@ -104,8 +127,68 @@ function denialOutput(reason: PermissionDenyReason, message: string): string {
 }
 
 /**
+ * Audit-copy of a capability: process argv is REDACTED (SC-011: the audit
+ * never stores raw sensitive command arguments). The capability's kind,
+ * executable, and shape remain for forensics; enforcement uses the exact
+ * capabilities, never this copy.
+ */
+function redactAuditCapability(cap: Capability): Capability {
+  if (cap.kind === "process") {
+    return { ...cap, argvPrefix: undefined };
+  }
+  return cap;
+}
+
+/** Keep in sync with `PermissionDenyReason` in permission-policy.ts. */
+const KNOWN_DENY_REASONS = new Set<string>([
+  "immutable-deny",
+  "outside-ceiling",
+  "outside-principal",
+  "outside-runtime-baseline",
+  "backend-unsupported",
+  "approval-unavailable",
+  "approval-denied",
+  "approval-expired",
+  "invalid-approval-response",
+  "user-denied",
+  "audit-unavailable",
+  "model-egress-denied",
+  "secret-denied",
+  "security-activation-required",
+  "policy-conflict",
+  "unknown-tool",
+  "capability-expired",
+  "capability-revoked",
+]);
+
+/** Map a broker-supplied reason to a typed deny reason (user-denied default). */
+function typedDenyReason(reason: string | undefined): PermissionDenyReason {
+  return reason !== undefined && KNOWN_DENY_REASONS.has(reason)
+    ? (reason as PermissionDenyReason)
+    : "user-denied";
+}
+
+/**
+ * Deep-freeze a plain-data value (permission requests are JSON-serializable).
+ * Used to give brokers a read-only view so a mutation attempt fails loudly
+ * instead of silently widening an approval.
+ */
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const key of Object.keys(value as Record<string, unknown>)) {
+      deepFreeze((value as Record<string, unknown>)[key]);
+    }
+  }
+  return value;
+}
+
+/**
  * Validate that an approval decision actually matches the request it claims to
- * answer. Mismatched requestId/actionDigest → invalid-approval-response.
+ * answer. Round 4 P1: approved decisions MUST carry the EXACT request ID and
+ * action digest — missing binding is rejected, never forgiven. (Legacy
+ * adapters normalize by filling these fields from the request they were
+ * given, before Domain sees the decision.)
  */
 function validFor(
   answer: PermissionDecision,
@@ -114,8 +197,8 @@ function validFor(
 ): boolean {
   if (!answer.approved) return true;
   return (
-    (answer.actionDigest === expectedActionDigest || !answer.actionDigest) &&
-    (answer.requestId === expectedRequestId || !answer.requestId)
+    answer.actionDigest === expectedActionDigest &&
+    answer.requestId === expectedRequestId
   );
 }
 
@@ -133,6 +216,9 @@ export class ActionLifecycle {
   private readonly active: MutableCapabilitySet;
   private readonly now: () => number;
   private readonly sessionId?: string;
+  private readonly policyStore?: PolicyStore;
+  private readonly workspaceId?: string;
+  private readonly persistentBaselineCapabilities: Capability[];
 
   private readonly terminalOutbox?: { enqueue: (event: import("../../foundations/contracts/execution-brokers.js").ActionAuditEvent, idempotencyKey: string) => void };
   private readonly capabilityLedger?: PersistedCapabilityLedger;
@@ -143,6 +229,11 @@ export class ActionLifecycle {
     this.broker = opts.broker;
     this.boundary = opts.boundary;
     this.sessionId = opts.sessionId;
+    this.policyStore = opts.policyStore;
+    this.workspaceId = opts.workspaceId;
+    this.persistentBaselineCapabilities = [
+      ...(opts.persistentBaselineCapabilities ?? []),
+    ];
     this.audit = opts.audit;
     const baseActive = (opts.activeCapabilities?.capabilities.length ?? 0) > 0
       ? opts.activeCapabilities!
@@ -180,7 +271,12 @@ export class ActionLifecycle {
           };
         }
       }
-      if (action.sessionId && this.capabilityLedger.isSessionRevoked(action.sessionId)) {
+      // Session revocation is checked against the lifecycle-bound session
+      // identity — analyzer-produced actions do not reliably carry
+      // `action.sessionId`, so relying on it alone would let revoked session
+      // authority keep authorizing later actions (spec 011 review fix).
+      const boundSessionId = action.sessionId ?? this.sessionId;
+      if (boundSessionId && this.capabilityLedger.isSessionRevoked(boundSessionId)) {
         const outcome = this.toOutcome(action, "denied", undefined, "capability-revoked");
         await this.record(action, "denied", "capability-revoked");
         return {
@@ -199,7 +295,13 @@ export class ActionLifecycle {
 
       let answer: PermissionDecision;
       try {
-        answer = await this.broker.request(decision.request, { signal });
+        // Spec 011 review fix (P0): Domain must validate against a TRUSTED
+        // snapshot of the request, and the broker must never be able to
+        // widen an approval by mutating the request it receives. The broker
+        // gets a deeply frozen clone — a mutation attempt throws and can
+        // never affect the pristine `decision.request` used below.
+        const brokerRequest = deepFreeze(structuredClone(decision.request));
+        answer = await this.broker.request(brokerRequest, { signal });
       } catch {
         const outcome = this.toOutcome(
           action,
@@ -245,7 +347,17 @@ export class ActionLifecycle {
       }
 
       if (!answer.approved) {
-        const reason: PermissionDenyReason = "user-denied";
+        // A broker that observed expiry/abort supplies a machine-readable
+        // reason; anything else is a plain user denial (spec 011 edge cases).
+        // The message must match the reason — expiry is NOT an explicit user
+        // denial (product acceptance feedback).
+        const reason: PermissionDenyReason = typedDenyReason(answer.reason);
+        const message =
+          reason === "approval-expired"
+            ? "The approval request expired before a decision was made."
+            : reason === "approval-unavailable"
+              ? "Approval is unavailable for this request."
+              : "User denied tool execution.";
         const outcome = this.toOutcome(action, "denied", undefined, reason);
         await this.record(action, "denied", reason);
         return {
@@ -253,41 +365,382 @@ export class ActionLifecycle {
           approval: answer,
           outcome,
           toolResult: {
-            output: denialOutput(reason, "User denied tool execution."),
+            output: denialOutput(reason, message),
             success: false,
           },
         };
       }
 
-      // Approved. Reevaluate ONCE with the approved capability added to activeCapabilities.
-      // Hard rule: Approval NEVER mutates or widens principalPolicy, runtimeBaseline, or deploymentCeiling.
+      // Approved. Spec 011 (T007): validate the selection against the ORIGINAL
+      // request before issuing any envelope — expiry, option membership, and
+      // lifetime support. A forged/stale/expired selection fails closed and
+      // never chooses another option.
+      // Hard rule: Approval NEVER mutates or widens principalPolicy,
+      // runtimeBaseline, or deploymentCeiling.
+      if (decision.request.expiresAt < this.now()) {
+        const outcome = this.toOutcome(action, "denied", undefined, "approval-expired");
+        await this.record(action, "denied", "approval-expired");
+        return {
+          decision,
+          approval: answer,
+          outcome,
+          toolResult: {
+            output: denialOutput(
+              "approval-expired",
+              "Approval request expired before a decision was recorded",
+            ),
+            success: false,
+          },
+        };
+      }
+      const option = decision.request.approvalOptions.find(
+        (o) => o.optionId === answer.optionId,
+      );
+      if (!option) {
+        const outcome = this.toOutcome(action, "denied", undefined, "invalid-approval-response");
+        await this.record(action, "denied", "invalid-approval-response");
+        return {
+          decision,
+          approval: answer,
+          outcome,
+          toolResult: {
+            output: denialOutput(
+              "invalid-approval-response",
+              "Approval named an option that is not part of the request",
+            ),
+            success: false,
+          },
+        };
+      }
+      // Round 4 P1: no silent lifetime default — an approved decision must
+      // name an explicit supported lifetime or be rejected below.
+      const lifetimeKind = answer.lifetime;
+      if (
+        !option.supportedLifetimes.includes(lifetimeKind) ||
+        !decision.request.offeredLifetimes.includes(lifetimeKind)
+      ) {
+        const outcome = this.toOutcome(action, "denied", undefined, "invalid-approval-response");
+        await this.record(action, "denied", "invalid-approval-response");
+        return {
+          decision,
+          approval: answer,
+          outcome,
+          toolResult: {
+            output: denialOutput(
+              "invalid-approval-response",
+              "Approval lifetime is not offered by the request or the selected option",
+            ),
+            success: false,
+          },
+        };
+      }
+      // Defense in depth (spec 011 T030): when the request carries complete
+      // Domain-issued choices, the approved option/lifetime pair must be one
+      // of them — a decision that cannot be expressed as a choice cannot
+      // come from a compliant surface.
+      if (decision.request.approvalChoices.length > 0) {
+        const matchesChoice = decision.request.approvalChoices.some(
+          (c) => c.optionId === option.optionId && c.lifetime === lifetimeKind,
+        );
+        if (!matchesChoice) {
+          const outcome = this.toOutcome(action, "denied", undefined, "invalid-approval-response");
+          await this.record(action, "denied", "invalid-approval-response");
+          return {
+            decision,
+            approval: answer,
+            outcome,
+            toolResult: {
+              output: denialOutput(
+                "invalid-approval-response",
+                "Approval option/lifetime pair is not a Domain-issued choice",
+              ),
+              success: false,
+            },
+          };
+        }
+      }
+      // Resolve the typed lifetime. A session lifetime requires a bound
+      // session identity and fails closed on revocation before issuance.
+      let envelopeLifetime: CapabilityLifetime;
+      if (lifetimeKind === "action") {
+        envelopeLifetime = {
+          kind: "action",
+          actionDigest: action.actionDigest,
+          consumeOnce: true,
+        };
+      } else if (lifetimeKind === "run") {
+        envelopeLifetime = {
+          kind: "run",
+          runId: action.runId,
+          expiresAt: this.now() + 86400000,
+        };
+      } else if (lifetimeKind === "session") {
+        const sessionId = action.sessionId ?? this.sessionId;
+        if (!sessionId) {
+          const outcome = this.toOutcome(action, "denied", undefined, "invalid-approval-response");
+          await this.record(action, "denied", "invalid-approval-response");
+          return {
+            decision,
+            approval: answer,
+            outcome,
+            toolResult: {
+              output: denialOutput(
+                "invalid-approval-response",
+                "Session approval requires a bound session identity",
+              ),
+              success: false,
+            },
+          };
+        }
+        if (this.capabilityLedger?.isSessionRevoked(sessionId)) {
+          const outcome = this.toOutcome(action, "denied", undefined, "capability-revoked");
+          await this.record(action, "denied", "capability-revoked");
+          return {
+            decision,
+            approval: answer,
+            outcome,
+            toolResult: {
+              output: denialOutput("capability-revoked", "Session capability was revoked"),
+              success: false,
+            },
+          };
+        }
+        envelopeLifetime = { kind: "session", sessionId };
+      } else {
+        // Persistent approval (project/global, spec 011). The capability is
+        // recorded through the PROTECTED policy store via compare-and-set —
+        // the same trusted flow `/permissions approve` uses — BEFORE the
+        // envelope is issued. A grant that cannot be written must not
+        // execute (fail closed; never a silent session-only fallback).
+        // Exact capabilities only: the choice projection never offers a
+        // bounded persistent choice.
+        const targetWorkspaceId =
+          lifetimeKind === "project"
+            ? (decision.request.workspaceId ?? this.workspaceId)
+            : GLOBAL_WORKSPACE_ID;
+        if (!this.policyStore || !targetWorkspaceId || !this.terminalOutbox) {
+          const outcome = this.toOutcome(action, "denied", undefined, "invalid-approval-response");
+          await this.record(action, "denied", "invalid-approval-response");
+          return {
+            decision,
+            approval: answer,
+            outcome,
+            toolResult: {
+              output: denialOutput(
+                "invalid-approval-response",
+                "Persistent approval requires the protected policy store, a workspace identity, and a durable audit outbox",
+              ),
+              success: false,
+            },
+          };
+        }
+        // P0 review fixes (durable audit ordering, rounds 3-4): a persistent
+        // grant must be durably AUDITED before it is INSTALLED. Order:
+        //   1. hard-append `approved` (fails -> deny, nothing installed);
+        //   2. ENQUEUE the `policy-granted` INTENT to the durable outbox —
+        //      the WAL. If audit AND outbox both fail here, the request is
+        //      denied with NOTHING installed (round 4 P0: no split state);
+        //   3. compare-and-set the grant;
+        //   4. best-effort direct append of the final event (with the
+        //      resulting version) — if it fails, the outbox intent covers
+        //      durability, and a last-resort CAS REVERT uninstalls the grant
+        //      so a denial never leaves authority behind.
+        let persisted = false;
+        let beforeVersion = 0;
+        try {
+          const current = await this.policyStore.read(targetWorkspaceId);
+          beforeVersion = current.version;
+          const persistentCapabilities =
+            lifetimeKind === "global" && this.policyContext.workspaceRoot
+              ? scopeGlobalPolicyCapabilities(
+                  option.capabilities,
+                  this.policyContext.workspaceRoot,
+                )
+              : option.capabilities;
+          const fresh = persistentCapabilities.filter(
+            (c) => !setCovers(current.policy, c),
+          );
+          // Audit copies of capabilities redact process argv (SC-011). The
+          // trail must match the full mutation: on a fresh workspace a
+          // project grant also persists the baseline seed, so the baseline
+          // is part of what this approval installs (review round 9).
+          const auditCapabilities = [
+            ...(lifetimeKind === "project" && fresh.length > 0
+              ? this.persistentBaselineCapabilities
+              : []),
+            ...option.capabilities,
+          ].map(redactAuditCapability);
+          await this.record(action, "approved", undefined, {
+            optionId: option.optionId,
+            lifetime: lifetimeKind,
+            capabilities: auditCapabilities,
+            actorId: answer.actorId,
+            policyBeforeVersion: beforeVersion,
+            grantedWorkspaceId: targetWorkspaceId,
+          });
+          if (fresh.length === 0) {
+            persisted = true; // already granted — nothing to write
+          } else {
+            // The unique transaction marker for THIS mutation: written into
+            // the stored policy by the same compare-and-set that installs
+            // the grant (round 6 P0). Recovery can then prove WHICH action
+            // performed the mutation.
+            const mutationId = generateId();
+            // DURABLE INTENT (WAL): must succeed or nothing is installed.
+            await this.enqueuePolicyGrantIntent(
+              action,
+              option.optionId,
+              auditCapabilities,
+              answer.actorId,
+              lifetimeKind,
+              targetWorkspaceId,
+              beforeVersion,
+              mutationId,
+            );
+            // Retry once on a concurrent-writer conflict (stale version).
+            for (let attempt = 0; attempt < 2 && !persisted; attempt++) {
+              const retried = attempt > 0
+                ? await this.policyStore.read(targetWorkspaceId)
+                : current;
+              try {
+                const nextCapabilities = [...retried.policy.capabilities];
+                const candidates = [
+                  // Baseline seed authority is part of the project grant and
+                  // must land even when a concurrent writer won the first
+                  // CAS (version > 0 then means OUR baseline never landed);
+                  // setCovers dedup keeps it out when the winner already
+                  // wrote it.
+                  ...(lifetimeKind === "project"
+                    ? this.persistentBaselineCapabilities
+                    : []),
+                  ...fresh,
+                ];
+                for (const capability of candidates) {
+                  if (!setCovers({ version: 1, capabilities: nextCapabilities }, capability)) {
+                    nextCapabilities.push(capability);
+                  }
+                }
+                const snap = await this.policyStore.compareAndSet(
+                  targetWorkspaceId,
+                  retried.version,
+                  {
+                    version: 1 as const,
+                    capabilities: nextCapabilities,
+                  },
+                  {
+                    kind: "human",
+                    authorityId: "inline-approval",
+                    authenticatedBy: "tui",
+                  },
+                  // Round 8 P0: transaction metadata travels SEPARATELY — the
+                  // store appends it to the snapshot's own append-only
+                  // history, so no caller (including the admin flows) can
+                  // erase earlier grants' evidence.
+                  { mutationId },
+                );
+                // Best-effort committed record with its own state/key. If
+                // this append fails (or the process crashes here), the
+                // durable intent (flushed or pending) is reconciled at
+                // startup by reconciling unresolved intents against the
+                // policy store (round 5 P0).
+                await this.record(action, "policy-granted", undefined, {
+                  optionId: option.optionId,
+                  lifetime: lifetimeKind,
+                  capabilities: auditCapabilities,
+                  actorId: answer.actorId,
+                  policyBeforeVersion: beforeVersion,
+                  policyAfterVersion: snap.version,
+                  grantedWorkspaceId: targetWorkspaceId,
+                  mutationId,
+                }).catch(() => {
+                  /* WAL intent already guarantees durability */
+                });
+                persisted = true;
+              } catch (err) {
+                if (!(err instanceof PolicyConflictError) || attempt === 1) {
+                  throw err;
+                }
+              }
+            }
+          }
+        } catch {
+          const outcome = this.toOutcome(action, "denied", undefined, "approval-unavailable");
+          await this.record(action, "denied", "approval-unavailable").catch(() => {});
+          return {
+            decision,
+            approval: answer,
+            outcome,
+            toolResult: {
+              output: denialOutput(
+                "approval-unavailable",
+                "Persistent approval could not be durably recorded and installed",
+              ),
+              success: false,
+            },
+          };
+        }
+        envelopeLifetime =
+          lifetimeKind === "project"
+            ? { kind: "project", workspaceId: targetWorkspaceId }
+            : { kind: "global" };
+      }
+
       approval = answer;
-      const approved = decision.proposedEnvelope.capabilities;
-      const lifetimeKind = answer.lifetime ?? "action";
+      const approved = option.capabilities;
+      // Reevaluate ONCE with the approved capability added to a TEMPORARY
+      // active-capability copy. The long-lived active set is committed only
+      // for session (or shared-contract run) lifetimes below (spec 011 D8) —
+      // an action approval is consumed once and never retained as session
+      // authority.
       const withApproval: CapabilitySet = {
         version: 1,
         capabilities: [...this.active.capabilities, ...approved],
       };
+      // Interactive approval is explicitly allowed to authorize a capability
+      // that is absent from the principal snapshot (provided it remains
+      // inside deployment/runtime/backend limits). Extend the principal for
+      // this one reevaluation; otherwise a narrowed persisted project policy
+      // would remove a valid action/session approval before it can execute.
+      const principalCapabilities = [
+        ...this.policyContext.principalPolicy.capabilities,
+      ];
+      for (const capability of approved) {
+        if (!setCovers({ version: 1, capabilities: principalCapabilities }, capability)) {
+          principalCapabilities.push(capability);
+        }
+      }
       const reevalContext: PolicyContext = {
         ...this.policyContext,
+        principalPolicy: { version: 1, capabilities: principalCapabilities },
         activeCapabilities: withApproval,
       };
       decision = this.policy.evaluate(action, reevalContext);
       if (decision.decision === "allow") {
-        decision.envelope.lifetime = {
-          kind: lifetimeKind,
-          actionDigest: action.actionDigest,
-          consumeOnce: lifetimeKind === "action" ? (true as const) : undefined,
-          runId: action.runId,
-          sessionId: action.sessionId ?? this.sessionId,
-          expiresAt: (answer as any).expiresAt ?? (lifetimeKind === "run" ? this.now() + 86400000 : undefined),
-        } as any;
-        if ((answer as any).expiresAt) {
-          decision.envelope.expiresAt = (answer as any).expiresAt;
-        }
+        // The final envelope carries the SELECTED option's capabilities
+        // exactly (FR-012), PLUS the action-required capabilities that were
+        // already authorized before this approval (e.g. a pre-covered
+        // model-egress). The envelope is the complete authority record for
+        // this action; the model-egress and broker gates check it as a whole.
+        const requiredCaps = decision.envelope.capabilities;
+        const optionSet = { version: 1 as const, capabilities: approved };
+        const alreadyAuthorized = requiredCaps.filter(
+          (c) => !setCovers(optionSet, c),
+        );
+        decision.envelope.capabilities = [...approved, ...alreadyAuthorized];
+        decision.envelope.lifetime = envelopeLifetime;
       }
-      this.active.capabilities.push(...approved);
-      this.policyContext.activeCapabilities.capabilities = this.active.capabilities;
+      if (lifetimeKind !== "action") {
+        this.active.capabilities.push(...approved);
+        this.policyContext.activeCapabilities.capabilities = this.active.capabilities;
+        // Session/run/persistent authority must survive later evaluations in
+        // this lifecycle. Active authority remains the execution gate, so
+        // revocation still removes the grant even though this session-local
+        // principal overlay remembers that it was approved.
+        this.policyContext.principalPolicy = {
+          version: 1,
+          capabilities: principalCapabilities,
+        };
+      }
     }
 
     // 4. Deny path — one terminal denial, no afterToolCall.
@@ -320,6 +773,23 @@ export class ActionLifecycle {
         const { checkRunLifetime, checkSessionLifetime } = await import("./persisted-capability-ledger.js");
 
         if (envelope.lifetime.kind === "action") {
+          if (envelope.actionDigest === undefined) {
+            // Fail closed: an action envelope without a digest cannot be
+            // bound or consumed safely (custom analyzers that skip digest
+            // computation would otherwise collide on a single undefined
+            // ledger key). Production analyzers always set it.
+            const outcome = this.toOutcome(action, "denied", undefined, "invalid-approval-response");
+            await this.record(action, "denied", "invalid-approval-response");
+            return {
+              decision,
+              approval,
+              outcome,
+              toolResult: {
+                output: denialOutput("invalid-approval-response", "Action envelope is missing its action digest"),
+                success: false,
+              },
+            };
+          }
           const consumed = await this.capabilityLedger.consume(
             envelope.envelopeId,
             envelope.actionDigest,
@@ -436,19 +906,12 @@ export class ActionLifecycle {
           : "failed";
     await this.recordTerminal(action, terminalState);
 
-    // 8. Remove action-scoped capabilities from activeCapabilities after terminal
-    //    audit event (T107a hard rule: consumed caps don't persist).
-    if (decision.decision === "allow" && decision.envelope.lifetime.kind === "action") {
-      const envelopedIds = new Set(
-        decision.envelope.capabilities.map((c) => JSON.stringify(c)),
-      );
-      const remaining = this.active.capabilities.filter(
-        (c) => !envelopedIds.has(JSON.stringify(c)),
-      );
-      this.active.capabilities.length = 0;
-      this.active.capabilities.push(...remaining);
-      this.policyContext.activeCapabilities.capabilities = this.active.capabilities;
-    }
+    // 8. Action-scoped capabilities are NOT removed here: since spec 011 D8
+    //    they are never added to the long-lived active set in the first place
+    //    (the approval path commits only session/run authority), so there is
+    //    nothing to clean up. A removal pass over the envelope would wrongly
+    //    strip pre-existing active authority (e.g. a baseline model-egress cap
+    //    that the envelope also carries) — review fix.
     const outcome = this.toOutcome(
       action,
       terminalState,
@@ -463,6 +926,37 @@ export class ActionLifecycle {
           };
 
     return { decision, approval, outcome, execution, toolResult };
+  }
+
+  /** Read-only view of the long-lived active capability set (test seam). */
+  getActiveCapabilities(): Capability[] {
+    return [...this.active.capabilities];
+  }
+
+  /** Change the interactive approval posture for subsequent actions. */
+  setApprovalMode(mode: PolicyContext["approvalMode"]): void {
+    this.policyContext.approvalMode = mode;
+  }
+
+  getApprovalMode(): PolicyContext["approvalMode"] {
+    return this.policyContext.approvalMode;
+  }
+
+  /**
+   * Revoke active-session authority covered by the given capabilities
+   * (P1 review fix: /permissions revoke-* must take effect immediately, not
+   * only after restart). Removes matching capabilities from the long-lived
+   * active set AND the policy context's view of it, so the next evaluation
+   * in this session fails closed until the store grant is re-approved.
+   */
+  revokeActiveCapabilities(revoked: Capability[]): void {
+    if (revoked.length === 0) return;
+    const remaining = this.active.capabilities.filter(
+      (c) => !revoked.some((r) => covers(r, c)),
+    );
+    if (remaining.length === this.active.capabilities.length) return;
+    this.active.capabilities = remaining;
+    this.policyContext.activeCapabilities.capabilities = remaining;
   }
 
   private toOutcome(
@@ -484,6 +978,9 @@ export class ActionLifecycle {
     action: PreparedToolAction,
     state: import("../../foundations/contracts/execution-brokers.js").ActionState,
     reason?: PermissionDenyReason,
+    forensic?: Partial<
+      import("../../foundations/contracts/execution-brokers.js").ActionAuditEvent
+    >,
   ): Promise<void> {
     const event = {
       eventId: generateId(),
@@ -496,6 +993,7 @@ export class ActionLifecycle {
       policyDigest: this.policy.getPolicyDigest(),
       reason,
       backend: this.boundary.capabilities.backend,
+      ...forensic,
     };
     await this.audit.append(event, {
       idempotencyKey: idempotencyKey(action.actionId, state),
@@ -537,6 +1035,53 @@ export class ActionLifecycle {
       }
     }
   }
+
+  /**
+   * The durable WAL for a persistent grant (round 4 P0): enqueues the
+   * `policy-granted` INTENT to the terminal outbox BEFORE the compare-and-
+   * set. The outbox persists the event to disk before returning, so a grant
+   * can never be installed unless its forensic record is already durable.
+   * A failure here denies with NOTHING installed.
+   */
+  private async enqueuePolicyGrantIntent(
+    action: PreparedToolAction,
+    optionId: string,
+    capabilities: Capability[],
+    actorId: string,
+    lifetimeKind: string,
+    grantedWorkspaceId: string,
+    beforeVersion: number,
+    mutationId: string,
+  ): Promise<void> {
+    // The intent uses its OWN state (round 5 P0): the shared outbox may
+    // flush it at any time, and it must never be mistaken for a committed
+    // grant. The committed record uses `policy-granted` with a different
+    // idempotency key, so a concurrent flush cannot turn the final record
+    // into a duplicate.
+    const event: import("../../foundations/contracts/execution-brokers.js").ActionAuditEvent = {
+      eventId: generateId(),
+      actionId: action.actionId,
+      actionDigest: action.actionDigest,
+      principalId: action.principalId,
+      runId: action.runId,
+      state: "policy-grant-intent",
+      timestamp: this.now(),
+      policyDigest: this.policy.getPolicyDigest(),
+      backend: this.boundary.capabilities.backend,
+      optionId,
+      lifetime: lifetimeKind as "project" | "global",
+      capabilities,
+      actorId,
+      policyBeforeVersion: beforeVersion,
+      grantedWorkspaceId,
+      mutationId,
+    };
+    await this.terminalOutbox!.enqueue(
+      event,
+      idempotencyKey(action.actionId, "policy-grant-intent"),
+    );
+  }
+
 }
 
 /** Type re-export for composition roots. */

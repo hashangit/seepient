@@ -10,7 +10,7 @@ import { createWidgetHost } from './widget-host.js';
 import { stabilizeStreamingText } from './stream-commit-gate.js';
 import { MessageArea } from './components/message-area.js';
 import { PromptArea } from './components/prompt-area.js';
-import { PermissionPrompt } from './components/permission-prompt.js';
+import { PermissionPrompt, LegacyPermissionPrompt } from './components/permission-prompt.js';
 import { AssistantMessage } from './components/assistant-message.js';
 import { ToolCallBlock } from './components/tool-call-block.js';
 import { GoalStatus } from './components/goal-status.js';
@@ -408,7 +408,7 @@ export function TuiApp({
       onCycleFocus: onCycleWidgetFocus,
       onEscapeWidget: () => { if (focusedWidgetId) setFocusedWidgetId(null); },
     },
-    { enabled: overlay === null, isRunning },
+    { enabled: overlay === null, isRunning, promptPending: !!pendingPermission },
   );
 
   // T2: stabilize streaming text for live display. While markdown is reflowing
@@ -422,8 +422,20 @@ export function TuiApp({
   // the inline prompt replaces it; otherwise the spinner (with queued count)
   // renders ABOVE the input — the input stays active so queued/steered messages
   // can be typed during a run.
+  // Spec 011: the native path passes the full typed request to the prompt
+  // (keyed by requestId so a new request resets selection state); the legacy
+  // flag-off path keeps the raw tool name/arguments view.
   const inputAreaSlot = pendingPermission ? (
-    <PermissionPrompt toolName={pendingPermission.toolName} args={pendingPermission.args} approvalContext={pendingPermission.approvalContext} onResolve={resolvePermission} />
+    pendingPermission.kind === 'native' ? (
+      <PermissionPrompt key={pendingPermission.request.requestId} request={pendingPermission.request} onResolve={resolvePermission} />
+    ) : (
+      <LegacyPermissionPrompt
+        toolName={pendingPermission.view.toolName}
+        args={pendingPermission.view.args}
+        approvalContext={pendingPermission.view.approvalContext}
+        onResolve={resolvePermission}
+      />
+    )
   ) : (
     <Box flexDirection="column">
       {showSpinner ? (

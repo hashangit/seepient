@@ -49,7 +49,7 @@ function parseSubcommand(args: string): { sub: Subcommand | null; rest: string }
 
 // ── Manager factory ───────────────────────────────────────────────────────
 
-function createManager(): SettingsManager {
+export function createSettingsManager(): SettingsManager {
   const config = applyEnvOverrides(loadMergedConfig());
   const paths = getConfigPaths();
   const projectConfig = loadJsonConfig(paths.local);
@@ -69,7 +69,7 @@ function createManager(): SettingsManager {
 export function settingsHandler(): CommandHandler {
   return async (ctx: CommandContext) => {
     const { sub, rest } = parseSubcommand(ctx.args);
-    const manager = createManager();
+    const manager = createSettingsManager();
 
     if (sub === 'list' || (sub === null && isNonInteractive())) {
       return { output: handleList(manager) };

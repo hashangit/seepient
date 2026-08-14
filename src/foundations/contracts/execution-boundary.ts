@@ -41,7 +41,19 @@ export interface ExecutionBackendCapabilities {
   capabilityKinds: Capability["kind"][];
   exactCommit: boolean;
   hostFilteredEgress: boolean;
+  /**
+   * True ONLY when a real containment backend (Seatbelt/Bubblewrap) is
+   * operational. Explicitly-uncontained execution leaves this false and
+   * sets `uncontainedOptIn` instead (P1 review fix).
+   */
   environmentIsolation: boolean;
+  /**
+   * Operator opt-in to uncontained process execution (SEEPIENT_UNCONTAINED
+   * or the explicit boundary flag). Policy permits process approvals when
+   * either real isolation OR this opt-in is present; audit evidence records
+   * `isolated:false` so status never claims containment.
+   */
+  uncontainedOptIn?: boolean;
   supportedOperationKinds: PreparedOperation["kind"][];
 }
 

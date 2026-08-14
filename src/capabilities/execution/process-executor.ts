@@ -16,6 +16,25 @@ import type { CapabilityEnvelope } from "../../foundations/contracts/permission-
 import type { OperationExecutor } from "./operation-executor-registry.js";
 import type { NativeProcessSandbox } from "../../vendors/sandbox-runtime/index.js";
 import { sanitizeEnvironment, isSecurityPath } from "./environment-policy.js";
+import { existsSync } from "node:fs";
+import { delimiter, join } from "node:path";
+
+function sandboxCommandPath(pathValue: string | undefined): string | undefined {
+  if (!pathValue || process.platform !== "darwin") return pathValue;
+  const entries = pathValue.split(delimiter).filter(Boolean);
+  const selectedGit = entries
+    .map((entry) => join(entry, "git"))
+    .find((candidate) => existsSync(candidate));
+  const cltDir = "/Library/Developer/CommandLineTools/usr/bin";
+  if (
+    selectedGit === "/usr/bin/git" &&
+    existsSync(join(cltDir, "git")) &&
+    !entries.includes(cltDir)
+  ) {
+    return [cltDir, ...entries].join(delimiter);
+  }
+  return pathValue;
+}
 
 export class ProcessExecutor implements OperationExecutor {
   readonly kind = "process" as const;
@@ -87,8 +106,11 @@ export class ProcessExecutor implements OperationExecutor {
       };
     }
     // Sanitize the environment — no ambient control-plane secrets cross.
+    const commandPath = sandboxCommandPath(
+      this.parentEnv.PATH ?? process.env.PATH,
+    );
     const env = sanitizeEnvironment(this.parentEnv, {
-      path: process.env.PATH,
+      path: commandPath,
       home: operation.command.cwd,
     });
 
@@ -113,6 +135,20 @@ export class ProcessExecutor implements OperationExecutor {
     };
     void envelope;
 
+    // A signal-terminated child is a CANCELLED execution — the audit must
+    // never record an aborted command as succeeded (review P1).
+    if (result.signal) {
+      return {
+        state: "cancelled",
+        error: {
+          code: "PROCESS_CANCELLED",
+          message: `terminated by ${result.signal}`,
+          retryable: false,
+        },
+        evidence,
+      };
+    }
+
     if (result.exitCode === 0) {
       return {
         state: "succeeded",
@@ -123,11 +159,24 @@ export class ProcessExecutor implements OperationExecutor {
         evidence,
       };
     }
+    const diagnostic = [result.stderr, result.stdout]
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .join("\n")
+      // Keep terminal diagnostics readable and bounded. Successful command
+      // output already follows the normal model-egress path; failures should
+      // not become an unbounded or control-character-bearing error string.
+      // Covers C0 controls (incl. CR), DEL, and C1 controls (U+0080–U+009F);
+      // tab and newline survive for multiline output.
+      .replace(/[\u0000-\u0008\u000b\u000c\u000d\u000e-\u001f\u007f\u0080-\u009f]/g, "�")
+      .slice(0, 4_096);
     return {
       state: "failed",
       error: {
         code: "PROCESS_NONZERO_EXIT",
-        message: `exit ${result.exitCode}`,
+        message: diagnostic
+          ? `exit ${result.exitCode}: ${diagnostic}`
+          : `exit ${result.exitCode}`,
         retryable: false,
       },
       evidence,

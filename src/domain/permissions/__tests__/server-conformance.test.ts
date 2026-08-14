@@ -289,6 +289,8 @@ describe("QS-4.4 REST never waits (T411)", () => {
       actionDigest: "d",
       action: { title: "t", summary: "s", canonicalTargets: [], effects: [] },
       requestedCapabilities: [],
+      approvalOptions: [],
+      approvalChoices: [],
       offeredLifetimes: ["action"],
       createdAt: 0,
       expiresAt: Date.now() + 60_000,
@@ -318,7 +320,7 @@ describe("QS-4.4 REST never waits (T411)", () => {
       sessionId: "s",
       continuationId: "c-1",
     });
-    const decision = { approved: true, requestId: "r", actionDigest: "d", lifetime: "action" as const, actorId: "u", decidedAt: 0 };
+    const decision = { approved: true, requestId: "r", actionDigest: "d", optionId: "opt-1", lifetime: "action" as const, actorId: "u", decidedAt: 0 };
     expect(store.cas("c-1", rec.version, decision).status).toBe("transitioned");
   });
 });
@@ -334,6 +336,8 @@ describe("QS-4.5 durable realtime approval (T411)", () => {
       actionDigest: "d",
       action: { title: "t", summary: "s", canonicalTargets: [], effects: [] },
       requestedCapabilities: [],
+      approvalOptions: [],
+      approvalChoices: [],
       offeredLifetimes: ["action"],
       createdAt: 0,
       expiresAt: Date.now() + 60_000,
@@ -374,7 +378,7 @@ describe("QS-4.5 durable realtime approval (T411)", () => {
       sessionId: "s",
       continuationId: "c-1",
     });
-    const decision = { approved: true, requestId: "rq-1", actionDigest: "d", lifetime: "action" as const, actorId: "u", decidedAt: 0 };
+    const decision = { approved: true, requestId: "rq-1", actionDigest: "d", optionId: "opt-1", lifetime: "action" as const, actorId: "u", decidedAt: 0 };
     expect(store.cas("c-1", rec.version, decision).status).toBe("transitioned");
     expect(store.cas("c-1", rec.version, decision).status).toBe("duplicate");
   });
@@ -387,7 +391,7 @@ describe("QS-4.5 durable realtime approval (T411)", () => {
       sessionId: "s",
       continuationId: "c-1",
     });
-    const decision = { approved: true, requestId: "rq-1", actionDigest: "d", lifetime: "action" as const, actorId: "u", decidedAt: 0 };
+    const decision = { approved: true, requestId: "rq-1", actionDigest: "d", optionId: "opt-1", lifetime: "action" as const, actorId: "u", decidedAt: 0 };
     expect(store.cas("c-1", 1, decision, Date.now() + 1000).status).toBe("expired");
   });
 
@@ -403,6 +407,7 @@ describe("QS-4.5 durable realtime approval (T411)", () => {
       approved: true,
       requestId: "rq-1",
       actionDigest: "d",
+      optionId: "opt-1",
       lifetime: "action",
       actorId: "u",
       decidedAt: 0,

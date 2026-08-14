@@ -17,6 +17,7 @@ import { extractPattern } from "../foundations/grant-pattern.js";
 import { getAllToolModules } from "./tool-executor.js";
 import { getModelMeta } from "../foundations/models-catalog.js";
 import type { WiredActionLifecycle } from "./permissions/action-lifecycle-factory.js";
+import type { PermissionRequest } from "../foundations/contracts/permission-policy.js";
 import { resolveAnalyzerWithFallback } from "./permissions/default-analyzers.js";
 
 // ProviderFactory for per-skill model switching
@@ -341,14 +342,31 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
       : autoConfirm
         ? {
             mode: "inline" as const,
-            request: async (req: any) => ({
-              approved: true,
-              requestId: req.requestId,
-              actionDigest: req.actionDigest,
-              lifetime: "action" as const,
-              actorId: "autoConfirm",
-              decidedAt: Date.now(),
-            }),
+            // Spec 011: auto-confirm binds to the request's narrowest option
+            // and an offered lifetime; a request with no representable option
+            // cannot be auto-approved.
+            request: async (req: PermissionRequest) => {
+              const option = req.approvalOptions[0];
+              if (!option) {
+                return {
+                  approved: false as const,
+                  requestId: req.requestId,
+                  actionDigest: req.actionDigest,
+                  actorId: "autoConfirm",
+                  reason: "approval-unavailable: request has no representable option",
+                  decidedAt: Date.now(),
+                };
+              }
+              return {
+                approved: true as const,
+                requestId: req.requestId,
+                actionDigest: req.actionDigest,
+                optionId: option.optionId,
+                lifetime: "action" as const,
+                actorId: "autoConfirm",
+                decidedAt: Date.now(),
+              };
+            },
           }
         : legacyApproveToolToBroker(undefined);
     wiredPipeline = await buildActionLifecycle({

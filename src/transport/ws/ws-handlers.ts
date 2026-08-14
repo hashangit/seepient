@@ -29,6 +29,10 @@ import type {
   ConnectionState,
 } from "./ws-types.js";
 import type { PermissionLevel } from "../../foundations/types.js";
+import type {
+  PermissionDecision,
+  PermissionRequest,
+} from "../../foundations/contracts/permission-policy.js";
 import type { SettingsHandlerContext } from "../http/settings-handlers.js";
 import { handleWsGetSettings, handleWsUpdateSettings } from "../http/settings-handlers.js";
 
@@ -378,6 +382,55 @@ function handleAbort(
 const APPROVAL_TIMEOUT_MS = 30_000; // 30 seconds
 
 /**
+ * Build the durable-store request record for the WS legacy surface (spec 011
+ * T022 review fix). The legacy server loop has no Domain policy evaluation on
+ * this path, so the record carries ONE exact-for-this-call option: its
+ * capabilities are empty (no authority is invented — the legacy loop remains
+ * the sole authority) and the option only makes the approval representable so
+ * the durable record and the executed outcome stay consistent. When the P4
+ * server split wires the real pipeline, engine-issued options replace this.
+ */
+export function wsLegacyApprovalRequest(
+  callId: string,
+  callName: string,
+  now = Date.now(),
+): PermissionRequest {
+  return {
+    requestId: callId,
+    principalId: "ws-user",
+    runId: "ws-run",
+    toolCallId: callId,
+    actionDigest: callId,
+    action: { title: callName, summary: callName, canonicalTargets: [], effects: [] },
+    requestedCapabilities: [],
+    approvalOptions: [
+      {
+        optionId: `ws-exact-${callId}`,
+        actionDigest: callId,
+        kind: "exact",
+        label: `Only this call — ${callName} (legacy server surface)`,
+        capabilities: [],
+        supportedLifetimes: ["action"],
+      },
+    ],
+    approvalChoices: [
+      {
+        choiceId: `ws-exact-${callId}::action`,
+        optionId: `ws-exact-${callId}`,
+        lifetime: "action",
+        title: "Allow this action once",
+        description: "You'll be asked again next time.",
+        authoritySummary: [`Approve the tool call shown (${callName})`],
+        recommended: true,
+      },
+    ],
+    offeredLifetimes: ["action"],
+    createdAt: now,
+    expiresAt: now + APPROVAL_TIMEOUT_MS,
+  };
+}
+
+/**
  * Create an `approveTool` callback for the server adapter.
  * Sends a `tool_approval_request` to the client and waits for a
  * `tool_approval_response`. Falls back to auto-deny on timeout.
@@ -388,18 +441,7 @@ export function createServerApproveTool(ws: WebSocket): import("../../foundation
     const continuationId = `cont-${callId}`;
 
     durableApprovalStore.create({
-      request: {
-        requestId: callId,
-        principalId: "ws-user",
-        runId: "ws-run",
-        toolCallId: callId,
-        actionDigest: callId,
-        action: { title: call.name, summary: call.name, canonicalTargets: [], effects: [] },
-        requestedCapabilities: [],
-        offeredLifetimes: ["action"],
-        createdAt: Date.now(),
-        expiresAt: Date.now() + APPROVAL_TIMEOUT_MS,
-      },
+      request: wsLegacyApprovalRequest(callId, call.name),
       tenantId: "default",
       sessionId: "ws-session",
       continuationId,
@@ -446,19 +488,61 @@ async function handleToolApprovalResponse(
     return;
   }
 
-  const decision: import("../../foundations/contracts/permission-policy.js").PermissionDecision = msg.approved
-    ? { approved: true, requestId: msg.callId, actionDigest: msg.callId, lifetime: "action", actorId: "ws-user", decidedAt: Date.now() }
-    : { approved: false, requestId: msg.callId, actionDigest: msg.callId, actorId: "ws-user", decidedAt: Date.now() };
+  // Spec 011 (T022): an approved legacy response must bind to the request's
+  // narrowest policy-issued option; with no options the approval cannot be
+  // represented and is denied as unavailable.
+  const rec = durableApprovalStore.get(pending.continuationId);
+  const decision = wsApprovalDecision(msg, rec?.request);
 
   const result = await durableApprovalStore.cas(pending.continuationId, 1, decision);
   clearTimeout(pending.timer);
   pendingApprovals.delete(msg.callId);
 
+  // Execution MUST follow the validated typed decision: when the request had
+  // no representable policy option, the approval was persisted as denied and
+  // the tool must NOT run (spec 011 review fix). The durable record and the
+  // resolved callback never disagree.
   if (result.status === "transitioned") {
-    pending.resolve(msg.approved);
+    pending.resolve(decision.approved);
   } else {
     pending.resolve(false);
   }
+}
+
+/**
+ * Build the strict typed decision for a WS approval response (spec 011
+ * T022). An approved response is bound to the request's narrowest
+ * policy-issued option; a request with no representable option can only be
+ * denied as `approval-unavailable`, and the caller must let execution follow
+ * this decision. Pure and exported for conformance tests.
+ */
+export function wsApprovalDecision(
+  msg: ToolApprovalResponse,
+  request: PermissionRequest | undefined,
+  now = Date.now(),
+): PermissionDecision {
+  const option = request?.approvalOptions[0];
+  if (msg.approved && option) {
+    return {
+      approved: true,
+      requestId: msg.callId,
+      actionDigest: msg.callId,
+      optionId: option.optionId,
+      lifetime: "action",
+      actorId: "ws-user",
+      decidedAt: now,
+    };
+  }
+  return {
+    approved: false,
+    requestId: msg.callId,
+    actionDigest: msg.callId,
+    actorId: "ws-user",
+    reason: msg.approved
+      ? "approval-unavailable: request has no representable option"
+      : undefined,
+    decidedAt: now,
+  };
 }
 
 // ── Resume handler ───────────────────────────────────────────────────

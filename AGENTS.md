@@ -109,7 +109,12 @@ Current layout of the Obsidian vault (annotated):
 │   └── 011-tui-permission-scope-ux/       # Multi-tab TUI permission scope & duration UX
 │       ├── spec.md                   # Problem statement, requirements, scope
 │       ├── plan.md                   # Phased implementation plan
-│       └── tasks.md                  # Dependency-ordered implementation tasks
+│       ├── tasks.md                  # Dependency-ordered implementation tasks
+│       ├── research.md               # Contract and authority-boundary decisions
+│       ├── data-model.md             # Request, option, decision, and lifecycle model
+│       ├── contracts/                # Policy-option and TUI prompt contracts
+│       ├── quickstart.md             # Automated and manual validation scenarios
+│       └── checklists/requirements.md # Specification quality checklist
 ├── 010-provider-management-redesign/ # Provider mgmt redesign: contracts + runtime + purpose/tier routing
 │   ├── spec.md                       # Problem, 5 blockers + 4 gaps, scope decisions, success criteria
 │   ├── plan.md                       # P0-P7 phased plan (contracts → Pi adapter → runtime → resolution → surfaces → reliability)
@@ -250,7 +255,7 @@ Env vars per provider: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GLM_API_KEY`, `OP
 
 - **No bundler** — plain `tsc` to ES2022 NodeNext. Dev via `tsx`.
 - **Package exports** — `seepient` (SDK), `seepient/server`. Binaries: `seepient` (CLI), `seepient-server`.
-- **Vitest test suite** — 532 tests across 52 files; CI gates publish on test pass
+- **Vitest test suite** — 1067 tests across 104 files; CI gates publish on test pass
 - **Errors carry metadata** — `code` (machine-readable) + `retryable` flag on all `SeepientError` subclasses.
 - **Hook errors are non-fatal** — never crash the agent loop.
 - **Dynamic provider imports** — unused provider SDKs stay out of memory.

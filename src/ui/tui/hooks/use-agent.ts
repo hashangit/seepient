@@ -14,8 +14,14 @@
  * renders) and the pending prompt's view in state (so the component re-renders).
  */
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Agent, type ChatResult } from '../../../transport/cli/agent.js';
+import { InlineApprovalBroker } from '../../../transport/approval-brokers.js';
+import type { InlineApprovalPresenter } from '../../../transport/approval-brokers.js';
+import type {
+  PermissionRequest,
+  TuiApprovalSelection,
+} from '../../../foundations/contracts/permission-policy.js';
 import type { ApproveToolFn, ApprovalContext, ApprovalDecision, PermissionLevel, StepResult, CumulativeUsage } from '../../../foundations/types.js';
 import type { Todo } from '../components/goal-status.js';
 import type { FeedApi } from './use-feed.js';
@@ -30,6 +36,14 @@ export interface PendingPermissionView {
   approvalContext?: ApprovalContext;
 }
 
+/**
+ * Spec 011: the native path holds the full typed `PermissionRequest`; the
+ * legacy (flag-off) path keeps the raw tool name/arguments view.
+ */
+export type PendingPermission =
+  | { kind: 'native'; request: PermissionRequest }
+  | { kind: 'legacy'; view: PendingPermissionView };
+
 export interface StreamingToolView {
   name: string;
   args: Record<string, unknown>;
@@ -38,7 +52,7 @@ export interface StreamingToolView {
 
 export interface AgentApi {
   isRunning: boolean;
-  pendingPermission: PendingPermissionView | null;
+  pendingPermission: PendingPermission | null;
   /** Live, accumulating assistant text while streaming (empty when idle). */
   streamingText: string;
   /** Live, accumulating tool output while a tool runs (null when idle). */
@@ -50,7 +64,8 @@ export interface AgentApi {
   /** Persistent todo list (updated by manage_todos tool; null when none). */
   latestTodos: Todo[] | null;
   submit: (input: string) => Promise<void>;
-  resolvePermission: (decision: ApprovalDecision) => void;
+  /** Native selections or legacy decisions both flow through this resolver. */
+  resolvePermission: (selection: TuiApprovalSelection | ApprovalDecision) => void;
   abort: () => void;
   resetTodos: () => void;
   /** Restore the persistent todo panel (e.g. from a resumed session). */
@@ -66,7 +81,7 @@ export interface UseAgentArgs {
 
 export function useAgent({ agent, feed, permissionLevel, widgetHost }: UseAgentArgs): AgentApi {
   const [isRunning, setIsRunning] = useState(false);
-  const [pendingPermission, setPendingPermission] = useState<PendingPermissionView | null>(null);
+  const [pendingPermission, setPendingPermission] = useState<PendingPermission | null>(null);
   const [streamingText, setStreamingText] = useState('');
   const [streamingTool, setStreamingTool] = useState<StreamingToolView | null>(null);
   const [usage, setUsage] = useState<CumulativeUsage>({
@@ -84,7 +99,87 @@ export function useAgent({ agent, feed, permissionLevel, widgetHost }: UseAgentA
   feedRef.current = feed;
   const permissionLevelRef = useRef(permissionLevel);
   permissionLevelRef.current = permissionLevel;
-  const resolverRef = useRef<((value: ApprovalDecision) => void) | null>(null);
+  const resolverRef = useRef<((value: TuiApprovalSelection | ApprovalDecision) => void) | null>(null);
+
+  // Spec 011: the native typed approval broker. Created once; its presenter
+  // stores the full PermissionRequest in state and waits for the user's
+  // transient selection. The broker enriches the selection into the shared
+  // PermissionDecision (actor + timestamp) before the lifecycle validates it.
+  const nativeBrokerRef = useRef<InlineApprovalBroker | null>(null);
+  // The pending native presenter promise, if any. Settled immediately on
+  // request replacement or TUI unmount (FR-020: the prompt must never hang
+  // until the broker deadline for a prompt that is no longer visible).
+  const pendingNativeRef = useRef<{ settle: (s: TuiApprovalSelection) => void } | null>(null);
+  const getNativeBroker = useCallback((): InlineApprovalBroker => {
+    let broker = nativeBrokerRef.current;
+    if (!broker) {
+      const presenter: InlineApprovalPresenter = {
+        prompt: (request: PermissionRequest, opts) => {
+          setPendingPermission({ kind: 'native', request });
+          return new Promise<TuiApprovalSelection>((resolve) => {
+            const settle = (value: TuiApprovalSelection): void => {
+              // Idempotent: only the CURRENT prompt may settle; a replaced
+              // or already-settled prompt ignores late calls.
+              if (pendingNativeRef.current !== current) return;
+              if (resolverRef.current === onSelection) resolverRef.current = null;
+              opts.signal?.removeEventListener('abort', onAbort);
+              pendingNativeRef.current = null;
+              resolve(value);
+            };
+            // User path: an Enter/Esc/q selection (or a legacy-style denial)
+            // settles this prompt.
+            const onSelection = (value: TuiApprovalSelection | ApprovalDecision): void => {
+              // Anything that is not an approved choice-ID selection denies
+              // safely.
+              if (typeof value !== 'boolean' && 'choiceId' in value) {
+                settle(value);
+              } else {
+                settle({ approved: false, reason: 'user-denied' });
+              }
+            };
+            // System path: broker deadline, parent abort, request replacement,
+            // or TUI unmount must settle the prompt immediately (FR-020).
+            const onAbort = (): void => {
+              setPendingPermission(null);
+              settle({ approved: false, reason: 'approval-unavailable' });
+            };
+            // A NEW request replacing a still-open prompt settles the old one
+            // immediately: one action produces at most one prompt. `settle`
+            // nulls the ref via its own guard path.
+            const previous = pendingNativeRef.current;
+            if (previous) {
+              previous.settle({ approved: false, reason: 'approval-unavailable' });
+            }
+            const current = { settle };
+            pendingNativeRef.current = current;
+            // The app's `resolvePermission` bridge and the abort/error paths
+            // route through `resolverRef`; register the user path there too
+            // (legacy approveTool only sets it when the pipeline is off).
+            resolverRef.current = onSelection;
+            opts.signal?.addEventListener('abort', onAbort, { once: true });
+          });
+        },
+      };
+      broker = new InlineApprovalBroker(presenter);
+      nativeBrokerRef.current = broker;
+    }
+    return broker;
+  }, []);
+
+  // The seam must not outlive the TUI: clear it on unmount so a pending
+  // prompt can never resolve through a dead surface, and settle a still-open
+  // prompt immediately (FR-020).
+  useEffect(() => {
+    return () => {
+      agent.setPipelineApprovalBroker(undefined);
+      const pending = pendingNativeRef.current;
+      if (pending) {
+        // `settle` nulls the ref itself via its guard path; a pre-null
+        // would make the guard bail and leave the prompt unresolved.
+        pending.settle({ approved: false, reason: 'approval-unavailable' });
+      }
+    };
+  }, [agent]);
   const streamingTextRef = useRef('');
   const streamingToolRef = useRef<StreamingToolView | null>(null);
 
@@ -134,7 +229,11 @@ export function useAgent({ agent, feed, permissionLevel, widgetHost }: UseAgentA
     const signal = agent.createAbortSignal();
 
     const approveTool: ApproveToolFn = async (call) => {
-      setPendingPermission({ toolName: call.name, args: call.args, approvalContext: call.approvalContext });
+      // Legacy (flag-off) surface: raw tool name/arguments, unchanged.
+      setPendingPermission({
+        kind: 'legacy',
+        view: { toolName: call.name, args: call.args, approvalContext: call.approvalContext },
+      });
 
       const decision = await new Promise<ApprovalDecision>((resolve) => {
         resolverRef.current = resolve;
@@ -144,6 +243,12 @@ export function useAgent({ agent, feed, permissionLevel, widgetHost }: UseAgentA
       setPendingPermission(null);
       return decision;
     };
+
+    // Spec 011: when the permission pipeline is active, install the native
+    // typed broker so the policy request reaches the TUI prompt intact.
+    if (agent.isPermissionPipelineEnabled()) {
+      agent.setPipelineApprovalBroker(getNativeBroker());
+    }
 
     const onStep = (step: StepResult): void => {
       if (step.type === 'text_delta' && step.content) {
@@ -232,28 +337,33 @@ export function useAgent({ agent, feed, permissionLevel, widgetHost }: UseAgentA
       // Flush any pending throttled updates before completing.
       textFlush.flushNow();
       toolFlush.flushNow();
-      // Unblock the loop if the agent was aborted mid-approval.
+      // Unblock the loop if the agent was aborted mid-approval. The object
+      // shape is valid for both the native selection and legacy decision.
       if (resolverRef.current) {
-        resolverRef.current(false);
+        resolverRef.current({ approved: false, reason: 'user-denied' });
         resolverRef.current = null;
       }
       setPendingPermission(null);
+      // The native seam is installed per chat; clear it on completion.
+      agent.setPipelineApprovalBroker(undefined);
       setIsRunning(false);
     }
-  }, [agent, commitStreaming, textFlush, toolFlush, widgetHost]);
+  }, [agent, commitStreaming, textFlush, toolFlush, widgetHost, getNativeBroker]);
 
-  const resolvePermission = useCallback((decision: ApprovalDecision): void => {
+  const resolvePermission = useCallback((selection: TuiApprovalSelection | ApprovalDecision): void => {
     const resolve = resolverRef.current;
     if (resolve) {
       resolverRef.current = null;
-      resolve(decision);
+      setPendingPermission(null);
+      resolve(selection);
     }
   }, []);
 
   const abort = useCallback((): void => {
-    // A pending approval is resolved as a deny so the loop unblocks before abort.
+    // A pending approval is resolved as a deny so the loop unblocks before
+    // abort. Object shape is valid for both native and legacy resolvers.
     if (resolverRef.current) {
-      resolverRef.current(false);
+      resolverRef.current({ approved: false, reason: 'user-denied' });
       resolverRef.current = null;
       setPendingPermission(null);
     }

@@ -5,6 +5,9 @@
  * denies, backend support, monotonic intersection, and headless denial.
  */
 import { describe, it, expect } from "vitest";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PolicyEngine, computePolicyDigest } from "../policy-engine.js";
 import type {
   Capability,
@@ -43,6 +46,35 @@ function context(overrides: Partial<PolicyContext> = {}): PolicyContext {
     interaction: { mode: "inline", deadlineMs: 30_000 },
     backendCapabilities: LOCAL_BACKEND,
     ...overrides,
+  };
+}
+
+/** Process action with a subcommand matcher (FR-009: bounded needs argv). */
+function processAction(actionDigest = "d-proc"): PreparedToolAction {
+  return {
+    version: 1,
+    actionId: "a1",
+    runId: "r1",
+    toolCallId: "c1",
+    toolName: "execute_shell_command",
+    principalId: "user",
+    argsDigest: "x",
+    actionDigest,
+    risk: "destructive",
+    effects: [
+      {
+        kind: "process-exec",
+        command: { executable: "/usr/bin/git", argv: ["status", "--porcelain"], cwd: "/proj" },
+        requestedRoots: [],
+      },
+    ],
+    display: {
+      title: "run",
+      summary: "git status",
+      canonicalTargets: [],
+      effects: ["process-exec"],
+    },
+    operation: { kind: "process", command: { executable: "/usr/bin/git", argv: ["status", "--porcelain"], cwd: "/proj" }, roots: [] },
   };
 }
 
@@ -113,16 +145,168 @@ describe("PolicyEngine (T106/T110)", () => {
     expect(d.decision).toBe("allow");
   });
 
-  it("needs-approval when capability missing but within ceiling", () => {
+  it("needs-approval carries policy-issued options, not a proposed envelope", () => {
     const engine = new PolicyEngine("digest");
     const d = engine.evaluate(writeAction("/proj/a.txt"), context());
     expect(d.decision).toBe("needs-approval");
     if (d.decision === "needs-approval") {
       expect(d.request.actionDigest).toBe("d-/proj/a.txt");
-      expect(d.proposedEnvelope.capabilities).toEqual([
+      expect("proposedEnvelope" in d).toBe(false);
+      // The backend cannot enforce root-shaped writes, so exactly ONE
+      // (exact) option is issued — never a tool-wide or raw fallback.
+      expect(d.request.approvalOptions).toHaveLength(1);
+      const [opt] = d.request.approvalOptions;
+      expect(opt.kind).toBe("exact");
+      expect(opt.actionDigest).toBe("d-/proj/a.txt");
+      expect(opt.capabilities).toEqual([
         { kind: "commit-file", path: "/proj/a.txt" },
       ]);
+      expect(opt.supportedLifetimes).toEqual(["action", "run"]);
+      expect(d.request.offeredLifetimes).toEqual(["action", "run"]);
     }
+  });
+
+  it("offers the session lifetime only when a stable session identity exists", () => {
+    const engine = new PolicyEngine("digest");
+    const d = engine.evaluate(writeAction("/proj/a.txt"), context({ sessionId: "sess-1" }));
+    expect(d.decision).toBe("needs-approval");
+    if (d.decision === "needs-approval") {
+      expect(d.request.sessionId).toBe("sess-1");
+      expect(d.request.offeredLifetimes).toContain("session");
+      for (const opt of d.request.approvalOptions) {
+        expect(opt.supportedLifetimes).toContain("session");
+      }
+    }
+  });
+
+  it("offers an exact + bounded pair for process actions the backend enforces", () => {
+    const engine = new PolicyEngine("digest");
+    const ctx = context({
+      deploymentCeiling: set({ kind: "process" }),
+      principalPolicy: set({ kind: "process" }),
+      runtimeBaseline: set({ kind: "process" }),
+    });
+    const d = engine.evaluate(processAction(), ctx);
+    expect(d.decision).toBe("needs-approval");
+    if (d.decision === "needs-approval") {
+      const kinds = d.request.approvalOptions.map((o) => o.kind);
+      // Narrowest first: exact, then the executable+subcommand bounded option.
+      expect(kinds).toEqual(["exact", "bounded"]);
+      const exact = d.request.approvalOptions[0];
+      const bounded = d.request.approvalOptions[1];
+      // FR-009: the bounded matcher pins the executable AND the FIRST argv token.
+      expect(bounded.capabilities).toEqual([
+        { kind: "process", executable: "/usr/bin/git", argvPrefix: ["status"] },
+      ]);
+      // The EXACT option carries argvExact (P0 review fix): it covers only
+      // the identical command, never trailing extra arguments.
+      expect(exact.capabilities).toEqual([
+        { kind: "process", executable: "/usr/bin/git", argvPrefix: ["status", "--porcelain"], argvExact: true },
+      ]);
+      // Option IDs are stable within the request and bound to the digest.
+      expect(exact.optionId).toContain("d-proc");
+      expect(exact.optionId).not.toBe(bounded.optionId);
+    }
+  });
+
+  it("needs-approval carries complete approval choices resolved from options (T027)", () => {
+    const engine = new PolicyEngine("digest");
+    const ctx = context({
+      sessionId: "sess-1",
+      deploymentCeiling: set({ kind: "process" }),
+      principalPolicy: set({ kind: "process" }),
+      runtimeBaseline: set({ kind: "process" }),
+    });
+    const d = engine.evaluate(processAction(), ctx);
+    expect(d.decision).toBe("needs-approval");
+    if (d.decision === "needs-approval") {
+      const { approvalOptions, approvalChoices } = d.request;
+      expect(approvalChoices.length).toBeGreaterThan(0);
+      const optionIds = new Set(approvalOptions.map((o) => o.optionId));
+      for (const choice of approvalChoices) {
+        expect(optionIds.has(choice.optionId)).toBe(true);
+        expect(choice.choiceId).toBe(`${choice.optionId}::${choice.lifetime}`);
+      }
+      // Bounded options are session-only (FR-010): bounded/action is never
+      // a Domain-issued choice.
+      const bounded = approvalOptions.find((o) => o.kind === "bounded");
+      expect(bounded).toBeDefined();
+      const boundedChoices = approvalChoices.filter((c) => c.optionId === bounded!.optionId);
+      expect(boundedChoices).toHaveLength(1);
+      expect(boundedChoices[0].lifetime).toBe("session");
+      // Exactly one recommended choice: exact/action.
+      const recommended = approvalChoices.filter((c) => c.recommended);
+      expect(recommended).toHaveLength(1);
+      expect(recommended[0].optionId).toBe(approvalOptions[0].optionId);
+      expect(recommended[0].lifetime).toBe("action");
+    }
+  });
+
+  it("offers project/global persistent choices only when a workspace identity exists", () => {
+    const engine = new PolicyEngine("digest");
+    const base = {
+      sessionId: "sess-1",
+      deploymentCeiling: set({ kind: "process" }),
+      principalPolicy: set({ kind: "process" }),
+      runtimeBaseline: set({ kind: "process" }),
+    };
+    // No workspace identity: session only, no persistent choices.
+    const noWs = engine.evaluate(processAction(), context({ ...base }));
+    expect(noWs.decision).toBe("needs-approval");
+    if (noWs.decision === "needs-approval") {
+      expect(noWs.request.workspaceId).toBeUndefined();
+      expect(noWs.request.offeredLifetimes).not.toContain("project");
+      expect(noWs.request.offeredLifetimes).not.toContain("global");
+      expect(noWs.request.approvalChoices.every((c) => c.lifetime === "action" || c.lifetime === "session")).toBe(true);
+    }
+    // With a workspace identity: project + global choices for the EXACT
+    // option only (bounded stays session-only).
+    const withWs = engine.evaluate(processAction(), context({ ...base, workspaceId: "ws-1" }));
+    expect(withWs.decision).toBe("needs-approval");
+    if (withWs.decision === "needs-approval") {
+      const { request } = withWs;
+      expect(request.workspaceId).toBe("ws-1");
+      expect(request.offeredLifetimes).toContain("project");
+      expect(request.offeredLifetimes).toContain("global");
+      const exact = request.approvalOptions.find((o) => o.kind === "exact")!;
+      const exactLifetimes = request.approvalChoices
+        .filter((c) => c.optionId === exact.optionId)
+        .map((c) => c.lifetime);
+      expect(exactLifetimes).toContain("action");
+      expect(exactLifetimes).toContain("session");
+      expect(exactLifetimes).toContain("project");
+      expect(exactLifetimes).toContain("global");
+      const bounded = request.approvalOptions.find((o) => o.kind === "bounded")!;
+      const boundedLifetimes = request.approvalChoices
+        .filter((c) => c.optionId === bounded.optionId)
+        .map((c) => c.lifetime);
+      expect(boundedLifetimes).toEqual(["session"]);
+    }
+  });
+
+  it("containment preflight denies process actions on non-isolated backends before prompting", () => {
+    const engine = new PolicyEngine("digest");
+    const ctx = context({
+      deploymentCeiling: set({ kind: "process" }),
+      principalPolicy: set({ kind: "process" }),
+      runtimeBaseline: set({ kind: "process" }),
+      backendCapabilities: { ...LOCAL_BACKEND, environmentIsolation: false },
+    });
+    const d = engine.evaluate(processAction(), ctx);
+    expect(d.decision).toBe("deny");
+    if (d.decision === "deny") {
+      expect(d.reason).toBe("approval-unavailable");
+      expect(d.message).toMatch(/containment/i);
+    }
+  });
+
+  it("file-only missing capabilities still reach needs-approval without process containment", () => {
+    const engine = new PolicyEngine("digest");
+    const ctx = context({
+      backendCapabilities: { ...LOCAL_BACKEND, environmentIsolation: false },
+    });
+    const d = engine.evaluate(writeAction("/proj/a.txt"), ctx);
+    expect(d.decision).toBe("needs-approval");
   });
 
   it("denies outside-ceiling when path is beyond deployment", () => {
@@ -172,6 +356,63 @@ describe("PolicyEngine (T106/T110)", () => {
     const engine = new PolicyEngine("digest");
     const ctx = context({ approvalMode: "never" });
     const d = engine.evaluate(writeAction("/proj/a.txt"), ctx);
+    expect(d.decision).toBe("deny");
+    if (d.decision === "deny") expect(d.reason).toBe("approval-unavailable");
+  });
+
+  it("autonomous mode allows an in-ceiling action without requesting approval", () => {
+    const engine = new PolicyEngine("digest");
+    const ctx = context({
+      approvalMode: "autonomous",
+      interaction: { mode: "none" },
+      principalPolicy: EMPTY,
+      runtimeBaseline: set({ kind: "commit-file", path: "/proj/a.txt" }),
+    });
+    const d = engine.evaluate(writeAction("/proj/a.txt"), ctx);
+    expect(d.decision).toBe("allow");
+    if (d.decision === "allow") {
+      expect(d.envelope.capabilities).toEqual([
+        { kind: "commit-file", path: "/proj/a.txt" },
+      ]);
+    }
+  });
+
+  it("autonomous mode still denies capabilities outside the deployment ceiling", () => {
+    const engine = new PolicyEngine("digest");
+    const ctx = context({
+      approvalMode: "autonomous",
+      interaction: { mode: "none" },
+      deploymentCeiling: EMPTY,
+      principalPolicy: EMPTY,
+      workspaceRoot: undefined,
+    });
+    const d = engine.evaluate(writeAction("/proj/a.txt"), ctx);
+    expect(d.decision).toBe("deny");
+    if (d.decision === "deny") expect(d.reason).toBe("outside-ceiling");
+  });
+
+  it("autonomous mode still enforces immutable denials", () => {
+    const engine = new PolicyEngine("digest");
+    const ctx = context({
+      approvalMode: "autonomous",
+      immutableDenies: [{ ruleId: "autonomous-deny", effect: "filesystem-write", reason: "immutable-deny" }],
+    });
+    const d = engine.evaluate(writeAction("/proj/a.txt"), ctx);
+    expect(d.decision).toBe("deny");
+    if (d.decision === "deny") expect(d.reason).toBe("immutable-deny");
+  });
+
+  it("autonomous mode still requires process containment", () => {
+    const engine = new PolicyEngine("digest");
+    const processCap: Capability = { kind: "process" };
+    const ctx = context({
+      approvalMode: "autonomous",
+      deploymentCeiling: set(processCap),
+      principalPolicy: EMPTY,
+      runtimeBaseline: set(processCap),
+      backendCapabilities: { ...LOCAL_BACKEND, environmentIsolation: false },
+    });
+    const d = engine.evaluate(processAction(), ctx);
     expect(d.decision).toBe("deny");
     if (d.decision === "deny") expect(d.reason).toBe("approval-unavailable");
   });
@@ -228,5 +469,99 @@ describe("policy digest deep-canonicalization (reviewer fix #7)", () => {
       deploymentCeiling: base.deploymentCeiling,
     };
     expect(computePolicyDigest(base)).toBe(computePolicyDigest(reordered as never));
+  });
+});
+
+describe("uncontained opt-in (P1 review fix)", () => {
+  it("process approvals are permitted when the operator explicitly opted into uncontained execution", () => {
+    const engine = new PolicyEngine("digest");
+    const ctx = context({
+      deploymentCeiling: set({ kind: "process" }),
+      principalPolicy: set({ kind: "process" }),
+      runtimeBaseline: set({ kind: "process" }),
+      backendCapabilities: {
+        ...LOCAL_BACKEND,
+        environmentIsolation: false,
+        uncontainedOptIn: true,
+      },
+    });
+    const d = engine.evaluate(processAction(), ctx);
+    // NOT the containment denial: the opt-in permits the prompt.
+    expect(d.decision).toBe("needs-approval");
+  });
+
+  it("process approvals stay denied without isolation AND without the opt-in", () => {
+    const engine = new PolicyEngine("digest");
+    const ctx = context({
+      deploymentCeiling: set({ kind: "process" }),
+      principalPolicy: set({ kind: "process" }),
+      runtimeBaseline: set({ kind: "process" }),
+      backendCapabilities: {
+        ...LOCAL_BACKEND,
+        environmentIsolation: false,
+      },
+    });
+    const d = engine.evaluate(processAction(), ctx);
+    expect(d.decision).toBe("deny");
+    if (d.decision === "deny") expect(d.reason).toBe("approval-unavailable");
+  });
+});
+
+// ── Workspace containment canonicalization (review round 10) ────────────
+//
+// The ceiling check's realpath canonicalization was dead code in ESM
+// (`require("node:fs")` threw ReferenceError inside a swallowed catch), so a
+// symlink inside the workspace pointing outside passed the raw string-prefix
+// containment check and became approvable. These tests pin the fixed
+// behavior with a real filesystem.
+
+describe("workspace containment canonicalization (review round 10)", () => {
+  it("a symlink inside the workspace pointing outside is outside-ceiling", () => {
+    const base = mkdtempSync(join(tmpdir(), "seepient-ceiling-"));
+    try {
+      const workspace = join(base, "workspace");
+      const outside = join(base, "outside");
+      mkdirSync(workspace);
+      mkdirSync(outside);
+      symlinkSync(outside, join(workspace, "link"));
+      // The target must resolve for realpathSync — write through the link.
+      writeFileSync(join(workspace, "link", "escape.txt"), "x");
+
+      const engine = new PolicyEngine("digest");
+      const ctx = context({
+        deploymentCeiling: EMPTY,
+        runtimeBaseline: EMPTY,
+        activeCapabilities: EMPTY,
+        workspaceRoot: workspace,
+      });
+      const d = engine.evaluate(writeAction(join(workspace, "link", "escape.txt")), ctx);
+      expect(d.decision).toBe("deny");
+      if (d.decision === "deny") expect(d.reason).toBe("outside-ceiling");
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it("a plain workspace path stays approvable when realpath fails (new file)", () => {
+    const base = mkdtempSync(join(tmpdir(), "seepient-ceiling-"));
+    try {
+      const workspace = join(base, "workspace");
+      mkdirSync(workspace);
+
+      const engine = new PolicyEngine("digest");
+      const ctx = context({
+        deploymentCeiling: EMPTY,
+        runtimeBaseline: EMPTY,
+        activeCapabilities: EMPTY,
+        workspaceRoot: workspace,
+      });
+      // inside.txt does not exist → realpath falls back to the raw path,
+      // which the string containment still accepts (fail-open only within
+      // the workspace root itself).
+      const d = engine.evaluate(writeAction(join(workspace, "inside.txt")), ctx);
+      expect(d.decision).not.toBe("deny");
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 });

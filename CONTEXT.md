@@ -1,22 +1,19 @@
 # Context
 
-**Current Task**: Spec 008 (permission-system-redesign) — COMPLETE.
+**Task**: Spec 011 (tui-permission-scope-ux), branch `011-tui-permission-scope-ux`.
 
 ## Status
-- 66/66 tasks complete across P0-P6. 842/842 tests pass (+310 new); clean tsc.
-- The spec's release gates are met at the contract/test layer.
+- Round-4 review fixes: persistent-grant WAL (durable outbox intent BEFORE
+  the policy CAS — audit+outbox double failure denies with nothing
+  installed), private scratch TMPDIR authoritative over ambient values,
+  strict request binding (exact requestId/actionDigest, explicit lifetime),
+  full vault reconciliation.
+- 1016+ tests, strict tsc, build green (re-run before commit).
 
-## Key Artifacts
-- docs/permissions-008.md — operator guide
-- docs/security-review-008.md — independent reviewer package (threat model,
-  asset map, call paths, audit checklist; the attestation itself is the
-  reviewer's, per FR-020)
-- docker-compose.008.yml — reference control-plane/scheduler/broker/db topology
+## Not Done
+- T025/T037–T040: manual quickstart + Linux canaries + 5-user pass + audit
+  redaction + go/no-go (need real sessions/platforms).
 
-## Production Handoff
-The remaining items are OPERATIONAL, not implementation:
-- Run the security review (docs/security-review-008.md) — human gate per FR-020.
-- Substitute PostgreSQL/Redis for the in-memory stores in production.
-- Ship the Rust seepient-fs-commit helper binary (separate build artifact).
-- Wire real mTLS signing keys for dispatch signatures + broker lease tokens.
-- Flip `permissionPipeline` default to true after adapter soak-in.
+## Next
+- Manual quickstart macOS + Linux (T025/T037); 5-user pass (T038); audit
+  redaction review (T039); go/no-go (T040); then merge.

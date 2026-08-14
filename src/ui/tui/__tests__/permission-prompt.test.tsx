@@ -1,18 +1,22 @@
 import { describe, it, expect } from "vitest";
 import { render } from "ink-testing-library";
 import React from "react";
-import { PermissionPrompt, commitDecision, cycleSelection } from "../components/permission-prompt.js";
-import type { ApprovalContext, ApprovalDecision } from "../../../foundations/types.js";
+import { PermissionPrompt, clampMove } from "../components/permission-prompt.js";
+import { useKeybindings } from "../hooks/use-keybindings.js";
+import type {
+  ApprovalChoice,
+  ApprovalOption,
+  PermissionRequest,
+  TuiApprovalSelection,
+} from "../../../foundations/contracts/permission-policy.js";
 
-// Helper: capture the decision passed to onResolve.
-function renderPrompt(props: Partial<Parameters<typeof PermissionPrompt>[0]> = {}) {
-  let captured: ApprovalDecision | null = null;
+// Helper: capture the selection passed to onResolve.
+function renderPrompt(overrides: Partial<PermissionRequest> = {}) {
+  let captured: TuiApprovalSelection | null = null;
   const r = render(
     <PermissionPrompt
-      toolName="execute_shell_command"
-      args={{ command: "npm test" }}
-      onResolve={(d) => { captured = d; }}
-      {...props}
+      request={request(overrides)}
+      onResolve={(s) => { captured = s; }}
     />,
   );
   return { ...r, getCaptured: () => captured };
@@ -20,144 +24,337 @@ function renderPrompt(props: Partial<Parameters<typeof PermissionPrompt>[0]> = {
 
 const ENTER = "\r";
 
-// ── Pure logic (arrow keys can't be driven via ink-testing-library, so the
-//    selection-cycling and decision-mapping logic is unit-tested directly) ──
+/** Let React commit the state change from a key press before the next key. */
+const tick = (): Promise<void> => {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  setTimeout(resolve, 0);
+  return promise;
+};
 
-describe("commitDecision", () => {
-  it("index 0 (once) → true", () => {
-    expect(commitDecision(0)).toBe(true);
-  });
-  it("index 1 (session) → scoped object", () => {
-    expect(commitDecision(1)).toEqual({ approved: true, scope: "session" });
-  });
-  it("index 2 (project) → scoped object", () => {
-    expect(commitDecision(2)).toEqual({ approved: true, scope: "project" });
-  });
-  it("index 3 (global) → scoped object", () => {
-    expect(commitDecision(3)).toEqual({ approved: true, scope: "global" });
-  });
-  it("index 4 (deny) → false", () => {
-    expect(commitDecision(4)).toBe(false);
-  });
-  it("out-of-range index → false (deny)", () => {
-    expect(commitDecision(99)).toBe(false);
+function option(kind: "exact" | "bounded", optionId: string, caps: Array<{ kind: "read-root"; root: string } | { kind: "read-file"; path: string } | { kind: "process"; executable: string; argvPrefix?: string[] }>, supportedLifetimes: Array<"action" | "session"> = ["action", "session"]): ApprovalOption {
+  return {
+    optionId,
+    actionDigest: "d1",
+    kind,
+    label: `${kind} option`,
+    capabilities: caps,
+    supportedLifetimes,
+  };
+}
+
+function choice(optionId: string, lifetime: "action" | "session", title: string, authoritySummary: string[], recommended = false): ApprovalChoice {
+  return {
+    choiceId: `${optionId}::${lifetime}`,
+    optionId,
+    lifetime,
+    title,
+    description:
+      lifetime === "action"
+        ? "You'll be asked again next time."
+        : "Seepient will remember this permission until you close it.",
+    authoritySummary,
+    recommended,
+  };
+}
+
+const EXACT_CAPS = [{ kind: "read-file" as const, path: "/proj/a.txt" }];
+const BOUNDED_CAPS = [{ kind: "read-root" as const, root: "/proj" }];
+
+function request(overrides: Partial<PermissionRequest> = {}): PermissionRequest {
+  const base: PermissionRequest = {
+    requestId: "req-1",
+    principalId: "u",
+    runId: "r1",
+    sessionId: "sess-1",
+    toolCallId: "c1",
+    actionDigest: "d1",
+    action: {
+      title: "Write file",
+      summary: "Write /proj/a.txt",
+      canonicalTargets: ["/proj/a.txt"],
+      effects: ["filesystem-write"],
+    },
+    requestedCapabilities: EXACT_CAPS,
+    approvalOptions: [
+      option("exact", "opt-exact", EXACT_CAPS),
+      option("bounded", "opt-bounded", BOUNDED_CAPS),
+    ],
+    approvalChoices: [
+      choice("opt-exact", "action", "Allow this action once", ["Read `/proj/a.txt`"], true),
+      choice("opt-exact", "session", "Allow this exact action until I close Seepient", ["Read `/proj/a.txt`"]),
+      choice("opt-bounded", "session", "Allow other files in this folder until I close Seepient", ["Read files under `/proj`"]),
+    ],
+    offeredLifetimes: ["action", "run", "session"],
+    createdAt: 0,
+    expiresAt: Date.now() + 60_000,
+  };
+  return { ...base, ...overrides };
+}
+
+function compactFrame(frame: string): string {
+  return frame.toLowerCase().replace(/\s+/g, " ");
+}
+
+// ── Pure helpers ────────────────────────────────────────────────────────
+
+describe("clampMove (FR-014)", () => {
+  it("never wraps at the ends", () => {
+    expect(clampMove(0, -1, 3)).toBe(0);
+    expect(clampMove(2, 1, 3)).toBe(2);
+    expect(clampMove(1, -1, 3)).toBe(0);
+    expect(clampMove(1, 1, 3)).toBe(2);
+    expect(clampMove(0, 1, 1)).toBe(0);
   });
 });
 
-describe("cycleSelection", () => {
-  it("down from 0 → 1", () => { expect(cycleSelection(0, 1)).toBe(1); });
-  it("down from 4 wraps → 0", () => { expect(cycleSelection(4, 1)).toBe(0); });
-  it("up from 0 wraps → 4", () => { expect(cycleSelection(0, -1)).toBe(4); });
-  it("up from 3 → 2", () => { expect(cycleSelection(3, -1)).toBe(2); });
-});
+// ── Rendering (T028/T029) ───────────────────────────────────────────────
 
-// ── Rendering + quick-select / Enter (single-byte inputs work in the test harness) ──
-
-describe("PermissionPrompt rendering", () => {
-  it("renders the LLM title and description", () => {
-    const ctx: ApprovalContext = {
-      title: "Run test suite",
-      description: "Verifies the build passes before committing.",
-    };
-    const { lastFrame } = renderPrompt({ approvalContext: ctx });
-    const frame = lastFrame()!;
-    expect(frame).toContain("Run test suite");
-    expect(frame).toContain("Verifies the build passes before committing.");
-  });
-
-  it("shows the actual command (tamper-proof)", () => {
+describe("PermissionPrompt rendering (T028)", () => {
+  it("shows one screen of complete Domain choices — no tabs, no pairs", () => {
     const { lastFrame } = renderPrompt();
-    expect(lastFrame()!).toContain("npm test");
+    const compact = compactFrame(lastFrame()!);
+    expect(compact).toContain("permission needed");
+    expect(compact).toContain("write file");
+    expect(compact).toContain("allow this action once");
+    // Rows wrap at terminal width; assert wrap-stable title prefixes.
+    expect(compact).toContain("allow this exact action until i close");
+    expect(compact).toContain("allow other files in this folder until i");
+    // No scope/duration matrix, no invented choices.
+    expect(compact).not.toContain("[1] scope");
+    expect(compact).not.toContain("duration");
+    expect(compact).not.toContain("bounded/action");
+    expect(compact).not.toContain("exact arguments");
+    // Domain labels are not the consent copy; choice titles are.
+    expect(compact).not.toContain("exact option");
   });
 
-  it("renders all five options with pattern-aware labels", () => {
+  it("marks the least-privilege choice Recommended without pre-approving", () => {
+    const { lastFrame } = renderPrompt();
+    const compact = compactFrame(lastFrame()!);
+    expect(compact).toContain("(recommended)");
+    // The recommendation sits on the exact/action row.
+    const actionIdx = compact.indexOf("allow this action once");
+    const recommendedIdx = compact.indexOf("(recommended)");
+    expect(recommendedIdx).toBeGreaterThan(actionIdx);
+    expect(recommendedIdx).toBeLessThan(compact.indexOf("allow this exact action until i close"));
+  });
+
+  it("shows the authority delta of the focused choice (FR-016)", () => {
+    const { stdin, lastFrame } = renderPrompt();
+    stdin.write("\u001B[B"); // down → exact/session
+    return tick().then(() => {
+      const frame = lastFrame()!;
+      expect(frame).toContain("Read `/proj/a.txt`");
+      expect(frame).toContain("Seepient will remember this permission until you close it.");
+    });
+  });
+
+  it("shows the request identity and expiry", () => {
     const { lastFrame } = renderPrompt();
     const frame = lastFrame()!;
-    // Assert on scope keywords + the pattern rather than exact copy, so the
-    // test survives wording edits. Labels wrap across box borders in the
-    // narrow test renderer, so "This Session" may be split across lines —
-    // use case-insensitive, whitespace-insensitive matching on fragments.
-    const compact = frame.toLowerCase().replace(/\s+/g, ' ');
-    expect(compact).toContain("allow");
-    expect(compact).toContain("once");
-    expect(compact).toContain("session");
-    expect(compact).toContain("project");
-    expect(compact).toContain("globally");
-    expect(compact).toContain("deny");
-    expect(compact).toContain("npm test");   // pattern appears in labels
+    expect(frame).toContain("req-1");
+    expect(frame).toMatch(/expires/);
   });
 
-  it("tool without a pattern shows generic wording in labels", () => {
-    const { lastFrame } = renderPrompt({
-      toolName: "web_search",
-      args: { query: "x" },
+  it("renders only the choices the request carries", () => {
+    const r = request({
+      approvalChoices: [
+        choice("opt-exact", "action", "Allow this action once", ["Read `/proj/a.txt`"], true),
+      ],
     });
-    const frame = lastFrame()!;
-    // No command/path → no extracted pattern; label uses a generic noun.
-    // Match case/whitespace-insensitively (label may wrap across borders).
-    const compact = frame.toLowerCase().replace(/\s+/g, ' ');
-    expect(compact).toContain("session");
-    // Should NOT claim a specific command it doesn't have
-    expect(compact).not.toContain("\"npm test\"");
+    const { lastFrame } = renderPrompt(r);
+    const compact = compactFrame(lastFrame()!);
+    expect(compact).toContain("allow this action once");
+    expect(compact).not.toContain("until i close seepient");
+    expect(compact).not.toContain("other files in this folder");
   });
 
-  it("falls back to template implications when LLM omitted them", () => {
-    const { lastFrame } = renderPrompt({
-      approvalContext: { title: "T", description: "D" }, // no implications
-    });
-    const frame = lastFrame()!;
-    // Template implications mention the session/global semantics.
-    const compact = frame.toLowerCase().replace(/\s+/g, ' ');
-    expect(compact).toMatch(/restart|session|until/);  // session template
-    expect(compact).toMatch(/revoke|permissions|everywhere|trust/); // global template
-  });
-
-  it("uses LLM-authored implications when provided", () => {
-    const { lastFrame } = renderPrompt({
-      approvalContext: {
-        title: "T",
-        description: "D",
-        implications: { session: "custom session implication text xyz", project: "p", global: "g" },
-      },
-    });
-    expect(lastFrame()!).toContain("custom session implication text xyz");
+  it("a request with no choices denies as unavailable immediately", async () => {
+    const { getCaptured } = renderPrompt({ approvalChoices: [] });
+    await tick();
+    expect(getCaptured()).toEqual({ approved: false, reason: "approval-unavailable" });
   });
 });
 
-describe("PermissionPrompt quick-select + enter", () => {
-  it("Enter on default selection (Allow once) resolves true", () => {
+// ── Submission and keyboard (T028/T029) ─────────────────────────────────
+
+describe("PermissionPrompt submission + keyboard (T028)", () => {
+  it("one Enter approves the focused (recommended) choice — no second step", async () => {
     const { stdin, getCaptured } = renderPrompt();
     stdin.write(ENTER);
-    expect(getCaptured()).toBe(true);
+    await tick();
+    expect(getCaptured()).toEqual({ approved: true, choiceId: "opt-exact::action" });
   });
 
-  it("quick-select 1 → true (once)", () => {
-    const { stdin, getCaptured } = renderPrompt();
-    stdin.write("1");
-    expect(getCaptured()).toBe(true);
+  it("focus starts on the Recommended choice wherever Domain placed it (FR-011)", async () => {
+    // Recommended is NOT first here — initial focus must find it, not
+    // assume index 0.
+    const req = request({
+      approvalChoices: [
+        choice("opt-exact", "session", "Allow this exact action until I close Seepient", ["Read `/proj/a.txt`"]),
+        choice("opt-exact", "action", "Allow this action once", ["Read `/proj/a.txt`"], true),
+      ],
+    });
+    let captured: TuiApprovalSelection | null = null;
+    const { stdin } = render(
+      <PermissionPrompt request={req} onResolve={(s) => { captured = s; }} />,
+    );
+    stdin.write(ENTER);
+    await tick();
+    expect(captured).toEqual({ approved: true, choiceId: "opt-exact::action" });
   });
 
-  it("quick-select 2 → session scope", () => {
+  it("Enter approves whatever choice is focused", async () => {
     const { stdin, getCaptured } = renderPrompt();
     stdin.write("2");
-    expect(getCaptured()).toEqual({ approved: true, scope: "session" });
+    await tick();
+    stdin.write(ENTER);
+    await tick();
+    expect(getCaptured()).toEqual({ approved: true, choiceId: "opt-exact::session" });
+    const { stdin: s2, getCaptured: g2 } = renderPrompt();
+    s2.write("\u001B[B"); // down → exact/session
+    await tick();
+    s2.write("\u001B[B"); // down → bounded/session
+    await tick();
+    s2.write(ENTER);
+    await tick();
+    expect(g2()).toEqual({ approved: true, choiceId: "opt-bounded::session" });
   });
 
-  it("quick-select 3 → project scope", () => {
+  it("Up/Down move without wrapping past the ends (FR-014)", async () => {
     const { stdin, getCaptured } = renderPrompt();
-    stdin.write("3");
-    expect(getCaptured()).toEqual({ approved: true, scope: "project" });
+    stdin.write("\u001B[A"); // up at the top → stays
+    await tick();
+    stdin.write(ENTER);
+    await tick();
+    expect(getCaptured()).toEqual({ approved: true, choiceId: "opt-exact::action" });
+    const { stdin: s2, getCaptured: g2 } = renderPrompt();
+    s2.write("\u001B[B"); // down → exact/session
+    await tick();
+    s2.write("\u001B[B"); // down → bounded/session
+    await tick();
+    s2.write("\u001B[B"); // down at the bottom → stays
+    await tick();
+    s2.write(ENTER);
+    await tick();
+    expect(g2()).toEqual({ approved: true, choiceId: "opt-bounded::session" });
   });
 
-  it("quick-select 4 → global scope", () => {
+  it("unsupported numbers do nothing (FR-014)", async () => {
     const { stdin, getCaptured } = renderPrompt();
-    stdin.write("4");
-    expect(getCaptured()).toEqual({ approved: true, scope: "global" });
+    stdin.write("9");
+    await tick();
+    stdin.write("0");
+    await tick();
+    stdin.write(ENTER);
+    await tick();
+    expect(getCaptured()).toEqual({ approved: true, choiceId: "opt-exact::action" });
   });
 
-  it("quick-select 5 → deny (false)", () => {
+  it("unsupported keys do nothing", async () => {
     const { stdin, getCaptured } = renderPrompt();
-    stdin.write("5");
-    expect(getCaptured()).toBe(false);
+    stdin.write("x");
+    await tick();
+    stdin.write("\t");
+    await tick();
+    stdin.write(ENTER);
+    await tick();
+    expect(getCaptured()).toEqual({ approved: true, choiceId: "opt-exact::action" });
+  });
+
+  it("q denies without executing", () => {
+    const { stdin, getCaptured } = renderPrompt();
+    stdin.write("q");
+    expect(getCaptured()).toEqual({ approved: false, reason: "user-denied" });
+  });
+
+  it("Escape denies without executing", () => {
+    const { stdin, getCaptured } = renderPrompt();
+    stdin.write("\u001B");
+    expect(getCaptured()).toEqual({ approved: false, reason: "user-denied" });
+  });
+
+  it("one prompt resolves at most once — late keys after Enter are ignored", async () => {
+    const { stdin, getCaptured } = renderPrompt();
+    stdin.write(ENTER);
+    await tick();
+    stdin.write("q");
+    await tick();
+    expect(getCaptured()).toEqual({ approved: true, choiceId: "opt-exact::action" });
   });
 });
+
+// ── Global-keybinding interplay (FR-015 regression) ─────────────────────
+//
+// app.tsx passes promptPending to useKeybindings while the native prompt is
+// open. This mounts BOTH input subscribers the way app.tsx does, proving an
+// Escape denies the request without also aborting the run — while Ctrl+C
+// remains the hard abort.
+
+describe("permission prompt vs global keybindings (FR-015)", () => {
+  it("Escape denies the prompt and does NOT abort the run", async () => {
+    let captured: TuiApprovalSelection | null = null;
+    const events: string[] = [];
+    function Harness() {
+      useKeybindings(
+        {
+          onAbort: () => events.push("abort"),
+          onExit: () => events.push("exit"),
+          onExpandToggle: () => {},
+          onPalette: () => {},
+          onClear: () => {},
+        },
+        { enabled: true, isRunning: true, promptPending: true },
+      );
+      return <PermissionPrompt request={request()} onResolve={(s) => { captured = s; }} />;
+    }
+    const { stdin } = render(<Harness />);
+    stdin.write("\u001B");
+    await tick();
+    expect(captured).toEqual({ approved: false, reason: "user-denied" });
+    expect(events).toEqual([]);
+  });
+
+  it("Ctrl+C still aborts the run while the prompt is open", async () => {
+    const events: string[] = [];
+    function Harness() {
+      useKeybindings(
+        {
+          onAbort: () => events.push("abort"),
+          onExit: () => events.push("exit"),
+          onExpandToggle: () => {},
+          onPalette: () => {},
+          onClear: () => {},
+        },
+        { enabled: true, isRunning: true, promptPending: true },
+      );
+      return <PermissionPrompt request={request()} onResolve={() => {}} />;
+    }
+    const { stdin } = render(<Harness />);
+    stdin.write("\x03");
+    await tick();
+    expect(events).toEqual(["abort"]);
+  });
+
+  it("Escape aborts as usual when no prompt is pending", async () => {
+    const events: string[] = [];
+    function Harness() {
+      useKeybindings(
+        {
+          onAbort: () => events.push("abort"),
+          onExit: () => events.push("exit"),
+          onExpandToggle: () => {},
+          onPalette: () => {},
+          onClear: () => {},
+        },
+        { enabled: true, isRunning: true },
+      );
+      return null;
+    }
+    const { stdin } = render(<Harness />);
+    stdin.write("\u001B");
+    await tick();
+    expect(events).toEqual(["abort"]);
+  });
+});
+
