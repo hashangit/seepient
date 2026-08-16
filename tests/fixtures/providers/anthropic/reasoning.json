@@ -1,0 +1,19 @@
+{
+  "provider": "anthropic",
+  "model": "claude-3-7-sonnet-20250219",
+  "response": {
+    "id": "msg_01XFDUDYJgAACzvnptvVoYEL",
+    "role": "assistant",
+    "content": [
+      {
+        "type": "thinking",
+        "thinking": "The user wants to analyze this architecture. First, check the layers...",
+        "signature": "sig_thought_hash_12345"
+      },
+      {
+        "type": "text",
+        "text": "Based on the architectural layers, here is the analysis..."
+      }
+    ]
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "provider": "openai",
+  "model": "gpt-4o",
+  "response": {
+    "id": "chatcmpl-test-tool-001",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "Let me read the file for you.",
+          "tool_calls": [
+            {
+              "id": "call_abc123",
+              "type": "function",
+              "function": {
+                "name": "read_file",
+                "arguments": "{\"path\":\"/path/to/file.txt\"}"
+              }
+            }
+          ]
+        },
+        "finish_reason": "tool_calls"
+      }
+    ]
+  }
+}

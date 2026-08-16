@@ -1,0 +1,43 @@
+{
+  "provider": "openai",
+  "operations": {
+    "generate": {
+      "model": "dall-e-3",
+      "request": {
+        "prompt": "A modern futuristic workspace",
+        "size": "1024x1024",
+        "quality": "standard"
+      },
+      "response": {
+        "created": 1700000000,
+        "data": [
+          { "url": "https://oaidalleapiprodscus.blob.core.windows.net/test.png", "revised_prompt": "A clean futuristic desk setup." }
+        ]
+      }
+    },
+    "variation": {
+      "model": "dall-e-2",
+      "supported": true,
+      "response": {
+        "created": 1700000000,
+        "data": [{ "b64_json": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" }]
+      }
+    },
+    "edit": {
+      "model": "gpt-image-2",
+      "supported": true,
+      "response": {
+        "created": 1700000000,
+        "data": [{ "url": "https://api.openai.com/v1/images/edit/sample.png" }]
+      }
+    },
+    "mask": {
+      "model": "gpt-image-2",
+      "supported": true,
+      "response": {
+        "created": 1700000000,
+        "data": [{ "url": "https://api.openai.com/v1/images/mask/sample.png" }]
+      }
+    }
+  }
+}

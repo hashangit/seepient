@@ -1,0 +1,21 @@
+{
+  "provider": "google",
+  "models": {
+    "gemini-3.1-flash-image": {
+      "operations": {
+        "generate": { "supported": true },
+        "edit": { "supported": true },
+        "variation": { "supported": true },
+        "mask": { "supported": true }
+      }
+    },
+    "gemini-2.5-flash-image": {
+      "operations": {
+        "generate": { "supported": true },
+        "edit": { "supported": false },
+        "variation": { "supported": false },
+        "mask": { "supported": false }
+      }
+    }
+  }
+}

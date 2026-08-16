@@ -1,0 +1,21 @@
+{
+  "provider": "anthropic",
+  "model": "claude-3-7-sonnet-20250219",
+  "response": {
+    "id": "msg_01XFDUDYJgAACzvnptvVoYEL",
+    "type": "message",
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "Hello! I am Claude. How can I help you today?"
+      }
+    ],
+    "model": "claude-3-7-sonnet-20250219",
+    "stop_reason": "end_turn",
+    "usage": {
+      "input_tokens": 12,
+      "output_tokens": 15
+    }
+  }
+}

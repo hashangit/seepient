@@ -1,0 +1,12 @@
+{
+  "provider": "openai",
+  "model": "gpt-4o",
+  "events": [
+    { "type": "response.text.delta", "delta": "Hello" },
+    { "type": "response.text.delta", "delta": " world!" },
+    {
+      "type": "response.done",
+      "usage": { "prompt_tokens": 8, "completion_tokens": 3, "total_tokens": 11 }
+    }
+  ]
+}

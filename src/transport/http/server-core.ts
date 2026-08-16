@@ -47,7 +47,7 @@ export async function serverGenerateText(
   middleware?: Middleware[],
 ): Promise<GenerateTextResult> {
   // Resolve provider
-  const { provider: llmProvider, model } = await getProvider(options.provider);
+  const { provider: llmProvider, model } = await getProvider(options.provider, options.model);
 
   // Resolve tools
   const toolDefs = options.tools ? resolveTools(options.tools) : getAllToolDefinitions();
@@ -138,7 +138,7 @@ export async function serverStreamText(
 ): Promise<void> {
   try {
     // Resolve provider
-    const { provider: llmProvider, model } = await getProvider(opts.provider);
+    const { provider: llmProvider, model } = await getProvider(opts.provider, opts.model);
 
     // Resolve tools
     const toolDefs = opts.tools ? resolveTools(opts.tools) : getAllToolDefinitions();
@@ -179,12 +179,13 @@ export async function serverStreamText(
       hooks,
       permissionLevel: opts.permissionLevel ?? serverPermissionLevel,
       approveTool: opts.approveTool,
+      stream: true,
       signal: opts.signal,
       middleware,
       config: { agentName: "server" },
       wiredPipeline: opts.wiredPipeline,
       onStep: (step) => {
-        if (step.type === "text" && step.content) {
+        if ((step.type === "text" || step.type === "text_delta") && step.content) {
           accumulatedText += step.content;
           opts.onText(step.content);
         }

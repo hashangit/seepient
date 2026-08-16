@@ -524,13 +524,16 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
         if (onStep) onStep(textStep);
       }
 
-      // Add assistant message with text content
-      messages.push({
-        id: generateId(),
-        role: "assistant",
-        content: response.content,
-        timestamp: now(),
-      });
+      // Add assistant message with text content ONLY when no tool calls are present.
+      // If tool calls exist, the assistant message added below already includes this content.
+      if (!response.tool_calls || response.tool_calls.length === 0) {
+        messages.push({
+          id: generateId(),
+          role: "assistant",
+          content: response.content,
+          timestamp: now(),
+        });
+      }
     }
 
     // Tool calls

@@ -1,0 +1,30 @@
+{
+  "provider": "openai",
+  "model": "gpt-4o",
+  "request": {
+    "messages": [
+      { "role": "user", "content": "Hello world" }
+    ]
+  },
+  "response": {
+    "id": "chatcmpl-test-001",
+    "object": "chat.completion",
+    "created": 1700000000,
+    "model": "gpt-4o",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "Hello! How can I assist you today?"
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 9,
+      "completion_tokens": 10,
+      "total_tokens": 19
+    }
+  }
+}
