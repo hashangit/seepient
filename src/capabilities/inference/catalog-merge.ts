@@ -88,7 +88,7 @@ export const CURATED_MODELS: readonly UpstreamModel[] = [
       streaming: true,
       vision: true,
     },
-    supportedReasoningLevels: ["low", "medium", "high"],
+    supportedReasoningLevels: ["none", "low", "medium", "high"],
     provenance: "seepient-curated",
   },
   {
@@ -114,6 +114,7 @@ export const CURATED_MODELS: readonly UpstreamModel[] = [
       streaming: true,
       vision: true,
     },
+    supportedReasoningLevels: ["none"],
     provenance: "seepient-curated",
   },
   {
@@ -143,6 +144,7 @@ export const CURATED_MODELS: readonly UpstreamModel[] = [
       streaming: true,
       vision: false,
     },
+    supportedReasoningLevels: ["none"],
     provenance: "seepient-curated",
   },
 ];

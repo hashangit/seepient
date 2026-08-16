@@ -307,4 +307,50 @@ describe("PiLanguageRaw backend (QS-P3.3)", () => {
     const finish = events.find((e) => e.type === "finish");
     expect((finish as any).usage?.cachedPromptTokens).toBe(5);
   });
+
+  it("handles custom/Ollama/vLLM models not in static catalog with complete cost and baseUrl overrides", async () => {
+    let capturedModel: any;
+    const credential = createMockCredential("sk-custom");
+
+    const mockModels = {
+      getModel: () => undefined, // Model is not in static Pi catalog!
+      stream: (model: any) => {
+        capturedModel = model;
+        return (async function* () {
+          yield {
+            type: "done",
+            reason: "stop",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "Custom response" }],
+              usage: { input: 10, output: 5, totalTokens: 15, cost: { input: 0, output: 0, total: 0 } },
+            },
+          };
+        })();
+      },
+    };
+
+    const backend = new PiLanguageRaw(mockModels as any);
+    const target: InferenceTarget = {
+      providerAccount: "local-ollama",
+      upstreamProvider: "ollama",
+      model: "llama3.3:70b",
+      baseUrl: "http://localhost:11434/v1",
+      credential,
+    };
+
+    const events = [];
+    for await (const ev of backend.chatStream(target, {
+      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+    })) {
+      events.push(ev);
+    }
+
+    expect(capturedModel).toBeDefined();
+    expect(capturedModel.id).toBe("llama3.3:70b");
+    expect(capturedModel.baseUrl).toBe("http://localhost:11434/v1");
+    expect(capturedModel.provider).toBe("openai"); // Mapped to openai provider for custom/Ollama
+    expect(capturedModel.cost).toBeDefined();
+    expect(Array.isArray(capturedModel.cost.tiers)).toBe(true); // Guarantees calculateCost doesn't crash!
+  });
 });

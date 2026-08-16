@@ -18,15 +18,18 @@ describe("ProviderRuntime (QS-P4.6)", () => {
     expect(snap1.revision).toBe(0);
 
     // Mutation does not alter existing snapshot
-    await runtime.configStore.updateOverlay({
-      providers: {
-        "test-acc": {
-          adapter: "pi-ai",
-          upstreamProvider: "openai",
-          credential: { kind: "none" },
-        } as any,
+    await runtime.configStore.updateOverlay(
+      {
+        providers: {
+          "test-acc": {
+            adapter: "pi-ai",
+            upstreamProvider: "openai",
+            credential: { kind: "none" },
+          } as any,
+        },
       },
-    });
+      0,
+    );
 
     const snap2 = await runtime.createTurnSnapshot();
     expect(snap2.revision).toBe(1);

@@ -108,11 +108,21 @@ describe("ProviderConfigStore & DeepPatch (QS-P4.3)", () => {
         store.updateOverlay({ providers: {} }, 0),
       ).rejects.toThrow(SeepientError);
 
+      // Fails when expected revision is omitted
+      await expect(
+        (store as any).updateOverlay({ providers: {} }),
+      ).rejects.toThrow(/expectedRevision is required/);
+
       // Re-opening store from disk retains persisted state
       const reloadedStore = new ProviderConfigStore(overlayFile);
       const reloaded = await reloadedStore.getOverlay();
       expect(reloaded.revision).toBe(1);
       expect((reloaded.patch.providers as any)?.["work-openai"]).toBeDefined();
+    });
+
+    it("throws CORRUPT_STORAGE when overlay file is malformed", () => {
+      fs.writeFileSync(overlayFile, "{ corrupt json ...", "utf8");
+      expect(() => new ProviderConfigStore(overlayFile)).toThrow(SeepientError);
     });
   });
 });

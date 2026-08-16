@@ -22,6 +22,7 @@ import {
   loadMergedConfig,
   resolveActiveProviderType,
 } from "../../foundations/config.js";
+import { getDefaultProviderRuntime } from "./provider-runtime.js";
 
 // Re-export AppConfig so the provider-resolver → core/index chain works
 export type { AppConfig };
@@ -142,7 +143,9 @@ export function getDefaultProvider(): ProviderType {
 
 /**
  * Creates and returns an LLMProvider instance using the existing factory.
- * If type is omitted, uses the default provider.
+/**
+ * Resolves configuration and initializes an LLMProvider instance.
+ * @deprecated In spec 010, use `getDefaultProviderRuntime()` and `resolvePlan()` instead.
  *
  * @param type - Provider type. If omitted, uses the default provider.
  * @param modelOverride - When set, overrides the resolved model before creating the provider.
@@ -152,6 +155,9 @@ export async function getProvider(
   type?: ProviderType,
   modelOverride?: string,
 ): Promise<{ provider: LLMProvider; model: string }> {
+  // Ensure default runtime is initialized
+  getDefaultProviderRuntime();
+
   const config = getProviderConfig(type);
 
   const factoryConfig: ProviderConfig = {

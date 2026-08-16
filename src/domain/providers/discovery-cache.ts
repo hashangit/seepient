@@ -5,6 +5,7 @@ import type {
 
 export interface AccountDiscoveryRecord {
   account: string;
+  upstreamProvider?: string;
   modelIds: string[];
   lastRefreshedAt: string | null;
   lastRefreshError?: string;
@@ -52,6 +53,7 @@ export class DiscoveryCache {
         // Retain prior cached models on error
         const record: AccountDiscoveryRecord = {
           account: accountName,
+          upstreamProvider: accountContext.upstreamProvider,
           modelIds: existing?.modelIds ?? [],
           lastRefreshedAt: existing?.lastRefreshedAt ?? null,
           lastRefreshError: result.error,
@@ -62,6 +64,7 @@ export class DiscoveryCache {
 
       const record: AccountDiscoveryRecord = {
         account: accountName,
+        upstreamProvider: accountContext.upstreamProvider,
         modelIds: Array.from(new Set(result.modelIds)),
         lastRefreshedAt: now,
         lastRefreshError: undefined,
@@ -72,6 +75,7 @@ export class DiscoveryCache {
       // Retain prior cached models on exception
       const record: AccountDiscoveryRecord = {
         account: accountName,
+        upstreamProvider: accountContext.upstreamProvider,
         modelIds: existing?.modelIds ?? [],
         lastRefreshedAt: existing?.lastRefreshedAt ?? null,
         lastRefreshError: err?.message || "Discovery failed",

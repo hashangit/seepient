@@ -25,17 +25,26 @@ export class CompositeCredentialStore implements CredentialStore {
   readonly fileStore: FileCredentialStore;
   readonly keychainStore: KeychainCredentialStore;
   readonly memoryStore: MemoryCredentialStore;
+  private primaryWriteStore: "file" | "keychain" | "memory";
 
   constructor(customStores?: {
     env?: EnvCredentialStore;
     file?: FileCredentialStore;
     keychain?: KeychainCredentialStore;
     memory?: MemoryCredentialStore;
+    primaryWriteStore?: "file" | "keychain" | "memory";
   }) {
     this.envStore = customStores?.env ?? new EnvCredentialStore();
     this.fileStore = customStores?.file ?? new FileCredentialStore();
     this.keychainStore = customStores?.keychain ?? new KeychainCredentialStore();
     this.memoryStore = customStores?.memory ?? new MemoryCredentialStore();
+    this.primaryWriteStore = customStores?.primaryWriteStore ?? "file";
+  }
+
+  private getWriteStore(): CredentialStore {
+    if (this.primaryWriteStore === "memory") return this.memoryStore;
+    if (this.primaryWriteStore === "keychain") return this.keychainStore;
+    return this.fileStore;
   }
 
   async resolve(ref: CredentialRef): Promise<CredentialHandle> {
@@ -72,6 +81,10 @@ export class CompositeCredentialStore implements CredentialStore {
       return this.keychainStore.resolve(ref);
     }
 
+    if ((ref as any).kind === "memory") {
+      return this.memoryStore.resolve(ref as any);
+    }
+
     if (ref.kind === "externalsecret") {
       throw new SeepientError(
         `External secret provider "${ref.ref}" is not configured in this environment`,
@@ -88,18 +101,18 @@ export class CompositeCredentialStore implements CredentialStore {
   }
 
   async get(id: string): Promise<CredentialRecord | undefined> {
-    return this.fileStore.get(id);
+    return this.getWriteStore().get(id);
   }
 
   async put(id: string, record: PersistedCredentialRecord, meta?: CredentialMeta): Promise<void> {
-    return this.fileStore.put(id, record, meta);
+    return this.getWriteStore().put(id, record, meta);
   }
 
   async list(): Promise<CredentialRecord[]> {
-    return this.fileStore.list();
+    return this.getWriteStore().list();
   }
 
   async delete(id: string): Promise<void> {
-    return this.fileStore.delete(id);
+    return this.getWriteStore().delete(id);
   }
 }

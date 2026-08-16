@@ -100,7 +100,7 @@ export class ProviderRuntime {
       createdAt: new Date().toISOString(),
       catalog,
       config,
-      assignments: config.modelAssignments || { text: { standard: { providerAccount: "openai", model: "gpt-4o" } } },
+      assignments: config.modelAssignments || {},
     };
   }
 

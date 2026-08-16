@@ -105,25 +105,61 @@ export class PiLanguageRaw implements LanguageBackend {
     req: LanguageRequest,
     apiKey?: string,
     signal?: AbortSignal,
+    opts?: InferenceOptions,
   ) {
-    const providerName = target.upstreamProvider === "glm" ? "zai" : target.upstreamProvider;
-    let model = this.models.getModel(providerName, target.model) as Model<Api> | undefined;
+    const knownPiProviders = new Set([
+      "openai",
+      "anthropic",
+      "google",
+      "openrouter",
+      "zai",
+      "groq",
+      "mistral",
+      "cerebras",
+      "together",
+      "deepseek",
+      "bedrock",
+    ]);
 
-    if (!model) {
+    let providerName = target.upstreamProvider === "glm" ? "zai" : target.upstreamProvider;
+    let piProvider = knownPiProviders.has(providerName) ? providerName : "openai";
+
+    let model = this.models.getModel(piProvider, target.model) as Model<Api> | undefined;
+
+    if (model) {
+      if (target.baseUrl) {
+        model = { ...model, baseUrl: target.baseUrl };
+      }
+    } else {
+      const api: Api = providerName === "anthropic" ? "anthropic-messages" : "openai-completions";
       model = {
         id: target.model,
-        provider: providerName,
+        provider: piProvider as any,
         name: target.model,
-        api: providerName === "anthropic" ? "anthropic-messages" : "openai-completions",
-        baseUrl: target.baseUrl,
+        api,
+        baseUrl:
+          target.baseUrl ||
+          (providerName === "anthropic"
+            ? "https://api.anthropic.com"
+            : "https://api.openai.com/v1"),
+        reasoning: Boolean(target.thinkingLevel && target.thinkingLevel !== "none"),
+        input: ["text", "image"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          tiers: [],
+        },
         contextWindow: 128_000,
-        maxOutputTokens: req.maxOutputTokens ?? 4096,
-      } as any;
+        maxTokens: req.maxOutputTokens ?? 4096,
+        compat: target.compat as any,
+      };
     }
 
     const converted = canonicalToPiContext(req.messages, {
       api: model?.api,
-      provider: providerName,
+      provider: piProvider,
       model: target.model,
     });
     const piTools = canonicalToPiTools(req.tools);
@@ -132,6 +168,7 @@ export class PiLanguageRaw implements LanguageBackend {
       signal,
       apiKey,
       maxTokens: req.maxOutputTokens,
+      timeoutMs: opts?.timeoutMs,
     };
 
     const context = {
@@ -172,6 +209,7 @@ export class PiLanguageRaw implements LanguageBackend {
         req,
         apiKey,
         signal,
+        opts,
       );
 
       yield {
@@ -387,6 +425,7 @@ export class PiLanguageRaw implements LanguageBackend {
         req,
         apiKey,
         signal,
+        opts,
       );
 
       const stream =

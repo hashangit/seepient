@@ -39,13 +39,13 @@ export class ModelCatalog {
 
     // Add discovered models from cache
     for (const record of this.discoveryCache.list()) {
+      const provider = record.upstreamProvider || record.account;
       for (const modelId of record.modelIds) {
-        // Look up provider from account or default
-        const key = `${record.account}:${modelId}`;
+        const key = `${provider}:${modelId}`;
         if (!modelMap.has(key)) {
           modelMap.set(key, {
             id: modelId,
-            upstreamProvider: record.account,
+            upstreamProvider: provider,
             displayName: modelId,
             contextWindow: 128_000,
             capabilities: {
@@ -53,6 +53,7 @@ export class ModelCatalog {
               streaming: true,
               vision: false,
             },
+            supportedReasoningLevels: ["none"],
             provenance: "provider-discovered",
           });
         }

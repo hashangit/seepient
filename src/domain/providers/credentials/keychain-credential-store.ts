@@ -56,11 +56,14 @@ class DefaultPlatformKeychainProvider implements PlatformKeychainProvider {
           account,
         ]);
         return stdout ? stdout.trim() : null;
-      } catch {
+      } catch (err: any) {
+        if (err?.code === "ENOENT") {
+          throw new SeepientError("secret-tool command not found", "KEYCHAIN_UNAVAILABLE", false);
+        }
         return null;
       }
     }
-    return null;
+    throw new SeepientError(`Platform ${platform} keychain is not supported`, "KEYCHAIN_UNAVAILABLE", false);
   }
 
   async setPassword(service: string, account: string, password: string): Promise<void> {
@@ -77,17 +80,37 @@ class DefaultPlatformKeychainProvider implements PlatformKeychainProvider {
         password,
       ]);
     } else if (platform === "linux") {
-      await execFileAsync("secret-tool", [
-        "store",
-        "--label",
-        `${service}/${account}`,
-        "service",
-        service,
-        "account",
-        account,
-      ]);
+      await new Promise<void>((resolve, reject) => {
+        const child = execFile(
+          "secret-tool",
+          [
+            "store",
+            "--label",
+            `${service}/${account}`,
+            "service",
+            service,
+            "account",
+            account,
+          ],
+          (err) => {
+            if (err) {
+              if ((err as any)?.code === "ENOENT") {
+                reject(new SeepientError("secret-tool command not found", "KEYCHAIN_UNAVAILABLE", false));
+              } else {
+                reject(err);
+              }
+            } else {
+              resolve();
+            }
+          },
+        );
+        if (child.stdin) {
+          child.stdin.write(password);
+          child.stdin.end();
+        }
+      });
     } else {
-      throw new Error(`Platform ${platform} keychain is not supported`);
+      throw new SeepientError(`Platform ${platform} keychain is not supported`, "KEYCHAIN_UNAVAILABLE", false);
     }
   }
 
