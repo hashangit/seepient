@@ -75,6 +75,45 @@ describe("OpenAIImageRaw backend (QS-P3.6)", () => {
     expect(credential.activeLeaseCount).toBe(0);
   });
 
+  it("handles image variations with in-memory base64 image buffer", async () => {
+    const credential = createMockCredential();
+    let passedFile: any;
+
+    const mockClient: any = {
+      images: {
+        createVariation: async (params: any) => {
+          passedFile = params.image;
+          return {
+            created: 1700000000,
+            data: [{ b64_json: "variation-b64-payload" }],
+          };
+        },
+      },
+    };
+
+    const backend = new OpenAIImageRaw(mockClient);
+    const target: InferenceTarget = {
+      providerAccount: "openai-main",
+      upstreamProvider: "openai",
+      model: "dall-e-2",
+      credential,
+    };
+
+    const result = await backend.generate(target, {
+      prompt: "Variation prompt",
+      operation: "variation",
+      inputImage: {
+        type: "image",
+        mediaType: "image/png",
+        data: Buffer.from("fake-png-content").toString("base64"),
+      },
+    });
+
+    expect(result.images.length).toBe(1);
+    expect(result.images[0].base64).toBe("variation-b64-payload");
+    expect(passedFile).toBeDefined();
+  });
+
   it("maps HTTP 429 to rate_limit InferenceError with retryable=true", async () => {
     const credential = createMockCredential();
 

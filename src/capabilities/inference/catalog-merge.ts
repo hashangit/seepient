@@ -124,7 +124,7 @@ export const CURATED_MODELS: readonly UpstreamModel[] = [
 
 /**
  * Merges multiple catalog sources with curated defaults and user-declared models.
- * Higher priority sources override lower priority attributes while merging capabilities.
+ * Preserves existing capabilities when user declares overrides.
  */
 export async function mergeCatalogs(
   sources: CatalogSource[],
@@ -163,10 +163,23 @@ export async function mergeCatalogs(
     }
   }
 
-  // 3. User-declared overrides (highest priority)
+  // 3. User-declared overrides (merge without wiping capabilities)
   for (const m of userDeclared) {
     const key = `${m.upstreamProvider}:${m.id}`;
-    modelMap.set(key, { ...m, provenance: "user-declared" });
+    const existing = modelMap.get(key);
+    if (existing) {
+      modelMap.set(key, {
+        ...existing,
+        ...m,
+        capabilities: {
+          ...existing.capabilities,
+          ...m.capabilities,
+        },
+        provenance: "user-declared",
+      });
+    } else {
+      modelMap.set(key, { ...m, provenance: "user-declared" });
+    }
   }
 
   return Array.from(modelMap.values());

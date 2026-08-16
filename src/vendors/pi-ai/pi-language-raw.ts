@@ -1,5 +1,11 @@
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
-import type { Models, Model, Api } from "@earendil-works/pi-ai";
+import type {
+  Models,
+  Model,
+  Api,
+  AssistantMessage,
+  AssistantMessageEvent,
+} from "@earendil-works/pi-ai";
 import type {
   LanguageBackend,
   InferenceTarget,
@@ -9,14 +15,19 @@ import type {
 import type {
   StreamEvent,
   InferenceResponse,
-  ContentBlock,
   Usage,
+  StopReason,
+  TextBlock,
+  ReasoningBlock,
+  ToolUseBlock,
 } from "../../foundations/schemas/inference.js";
 import { InferenceError } from "../../foundations/errors.js";
 import {
   canonicalToPiMessages,
   canonicalToPiTools,
 } from "./pi-canonical-converter.js";
+
+type AssistantContentBlock = TextBlock | ReasoningBlock | ToolUseBlock;
 
 /** Combine AbortSignal and timeoutMs into a single effective AbortSignal */
 function resolveSignal(opts?: InferenceOptions): { signal?: AbortSignal; cleanup: () => void } {
@@ -51,6 +62,23 @@ function resolveSignal(opts?: InferenceOptions): { signal?: AbortSignal; cleanup
   };
 }
 
+function mapPiUsageToCanonical(piUsage?: any): Usage | undefined {
+  if (!piUsage) return undefined;
+  return {
+    promptTokens: piUsage.input ?? 0,
+    completionTokens: piUsage.output ?? 0,
+    totalTokens: piUsage.totalTokens ?? ((piUsage.input ?? 0) + (piUsage.output ?? 0)),
+    reasoningTokens: piUsage.reasoning,
+    cost: piUsage.cost?.total,
+  };
+}
+
+function mapPiStopReasonToCanonical(reason?: string): StopReason {
+  if (reason === "toolUse") return "tool_use";
+  if (reason === "length") return "max_tokens";
+  return "end_turn";
+}
+
 /**
  * Pi AI raw language backend implementation.
  */
@@ -72,12 +100,8 @@ export class PiLanguageRaw implements LanguageBackend {
     try {
       if (signal?.aborted) {
         yield {
-          type: "error",
-          error: {
-            code: "timeout",
-            message: signal.reason?.message || "Operation aborted",
-            retryable: false,
-          },
+          type: "abort",
+          reason: "timeout",
         };
         return;
       }
@@ -89,7 +113,6 @@ export class PiLanguageRaw implements LanguageBackend {
       let model = this.models.getModel(providerName, target.model) as Model<Api> | undefined;
 
       if (!model) {
-        // Fall back to creating a dynamic model entry if not in static catalog
         model = {
           id: target.model,
           provider: providerName,
@@ -100,6 +123,7 @@ export class PiLanguageRaw implements LanguageBackend {
           maxOutputTokens: req.maxOutputTokens ?? 4096,
         } as any;
       }
+      const resolvedModel: Model<Api> = model!;
 
       const piMessages = canonicalToPiMessages(req.messages);
       const piTools = canonicalToPiTools(req.tools);
@@ -112,154 +136,153 @@ export class PiLanguageRaw implements LanguageBackend {
         },
       };
 
-      let blockIndex = 0;
-      let textBlockOpen = false;
-      let thinkingBlockOpen = false;
-      let accumulatedUsage: Usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
-      let stopReason: "end_turn" | "tool_use" | "max_tokens" | "stop_sequence" = "end_turn";
+      const openBlocks = new Set<number>();
+      let lastUsage: Usage | undefined;
+      let lastStopReason: StopReason = "end_turn";
+      let lastResponseId: string | undefined;
 
-      const piOptions: any = {
+      const streamOptions: any = {
         signal,
         apiKey,
-        reasoning: req.thinkingLevel && req.thinkingLevel !== "none" ? req.thinkingLevel : undefined,
         maxTokens: req.maxOutputTokens,
       };
 
+      const context = {
+        messages: piMessages,
+        tools: piTools.length > 0 ? piTools : undefined,
+      };
+
       try {
-        const stream = this.models.stream(
-          model!,
-          {
-            messages: piMessages as any,
-            tools: piTools.length > 0 ? piTools : undefined,
-          } as any,
-          piOptions,
-        );
+        const stream =
+          req.thinkingLevel && req.thinkingLevel !== "none"
+            ? this.models.streamSimple(resolvedModel, context as any, {
+                ...streamOptions,
+                reasoning: req.thinkingLevel as any,
+              })
+            : this.models.stream(resolvedModel, context as any, streamOptions);
 
         for await (const event of stream) {
           if (event.type === "text_start") {
-            textBlockOpen = true;
+            openBlocks.add(event.contentIndex);
             yield {
               type: "content_block_start",
-              index: blockIndex,
+              index: event.contentIndex,
               block: { type: "text", text: "" },
             };
-          } else if (event.type === "text_delta" && (event as any).content) {
-            if (!textBlockOpen) {
-              textBlockOpen = true;
+          } else if (event.type === "text_delta") {
+            if (!openBlocks.has(event.contentIndex)) {
+              openBlocks.add(event.contentIndex);
               yield {
                 type: "content_block_start",
-                index: blockIndex,
+                index: event.contentIndex,
                 block: { type: "text", text: "" },
               };
             }
             yield {
               type: "content_block_delta",
-              index: blockIndex,
-              delta: { type: "text_delta", text: (event as any).content },
+              index: event.contentIndex,
+              delta: { type: "text_delta", text: event.delta },
             };
           } else if (event.type === "text_end") {
-            if (textBlockOpen) {
-              textBlockOpen = false;
+            if (openBlocks.has(event.contentIndex)) {
+              openBlocks.delete(event.contentIndex);
               yield {
                 type: "content_block_stop",
-                index: blockIndex,
+                index: event.contentIndex,
               };
-              blockIndex++;
             }
           } else if (event.type === "thinking_start") {
-            thinkingBlockOpen = true;
+            openBlocks.add(event.contentIndex);
             yield {
               type: "content_block_start",
-              index: blockIndex,
+              index: event.contentIndex,
               block: { type: "reasoning", text: "" },
             };
-          } else if (event.type === "thinking_delta" && (event as any).content) {
-            if (!thinkingBlockOpen) {
-              thinkingBlockOpen = true;
+          } else if (event.type === "thinking_delta") {
+            if (!openBlocks.has(event.contentIndex)) {
+              openBlocks.add(event.contentIndex);
               yield {
                 type: "content_block_start",
-                index: blockIndex,
+                index: event.contentIndex,
                 block: { type: "reasoning", text: "" },
               };
             }
             yield {
               type: "content_block_delta",
-              index: blockIndex,
-              delta: { type: "reasoning_delta", text: (event as any).content },
+              index: event.contentIndex,
+              delta: { type: "reasoning_delta", text: event.delta },
             };
           } else if (event.type === "thinking_end") {
-            if (thinkingBlockOpen) {
-              thinkingBlockOpen = false;
+            if (openBlocks.has(event.contentIndex)) {
+              openBlocks.delete(event.contentIndex);
               yield {
                 type: "content_block_stop",
-                index: blockIndex,
+                index: event.contentIndex,
               };
-              blockIndex++;
             }
-          } else if ((event as any).type === "toolcall_start" || (event as any).type === "tool_call_start") {
-            const toolCall = (event as any).toolCall || event;
+          } else if (event.type === "toolcall_start") {
+            openBlocks.add(event.contentIndex);
             yield {
               type: "content_block_start",
-              index: blockIndex,
+              index: event.contentIndex,
               block: {
                 type: "tool_use",
-                id: toolCall.id || `call_${blockIndex}`,
-                name: toolCall.name || "",
+                id: `call_${event.contentIndex}`,
+                name: "",
                 input: {},
               },
             };
-          } else if ((event as any).type === "toolcall_delta" || (event as any).type === "tool_call_delta") {
+          } else if (event.type === "toolcall_delta") {
             yield {
               type: "content_block_delta",
-              index: blockIndex,
+              index: event.contentIndex,
               delta: {
                 type: "tool_input_delta",
-                partialJson: (event as any).delta || (event as any).argumentsDelta || "",
+                partialJson: event.delta,
               },
             };
-          } else if ((event as any).type === "toolcall_end" || (event as any).type === "tool_call_end") {
-            yield {
-              type: "content_block_stop",
-              index: blockIndex,
-            };
-            blockIndex++;
-            stopReason = "tool_use";
-          } else if (event.type === "done") {
-            const msg = (event as any).message;
-            if (msg?.usage) {
-              accumulatedUsage = {
-                promptTokens: msg.usage.promptTokens ?? msg.usage.inputTokens ?? 0,
-                completionTokens: msg.usage.completionTokens ?? msg.usage.outputTokens ?? 0,
-                totalTokens:
-                  (msg.usage.promptTokens ?? msg.usage.inputTokens ?? 0) +
-                  (msg.usage.completionTokens ?? msg.usage.outputTokens ?? 0),
+          } else if (event.type === "toolcall_end") {
+            if (openBlocks.has(event.contentIndex)) {
+              openBlocks.delete(event.contentIndex);
+              yield {
+                type: "content_block_stop",
+                index: event.contentIndex,
               };
             }
-            if ((event as any).reason === "toolUse") {
-              stopReason = "tool_use";
-            }
+          } else if (event.type === "done") {
+            lastStopReason = mapPiStopReasonToCanonical(event.reason);
+            lastUsage = mapPiUsageToCanonical(event.message?.usage);
+            lastResponseId = event.message?.responseId;
           } else if (event.type === "error") {
-            throw new InferenceError({
-              code: "internal_adapter",
-              message: (event as any).error?.message || "Pi stream error",
-              providerAccount: target.providerAccount,
-              model: target.model,
-              retryable: true,
-            });
+            if (event.reason === "aborted") {
+              yield {
+                type: "abort",
+                reason: signal?.aborted ? "timeout" : "user",
+                partialUsage: lastUsage,
+              };
+              return;
+            }
+            yield {
+              type: "error",
+              error: {
+                code: "internal_adapter",
+                message: event.error?.errorMessage || "Pi inference error",
+                retryable: true,
+              },
+              partialUsage: lastUsage,
+            };
+            return;
           }
         }
 
-        if (textBlockOpen) {
-          yield { type: "content_block_stop", index: blockIndex };
-        }
-        if (thinkingBlockOpen) {
-          yield { type: "content_block_stop", index: blockIndex };
+        for (const idx of openBlocks) {
+          yield { type: "content_block_stop", index: idx };
         }
 
         yield {
           type: "finish",
-          stopReason,
-          usage: accumulatedUsage,
+          stopReason: lastStopReason,
+          usage: lastUsage ?? { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
         };
       } catch (err: any) {
         const isTimeout = signal?.aborted;
@@ -270,7 +293,7 @@ export class PiLanguageRaw implements LanguageBackend {
             message: err?.message || "Pi language stream failed",
             retryable: true,
           },
-          partialUsage: accumulatedUsage,
+          partialUsage: lastUsage,
         };
       }
     } finally {
@@ -284,43 +307,134 @@ export class PiLanguageRaw implements LanguageBackend {
     req: LanguageRequest,
     opts?: InferenceOptions,
   ): Promise<InferenceResponse> {
-    const contentBlocks: ContentBlock[] = [];
-    let usage: Usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
-    let stopReason: "end_turn" | "tool_use" | "max_tokens" | "stop_sequence" = "end_turn";
+    const lease = target.credential.acquireLease();
+    const { signal, cleanup } = resolveSignal(opts);
 
-    for await (const event of this.chatStream(target, req, opts)) {
-      if (event.type === "content_block_start") {
-        contentBlocks.push(event.block);
-      } else if (event.type === "content_block_delta") {
-        const block = contentBlocks[event.index];
-        if (block && block.type === "text" && event.delta.type === "text_delta") {
-          block.text += event.delta.text;
-        } else if (block && block.type === "reasoning" && event.delta.type === "reasoning_delta") {
-          block.text += event.delta.text;
-        }
-      } else if (event.type === "finish") {
-        stopReason = event.stopReason;
-        if (event.usage) usage = event.usage;
-      } else if (event.type === "error") {
+    try {
+      if (signal?.aborted) {
         throw new InferenceError({
-          code: event.error.code as any,
-          message: event.error.message,
+          code: "timeout",
+          message: signal.reason?.message || "Operation aborted",
           providerAccount: target.providerAccount,
           model: target.model,
-          retryable: event.error.retryable,
+          retryable: false,
         });
       }
+
+      const secret = await lease.secret();
+      const apiKey = secret.kind === "api_key" ? secret.value : undefined;
+
+      const providerName = target.upstreamProvider === "glm" ? "zai" : target.upstreamProvider;
+      let model = this.models.getModel(providerName, target.model) as Model<Api> | undefined;
+
+      if (!model) {
+        model = {
+          id: target.model,
+          provider: providerName,
+          name: target.model,
+          api: providerName === "anthropic" ? "anthropic-messages" : "openai-completions",
+          baseUrl: target.baseUrl,
+          contextWindow: 128_000,
+          maxOutputTokens: req.maxOutputTokens ?? 4096,
+        } as any;
+      }
+      const resolvedModel: Model<Api> = model!;
+
+      const piMessages = canonicalToPiMessages(req.messages);
+      const piTools = canonicalToPiTools(req.tools);
+
+      const streamOptions: any = {
+        signal,
+        apiKey,
+        maxTokens: req.maxOutputTokens,
+      };
+
+      const context = {
+        messages: piMessages,
+        tools: piTools.length > 0 ? piTools : undefined,
+      };
+
+      const stream =
+        req.thinkingLevel && req.thinkingLevel !== "none"
+          ? this.models.streamSimple(resolvedModel, context as any, {
+              ...streamOptions,
+              reasoning: req.thinkingLevel as any,
+            })
+          : this.models.stream(resolvedModel, context as any, streamOptions);
+
+      let finalMessage: AssistantMessage | undefined;
+      let finalReason: string = "stop";
+
+      for await (const event of stream) {
+        if (event.type === "done") {
+          finalMessage = event.message;
+          finalReason = event.reason;
+        } else if (event.type === "error") {
+          throw new InferenceError({
+            code: event.reason === "aborted" ? "timeout" : "network",
+            message: event.error?.errorMessage || "Pi chat request failed",
+            providerAccount: target.providerAccount,
+            model: target.model,
+            retryable: event.reason !== "aborted",
+          });
+        }
+      }
+
+      if (!finalMessage) {
+        throw new InferenceError({
+          code: "malformed_response",
+          message: "Pi stream completed without emitting a final done message",
+          providerAccount: target.providerAccount,
+          model: target.model,
+          retryable: false,
+        });
+      }
+
+      // Convert authoritative AssistantMessage content into canonical ContentBlocks
+      const contentBlocks: AssistantContentBlock[] = [];
+      for (const item of finalMessage.content || []) {
+        if (item.type === "text") {
+          contentBlocks.push({ type: "text", text: item.text });
+        } else if (item.type === "thinking") {
+          contentBlocks.push({
+            type: "reasoning",
+            text: item.thinking,
+            signature: item.thinkingSignature,
+            signatureProvenance: {
+              adapter: "pi-ai",
+              providerApi: resolvedModel.api,
+              upstreamProvider: target.upstreamProvider,
+            },
+          });
+        } else if (item.type === "toolCall") {
+          contentBlocks.push({
+            type: "tool_use",
+            id: item.id,
+            name: item.name,
+            input: item.arguments ?? {},
+          });
+        }
+      }
+
+      const stopReason = mapPiStopReasonToCanonical(finalReason);
+      const usage = mapPiUsageToCanonical(finalMessage.usage) ?? {
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+      };
+
+      return {
+        message: {
+          role: "assistant",
+          content: contentBlocks.length > 0 ? contentBlocks : [{ type: "text", text: "" }],
+        },
+        stopReason,
+        usage,
+        providerResponseId: finalMessage.responseId,
+      };
+    } finally {
+      cleanup();
+      await lease.release();
     }
-
-    const assistantMessage: any = {
-      role: "assistant",
-      content: contentBlocks.length > 0 ? contentBlocks : [{ type: "text", text: "" }],
-    };
-
-    return {
-      message: assistantMessage,
-      stopReason,
-      usage,
-    };
   }
 }

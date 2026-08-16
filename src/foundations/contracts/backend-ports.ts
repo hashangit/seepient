@@ -53,8 +53,13 @@ export interface CatalogSource {
   list(): Promise<readonly UpstreamModel[]>;
 }
 
+export interface DiscoveryResult {
+  readonly modelIds: readonly string[];
+  readonly error?: string;
+}
+
 export interface DiscoverySource {
-  discover(account: ProviderAccountContext): Promise<readonly string[]>;
+  discover(account: ProviderAccountContext): Promise<DiscoveryResult>;
 }
 
 export interface RawBackend {

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { AggregateInferenceAdapter } from "../../src/capabilities/inference/aggregate-adapter.js";
 import { PiLanguageRaw } from "../../src/vendors/pi-ai/pi-language-raw.js";
 import { OpenAIImageRaw } from "../../src/vendors/openai/openai-image-raw.js";
-import { GoogleImageRaw } from "../../src/vendors/google/google-image-raw.js";
+import type { AssistantMessageEvent } from "@earendil-works/pi-ai";
 import type { InferenceTarget } from "../../src/foundations/contracts/backend-ports.js";
 import type { CredentialHandle } from "../../src/foundations/contracts/credential-store.js";
 
@@ -33,13 +33,32 @@ describe("Adapter-substitution Conformance Suite (QS-P3.12)", () => {
   it("satisfies language streaming lifecycle invariants", async () => {
     const mockModels: any = {
       getModel: () => ({ id: "gpt-4o", provider: "openai" }),
-      stream: async function* () {
-        yield { type: "text_start" };
-        yield { type: "text_delta", content: "Conformance verified" };
-        yield { type: "text_end" };
+      stream: async function* (): AsyncIterable<AssistantMessageEvent> {
+        const dummyMsg: any = { role: "assistant", content: [] };
+        yield { type: "start", partial: dummyMsg };
+        yield { type: "text_start", contentIndex: 0, partial: dummyMsg };
+        yield { type: "text_delta", contentIndex: 0, delta: "Conformance verified", partial: dummyMsg };
+        yield { type: "text_end", contentIndex: 0, content: "Conformance verified", partial: dummyMsg };
         yield {
           type: "done",
-          message: { usage: { promptTokens: 4, completionTokens: 2 } },
+          reason: "stop",
+          message: {
+            role: "assistant",
+            api: "openai-completions",
+            provider: "openai",
+            model: "gpt-4o",
+            content: [{ type: "text", text: "Conformance verified" }],
+            stopReason: "stop",
+            timestamp: Date.now(),
+            usage: {
+              input: 4,
+              output: 2,
+              totalTokens: 6,
+              cacheRead: 0,
+              cacheWrite: 0,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+            },
+          },
         };
       },
     };

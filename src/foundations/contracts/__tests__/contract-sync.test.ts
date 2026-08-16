@@ -56,7 +56,7 @@ const _assertThinkingLevelSync: AssertEqual<
 
 const _assertAgentPurposeValues: AssertEqual<
   AgentPurpose,
-  "plan" | "text" | "vision" | "commit"
+  "plan" | "text" | "coding" | "vision" | "commit"
 > = true;
 
 const _assertStopReasonValues: AssertEqual<

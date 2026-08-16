@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { AggregateInferenceAdapter } from "../aggregate-adapter.js";
 import type {
   InferenceTarget,
@@ -6,7 +6,7 @@ import type {
   ImageBackend,
 } from "../../../foundations/contracts/backend-ports.js";
 import type { CredentialHandle } from "../../../foundations/contracts/credential-store.js";
-import { CURATED_MODELS } from "../catalog-merge.js";
+import { InferenceError } from "../../../foundations/errors.js";
 
 function createMockCredential(): CredentialHandle {
   return {
@@ -58,51 +58,45 @@ describe("AggregateInferenceAdapter (QS-P3.8)", () => {
     expect(boundImg.language).toBeUndefined();
   });
 
-  it("routes language stream and chat to the configured language backend", async () => {
-    const mockLangBackend: LanguageBackend = {
-      chatStream: async function* () {
-        yield {
-          type: "start",
-          resolvedModel: { modelId: "gpt-4o", providerAccount: "work" },
-        };
-        yield {
-          type: "finish",
-          stopReason: "end_turn",
-        };
-      },
-      chat: async () => ({
-        content: [{ type: "text", text: "chat result" }],
-        stopReason: "end_turn",
-        usage: { promptTokens: 2, completionTokens: 2, totalTokens: 4 },
+  it("strictly enforces catalog operation flags (rejects unsupported operations)", async () => {
+    const mockOpenAI: ImageBackend = {
+      generate: async () => ({
+        images: [{ url: "https://openai.com/test.png", mimeType: "image/png" }],
       }),
     };
 
     const adapter = new AggregateInferenceAdapter({
-      language: mockLangBackend,
+      openaiImage: mockOpenAI,
     });
 
     const target: InferenceTarget = {
-      providerAccount: "work",
+      providerAccount: "work-openai",
       upstreamProvider: "openai",
-      model: "gpt-4o",
+      model: "dall-e-3", // dall-e-3 supports generate, but NOT edit/variation
       credential,
     };
 
     const bound = await adapter.bind(target);
-    expect(bound.language).toBeDefined();
+    expect(bound.images).toBeDefined();
 
-    const events = [];
-    for await (const ev of bound.language!.stream({
-      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
-    })) {
-      events.push(ev);
-    }
-    expect(events.length).toBe(2);
-
-    const resp = await bound.language!.chat({
-      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+    // Generate succeeds
+    const genRes = await bound.images!.generate({
+      prompt: "A dog",
+      operation: "generate",
     });
-    expect((resp.content[0] as any).text).toBe("chat result");
+    expect(genRes.images.length).toBe(1);
+
+    // Edit fails with unsupported_capability BEFORE calling vendor
+    try {
+      await bound.images!.generate({
+        prompt: "Edit dog",
+        operation: "edit",
+      });
+      expect.fail("Should have thrown InferenceError");
+    } catch (e: any) {
+      expect(e).toBeInstanceOf(InferenceError);
+      expect(e.code).toBe("unsupported_capability");
+    }
   });
 
   it("routes image generation to the appropriate peer backend (OpenAI, Google, Pi)", async () => {

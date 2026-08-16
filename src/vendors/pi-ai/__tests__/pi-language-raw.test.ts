@@ -1,11 +1,11 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { PiLanguageRaw } from "../pi-language-raw.js";
+import type { AssistantMessageEvent } from "@earendil-works/pi-ai";
 import type { InferenceTarget } from "../../../foundations/contracts/backend-ports.js";
 import type {
   CredentialHandle,
   CredentialLease,
 } from "../../../foundations/contracts/credential-store.js";
-import { InferenceError } from "../../../foundations/errors.js";
 
 function createMockCredential(apiKey = "sk-test", onRelease?: () => void): CredentialHandle {
   let activeLeases = 0;
@@ -46,15 +46,32 @@ describe("PiLanguageRaw backend (QS-P3.3)", () => {
 
     const mockModels = {
       getModel: () => ({ id: "gpt-4o", provider: "openai" }),
-      stream: async function* () {
-        yield { type: "text_start" };
-        yield { type: "text_delta", content: "Hello " };
-        yield { type: "text_delta", content: "World!" };
-        yield { type: "text_end" };
+      stream: async function* (): AsyncIterable<AssistantMessageEvent> {
+        const dummyMsg: any = { role: "assistant", content: [] };
+        yield { type: "start", partial: dummyMsg };
+        yield { type: "text_start", contentIndex: 0, partial: dummyMsg };
+        yield { type: "text_delta", contentIndex: 0, delta: "Hello ", partial: dummyMsg };
+        yield { type: "text_delta", contentIndex: 0, delta: "World!", partial: dummyMsg };
+        yield { type: "text_end", contentIndex: 0, content: "Hello World!", partial: dummyMsg };
         yield {
           type: "done",
+          reason: "stop",
           message: {
-            usage: { promptTokens: 5, completionTokens: 3 },
+            role: "assistant",
+            api: "openai-completions",
+            provider: "openai",
+            model: "gpt-4o",
+            content: [{ type: "text", text: "Hello World!" }],
+            stopReason: "stop",
+            timestamp: Date.now(),
+            usage: {
+              input: 5,
+              output: 3,
+              totalTokens: 8,
+              cacheRead: 0,
+              cacheWrite: 0,
+              cost: { input: 0.001, output: 0.002, cacheRead: 0, cacheWrite: 0, total: 0.003 },
+            },
           },
         };
       },
@@ -77,25 +94,46 @@ describe("PiLanguageRaw backend (QS-P3.3)", () => {
 
     expect(events.length).toBeGreaterThan(0);
     expect(events[0].type).toBe("start");
+    const deltaEvents = events.filter((e) => e.type === "content_block_delta");
+    expect(deltaEvents.length).toBe(2);
+    expect((deltaEvents[0] as any).delta.text).toBe("Hello ");
+
     const finish = events.find((e) => e.type === "finish");
     expect(finish).toBeDefined();
     expect((finish as any).stopReason).toBe("end_turn");
     expect((finish as any).usage?.totalTokens).toBe(8);
+    expect((finish as any).usage?.cost).toBe(0.003);
     expect(released).toBe(true);
   });
 
-  it("chat() accumulates stream events into complete response", async () => {
+  it("chat() uses authoritative message content and usage from done event", async () => {
     const credential = createMockCredential();
     const mockModels = {
       getModel: () => ({ id: "gpt-4o", provider: "openai" }),
-      stream: async function* () {
-        yield { type: "text_start" };
-        yield { type: "text_delta", content: "Direct chat response" };
-        yield { type: "text_end" };
+      stream: async function* (): AsyncIterable<AssistantMessageEvent> {
+        const dummyMsg: any = { role: "assistant", content: [] };
+        yield { type: "text_start", contentIndex: 0, partial: dummyMsg };
+        yield { type: "text_delta", contentIndex: 0, delta: "Direct chat response", partial: dummyMsg };
+        yield { type: "text_end", contentIndex: 0, content: "Direct chat response", partial: dummyMsg };
         yield {
           type: "done",
+          reason: "stop",
           message: {
-            usage: { promptTokens: 4, completionTokens: 4 },
+            role: "assistant",
+            api: "openai-completions",
+            provider: "openai",
+            model: "gpt-4o",
+            content: [{ type: "text", text: "Direct chat response" }],
+            stopReason: "stop",
+            timestamp: Date.now(),
+            usage: {
+              input: 4,
+              output: 4,
+              totalTokens: 8,
+              cacheRead: 0,
+              cacheWrite: 0,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+            },
           },
         };
       },
@@ -119,23 +157,55 @@ describe("PiLanguageRaw backend (QS-P3.3)", () => {
     expect(resp.usage.totalTokens).toBe(8);
   });
 
-  it("streams reasoning thinking tokens and tool calls", async () => {
+  it("streams reasoning thinking tokens and captures signature triple", async () => {
     const credential = createMockCredential();
     const mockModels = {
-      getModel: () => ({ id: "claude-3-7-sonnet", provider: "anthropic" }),
-      stream: async function* () {
-        yield { type: "thinking_start" };
-        yield { type: "thinking_delta", content: "Analyzing input..." };
-        yield { type: "thinking_end" };
-        yield { type: "toolcall_start", toolCall: { id: "call_1", name: "read_file" } };
-        yield { type: "toolcall_delta", delta: '{"path":' };
-        yield { type: "toolcall_delta", delta: '"/a.txt"}' };
-        yield { type: "toolcall_end" };
+      getModel: () => ({ id: "claude-3-7-sonnet", provider: "anthropic", api: "anthropic-messages" }),
+      streamSimple: async function* (): AsyncIterable<AssistantMessageEvent> {
+        const dummyMsg: any = { role: "assistant", content: [] };
+        yield { type: "thinking_start", contentIndex: 0, partial: dummyMsg };
+        yield { type: "thinking_delta", contentIndex: 0, delta: "Analyzing input...", partial: dummyMsg };
+        yield { type: "thinking_end", contentIndex: 0, content: "Analyzing input...", partial: dummyMsg };
+        yield { type: "toolcall_start", contentIndex: 1, partial: dummyMsg };
+        yield { type: "toolcall_delta", contentIndex: 1, delta: '{"path":"/a.txt"}', partial: dummyMsg };
+        yield {
+          type: "toolcall_end",
+          contentIndex: 1,
+          toolCall: { type: "toolCall", id: "call_1", name: "read_file", arguments: { path: "/a.txt" } },
+          partial: dummyMsg,
+        };
         yield {
           type: "done",
           reason: "toolUse",
           message: {
-            usage: { promptTokens: 10, completionTokens: 15 },
+            role: "assistant",
+            api: "anthropic-messages",
+            provider: "anthropic",
+            model: "claude-3-7-sonnet",
+            content: [
+              {
+                type: "thinking",
+                thinking: "Analyzing input...",
+                thinkingSignature: "sig-anthropic-123",
+              },
+              {
+                type: "toolCall",
+                id: "call_1",
+                name: "read_file",
+                arguments: { path: "/a.txt" },
+              },
+            ],
+            stopReason: "toolUse",
+            timestamp: Date.now(),
+            usage: {
+              input: 10,
+              output: 15,
+              reasoning: 8,
+              totalTokens: 25,
+              cacheRead: 0,
+              cacheWrite: 0,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+            },
           },
         };
       },
@@ -149,25 +219,27 @@ describe("PiLanguageRaw backend (QS-P3.3)", () => {
       credential,
     };
 
-    const events = [];
-    for await (const ev of backend.chatStream(target, {
+    const resp = await backend.chat(target, {
       messages: [{ role: "user", content: [{ type: "text", text: "read file" }] }],
       thinkingLevel: "high",
-    })) {
-      events.push(ev);
-    }
+    });
 
-    const reasoningStart = events.find(
-      (e) => e.type === "content_block_start" && (e as any).block.type === "reasoning",
-    );
-    expect(reasoningStart).toBeDefined();
+    expect(resp.stopReason).toBe("tool_use");
+    expect(resp.message.content.length).toBe(2);
 
-    const toolUseStart = events.find(
-      (e) => e.type === "content_block_start" && (e as any).block.type === "tool_use",
-    );
-    expect(toolUseStart).toBeDefined();
+    const reasoning = resp.message.content[0];
+    expect(reasoning.type).toBe("reasoning");
+    expect((reasoning as any).signature).toBe("sig-anthropic-123");
+    expect((reasoning as any).signatureProvenance).toEqual({
+      adapter: "pi-ai",
+      providerApi: "anthropic-messages",
+      upstreamProvider: "anthropic",
+    });
 
-    const finish = events.find((e) => e.type === "finish");
-    expect((finish as any).stopReason).toBe("tool_use");
+    const toolUse = resp.message.content[1];
+    expect(toolUse.type).toBe("tool_use");
+    expect((toolUse as any).id).toBe("call_1");
+    expect((toolUse as any).name).toBe("read_file");
+    expect((toolUse as any).input).toEqual({ path: "/a.txt" });
   });
 });

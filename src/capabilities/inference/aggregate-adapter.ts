@@ -7,7 +7,6 @@ import type {
   BoundImageExecutor,
   LanguageBackend,
   ImageBackend,
-  RawBackend,
 } from "../../foundations/contracts/backend-ports.js";
 import type {
   ImageRequest,
@@ -22,12 +21,6 @@ import { OpenAIImageRaw } from "../../vendors/openai/openai-image-raw.js";
 import { CURATED_MODELS } from "./catalog-merge.js";
 
 export type ImageOperation = "generate" | "variation" | "edit" | "mask";
-
-export type ImageBackendResolver = (
-  target: InferenceTarget,
-  op: ImageOperation,
-  req: ImageRequest,
-) => ImageBackend | undefined;
 
 /**
  * Unified Aggregate Inference Adapter that composes peer vendor backends
@@ -72,25 +65,21 @@ export class AggregateInferenceAdapter {
     };
   }
 
-  private hasLanguageCapability(target: InferenceTarget): boolean {
-    const model = this.catalog.find(
+  private findCatalogModel(target: InferenceTarget): UpstreamModel | undefined {
+    return this.catalog.find(
       (m) => m.id === target.model && m.upstreamProvider === target.upstreamProvider,
     );
-    if (!model) return true; // optimistic default for dynamically discovered / custom models
-    return model.capabilities.streaming || model.capabilities.toolUse;
+  }
+
+  private hasLanguageCapability(target: InferenceTarget): boolean {
+    const model = this.findCatalogModel(target);
+    if (!model) return true; // optimistic default for dynamic/custom language models
+    return !!(model.capabilities.streaming || model.capabilities.toolUse);
   }
 
   private hasImageCapability(target: InferenceTarget): boolean {
-    const model = this.catalog.find(
-      (m) => m.id === target.model && m.upstreamProvider === target.upstreamProvider,
-    );
-    if (!model) {
-      return (
-        target.model.includes("dall-e") ||
-        target.model.includes("image") ||
-        target.model.includes("imagen")
-      );
-    }
+    const model = this.findCatalogModel(target);
+    if (!model) return false;
     return !!(
       model.capabilities.imageGenerate ||
       model.capabilities.imageVariation ||
@@ -117,7 +106,7 @@ export class AggregateInferenceAdapter {
         if (!backend) {
           throw new InferenceError({
             code: "unsupported_capability",
-            message: `Model "${target.model}" under provider "${target.providerAccount}" does not support image operation "${op}".`,
+            message: `Model "${target.model}" under provider "${target.upstreamProvider}" does not support image operation "${op}".`,
             providerAccount: target.providerAccount,
             model: target.model,
             retryable: false,
@@ -131,12 +120,27 @@ export class AggregateInferenceAdapter {
 
   /**
    * Resolves the appropriate ImageBackend for a specific (target, operation, request).
+   * Strictly verifies catalog capability flags and never silently falls back to an unrelated provider.
    */
   private resolveImageBackend(
     target: InferenceTarget,
     op: ImageOperation,
     req: ImageRequest,
   ): ImageBackend | undefined {
+    const model = this.findCatalogModel(target);
+    if (!model) return undefined;
+
+    // Verify operation support on the specific catalog model
+    let opSupported = false;
+    if (op === "generate") opSupported = !!model.capabilities.imageGenerate;
+    else if (op === "variation") opSupported = !!model.capabilities.imageVariation;
+    else if (op === "edit") opSupported = !!model.capabilities.imageEdit;
+    else if (op === "mask") opSupported = !!model.capabilities.imageMask;
+
+    if (!opSupported) {
+      return undefined;
+    }
+
     if (target.upstreamProvider === "google") {
       return this.googleImageBackend;
     }
@@ -145,7 +149,10 @@ export class AggregateInferenceAdapter {
       return this.openaiImageBackend;
     }
 
-    // Default to Pi image backend (e.g. OpenRouter or custom provider)
-    return this.piImageBackend;
+    if (target.upstreamProvider === "openrouter" || target.upstreamProvider === "pi-ai") {
+      return this.piImageBackend;
+    }
+
+    return undefined;
   }
 }

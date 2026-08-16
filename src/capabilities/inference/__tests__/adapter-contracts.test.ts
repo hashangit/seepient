@@ -1,11 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { AggregateInferenceAdapter } from "../aggregate-adapter.js";
 import { PiLanguageRaw } from "../../../vendors/pi-ai/pi-language-raw.js";
-import { OpenAIImageRaw } from "../../../vendors/openai/openai-image-raw.js";
-import { GoogleImageRaw } from "../../../vendors/google/google-image-raw.js";
+import type { AssistantMessageEvent } from "@earendil-works/pi-ai";
 import type { InferenceTarget } from "../../../foundations/contracts/backend-ports.js";
 import type { CredentialHandle } from "../../../foundations/contracts/credential-store.js";
-import { InferenceError } from "../../../foundations/errors.js";
 
 function createMockCredential(): CredentialHandle {
   return {
@@ -34,13 +32,32 @@ describe("Adapter contract tests (QS-P3.10)", () => {
   it("handles streaming start, deltas, and finish events sequentially", async () => {
     const mockModels: any = {
       getModel: () => ({ id: "gpt-4o", provider: "openai" }),
-      stream: async function* () {
-        yield { type: "text_start" };
-        yield { type: "text_delta", content: "Streaming contract step" };
-        yield { type: "text_end" };
+      stream: async function* (): AsyncIterable<AssistantMessageEvent> {
+        const dummyMsg: any = { role: "assistant", content: [] };
+        yield { type: "start", partial: dummyMsg };
+        yield { type: "text_start", contentIndex: 0, partial: dummyMsg };
+        yield { type: "text_delta", contentIndex: 0, delta: "Streaming contract step", partial: dummyMsg };
+        yield { type: "text_end", contentIndex: 0, content: "Streaming contract step", partial: dummyMsg };
         yield {
           type: "done",
-          message: { usage: { promptTokens: 3, completionTokens: 4 } },
+          reason: "stop",
+          message: {
+            role: "assistant",
+            api: "openai-completions",
+            provider: "openai",
+            model: "gpt-4o",
+            content: [{ type: "text", text: "Streaming contract step" }],
+            stopReason: "stop",
+            timestamp: Date.now(),
+            usage: {
+              input: 3,
+              output: 4,
+              totalTokens: 7,
+              cacheRead: 0,
+              cacheWrite: 0,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+            },
+          },
         };
       },
     };
@@ -94,8 +111,8 @@ describe("Adapter contract tests (QS-P3.10)", () => {
       events.push(ev);
     }
 
-    const errorEvent = events.find((e) => e.type === "error");
-    expect(errorEvent).toBeDefined();
-    expect((errorEvent as any).error.code).toBe("timeout");
+    const abortEvent = events.find((e) => e.type === "abort");
+    expect(abortEvent).toBeDefined();
+    expect((abortEvent as any).reason).toBe("timeout");
   });
 });

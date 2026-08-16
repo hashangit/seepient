@@ -1,5 +1,11 @@
 import { builtinImagesModels } from "@earendil-works/pi-ai/providers/all";
 import type {
+  ImagesModel,
+  ImagesApi,
+  ImagesInputContent,
+  AssistantImages,
+} from "@earendil-works/pi-ai";
+import type {
   ImageBackend,
   InferenceTarget,
   InferenceOptions,
@@ -10,8 +16,41 @@ import type {
 } from "../../foundations/schemas/inference.js";
 import { InferenceError } from "../../foundations/errors.js";
 
+/** Combine AbortSignal and timeoutMs into a single effective AbortSignal */
+function resolveSignal(opts?: InferenceOptions): { signal?: AbortSignal; cleanup: () => void } {
+  if (!opts?.timeoutMs && !opts?.signal) {
+    return { signal: undefined, cleanup: () => {} };
+  }
+
+  const controller = new AbortController();
+  let timer: NodeJS.Timeout | undefined;
+
+  if (opts.timeoutMs && opts.timeoutMs > 0) {
+    timer = setTimeout(() => {
+      controller.abort(new Error(`Operation timed out after ${opts.timeoutMs}ms`));
+    }, opts.timeoutMs);
+  }
+
+  const onAbort = () => controller.abort(opts.signal?.reason);
+  if (opts.signal) {
+    if (opts.signal.aborted) {
+      controller.abort(opts.signal.reason);
+    } else {
+      opts.signal.addEventListener("abort", onAbort, { once: true });
+    }
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      if (timer) clearTimeout(timer);
+      if (opts.signal) opts.signal.removeEventListener("abort", onAbort);
+    },
+  };
+}
+
 /**
- * Pi AI raw image backend implementation.
+ * Pi AI raw image backend implementation using generateImages().
  */
 export class PiImageRaw implements ImageBackend {
   private imageModels: any;
@@ -26,12 +65,24 @@ export class PiImageRaw implements ImageBackend {
     opts?: InferenceOptions,
   ): Promise<ImageResult> {
     const lease = target.credential.acquireLease();
+    const { signal, cleanup } = resolveSignal(opts);
 
     try {
-      if (opts?.signal?.aborted) {
+      if (signal?.aborted) {
         throw new InferenceError({
           code: "timeout",
-          message: opts.signal.reason?.message || "Operation aborted",
+          message: signal.reason?.message || "Operation aborted",
+          providerAccount: target.providerAccount,
+          model: target.model,
+          retryable: false,
+        });
+      }
+
+      const op = req.operation ?? "generate";
+      if (op !== "generate") {
+        throw new InferenceError({
+          code: "unsupported_capability",
+          message: `Pi image backend currently only supports "generate" operation, received "${op}"`,
           providerAccount: target.providerAccount,
           model: target.model,
           retryable: false,
@@ -42,7 +93,9 @@ export class PiImageRaw implements ImageBackend {
       const apiKey = secret.kind === "api_key" ? secret.value : undefined;
 
       const providerName = target.upstreamProvider;
-      let model = this.imageModels.getModel(providerName, target.model);
+      let model = this.imageModels.getModel(providerName, target.model) as
+        | ImagesModel<ImagesApi>
+        | undefined;
 
       if (!model) {
         throw new InferenceError({
@@ -54,34 +107,32 @@ export class PiImageRaw implements ImageBackend {
         });
       }
 
-      // Pi image generation
-      try {
-        const res: any = await this.imageModels.generateImage(model, {
-          prompt: req.prompt,
-          aspectRatio: req.aspectRatio,
-          apiKey,
-        });
+      const inputContents: ImagesInputContent[] = [
+        { type: "text", text: req.prompt },
+      ];
 
-        if (!res || !res.images || res.images.length === 0) {
+      let result: AssistantImages;
+      try {
+        result = await this.imageModels.generateImages(
+          model,
+          { input: inputContents },
+          {
+            apiKey,
+            signal,
+            timeoutMs: opts?.timeoutMs,
+          },
+        );
+      } catch (err: any) {
+        if (signal?.aborted) {
           throw new InferenceError({
-            code: "malformed_response",
-            message: "Pi image backend produced 0 image items",
+            code: "timeout",
+            message: signal.reason?.message || "Pi image request timed out",
             providerAccount: target.providerAccount,
             model: target.model,
-            retryable: false,
+            retryable: true,
+            cause: err,
           });
         }
-
-        const images = res.images.map((img: any) => ({
-          mimeType: img.mimeType || "image/png",
-          url: img.url,
-          base64: img.base64 || img.data,
-          revisedPrompt: img.revisedPrompt,
-        }));
-
-        return { images };
-      } catch (err: any) {
-        if (err instanceof InferenceError) throw err;
         throw new InferenceError({
           code: "network",
           message: err?.message || "Pi image generation failed",
@@ -91,7 +142,50 @@ export class PiImageRaw implements ImageBackend {
           cause: err,
         });
       }
+
+      if (result.stopReason === "error") {
+        throw new InferenceError({
+          code: "internal_adapter",
+          message: result.errorMessage || "Pi image generation failed with error stopReason",
+          providerAccount: target.providerAccount,
+          model: target.model,
+          retryable: true,
+        });
+      }
+
+      if (result.stopReason === "aborted") {
+        throw new InferenceError({
+          code: "timeout",
+          message: "Pi image request was aborted",
+          providerAccount: target.providerAccount,
+          model: target.model,
+          retryable: true,
+        });
+      }
+
+      const images: ImageResult["images"] = [];
+      for (const item of result.output || []) {
+        if (item.type === "image") {
+          images.push({
+            mimeType: item.mimeType || "image/png",
+            base64: item.data,
+          });
+        }
+      }
+
+      if (images.length === 0) {
+        throw new InferenceError({
+          code: "malformed_response",
+          message: "Pi image backend produced 0 image items in output",
+          providerAccount: target.providerAccount,
+          model: target.model,
+          retryable: false,
+        });
+      }
+
+      return { images };
     } finally {
+      cleanup();
       await lease.release();
     }
   }

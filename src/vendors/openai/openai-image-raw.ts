@@ -1,5 +1,4 @@
-import * as fs from "node:fs";
-import { OpenAI } from "openai";
+import { OpenAI, toFile } from "openai";
 import type {
   ImageBackend,
   InferenceTarget,
@@ -59,36 +58,37 @@ export class OpenAIImageRaw implements ImageBackend {
           timeout: opts?.timeoutMs,
         });
 
-      const params = canonicalToOpenAIImageParams(req);
+      const params = canonicalToOpenAIImageParams(req, target.model);
       const op = req.operation ?? "generate";
 
       let response: any;
       try {
         if (op === "generate") {
-          response = await client.images.generate(
-            {
-              model: target.model,
-              prompt: params.prompt,
-              n: params.n,
-              quality: params.quality,
-              size: params.size,
-              response_format: "b64_json",
-            },
-            { signal: opts?.signal },
-          );
+          const genParams: any = {
+            model: target.model,
+            prompt: params.prompt,
+            n: params.n,
+            size: params.size,
+            response_format: "b64_json",
+          };
+          if (params.quality) {
+            genParams.quality = params.quality;
+          }
+          response = await client.images.generate(genParams, { signal: opts?.signal });
         } else if (op === "variation") {
-          if (!params.inputImagePath || !fs.existsSync(params.inputImagePath)) {
+          if (!params.inputImageBuffer) {
             throw new InferenceError({
               code: "invalid_request",
-              message: `Image variation requires a valid existing input image at ${params.inputImagePath}`,
+              message: "Image variation requires an input image with base64 data",
               providerAccount: target.providerAccount,
               model: target.model,
               retryable: false,
             });
           }
+          const file = await toFile(params.inputImageBuffer, "input.png", { type: "image/png" });
           response = await client.images.createVariation(
             {
-              image: fs.createReadStream(params.inputImagePath),
+              image: file,
               model: target.model,
               n: params.n,
               size: params.size as any,
@@ -97,25 +97,26 @@ export class OpenAIImageRaw implements ImageBackend {
             { signal: opts?.signal },
           );
         } else if (op === "edit" || op === "mask") {
-          if (!params.inputImagePath || !fs.existsSync(params.inputImagePath)) {
+          if (!params.inputImageBuffer) {
             throw new InferenceError({
               code: "invalid_request",
-              message: `Image edit requires a valid existing input image at ${params.inputImagePath}`,
+              message: "Image edit requires an input image with base64 data",
               providerAccount: target.providerAccount,
               model: target.model,
               retryable: false,
             });
           }
+          const file = await toFile(params.inputImageBuffer, "input.png", { type: "image/png" });
           const editParams: any = {
-            image: fs.createReadStream(params.inputImagePath),
+            image: file,
             prompt: params.prompt,
             model: target.model,
             n: params.n,
             size: params.size as any,
             response_format: "b64_json",
           };
-          if (params.maskPath && fs.existsSync(params.maskPath)) {
-            editParams.mask = fs.createReadStream(params.maskPath);
+          if (params.maskBuffer) {
+            editParams.mask = await toFile(params.maskBuffer, "mask.png", { type: "image/png" });
           }
           response = await client.images.edit(editParams, { signal: opts?.signal });
         }
@@ -130,7 +131,12 @@ export class OpenAIImageRaw implements ImageBackend {
         } else if (status === 429) {
           code = "rate_limit";
           retryable = true;
-        } else if (err.name === "AbortError" || err.name === "APIUserAbortError" || err.message?.includes("aborted") || err.message?.includes("timed out")) {
+        } else if (
+          err.name === "AbortError" ||
+          err.name === "APIUserAbortError" ||
+          err.message?.includes("aborted") ||
+          err.message?.includes("timed out")
+        ) {
           code = "timeout";
           retryable = true;
         } else if (status && status >= 500) {
