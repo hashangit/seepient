@@ -1,0 +1,92 @@
+import { isSensitiveHeader } from "./headers.js";
+
+const SENSITIVE_KEY_PATTERNS: readonly RegExp[] = [
+  /api[-_]?key/i,
+  /secret/i,
+  /token/i,
+  /password/i,
+  /auth/i,
+  /private[-_]?key/i,
+];
+
+const SECRET_VALUE_PATTERNS: readonly RegExp[] = [
+  /\b(?:sk-[a-zA-Z0-9_-]{20,})\b/g, // OpenAI API keys
+  /\b(?:ghp_[a-zA-Z0-9]{36})\b/g,   // GitHub tokens
+  /\b(?:xox[baprs]-[a-zA-Z0-9-]{10,})\b/g, // Slack tokens
+  /\b(?:AIza[0-9A-Za-z-_]{35})\b/g, // Google API keys
+  /Bearer\s+[a-zA-Z0-9._~+/-]+=*/gi, // Bearer tokens
+];
+
+/**
+ * Checks if an object property key is considered sensitive.
+ */
+export function isSensitiveKey(key: string): boolean {
+  return isSensitiveHeader(key) || SENSITIVE_KEY_PATTERNS.some((pat) => pat.test(key));
+}
+
+/**
+ * Redacts known secret tokens from a raw string.
+ */
+export function redactString(str: string): string {
+  let result = str;
+  for (const pattern of SECRET_VALUE_PATTERNS) {
+    result = result.replace(pattern, "[REDACTED]");
+  }
+  return result;
+}
+
+/**
+ * Universal deep redaction for objects, arrays, errors, and primitives.
+ */
+export function redact<T>(value: T, seen = new WeakSet()): T {
+  if (value === null || value === undefined) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    return redactString(value) as unknown as T;
+  }
+
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "symbol") {
+    return value;
+  }
+
+  if (value instanceof Error) {
+    const errorCopy = new (value.constructor as any)(redactString(value.message));
+    if (value.stack) errorCopy.stack = redactString(value.stack);
+    if ((value as any).cause) errorCopy.cause = redact((value as any).cause, seen);
+    for (const key of Object.getOwnPropertyNames(value)) {
+      if (key !== "message" && key !== "stack" && key !== "cause") {
+        if (isSensitiveKey(key) && typeof (value as any)[key] !== "object") {
+          errorCopy[key] = "[REDACTED]";
+        } else {
+          errorCopy[key] = redact((value as any)[key], seen);
+        }
+      }
+    }
+    return errorCopy;
+  }
+
+  if (typeof value === "object") {
+    if (seen.has(value as any)) {
+      return "[CIRCULAR]" as unknown as T;
+    }
+    seen.add(value as any);
+
+    if (Array.isArray(value)) {
+      return value.map((item) => redact(item, seen)) as unknown as T;
+    }
+
+    const result: Record<string, any> = {};
+    for (const [k, v] of Object.entries(value as Record<string, any>)) {
+      if (isSensitiveKey(k) && (typeof v !== "object" || v === null)) {
+        result[k] = "[REDACTED]";
+      } else {
+        result[k] = redact(v, seen);
+      }
+    }
+    return result as unknown as T;
+  }
+
+  return value;
+}

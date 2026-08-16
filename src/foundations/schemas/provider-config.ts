@@ -68,6 +68,13 @@ export const ModelAssignmentSchema = Type.Object({
 });
 export type ModelAssignment = Type.Static<typeof ModelAssignmentSchema>;
 
+export const ModelAssignmentOverrideSchema = Type.Object({
+  providerAccount: Type.Optional(Type.String()),
+  model: Type.Optional(Type.String()),
+  thinkingLevel: Type.Optional(ThinkingLevelSchema),
+});
+export type ModelAssignmentOverride = Type.Static<typeof ModelAssignmentOverrideSchema>;
+
 export const TieredAssignmentsSchema = Type.Object({
   standard: ModelAssignmentSchema,
   efficient: Type.Optional(ModelAssignmentSchema),

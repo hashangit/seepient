@@ -1,0 +1,105 @@
+import type {
+  CredentialStore,
+  CredentialHandle,
+  CredentialLease,
+  CredentialSecret,
+} from "../../../foundations/contracts/credential-store.js";
+import type {
+  CredentialRef,
+  CredentialRecord,
+  PersistedCredentialRecord,
+  CredentialMeta,
+} from "../../../foundations/schemas/credential-store.js";
+import { SeepientError } from "../../../foundations/errors.js";
+import { EnvCredentialStore } from "./env-credential-store.js";
+import { FileCredentialStore } from "./file-credential-store.js";
+import { KeychainCredentialStore } from "./keychain-credential-store.js";
+import { MemoryCredentialStore } from "./memory-credential-store.js";
+
+/**
+ * Unified CompositeCredentialStore routing credential resolution and persistence
+ * across env, file, keychain, and memory stores based on ref.kind.
+ */
+export class CompositeCredentialStore implements CredentialStore {
+  readonly envStore: EnvCredentialStore;
+  readonly fileStore: FileCredentialStore;
+  readonly keychainStore: KeychainCredentialStore;
+  readonly memoryStore: MemoryCredentialStore;
+
+  constructor(customStores?: {
+    env?: EnvCredentialStore;
+    file?: FileCredentialStore;
+    keychain?: KeychainCredentialStore;
+    memory?: MemoryCredentialStore;
+  }) {
+    this.envStore = customStores?.env ?? new EnvCredentialStore();
+    this.fileStore = customStores?.file ?? new FileCredentialStore();
+    this.keychainStore = customStores?.keychain ?? new KeychainCredentialStore();
+    this.memoryStore = customStores?.memory ?? new MemoryCredentialStore();
+  }
+
+  async resolve(ref: CredentialRef): Promise<CredentialHandle> {
+    if (ref.kind === "none") {
+      return {
+        id: "none",
+        ref,
+        activeLeaseCount: 0,
+        async isResolvable() {
+          return true;
+        },
+        acquireLease(): CredentialLease {
+          return {
+            leaseId: "none-lease",
+            isReleased: false,
+            async secret(): Promise<CredentialSecret> {
+              return { kind: "none" };
+            },
+            async release() {},
+          };
+        },
+      };
+    }
+
+    if (ref.kind === "env") {
+      return this.envStore.resolve(ref);
+    }
+
+    if (ref.kind === "seepient") {
+      return this.fileStore.resolve(ref);
+    }
+
+    if (ref.kind === "keychain") {
+      return this.keychainStore.resolve(ref);
+    }
+
+    if (ref.kind === "externalsecret") {
+      throw new SeepientError(
+        `External secret provider "${ref.ref}" is not configured in this environment`,
+        "UNRESOLVABLE_CREDENTIAL",
+        false,
+      );
+    }
+
+    throw new SeepientError(
+      `Unknown credential ref kind: ${(ref as any).kind}`,
+      "UNRESOLVABLE_CREDENTIAL",
+      false,
+    );
+  }
+
+  async get(id: string): Promise<CredentialRecord | undefined> {
+    return this.fileStore.get(id);
+  }
+
+  async put(id: string, record: PersistedCredentialRecord, meta?: CredentialMeta): Promise<void> {
+    return this.fileStore.put(id, record, meta);
+  }
+
+  async list(): Promise<CredentialRecord[]> {
+    return this.fileStore.list();
+  }
+
+  async delete(id: string): Promise<void> {
+    return this.fileStore.delete(id);
+  }
+}

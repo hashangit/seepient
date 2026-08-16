@@ -30,6 +30,7 @@ export interface InferenceTarget {
   baseUrl?: string;
   compat?: "openai" | "anthropic" | "google" | "openai-responses";
   timeoutMs?: number;
+  thinkingLevel?: ThinkingLevel;
 }
 
 export interface ProviderAccountContext {
