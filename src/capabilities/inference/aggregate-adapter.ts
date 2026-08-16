@@ -7,6 +7,7 @@ import type {
   BoundImageExecutor,
   LanguageBackend,
   ImageBackend,
+  ImageOperation,
 } from "../../foundations/contracts/backend-ports.js";
 import type {
   ImageRequest,
@@ -19,8 +20,6 @@ import { PiImageRaw } from "../../vendors/pi-ai/pi-image-raw.js";
 import { GoogleImageRaw } from "../../vendors/google/google-image-raw.js";
 import { OpenAIImageRaw } from "../../vendors/openai/openai-image-raw.js";
 import { CURATED_MODELS } from "./catalog-merge.js";
-
-export type ImageOperation = "generate" | "variation" | "edit" | "mask";
 
 /**
  * Unified Aggregate Inference Adapter that composes peer vendor backends

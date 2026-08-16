@@ -242,4 +242,69 @@ describe("PiLanguageRaw backend (QS-P3.3)", () => {
     expect((toolUse as any).name).toBe("read_file");
     expect((toolUse as any).input).toEqual({ path: "/a.txt" });
   });
+
+  it("emits real toolcall name and id during streaming toolcall_start", async () => {
+    const credential = createMockCredential();
+    const mockModels = {
+      getModel: () => ({ id: "gpt-4o", provider: "openai" }),
+      stream: async function* (): AsyncIterable<AssistantMessageEvent> {
+        const partialWithTool: any = {
+          role: "assistant",
+          content: [
+            { type: "toolCall", id: "call_exec_123", name: "execute_shell_command", arguments: {} },
+          ],
+        };
+        yield { type: "start", partial: partialWithTool };
+        yield { type: "toolcall_start", contentIndex: 0, partial: partialWithTool };
+        yield { type: "toolcall_delta", contentIndex: 0, delta: '{"cmd":"ls"}', partial: partialWithTool };
+        yield {
+          type: "toolcall_end",
+          contentIndex: 0,
+          toolCall: { type: "toolCall", id: "call_exec_123", name: "execute_shell_command", arguments: { cmd: "ls" } },
+          partial: partialWithTool,
+        };
+        yield {
+          type: "done",
+          reason: "toolUse",
+          message: {
+            role: "assistant",
+            api: "openai-completions",
+            provider: "openai",
+            model: "gpt-4o",
+            content: [
+              { type: "toolCall", id: "call_exec_123", name: "execute_shell_command", arguments: { cmd: "ls" } },
+            ],
+            stopReason: "toolUse",
+            timestamp: Date.now(),
+            usage: { input: 12, output: 8, totalTokens: 20, cacheRead: 5, cacheWrite: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+          },
+        };
+      },
+    };
+
+    const backend = new PiLanguageRaw(mockModels as any);
+    const target: InferenceTarget = {
+      providerAccount: "work-openai",
+      upstreamProvider: "openai",
+      model: "gpt-4o",
+      credential,
+    };
+
+    const events = [];
+    for await (const ev of backend.chatStream(target, {
+      messages: [{ role: "user", content: [{ type: "text", text: "run ls" }] }],
+    })) {
+      events.push(ev);
+    }
+
+    const toolStart = events.find(
+      (e) => e.type === "content_block_start" && (e as any).block.type === "tool_use",
+    );
+    expect(toolStart).toBeDefined();
+    expect((toolStart as any).block.id).toBe("call_exec_123");
+    expect((toolStart as any).block.name).toBe("execute_shell_command");
+
+    const finish = events.find((e) => e.type === "finish");
+    expect((finish as any).usage?.cachedPromptTokens).toBe(5);
+  });
 });

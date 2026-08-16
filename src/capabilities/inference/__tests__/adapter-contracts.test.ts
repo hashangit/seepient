@@ -113,6 +113,6 @@ describe("Adapter contract tests (QS-P3.10)", () => {
 
     const abortEvent = events.find((e) => e.type === "abort");
     expect(abortEvent).toBeDefined();
-    expect((abortEvent as any).reason).toBe("timeout");
+    expect((abortEvent as any).reason).toBe("user");
   });
 });

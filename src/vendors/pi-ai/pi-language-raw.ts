@@ -29,17 +29,25 @@ import {
 
 type AssistantContentBlock = TextBlock | ReasoningBlock | ToolUseBlock;
 
-/** Combine AbortSignal and timeoutMs into a single effective AbortSignal */
-function resolveSignal(opts?: InferenceOptions): { signal?: AbortSignal; cleanup: () => void } {
+interface ResolvedSignalInfo {
+  signal?: AbortSignal;
+  isTimeout: () => boolean;
+  cleanup: () => void;
+}
+
+/** Combine AbortSignal and timeoutMs with explicit timeout tracking */
+function resolveSignal(opts?: InferenceOptions): ResolvedSignalInfo {
   if (!opts?.timeoutMs && !opts?.signal) {
-    return { signal: undefined, cleanup: () => {} };
+    return { signal: undefined, isTimeout: () => false, cleanup: () => {} };
   }
 
   const controller = new AbortController();
   let timer: NodeJS.Timeout | undefined;
+  let didTimeout = false;
 
   if (opts.timeoutMs && opts.timeoutMs > 0) {
     timer = setTimeout(() => {
+      didTimeout = true;
       controller.abort(new Error(`Operation timed out after ${opts.timeoutMs}ms`));
     }, opts.timeoutMs);
   }
@@ -55,6 +63,7 @@ function resolveSignal(opts?: InferenceOptions): { signal?: AbortSignal; cleanup
 
   return {
     signal: controller.signal,
+    isTimeout: () => didTimeout,
     cleanup: () => {
       if (timer) clearTimeout(timer);
       if (opts.signal) opts.signal.removeEventListener("abort", onAbort);
@@ -68,8 +77,9 @@ function mapPiUsageToCanonical(piUsage?: any): Usage | undefined {
     promptTokens: piUsage.input ?? 0,
     completionTokens: piUsage.output ?? 0,
     totalTokens: piUsage.totalTokens ?? ((piUsage.input ?? 0) + (piUsage.output ?? 0)),
-    reasoningTokens: piUsage.reasoning,
-    cost: piUsage.cost?.total,
+    cachedPromptTokens: piUsage.cacheRead ?? undefined,
+    reasoningTokens: piUsage.reasoning ?? undefined,
+    cost: piUsage.cost?.total ?? undefined,
   };
 }
 
@@ -89,19 +99,61 @@ export class PiLanguageRaw implements LanguageBackend {
     this.models = customModels ?? builtinModels();
   }
 
+  private prepareInvocation(
+    target: InferenceTarget,
+    req: LanguageRequest,
+    apiKey?: string,
+    signal?: AbortSignal,
+  ) {
+    const providerName = target.upstreamProvider === "glm" ? "zai" : target.upstreamProvider;
+    let model = this.models.getModel(providerName, target.model) as Model<Api> | undefined;
+
+    if (!model) {
+      model = {
+        id: target.model,
+        provider: providerName,
+        name: target.model,
+        api: providerName === "anthropic" ? "anthropic-messages" : "openai-completions",
+        baseUrl: target.baseUrl,
+        contextWindow: 128_000,
+        maxOutputTokens: req.maxOutputTokens ?? 4096,
+      } as any;
+    }
+
+    const piMessages = canonicalToPiMessages(req.messages);
+    const piTools = canonicalToPiTools(req.tools);
+
+    const streamOptions: any = {
+      signal,
+      apiKey,
+      maxTokens: req.maxOutputTokens,
+    };
+
+    const context = {
+      messages: piMessages,
+      tools: piTools.length > 0 ? piTools : undefined,
+    };
+
+    return {
+      model: model!,
+      context,
+      streamOptions,
+    };
+  }
+
   async *chatStream(
     target: InferenceTarget,
     req: LanguageRequest,
     opts?: InferenceOptions,
   ): AsyncIterable<StreamEvent> {
     const lease = target.credential.acquireLease();
-    const { signal, cleanup } = resolveSignal(opts);
+    const { signal, isTimeout, cleanup } = resolveSignal(opts);
 
     try {
       if (signal?.aborted) {
         yield {
           type: "abort",
-          reason: "timeout",
+          reason: isTimeout() ? "timeout" : "user",
         };
         return;
       }
@@ -109,24 +161,12 @@ export class PiLanguageRaw implements LanguageBackend {
       const secret = await lease.secret();
       const apiKey = secret.kind === "api_key" ? secret.value : undefined;
 
-      const providerName = target.upstreamProvider === "glm" ? "zai" : target.upstreamProvider;
-      let model = this.models.getModel(providerName, target.model) as Model<Api> | undefined;
-
-      if (!model) {
-        model = {
-          id: target.model,
-          provider: providerName,
-          name: target.model,
-          api: providerName === "anthropic" ? "anthropic-messages" : "openai-completions",
-          baseUrl: target.baseUrl,
-          contextWindow: 128_000,
-          maxOutputTokens: req.maxOutputTokens ?? 4096,
-        } as any;
-      }
-      const resolvedModel: Model<Api> = model!;
-
-      const piMessages = canonicalToPiMessages(req.messages);
-      const piTools = canonicalToPiTools(req.tools);
+      const { model, context, streamOptions } = this.prepareInvocation(
+        target,
+        req,
+        apiKey,
+        signal,
+      );
 
       yield {
         type: "start",
@@ -139,27 +179,15 @@ export class PiLanguageRaw implements LanguageBackend {
       const openBlocks = new Set<number>();
       let lastUsage: Usage | undefined;
       let lastStopReason: StopReason = "end_turn";
-      let lastResponseId: string | undefined;
-
-      const streamOptions: any = {
-        signal,
-        apiKey,
-        maxTokens: req.maxOutputTokens,
-      };
-
-      const context = {
-        messages: piMessages,
-        tools: piTools.length > 0 ? piTools : undefined,
-      };
 
       try {
         const stream =
           req.thinkingLevel && req.thinkingLevel !== "none"
-            ? this.models.streamSimple(resolvedModel, context as any, {
+            ? this.models.streamSimple(model, context as any, {
                 ...streamOptions,
                 reasoning: req.thinkingLevel as any,
               })
-            : this.models.stream(resolvedModel, context as any, streamOptions);
+            : this.models.stream(model, context as any, streamOptions);
 
         for await (const event of stream) {
           if (event.type === "text_start") {
@@ -222,13 +250,18 @@ export class PiLanguageRaw implements LanguageBackend {
             }
           } else if (event.type === "toolcall_start") {
             openBlocks.add(event.contentIndex);
+            // Pi populates partial.content[event.contentIndex] with { type: 'toolCall', id, name, arguments: {} }
+            const partialItem = (event.partial?.content as any)?.[event.contentIndex];
+            const toolId = partialItem?.id || `call_${event.contentIndex}`;
+            const toolName = partialItem?.name || "";
+
             yield {
               type: "content_block_start",
               index: event.contentIndex,
               block: {
                 type: "tool_use",
-                id: `call_${event.contentIndex}`,
-                name: "",
+                id: toolId,
+                name: toolName,
                 input: {},
               },
             };
@@ -252,12 +285,11 @@ export class PiLanguageRaw implements LanguageBackend {
           } else if (event.type === "done") {
             lastStopReason = mapPiStopReasonToCanonical(event.reason);
             lastUsage = mapPiUsageToCanonical(event.message?.usage);
-            lastResponseId = event.message?.responseId;
           } else if (event.type === "error") {
             if (event.reason === "aborted") {
               yield {
                 type: "abort",
-                reason: signal?.aborted ? "timeout" : "user",
+                reason: isTimeout() ? "timeout" : "user",
                 partialUsage: lastUsage,
               };
               return;
@@ -285,11 +317,11 @@ export class PiLanguageRaw implements LanguageBackend {
           usage: lastUsage ?? { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
         };
       } catch (err: any) {
-        const isTimeout = signal?.aborted;
+        const timeout = isTimeout();
         yield {
           type: "error",
           error: {
-            code: isTimeout ? "timeout" : "network",
+            code: timeout ? "timeout" : "network",
             message: err?.message || "Pi language stream failed",
             retryable: true,
           },
@@ -324,43 +356,20 @@ export class PiLanguageRaw implements LanguageBackend {
       const secret = await lease.secret();
       const apiKey = secret.kind === "api_key" ? secret.value : undefined;
 
-      const providerName = target.upstreamProvider === "glm" ? "zai" : target.upstreamProvider;
-      let model = this.models.getModel(providerName, target.model) as Model<Api> | undefined;
-
-      if (!model) {
-        model = {
-          id: target.model,
-          provider: providerName,
-          name: target.model,
-          api: providerName === "anthropic" ? "anthropic-messages" : "openai-completions",
-          baseUrl: target.baseUrl,
-          contextWindow: 128_000,
-          maxOutputTokens: req.maxOutputTokens ?? 4096,
-        } as any;
-      }
-      const resolvedModel: Model<Api> = model!;
-
-      const piMessages = canonicalToPiMessages(req.messages);
-      const piTools = canonicalToPiTools(req.tools);
-
-      const streamOptions: any = {
-        signal,
+      const { model, context, streamOptions } = this.prepareInvocation(
+        target,
+        req,
         apiKey,
-        maxTokens: req.maxOutputTokens,
-      };
-
-      const context = {
-        messages: piMessages,
-        tools: piTools.length > 0 ? piTools : undefined,
-      };
+        signal,
+      );
 
       const stream =
         req.thinkingLevel && req.thinkingLevel !== "none"
-          ? this.models.streamSimple(resolvedModel, context as any, {
+          ? this.models.streamSimple(model, context as any, {
               ...streamOptions,
               reasoning: req.thinkingLevel as any,
             })
-          : this.models.stream(resolvedModel, context as any, streamOptions);
+          : this.models.stream(model, context as any, streamOptions);
 
       let finalMessage: AssistantMessage | undefined;
       let finalReason: string = "stop";
@@ -402,7 +411,7 @@ export class PiLanguageRaw implements LanguageBackend {
             signature: item.thinkingSignature,
             signatureProvenance: {
               adapter: "pi-ai",
-              providerApi: resolvedModel.api,
+              providerApi: model.api,
               upstreamProvider: target.upstreamProvider,
             },
           });
