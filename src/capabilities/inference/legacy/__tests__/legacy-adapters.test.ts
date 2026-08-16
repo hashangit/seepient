@@ -1,4 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { LegacyLanguageAdapter } from "../legacy-language-adapter.js";
 import { LegacyMediaAdapter } from "../legacy-media-adapter.js";
 import type { InferenceTarget } from "../../../../foundations/contracts/backend-ports.js";
@@ -62,7 +65,7 @@ describe("legacy adapters (QS-P1.5)", () => {
     expect(credential.activeLeaseCount).toBe(0);
   });
 
-  it("LegacyLanguageAdapter releases lease on chatStream completion", async () => {
+  it("LegacyLanguageAdapter reports stopReason: 'end_turn' for pure text streams", async () => {
     const adapter = new LegacyLanguageAdapter();
     let released = false;
     const credential = createMockCredential("sk-test", () => {
@@ -93,19 +96,72 @@ describe("legacy adapters (QS-P1.5)", () => {
       events.push(event);
     }
 
-    expect(events.length).toBeGreaterThanOrEqual(2);
+    const finishEvent = events.find((e) => e.type === "finish");
+    expect(finishEvent).toBeDefined();
+    expect((finishEvent as any).stopReason).toBe("end_turn");
     expect(released).toBe(true);
     expect(credential.activeLeaseCount).toBe(0);
   });
 
-  it("LegacyMediaAdapter generates image and releases lease", async () => {
+  it("LegacyLanguageAdapter reports stopReason: 'tool_use' and emits block start/stop for tool streams", async () => {
+    const adapter = new LegacyLanguageAdapter();
+    let released = false;
+    const credential = createMockCredential("sk-test", () => {
+      released = true;
+    });
+
+    vi.spyOn(OpenAIProvider.prototype, "chatStream").mockImplementation(async function* () {
+      yield { type: "tool_call_begin", index: 0, id: "call-1", name: "read_file" };
+      yield { type: "tool_call_delta", index: 0, argumentsDelta: '{"path":"/a.txt"}' };
+      yield {
+        type: "finish",
+        usage: { promptTokens: 5, completionTokens: 5, totalTokens: 10, cost: 0 },
+      };
+    });
+
+    const target: InferenceTarget = {
+      providerAccount: "openai-acc",
+      upstreamProvider: "openai",
+      model: "gpt-4o",
+      credential,
+    };
+
+    const stream = adapter.chatStream(target, {
+      messages: [{ role: "user", content: [{ type: "text", text: "check file" }] }],
+    });
+
+    const events = [];
+    for await (const event of stream) {
+      events.push(event);
+    }
+
+    const blockStart = events.find((e) => e.type === "content_block_start");
+    const blockStop = events.find((e) => e.type === "content_block_stop");
+    const finishEvent = events.find((e) => e.type === "finish");
+
+    expect(blockStart).toBeDefined();
+    expect((blockStart as any).block.type).toBe("tool_use");
+    expect(blockStop).toBeDefined();
+    expect(finishEvent).toBeDefined();
+    expect((finishEvent as any).stopReason).toBe("tool_use");
+    expect(released).toBe(true);
+  });
+
+  it("LegacyMediaAdapter parses file paths and reads generated files as base64", async () => {
     const adapter = new LegacyMediaAdapter();
     let released = false;
     const credential = createMockCredential("sk-test", () => {
       released = true;
     });
 
-    vi.spyOn(mediaModule, "generateImages").mockResolvedValue("https://example.com/generated-image.png");
+    const tmpFile1 = path.join(os.tmpdir(), `test-img-${Date.now()}-1.png`);
+    const tmpFile2 = path.join(os.tmpdir(), `test-img-${Date.now()}-2.png`);
+    fs.writeFileSync(tmpFile1, Buffer.from("fake-png-data-1"));
+    fs.writeFileSync(tmpFile2, Buffer.from("fake-png-data-2"));
+
+    vi.spyOn(mediaModule, "generateImages").mockResolvedValue(
+      `Successfully generated 2 image(s):\n${tmpFile1}\n${tmpFile2}`,
+    );
 
     const target: InferenceTarget = {
       providerAccount: "openai-acc",
@@ -115,16 +171,23 @@ describe("legacy adapters (QS-P1.5)", () => {
     };
 
     const result = await adapter.generate(target, {
-      prompt: "A beautiful forest",
+      prompt: "Two landscape photos",
       operation: "generate",
+      count: 2,
       qualityPreset: "hd",
     });
 
-    expect(result.images.length).toBe(1);
-    expect(result.images[0].url).toBe("https://example.com/generated-image.png");
+    expect(result.images.length).toBe(2);
+    expect(result.images[0].base64).toBe(Buffer.from("fake-png-data-1").toString("base64"));
+    expect(result.images[1].base64).toBe(Buffer.from("fake-png-data-2").toString("base64"));
     expect(result.images[0].mimeType).toBe("image/png");
     expect(released).toBe(true);
     expect(credential.activeLeaseCount).toBe(0);
+
+    try {
+      fs.unlinkSync(tmpFile1);
+      fs.unlinkSync(tmpFile2);
+    } catch {}
   });
 
   it("LegacyMediaAdapter maps errors and releases lease on failure", async () => {

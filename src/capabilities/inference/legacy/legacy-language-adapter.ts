@@ -9,7 +9,6 @@ import type {
   InferenceResponse,
   CanonicalMessage,
   ContentBlock,
-  ToolUseBlock,
 } from "../../../foundations/schemas/inference.js";
 import { OpenAIProvider } from "../../llm/openai.js";
 import { AnthropicProvider } from "../../llm/anthropic.js";
@@ -116,23 +115,40 @@ export class LegacyLanguageAdapter implements LanguageBackend {
         },
       };
 
-      let blockIndex = 0;
+      let textBlockStarted = false;
+      let hasToolCalls = false;
+      const openToolIndices = new Set<number>();
+
       if (typeof provider.chatStream === "function") {
         for await (const delta of provider.chatStream(providerMessages, req.tools ?? [], { signal: opts?.signal })) {
           if (delta.type === "text_delta" && delta.content) {
+            if (!textBlockStarted) {
+              textBlockStarted = true;
+              yield {
+                type: "content_block_start",
+                index: 0,
+                block: { type: "text", text: "" },
+              };
+            }
             yield {
               type: "content_block_delta",
-              index: blockIndex,
+              index: 0,
               delta: {
                 type: "text_delta",
                 text: delta.content,
               },
             };
           } else if (delta.type === "tool_call_begin") {
-            blockIndex = delta.index;
+            hasToolCalls = true;
+            if (textBlockStarted) {
+              yield { type: "content_block_stop", index: 0 };
+              textBlockStarted = false;
+            }
+            const toolBlockIndex = 1 + delta.index;
+            openToolIndices.add(toolBlockIndex);
             yield {
               type: "content_block_start",
-              index: blockIndex,
+              index: toolBlockIndex,
               block: {
                 type: "tool_use",
                 id: delta.id,
@@ -141,18 +157,28 @@ export class LegacyLanguageAdapter implements LanguageBackend {
               },
             };
           } else if (delta.type === "tool_call_delta") {
+            const toolBlockIndex = 1 + delta.index;
             yield {
               type: "content_block_delta",
-              index: delta.index,
+              index: toolBlockIndex,
               delta: {
                 type: "tool_input_delta",
                 partialJson: delta.argumentsDelta,
               },
             };
           } else if (delta.type === "finish") {
+            if (textBlockStarted) {
+              yield { type: "content_block_stop", index: 0 };
+              textBlockStarted = false;
+            }
+            for (const idx of openToolIndices) {
+              yield { type: "content_block_stop", index: idx };
+            }
+            openToolIndices.clear();
+
             yield {
               type: "finish",
-              stopReason: "end_turn",
+              stopReason: hasToolCalls ? "tool_use" : "end_turn",
               usage: {
                 promptTokens: delta.usage?.promptTokens ?? 0,
                 completionTokens: delta.usage?.completionTokens ?? 0,
@@ -164,9 +190,16 @@ export class LegacyLanguageAdapter implements LanguageBackend {
         }
       }
 
+      if (textBlockStarted) {
+        yield { type: "content_block_stop", index: 0 };
+      }
+      for (const idx of openToolIndices) {
+        yield { type: "content_block_stop", index: idx };
+      }
+
       yield {
         type: "finish",
-        stopReason: "end_turn",
+        stopReason: hasToolCalls ? "tool_use" : "end_turn",
         usage: {
           promptTokens: 0,
           completionTokens: 0,

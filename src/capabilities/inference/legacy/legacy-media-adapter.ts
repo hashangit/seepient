@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 import type {
   ImageBackend,
   InferenceTarget,
@@ -60,7 +61,7 @@ export class LegacyMediaAdapter implements ImageBackend {
         },
       );
 
-      if (typeof legacyResult === "string" && legacyResult.startsWith("Error:")) {
+      if (typeof legacyResult === "string" && legacyResult.startsWith("Error")) {
         throw new InferenceError({
           code: "invalid_request",
           message: legacyResult,
@@ -70,17 +71,53 @@ export class LegacyMediaAdapter implements ImageBackend {
         });
       }
 
-      // Format response cleanly
-      const isUrl = typeof legacyResult === "string" && (legacyResult.startsWith("http://") || legacyResult.startsWith("https://"));
-      return {
-        images: [
-          {
+      // Parse output: media.ts returns "Successfully generated N image(s):\n<path1>\n<path2>"
+      const rawLines = typeof legacyResult === "string"
+        ? legacyResult.split("\n").map((l) => l.trim()).filter((l) => l.length > 0)
+        : [];
+
+      // Filter out header lines (e.g. "Successfully generated N image(s):")
+      const candidatePaths = rawLines.filter(
+        (line) => !line.toLowerCase().startsWith("successfully generated"),
+      );
+
+      const images = candidatePaths.map((item) => {
+        if (item.startsWith("http://") || item.startsWith("https://")) {
+          return {
             mimeType: "image/png",
-            url: isUrl ? legacyResult : undefined,
-            base64: !isUrl ? legacyResult : undefined,
-          },
-        ],
-      };
+            url: item,
+          };
+        }
+        try {
+          if (fs.existsSync(item)) {
+            const buffer = fs.readFileSync(item);
+            return {
+              mimeType: "image/png",
+              base64: buffer.toString("base64"),
+            };
+          }
+        } catch {
+          // Fall through to path string if reading file fails
+        }
+        return {
+          mimeType: "image/png",
+          url: item.includes("://") ? item : undefined,
+          base64: !item.includes("://") ? item : undefined,
+        };
+      });
+
+      // Ensure at least one image entry if no file paths were parsed
+      if (images.length === 0) {
+        images.push({
+          mimeType: "image/png",
+          url: typeof legacyResult === "string" && legacyResult.startsWith("http") ? legacyResult : undefined,
+          base64: typeof legacyResult === "string" && !legacyResult.startsWith("http") && !legacyResult.startsWith("Successfully")
+            ? legacyResult
+            : undefined,
+        });
+      }
+
+      return { images };
     } finally {
       await lease.release();
     }
