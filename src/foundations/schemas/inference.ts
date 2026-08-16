@@ -328,7 +328,13 @@ export const ImageRequestSchema = Type.Object({
     ]),
   ),
   aspectRatio: Type.Optional(Type.String()),
-  qualityPreset: Type.Optional(Type.Union([Type.Literal("standard"), Type.Literal("hd")])),
+  qualityPreset: Type.Optional(
+    Type.Union([
+      Type.Literal("low"),
+      Type.Literal("standard"),
+      Type.Literal("high"),
+    ]),
+  ),
   count: Type.Optional(Type.Integer({ minimum: 1, maximum: 10 })),
   inputImage: Type.Optional(Type.Union([Type.String(), ImageBlockSchema])),
   mask: Type.Optional(Type.Union([Type.String(), ImageBlockSchema])),
@@ -337,16 +343,23 @@ export const ImageRequestSchema = Type.Object({
 });
 export type ImageRequest = Type.Static<typeof ImageRequestSchema>;
 
+export const ImageResultItemSchema = Type.Union([
+  Type.Object({
+    url: Type.String(),
+    base64: Type.Optional(Type.String()),
+    mimeType: Type.String(),
+    revisedPrompt: Type.Optional(Type.String()),
+  }),
+  Type.Object({
+    url: Type.Optional(Type.String()),
+    base64: Type.String(),
+    mimeType: Type.String(),
+    revisedPrompt: Type.Optional(Type.String()),
+  }),
+]);
+
 export const ImageResultSchema = Type.Object({
-  images: Type.Array(
-    Type.Object({
-      url: Type.Optional(Type.String()),
-      base64: Type.Optional(Type.String()),
-      mimeType: Type.String(),
-      revisedPrompt: Type.Optional(Type.String()),
-    }),
-    { minItems: 1 },
-  ),
+  images: Type.Array(ImageResultItemSchema, { minItems: 1 }),
   usage: Type.Optional(UsageSchema),
 });
 export type ImageResult = Type.Static<typeof ImageResultSchema>;

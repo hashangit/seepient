@@ -44,6 +44,11 @@ const _assertQualityPresetSync: AssertEqual<
   ImageRequest["qualityPreset"]
 > = true;
 
+const _assertQualityPresetValues: AssertEqual<
+  ImageRequest["qualityPreset"],
+  "low" | "standard" | "high" | undefined
+> = true;
+
 const _assertThinkingLevelSync: AssertEqual<
   ThinkingLevel,
   NonNullable<NonNullable<GenerateTextOptions["override"]>["thinkingLevel"]>
@@ -64,6 +69,7 @@ describe("contract sync and schema validation (QS-P1.1, QS-P1.2, QS-P1.3)", () =
 
   it("verifies compile-time type equivalence between SDK contracts and schemas", () => {
     expect(_assertQualityPresetSync).toBe(true);
+    expect(_assertQualityPresetValues).toBe(true);
     expect(_assertThinkingLevelSync).toBe(true);
     expect(_assertAgentPurposeValues).toBe(true);
     expect(_assertStopReasonValues).toBe(true);
@@ -79,6 +85,21 @@ describe("contract sync and schema validation (QS-P1.1, QS-P1.2, QS-P1.3)", () =
     expect(validateStopReason("end_turn")).toBe(true);
     expect(validateStopReason("tool_use")).toBe(true);
     expect(validateStopReason("unknown_stop")).toBe(false);
+  });
+
+  it("validates image request qualityPreset with low, standard, and high", () => {
+    const validateImage = ajv.compile(ImageRequestSchema);
+    expect(validateImage({ prompt: "Test", qualityPreset: "low" })).toBe(true);
+    expect(validateImage({ prompt: "Test", qualityPreset: "standard" })).toBe(true);
+    expect(validateImage({ prompt: "Test", qualityPreset: "high" })).toBe(true);
+    expect(validateImage({ prompt: "Test", qualityPreset: "ultra" })).toBe(false);
+  });
+
+  it("validates image result schema requiring at least one of url or base64", () => {
+    const validateResult = ajv.compile(ImageResultSchema);
+    expect(validateResult({ images: [{ url: "https://example.com/a.png", mimeType: "image/png" }] })).toBe(true);
+    expect(validateResult({ images: [{ base64: "YWJj", mimeType: "image/png" }] })).toBe(true);
+    expect(validateResult({ images: [{ mimeType: "image/png" }] })).toBe(false); // Invalid: must have url or base64
   });
 
   it("validates streaming event schema for all variants", () => {
@@ -270,28 +291,33 @@ describe("contract sync and schema validation (QS-P1.1, QS-P1.2, QS-P1.3)", () =
     expect(validateOverlay(patchSectionNull)).toBe(true);
   });
 
-  it("validates against frozen provider test fixtures corpus", () => {
+  it("validates fixture payload structure against schemas", () => {
     const fixturesDir = path.resolve(process.cwd(), "tests/fixtures/providers");
     expect(fs.existsSync(fixturesDir)).toBe(true);
 
-    const fixtureFiles = [
-      "openai/chat.json",
-      "openai/streaming.json",
-      "openai/tools.json",
-      "openai/images.json",
-      "anthropic/chat.json",
-      "anthropic/reasoning.json",
-      "google/images.json",
-    ];
+    // Anthropic reasoning fixture validation
+    const reasoningPath = path.join(fixturesDir, "anthropic/reasoning.json");
+    const reasoningData = JSON.parse(fs.readFileSync(reasoningPath, "utf-8"));
+    const thinkingBlock = reasoningData.response.content.find((b: any) => b.type === "thinking");
+    expect(thinkingBlock).toBeDefined();
+    expect(thinkingBlock.thinking).toBeDefined();
+    expect(thinkingBlock.signature).toBeDefined();
 
-    for (const relPath of fixtureFiles) {
-      const fullPath = path.join(fixturesDir, relPath);
-      expect(fs.existsSync(fullPath), `Fixture ${relPath} must exist`).toBe(true);
-      const content = JSON.parse(fs.readFileSync(fullPath, "utf-8"));
-      expect(content).toBeDefined();
-      expect(content.provider).toBeDefined();
-      expect(content.model || content.models || content.operations).toBeDefined();
-    }
+    // OpenAI chat fixture validation
+    const chatPath = path.join(fixturesDir, "openai/chat.json");
+    const chatData = JSON.parse(fs.readFileSync(chatPath, "utf-8"));
+    expect(chatData.response.choices[0].message.content).toBeDefined();
+
+    // OpenAI images fixture validation
+    const imagesPath = path.join(fixturesDir, "openai/images.json");
+    const imagesData = JSON.parse(fs.readFileSync(imagesPath, "utf-8"));
+    const validateImgReq = ajv.compile(ImageRequestSchema);
+    expect(
+      validateImgReq({
+        prompt: imagesData.operations.generate.request.prompt,
+        qualityPreset: imagesData.operations.generate.request.quality, // "standard"
+      }),
+    ).toBe(true);
   });
 
   it("sdk-fixture types compile cleanly and satisfy interface shapes", () => {

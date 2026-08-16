@@ -11,6 +11,37 @@ import type {
 import { generateImagesStructured } from "../../media/media.js";
 import { InferenceError } from "../../../foundations/errors.js";
 
+/** Combine AbortSignal and timeoutMs into a single effective AbortSignal */
+function resolveSignal(opts?: InferenceOptions): { signal?: AbortSignal; cleanup: () => void } {
+  if (!opts?.timeoutMs && !opts?.signal) {
+    return { signal: undefined, cleanup: () => {} };
+  }
+
+  const controller = new AbortController();
+  let timer: NodeJS.Timeout | undefined;
+
+  if (opts.timeoutMs && opts.timeoutMs > 0) {
+    timer = setTimeout(() => {
+      controller.abort(new Error(`Operation timed out after ${opts.timeoutMs}ms`));
+    }, opts.timeoutMs);
+  }
+
+  if (opts.signal) {
+    if (opts.signal.aborted) {
+      controller.abort(opts.signal.reason);
+    } else {
+      opts.signal.addEventListener("abort", () => controller.abort(opts.signal?.reason), { once: true });
+    }
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      if (timer) clearTimeout(timer);
+    },
+  };
+}
+
 /**
  * Legacy media adapter implementing ImageBackend using OpenAI image APIs.
  */
@@ -21,7 +52,19 @@ export class LegacyMediaAdapter implements ImageBackend {
     opts?: InferenceOptions,
   ): Promise<ImageResult> {
     const lease = target.credential.acquireLease();
+    const { signal, cleanup } = resolveSignal(opts);
+
     try {
+      if (signal?.aborted) {
+        throw new InferenceError({
+          code: "timeout",
+          message: signal.reason?.message || "Operation aborted",
+          providerAccount: target.providerAccount,
+          model: target.model,
+          retryable: false,
+        });
+      }
+
       const secret = await lease.secret();
 
       if (secret.kind !== "api_key") {
@@ -67,6 +110,8 @@ export class LegacyMediaAdapter implements ImageBackend {
             ? (req.mask as any).url || (req.mask as any).path
             : undefined;
 
+      const legacyQuality = req.qualityPreset === "high" ? "hd" : "standard";
+
       let structuredResult;
       try {
         structuredResult = await generateImagesStructured(
@@ -77,18 +122,19 @@ export class LegacyMediaAdapter implements ImageBackend {
             mode: legacyMode,
             model: target.model,
             n: req.count ?? 1,
-            quality: req.qualityPreset === "hd" ? "hd" : "standard",
+            quality: legacyQuality,
             style: req.style,
             outputDir: req.outputDir,
           },
           {
-            apiKey: secret.key,
+            apiKey: secret.value,
             baseUrl: target.baseUrl,
           },
         );
       } catch (err: any) {
+        const isTimeout = signal?.aborted;
         throw new InferenceError({
-          code: "network",
+          code: isTimeout ? "timeout" : "network",
           message: err?.message || "Failed to generate image via media backend",
           providerAccount: target.providerAccount,
           model: target.model,
@@ -98,11 +144,9 @@ export class LegacyMediaAdapter implements ImageBackend {
       }
 
       if (!structuredResult.success || structuredResult.error) {
-        const errMsg = structuredResult.error || "Image generation failed";
-        const isAuth = errMsg.toLowerCase().includes("api key") || errMsg.toLowerCase().includes("auth");
         throw new InferenceError({
-          code: isAuth ? "auth" : "invalid_request",
-          message: errMsg,
+          code: "invalid_request",
+          message: structuredResult.error || "Image generation failed",
           providerAccount: target.providerAccount,
           model: target.model,
           retryable: false,
@@ -127,11 +171,9 @@ export class LegacyMediaAdapter implements ImageBackend {
         } catch {
           // Fall through
         }
-        return {
-          mimeType: "image/png",
-          url: item.includes("://") ? item : undefined,
-          base64: !item.includes("://") ? item : undefined,
-        };
+        return item.includes("://")
+          ? { mimeType: "image/png", url: item }
+          : { mimeType: "image/png", base64: item };
       });
 
       if (images.length === 0) {
@@ -146,6 +188,7 @@ export class LegacyMediaAdapter implements ImageBackend {
 
       return { images };
     } finally {
+      cleanup();
       await lease.release();
     }
   }

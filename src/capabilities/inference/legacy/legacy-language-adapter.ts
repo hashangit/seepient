@@ -148,7 +148,7 @@ export class LegacyLanguageAdapter implements LanguageBackend {
         });
       }
 
-      const provider = this.createProvider(target, secret.key);
+      const provider = this.createProvider(target, secret.value);
       const providerMessages = canonicalToProviderMessages(req.messages);
 
       yield {
@@ -297,7 +297,7 @@ export class LegacyLanguageAdapter implements LanguageBackend {
         });
       }
 
-      const provider = this.createProvider(target, secret.key);
+      const provider = this.createProvider(target, secret.value);
       const providerMessages = canonicalToProviderMessages(req.messages);
 
       let resp;

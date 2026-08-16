@@ -9,6 +9,7 @@ import type {
   Usage,
   ThinkingLevel,
   UpstreamModel,
+  StopReason,
 } from "../schemas/inference.js";
 import type { ToolDefinition } from "./tool.js";
 import type {
@@ -19,7 +20,7 @@ import type { CredentialStore } from "./credential-store.js";
 import type { CredentialRef } from "../schemas/credential-store.js";
 
 export type ProviderId = string;
-export type StopReason = "end_turn" | "tool_use" | "max_tokens" | "stop_sequence";
+export type { StopReason };
 
 // ── Factory options (credentials OPTIONAL — zero-config compat) ────────
 export interface CreateSeepientOptions {
@@ -81,10 +82,10 @@ export interface GenerateImageOptions {
   operation?: "generate" | "variation" | "edit" | "mask";
   prompt?: string;
   aspectRatio?: string; // "1:1", "16:9", ...
-  qualityPreset?: "standard" | "hd";
+  qualityPreset?: "low" | "standard" | "high";
   count?: number; // number of images; default 1
-  inputImage?: ImageBlock; // for variation/edit/mask
-  mask?: ImageBlock; // for masked edit
+  inputImage?: string | ImageBlock; // for variation/edit/mask
+  mask?: string | ImageBlock; // for masked edit
   outputDir?: string;
   override?: ModelAssignmentOverride; // single override path. No separate `model` field.
 }

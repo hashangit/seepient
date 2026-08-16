@@ -6,8 +6,8 @@ import type {
 } from "../schemas/credential-store.js";
 
 export type CredentialSecret =
-  | { kind: "api_key"; key: string }
-  | { kind: "pi_oauth"; account: string; provider: string; tokens?: unknown }
+  | { kind: "api_key"; value: string }
+  | { kind: "pi_oauth"; piAuthContext: unknown }
   | { kind: "none" };
 
 export interface CredentialLease {
