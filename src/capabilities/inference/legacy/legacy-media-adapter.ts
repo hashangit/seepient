@@ -7,6 +7,7 @@ import type {
 import type {
   ImageRequest,
   ImageResult,
+  ImageBlock,
 } from "../../../foundations/schemas/inference.js";
 import { generateImagesStructured } from "../../media/media.js";
 import { InferenceError } from "../../../foundations/errors.js";
@@ -26,11 +27,12 @@ function resolveSignal(opts?: InferenceOptions): { signal?: AbortSignal; cleanup
     }, opts.timeoutMs);
   }
 
+  const onAbort = () => controller.abort(opts.signal?.reason);
   if (opts.signal) {
     if (opts.signal.aborted) {
       controller.abort(opts.signal.reason);
     } else {
-      opts.signal.addEventListener("abort", () => controller.abort(opts.signal?.reason), { once: true });
+      opts.signal.addEventListener("abort", onAbort, { once: true });
     }
   }
 
@@ -38,8 +40,18 @@ function resolveSignal(opts?: InferenceOptions): { signal?: AbortSignal; cleanup
     signal: controller.signal,
     cleanup: () => {
       if (timer) clearTimeout(timer);
+      if (opts.signal) opts.signal.removeEventListener("abort", onAbort);
     },
   };
+}
+
+function resolveImageBlockPath(block?: ImageBlock): string | undefined {
+  if (!block) return undefined;
+  if ("url" in block && typeof block.url === "string") return block.url;
+  if ("artifact" in block && typeof block.artifact === "object" && block.artifact !== null) {
+    return block.artifact.ref;
+  }
+  return undefined;
 }
 
 /**
@@ -96,20 +108,8 @@ export class LegacyMediaAdapter implements ImageBackend {
               ? "edit"
               : undefined;
 
-      const inputImagePath =
-        typeof req.inputImage === "string"
-          ? req.inputImage
-          : typeof req.inputImage === "object" && req.inputImage !== null
-            ? (req.inputImage as any).url || (req.inputImage as any).path
-            : undefined;
-
-      const maskPath =
-        typeof req.mask === "string"
-          ? req.mask
-          : typeof req.mask === "object" && req.mask !== null
-            ? (req.mask as any).url || (req.mask as any).path
-            : undefined;
-
+      const inputImagePath = resolveImageBlockPath(req.inputImage);
+      const maskPath = resolveImageBlockPath(req.mask);
       const legacyQuality = req.qualityPreset === "high" ? "hd" : "standard";
 
       let structuredResult;
@@ -129,6 +129,8 @@ export class LegacyMediaAdapter implements ImageBackend {
           {
             apiKey: secret.value,
             baseUrl: target.baseUrl,
+            signal,
+            timeoutMs: opts?.timeoutMs,
           },
         );
       } catch (err: any) {
@@ -144,16 +146,18 @@ export class LegacyMediaAdapter implements ImageBackend {
       }
 
       if (!structuredResult.success || structuredResult.error) {
+        const errorType = structuredResult.errorType || "invalid_request";
+        const isRetryable = errorType === "rate_limit" || errorType === "provider_unavailable" || errorType === "timeout";
         throw new InferenceError({
-          code: "invalid_request",
+          code: errorType,
           message: structuredResult.error || "Image generation failed",
           providerAccount: target.providerAccount,
           model: target.model,
-          retryable: false,
+          retryable: isRetryable,
         });
       }
 
-      const images = structuredResult.files.map((item) => {
+      const images: ImageResult["images"] = structuredResult.files.map((item) => {
         if (item.startsWith("http://") || item.startsWith("https://")) {
           return {
             mimeType: "image/png",

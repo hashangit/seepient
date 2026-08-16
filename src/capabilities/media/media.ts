@@ -35,10 +35,12 @@ export interface MediaConfig {
   imageQuality?: string;
   imageStyle?: string;
   model?: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
 }
 
-async function downloadImage(url: string, destPath: string): Promise<void> {
-  const response = await fetch(url);
+async function downloadImage(url: string, destPath: string, signal?: AbortSignal): Promise<void> {
+  const response = await fetch(url, { signal });
   if (!response.ok) throw new Error(`Failed to download image: ${response.statusText}`);
   const buffer = await response.arrayBuffer();
   fs.writeFileSync(destPath, Buffer.from(buffer));
@@ -48,6 +50,8 @@ export interface StructuredImageResult {
   success: boolean;
   files: string[];
   error?: string;
+  errorType?: "auth" | "rate_limit" | "timeout" | "provider_unavailable" | "invalid_request";
+  status?: number;
 }
 
 export async function generateImagesStructured(
@@ -62,12 +66,15 @@ export async function generateImagesStructured(
       success: false,
       files: [],
       error: "Error: Image Service API Key is missing. Please configure it in .seepient/setting.json (imageApiKey or apiKey).",
+      errorType: "auth",
+      status: 401,
     };
   }
 
   const client = new OpenAI({
     apiKey: apiKey,
     baseURL: baseURL,
+    timeout: config.timeoutMs,
   });
 
   const { prompt, imagePath, maskPath } = req;
@@ -145,32 +152,38 @@ export async function generateImagesStructured(
 
       if (model === "dall-e-3") {
         for (let i = 0; i < n; i++) {
-          const response = await client.images.generate({
-            model: "dall-e-3",
-            prompt: prompt,
-            n: 1,
-            size: size as any,
-            quality: quality as any,
-            style: style as any,
-            response_format: "url",
-          });
+          const response = await client.images.generate(
+            {
+              model: "dall-e-3",
+              prompt: prompt,
+              n: 1,
+              size: size as any,
+              quality: quality as any,
+              style: style as any,
+              response_format: "url",
+            },
+            { signal: config.signal },
+          );
 
           const imageUrl = response.data?.[0]?.url;
           if (imageUrl) {
             const fileName = `generated-${Date.now()}-${i + 1}.png`;
             const filePath = path.join(resolvedOutputDir, fileName);
-            await downloadImage(imageUrl, filePath);
+            await downloadImage(imageUrl, filePath, config.signal);
             generatedFiles.push(filePath);
           }
         }
       } else {
-        const response = await client.images.generate({
-          model: model,
-          prompt: prompt,
-          n: n,
-          size: size as any,
-          response_format: "url",
-        });
+        const response = await client.images.generate(
+          {
+            model: model,
+            prompt: prompt,
+            n: n,
+            size: size as any,
+            response_format: "url",
+          },
+          { signal: config.signal },
+        );
 
         const data = response.data || [];
         for (let i = 0; i < data.length; i++) {
@@ -178,7 +191,7 @@ export async function generateImagesStructured(
           if (imageUrl) {
             const fileName = `generated-${Date.now()}-${i + 1}.png`;
             const filePath = path.join(resolvedOutputDir, fileName);
-            await downloadImage(imageUrl, filePath);
+            await downloadImage(imageUrl, filePath, config.signal);
             generatedFiles.push(filePath);
           }
         }
@@ -201,13 +214,16 @@ export async function generateImagesStructured(
 
       console.log(`Generating ${n} variation(s) with ${model}...`);
 
-      const response = await client.images.createVariation({
-        image: fs.createReadStream(imagePath),
-        n: n,
-        model: "dall-e-2",
-        size: size as any,
-        response_format: "url",
-      });
+      const response = await client.images.createVariation(
+        {
+          image: fs.createReadStream(imagePath),
+          n: n,
+          model: "dall-e-2",
+          size: size as any,
+          response_format: "url",
+        },
+        { signal: config.signal },
+      );
 
       const data = response.data || [];
       for (let i = 0; i < data.length; i++) {
@@ -215,7 +231,7 @@ export async function generateImagesStructured(
         if (imageUrl) {
           const fileName = `variation-${Date.now()}-${i + 1}.png`;
           const filePath = path.join(resolvedOutputDir, fileName);
-          await downloadImage(imageUrl, filePath);
+          await downloadImage(imageUrl, filePath, config.signal);
           generatedFiles.push(filePath);
         }
       }
@@ -257,7 +273,7 @@ export async function generateImagesStructured(
         params.mask = fs.createReadStream(maskPath);
       }
 
-      const response = await client.images.edit(params);
+      const response = await client.images.edit(params, { signal: config.signal });
 
       const data = response.data || [];
       for (let i = 0; i < data.length; i++) {
@@ -265,7 +281,7 @@ export async function generateImagesStructured(
         if (imageUrl) {
           const fileName = `edited-${Date.now()}-${i + 1}.png`;
           const filePath = path.join(resolvedOutputDir, fileName);
-          await downloadImage(imageUrl, filePath);
+          await downloadImage(imageUrl, filePath, config.signal);
           generatedFiles.push(filePath);
         }
       }
@@ -286,10 +302,24 @@ export async function generateImagesStructured(
     if (error.response && error.response.data) {
       console.error(chalk.dim(JSON.stringify(error.response.data)));
     }
+    let errorType: StructuredImageResult["errorType"] = "invalid_request";
+    const status = error.status || error.response?.status;
+    if (status === 401 || status === 403) {
+      errorType = "auth";
+    } else if (status === 429) {
+      errorType = "rate_limit";
+    } else if (error.name === "AbortError" || error.name === "APIUserAbortError" || error.message?.includes("aborted") || error.message?.includes("timed out")) {
+      errorType = "timeout";
+    } else if (status && status >= 500) {
+      errorType = "provider_unavailable";
+    }
+
     return {
       success: false,
       files: [],
       error: `Error generating image: ${error.message}`,
+      errorType,
+      status,
     };
   }
 }

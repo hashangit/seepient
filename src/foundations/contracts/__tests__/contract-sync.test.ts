@@ -291,24 +291,79 @@ describe("contract sync and schema validation (QS-P1.1, QS-P1.2, QS-P1.3)", () =
     expect(validateOverlay(patchSectionNull)).toBe(true);
   });
 
-  it("validates fixture payload structure against schemas", () => {
+  it("validates all 7 provider test fixtures for existence, structure, and schema conformity", () => {
     const fixturesDir = path.resolve(process.cwd(), "tests/fixtures/providers");
     expect(fs.existsSync(fixturesDir)).toBe(true);
 
-    // Anthropic reasoning fixture validation
+    const fixtureFiles = [
+      "openai/chat.json",
+      "openai/streaming.json",
+      "openai/tools.json",
+      "openai/images.json",
+      "anthropic/chat.json",
+      "anthropic/reasoning.json",
+      "google/images.json",
+    ];
+
+    // Ensure all 7 fixture files exist and parse
+    for (const relPath of fixtureFiles) {
+      const fullPath = path.join(fixturesDir, relPath);
+      expect(fs.existsSync(fullPath), `Fixture ${relPath} must exist`).toBe(true);
+      const content = JSON.parse(fs.readFileSync(fullPath, "utf-8"));
+      expect(content.provider).toBeDefined();
+    }
+
+    // 1. Anthropic reasoning fixture validation against ReasoningBlockSchema
     const reasoningPath = path.join(fixturesDir, "anthropic/reasoning.json");
     const reasoningData = JSON.parse(fs.readFileSync(reasoningPath, "utf-8"));
+    const validateReasoning = ajv.compile(ReasoningBlockSchema);
     const thinkingBlock = reasoningData.response.content.find((b: any) => b.type === "thinking");
     expect(thinkingBlock).toBeDefined();
-    expect(thinkingBlock.thinking).toBeDefined();
-    expect(thinkingBlock.signature).toBeDefined();
+    expect(
+      validateReasoning({
+        type: "reasoning",
+        text: thinkingBlock.thinking,
+        signature: thinkingBlock.signature,
+      }),
+    ).toBe(true);
 
-    // OpenAI chat fixture validation
+    // 2. Anthropic chat fixture validation against AssistantMessageSchema
+    const anthropicChatPath = path.join(fixturesDir, "anthropic/chat.json");
+    const anthropicChatData = JSON.parse(fs.readFileSync(anthropicChatPath, "utf-8"));
+    const validateAssistant = ajv.compile(AssistantMessageSchema);
+    expect(
+      validateAssistant({
+        role: "assistant",
+        content: anthropicChatData.response.content,
+      }),
+    ).toBe(true);
+
+    // 3. OpenAI chat fixture validation
     const chatPath = path.join(fixturesDir, "openai/chat.json");
     const chatData = JSON.parse(fs.readFileSync(chatPath, "utf-8"));
     expect(chatData.response.choices[0].message.content).toBeDefined();
 
-    // OpenAI images fixture validation
+    // 4. OpenAI tools fixture validation against ToolUseBlockSchema
+    const toolsPath = path.join(fixturesDir, "openai/tools.json");
+    const toolsData = JSON.parse(fs.readFileSync(toolsPath, "utf-8"));
+    const validateToolUse = ajv.compile(ToolUseBlockSchema);
+    const rawTool = toolsData.response.choices[0].message.tool_calls[0];
+    expect(
+      validateToolUse({
+        type: "tool_use",
+        id: rawTool.id,
+        name: rawTool.function.name,
+        input: JSON.parse(rawTool.function.arguments),
+      }),
+    ).toBe(true);
+
+    // 5. OpenAI streaming fixture validation
+    const streamPath = path.join(fixturesDir, "openai/streaming.json");
+    const streamData = JSON.parse(fs.readFileSync(streamPath, "utf-8"));
+    expect(Array.isArray(streamData.events)).toBe(true);
+    expect(streamData.events.length).toBeGreaterThan(0);
+
+    // 6. OpenAI images fixture validation against ImageRequestSchema
     const imagesPath = path.join(fixturesDir, "openai/images.json");
     const imagesData = JSON.parse(fs.readFileSync(imagesPath, "utf-8"));
     const validateImgReq = ajv.compile(ImageRequestSchema);
@@ -318,6 +373,11 @@ describe("contract sync and schema validation (QS-P1.1, QS-P1.2, QS-P1.3)", () =
         qualityPreset: imagesData.operations.generate.request.quality, // "standard"
       }),
     ).toBe(true);
+
+    // 7. Google images fixture validation
+    const googleImagesPath = path.join(fixturesDir, "google/images.json");
+    const googleImagesData = JSON.parse(fs.readFileSync(googleImagesPath, "utf-8"));
+    expect(googleImagesData.models["gemini-3.1-flash-image"].operations.generate.supported).toBe(true);
   });
 
   it("sdk-fixture types compile cleanly and satisfy interface shapes", () => {

@@ -92,11 +92,12 @@ function resolveSignal(opts?: InferenceOptions): { signal?: AbortSignal; cleanup
     }, opts.timeoutMs);
   }
 
+  const onAbort = () => controller.abort(opts.signal?.reason);
   if (opts.signal) {
     if (opts.signal.aborted) {
       controller.abort(opts.signal.reason);
     } else {
-      opts.signal.addEventListener("abort", () => controller.abort(opts.signal?.reason), { once: true });
+      opts.signal.addEventListener("abort", onAbort, { once: true });
     }
   }
 
@@ -104,6 +105,7 @@ function resolveSignal(opts?: InferenceOptions): { signal?: AbortSignal; cleanup
     signal: controller.signal,
     cleanup: () => {
       if (timer) clearTimeout(timer);
+      if (opts.signal) opts.signal.removeEventListener("abort", onAbort);
     },
   };
 }

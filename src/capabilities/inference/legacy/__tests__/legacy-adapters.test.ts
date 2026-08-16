@@ -269,11 +269,26 @@ describe("legacy adapters (QS-P1.5)", () => {
     expect(credential.activeLeaseCount).toBe(0);
   });
 
-  it("LegacyMediaAdapter honors abort signal and timeout", async () => {
+  it("LegacyMediaAdapter forwards abort signal to in-flight request and throws timeout InferenceError", async () => {
     const adapter = new LegacyMediaAdapter();
-    const credential = createMockCredential({ kind: "api_key", value: "sk-test" });
+    let leaseReleased = false;
+    const credential = createMockCredential({ kind: "api_key", value: "sk-test" }, () => {
+      leaseReleased = true;
+    });
+
     const ac = new AbortController();
-    ac.abort(new Error("User cancelled"));
+
+    vi.spyOn(mediaModule, "generateImagesStructured").mockImplementation(async (_req, config) => {
+      return new Promise<never>((_, reject) => {
+        if (config.signal) {
+          config.signal.addEventListener("abort", () => {
+            const err = new Error("Request aborted");
+            (err as any).name = "AbortError";
+            reject(err);
+          });
+        }
+      });
+    });
 
     const target: InferenceTarget = {
       providerAccount: "openai-acc",
@@ -282,12 +297,16 @@ describe("legacy adapters (QS-P1.5)", () => {
       credential,
     };
 
-    await expect(
-      adapter.generate(
-        target,
-        { prompt: "A test prompt", operation: "generate" },
-        { signal: ac.signal },
-      ),
-    ).rejects.toThrow(InferenceError);
+    const genPromise = adapter.generate(
+      target,
+      { prompt: "A test prompt", operation: "generate" },
+      { signal: ac.signal },
+    );
+
+    setTimeout(() => ac.abort(new Error("Cancelled mid-flight")), 10);
+
+    await expect(genPromise).rejects.toThrow(InferenceError);
+    expect(leaseReleased).toBe(true);
+    expect(credential.activeLeaseCount).toBe(0);
   });
 });

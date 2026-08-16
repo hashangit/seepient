@@ -84,8 +84,8 @@ export interface GenerateImageOptions {
   aspectRatio?: string; // "1:1", "16:9", ...
   qualityPreset?: "low" | "standard" | "high";
   count?: number; // number of images; default 1
-  inputImage?: string | ImageBlock; // for variation/edit/mask
-  mask?: string | ImageBlock; // for masked edit
+  inputImage?: ImageBlock; // for variation/edit/mask
+  mask?: ImageBlock; // for masked edit
   outputDir?: string;
   override?: ModelAssignmentOverride; // single override path. No separate `model` field.
 }

@@ -336,8 +336,8 @@ export const ImageRequestSchema = Type.Object({
     ]),
   ),
   count: Type.Optional(Type.Integer({ minimum: 1, maximum: 10 })),
-  inputImage: Type.Optional(Type.Union([Type.String(), ImageBlockSchema])),
-  mask: Type.Optional(Type.Union([Type.String(), ImageBlockSchema])),
+  inputImage: Type.Optional(ImageBlockSchema),
+  mask: Type.Optional(ImageBlockSchema),
   style: Type.Optional(Type.String()),
   outputDir: Type.Optional(Type.String()),
 });
