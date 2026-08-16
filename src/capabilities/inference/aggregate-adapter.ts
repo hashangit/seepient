@@ -51,6 +51,13 @@ export class AggregateInferenceAdapter {
   }
 
   /**
+   * Updates the runtime model catalog for dynamic/user-declared model routing.
+   */
+  updateCatalog(catalog: readonly UpstreamModel[]): void {
+    this.catalog = catalog;
+  }
+
+  /**
    * Binds an InferenceTarget and returns capability-gated executors.
    */
   async bind(target: InferenceTarget): Promise<BoundAdapter> {

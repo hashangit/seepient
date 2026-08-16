@@ -51,37 +51,8 @@ export async function resolveInvocationPlan(
 ): Promise<InvocationPlan> {
   const accounts = snapshot.config.providers || {};
 
-  // 1. If override is specified
-  if (override?.model && override?.providerAccount) {
-    const accEntry = accounts[override.providerAccount];
-    if (!accEntry) {
-      throw new SeepientError(
-        `Provider account "${override.providerAccount}" specified in override is not configured`,
-        "UNRESOLVABLE_CREDENTIAL",
-        false,
-      );
-    }
-
-    const credHandle = await credentialStore.resolve(accEntry.credential);
-    const selectedTarget: InferenceTarget = {
-      providerAccount: override.providerAccount,
-      upstreamProvider: accEntry.upstreamProvider,
-      model: override.model,
-      credential: credHandle,
-      baseUrl: accEntry.baseUrl,
-      compat: accEntry.compat,
-      thinkingLevel: override.thinkingLevel,
-    };
-
-    return {
-      selectedTarget,
-      failureTargets: [],
-    };
-  }
-
-  // 2. Resolve assignment from PurposeModelMap
+  // 1. Resolve base assignment from PurposeModelMap
   let assignment: ModelAssignment | undefined;
-
   const assignments = snapshot.assignments as Record<string, any>;
 
   if (
@@ -113,6 +84,15 @@ export async function resolveInvocationPlan(
     else if (purpose === "video-generation") assignment = mediaMap?.video ?? assignments["video-generation"];
   }
 
+  // Synthesize assignment if full override is provided without purpose mapping
+  if (!assignment && override?.providerAccount && override?.model) {
+    assignment = {
+      providerAccount: override.providerAccount,
+      model: override.model,
+      thinkingLevel: override.thinkingLevel,
+    };
+  }
+
   if (!assignment) {
     throw new SeepientError(
       `No model assignment configured for purpose "${purpose}" (tier "${tier}")`,
@@ -121,10 +101,15 @@ export async function resolveInvocationPlan(
     );
   }
 
-  const mainAcc = accounts[assignment.providerAccount];
+  // Apply partial or complete overrides
+  const effectiveAccount = override?.providerAccount ?? assignment.providerAccount;
+  const effectiveModel = override?.model ?? assignment.model;
+  const effectiveThinking = (override?.thinkingLevel ?? assignment.thinkingLevel) as ThinkingLevel | undefined;
+
+  const mainAcc = accounts[effectiveAccount];
   if (!mainAcc) {
     throw new SeepientError(
-      `Provider account "${assignment.providerAccount}" assigned to purpose "${purpose}" is not configured`,
+      `Provider account "${effectiveAccount}" is not configured`,
       "UNRESOLVABLE_CREDENTIAL",
       false,
     );
@@ -132,30 +117,32 @@ export async function resolveInvocationPlan(
 
   const mainCredHandle = await credentialStore.resolve(mainAcc.credential);
   const selectedTarget: InferenceTarget = {
-    providerAccount: assignment.providerAccount,
+    providerAccount: effectiveAccount,
     upstreamProvider: mainAcc.upstreamProvider,
-    model: assignment.model,
+    model: effectiveModel,
     credential: mainCredHandle,
     baseUrl: mainAcc.baseUrl,
     compat: mainAcc.compat,
-    thinkingLevel: (override?.thinkingLevel ?? assignment.thinkingLevel) as ThinkingLevel,
+    thinkingLevel: effectiveThinking,
   };
 
-  // 3. Resolve explicit fallback targets
+  // 2. Resolve explicit fallback targets (only when not overriding specific target)
   const failureTargets: InferenceTarget[] = [];
-  for (const fb of assignment.fallback || []) {
-    const fbAcc = accounts[fb.providerAccount];
-    if (fbAcc) {
-      const fbCredHandle = await credentialStore.resolve(fbAcc.credential);
-      failureTargets.push({
-        providerAccount: fb.providerAccount,
-        upstreamProvider: fbAcc.upstreamProvider,
-        model: fb.model,
-        credential: fbCredHandle,
-        baseUrl: fbAcc.baseUrl,
-        compat: fbAcc.compat,
-        thinkingLevel: fb.thinkingLevel as ThinkingLevel,
-      });
+  if (!override?.model && !override?.providerAccount) {
+    for (const fb of assignment.fallback || []) {
+      const fbAcc = accounts[fb.providerAccount];
+      if (fbAcc) {
+        const fbCredHandle = await credentialStore.resolve(fbAcc.credential);
+        failureTargets.push({
+          providerAccount: fb.providerAccount,
+          upstreamProvider: fbAcc.upstreamProvider,
+          model: fb.model,
+          credential: fbCredHandle,
+          baseUrl: fbAcc.baseUrl,
+          compat: fbAcc.compat,
+          thinkingLevel: fb.thinkingLevel as ThinkingLevel,
+        });
+      }
     }
   }
 

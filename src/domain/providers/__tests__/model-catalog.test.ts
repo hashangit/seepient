@@ -134,7 +134,14 @@ describe("Failure-safe Discovery & ModelCatalog (QS-P4.4 & P4.4a)", () => {
             credential: { kind: "env", name: "GEMINI_API_KEY" },
           },
         },
-        modelAssignments: {},
+        modelAssignments: {
+          text: {
+            standard: {
+              providerAccount: "openai-prod",
+              model: "gpt-4o",
+            },
+          },
+        },
         retryPolicy: {
           maxAttempts: 3,
           operationTimeoutMs: 60000,

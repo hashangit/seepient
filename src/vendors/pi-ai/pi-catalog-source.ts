@@ -20,7 +20,7 @@ export class PiCatalogSource implements CatalogSource {
         capabilities: {
           toolUse: true,
           streaming: true,
-          vision: !!(m as any).inputModalities?.includes("image"),
+          vision: !!((m as any).input?.includes("image") || (m as any).inputModalities?.includes("image")),
         },
         provenance: "pi-catalog",
       });

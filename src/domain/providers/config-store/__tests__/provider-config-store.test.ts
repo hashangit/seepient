@@ -101,7 +101,7 @@ describe("ProviderConfigStore & DeepPatch (QS-P4.3)", () => {
       );
 
       expect(updated.revision).toBe(1);
-      expect(updated.patch.providers?.["work-openai"]).toBeDefined();
+      expect((updated.patch.providers as any)?.["work-openai"]).toBeDefined();
 
       // Fails when expected revision is stale (0 instead of 1)
       await expect(
@@ -112,7 +112,7 @@ describe("ProviderConfigStore & DeepPatch (QS-P4.3)", () => {
       const reloadedStore = new ProviderConfigStore(overlayFile);
       const reloaded = await reloadedStore.getOverlay();
       expect(reloaded.revision).toBe(1);
-      expect(reloaded.patch.providers?.["work-openai"]).toBeDefined();
+      expect((reloaded.patch.providers as any)?.["work-openai"]).toBeDefined();
     });
   });
 });

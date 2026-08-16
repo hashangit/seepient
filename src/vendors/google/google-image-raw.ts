@@ -57,17 +57,49 @@ export class GoogleImageRaw implements ImageBackend {
         });
 
       const payload = canonicalToGoogleImagePayload(req);
+      const signal = opts?.signal;
 
       let response: any;
       try {
-        response = await ai.models.generateContent({
+        const generatePromise = ai.models.generateContent({
           model: target.model,
           contents: payload.contents,
           config: {
             responseModalities: [Modality.IMAGE, Modality.TEXT],
-          },
+            abortSignal: signal,
+          } as any,
         });
+
+        if (opts?.timeoutMs && opts.timeoutMs > 0) {
+          let timeoutHandle: any;
+          const timeoutPromise = new Promise((_, reject) => {
+            timeoutHandle = setTimeout(() => {
+              reject(new InferenceError({
+                code: "timeout",
+                message: `Google image request timed out after ${opts.timeoutMs}ms`,
+                providerAccount: target.providerAccount,
+                model: target.model,
+                retryable: true,
+              }));
+            }, opts.timeoutMs);
+          });
+          response = await Promise.race([generatePromise, timeoutPromise]);
+          clearTimeout(timeoutHandle);
+        } else {
+          response = await generatePromise;
+        }
       } catch (err: any) {
+        if (err instanceof InferenceError) throw err;
+        if (signal?.aborted) {
+          throw new InferenceError({
+            code: "timeout",
+            message: signal.reason?.message || "Google image request aborted by user",
+            providerAccount: target.providerAccount,
+            model: target.model,
+            retryable: false,
+            cause: err,
+          });
+        }
         const msg = String(err?.message || err);
         if (/not supported|unsupported/i.test(msg)) {
           throw new InferenceError({

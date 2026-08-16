@@ -138,7 +138,8 @@ export class OpenAIImageRaw implements ImageBackend {
           err.message?.includes("timed out")
         ) {
           code = "timeout";
-          retryable = true;
+          const isTimeout = err.message?.includes("timed out") || (opts?.signal?.reason?.name === "TimeoutError");
+          retryable = isTimeout;
         } else if (status && status >= 500) {
           code = "provider_unavailable";
           retryable = true;

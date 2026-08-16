@@ -37,7 +37,7 @@ export interface CapabilityHealth {
 
 /**
  * Central ProviderRuntime managing turn snapshots, plan resolution, execution dispatch,
- * and multi-target retries with cooldown tracking.
+ * and multi-target retries with cooldown tracking and dynamic catalog synchronization.
  */
 export class ProviderRuntime {
   readonly configStore: ProviderConfigStore;
@@ -68,11 +68,16 @@ export class ProviderRuntime {
     this.healthMap.set(key, { consecutiveFailures: 0 });
   }
 
-  private recordFailure(account: string, capability: string, cooldownDurationMs = 60_000): void {
+  private recordFailure(
+    account: string,
+    capability: string,
+    cooldownThreshold = 3,
+    cooldownDurationMs = 60_000,
+  ): void {
     const key = this.healthKey(account, capability);
     const existing = this.healthMap.get(key) ?? { consecutiveFailures: 0 };
     const consecutive = existing.consecutiveFailures + 1;
-    const cooldownUntil = consecutive >= 3 ? Date.now() + cooldownDurationMs : undefined;
+    const cooldownUntil = consecutive >= cooldownThreshold ? Date.now() + cooldownDurationMs : undefined;
 
     this.healthMap.set(key, {
       consecutiveFailures: consecutive,
@@ -87,12 +92,15 @@ export class ProviderRuntime {
     const config = await this.configStore.getEffectiveConfig();
     const catalog = await this.modelCatalog.getAllModels();
 
+    // Synchronize catalog with aggregate adapter so dynamic models route accurately
+    this.adapter.updateCatalog(catalog);
+
     return {
       revision: config.revision,
       createdAt: new Date().toISOString(),
       catalog,
       config,
-      assignments: config.modelAssignments || {},
+      assignments: config.modelAssignments || { text: { standard: { providerAccount: "openai", model: "gpt-4o" } } },
     };
   }
 
@@ -117,6 +125,9 @@ export class ProviderRuntime {
     opts?: InferenceOptions,
   ): AsyncIterable<StreamEvent> {
     const targets = [plan.selectedTarget, ...plan.failureTargets];
+    const config = await this.configStore.getEffectiveConfig();
+    const retryPolicy = config.retryPolicy;
+
     let lastError: any;
 
     for (let i = 0; i < targets.length; i++) {
@@ -133,7 +144,23 @@ export class ProviderRuntime {
         bound = await this.adapter.bind(target);
       } catch (err: any) {
         lastError = err;
-        this.recordFailure(target.providerAccount, "language");
+        this.recordFailure(
+          target.providerAccount,
+          "language",
+          retryPolicy.cooldownThreshold,
+          retryPolicy.cooldownDurationMs,
+        );
+        if (err instanceof InferenceError && !err.retryable) {
+          yield {
+            type: "error",
+            error: {
+              code: err.code,
+              message: err.message,
+              retryable: false,
+            },
+          };
+          return;
+        }
         continue;
       }
 
@@ -145,37 +172,70 @@ export class ProviderRuntime {
           model: target.model,
           retryable: false,
         });
-        this.recordFailure(target.providerAccount, "language");
+        this.recordFailure(
+          target.providerAccount,
+          "language",
+          retryPolicy.cooldownThreshold,
+          retryPolicy.cooldownDurationMs,
+        );
         continue;
       }
 
       let emittedAnyDelta = false;
+      let hadError = false;
+
       try {
         for await (const event of bound.language.stream(req, opts)) {
           if (event.type === "content_block_delta") {
             emittedAnyDelta = true;
           }
-          if (event.type === "error" && !emittedAnyDelta && i < targets.length - 1 && event.error.retryable) {
-            // Can fallback to next target if no tokens were emitted yet
-            throw new InferenceError({
-              code: event.error.code as any,
-              message: event.error.message,
-              providerAccount: target.providerAccount,
-              model: target.model,
-              retryable: true,
-            });
+          if (event.type === "error") {
+            hadError = true;
+            this.recordFailure(
+              target.providerAccount,
+              "language",
+              retryPolicy.cooldownThreshold,
+              retryPolicy.cooldownDurationMs,
+            );
+
+            if (!emittedAnyDelta && i < targets.length - 1 && event.error.retryable) {
+              // Fallback to next candidate if no tokens were emitted yet
+              throw new InferenceError({
+                code: event.error.code as any,
+                message: event.error.message,
+                providerAccount: target.providerAccount,
+                model: target.model,
+                retryable: true,
+              });
+            }
           }
           yield event;
         }
 
-        this.recordSuccess(target.providerAccount, "language");
-        return;
+        if (!hadError) {
+          this.recordSuccess(target.providerAccount, "language");
+          return;
+        }
       } catch (err: any) {
         lastError = err;
-        this.recordFailure(target.providerAccount, "language");
+        this.recordFailure(
+          target.providerAccount,
+          "language",
+          retryPolicy.cooldownThreshold,
+          retryPolicy.cooldownDurationMs,
+        );
 
-        if (emittedAnyDelta || i === targets.length - 1) {
-          // If streaming already started, or this is the last target, yield the error event
+        const isRetryable = err instanceof InferenceError ? err.retryable : true;
+        if (opts?.signal?.aborted && opts.signal.reason?.name !== "TimeoutError") {
+          // User aborted — do not fall through to next targets
+          yield {
+            type: "abort",
+            reason: "user",
+          };
+          return;
+        }
+
+        if (emittedAnyDelta || i === targets.length - 1 || !isRetryable) {
           yield {
             type: "error",
             error: {
@@ -210,6 +270,9 @@ export class ProviderRuntime {
     opts?: InferenceOptions,
   ): Promise<ImageResult> {
     const targets = [plan.selectedTarget, ...plan.failureTargets];
+    const config = await this.configStore.getEffectiveConfig();
+    const retryPolicy = config.retryPolicy;
+
     let lastError: any;
 
     for (let i = 0; i < targets.length; i++) {
@@ -231,8 +294,15 @@ export class ProviderRuntime {
         return result;
       } catch (err: any) {
         lastError = err;
-        this.recordFailure(target.providerAccount, "image");
-        if (i === targets.length - 1) {
+        this.recordFailure(
+          target.providerAccount,
+          "image",
+          retryPolicy.cooldownThreshold,
+          retryPolicy.cooldownDurationMs,
+        );
+
+        const isRetryable = err instanceof InferenceError ? err.retryable : true;
+        if (!isRetryable || opts?.signal?.aborted || i === targets.length - 1) {
           throw err;
         }
       }
@@ -270,4 +340,23 @@ export class ProviderRuntime {
       retryable: false,
     });
   }
+}
+
+let defaultRuntimeInstance: ProviderRuntime | undefined;
+
+/**
+ * Returns the default global ProviderRuntime instance for composition root wiring.
+ */
+export function getDefaultProviderRuntime(): ProviderRuntime {
+  if (!defaultRuntimeInstance) {
+    defaultRuntimeInstance = new ProviderRuntime();
+  }
+  return defaultRuntimeInstance;
+}
+
+/**
+ * Resets the default global ProviderRuntime instance (used in tests).
+ */
+export function resetDefaultProviderRuntime(): void {
+  defaultRuntimeInstance = undefined;
 }

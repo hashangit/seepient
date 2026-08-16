@@ -10,8 +10,6 @@ describe("server model-override handling (QS-P0.1)", () => {
 
   it("passes explicit model override to getProvider in serverGenerateText", async () => {
     const mockProvider: LLMProvider = {
-      type: "openai",
-      model: "gpt-5.4-mini",
       async chat(): Promise<ProviderResponse> {
         return { content: "Response generated from gpt-5.4-mini" };
       },
@@ -37,8 +35,9 @@ describe("server model-override handling (QS-P0.1)", () => {
 
   it("passes explicit model override to getProvider in serverStreamText", async () => {
     const mockProvider: LLMProvider = {
-      type: "openai",
-      model: "gpt-5.4-mini",
+      async chat(): Promise<ProviderResponse> {
+        return { content: "Streaming from gpt-5.4-mini" };
+      },
       async *chatStream() {
         yield { type: "text_delta", content: "Streaming from " };
         yield { type: "text_delta", content: "gpt-5.4-mini" };

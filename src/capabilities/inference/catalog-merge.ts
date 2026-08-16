@@ -1,8 +1,21 @@
-import type { UpstreamModel } from "../../foundations/schemas/inference.js";
+import type {
+  UpstreamModel,
+} from "../../foundations/schemas/inference.js";
 import type { CatalogSource } from "../../foundations/contracts/backend-ports.js";
 
+function cleanDefined<T extends Record<string, any>>(obj?: T): Partial<T> {
+  if (!obj) return {};
+  const res: any = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) {
+      res[k] = v;
+    }
+  }
+  return res;
+}
+
 /**
- * Curated baseline models shipped with Seepient.
+ * Curated upstream model catalog with baseline capabilities.
  */
 export const CURATED_MODELS: readonly UpstreamModel[] = [
   {
@@ -15,6 +28,7 @@ export const CURATED_MODELS: readonly UpstreamModel[] = [
       streaming: true,
       vision: true,
     },
+    supportedReasoningLevels: ["none"],
     provenance: "seepient-curated",
   },
   {
@@ -27,13 +41,14 @@ export const CURATED_MODELS: readonly UpstreamModel[] = [
       streaming: true,
       vision: true,
     },
+    supportedReasoningLevels: ["none"],
     provenance: "seepient-curated",
   },
   {
     id: "dall-e-3",
     upstreamProvider: "openai",
     displayName: "DALL-E 3",
-    contextWindow: 32_000,
+    contextWindow: 4096,
     capabilities: {
       toolUse: false,
       streaming: false,
@@ -50,7 +65,7 @@ export const CURATED_MODELS: readonly UpstreamModel[] = [
     id: "dall-e-2",
     upstreamProvider: "openai",
     displayName: "DALL-E 2",
-    contextWindow: 32_000,
+    contextWindow: 4096,
     capabilities: {
       toolUse: false,
       streaming: false,
@@ -73,14 +88,27 @@ export const CURATED_MODELS: readonly UpstreamModel[] = [
       streaming: true,
       vision: true,
     },
-    supportedReasoningLevels: ["none", "low", "medium", "high"],
+    supportedReasoningLevels: ["low", "medium", "high"],
     provenance: "seepient-curated",
   },
   {
-    id: "claude-3-5-haiku-20241022",
+    id: "claude-3-5-haiku",
     upstreamProvider: "anthropic",
     displayName: "Claude 3.5 Haiku",
     contextWindow: 200_000,
+    capabilities: {
+      toolUse: true,
+      streaming: true,
+      vision: true,
+    },
+    supportedReasoningLevels: ["none"],
+    provenance: "seepient-curated",
+  },
+  {
+    id: "gemini-2.5-flash",
+    upstreamProvider: "google",
+    displayName: "Gemini 2.5 Flash",
+    contextWindow: 1_000_000,
     capabilities: {
       toolUse: true,
       streaming: true,
@@ -96,35 +124,32 @@ export const CURATED_MODELS: readonly UpstreamModel[] = [
     capabilities: {
       toolUse: false,
       streaming: false,
-      vision: true,
+      vision: false,
       imageGenerate: true,
       imageVariation: true,
       imageEdit: true,
       imageMask: true,
+      aspectRatios: ["1:1", "16:9", "9:16", "4:3", "3:4"],
     },
     provenance: "seepient-curated",
   },
   {
-    id: "gemini-2.5-flash-image",
-    upstreamProvider: "google",
-    displayName: "Gemini 2.5 Flash Image",
-    contextWindow: 32_000,
+    id: "glm-4.7",
+    upstreamProvider: "glm",
+    displayName: "GLM 4.7",
+    contextWindow: 128_000,
     capabilities: {
-      toolUse: false,
-      streaming: false,
-      vision: true,
-      imageGenerate: true,
-      imageVariation: false,
-      imageEdit: false,
-      imageMask: false,
+      toolUse: true,
+      streaming: true,
+      vision: false,
     },
     provenance: "seepient-curated",
   },
 ];
 
 /**
- * Merges multiple catalog sources with curated defaults and user-declared models.
- * Preserves existing capabilities when user declares overrides.
+ * Merges curated models with dynamic catalog sources and user declarations.
+ * Prevents undefined properties from overwriting known model capabilities.
  */
 export async function mergeCatalogs(
   sources: CatalogSource[],
@@ -132,13 +157,12 @@ export async function mergeCatalogs(
 ): Promise<UpstreamModel[]> {
   const modelMap = new Map<string, UpstreamModel>();
 
-  // 1. Base curated models
+  // 1. Curated baseline
   for (const m of CURATED_MODELS) {
-    const key = `${m.upstreamProvider}:${m.id}`;
-    modelMap.set(key, { ...m, capabilities: { ...m.capabilities } });
+    modelMap.set(`${m.upstreamProvider}:${m.id}`, { ...m, capabilities: { ...m.capabilities } });
   }
 
-  // 2. Dynamic catalog sources (e.g. Pi, Google, OpenAI)
+  // 2. Dynamic vendor sources (e.g. Pi bundled catalog)
   for (const source of sources) {
     try {
       const models = await source.list();
@@ -146,12 +170,14 @@ export async function mergeCatalogs(
         const key = `${m.upstreamProvider}:${m.id}`;
         const existing = modelMap.get(key);
         if (existing) {
+          const cleanM = cleanDefined(m);
+          const cleanCaps = cleanDefined(m.capabilities);
           modelMap.set(key, {
             ...existing,
-            ...m,
+            ...cleanM,
             capabilities: {
               ...existing.capabilities,
-              ...m.capabilities,
+              ...cleanCaps,
             },
           });
         } else {
@@ -168,12 +194,14 @@ export async function mergeCatalogs(
     const key = `${m.upstreamProvider}:${m.id}`;
     const existing = modelMap.get(key);
     if (existing) {
+      const cleanM = cleanDefined(m);
+      const cleanCaps = cleanDefined(m.capabilities);
       modelMap.set(key, {
         ...existing,
-        ...m,
+        ...cleanM,
         capabilities: {
           ...existing.capabilities,
-          ...m.capabilities,
+          ...cleanCaps,
         },
         provenance: "user-declared",
       });

@@ -1,3 +1,6 @@
+import * as os from "node:os";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type {
   CredentialStore,
   CredentialHandle,
@@ -12,10 +15,113 @@ import type {
 } from "../../../foundations/schemas/credential-store.js";
 import { SeepientError } from "../../../foundations/errors.js";
 
+const execFileAsync = promisify(execFile);
+
 export interface PlatformKeychainProvider {
   getPassword(service: string, account: string): Promise<string | null>;
   setPassword(service: string, account: string, password: string): Promise<void>;
   deletePassword(service: string, account: string): Promise<boolean>;
+}
+
+/**
+ * Default OS-native keychain provider using `security` on macOS or `secret-tool` on Linux.
+ */
+class DefaultPlatformKeychainProvider implements PlatformKeychainProvider {
+  async getPassword(service: string, account: string): Promise<string | null> {
+    const platform = os.platform();
+    if (platform === "darwin") {
+      try {
+        const { stdout } = await execFileAsync("security", [
+          "find-generic-password",
+          "-s",
+          service,
+          "-a",
+          account,
+          "-w",
+        ]);
+        return stdout.trim();
+      } catch (err: any) {
+        if (err?.code === 44 || err?.message?.includes("could not be found")) {
+          return null;
+        }
+        throw err;
+      }
+    } else if (platform === "linux") {
+      try {
+        const { stdout } = await execFileAsync("secret-tool", [
+          "lookup",
+          "service",
+          service,
+          "account",
+          account,
+        ]);
+        return stdout ? stdout.trim() : null;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  async setPassword(service: string, account: string, password: string): Promise<void> {
+    const platform = os.platform();
+    if (platform === "darwin") {
+      await execFileAsync("security", [
+        "add-generic-password",
+        "-U",
+        "-s",
+        service,
+        "-a",
+        account,
+        "-w",
+        password,
+      ]);
+    } else if (platform === "linux") {
+      await execFileAsync("secret-tool", [
+        "store",
+        "--label",
+        `${service}/${account}`,
+        "service",
+        service,
+        "account",
+        account,
+      ]);
+    } else {
+      throw new Error(`Platform ${platform} keychain is not supported`);
+    }
+  }
+
+  async deletePassword(service: string, account: string): Promise<boolean> {
+    const platform = os.platform();
+    if (platform === "darwin") {
+      try {
+        await execFileAsync("security", [
+          "delete-generic-password",
+          "-s",
+          service,
+          "-a",
+          account,
+        ]);
+        return true;
+      } catch {
+        return false;
+      }
+    } else if (platform === "linux") {
+      try {
+        await execFileAsync("secret-tool", [
+          "clear",
+          "service",
+          service,
+          "account",
+          account,
+        ]);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
 }
 
 /**
@@ -27,8 +133,8 @@ export class KeychainCredentialStore implements CredentialStore {
   private defaultService: string;
   private provider?: PlatformKeychainProvider;
 
-  constructor(customProvider?: PlatformKeychainProvider, defaultService = "seepient") {
-    this.provider = customProvider;
+  constructor(customProvider?: PlatformKeychainProvider | null, defaultService = "seepient") {
+    this.provider = customProvider === null ? undefined : (customProvider ?? new DefaultPlatformKeychainProvider());
     this.defaultService = defaultService;
   }
 
@@ -129,12 +235,20 @@ export class KeychainCredentialStore implements CredentialStore {
   async put(id: string, record: PersistedCredentialRecord, _meta?: CredentialMeta): Promise<void> {
     if (!this.provider) {
       throw new SeepientError(
-        "OS Keychain provider is not available",
+        "OS Keychain is not available on this platform",
         "KEYCHAIN_UNAVAILABLE",
         false,
       );
     }
-    await this.provider.setPassword(this.defaultService, id, record.keyValue);
+    try {
+      await this.provider.setPassword(this.defaultService, id, record.keyValue);
+    } catch (err: any) {
+      throw new SeepientError(
+        `OS Keychain put failed: ${err?.message}`,
+        "KEYCHAIN_UNAVAILABLE",
+        false,
+      );
+    }
   }
 
   async list(): Promise<CredentialRecord[]> {
@@ -144,11 +258,19 @@ export class KeychainCredentialStore implements CredentialStore {
   async delete(id: string): Promise<void> {
     if (!this.provider) {
       throw new SeepientError(
-        "OS Keychain provider is not available",
+        "OS Keychain is not available on this platform",
         "KEYCHAIN_UNAVAILABLE",
         false,
       );
     }
-    await this.provider.deletePassword(this.defaultService, id);
+    try {
+      await this.provider.deletePassword(this.defaultService, id);
+    } catch (err: any) {
+      throw new SeepientError(
+        `OS Keychain delete failed: ${err?.message}`,
+        "KEYCHAIN_UNAVAILABLE",
+        false,
+      );
+    }
   }
 }

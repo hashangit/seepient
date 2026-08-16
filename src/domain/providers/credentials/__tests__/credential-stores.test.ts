@@ -123,7 +123,7 @@ describe("CredentialStore implementations (QS-P4.1)", () => {
 
   describe("KeychainCredentialStore", () => {
     it("throws KEYCHAIN_UNAVAILABLE when keychain provider is absent (no silent plaintext fallback)", async () => {
-      const store = new KeychainCredentialStore(undefined);
+      const store = new KeychainCredentialStore(null);
       const handle = await store.resolve({ kind: "keychain", account: "test-user" });
 
       expect(await handle.isResolvable()).toBe(false);

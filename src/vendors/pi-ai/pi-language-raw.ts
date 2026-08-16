@@ -23,6 +23,7 @@ import type {
 } from "../../foundations/schemas/inference.js";
 import { InferenceError } from "../../foundations/errors.js";
 import {
+  canonicalToPiContext,
   canonicalToPiMessages,
   canonicalToPiTools,
 } from "./pi-canonical-converter.js";
@@ -120,7 +121,11 @@ export class PiLanguageRaw implements LanguageBackend {
       } as any;
     }
 
-    const piMessages = canonicalToPiMessages(req.messages);
+    const converted = canonicalToPiContext(req.messages, {
+      api: model?.api,
+      provider: providerName,
+      model: target.model,
+    });
     const piTools = canonicalToPiTools(req.tools);
 
     const streamOptions: any = {
@@ -130,7 +135,8 @@ export class PiLanguageRaw implements LanguageBackend {
     };
 
     const context = {
-      messages: piMessages,
+      systemPrompt: converted.systemPrompt,
+      messages: converted.messages,
       tools: piTools.length > 0 ? piTools : undefined,
     };
 
@@ -317,11 +323,31 @@ export class PiLanguageRaw implements LanguageBackend {
           usage: lastUsage ?? { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
         };
       } catch (err: any) {
-        const timeout = isTimeout();
+        if (signal?.aborted) {
+          const timeout = isTimeout();
+          if (timeout) {
+            yield {
+              type: "error",
+              error: {
+                code: "timeout",
+                message: err?.message || "Pi language stream timed out",
+                retryable: true,
+              },
+              partialUsage: lastUsage,
+            };
+          } else {
+            yield {
+              type: "abort",
+              reason: "user",
+            };
+          }
+          return;
+        }
+
         yield {
           type: "error",
           error: {
-            code: timeout ? "timeout" : "network",
+            code: isTimeout() ? "timeout" : "network",
             message: err?.message || "Pi language stream failed",
             retryable: true,
           },

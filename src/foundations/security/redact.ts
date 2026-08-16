@@ -52,7 +52,8 @@ export function redact<T>(value: T, seen = new WeakSet()): T {
   }
 
   if (value instanceof Error) {
-    const errorCopy = new (value.constructor as any)(redactString(value.message));
+    const errorCopy = Object.create(Object.getPrototypeOf(value));
+    errorCopy.message = redactString(value.message);
     if (value.stack) errorCopy.stack = redactString(value.stack);
     if ((value as any).cause) errorCopy.cause = redact((value as any).cause, seen);
     for (const key of Object.getOwnPropertyNames(value)) {

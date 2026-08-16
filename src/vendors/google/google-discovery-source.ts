@@ -17,8 +17,12 @@ export class GoogleDiscoverySource implements DiscoverySource {
         return { modelIds: [], error: `Google discovery requires an api_key credential, received kind "${secret.kind}"` };
       }
 
-      const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(secret.value)}`;
-      const response = await fetch(url);
+      const url = "https://generativelanguage.googleapis.com/v1beta/models";
+      const response = await fetch(url, {
+        headers: {
+          "x-goog-api-key": secret.value,
+        },
+      });
       if (!response.ok) {
         return { modelIds: [], error: `Google discovery endpoint returned ${response.status}: ${response.statusText}` };
       }

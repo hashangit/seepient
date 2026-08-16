@@ -55,7 +55,7 @@ describe("ProviderRuntime (QS-P4.6)", () => {
         yield { type: "content_block_start", index: 0, block: { type: "text", text: "" } };
         yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Fallback response" } };
         yield { type: "content_block_stop", index: 0 };
-        yield { type: "finish", stopReason: "end_turn" };
+        yield { type: "finish", stopReason: "end_turn", usage: { promptTokens: 5, completionTokens: 5, totalTokens: 10 } };
       },
       chat: async () => ({
         message: { role: "assistant", content: [{ type: "text", text: "ok" }] },

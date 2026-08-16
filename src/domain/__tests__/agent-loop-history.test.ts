@@ -7,8 +7,6 @@ import type { LLMProvider, ProviderResponse } from "../../foundations/contracts/
 function createMockProvider(responses: ProviderResponse[]): LLMProvider {
   let callIndex = 0;
   return {
-    type: "openai",
-    model: "gpt-mock",
     async chat(): Promise<ProviderResponse> {
       const resp = responses[callIndex] ?? { content: "Done" };
       callIndex++;
@@ -25,7 +23,6 @@ describe("agent-loop conversation history (QS-P0.2)", () => {
         tool_calls: [
           {
             id: "call-1",
-            type: "function",
             name: "get_current_datetime",
             arguments: "{}",
           },

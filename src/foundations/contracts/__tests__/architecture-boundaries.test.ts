@@ -57,6 +57,7 @@ function moduleSpecifiers(source: string): string[] {
   const out: string[] = [];
   const patterns = [
     /import\s+(?:[\s\S]*?\s+from\s+)?["']([^"']+)["']/g, // static import
+    /export\s+(?:[\s\S]*?\s+from\s+)?["']([^"']+)["']/g, // re-export
     /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g,            // dynamic import()
     /\brequire\s*\(\s*["']([^"']+)["']\s*\)/g,           // require()
   ];
