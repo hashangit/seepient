@@ -221,8 +221,8 @@ export class AsrtSandbox implements NativeProcessSandbox {
    * SandboxManager API + a successful session initialize. Returns an
    * AsrtSandbox on success, or UncontainedSandbox on any failure.
    */
-  static async create(): Promise<NativeProcessSandbox> {
-    const probe = await probeSandbox();
+  static async create(probeOverride?: SandboxProbe): Promise<NativeProcessSandbox> {
+    const probe = probeOverride ?? (await probeSandbox());
     if (!probe.available) {
       return new UncontainedSandbox();
     }
@@ -335,9 +335,21 @@ export class AsrtSandbox implements NativeProcessSandbox {
 /** POSIX environment-variable name — anything else is dropped, never interpolated. */
 const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-/** Shell-quote one token for the `bash -c` line SRT wraps. */
+/**
+ * Shell-quote one token for the `bash -c` line SRT wraps.
+ *
+ * Uses DOUBLE-quote escaping: the SDK's wrapWithSandboxArgv re-quotes the
+ * whole command with its own single-quote escaping (`'"'"'`). A token that
+ * already contains single quotes would be escaped AGAIN (the SDK's quote()
+ * treats our `'` and `\` as literals and wraps the whole string in single
+ * quotes, producing a double-escaped `'` that the inner shell cannot
+ * parse — "unexpected EOF while looking for matching `'"). Double quotes
+ * survive the SDK's single-quote re-wrapping untouched, and the only
+ * characters needing protection inside double quotes are `"`, `$`, and
+ * backtick — all backslash-escaped here.
+ */
 function shellQuote(token: string): string {
-  return `'${token.replace(/'/g, "'\\''")}'`;
+  return `"${token.replace(/["\\$`]/g, "\\$&")}"`;
 }
 
 /**
@@ -530,20 +542,23 @@ function spawnProcessTree(args: {
   let stdoutEnded = !child.stdout;
 
   const checkDone = (): void => {
-    if (!closed || !stdoutEnded) return;
-    if (stdout.length > lastFlushedLen) {
-      emitProgress(stdout.slice(lastFlushedLen));
+    if (closed && stdoutEnded) {
+      if (stdout.length > lastFlushedLen) {
+        emitProgress(stdout.slice(lastFlushedLen));
+      }
+      // A signal-terminated child is a CANCELLED execution, never success
+      // (exitCode is null in that case; reporting 0 would let the audit
+      // record an aborted command as succeeded — review P1).
+      settle({ exitCode, stdout, stderr, isolated: args.isolated, signal });
     }
-    // A signal-terminated child is a CANCELLED execution, never success
-    // (exitCode is null in that case; reporting 0 would let the audit
-    // record an aborted command as succeeded — review P1).
-    settle({ exitCode, stdout, stderr, isolated: args.isolated, signal });
   };
 
   // Spawn failures (missing cwd, ENOENT binary) are typed results with a
   // GENERIC message — never the wrapped argv or the ASRT proxy credential
   // (review P1).
+  const errorEventSeen = { seen: false };
   child.on("error", (err) => {
+    errorEventSeen.seen = true;
     const code = (err as NodeJS.ErrnoException).code ?? "spawn-error";
     settle({
       exitCode: 1,
@@ -553,11 +568,19 @@ function spawnProcessTree(args: {
     });
   });
 
+  // A failed spawn emits `error` FIRST, then `close` with code -2 (POSIX).
+  // The close handler must not overwrite the typed error result with exit
+  // code 0 — the P1 review guarantee ("spawn failures are typed results,
+  // never exit 0") held on macOS because the process tree settled before
+  // the close event; on Linux the close event won the race and reported
+  // the failed spawn as success (CI regression). Latch on the error event
+  // so close is ignored after a spawn failure.
   child.stdout?.on("end", () => {
     stdoutEnded = true;
     checkDone();
   });
   child.on("close", (code, closeSignal) => {
+    if (errorEventSeen.seen) return; // spawn failed — typed result already settled
     exitCode = code ?? 0;
     signal = closeSignal ?? undefined;
     closed = true;
@@ -600,6 +623,6 @@ function spawnSandboxed(
  * Probes for binary presence and ASRT SDK availability. Returns
  * UncontainedSandbox with isolated:false when containment is unavailable.
  */
-export async function createNativeProcessSandbox(): Promise<NativeProcessSandbox> {
-  return AsrtSandbox.create();
+export async function createNativeProcessSandbox(probeOverride?: SandboxProbe): Promise<NativeProcessSandbox> {
+  return AsrtSandbox.create(probeOverride);
 }
