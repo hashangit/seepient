@@ -5,12 +5,12 @@ import * as path from "node:path";
 import { LegacyLanguageAdapter } from "../legacy-language-adapter.js";
 import { LegacyMediaAdapter } from "../legacy-media-adapter.js";
 import type { InferenceTarget } from "../../../../foundations/contracts/backend-ports.js";
-import type { CredentialHandle, CredentialLease } from "../../../../foundations/contracts/credential-store.js";
+import type { CredentialHandle, CredentialLease, CredentialSecret } from "../../../../foundations/contracts/credential-store.js";
 import { InferenceError } from "../../../../foundations/errors.js";
 import * as mediaModule from "../../../media/media.js";
 import { OpenAIProvider } from "../../../llm/openai.js";
 
-function createMockCredential(secretValue: string, onRelease?: () => void): CredentialHandle {
+function createMockCredential(secretValue: CredentialSecret, onRelease?: () => void): CredentialHandle {
   let activeLeases = 0;
   return {
     id: "cred-test",
@@ -44,7 +44,7 @@ describe("legacy adapters (QS-P1.5)", () => {
   it("LegacyLanguageAdapter rejects unsupported upstream provider with InferenceError and releases lease", async () => {
     const adapter = new LegacyLanguageAdapter();
     let released = false;
-    const credential = createMockCredential("sk-test", () => {
+    const credential = createMockCredential({ kind: "api_key", key: "sk-test" }, () => {
       released = true;
     });
 
@@ -65,10 +65,28 @@ describe("legacy adapters (QS-P1.5)", () => {
     expect(credential.activeLeaseCount).toBe(0);
   });
 
+  it("LegacyLanguageAdapter rejects non-api_key credentials with auth InferenceError", async () => {
+    const adapter = new LegacyLanguageAdapter();
+    const credential = createMockCredential({ kind: "none" });
+
+    const target: InferenceTarget = {
+      providerAccount: "openai-acc",
+      upstreamProvider: "openai",
+      model: "gpt-4o",
+      credential,
+    };
+
+    await expect(
+      adapter.chat(target, {
+        messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      }),
+    ).rejects.toThrow(InferenceError);
+  });
+
   it("LegacyLanguageAdapter reports stopReason: 'end_turn' for pure text streams", async () => {
     const adapter = new LegacyLanguageAdapter();
     let released = false;
-    const credential = createMockCredential("sk-test", () => {
+    const credential = createMockCredential({ kind: "api_key", key: "sk-test" }, () => {
       released = true;
     });
 
@@ -106,7 +124,7 @@ describe("legacy adapters (QS-P1.5)", () => {
   it("LegacyLanguageAdapter reports stopReason: 'tool_use' and emits block start/stop for tool streams", async () => {
     const adapter = new LegacyLanguageAdapter();
     let released = false;
-    const credential = createMockCredential("sk-test", () => {
+    const credential = createMockCredential({ kind: "api_key", key: "sk-test" }, () => {
       released = true;
     });
 
@@ -147,10 +165,39 @@ describe("legacy adapters (QS-P1.5)", () => {
     expect(released).toBe(true);
   });
 
+  it("LegacyLanguageAdapter emits error stream event on stream failure", async () => {
+    const adapter = new LegacyLanguageAdapter();
+    const credential = createMockCredential({ kind: "api_key", key: "sk-test" });
+
+    vi.spyOn(OpenAIProvider.prototype, "chatStream").mockImplementation(async function* () {
+      throw new Error("Network connection dropped");
+    });
+
+    const target: InferenceTarget = {
+      providerAccount: "openai-acc",
+      upstreamProvider: "openai",
+      model: "gpt-4o",
+      credential,
+    };
+
+    const stream = adapter.chatStream(target, {
+      messages: [{ role: "user", content: [{ type: "text", text: "stream fail" }] }],
+    });
+
+    const events = [];
+    for await (const event of stream) {
+      events.push(event);
+    }
+
+    const errorEvent = events.find((e) => e.type === "error");
+    expect(errorEvent).toBeDefined();
+    expect((errorEvent as any).error.message).toContain("Network connection dropped");
+  });
+
   it("LegacyMediaAdapter parses file paths and reads generated files as base64", async () => {
     const adapter = new LegacyMediaAdapter();
     let released = false;
-    const credential = createMockCredential("sk-test", () => {
+    const credential = createMockCredential({ kind: "api_key", key: "sk-test" }, () => {
       released = true;
     });
 
@@ -159,9 +206,10 @@ describe("legacy adapters (QS-P1.5)", () => {
     fs.writeFileSync(tmpFile1, Buffer.from("fake-png-data-1"));
     fs.writeFileSync(tmpFile2, Buffer.from("fake-png-data-2"));
 
-    vi.spyOn(mediaModule, "generateImages").mockResolvedValue(
-      `Successfully generated 2 image(s):\n${tmpFile1}\n${tmpFile2}`,
-    );
+    vi.spyOn(mediaModule, "generateImagesStructured").mockResolvedValue({
+      success: true,
+      files: [tmpFile1, tmpFile2],
+    });
 
     const target: InferenceTarget = {
       providerAccount: "openai-acc",
@@ -190,14 +238,18 @@ describe("legacy adapters (QS-P1.5)", () => {
     } catch {}
   });
 
-  it("LegacyMediaAdapter maps errors and releases lease on failure", async () => {
+  it("LegacyMediaAdapter maps structured errors and releases lease on failure", async () => {
     const adapter = new LegacyMediaAdapter();
     let released = false;
-    const credential = createMockCredential("sk-test", () => {
+    const credential = createMockCredential({ kind: "api_key", key: "sk-test" }, () => {
       released = true;
     });
 
-    vi.spyOn(mediaModule, "generateImages").mockResolvedValue("Error: Invalid prompt format");
+    vi.spyOn(mediaModule, "generateImagesStructured").mockResolvedValue({
+      success: false,
+      files: [],
+      error: "Error: Invalid prompt format",
+    });
 
     const target: InferenceTarget = {
       providerAccount: "openai-acc",

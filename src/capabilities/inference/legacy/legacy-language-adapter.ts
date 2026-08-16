@@ -9,6 +9,7 @@ import type {
   InferenceResponse,
   CanonicalMessage,
   ContentBlock,
+  Usage,
 } from "../../../foundations/schemas/inference.js";
 import { OpenAIProvider } from "../../llm/openai.js";
 import { AnthropicProvider } from "../../llm/anthropic.js";
@@ -76,16 +77,47 @@ export function canonicalToProviderMessages(messages: CanonicalMessage[]): Provi
   return result;
 }
 
+/** Combine AbortSignal and timeoutMs into a single effective AbortSignal */
+function resolveSignal(opts?: InferenceOptions): { signal?: AbortSignal; cleanup: () => void } {
+  if (!opts?.timeoutMs && !opts?.signal) {
+    return { signal: undefined, cleanup: () => {} };
+  }
+
+  const controller = new AbortController();
+  let timer: NodeJS.Timeout | undefined;
+
+  if (opts.timeoutMs && opts.timeoutMs > 0) {
+    timer = setTimeout(() => {
+      controller.abort(new Error(`Operation timed out after ${opts.timeoutMs}ms`));
+    }, opts.timeoutMs);
+  }
+
+  if (opts.signal) {
+    if (opts.signal.aborted) {
+      controller.abort(opts.signal.reason);
+    } else {
+      opts.signal.addEventListener("abort", () => controller.abort(opts.signal?.reason), { once: true });
+    }
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      if (timer) clearTimeout(timer);
+    },
+  };
+}
+
 /**
  * Legacy language adapter implementing LanguageBackend via direct OpenAI / Anthropic SDK wrappers.
  */
 export class LegacyLanguageAdapter implements LanguageBackend {
-  private createProvider(target: InferenceTarget, secret: string) {
+  private createProvider(target: InferenceTarget, apiKey: string) {
     if (target.upstreamProvider === "openai" || target.upstreamProvider === "openai-compatible") {
-      return new OpenAIProvider(secret, target.model, target.baseUrl);
+      return new OpenAIProvider(apiKey, target.model, target.baseUrl);
     }
     if (target.upstreamProvider === "anthropic" || target.upstreamProvider === "glm") {
-      return new AnthropicProvider(secret, target.model, target.baseUrl ? { baseURL: target.baseUrl } : undefined);
+      return new AnthropicProvider(apiKey, target.model, target.baseUrl ? { baseURL: target.baseUrl } : undefined);
     }
     throw new InferenceError({
       code: "unsupported_capability",
@@ -102,9 +134,21 @@ export class LegacyLanguageAdapter implements LanguageBackend {
     opts?: InferenceOptions,
   ): AsyncIterable<StreamEvent> {
     const lease = target.credential.acquireLease();
+    const { signal, cleanup } = resolveSignal(opts);
+
     try {
       const secret = await lease.secret();
-      const provider = this.createProvider(target, secret);
+      if (secret.kind !== "api_key") {
+        throw new InferenceError({
+          code: "auth",
+          message: `Legacy language adapter requires an api_key credential, received kind "${secret.kind}"`,
+          providerAccount: target.providerAccount,
+          model: target.model,
+          retryable: false,
+        });
+      }
+
+      const provider = this.createProvider(target, secret.key);
       const providerMessages = canonicalToProviderMessages(req.messages);
 
       yield {
@@ -118,95 +162,117 @@ export class LegacyLanguageAdapter implements LanguageBackend {
       let textBlockStarted = false;
       let hasToolCalls = false;
       const openToolIndices = new Set<number>();
+      let accumulatedUsage: Usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 
-      if (typeof provider.chatStream === "function") {
-        for await (const delta of provider.chatStream(providerMessages, req.tools ?? [], { signal: opts?.signal })) {
-          if (delta.type === "text_delta" && delta.content) {
-            if (!textBlockStarted) {
-              textBlockStarted = true;
+      try {
+        if (typeof provider.chatStream === "function") {
+          for await (const delta of provider.chatStream(providerMessages, req.tools ?? [], { signal })) {
+            if (delta.type === "text_delta" && delta.content) {
+              if (!textBlockStarted) {
+                textBlockStarted = true;
+                yield {
+                  type: "content_block_start",
+                  index: 0,
+                  block: { type: "text", text: "" },
+                };
+              }
+              yield {
+                type: "content_block_delta",
+                index: 0,
+                delta: {
+                  type: "text_delta",
+                  text: delta.content,
+                },
+              };
+            } else if (delta.type === "tool_call_begin") {
+              hasToolCalls = true;
+              if (textBlockStarted) {
+                yield { type: "content_block_stop", index: 0 };
+                textBlockStarted = false;
+              }
+              const toolBlockIndex = 1 + delta.index;
+              openToolIndices.add(toolBlockIndex);
               yield {
                 type: "content_block_start",
-                index: 0,
-                block: { type: "text", text: "" },
+                index: toolBlockIndex,
+                block: {
+                  type: "tool_use",
+                  id: delta.id,
+                  name: delta.name,
+                  input: {},
+                },
               };
-            }
-            yield {
-              type: "content_block_delta",
-              index: 0,
-              delta: {
-                type: "text_delta",
-                text: delta.content,
-              },
-            };
-          } else if (delta.type === "tool_call_begin") {
-            hasToolCalls = true;
-            if (textBlockStarted) {
-              yield { type: "content_block_stop", index: 0 };
-              textBlockStarted = false;
-            }
-            const toolBlockIndex = 1 + delta.index;
-            openToolIndices.add(toolBlockIndex);
-            yield {
-              type: "content_block_start",
-              index: toolBlockIndex,
-              block: {
-                type: "tool_use",
-                id: delta.id,
-                name: delta.name,
-                input: {},
-              },
-            };
-          } else if (delta.type === "tool_call_delta") {
-            const toolBlockIndex = 1 + delta.index;
-            yield {
-              type: "content_block_delta",
-              index: toolBlockIndex,
-              delta: {
-                type: "tool_input_delta",
-                partialJson: delta.argumentsDelta,
-              },
-            };
-          } else if (delta.type === "finish") {
-            if (textBlockStarted) {
-              yield { type: "content_block_stop", index: 0 };
-              textBlockStarted = false;
-            }
-            for (const idx of openToolIndices) {
-              yield { type: "content_block_stop", index: idx };
-            }
-            openToolIndices.clear();
+            } else if (delta.type === "tool_call_delta") {
+              const toolBlockIndex = 1 + delta.index;
+              yield {
+                type: "content_block_delta",
+                index: toolBlockIndex,
+                delta: {
+                  type: "tool_input_delta",
+                  partialJson: delta.argumentsDelta,
+                },
+              };
+            } else if (delta.type === "finish") {
+              if (delta.usage) {
+                accumulatedUsage = {
+                  promptTokens: delta.usage.promptTokens ?? 0,
+                  completionTokens: delta.usage.completionTokens ?? 0,
+                  totalTokens: delta.usage.totalTokens ?? 0,
+                };
+              }
+              if (textBlockStarted) {
+                yield { type: "content_block_stop", index: 0 };
+                textBlockStarted = false;
+              }
+              for (const idx of openToolIndices) {
+                yield { type: "content_block_stop", index: idx };
+              }
+              openToolIndices.clear();
 
-            yield {
-              type: "finish",
-              stopReason: hasToolCalls ? "tool_use" : "end_turn",
-              usage: {
-                promptTokens: delta.usage?.promptTokens ?? 0,
-                completionTokens: delta.usage?.completionTokens ?? 0,
-                totalTokens: delta.usage?.totalTokens ?? 0,
-              },
-            };
-            return;
+              yield {
+                type: "finish",
+                stopReason: hasToolCalls ? "tool_use" : "end_turn",
+                usage: accumulatedUsage,
+              };
+              return;
+            }
           }
         }
-      }
 
-      if (textBlockStarted) {
-        yield { type: "content_block_stop", index: 0 };
-      }
-      for (const idx of openToolIndices) {
-        yield { type: "content_block_stop", index: idx };
-      }
+        if (textBlockStarted) {
+          yield { type: "content_block_stop", index: 0 };
+        }
+        for (const idx of openToolIndices) {
+          yield { type: "content_block_stop", index: idx };
+        }
 
-      yield {
-        type: "finish",
-        stopReason: hasToolCalls ? "tool_use" : "end_turn",
-        usage: {
-          promptTokens: 0,
-          completionTokens: 0,
-          totalTokens: 0,
-        },
-      };
+        yield {
+          type: "finish",
+          stopReason: hasToolCalls ? "tool_use" : "end_turn",
+          usage: accumulatedUsage,
+        };
+      } catch (streamErr: any) {
+        const isAbort = signal?.aborted;
+        if (isAbort) {
+          yield {
+            type: "abort",
+            reason: signal?.reason?.message || "Stream aborted",
+            partialUsage: accumulatedUsage,
+          };
+        } else {
+          yield {
+            type: "error",
+            error: {
+              code: "network",
+              message: streamErr?.message || "Streaming error occurred",
+              retryable: true,
+            },
+            partialUsage: accumulatedUsage,
+          };
+        }
+      }
     } finally {
+      cleanup();
       await lease.release();
     }
   }
@@ -217,11 +283,37 @@ export class LegacyLanguageAdapter implements LanguageBackend {
     opts?: InferenceOptions,
   ): Promise<InferenceResponse> {
     const lease = target.credential.acquireLease();
+    const { signal, cleanup } = resolveSignal(opts);
+
     try {
       const secret = await lease.secret();
-      const provider = this.createProvider(target, secret);
+      if (secret.kind !== "api_key") {
+        throw new InferenceError({
+          code: "auth",
+          message: `Legacy language adapter requires an api_key credential, received kind "${secret.kind}"`,
+          providerAccount: target.providerAccount,
+          model: target.model,
+          retryable: false,
+        });
+      }
+
+      const provider = this.createProvider(target, secret.key);
       const providerMessages = canonicalToProviderMessages(req.messages);
-      const resp = await provider.chat(providerMessages, req.tools ?? [], { signal: opts?.signal });
+
+      let resp;
+      try {
+        resp = await provider.chat(providerMessages, req.tools ?? [], { signal });
+      } catch (err: any) {
+        const isTimeout = signal?.aborted && opts?.timeoutMs;
+        throw new InferenceError({
+          code: isTimeout ? "timeout" : "network",
+          message: err?.message || "Chat request failed",
+          providerAccount: target.providerAccount,
+          model: target.model,
+          retryable: true,
+          cause: err,
+        });
+      }
 
       const contentBlocks: (ContentBlock & { type: "text" | "tool_use" })[] = [];
       if (resp.content) {
@@ -267,6 +359,7 @@ export class LegacyLanguageAdapter implements LanguageBackend {
         },
       };
     } finally {
+      cleanup();
       await lease.release();
     }
   }

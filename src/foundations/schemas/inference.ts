@@ -67,8 +67,6 @@ export const ImageBlockSchema = Type.Union([
       Type.Literal("image/gif"),
     ]),
     data: Type.String(),
-    url: Type.Optional(Type.Undefined()),
-    artifact: Type.Optional(Type.Undefined()),
     detail: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("low"), Type.Literal("high")])),
   }),
   Type.Object({
@@ -79,9 +77,7 @@ export const ImageBlockSchema = Type.Union([
       Type.Literal("image/webp"),
       Type.Literal("image/gif"),
     ]),
-    data: Type.Optional(Type.Undefined()),
     url: Type.String(),
-    artifact: Type.Optional(Type.Undefined()),
     detail: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("low"), Type.Literal("high")])),
   }),
   Type.Object({
@@ -92,8 +88,6 @@ export const ImageBlockSchema = Type.Union([
       Type.Literal("image/webp"),
       Type.Literal("image/gif"),
     ]),
-    data: Type.Optional(Type.Undefined()),
-    url: Type.Optional(Type.Undefined()),
     artifact: Type.Object({ ref: Type.String(), mediaType: Type.String() }),
     detail: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("low"), Type.Literal("high")])),
   }),
@@ -109,8 +103,6 @@ export const AudioBlockSchema = Type.Union([
       Type.Literal("audio/ogg"),
     ]),
     data: Type.String(),
-    url: Type.Optional(Type.Undefined()),
-    artifact: Type.Optional(Type.Undefined()),
   }),
   Type.Object({
     type: Type.Literal("audio"),
@@ -119,9 +111,7 @@ export const AudioBlockSchema = Type.Union([
       Type.Literal("audio/mp3"),
       Type.Literal("audio/ogg"),
     ]),
-    data: Type.Optional(Type.Undefined()),
     url: Type.String(),
-    artifact: Type.Optional(Type.Undefined()),
   }),
   Type.Object({
     type: Type.Literal("audio"),
@@ -130,8 +120,6 @@ export const AudioBlockSchema = Type.Union([
       Type.Literal("audio/mp3"),
       Type.Literal("audio/ogg"),
     ]),
-    data: Type.Optional(Type.Undefined()),
-    url: Type.Optional(Type.Undefined()),
     artifact: Type.Object({ ref: Type.String(), mediaType: Type.String() }),
   }),
 ]);
@@ -142,21 +130,15 @@ export const BinaryBlockSchema = Type.Union([
     type: Type.Literal("binary"),
     mediaType: Type.String(),
     data: Type.String(),
-    url: Type.Optional(Type.Undefined()),
-    artifact: Type.Optional(Type.Undefined()),
   }),
   Type.Object({
     type: Type.Literal("binary"),
     mediaType: Type.String(),
-    data: Type.Optional(Type.Undefined()),
     url: Type.String(),
-    artifact: Type.Optional(Type.Undefined()),
   }),
   Type.Object({
     type: Type.Literal("binary"),
     mediaType: Type.String(),
-    data: Type.Optional(Type.Undefined()),
-    url: Type.Optional(Type.Undefined()),
     artifact: Type.Object({ ref: Type.String(), mediaType: Type.String() }),
   }),
 ]);
@@ -261,6 +243,15 @@ export const UsageSchema = Type.Object({
 });
 export type Usage = Type.Static<typeof UsageSchema>;
 
+// ── Stop Reason ──────────────────────────────────────────────────────────
+export const StopReasonSchema = Type.Union([
+  Type.Literal("end_turn"),
+  Type.Literal("tool_use"),
+  Type.Literal("max_tokens"),
+  Type.Literal("stop_sequence"),
+]);
+export type StopReason = Type.Static<typeof StopReasonSchema>;
+
 // ── Streaming Events ──────────────────────────────────────────────────────
 export const StreamEventSchema = Type.Union([
   Type.Object({
@@ -297,12 +288,7 @@ export const StreamEventSchema = Type.Union([
   }),
   Type.Object({
     type: Type.Literal("finish"),
-    stopReason: Type.Union([
-      Type.Literal("end_turn"),
-      Type.Literal("tool_use"),
-      Type.Literal("max_tokens"),
-      Type.Literal("stop_sequence"),
-    ]),
+    stopReason: StopReasonSchema,
     usage: UsageSchema,
   }),
   Type.Object({
@@ -325,12 +311,7 @@ export type StreamEvent = Type.Static<typeof StreamEventSchema>;
 // ── Responses & Requests ──────────────────────────────────────────────────
 export const InferenceResponseSchema = Type.Object({
   message: AssistantMessageSchema,
-  stopReason: Type.Union([
-    Type.Literal("end_turn"),
-    Type.Literal("tool_use"),
-    Type.Literal("max_tokens"),
-    Type.Literal("stop_sequence"),
-  ]),
+  stopReason: StopReasonSchema,
   usage: UsageSchema,
   providerResponseId: Type.Optional(Type.String()),
 });
@@ -349,8 +330,8 @@ export const ImageRequestSchema = Type.Object({
   aspectRatio: Type.Optional(Type.String()),
   qualityPreset: Type.Optional(Type.Union([Type.Literal("standard"), Type.Literal("hd")])),
   count: Type.Optional(Type.Integer({ minimum: 1, maximum: 10 })),
-  inputImage: Type.Optional(Type.String()),
-  mask: Type.Optional(Type.String()),
+  inputImage: Type.Optional(Type.Union([Type.String(), ImageBlockSchema])),
+  mask: Type.Optional(Type.Union([Type.String(), ImageBlockSchema])),
   style: Type.Optional(Type.String()),
   outputDir: Type.Optional(Type.String()),
 });

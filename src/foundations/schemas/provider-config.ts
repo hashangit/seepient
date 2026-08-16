@@ -80,6 +80,7 @@ export const PurposeModelMapSchema = Type.Object({
   text: TieredAssignmentsSchema,
   coding: Type.Optional(TieredAssignmentsSchema),
   vision: Type.Optional(TieredAssignmentsSchema),
+  commit: Type.Optional(TieredAssignmentsSchema),
   media: Type.Optional(
     Type.Object({
       image: Type.Optional(ModelAssignmentSchema),
@@ -198,6 +199,7 @@ export const PurposeModelMapPatchSchema = Type.Object({
   text: Nullable(TieredAssignmentsPatchSchema),
   coding: Nullable(TieredAssignmentsPatchSchema),
   vision: Nullable(TieredAssignmentsPatchSchema),
+  commit: Nullable(TieredAssignmentsPatchSchema),
   media: Nullable(
     Type.Object({
       image: Nullable(ModelAssignmentPatchSchema),

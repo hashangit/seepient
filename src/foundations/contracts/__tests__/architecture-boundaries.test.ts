@@ -203,4 +203,38 @@ describe("architecture boundaries (spec 008, T008)", () => {
     }
     expect(violations, violations.join("\n")).toEqual([]);
   });
+
+  it("enforces specific vendor sub-directory quarantine (pi-ai and google)", () => {
+    const violations: string[] = [];
+    for (const f of files) {
+      const rel = relative(ROOT, f).replace(/\\/g, "/");
+      if (rel.startsWith("test") || rel.endsWith(".test.ts") || rel.endsWith(".test.tsx")) continue;
+      const src = readFileSync(f, "utf8");
+      for (const spec of moduleSpecifiers(src)) {
+        const pkg = packageName(spec);
+        if (pkg === "@earendil-works/pi-ai" && !rel.startsWith("vendors/pi-ai/")) {
+          violations.push(`${rel} imports @earendil-works/pi-ai outside vendors/pi-ai/`);
+        }
+        if (pkg === "@google/genai" && !rel.startsWith("vendors/google/")) {
+          violations.push(`${rel} imports @google/genai outside vendors/google/`);
+        }
+      }
+    }
+    expect(violations, violations.join("\n")).toEqual([]);
+  });
+
+  it("Foundations imports standalone typebox directly and never via vendor re-exports", () => {
+    const violations: string[] = [];
+    for (const f of files) {
+      const rel = relative(ROOT, f).replace(/\\/g, "/");
+      if (!rel.startsWith("foundations/")) continue;
+      const src = readFileSync(f, "utf8");
+      for (const spec of moduleSpecifiers(src)) {
+        if (spec.includes("pi-ai") || spec.includes("vendors")) {
+          violations.push(`${rel} imports from ${spec}`);
+        }
+      }
+    }
+    expect(violations, violations.join("\n")).toEqual([]);
+  });
 });

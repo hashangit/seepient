@@ -44,17 +44,30 @@ async function downloadImage(url: string, destPath: string): Promise<void> {
   fs.writeFileSync(destPath, Buffer.from(buffer));
 }
 
-export async function generateImages(req: ImageRequest, config: MediaConfig): Promise<string> {
+export interface StructuredImageResult {
+  success: boolean;
+  files: string[];
+  error?: string;
+}
+
+export async function generateImagesStructured(
+  req: ImageRequest,
+  config: MediaConfig,
+): Promise<StructuredImageResult> {
   const apiKey = config.imageApiKey || config.apiKey || process.env.OPENAI_API_KEY;
   const baseURL = config.imageBaseUrl || config.baseUrl || process.env.OPENAI_COMPAT_BASE_URL || process.env.OPENAI_BASE_URL;
 
   if (!apiKey) {
-    return "Error: Image Service API Key is missing. Please configure it in .seepient/setting.json (imageApiKey or apiKey).";
+    return {
+      success: false,
+      files: [],
+      error: "Error: Image Service API Key is missing. Please configure it in .seepient/setting.json (imageApiKey or apiKey).",
+    };
   }
 
   const client = new OpenAI({
     apiKey: apiKey,
-    baseURL: baseURL
+    baseURL: baseURL,
   });
 
   const { prompt, imagePath, maskPath } = req;
@@ -64,7 +77,7 @@ export async function generateImages(req: ImageRequest, config: MediaConfig): Pr
 
   let mode = req.mode;
   let model = req.model;
-  if (config.imageModel && (!model || model === 'dall-e-3')) {
+  if (config.imageModel && (!model || model === "dall-e-3")) {
     model = config.imageModel;
   }
   model = model || "dall-e-3";
@@ -88,13 +101,20 @@ export async function generateImages(req: ImageRequest, config: MediaConfig): Pr
     if (model === "dall-e-3") {
       const validSizes = ["1024x1024", "1024x1792", "1792x1024"];
       if (!validSizes.includes(size)) {
-         return `Error: Invalid size '${size}' for DALL-E 3. Supported sizes are: ${validSizes.join(", ")}.`;
+        return {
+          success: false,
+          files: [],
+          error: `Error: Invalid size '${size}' for DALL-E 3. Supported sizes are: ${validSizes.join(", ")}.`,
+        };
       }
-    }
-    else if (model === "dall-e-2") {
+    } else if (model === "dall-e-2") {
       const validSizes = ["256x256", "512x512", "1024x1024"];
       if (!validSizes.includes(size)) {
-        return `Error: Invalid size '${size}' for DALL-E 2. Supported sizes are: ${validSizes.join(", ")}.`;
+        return {
+          success: false,
+          files: [],
+          error: `Error: Invalid size '${size}' for DALL-E 2. Supported sizes are: ${validSizes.join(", ")}.`,
+        };
       }
     }
   } else {
@@ -113,7 +133,13 @@ export async function generateImages(req: ImageRequest, config: MediaConfig): Pr
 
   try {
     if (mode === "text-to-image") {
-      if (!prompt) return "Error: 'prompt' is required for text-to-image mode.";
+      if (!prompt) {
+        return {
+          success: false,
+          files: [],
+          error: "Error: 'prompt' is required for text-to-image mode.",
+        };
+      }
 
       console.log(`Generating ${n} image(s) with ${model} (${size}, ${quality})...`);
 
@@ -126,7 +152,7 @@ export async function generateImages(req: ImageRequest, config: MediaConfig): Pr
             size: size as any,
             quality: quality as any,
             style: style as any,
-            response_format: "url"
+            response_format: "url",
           });
 
           const imageUrl = response.data?.[0]?.url;
@@ -143,7 +169,7 @@ export async function generateImages(req: ImageRequest, config: MediaConfig): Pr
           prompt: prompt,
           n: n,
           size: size as any,
-          response_format: "url"
+          response_format: "url",
         });
 
         const data = response.data || [];
@@ -157,10 +183,21 @@ export async function generateImages(req: ImageRequest, config: MediaConfig): Pr
           }
         }
       }
-
     } else if (mode === "variation") {
-      if (!imagePath) return "Error: 'image_path' is required for variation mode.";
-      if (!fs.existsSync(imagePath)) return `Error: Image file not found at ${imagePath}`;
+      if (!imagePath) {
+        return {
+          success: false,
+          files: [],
+          error: "Error: 'image_path' is required for variation mode.",
+        };
+      }
+      if (!fs.existsSync(imagePath)) {
+        return {
+          success: false,
+          files: [],
+          error: `Error: Image file not found at ${imagePath}`,
+        };
+      }
 
       console.log(`Generating ${n} variation(s) with ${model}...`);
 
@@ -169,7 +206,7 @@ export async function generateImages(req: ImageRequest, config: MediaConfig): Pr
         n: n,
         model: "dall-e-2",
         size: size as any,
-        response_format: "url"
+        response_format: "url",
       });
 
       const data = response.data || [];
@@ -182,11 +219,28 @@ export async function generateImages(req: ImageRequest, config: MediaConfig): Pr
           generatedFiles.push(filePath);
         }
       }
-
     } else if (mode === "edit") {
-      if (!imagePath) return "Error: 'image_path' is required for edit mode.";
-      if (!prompt) return "Error: 'prompt' is required for edit mode.";
-      if (!fs.existsSync(imagePath)) return `Error: Image file not found at ${imagePath}`;
+      if (!imagePath) {
+        return {
+          success: false,
+          files: [],
+          error: "Error: 'image_path' is required for edit mode.",
+        };
+      }
+      if (!prompt) {
+        return {
+          success: false,
+          files: [],
+          error: "Error: 'prompt' is required for edit mode.",
+        };
+      }
+      if (!fs.existsSync(imagePath)) {
+        return {
+          success: false,
+          files: [],
+          error: `Error: Image file not found at ${imagePath}`,
+        };
+      }
 
       console.log(`Editing image with ${model}...`);
 
@@ -196,7 +250,7 @@ export async function generateImages(req: ImageRequest, config: MediaConfig): Pr
         n: n,
         model: "dall-e-2",
         size: size as any,
-        response_format: "url"
+        response_format: "url",
       };
 
       if (maskPath && fs.existsSync(maskPath)) {
@@ -216,18 +270,36 @@ export async function generateImages(req: ImageRequest, config: MediaConfig): Pr
         }
       }
     } else {
-      return `Error: Unknown mode '${mode}'.`;
+      return {
+        success: false,
+        files: [],
+        error: `Error: Unknown mode '${mode}'.`,
+      };
     }
 
-    return `Successfully generated ${generatedFiles.length} image(s):\n${generatedFiles.join('\n')}`;
-
+    return {
+      success: true,
+      files: generatedFiles,
+    };
   } catch (error: any) {
     console.error(chalk.red(`Image Generation Failed: ${error.message}`));
     if (error.response && error.response.data) {
-       console.error(chalk.dim(JSON.stringify(error.response.data)));
+      console.error(chalk.dim(JSON.stringify(error.response.data)));
     }
-    return `Error generating image: ${error.message}`;
+    return {
+      success: false,
+      files: [],
+      error: `Error generating image: ${error.message}`,
+    };
   }
+}
+
+export async function generateImages(req: ImageRequest, config: MediaConfig): Promise<string> {
+  const res = await generateImagesStructured(req, config);
+  if (!res.success || res.error) {
+    return res.error ?? "Error generating image.";
+  }
+  return `Successfully generated ${res.files.length} image(s):\n${res.files.join("\n")}`;
 }
 
 export async function optimizePrompt(

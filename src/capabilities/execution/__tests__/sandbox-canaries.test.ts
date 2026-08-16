@@ -301,12 +301,18 @@ describe("containment negative canaries (review P0)", () => {
       ? `/Library/Developer/CommandLineTools/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin`
       : "/usr/bin:/bin:/usr/sbin:/sbin";
     const r = await sandbox.exec({
-      command: { executable: "/bin/sh", argv: ["-c", "git status --short"], cwd: workspace },
+      command: { executable: "/bin/sh", argv: ["-c", "git -c core.excludesFile='' status --short"], cwd: workspace },
       roots: [
         { access: "read", canonicalRoot: workspace },
         { access: "write", canonicalRoot: workspace },
       ],
-      env: { PATH: path, HOME: process.env.HOME ?? workspace },
+      env: {
+        PATH: path,
+        HOME: workspace,
+        XDG_CONFIG_HOME: workspace,
+        GIT_CONFIG_GLOBAL: "/dev/null",
+        GIT_CONFIG_NOSYSTEM: "1",
+      },
     });
     expect(r.exitCode).toBe(0);
     expect(r.stderr).toBe("");

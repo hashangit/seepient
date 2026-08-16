@@ -30,17 +30,24 @@ export class SeepientError extends Error {
 
 // ── Provider errors ─────────────────────────────────────────────────────
 
+export type InferenceErrorCode =
+  | "unsupported_capability"
+  | "provider_unavailable"
+  | "rate_limit"
+  | "rate_limit_exceeded"
+  | "context_overflow"
+  | "invalid_request"
+  | "auth"
+  | "auth_failed"
+  | "timeout"
+  | "network"
+  | "network_error"
+  | "overload"
+  | "malformed_response"
+  | "internal_adapter";
+
 export interface InferenceErrorOptions {
-  code:
-    | "unsupported_capability"
-    | "provider_unavailable"
-    | "rate_limit_exceeded"
-    | "context_overflow"
-    | "invalid_request"
-    | "auth_failed"
-    | "timeout"
-    | "network_error"
-    | "internal_adapter";
+  code: InferenceErrorCode;
   message: string;
   retryable?: boolean;
   providerAccount?: string;

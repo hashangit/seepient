@@ -8,7 +8,7 @@ import type {
   ImageRequest,
   ImageResult,
 } from "../../../foundations/schemas/inference.js";
-import { generateImages } from "../../media/media.js";
+import { generateImagesStructured } from "../../media/media.js";
 import { InferenceError } from "../../../foundations/errors.js";
 
 /**
@@ -18,11 +18,21 @@ export class LegacyMediaAdapter implements ImageBackend {
   async generate(
     target: InferenceTarget,
     req: ImageRequest,
-    _opts?: InferenceOptions,
+    opts?: InferenceOptions,
   ): Promise<ImageResult> {
     const lease = target.credential.acquireLease();
     try {
       const secret = await lease.secret();
+
+      if (secret.kind !== "api_key") {
+        throw new InferenceError({
+          code: "auth",
+          message: `Legacy media adapter requires an api_key credential, received kind "${secret.kind}"`,
+          providerAccount: target.providerAccount,
+          model: target.model,
+          retryable: false,
+        });
+      }
 
       if (target.upstreamProvider !== "openai" && target.upstreamProvider !== "openai-compatible") {
         throw new InferenceError({
@@ -43,45 +53,63 @@ export class LegacyMediaAdapter implements ImageBackend {
               ? "edit"
               : undefined;
 
-      const legacyResult = await generateImages(
-        {
-          prompt: req.prompt,
-          imagePath: req.inputImage,
-          maskPath: req.mask,
-          mode: legacyMode,
-          model: target.model,
-          n: req.count ?? 1,
-          quality: req.qualityPreset === "hd" ? "hd" : "standard",
-          style: req.style,
-          outputDir: req.outputDir,
-        },
-        {
-          apiKey: secret,
-          baseUrl: target.baseUrl,
-        },
-      );
+      const inputImagePath =
+        typeof req.inputImage === "string"
+          ? req.inputImage
+          : typeof req.inputImage === "object" && req.inputImage !== null
+            ? (req.inputImage as any).url || (req.inputImage as any).path
+            : undefined;
 
-      if (typeof legacyResult === "string" && legacyResult.startsWith("Error")) {
+      const maskPath =
+        typeof req.mask === "string"
+          ? req.mask
+          : typeof req.mask === "object" && req.mask !== null
+            ? (req.mask as any).url || (req.mask as any).path
+            : undefined;
+
+      let structuredResult;
+      try {
+        structuredResult = await generateImagesStructured(
+          {
+            prompt: req.prompt,
+            imagePath: inputImagePath,
+            maskPath,
+            mode: legacyMode,
+            model: target.model,
+            n: req.count ?? 1,
+            quality: req.qualityPreset === "hd" ? "hd" : "standard",
+            style: req.style,
+            outputDir: req.outputDir,
+          },
+          {
+            apiKey: secret.key,
+            baseUrl: target.baseUrl,
+          },
+        );
+      } catch (err: any) {
         throw new InferenceError({
-          code: "invalid_request",
-          message: legacyResult,
+          code: "network",
+          message: err?.message || "Failed to generate image via media backend",
+          providerAccount: target.providerAccount,
+          model: target.model,
+          retryable: true,
+          cause: err,
+        });
+      }
+
+      if (!structuredResult.success || structuredResult.error) {
+        const errMsg = structuredResult.error || "Image generation failed";
+        const isAuth = errMsg.toLowerCase().includes("api key") || errMsg.toLowerCase().includes("auth");
+        throw new InferenceError({
+          code: isAuth ? "auth" : "invalid_request",
+          message: errMsg,
           providerAccount: target.providerAccount,
           model: target.model,
           retryable: false,
         });
       }
 
-      // Parse output: media.ts returns "Successfully generated N image(s):\n<path1>\n<path2>"
-      const rawLines = typeof legacyResult === "string"
-        ? legacyResult.split("\n").map((l) => l.trim()).filter((l) => l.length > 0)
-        : [];
-
-      // Filter out header lines (e.g. "Successfully generated N image(s):")
-      const candidatePaths = rawLines.filter(
-        (line) => !line.toLowerCase().startsWith("successfully generated"),
-      );
-
-      const images = candidatePaths.map((item) => {
+      const images = structuredResult.files.map((item) => {
         if (item.startsWith("http://") || item.startsWith("https://")) {
           return {
             mimeType: "image/png",
@@ -97,7 +125,7 @@ export class LegacyMediaAdapter implements ImageBackend {
             };
           }
         } catch {
-          // Fall through to path string if reading file fails
+          // Fall through
         }
         return {
           mimeType: "image/png",
@@ -106,14 +134,13 @@ export class LegacyMediaAdapter implements ImageBackend {
         };
       });
 
-      // Ensure at least one image entry if no file paths were parsed
       if (images.length === 0) {
-        images.push({
-          mimeType: "image/png",
-          url: typeof legacyResult === "string" && legacyResult.startsWith("http") ? legacyResult : undefined,
-          base64: typeof legacyResult === "string" && !legacyResult.startsWith("http") && !legacyResult.startsWith("Successfully")
-            ? legacyResult
-            : undefined,
+        throw new InferenceError({
+          code: "malformed_response",
+          message: "Media backend returned success but produced 0 image files",
+          providerAccount: target.providerAccount,
+          model: target.model,
+          retryable: false,
         });
       }
 

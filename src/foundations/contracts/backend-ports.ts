@@ -7,13 +7,14 @@ import type {
   ImageResult,
   UpstreamModel,
 } from "../schemas/inference.js";
+import type { ToolDefinition } from "./tool.js";
 import type { CredentialHandle } from "./credential-store.js";
 
 export interface LanguageRequest {
   messages: CanonicalMessage[];
   thinkingLevel?: ThinkingLevel;
   maxOutputTokens?: number;
-  tools?: any[];
+  tools?: ToolDefinition[];
 }
 
 export interface InferenceOptions {

@@ -5,7 +5,10 @@ import type {
   CredentialMeta,
 } from "../schemas/credential-store.js";
 
-export type CredentialSecret = string;
+export type CredentialSecret =
+  | { kind: "api_key"; key: string }
+  | { kind: "pi_oauth"; account: string; provider: string; tokens?: unknown }
+  | { kind: "none" };
 
 export interface CredentialLease {
   readonly leaseId: string;

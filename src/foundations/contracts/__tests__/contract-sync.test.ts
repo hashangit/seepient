@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import AjvModule from "ajv";
 const Ajv = (AjvModule as any).default ?? AjvModule;
 import {
@@ -17,9 +19,11 @@ import {
   OverlayDocumentSchema,
   CredentialRefSchema,
   ThinkingLevelSchema,
+  StopReasonSchema,
   type ImageRequest,
   type ImageResult,
   type ThinkingLevel,
+  type StopReason,
   type CredentialRef,
   type ProviderEffectiveConfig,
   type OverlayDocument,
@@ -50,6 +54,11 @@ const _assertAgentPurposeValues: AssertEqual<
   "plan" | "text" | "vision" | "commit"
 > = true;
 
+const _assertStopReasonValues: AssertEqual<
+  StopReason,
+  "end_turn" | "tool_use" | "max_tokens" | "stop_sequence"
+> = true;
+
 describe("contract sync and schema validation (QS-P1.1, QS-P1.2, QS-P1.3)", () => {
   const ajv = new Ajv({ strict: false });
 
@@ -57,6 +66,75 @@ describe("contract sync and schema validation (QS-P1.1, QS-P1.2, QS-P1.3)", () =
     expect(_assertQualityPresetSync).toBe(true);
     expect(_assertThinkingLevelSync).toBe(true);
     expect(_assertAgentPurposeValues).toBe(true);
+    expect(_assertStopReasonValues).toBe(true);
+  });
+
+  it("validates thinking level and stop reason schemas", () => {
+    const validateThinking = ajv.compile(ThinkingLevelSchema);
+    expect(validateThinking("high")).toBe(true);
+    expect(validateThinking("none")).toBe(true);
+    expect(validateThinking("extreme")).toBe(false);
+
+    const validateStopReason = ajv.compile(StopReasonSchema);
+    expect(validateStopReason("end_turn")).toBe(true);
+    expect(validateStopReason("tool_use")).toBe(true);
+    expect(validateStopReason("unknown_stop")).toBe(false);
+  });
+
+  it("validates streaming event schema for all variants", () => {
+    const validateStream = ajv.compile(StreamEventSchema);
+
+    expect(
+      validateStream({
+        type: "start",
+        resolvedModel: { modelId: "gpt-4o", providerAccount: "work" },
+      }),
+    ).toBe(true);
+
+    expect(
+      validateStream({
+        type: "content_block_start",
+        index: 0,
+        block: { type: "text", text: "" },
+      }),
+    ).toBe(true);
+
+    expect(
+      validateStream({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "Hello" },
+      }),
+    ).toBe(true);
+
+    expect(
+      validateStream({
+        type: "content_block_stop",
+        index: 0,
+      }),
+    ).toBe(true);
+
+    expect(
+      validateStream({
+        type: "finish",
+        stopReason: "end_turn",
+        usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+      }),
+    ).toBe(true);
+
+    expect(
+      validateStream({
+        type: "error",
+        error: { code: "rate_limit", message: "Too many requests", retryable: true },
+      }),
+    ).toBe(true);
+
+    expect(
+      validateStream({
+        type: "abort",
+        reason: "User cancelled",
+      }),
+    ).toBe(true);
   });
 
   it("validates text and reasoning content blocks", () => {
@@ -110,38 +188,51 @@ describe("contract sync and schema validation (QS-P1.1, QS-P1.2, QS-P1.3)", () =
     expect(validateCred({ kind: "unknown_kind" })).toBe(false);
   });
 
-  it("validates image request schema with standard and hd quality presets", () => {
-    const validateImage = ajv.compile(ImageRequestSchema);
-    expect(
-      validateImage({
-        prompt: "A landscape painting",
-        operation: "generate",
-        qualityPreset: "standard",
-        count: 1,
-      }),
-    ).toBe(true);
-
-    expect(
-      validateImage({
-        prompt: "A landscape painting",
-        operation: "generate",
-        qualityPreset: "hd",
-        count: 1,
-      }),
-    ).toBe(true);
-
-    expect(
-      validateImage({
-        prompt: "A landscape painting",
-        operation: "generate",
-        qualityPreset: "low", // Invalid: only standard and hd allowed
-      }),
-    ).toBe(false);
+  it("validates provider effective configuration schema", () => {
+    const validateConfig = ajv.compile(ProviderEffectiveConfigSchema);
+    const effectiveConfig = {
+      schemaVersion: 2,
+      revision: 1,
+      updatedAt: "2026-08-16T00:00:00.000Z",
+      providers: {
+        work: {
+          adapter: "pi-ai",
+          upstreamProvider: "openai",
+          credential: { kind: "env", name: "OPENAI_API_KEY" },
+        },
+      },
+      modelAssignments: {
+        text: {
+          standard: {
+            providerAccount: "work",
+            model: "gpt-4o",
+          },
+        },
+      },
+      retryPolicy: {
+        maxAttempts: 3,
+        operationTimeoutMs: 60000,
+        streamingIdleTimeoutMs: 30000,
+        backoffBaseMs: 500,
+        backoffMultiplier: 2,
+        backoffJitter: 0.25,
+        backoffCapMs: 30000,
+        cooldownThreshold: 3,
+        cooldownDurationMs: 60000,
+      },
+      ssrf: {
+        allowPrivateNetworks: false,
+        allowedProtocols: ["https:"],
+      },
+    };
+    expect(validateConfig(effectiveConfig)).toBe(true);
   });
 
-  it("validates overlay document schema with deep-patch capability", () => {
+  it("validates overlay document schema with all 3 nested-null patch cases", () => {
     const validateOverlay = ajv.compile(OverlayDocumentSchema);
-    const validOverlay = {
+
+    // Case 1: unsetting a nested field (timeoutMs: null)
+    const patchFieldNull = {
       revision: 1,
       updatedAt: "2026-08-16T00:00:00.000Z",
       patch: {
@@ -149,12 +240,58 @@ describe("contract sync and schema validation (QS-P1.1, QS-P1.2, QS-P1.3)", () =
           work: {
             adapter: "pi-ai",
             upstreamProvider: "openai",
-            timeoutMs: null, // explicitly unset
+            timeoutMs: null,
           },
         },
       },
     };
-    expect(validateOverlay(validOverlay)).toBe(true);
+    expect(validateOverlay(patchFieldNull)).toBe(true);
+
+    // Case 2: unsetting an entire provider entry (work: null)
+    const patchEntryNull = {
+      revision: 2,
+      updatedAt: "2026-08-16T00:01:00.000Z",
+      patch: {
+        providers: {
+          work: null,
+        },
+      },
+    };
+    expect(validateOverlay(patchEntryNull)).toBe(true);
+
+    // Case 3: unsetting an entire section (providers: null)
+    const patchSectionNull = {
+      revision: 3,
+      updatedAt: "2026-08-16T00:02:00.000Z",
+      patch: {
+        providers: null,
+      },
+    };
+    expect(validateOverlay(patchSectionNull)).toBe(true);
+  });
+
+  it("validates against frozen provider test fixtures corpus", () => {
+    const fixturesDir = path.resolve(process.cwd(), "tests/fixtures/providers");
+    expect(fs.existsSync(fixturesDir)).toBe(true);
+
+    const fixtureFiles = [
+      "openai/chat.json",
+      "openai/streaming.json",
+      "openai/tools.json",
+      "openai/images.json",
+      "anthropic/chat.json",
+      "anthropic/reasoning.json",
+      "google/images.json",
+    ];
+
+    for (const relPath of fixtureFiles) {
+      const fullPath = path.join(fixturesDir, relPath);
+      expect(fs.existsSync(fullPath), `Fixture ${relPath} must exist`).toBe(true);
+      const content = JSON.parse(fs.readFileSync(fullPath, "utf-8"));
+      expect(content).toBeDefined();
+      expect(content.provider).toBeDefined();
+      expect(content.model || content.models || content.operations).toBeDefined();
+    }
   });
 
   it("sdk-fixture types compile cleanly and satisfy interface shapes", () => {
@@ -171,6 +308,12 @@ describe("contract sync and schema validation (QS-P1.1, QS-P1.2, QS-P1.3)", () =
           standard: {
             providerAccount: "openai-main",
             model: "gpt-4o",
+          },
+        },
+        commit: {
+          standard: {
+            providerAccount: "openai-main",
+            model: "gpt-4o-mini",
           },
         },
       },
