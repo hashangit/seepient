@@ -21,12 +21,17 @@ export function env(name: string): string {
   return envProvider.get(name) ?? "";
 }
 
+const LIVE_SPIKES_ENV = "RUN_LIVE_SPIKES";
+
 /**
- * Skips the current test when `key` is empty. Call at the top of any test body
- * that would make a real network call. Pass the vitest context so we can call
- * `ctx.skip()` cleanly (no control-flow gymnastics).
+ * Skips the current test when RUN_LIVE_SPIKES is not 1 or `key` is empty. Call at
+ * the top of any test body that would make a real network call.
  */
 export function requireKey(ctx: TestContext, keyName: string, key: string, hint = ""): void {
+  if (process.env[LIVE_SPIKES_ENV] !== "1") {
+    ctx.skip(`live spike: set ${LIVE_SPIKES_ENV}=1 to run`);
+    return;
+  }
   if (!key) {
     const trailer = hint ? ` — ${hint}` : "";
     ctx.skip(`live spike: set ${keyName} to run${trailer}`);

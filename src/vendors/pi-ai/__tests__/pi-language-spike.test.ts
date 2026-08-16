@@ -117,12 +117,9 @@ describe("S0.7–S0.11 Pi language spike", () => {
       } satisfies Tool],
     }));
     const done = requireDone(events);
-    // A tool-capable model asked to call a tool should stop with reason "toolUse".
-    if (done.reason === "toolUse") {
-      const toolcallEnd = events.find((e) => e.type === "toolcall_end");
-      expect(toolcallEnd, "expected a toolcall_end event for a toolUse stop").toBeDefined();
-    }
-    // If it answered in text instead, that is still a valid `done` — recorded, not failed.
+    expect(done.reason).toBe("toolUse");
+    const toolcallEnd = events.find((e) => e.type === "toolcall_end");
+    expect(toolcallEnd, "expected a toolcall_end event for a toolUse stop").toBeDefined();
   }, 30_000);
 
   it("AbortController aborts the stream cleanly (S0.11)", async (ctx) => {

@@ -60,10 +60,13 @@ describe("S0.14 OpenAI-compatible (Ollama) spike", () => {
     const modelId = env("OLLAMA_MODEL") || "llama3.2";
 
     // Snapshot + mutate env: Ollama is keyless, so supply a dummy key so Pi's
-    // ambient auth resolves. Restore originals in afterEach (no leak).
+    // ambient auth resolves. For authenticated compat endpoints, use compatKey.
+    const compatKey = env(SPIKE_KEYS.openaiCompatKey);
     envSnapshots.key = process.env.OPENAI_API_KEY;
     envSnapshots.baseUrl = process.env.OPENAI_BASE_URL;
-    if (!process.env.OPENAI_API_KEY) process.env.OPENAI_API_KEY = "ollama-no-key-needed";
+    if (!process.env.OPENAI_API_KEY) {
+      process.env.OPENAI_API_KEY = compatKey || "ollama-no-key-needed";
+    }
 
     const m = openAiCompatModels(baseUrl);
     // getModel() requires the id to exist in Pi's catalog; Ollama models do not.

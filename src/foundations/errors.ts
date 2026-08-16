@@ -30,6 +30,42 @@ export class SeepientError extends Error {
 
 // ── Provider errors ─────────────────────────────────────────────────────
 
+export interface InferenceErrorOptions {
+  code:
+    | "unsupported_capability"
+    | "provider_unavailable"
+    | "rate_limit_exceeded"
+    | "context_overflow"
+    | "invalid_request"
+    | "auth_failed"
+    | "timeout"
+    | "network_error"
+    | "internal_adapter";
+  message: string;
+  retryable?: boolean;
+  providerAccount?: string;
+  model?: string;
+  cause?: unknown;
+}
+
+/**
+ * Standardized error originating from unified inference operations.
+ */
+export class InferenceError extends SeepientError {
+  providerAccount?: string;
+  model?: string;
+
+  constructor(opts: InferenceErrorOptions) {
+    super(opts.message, opts.code, opts.retryable ?? false);
+    this.name = "InferenceError";
+    this.providerAccount = opts.providerAccount;
+    this.model = opts.model;
+    if (opts.cause) {
+      this.cause = opts.cause;
+    }
+  }
+}
+
 /**
  * Error originating from a provider (LLM API call failure, auth, rate-limit, etc.).
  */
