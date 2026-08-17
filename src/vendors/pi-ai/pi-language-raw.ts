@@ -318,9 +318,20 @@ export class PiLanguageRaw implements LanguageBackend {
           } else if (event.type === "thinking_end") {
             if (openBlocks.has(event.contentIndex)) {
               openBlocks.delete(event.contentIndex);
+              const sig =
+                (event as any).signature ||
+                (event.partial?.content as any)?.[event.contentIndex]?.thinkingSignature;
               yield {
                 type: "content_block_stop",
                 index: event.contentIndex,
+                signature: sig,
+                signatureProvenance: sig
+                  ? {
+                      adapter: "pi-ai",
+                      providerApi: model.api,
+                      upstreamProvider: target.upstreamProvider,
+                    }
+                  : undefined,
               };
             }
           } else if (event.type === "toolcall_start") {

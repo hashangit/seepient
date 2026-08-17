@@ -36,6 +36,7 @@ export interface TurnSnapshot {
 export interface InvocationPlan {
   readonly selectedTarget: InferenceTarget;
   readonly failureTargets: readonly InferenceTarget[];
+  readonly snapshot?: TurnSnapshot;
 }
 
 /**
@@ -147,5 +148,6 @@ export async function resolveInvocationPlan(
   return {
     selectedTarget,
     failureTargets,
+    snapshot,
   };
 }

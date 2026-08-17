@@ -165,7 +165,11 @@ describe("PiLanguageRaw backend (QS-P3.3)", () => {
         const dummyMsg: any = { role: "assistant", content: [] };
         yield { type: "thinking_start", contentIndex: 0, partial: dummyMsg };
         yield { type: "thinking_delta", contentIndex: 0, delta: "Analyzing input...", partial: dummyMsg };
-        yield { type: "thinking_end", contentIndex: 0, content: "Analyzing input...", partial: dummyMsg };
+        const dummyMsgEnd: any = {
+          role: "assistant",
+          content: [{ type: "thinking", thinkingSignature: "sig-anthropic-123" }],
+        };
+        yield { type: "thinking_end", contentIndex: 0, content: "Analyzing input...", partial: dummyMsgEnd };
         yield { type: "toolcall_start", contentIndex: 1, partial: dummyMsg };
         yield { type: "toolcall_delta", contentIndex: 1, delta: '{"path":"/a.txt"}', partial: dummyMsg };
         yield {
@@ -241,6 +245,24 @@ describe("PiLanguageRaw backend (QS-P3.3)", () => {
     expect((toolUse as any).id).toBe("call_1");
     expect((toolUse as any).name).toBe("read_file");
     expect((toolUse as any).input).toEqual({ path: "/a.txt" });
+
+    // Test streaming signature capture on content_block_stop
+    const events = [];
+    for await (const event of backend.chatStream(target, {
+      messages: [{ role: "user", content: [{ type: "text", text: "read file" }] }],
+      thinkingLevel: "high",
+    })) {
+      events.push(event);
+    }
+
+    const reasoningStop = events.find((e) => e.type === "content_block_stop" && e.index === 0) as any;
+    expect(reasoningStop).toBeDefined();
+    expect(reasoningStop.signature).toBe("sig-anthropic-123");
+    expect(reasoningStop.signatureProvenance).toEqual({
+      adapter: "pi-ai",
+      providerApi: "anthropic-messages",
+      upstreamProvider: "anthropic",
+    });
   });
 
   it("emits real toolcall name and id during streaming toolcall_start", async () => {

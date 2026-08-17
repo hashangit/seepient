@@ -22,7 +22,10 @@ import {
   type Tier,
   resolveInvocationPlan,
 } from "./assignment-resolver.js";
-import type { ModelAssignmentOverride } from "../../foundations/schemas/provider-config.js";
+import {
+  type ModelAssignmentOverride,
+  DEFAULT_RETRY_POLICY,
+} from "../../foundations/schemas/provider-config.js";
 
 export interface ProviderRuntimeOptions {
   configStore?: ProviderConfigStore;
@@ -141,8 +144,7 @@ export class ProviderRuntime {
     opts?: InferenceOptions,
   ): AsyncIterable<StreamEvent> {
     const targets = [plan.selectedTarget, ...plan.failureTargets];
-    const config = await this.configStore.getEffectiveConfig();
-    const retryPolicy = config.retryPolicy;
+    const retryPolicy = plan.snapshot?.config?.retryPolicy ?? DEFAULT_RETRY_POLICY;
 
     let lastError: any;
 
@@ -290,8 +292,7 @@ export class ProviderRuntime {
     opts?: InferenceOptions,
   ): Promise<ImageResult> {
     const targets = [plan.selectedTarget, ...plan.failureTargets];
-    const config = await this.configStore.getEffectiveConfig();
-    const retryPolicy = config.retryPolicy;
+    const retryPolicy = plan.snapshot?.config?.retryPolicy ?? DEFAULT_RETRY_POLICY;
 
     let lastError: any;
 

@@ -293,6 +293,14 @@ export const StreamEventSchema = Type.Union([
   Type.Object({
     type: Type.Literal("content_block_stop"),
     index: Type.Integer({ minimum: 0 }),
+    signature: Type.Optional(Type.String()),
+    signatureProvenance: Type.Optional(
+      Type.Object({
+        adapter: Type.String(),
+        providerApi: Type.String(),
+        upstreamProvider: Type.String(),
+      }),
+    ),
   }),
   Type.Object({
     type: Type.Literal("finish"),
