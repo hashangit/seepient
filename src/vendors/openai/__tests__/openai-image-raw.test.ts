@@ -192,4 +192,72 @@ describe("OpenAIImageRaw backend (QS-P3.6)", () => {
       expect(e.code).toBe("timeout");
     }
   });
+
+  it("enforces n=1 for DALL-E 3 even when request specifies higher count", async () => {
+    const credential = createMockCredential();
+    let passedParams: any;
+
+    const mockClient: any = {
+      images: {
+        generate: async (params: any) => {
+          passedParams = params;
+          return { data: [{ b64_json: "dalle3-b64" }] };
+        },
+      },
+    };
+
+    const backend = new OpenAIImageRaw(mockClient);
+    const target: InferenceTarget = {
+      providerAccount: "openai-main",
+      upstreamProvider: "openai",
+      model: "dall-e-3",
+      credential,
+    };
+
+    await backend.generate(target, {
+      prompt: "A landscape",
+      count: 4,
+      qualityPreset: "high",
+      aspectRatio: "16:9",
+    });
+
+    expect(passedParams.n).toBe(1);
+    expect(passedParams.quality).toBe("hd");
+    expect(passedParams.size).toBe("1792x1024");
+    expect(passedParams.response_format).toBe("b64_json");
+  });
+
+  it("formats gpt-image-2 parameters without forcing response_format: b64_json", async () => {
+    const credential = createMockCredential();
+    let passedParams: any;
+
+    const mockClient: any = {
+      images: {
+        generate: async (params: any) => {
+          passedParams = params;
+          return { data: [{ b64_json: "gpt-image-b64" }] };
+        },
+      },
+    };
+
+    const backend = new OpenAIImageRaw(mockClient);
+    const target: InferenceTarget = {
+      providerAccount: "openai-main",
+      upstreamProvider: "openai",
+      model: "gpt-image-2",
+      credential,
+    };
+
+    await backend.generate(target, {
+      prompt: "A futuristic city",
+      count: 2,
+      qualityPreset: "high",
+      aspectRatio: "9:16",
+    });
+
+    expect(passedParams.n).toBe(2);
+    expect(passedParams.quality).toBe("high");
+    expect(passedParams.size).toBe("1024x1792");
+    expect(passedParams.response_format).toBeUndefined();
+  });
 });

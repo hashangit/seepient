@@ -56,8 +56,12 @@ export class GoogleImageRaw implements ImageBackend {
           apiKey: secret.value,
         });
 
+      const controller = new AbortController();
+      if (opts?.signal) {
+        opts.signal.addEventListener("abort", () => controller.abort(opts.signal?.reason));
+      }
       const payload = canonicalToGoogleImagePayload(req);
-      const signal = opts?.signal;
+      const signal = controller.signal;
 
       let response: any;
       try {
@@ -75,6 +79,7 @@ export class GoogleImageRaw implements ImageBackend {
           let timeoutHandle: any;
           const timeoutPromise = new Promise((_, reject) => {
             timeoutHandle = setTimeout(() => {
+              controller.abort(new Error(`Timeout after ${opts.timeoutMs}ms`));
               reject(new InferenceError({
                 code: "timeout",
                 message: `Google image request timed out after ${opts.timeoutMs}ms`,
@@ -84,8 +89,11 @@ export class GoogleImageRaw implements ImageBackend {
               }));
             }, opts.timeoutMs);
           });
-          response = await Promise.race([generatePromise, timeoutPromise]);
-          clearTimeout(timeoutHandle);
+          try {
+            response = await Promise.race([generatePromise, timeoutPromise]);
+          } finally {
+            clearTimeout(timeoutHandle);
+          }
         } else {
           response = await generatePromise;
         }

@@ -115,4 +115,79 @@ describe("GoogleImageRaw backend (QS-P3.5)", () => {
       expect(e.retryable).toBe(false);
     }
   });
+
+  it("passes aspectRatio to imageConfig in Google GenAI options", async () => {
+    const credential = createMockCredential();
+    let passedParams: any;
+
+    const mockAi: any = {
+      models: {
+        generateContent: async (params: any) => {
+          passedParams = params;
+          return {
+            candidates: [
+              {
+                content: {
+                  parts: [{ inlineData: { mimeType: "image/png", data: "gemini-16-9-b64" } }],
+                },
+              },
+            ],
+          };
+        },
+      },
+    };
+
+    const backend = new GoogleImageRaw(mockAi);
+    const target: InferenceTarget = {
+      providerAccount: "google-work",
+      upstreamProvider: "google",
+      model: "gemini-3.1-flash-image",
+      credential,
+    };
+
+    await backend.generate(target, {
+      prompt: "A panoramic mountain view",
+      operation: "generate",
+      aspectRatio: "16:9",
+    });
+
+    expect(passedParams.config?.imageConfig?.aspectRatio).toBe("16:9");
+  });
+
+  it("aborts in-flight request on timeout", async () => {
+    const credential = createMockCredential();
+    let receivedSignal: AbortSignal | undefined;
+
+    const mockAi: any = {
+      models: {
+        generateContent: async (params: any) => {
+          receivedSignal = params.config?.abortSignal;
+          return new Promise<never>(() => {
+            // Never resolves
+          });
+        },
+      },
+    };
+
+    const backend = new GoogleImageRaw(mockAi);
+    const target: InferenceTarget = {
+      providerAccount: "google-work",
+      upstreamProvider: "google",
+      model: "gemini-3.1-flash-image",
+      credential,
+    };
+
+    try {
+      await backend.generate(
+        target,
+        { prompt: "Long request", operation: "generate" },
+        { timeoutMs: 20 },
+      );
+      expect.fail("Should have timed out");
+    } catch (e: any) {
+      expect(e).toBeInstanceOf(InferenceError);
+      expect(e.code).toBe("timeout");
+      expect(receivedSignal?.aborted).toBe(true);
+    }
+  });
 });

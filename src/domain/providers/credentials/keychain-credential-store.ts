@@ -84,6 +84,7 @@ class DefaultPlatformKeychainProvider implements PlatformKeychainProvider {
           },
         );
         if (child.stdin) {
+          child.stdin.on("error", () => {});
           child.stdin.write(password);
           child.stdin.end();
         }
@@ -101,19 +102,18 @@ class DefaultPlatformKeychainProvider implements PlatformKeychainProvider {
             "account",
             account,
           ],
-          (err) => {
-            if (err) {
-              if ((err as any)?.code === "ENOENT") {
-                reject(new SeepientError("secret-tool command not found", "KEYCHAIN_UNAVAILABLE", false));
-              } else {
-                reject(err);
+          (error) => {
+            if (error) {
+              if ((error as any)?.code === "ENOENT") {
+                return reject(new SeepientError("secret-tool command not found", "KEYCHAIN_UNAVAILABLE", false));
               }
-            } else {
-              resolve();
+              return reject(error);
             }
+            resolve();
           },
         );
         if (child.stdin) {
+          child.stdin.on("error", () => {});
           child.stdin.write(password);
           child.stdin.end();
         }

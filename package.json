@@ -30,6 +30,7 @@
     "test:unit": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "bench:provider": "vitest run src/domain/providers/__tests__/provider-benchmark.test.ts",
     "prepublishOnly": "pnpm run build"
   },
   "files": [

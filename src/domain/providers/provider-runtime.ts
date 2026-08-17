@@ -7,7 +7,6 @@ import type {
   StreamEvent,
   ImageRequest,
   ImageResult,
-  UpstreamModel,
 } from "../../foundations/schemas/inference.js";
 import type { CredentialStore } from "../../foundations/contracts/credential-store.js";
 import { InferenceError } from "../../foundations/errors.js";

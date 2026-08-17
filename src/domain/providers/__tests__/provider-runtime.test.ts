@@ -114,4 +114,89 @@ describe("ProviderRuntime (QS-P4.6)", () => {
     expect(delta).toBeDefined();
     expect((delta as any).delta.text).toBe("Fallback response");
   });
+
+  it("extracts user-declared models from ProviderEffectiveConfig into TurnSnapshot catalog", async () => {
+    const configStore = new ProviderConfigStore(":memory:");
+    await configStore.updateOverlay(
+      {
+        providers: {
+          "custom-llm": {
+            adapter: "pi-ai",
+            upstreamProvider: "custom-llm",
+            credential: { kind: "none" },
+            models: {
+              "my-custom-model-70b": {
+                displayName: "Custom Model 70B",
+                contextWindow: 64_000,
+                capabilities: {
+                  toolUse: true,
+                  streaming: true,
+                  vision: true,
+                  imageGenerate: true,
+                },
+                supportedReasoningLevels: ["low", "high"],
+              },
+            },
+          } as any,
+        },
+      },
+      0,
+    );
+
+    const runtime = new ProviderRuntime({ configStore });
+    const snapshot = await runtime.createTurnSnapshot();
+
+    const customModel = snapshot.catalog.find((m) => m.id === "my-custom-model-70b");
+    expect(customModel).toBeDefined();
+    expect(customModel?.displayName).toBe("Custom Model 70B");
+    expect(customModel?.provenance).toBe("user-declared");
+    expect(customModel?.contextWindow).toBe(64_000);
+    expect(customModel?.capabilities.imageGenerate).toBe(true);
+    expect(customModel?.supportedReasoningLevels).toEqual(["low", "high"]);
+  });
+
+  it("merges target thinkingLevel into LanguageRequest during execution", async () => {
+    let capturedReq: LanguageRequest | undefined;
+    const mockLangBackend: LanguageBackend = {
+      chatStream: async function* (target: InferenceTarget, req: LanguageRequest) {
+        capturedReq = req;
+        yield { type: "start", resolvedModel: { modelId: target.model, providerAccount: target.providerAccount } };
+        yield { type: "finish", stopReason: "end_turn" };
+      },
+      chat: async () => ({
+        message: { role: "assistant", content: [] },
+        stopReason: "end_turn",
+      }),
+    };
+
+    const adapter = new AggregateInferenceAdapter({
+      language: mockLangBackend,
+    });
+    const credStore = new MemoryCredentialStore();
+    const runtime = new ProviderRuntime({
+      adapter,
+      credentialStore: credStore,
+    });
+
+    const cred = await credStore.resolve({ kind: "none" });
+
+    // 1. Target has thinkingLevel: "high", request has no thinkingLevel -> target's thinkingLevel applies
+    const planWithTargetThinking = {
+      selectedTarget: {
+        providerAccount: "primary",
+        upstreamProvider: "anthropic",
+        model: "claude-3-7-sonnet-20250219",
+        credential: cred,
+        thinkingLevel: "high" as const,
+      },
+      failureTargets: [],
+    };
+
+    for await (const _ of runtime.executeLanguage(planWithTargetThinking, { messages: [] })) {}
+    expect(capturedReq?.thinkingLevel).toBe("high");
+
+    // 2. Request explicitly sets thinkingLevel: "low" -> request overrides target
+    for await (const _ of runtime.executeLanguage(planWithTargetThinking, { messages: [], thinkingLevel: "low" })) {}
+    expect(capturedReq?.thinkingLevel).toBe("low");
+  });
 });

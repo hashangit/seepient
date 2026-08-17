@@ -165,5 +165,31 @@ describe("ProviderConfigStore & DeepPatch (QS-P4.3)", () => {
       expect(effective.providers["default-provider"]).toBeUndefined();
       expect(effective.providers["kept-provider"]).toBeDefined();
     });
+
+    it("self-heals and acquires lock when prior lockfile contains corrupt/malformed JSON", async () => {
+      const lockPath = `${overlayFile}.lock`;
+      // Write unparseable junk to the lock file
+      fs.writeFileSync(lockPath, "{ corrupt invalid json @@@", "utf8");
+
+      const store = new ProviderConfigStore(overlayFile);
+      const res = await store.updateOverlay({ providers: {} }, 0);
+      expect(res.revision).toBe(1);
+      expect(fs.existsSync(lockPath)).toBe(false);
+    });
+
+    it("prevents TOCTOU lock stealing if a fresh lock was placed before stale eviction", async () => {
+      const lockPath = `${overlayFile}.lock`;
+      // Active process PID (current process) with fresh timestamp
+      fs.writeFileSync(
+        lockPath,
+        JSON.stringify({ pid: process.pid, createdAt: Date.now() }),
+        "utf8",
+      );
+
+      const store = new ProviderConfigStore(overlayFile);
+      await expect(
+        store.updateOverlay({ providers: {} }, 0),
+      ).rejects.toThrow(/Configuration store locked/);
+    });
   });
 });

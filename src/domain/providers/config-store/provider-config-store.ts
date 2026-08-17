@@ -104,10 +104,40 @@ export class ProviderConfigStore {
             const staleTmp = `${lockPath}.stale.${Date.now()}.${Math.random().toString(36).slice(2)}`;
             try {
               fs.renameSync(lockPath, staleTmp);
-              fs.unlinkSync(staleTmp);
             } catch {
-              // Ignore if already moved/deleted by racing process
+              throw new SeepientError(
+                `Configuration store locked by concurrent process: ${lockPath}`,
+                "LOCKED",
+                true,
+              );
             }
+
+            // Verify the renamed lock matches what we inspected (prevent stealing a fresh lock)
+            try {
+              const renamedRaw = fs.readFileSync(staleTmp, "utf8");
+              if (raw.trim() !== renamedRaw.trim()) {
+                // Lock was replaced with a new one before rename! Restore and abort
+                try {
+                  fs.renameSync(staleTmp, lockPath);
+                } catch {
+                  // Ignore
+                }
+                throw new SeepientError(
+                  `Configuration store locked by concurrent process: ${lockPath}`,
+                  "LOCKED",
+                  true,
+                );
+              }
+              fs.unlinkSync(staleTmp);
+            } catch (vErr: any) {
+              if (vErr instanceof SeepientError) throw vErr;
+              try {
+                fs.unlinkSync(staleTmp);
+              } catch {
+                // Ignore
+              }
+            }
+
             const fd = fs.openSync(lockPath, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_RDWR, 0o600);
             fs.writeSync(fd, Buffer.from(lockInfo, "utf8"));
             fs.fsyncSync(fd);

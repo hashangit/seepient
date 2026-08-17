@@ -61,6 +61,8 @@ export class OpenAIImageRaw implements ImageBackend {
       const params = canonicalToOpenAIImageParams(req, target.model);
       const op = req.operation ?? "generate";
 
+      const isGptImage = target.model.includes("gpt-image");
+
       let response: any;
       try {
         if (op === "generate") {
@@ -69,8 +71,10 @@ export class OpenAIImageRaw implements ImageBackend {
             prompt: params.prompt,
             n: params.n,
             size: params.size,
-            response_format: "b64_json",
           };
+          if (!isGptImage) {
+            genParams.response_format = "b64_json";
+          }
           if (params.quality) {
             genParams.quality = params.quality;
           }
@@ -86,16 +90,16 @@ export class OpenAIImageRaw implements ImageBackend {
             });
           }
           const file = await toFile(params.inputImageBuffer, "input.png", { type: "image/png" });
-          response = await client.images.createVariation(
-            {
-              image: file,
-              model: target.model,
-              n: params.n,
-              size: params.size as any,
-              response_format: "b64_json",
-            },
-            { signal: opts?.signal },
-          );
+          const varParams: any = {
+            image: file,
+            model: target.model,
+            n: params.n,
+            size: params.size as any,
+          };
+          if (!isGptImage) {
+            varParams.response_format = "b64_json";
+          }
+          response = await client.images.createVariation(varParams, { signal: opts?.signal });
         } else if (op === "edit" || op === "mask") {
           if (!params.inputImageBuffer) {
             throw new InferenceError({
@@ -109,12 +113,14 @@ export class OpenAIImageRaw implements ImageBackend {
           const file = await toFile(params.inputImageBuffer, "input.png", { type: "image/png" });
           const editParams: any = {
             image: file,
-            prompt: params.prompt,
             model: target.model,
+            prompt: params.prompt,
             n: params.n,
             size: params.size as any,
-            response_format: "b64_json",
           };
+          if (!isGptImage) {
+            editParams.response_format = "b64_json";
+          }
           if (params.maskBuffer) {
             editParams.mask = await toFile(params.maskBuffer, "mask.png", { type: "image/png" });
           }
