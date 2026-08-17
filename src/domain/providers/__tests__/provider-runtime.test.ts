@@ -200,7 +200,7 @@ describe("ProviderRuntime (QS-P4.6)", () => {
     expect(capturedReq?.thinkingLevel).toBe("low");
   });
 
-  it("creates independent InvocationPlan for per-step skill overrides from same TurnSnapshot (QS-P5.4)", async () => {
+  it("creates independent InvocationPlan for per-step skill overrides from same TurnSnapshot (QS-P5.4 / P5.6)", async () => {
     const credStore = new MemoryCredentialStore();
     const configStore = new ProviderConfigStore(":memory:");
     await configStore.updateOverlay({

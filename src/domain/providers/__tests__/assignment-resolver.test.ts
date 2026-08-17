@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { resolveInvocationPlan, type TurnSnapshot } from "../assignment-resolver.js";
 import { MemoryCredentialStore } from "../credentials/memory-credential-store.js";
 import { DEFAULT_RETRY_POLICY } from "../../../foundations/schemas/provider-config.js";
-import { SeepientError } from "../../../foundations/errors.js";
+import { SeepientError, InferenceError } from "../../../foundations/errors.js";
 
 describe("AssignmentResolver (QS-P4.5)", () => {
   const credentialStore = new MemoryCredentialStore();
@@ -163,13 +163,61 @@ describe("AssignmentResolver (QS-P4.5)", () => {
     });
     expect(validPlan.selectedTarget.thinkingLevel).toBe("minimal");
 
-    // 2. "max" is not supported -> throws invalid_request error
-    await expect(
-      resolveInvocationPlan(snap, credentialStore, "text", "standard", {
+    // 2. "max" is not supported -> throws unsupported_thinking_level error
+    try {
+      await resolveInvocationPlan(snap, credentialStore, "text", "standard", {
         providerAccount: "backup-anthropic",
         model: "claude-model",
         thinkingLevel: "max",
-      }),
-    ).rejects.toThrow(/does not support thinking level "max"/);
+      });
+      expect.unreachable("Should have thrown");
+    } catch (err: any) {
+      expect(err).toBeInstanceOf(InferenceError);
+      expect(err.code).toBe("unsupported_thinking_level");
+      expect(err.message).toMatch(/does not support thinking level "max"/);
+    }
+  });
+
+  it("validates capabilities of failureTargets during resolution", async () => {
+    const snap: TurnSnapshot = {
+      ...mockSnapshot,
+      catalog: [
+        {
+          id: "gpt-4o",
+          upstreamProvider: "openai",
+          displayName: "GPT-4o",
+          contextWindow: 128_000,
+          capabilities: { toolUse: true, streaming: true, vision: true },
+          supportedReasoningLevels: ["none", "medium"],
+          provenance: "seepient-curated",
+        },
+        {
+          id: "no-tool-fallback",
+          upstreamProvider: "anthropic",
+          displayName: "No Tools",
+          contextWindow: 4096,
+          capabilities: { toolUse: false, streaming: true, vision: false },
+          provenance: "seepient-curated",
+        },
+      ],
+      assignments: {
+        text: {
+          standard: {
+            providerAccount: "primary-openai",
+            model: "gpt-4o",
+            fallback: [
+              {
+                providerAccount: "backup-anthropic",
+                model: "no-tool-fallback",
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    await expect(
+      resolveInvocationPlan(snap, credentialStore, "text", "standard"),
+    ).rejects.toThrow(/does not support tool use/);
   });
 });

@@ -151,13 +151,18 @@ export function getDefaultProvider(): ProviderType {
  * @param modelOverride - When set, overrides the resolved model before creating the provider.
  * @returns The initialized LLMProvider and the resolved model name.
  */
+let warnedGetProvider = false;
+
 export async function getProvider(
   type?: ProviderType,
   modelOverride?: string,
 ): Promise<{ provider: LLMProvider; model: string }> {
-  console.warn(
-    "[DEPRECATION] getProvider() is deprecated and will be removed in a future release. Use ProviderRuntime.createTurnSnapshot() and ProviderRuntime.resolvePlan() instead.",
-  );
+  if (!warnedGetProvider) {
+    warnedGetProvider = true;
+    console.warn(
+      "[DEPRECATION] getProvider() is deprecated and will be removed in a future release. Use ProviderRuntime.createTurnSnapshot() and ProviderRuntime.resolvePlan() instead.",
+    );
+  }
   const config = getProviderConfig(type);
 
   const factoryConfig: ProviderConfig = {

@@ -114,51 +114,15 @@ export async function resolveInvocationPlan(
     );
   }
 
-  // Capability gating & thinking level validation (QS-P5.1)
-  const catalogModel =
-    snapshot.catalog.find(
-      (m) =>
-        m.id === effectiveModel &&
-        (m.upstreamProvider === mainAcc.upstreamProvider || m.upstreamProvider === effectiveAccount),
-    ) || snapshot.catalog.find((m) => m.id === effectiveModel);
-
-  if (catalogModel) {
-    if (
-      (purpose === "text" || purpose === "plan" || purpose === "commit" || purpose === "vision") &&
-      catalogModel.capabilities.toolUse === false
-    ) {
-      throw new InferenceError({
-        code: "unsupported_capability",
-        message: `Model "${effectiveModel}" does not support tool use required for purpose "${purpose}"`,
-        providerAccount: effectiveAccount,
-        model: effectiveModel,
-        retryable: false,
-      });
-    }
-
-    if (purpose === "image-generation" && catalogModel.capabilities.imageGenerate === false) {
-      throw new InferenceError({
-        code: "unsupported_capability",
-        message: `Model "${effectiveModel}" does not support image generation`,
-        providerAccount: effectiveAccount,
-        model: effectiveModel,
-        retryable: false,
-      });
-    }
-
-    if (effectiveThinking && effectiveThinking !== "none") {
-      const supported = catalogModel.supportedReasoningLevels || ["none"];
-      if (!supported.includes(effectiveThinking)) {
-        throw new InferenceError({
-          code: "invalid_request",
-          message: `Model "${effectiveModel}" does not support thinking level "${effectiveThinking}". Supported: ${supported.join(", ")}`,
-          providerAccount: effectiveAccount,
-          model: effectiveModel,
-          retryable: false,
-        });
-      }
-    }
-  }
+  // Capability gating & thinking level validation on selected target (QS-P5.1)
+  validateTargetCapabilities(
+    snapshot.catalog,
+    purpose,
+    effectiveAccount,
+    mainAcc.upstreamProvider,
+    effectiveModel,
+    effectiveThinking,
+  );
 
   const mainCredHandle = await credentialStore.resolve(mainAcc.credential);
   const selectedTarget: InferenceTarget = {
@@ -177,6 +141,16 @@ export async function resolveInvocationPlan(
     for (const fb of assignment.fallback || []) {
       const fbAcc = accounts[fb.providerAccount];
       if (fbAcc) {
+        // Validate fallback target capabilities
+        validateTargetCapabilities(
+          snapshot.catalog,
+          purpose,
+          fb.providerAccount,
+          fbAcc.upstreamProvider,
+          fb.model,
+          fb.thinkingLevel as ThinkingLevel,
+        );
+
         const fbCredHandle = await credentialStore.resolve(fbAcc.credential);
         failureTargets.push({
           providerAccount: fb.providerAccount,
@@ -196,4 +170,58 @@ export async function resolveInvocationPlan(
     failureTargets,
     snapshot,
   };
+}
+
+function validateTargetCapabilities(
+  catalog: readonly UpstreamModel[],
+  purpose: Purpose,
+  accountName: string,
+  upstreamProvider: string,
+  modelId: string,
+  thinkingLevel?: ThinkingLevel,
+): void {
+  const catalogModel =
+    catalog.find(
+      (m) =>
+        m.id === modelId &&
+        (m.upstreamProvider === upstreamProvider || m.upstreamProvider === accountName),
+    ) || (catalog.length > 0 && !upstreamProvider ? catalog.find((m) => m.id === modelId) : undefined);
+
+  if (catalogModel) {
+    if (
+      (purpose === "text" || purpose === "plan" || purpose === "commit" || purpose === "vision") &&
+      catalogModel.capabilities.toolUse === false
+    ) {
+      throw new InferenceError({
+        code: "unsupported_capability",
+        message: `Model "${modelId}" does not support tool use required for purpose "${purpose}"`,
+        providerAccount: accountName,
+        model: modelId,
+        retryable: false,
+      });
+    }
+
+    if (purpose === "image-generation" && catalogModel.capabilities.imageGenerate === false) {
+      throw new InferenceError({
+        code: "unsupported_capability",
+        message: `Model "${modelId}" does not support image generation`,
+        providerAccount: accountName,
+        model: modelId,
+        retryable: false,
+      });
+    }
+
+    if (thinkingLevel && thinkingLevel !== "none") {
+      const supported = catalogModel.supportedReasoningLevels || ["none"];
+      if (!supported.includes(thinkingLevel)) {
+        throw new InferenceError({
+          code: "unsupported_thinking_level",
+          message: `Model "${modelId}" does not support thinking level "${thinkingLevel}". Supported: ${supported.join(", ")}`,
+          providerAccount: accountName,
+          model: modelId,
+          retryable: false,
+        });
+      }
+    }
+  }
 }

@@ -59,32 +59,46 @@ export class AggregateInferenceAdapter {
 
   /**
    * Binds an InferenceTarget and returns capability-gated executors.
+   * Can evaluate against a snapshot-pinned catalog or the adapter's runtime catalog.
    */
-  async bind(target: InferenceTarget): Promise<BoundAdapter> {
-    const hasLang = this.hasLanguageCapability(target);
-    const hasImg = this.hasImageCapability(target);
+  async bind(
+    target: InferenceTarget,
+    catalog?: readonly UpstreamModel[],
+  ): Promise<BoundAdapter> {
+    const hasLang = this.hasLanguageCapability(target, catalog);
+    const hasImg = this.hasImageCapability(target, catalog);
 
     return {
       target,
       language: hasLang ? this.bindLanguage(target) : undefined,
-      images: hasImg ? this.bindImages(target) : undefined,
+      images: hasImg ? this.bindImages(target, catalog) : undefined,
     };
   }
 
-  private findCatalogModel(target: InferenceTarget): UpstreamModel | undefined {
-    return this.catalog.find(
+  private findCatalogModel(
+    target: InferenceTarget,
+    catalog?: readonly UpstreamModel[],
+  ): UpstreamModel | undefined {
+    const effectiveCatalog = catalog ?? this.catalog;
+    return effectiveCatalog.find(
       (m) => m.id === target.model && m.upstreamProvider === target.upstreamProvider,
     );
   }
 
-  private hasLanguageCapability(target: InferenceTarget): boolean {
-    const model = this.findCatalogModel(target);
+  private hasLanguageCapability(
+    target: InferenceTarget,
+    catalog?: readonly UpstreamModel[],
+  ): boolean {
+    const model = this.findCatalogModel(target, catalog);
     if (!model) return true; // optimistic default for dynamic/custom language models
     return !!(model.capabilities.streaming || model.capabilities.toolUse);
   }
 
-  private hasImageCapability(target: InferenceTarget): boolean {
-    const model = this.findCatalogModel(target);
+  private hasImageCapability(
+    target: InferenceTarget,
+    catalog?: readonly UpstreamModel[],
+  ): boolean {
+    const model = this.findCatalogModel(target, catalog);
     if (!model) return false;
     return !!(
       model.capabilities.imageGenerate ||
@@ -103,11 +117,14 @@ export class AggregateInferenceAdapter {
     };
   }
 
-  private bindImages(target: InferenceTarget): BoundImageExecutor {
+  private bindImages(
+    target: InferenceTarget,
+    catalog?: readonly UpstreamModel[],
+  ): BoundImageExecutor {
     return {
       generate: async (req: ImageRequest, opts?: InferenceOptions): Promise<ImageResult> => {
         const op: ImageOperation = req.operation ?? "generate";
-        const backend = this.resolveImageBackend(target, op, req);
+        const backend = this.resolveImageBackend(target, op, req, catalog);
 
         if (!backend) {
           throw new InferenceError({
@@ -132,33 +149,26 @@ export class AggregateInferenceAdapter {
     target: InferenceTarget,
     op: ImageOperation,
     req: ImageRequest,
+    catalog?: readonly UpstreamModel[],
   ): ImageBackend | undefined {
-    const model = this.findCatalogModel(target);
+    const model = this.findCatalogModel(target, catalog);
     if (!model) return undefined;
 
     // Verify operation support on the specific catalog model
     let opSupported = false;
-    if (op === "generate") opSupported = !!model.capabilities.imageGenerate;
-    else if (op === "variation") opSupported = !!model.capabilities.imageVariation;
-    else if (op === "edit") opSupported = !!model.capabilities.imageEdit;
-    else if (op === "mask") opSupported = !!model.capabilities.imageMask;
+    if (op === "generate" && model.capabilities.imageGenerate) opSupported = true;
+    else if (op === "variation" && model.capabilities.imageVariation) opSupported = true;
+    else if (op === "edit" && model.capabilities.imageEdit) opSupported = true;
+    else if (op === "mask" && model.capabilities.imageMask) opSupported = true;
 
-    if (!opSupported) {
-      return undefined;
-    }
+    if (!opSupported) return undefined;
 
     if (target.upstreamProvider === "google") {
       return this.googleImageBackend;
     }
-
-    if (target.upstreamProvider === "openai" || target.upstreamProvider === "openai-compatible") {
+    if (target.upstreamProvider === "openai") {
       return this.openaiImageBackend;
     }
-
-    if (target.upstreamProvider === "openrouter" || target.upstreamProvider === "pi-ai") {
-      return this.piImageBackend;
-    }
-
-    return undefined;
+    return this.piImageBackend;
   }
 }

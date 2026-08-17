@@ -32,6 +32,7 @@ export class SeepientError extends Error {
 
 export type InferenceErrorCode =
   | "unsupported_capability"
+  | "unsupported_thinking_level"
   | "provider_unavailable"
   | "rate_limit"
   | "context_overflow"

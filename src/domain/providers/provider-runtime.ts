@@ -144,7 +144,7 @@ export class ProviderRuntime {
 
       let bound: BoundAdapter;
       try {
-        bound = await this.adapter.bind(target);
+        bound = await this.adapter.bind(target, plan.snapshot?.catalog);
       } catch (err: any) {
         lastError = err;
         this.recordFailure(
@@ -289,7 +289,7 @@ export class ProviderRuntime {
     for (let i = 0; i < targets.length; i++) {
       const target = targets[i];
       try {
-        const bound = await this.adapter.bind(target);
+        const bound = await this.adapter.bind(target, plan.snapshot?.catalog);
         if (!bound.images) {
           throw new InferenceError({
             code: "unsupported_capability",
