@@ -7,6 +7,7 @@ import type {
   StreamEvent,
   ImageRequest,
   ImageResult,
+  UpstreamModel,
 } from "../../foundations/schemas/inference.js";
 import type { CredentialStore } from "../../foundations/contracts/credential-store.js";
 import { InferenceError } from "../../foundations/errors.js";
@@ -90,7 +91,22 @@ export class ProviderRuntime {
    */
   async createTurnSnapshot(): Promise<TurnSnapshot> {
     const config = await this.configStore.getEffectiveConfig();
-    const catalog = await this.modelCatalog.getAllModels();
+
+    const userDeclared: UpstreamModel[] = [];
+    const accounts = config.providers || {};
+    for (const [accId, entry] of Object.entries(accounts)) {
+      if (entry.models && Array.isArray(entry.models)) {
+        for (const m of entry.models) {
+          userDeclared.push({
+            ...m,
+            upstreamProvider: entry.upstreamProvider || accId,
+            provenance: "user-declared",
+          });
+        }
+      }
+    }
+
+    const catalog = await this.modelCatalog.getAllModels(userDeclared);
 
     // Synchronize catalog with aggregate adapter so dynamic models route accurately
     this.adapter.updateCatalog(catalog);
@@ -207,6 +223,10 @@ export class ProviderRuntime {
                 model: target.model,
                 retryable: true,
               });
+            } else {
+              // Yield error and terminate stream immediately
+              yield event;
+              return;
             }
           }
           yield event;
@@ -301,8 +321,11 @@ export class ProviderRuntime {
           retryPolicy.cooldownDurationMs,
         );
 
+        const isUnsupportedCap = err instanceof InferenceError && err.code === "unsupported_capability";
         const isRetryable = err instanceof InferenceError ? err.retryable : true;
-        if (!isRetryable || opts?.signal?.aborted || i === targets.length - 1) {
+        const canFallback = (isRetryable || isUnsupportedCap) && !opts?.signal?.aborted && i < targets.length - 1;
+
+        if (!canFallback) {
           throw err;
         }
       }

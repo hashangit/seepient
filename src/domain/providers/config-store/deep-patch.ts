@@ -42,3 +42,36 @@ export function applyDeepPatch(target: any, patch: any): any {
 
   return result;
 }
+
+/**
+ * Merges two patch documents, preserving explicit `null` unsetting markers in the resulting patch.
+ */
+export function mergePatches(targetPatch: any, newPatch: any): any {
+  if (newPatch === undefined) {
+    return targetPatch;
+  }
+  if (newPatch === null || typeof newPatch !== "object" || Array.isArray(newPatch)) {
+    return newPatch;
+  }
+
+  const result = typeof targetPatch === "object" && targetPatch !== null && !Array.isArray(targetPatch)
+    ? { ...targetPatch }
+    : {};
+
+  for (const [key, patchVal] of Object.entries(newPatch)) {
+    if (patchVal === undefined) {
+      continue;
+    }
+    if (patchVal === null) {
+      result[key] = null;
+    } else if (Array.isArray(patchVal)) {
+      result[key] = patchVal;
+    } else if (typeof patchVal === "object") {
+      result[key] = mergePatches(result[key], patchVal);
+    } else {
+      result[key] = patchVal;
+    }
+  }
+
+  return result;
+}

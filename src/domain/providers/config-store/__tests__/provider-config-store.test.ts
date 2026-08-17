@@ -140,5 +140,30 @@ describe("ProviderConfigStore & DeepPatch (QS-P4.3)", () => {
       // Lockfile should be cleaned up after successful acquisition & write
       expect(fs.existsSync(lockPath)).toBe(false);
     });
+
+    it("persists explicit nulls in overlay to suppress base defaults at merge time", async () => {
+      const store = new ProviderConfigStore(overlayFile);
+      await store.updateOverlay(
+        {
+          providers: {
+            "default-provider": null as any,
+          },
+        },
+        0,
+      );
+
+      const overlay = await store.getOverlay();
+      expect((overlay.patch.providers as any)?.["default-provider"]).toBeNull();
+
+      const effective = await store.getEffectiveConfig({
+        providers: {
+          "default-provider": { adapter: "pi-ai", upstreamProvider: "openai", credential: { kind: "none" } },
+          "kept-provider": { adapter: "pi-ai", upstreamProvider: "anthropic", credential: { kind: "none" } },
+        },
+      });
+
+      expect(effective.providers["default-provider"]).toBeUndefined();
+      expect(effective.providers["kept-provider"]).toBeDefined();
+    });
   });
 });

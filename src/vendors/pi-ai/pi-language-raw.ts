@@ -369,12 +369,13 @@ export class PiLanguageRaw implements LanguageBackend {
               };
               return;
             }
+            const classified = classifyPiError(event.error?.errorMessage || "", isTimeout());
             yield {
               type: "error",
               error: {
-                code: "internal_adapter",
+                code: classified.code,
                 message: event.error?.errorMessage || "Pi inference error",
-                retryable: true,
+                retryable: classified.retryable,
               },
               partialUsage: lastUsage,
             };
@@ -413,12 +414,13 @@ export class PiLanguageRaw implements LanguageBackend {
           return;
         }
 
+        const classified = classifyPiError(err?.message || "", isTimeout());
         yield {
           type: "error",
           error: {
-            code: isTimeout() ? "timeout" : "network",
+            code: classified.code,
             message: err?.message || "Pi language stream failed",
-            retryable: true,
+            retryable: classified.retryable,
           },
           partialUsage: lastUsage,
         };
@@ -435,16 +437,17 @@ export class PiLanguageRaw implements LanguageBackend {
     opts?: InferenceOptions,
   ): Promise<InferenceResponse> {
     const lease = target.credential.acquireLease();
-    const { signal, cleanup } = resolveSignal(opts);
+    const { signal, cleanup, isTimeout } = resolveSignal(opts);
 
     try {
       if (signal?.aborted) {
+        const timeout = isTimeout();
         throw new InferenceError({
-          code: "timeout",
-          message: signal.reason?.message || "Operation aborted",
+          code: timeout ? "timeout" : "invalid_request",
+          message: signal.reason?.message || (timeout ? "Request timed out" : "Operation aborted"),
           providerAccount: target.providerAccount,
           model: target.model,
-          retryable: false,
+          retryable: timeout,
         });
       }
 
@@ -475,12 +478,14 @@ export class PiLanguageRaw implements LanguageBackend {
           finalMessage = event.message;
           finalReason = event.reason;
         } else if (event.type === "error") {
+          const timeout = isTimeout();
+          const classified = classifyPiError(event.error?.errorMessage || "", timeout);
           throw new InferenceError({
-            code: event.reason === "aborted" ? "timeout" : "network",
+            code: event.reason === "aborted" ? "timeout" : (classified.code as any),
             message: event.error?.errorMessage || "Pi chat request failed",
             providerAccount: target.providerAccount,
             model: target.model,
-            retryable: event.reason !== "aborted",
+            retryable: event.reason === "aborted" ? true : classified.retryable,
           });
         }
       }
@@ -542,4 +547,42 @@ export class PiLanguageRaw implements LanguageBackend {
       await lease.release();
     }
   }
+}
+
+function classifyPiError(msg: string, isTimeout: boolean): { code: string; retryable: boolean } {
+  if (isTimeout) return { code: "timeout", retryable: true };
+  const lower = (msg || "").toLowerCase();
+  if (
+    lower.includes("401") ||
+    lower.includes("unauthorized") ||
+    lower.includes("invalid api key") ||
+    lower.includes("invalid_api_key") ||
+    lower.includes("403") ||
+    lower.includes("forbidden")
+  ) {
+    return { code: "auth", retryable: false };
+  }
+  if (
+    lower.includes("429") ||
+    lower.includes("rate limit") ||
+    lower.includes("rate_limit") ||
+    lower.includes("quota")
+  ) {
+    return { code: "rate_limit", retryable: true };
+  }
+  if (
+    lower.includes("model not found") ||
+    lower.includes("does not exist") ||
+    lower.includes("404")
+  ) {
+    return { code: "model_not_found", retryable: false };
+  }
+  if (
+    lower.includes("context length") ||
+    lower.includes("maximum context") ||
+    lower.includes("context_length_exceeded")
+  ) {
+    return { code: "context_overflow", retryable: false };
+  }
+  return { code: "network", retryable: true };
 }

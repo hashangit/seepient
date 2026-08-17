@@ -8,7 +8,7 @@ import type {
 } from "../../../foundations/schemas/provider-config.js";
 import { DEFAULT_RETRY_POLICY } from "../../../foundations/schemas/provider-config.js";
 import { SeepientError } from "../../../foundations/errors.js";
-import { applyDeepPatch } from "./deep-patch.js";
+import { applyDeepPatch, mergePatches } from "./deep-patch.js";
 
 /**
  * Manages the runtime provider configuration store with optimistic concurrency locking (If-Match),
@@ -91,7 +91,7 @@ export class ProviderConfigStore {
           if (raw.trim().length > 0) {
             const existing = JSON.parse(raw);
             isAlive = existing?.pid && this.isPidAlive(existing.pid);
-            isStale = Date.now() - (existing?.createdAt || 0) > 10_000;
+            isStale = Date.now() - (existing?.createdAt || 0) > 300_000;
           }
 
           if (!isAlive || isStale) {
@@ -165,7 +165,7 @@ export class ProviderConfigStore {
         );
       }
 
-      const newPatch = applyDeepPatch(this.currentOverlay.patch, patch) || {};
+      const newPatch = mergePatches(this.currentOverlay.patch, patch) || {};
       const nextRevision = this.currentOverlay.revision + 1;
       const now = new Date().toISOString();
 
