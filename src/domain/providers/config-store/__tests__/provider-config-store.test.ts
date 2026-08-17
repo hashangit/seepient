@@ -124,5 +124,21 @@ describe("ProviderConfigStore & DeepPatch (QS-P4.3)", () => {
       fs.writeFileSync(overlayFile, "{ corrupt json ...", "utf8");
       expect(() => new ProviderConfigStore(overlayFile)).toThrow(SeepientError);
     });
+
+    it("recovers and acquires lock when prior process crashed or left a stale lock file", async () => {
+      const lockPath = `${overlayFile}.lock`;
+      // Simulate crashed process lock (dead PID or old timestamp)
+      fs.writeFileSync(
+        lockPath,
+        JSON.stringify({ pid: 99999999, createdAt: Date.now() - 20_000 }),
+        "utf8",
+      );
+
+      const store = new ProviderConfigStore(overlayFile);
+      const res = await store.updateOverlay({ providers: {} }, 0);
+      expect(res.revision).toBe(1);
+      // Lockfile should be cleaned up after successful acquisition & write
+      expect(fs.existsSync(lockPath)).toBe(false);
+    });
   });
 });

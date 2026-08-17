@@ -155,9 +155,6 @@ export async function getProvider(
   type?: ProviderType,
   modelOverride?: string,
 ): Promise<{ provider: LLMProvider; model: string }> {
-  // Ensure default runtime is initialized
-  getDefaultProviderRuntime();
-
   const config = getProviderConfig(type);
 
   const factoryConfig: ProviderConfig = {

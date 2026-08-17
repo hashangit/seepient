@@ -11,9 +11,13 @@ import type {
 import type { StreamEvent } from "../../../foundations/schemas/inference.js";
 import { InferenceError } from "../../../foundations/errors.js";
 
+import { ProviderConfigStore } from "../config-store/provider-config-store.js";
+
 describe("ProviderRuntime (QS-P4.6)", () => {
   it("pins an immutable TurnSnapshot for the turn duration", async () => {
-    const runtime = new ProviderRuntime();
+    const runtime = new ProviderRuntime({
+      configStore: new ProviderConfigStore(":memory:"),
+    });
     const snap1 = await runtime.createTurnSnapshot();
     expect(snap1.revision).toBe(0);
 

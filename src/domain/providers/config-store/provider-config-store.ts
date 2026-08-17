@@ -78,21 +78,35 @@ export class ProviderConfigStore {
   private acquireLock(lockPath: string): number {
     const lockInfo = JSON.stringify({ pid: process.pid, createdAt: Date.now() });
     try {
-      return fs.openSync(lockPath, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_RDWR, 0o600);
+      const fd = fs.openSync(lockPath, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_RDWR, 0o600);
+      fs.writeSync(fd, Buffer.from(lockInfo, "utf8"));
+      fs.fsyncSync(fd);
+      return fd;
     } catch (err: any) {
       if (err.code === "EEXIST") {
         try {
           const raw = fs.readFileSync(lockPath, "utf8");
-          const existing = JSON.parse(raw);
-          const isAlive = existing?.pid && this.isPidAlive(existing.pid);
-          const isStale = Date.now() - (existing?.createdAt || 0) > 10_000;
+          let isAlive = false;
+          let isStale = true;
+          if (raw.trim().length > 0) {
+            const existing = JSON.parse(raw);
+            isAlive = existing?.pid && this.isPidAlive(existing.pid);
+            isStale = Date.now() - (existing?.createdAt || 0) > 10_000;
+          }
 
           if (!isAlive || isStale) {
-            fs.unlinkSync(lockPath);
-            return fs.openSync(lockPath, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_RDWR, 0o600);
+            try {
+              fs.unlinkSync(lockPath);
+            } catch {
+              // Ignore
+            }
+            const fd = fs.openSync(lockPath, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_RDWR, 0o600);
+            fs.writeSync(fd, Buffer.from(lockInfo, "utf8"));
+            fs.fsyncSync(fd);
+            return fd;
           }
-        } catch {
-          // Lock contention
+        } catch (innerErr: any) {
+          if (innerErr instanceof SeepientError) throw innerErr;
         }
         throw new SeepientError(
           `Configuration store locked by concurrent process: ${lockPath}`,
@@ -182,7 +196,15 @@ export class ProviderConfigStore {
         }
         try {
           if (fs.existsSync(lockPath)) {
-            fs.unlinkSync(lockPath);
+            const raw = fs.readFileSync(lockPath, "utf8");
+            if (raw.trim().length > 0) {
+              const existing = JSON.parse(raw);
+              if (existing?.pid === process.pid) {
+                fs.unlinkSync(lockPath);
+              }
+            } else {
+              fs.unlinkSync(lockPath);
+            }
           }
         } catch {
           // Ignore
@@ -195,6 +217,7 @@ export class ProviderConfigStore {
    * Computes the effective config from the merged overlay and default policies.
    */
   async getEffectiveConfig(baseDefaults?: Partial<ProviderEffectiveConfig>): Promise<ProviderEffectiveConfig> {
+    this.reloadFromDisk();
     const patch = this.currentOverlay.patch || {};
     const mergedProviders = applyDeepPatch(baseDefaults?.providers || {}, patch.providers || {}) || {};
     const mergedAssignments = applyDeepPatch(baseDefaults?.modelAssignments || {}, patch.modelAssignments || {}) || {};

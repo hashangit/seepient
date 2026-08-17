@@ -121,8 +121,19 @@ export class PiLanguageRaw implements LanguageBackend {
       "bedrock",
     ]);
 
-    let providerName = target.upstreamProvider === "glm" ? "zai" : target.upstreamProvider;
-    let piProvider = knownPiProviders.has(providerName) ? providerName : "openai";
+    const providerName = target.upstreamProvider === "glm" ? "zai" : target.upstreamProvider;
+    const isKnown = knownPiProviders.has(providerName);
+    const piProvider = isKnown ? providerName : "openai";
+
+    if (!isKnown && !target.baseUrl) {
+      throw new InferenceError({
+        code: "invalid_request",
+        message: `Custom or unknown upstream provider "${target.upstreamProvider}" requires a baseUrl`,
+        providerAccount: target.providerAccount,
+        model: target.model,
+        retryable: false,
+      });
+    }
 
     let model = this.models.getModel(piProvider, target.model) as Model<Api> | undefined;
 
@@ -265,18 +276,38 @@ export class PiLanguageRaw implements LanguageBackend {
             }
           } else if (event.type === "thinking_start") {
             openBlocks.add(event.contentIndex);
+            const sig = (event as any).signature || (event.partial?.content as any)?.[event.contentIndex]?.thinkingSignature;
             yield {
               type: "content_block_start",
               index: event.contentIndex,
-              block: { type: "reasoning", text: "" },
+              block: {
+                type: "reasoning",
+                text: "",
+                signature: sig,
+                signatureProvenance: sig ? {
+                  adapter: "pi-ai",
+                  providerApi: model.api,
+                  upstreamProvider: target.upstreamProvider,
+                } : undefined,
+              },
             };
           } else if (event.type === "thinking_delta") {
             if (!openBlocks.has(event.contentIndex)) {
               openBlocks.add(event.contentIndex);
+              const sig = (event as any).signature || (event.partial?.content as any)?.[event.contentIndex]?.thinkingSignature;
               yield {
                 type: "content_block_start",
                 index: event.contentIndex,
-                block: { type: "reasoning", text: "" },
+                block: {
+                  type: "reasoning",
+                  text: "",
+                  signature: sig,
+                  signatureProvenance: sig ? {
+                    adapter: "pi-ai",
+                    providerApi: model.api,
+                    upstreamProvider: target.upstreamProvider,
+                  } : undefined,
+                },
               };
             }
             yield {
