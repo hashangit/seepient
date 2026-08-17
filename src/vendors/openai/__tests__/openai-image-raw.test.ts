@@ -257,7 +257,7 @@ describe("OpenAIImageRaw backend (QS-P3.6)", () => {
 
     expect(passedParams.n).toBe(2);
     expect(passedParams.quality).toBe("high");
-    expect(passedParams.size).toBe("1024x1792");
+    expect(passedParams.size).toBe("1024x1536");
     expect(passedParams.response_format).toBeUndefined();
   });
 });

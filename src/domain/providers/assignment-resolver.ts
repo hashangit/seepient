@@ -9,7 +9,7 @@ import type {
 } from "../../foundations/schemas/provider-config.js";
 import type { UpstreamModel, ThinkingLevel } from "../../foundations/schemas/inference.js";
 import type { ProviderEffectiveConfig } from "../../foundations/schemas/provider-config.js";
-import { SeepientError } from "../../foundations/errors.js";
+import { SeepientError, InferenceError } from "../../foundations/errors.js";
 
 export type Purpose =
   | "plan"
@@ -112,6 +112,52 @@ export async function resolveInvocationPlan(
       "UNRESOLVABLE_CREDENTIAL",
       false,
     );
+  }
+
+  // Capability gating & thinking level validation (QS-P5.1)
+  const catalogModel =
+    snapshot.catalog.find(
+      (m) =>
+        m.id === effectiveModel &&
+        (m.upstreamProvider === mainAcc.upstreamProvider || m.upstreamProvider === effectiveAccount),
+    ) || snapshot.catalog.find((m) => m.id === effectiveModel);
+
+  if (catalogModel) {
+    if (
+      (purpose === "text" || purpose === "plan" || purpose === "commit" || purpose === "vision") &&
+      catalogModel.capabilities.toolUse === false
+    ) {
+      throw new InferenceError({
+        code: "unsupported_capability",
+        message: `Model "${effectiveModel}" does not support tool use required for purpose "${purpose}"`,
+        providerAccount: effectiveAccount,
+        model: effectiveModel,
+        retryable: false,
+      });
+    }
+
+    if (purpose === "image-generation" && catalogModel.capabilities.imageGenerate === false) {
+      throw new InferenceError({
+        code: "unsupported_capability",
+        message: `Model "${effectiveModel}" does not support image generation`,
+        providerAccount: effectiveAccount,
+        model: effectiveModel,
+        retryable: false,
+      });
+    }
+
+    if (effectiveThinking && effectiveThinking !== "none") {
+      const supported = catalogModel.supportedReasoningLevels || ["none"];
+      if (!supported.includes(effectiveThinking)) {
+        throw new InferenceError({
+          code: "invalid_request",
+          message: `Model "${effectiveModel}" does not support thinking level "${effectiveThinking}". Supported: ${supported.join(", ")}`,
+          providerAccount: effectiveAccount,
+          model: effectiveModel,
+          retryable: false,
+        });
+      }
+    }
   }
 
   const mainCredHandle = await credentialStore.resolve(mainAcc.credential);

@@ -115,4 +115,61 @@ describe("AssignmentResolver (QS-P4.5)", () => {
       resolveInvocationPlan(mockSnapshot, credentialStore, "image-generation"),
     ).rejects.toThrow(SeepientError);
   });
+
+  it("rejects non-tool-use models assigned to text purpose (QS-P5.1)", async () => {
+    const snap: TurnSnapshot = {
+      ...mockSnapshot,
+      catalog: [
+        {
+          id: "no-tool-model",
+          upstreamProvider: "openai",
+          displayName: "No Tools",
+          contextWindow: 4096,
+          capabilities: { toolUse: false, streaming: true, vision: false },
+          provenance: "seepient-curated",
+        },
+      ],
+    };
+
+    await expect(
+      resolveInvocationPlan(snap, credentialStore, "text", "standard", {
+        providerAccount: "primary-openai",
+        model: "no-tool-model",
+      }),
+    ).rejects.toThrow(/does not support tool use/);
+  });
+
+  it("rejects unsupported thinking levels instead of clamping, allowing minimal when supported (QS-P5.1)", async () => {
+    const snap: TurnSnapshot = {
+      ...mockSnapshot,
+      catalog: [
+        {
+          id: "claude-model",
+          upstreamProvider: "anthropic",
+          displayName: "Claude",
+          contextWindow: 200_000,
+          capabilities: { toolUse: true, streaming: true, vision: true },
+          supportedReasoningLevels: ["none", "minimal", "low", "high"],
+          provenance: "seepient-curated",
+        },
+      ],
+    };
+
+    // 1. "minimal" is supported -> succeeds
+    const validPlan = await resolveInvocationPlan(snap, credentialStore, "text", "standard", {
+      providerAccount: "backup-anthropic",
+      model: "claude-model",
+      thinkingLevel: "minimal",
+    });
+    expect(validPlan.selectedTarget.thinkingLevel).toBe("minimal");
+
+    // 2. "max" is not supported -> throws invalid_request error
+    await expect(
+      resolveInvocationPlan(snap, credentialStore, "text", "standard", {
+        providerAccount: "backup-anthropic",
+        model: "claude-model",
+        thinkingLevel: "max",
+      }),
+    ).rejects.toThrow(/does not support thinking level "max"/);
+  });
 });

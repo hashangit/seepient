@@ -28,6 +28,7 @@ export class GoogleImageRaw implements ImageBackend {
   ): Promise<ImageResult> {
     const lease = target.credential.acquireLease();
 
+    let onAbort: (() => void) | undefined;
     try {
       if (opts?.signal?.aborted) {
         throw new InferenceError({
@@ -57,8 +58,9 @@ export class GoogleImageRaw implements ImageBackend {
         });
 
       const controller = new AbortController();
+      onAbort = () => controller.abort(opts?.signal?.reason);
       if (opts?.signal) {
-        opts.signal.addEventListener("abort", () => controller.abort(opts.signal?.reason));
+        opts.signal.addEventListener("abort", onAbort);
       }
       const payload = canonicalToGoogleImagePayload(req);
       const signal = controller.signal;
@@ -168,6 +170,9 @@ export class GoogleImageRaw implements ImageBackend {
 
       return { images };
     } finally {
+      if (opts?.signal && onAbort) {
+        opts.signal.removeEventListener("abort", onAbort);
+      }
       await lease.release();
     }
   }

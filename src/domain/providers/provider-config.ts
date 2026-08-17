@@ -155,6 +155,9 @@ export async function getProvider(
   type?: ProviderType,
   modelOverride?: string,
 ): Promise<{ provider: LLMProvider; model: string }> {
+  console.warn(
+    "[DEPRECATION] getProvider() is deprecated and will be removed in a future release. Use ProviderRuntime.createTurnSnapshot() and ProviderRuntime.resolvePlan() instead.",
+  );
   const config = getProviderConfig(type);
 
   const factoryConfig: ProviderConfig = {

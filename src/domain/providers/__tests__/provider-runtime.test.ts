@@ -199,4 +199,52 @@ describe("ProviderRuntime (QS-P4.6)", () => {
     for await (const _ of runtime.executeLanguage(planWithTargetThinking, { messages: [], thinkingLevel: "low" })) {}
     expect(capturedReq?.thinkingLevel).toBe("low");
   });
+
+  it("creates independent InvocationPlan for per-step skill overrides from same TurnSnapshot (QS-P5.4)", async () => {
+    const credStore = new MemoryCredentialStore();
+    const configStore = new ProviderConfigStore(":memory:");
+    await configStore.updateOverlay({
+      providers: {
+        "openai-main": {
+          adapter: "pi-ai",
+          upstreamProvider: "openai",
+          credential: { kind: "none" },
+        },
+        "anthropic-backup": {
+          adapter: "pi-ai",
+          upstreamProvider: "anthropic",
+          credential: { kind: "none" },
+        },
+      },
+      modelAssignments: {
+        text: {
+          standard: { providerAccount: "openai-main", model: "gpt-4o" },
+        },
+      },
+    }, 0);
+    const runtime = new ProviderRuntime({
+      configStore,
+      credentialStore: credStore,
+    });
+
+    const snapshot = await runtime.createTurnSnapshot();
+
+    // 1. Default base plan for turn
+    const basePlan = await runtime.resolvePlan(snapshot, "text", "standard");
+    expect(basePlan.selectedTarget.providerAccount).toBe("openai-main");
+    expect(basePlan.selectedTarget.model).toBe("gpt-4o");
+
+    // 2. Skill override plan resolved from the SAME snapshot
+    const skillPlan = await runtime.resolvePlan(snapshot, "text", "standard", {
+      providerAccount: "anthropic-backup",
+      model: "claude-3-7-sonnet",
+    });
+    expect(skillPlan.selectedTarget.providerAccount).toBe("anthropic-backup");
+    expect(skillPlan.selectedTarget.model).toBe("claude-3-7-sonnet");
+
+    // Both plans are pinned to the same snapshot revision
+    expect(basePlan.snapshot?.revision).toBe(snapshot.revision);
+    expect(skillPlan.snapshot?.revision).toBe(snapshot.revision);
+    expect(basePlan).not.toBe(skillPlan);
+  });
 });
