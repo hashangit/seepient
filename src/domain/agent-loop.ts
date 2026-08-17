@@ -42,6 +42,8 @@ export interface AgentLoopOptions {
   /** Opt into token streaming (provider.chatStream). Off → always chat(). */
   stream?: boolean;
   providerFactory?: ProviderFactory;
+  providerRuntime?: any;
+  turnSnapshot?: any;
   middleware?: Middleware[];
   approveTool?: ApproveToolFn;
   permissionLevel?: PermissionLevel;
@@ -454,7 +456,58 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     let streamed = false;
     let acc: StreamingResponseAccumulator | undefined;
     try {
-      if (stream && typeof currentProvider.chatStream === 'function') {
+      if (options.providerRuntime) {
+        streamed = true;
+        acc = new StreamingResponseAccumulator();
+        const snapshot =
+          options.turnSnapshot ?? (await options.providerRuntime.createTurnSnapshot());
+        const plan = await options.providerRuntime.resolvePlan(snapshot, "text", "standard", {
+          model: currentModel,
+        });
+
+        const canonicalMessages = messages.map((m) => ({
+          role: m.role as "user" | "assistant" | "system",
+          content:
+            typeof m.content === "string"
+              ? [{ type: "text" as const, text: m.content }]
+              : (m.content as any),
+        }));
+
+        for await (const event of options.providerRuntime.executeLanguage(
+          plan,
+          {
+            messages: canonicalMessages,
+            tools: toolDefs as any,
+          },
+          { signal },
+        )) {
+          if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+            acc.appendText(event.delta.text);
+            const deltaStep: StepResult = {
+              type: "text_delta",
+              content: event.delta.text,
+              timestamp: now(),
+            };
+            steps.push(deltaStep);
+            await hooks.onStep(deltaStep);
+            if (onStep) onStep(deltaStep);
+          } else if (event.type === "content_block_start" && (event.block?.type === "tool_call" || event.block?.type === "tool_use")) {
+            acc.beginToolCall(event.index, (event.block as any).id, (event.block as any).name);
+          } else if (event.type === "content_block_delta" && event.delta.type === "tool_input_delta") {
+            acc.appendToolCallArgs(event.index, event.delta.partialJson);
+          } else if (event.type === "finish" && event.usage) {
+            acc.setUsage({
+              promptTokens: event.usage.inputTokens,
+              completionTokens: event.usage.outputTokens,
+              totalTokens: event.usage.totalTokens,
+              cost: event.usage.cost?.total ?? 0,
+            });
+          } else if (event.type === "error") {
+            throw new SeepientError(event.error.message, event.error.code, event.error.retryable);
+          }
+        }
+        response = acc.toResponse();
+      } else if (stream && typeof currentProvider.chatStream === 'function') {
         streamed = true;
         acc = new StreamingResponseAccumulator();
         for await (const delta of currentProvider.chatStream(providerMessages, toolDefs, { signal })) {

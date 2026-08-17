@@ -37,6 +37,7 @@ export interface MediaConfig {
   model?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
+  runtime?: any;
 }
 
 async function downloadImage(url: string, destPath: string, signal?: AbortSignal): Promise<void> {
@@ -58,6 +59,91 @@ export async function generateImagesStructured(
   req: ImageRequest,
   config: MediaConfig,
 ): Promise<StructuredImageResult> {
+  if (config.runtime) {
+    try {
+      const runtime = config.runtime;
+      const snapshot = await runtime.createTurnSnapshot();
+      const plan = await runtime.resolvePlan(
+        snapshot,
+        "image-generation",
+        undefined,
+        req.model ? { model: req.model } : undefined,
+      );
+      const operation = req.mode === "variation" ? "variation" : req.mode === "edit" ? "edit" : "generate";
+
+      let aspectRatio: any;
+      if (req.size === "1792x1024" || req.size === "1536x1024") aspectRatio = "16:9";
+      else if (req.size === "1024x1792" || req.size === "1024x1536") aspectRatio = "9:16";
+      else if (req.size === "1024x1024") aspectRatio = "1:1";
+
+      let inputImage: any;
+      if (req.imagePath && fs.existsSync(req.imagePath)) {
+        inputImage = {
+          type: "image" as const,
+          mediaType: "image/png" as const,
+          data: fs.readFileSync(req.imagePath).toString("base64"),
+        };
+      }
+
+      let mask: any;
+      if (req.maskPath && fs.existsSync(req.maskPath)) {
+        mask = {
+          type: "image" as const,
+          mediaType: "image/png" as const,
+          data: fs.readFileSync(req.maskPath).toString("base64"),
+        };
+      }
+
+      const result = await runtime.executeImage(
+        plan,
+        {
+          prompt: req.prompt || "",
+          operation,
+          count: req.n || 1,
+          qualityPreset: req.quality === "hd" || req.quality === "high" ? "high" : "standard",
+          aspectRatio,
+          inputImage,
+          mask,
+        },
+        {
+          signal: config.signal,
+          timeoutMs: config.timeoutMs,
+        },
+      );
+
+      const generatedFiles: string[] = [];
+      const resolvedOutputDir = path.resolve(req.outputDir ?? ".");
+      if (!fs.existsSync(resolvedOutputDir)) {
+        fs.mkdirSync(resolvedOutputDir, { recursive: true });
+      }
+
+      for (let i = 0; i < result.images.length; i++) {
+        const img = result.images[i];
+        const fileName = `generated-${Date.now()}-${i + 1}.png`;
+        const filePath = path.join(resolvedOutputDir, fileName);
+        if (img.base64) {
+          fs.writeFileSync(filePath, Buffer.from(img.base64, "base64"));
+          generatedFiles.push(filePath);
+        } else if (img.url) {
+          await downloadImage(img.url, filePath, config.signal);
+          generatedFiles.push(filePath);
+        }
+      }
+
+      return {
+        success: true,
+        files: generatedFiles,
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        files: [],
+        error: `Error generating image: ${err.message}`,
+        errorType: err.code === "auth" ? "auth" : "invalid_request",
+        status: err.code === "auth" ? 401 : 400,
+      };
+    }
+  }
   const apiKey = config.imageApiKey || config.apiKey || process.env.OPENAI_API_KEY;
   const baseURL = config.imageBaseUrl || config.baseUrl || process.env.OPENAI_COMPAT_BASE_URL || process.env.OPENAI_BASE_URL;
 
@@ -337,20 +423,73 @@ export async function optimizePrompt(
   context: string | undefined,
   config: MediaConfig,
 ): Promise<string> {
+  const contextMsg = context ? `Context: ${context}` : "Context: General AI Assistant interaction.";
+
+  if (config?.runtime) {
+    try {
+      const runtime = config.runtime;
+      const snapshot = await runtime.createTurnSnapshot();
+      const plan = await runtime.resolvePlan(snapshot, "text", "efficient");
+      let optimizedText = "";
+      for await (const event of runtime.executeLanguage(
+        plan,
+        {
+          messages: [
+            {
+              role: "system",
+              content: [
+                {
+                  type: "text",
+                  text: `You are an expert Prompt Engineer. Your goal is to rewrite the user's raw prompt to be clear, precise, and highly effective for LLMs or professional communication.
+
+RULES:
+1. Preserve the original intent.
+2. Structure the prompt logically (e.g., Role, Context, Task, Constraints, Output Format).
+3. Use professional and concise language.
+4. Return ONLY the optimized prompt. Do not add conversational filler.`,
+                },
+              ],
+            },
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: `Raw Prompt: "${rawPrompt}"\n\n${contextMsg}\n\nPlease optimize this prompt.`,
+                },
+              ],
+            },
+          ],
+        },
+        {
+          signal: config.signal,
+          timeoutMs: config.timeoutMs,
+        },
+      )) {
+        if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+          optimizedText += event.delta.text;
+        }
+      }
+      if (optimizedText.trim()) {
+        return optimizedText.trim();
+      }
+    } catch (err: any) {
+      return `Error optimizing prompt: ${err.message}`;
+    }
+  }
+
   if (!config?.apiKey) {
     return "Error: OpenAI API Key is missing in the configuration. Please run 'seepient setup' or check your .env file.";
   }
 
   const client = new OpenAI({
     apiKey: config.apiKey,
-    baseURL: config.baseUrl
+    baseURL: config.baseUrl,
   });
-
-  const contextMsg = context ? `Context: ${context}` : "Context: General AI Assistant interaction.";
 
   try {
     const completion = await client.chat.completions.create({
-      model: config.model || 'gpt-4o',
+      model: config.model || "gpt-4o",
       messages: [
         {
           role: "system",
@@ -360,17 +499,13 @@ RULES:
 1. Preserve the original intent.
 2. Structure the prompt logically (e.g., Role, Context, Task, Constraints, Output Format).
 3. Use professional and concise language.
-4. Return ONLY the optimized prompt. Do not add conversational filler.`
+4. Return ONLY the optimized prompt. Do not add conversational filler.`,
         },
         {
           role: "user",
-          content: `Raw Prompt: "${rawPrompt}"
-
-${contextMsg}
-
-Please optimize this prompt.`
-        }
-      ]
+          content: `Raw Prompt: "${rawPrompt}"\n\n${contextMsg}\n\nPlease optimize this prompt.`,
+        },
+      ],
     });
 
     return completion.choices[0].message?.content || "Error: Failed to generate optimized prompt.";
