@@ -24,13 +24,20 @@ function resolveImageBlockBuffer(block?: ImageBlock): Buffer | undefined {
  */
 export function canonicalToOpenAIImageParams(
   req: ImageRequest,
-  model = "dall-e-3",
+  model = "gpt-image-2",
 ): OpenAIImageParams {
   const isDallE3 = model.includes("dall-e-3");
-  const quality = isDallE3 ? (req.qualityPreset === "high" ? "hd" : "standard") : undefined;
+  const isGptImage = model.includes("gpt-image");
+
+  let quality: OpenAIImageParams["quality"];
+  if (isDallE3) {
+    quality = req.qualityPreset === "high" ? "hd" : "standard";
+  } else if (isGptImage) {
+    quality = (req.qualityPreset === "high" ? "high" : (req.qualityPreset === "low" ? "low" : "medium")) as any;
+  }
 
   let size: OpenAIImageParams["size"] = "1024x1024";
-  if (isDallE3) {
+  if (isDallE3 || isGptImage) {
     if (req.aspectRatio === "16:9") size = "1792x1024";
     else if (req.aspectRatio === "9:16") size = "1024x1792";
     else size = "1024x1024";
