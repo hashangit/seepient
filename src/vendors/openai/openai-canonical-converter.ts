@@ -40,7 +40,7 @@ export function canonicalToOpenAIImageParams(
 
   return {
     prompt: req.prompt,
-    n: req.count ?? 1,
+    n: isDallE3 ? 1 : (req.count ?? 1),
     quality,
     size,
     response_format: "b64_json",

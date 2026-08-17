@@ -13,7 +13,7 @@ import type { CredentialStore } from "../../foundations/contracts/credential-sto
 import { InferenceError } from "../../foundations/errors.js";
 import { AggregateInferenceAdapter } from "../../capabilities/inference/aggregate-adapter.js";
 import { ProviderConfigStore } from "./config-store/provider-config-store.js";
-import { ModelCatalog } from "./model-catalog.js";
+import { ModelCatalog, extractUserDeclaredModels } from "./model-catalog.js";
 import { CompositeCredentialStore } from "./credentials/composite-credential-store.js";
 import {
   type TurnSnapshot,
@@ -94,21 +94,7 @@ export class ProviderRuntime {
    */
   async createTurnSnapshot(): Promise<TurnSnapshot> {
     const config = await this.configStore.getEffectiveConfig();
-
-    const userDeclared: UpstreamModel[] = [];
-    const accounts = config.providers || {};
-    for (const [accId, entry] of Object.entries(accounts)) {
-      if (entry.models && Array.isArray(entry.models)) {
-        for (const m of entry.models) {
-          userDeclared.push({
-            ...m,
-            upstreamProvider: entry.upstreamProvider || accId,
-            provenance: "user-declared",
-          });
-        }
-      }
-    }
-
+    const userDeclared = extractUserDeclaredModels(config);
     const catalog = await this.modelCatalog.getAllModels(userDeclared);
 
     // Synchronize catalog with aggregate adapter so dynamic models route accurately
@@ -202,8 +188,13 @@ export class ProviderRuntime {
       let emittedAnyDelta = false;
       let hadError = false;
 
+      const mergedReq: LanguageRequest = {
+        ...req,
+        thinkingLevel: req.thinkingLevel ?? target.thinkingLevel,
+      };
+
       try {
-        for await (const event of bound.language.stream(req, opts)) {
+        for await (const event of bound.language.stream(mergedReq, opts)) {
           if (event.type === "content_block_delta") {
             emittedAnyDelta = true;
           }

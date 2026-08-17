@@ -67,6 +67,7 @@ export class GoogleImageRaw implements ImageBackend {
           config: {
             responseModalities: [Modality.IMAGE, Modality.TEXT],
             abortSignal: signal,
+            ...(req.aspectRatio ? { imageConfig: { aspectRatio: req.aspectRatio } } : {}),
           } as any,
         });
 

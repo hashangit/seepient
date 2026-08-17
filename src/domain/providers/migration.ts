@@ -45,26 +45,27 @@ export function migrateV1ToV2(
   v1Config: AppConfig,
   options?: MigrationOptions,
 ): MigrationResult {
+  const cfg = v1Config || ({} as AppConfig);
   const providers: Record<string, ProviderEntry> = {};
   const migratedCredentials: MigrationResult["migratedCredentials"] = [];
 
-  const defaultProvider = (v1Config.provider as LegacyProviderType) || "openai";
+  const defaultProvider = (cfg.provider as LegacyProviderType) || "openai";
   const defaultModel =
-    v1Config.model ||
-    (v1Config.models as any)?.[defaultProvider]?.model ||
+    cfg.model ||
+    (cfg.models as any)?.[defaultProvider]?.model ||
     DEFAULT_PROVIDER_MODELS[defaultProvider] ||
     "gpt-4o";
 
   const knownProviders: LegacyProviderType[] = ["openai", "anthropic", "glm", "openai-compatible"];
 
   for (const p of knownProviders) {
-    const modelEntry = (v1Config.models as any)?.[p];
+    const modelEntry = (cfg.models as any)?.[p];
     // Check models map apiKey or top-level apiKey if this is the active default provider
-    const key = modelEntry?.apiKey || (p === defaultProvider ? v1Config.apiKey : undefined);
+    const key = modelEntry?.apiKey || (p === defaultProvider ? cfg.apiKey : undefined);
     const baseUrl =
       modelEntry && "baseUrl" in modelEntry
         ? modelEntry.baseUrl
-        : (p === "openai-compatible" || p === defaultProvider ? v1Config.baseUrl : undefined);
+        : (p === "openai-compatible" || p === defaultProvider ? cfg.baseUrl : undefined);
 
     if (key && key.trim().length > 0) {
       const credId = `${p}-migrated`;

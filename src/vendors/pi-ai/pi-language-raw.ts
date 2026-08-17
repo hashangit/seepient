@@ -137,6 +137,9 @@ export class PiLanguageRaw implements LanguageBackend {
 
     let model = this.models.getModel(piProvider, target.model) as Model<Api> | undefined;
 
+    const effectiveThinking = req.thinkingLevel ?? target.thinkingLevel;
+    const isThinking = Boolean(effectiveThinking && effectiveThinking !== "none");
+
     if (model) {
       if (target.baseUrl) {
         model = { ...model, baseUrl: target.baseUrl };
@@ -153,7 +156,7 @@ export class PiLanguageRaw implements LanguageBackend {
           (providerName === "anthropic"
             ? "https://api.anthropic.com"
             : "https://api.openai.com/v1"),
-        reasoning: Boolean(target.thinkingLevel && target.thinkingLevel !== "none"),
+        reasoning: isThinking,
         input: ["text", "image"],
         cost: {
           input: 0,
@@ -235,14 +238,16 @@ export class PiLanguageRaw implements LanguageBackend {
       let lastUsage: Usage | undefined;
       let lastStopReason: StopReason = "end_turn";
 
+      const effectiveThinking = req.thinkingLevel ?? target.thinkingLevel;
+      const isThinking = Boolean(effectiveThinking && effectiveThinking !== "none");
+
       try {
-        const stream =
-          req.thinkingLevel && req.thinkingLevel !== "none"
-            ? this.models.streamSimple(model, context as any, {
-                ...streamOptions,
-                reasoning: req.thinkingLevel as any,
-              })
-            : this.models.stream(model, context as any, streamOptions);
+        const stream = isThinking
+          ? this.models.streamSimple(model, context as any, {
+              ...streamOptions,
+              reasoning: effectiveThinking as any,
+            })
+          : this.models.stream(model, context as any, streamOptions);
 
         for await (const event of stream) {
           if (event.type === "text_start") {
@@ -473,13 +478,15 @@ export class PiLanguageRaw implements LanguageBackend {
         opts,
       );
 
-      const stream =
-        req.thinkingLevel && req.thinkingLevel !== "none"
-          ? this.models.streamSimple(model, context as any, {
-              ...streamOptions,
-              reasoning: req.thinkingLevel as any,
-            })
-          : this.models.stream(model, context as any, streamOptions);
+      const effectiveThinking = req.thinkingLevel ?? target.thinkingLevel;
+      const isThinking = Boolean(effectiveThinking && effectiveThinking !== "none");
+
+      const stream = isThinking
+        ? this.models.streamSimple(model, context as any, {
+            ...streamOptions,
+            reasoning: effectiveThinking as any,
+          })
+        : this.models.stream(model, context as any, streamOptions);
 
       let finalMessage: AssistantMessage | undefined;
       let finalReason: string = "stop";

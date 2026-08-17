@@ -69,34 +69,8 @@ export class ModelCatalog {
   async listAvailableModels(
     config: ProviderEffectiveConfig,
   ): Promise<AvailableModel[]> {
-    // Extract user-declared models from config.providers
-    const userDeclared: UpstreamModel[] = [];
+    const userDeclared = extractUserDeclaredModels(config);
     const accounts = config.providers || {};
-
-    for (const [accId, entry] of Object.entries(accounts)) {
-      if (entry.models) {
-        for (const [modelId, declared] of Object.entries(entry.models)) {
-          userDeclared.push({
-            id: modelId,
-            upstreamProvider: entry.upstreamProvider,
-            displayName: declared.displayName || modelId,
-            contextWindow: declared.contextWindow || 128_000,
-            capabilities: {
-              toolUse: declared.capabilities.toolUse ?? true,
-              streaming: declared.capabilities.streaming ?? true,
-              vision: declared.capabilities.vision ?? false,
-              imageGenerate: declared.capabilities.imageGenerate,
-              imageVariation: declared.capabilities.imageVariation,
-              imageEdit: declared.capabilities.imageEdit,
-              imageMask: declared.capabilities.imageMask,
-              aspectRatios: declared.capabilities.aspectRatios,
-            },
-            supportedReasoningLevels: declared.supportedReasoningLevels,
-            provenance: "user-declared",
-          });
-        }
-      }
-    }
 
     const allModels = await this.getAllModels(userDeclared);
     const availableList: AvailableModel[] = [];
@@ -121,4 +95,40 @@ export class ModelCatalog {
 
     return availableList;
   }
+}
+
+/**
+ * Extracts user-declared models from ProviderEffectiveConfig.providers.
+ * Properly parses the Record<string, UserDeclaredModel> schema shape.
+ */
+export function extractUserDeclaredModels(config: ProviderEffectiveConfig): UpstreamModel[] {
+  const userDeclared: UpstreamModel[] = [];
+  const accounts = config.providers || {};
+
+  for (const [accId, entry] of Object.entries(accounts)) {
+    if (entry && entry.models && typeof entry.models === "object" && !Array.isArray(entry.models)) {
+      for (const [modelId, declared] of Object.entries(entry.models)) {
+        userDeclared.push({
+          id: modelId,
+          upstreamProvider: entry.upstreamProvider || accId,
+          displayName: declared.displayName || modelId,
+          contextWindow: declared.contextWindow || 128_000,
+          capabilities: {
+            toolUse: declared.capabilities?.toolUse ?? true,
+            streaming: declared.capabilities?.streaming ?? true,
+            vision: declared.capabilities?.vision ?? false,
+            imageGenerate: declared.capabilities?.imageGenerate,
+            imageVariation: declared.capabilities?.imageVariation,
+            imageEdit: declared.capabilities?.imageEdit,
+            imageMask: declared.capabilities?.imageMask,
+            aspectRatios: declared.capabilities?.aspectRatios,
+          },
+          supportedReasoningLevels: declared.supportedReasoningLevels,
+          provenance: "user-declared",
+        });
+      }
+    }
+  }
+
+  return userDeclared;
 }

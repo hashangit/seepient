@@ -69,16 +69,25 @@ class DefaultPlatformKeychainProvider implements PlatformKeychainProvider {
   async setPassword(service: string, account: string, password: string): Promise<void> {
     const platform = os.platform();
     if (platform === "darwin") {
-      await execFileAsync("security", [
-        "add-generic-password",
-        "-U",
-        "-s",
-        service,
-        "-a",
-        account,
-        "-w",
-        password,
-      ]);
+      await new Promise<void>((resolve, reject) => {
+        const child = execFile(
+          "security",
+          ["add-generic-password", "-U", "-s", service, "-a", account, "-w"],
+          (error) => {
+            if (error) {
+              if ((error as any)?.code === "ENOENT") {
+                return reject(new SeepientError("security command not found", "KEYCHAIN_UNAVAILABLE", false));
+              }
+              return reject(error);
+            }
+            resolve();
+          },
+        );
+        if (child.stdin) {
+          child.stdin.write(password);
+          child.stdin.end();
+        }
+      });
     } else if (platform === "linux") {
       await new Promise<void>((resolve, reject) => {
         const child = execFile(

@@ -89,16 +89,24 @@ export class ProviderConfigStore {
           let isAlive = false;
           let isStale = true;
           if (raw.trim().length > 0) {
-            const existing = JSON.parse(raw);
-            isAlive = existing?.pid && this.isPidAlive(existing.pid);
-            isStale = Date.now() - (existing?.createdAt || 0) > 300_000;
+            try {
+              const existing = JSON.parse(raw);
+              isAlive = Boolean(existing?.pid && this.isPidAlive(existing.pid));
+              isStale = Date.now() - (existing?.createdAt || 0) > 300_000;
+            } catch {
+              // Corrupt lock file is treated as stale/abandoned
+              isAlive = false;
+              isStale = true;
+            }
           }
 
           if (!isAlive || isStale) {
+            const staleTmp = `${lockPath}.stale.${Date.now()}.${Math.random().toString(36).slice(2)}`;
             try {
-              fs.unlinkSync(lockPath);
+              fs.renameSync(lockPath, staleTmp);
+              fs.unlinkSync(staleTmp);
             } catch {
-              // Ignore
+              // Ignore if already moved/deleted by racing process
             }
             const fd = fs.openSync(lockPath, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_RDWR, 0o600);
             fs.writeSync(fd, Buffer.from(lockInfo, "utf8"));
