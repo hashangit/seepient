@@ -230,7 +230,7 @@ export class ProviderConfigStore {
       providers: mergedProviders,
       modelAssignments: mergedAssignments,
       retryPolicy: mergedRetry,
-      ssrf: (patch.ssrf as any) || baseDefaults?.ssrf,
+      ssrf: patch.ssrf === null ? undefined : (patch.ssrf !== undefined ? (patch.ssrf as any) : baseDefaults?.ssrf),
     };
   }
 }

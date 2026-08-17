@@ -46,6 +46,6 @@ describe("AggregateInferenceAdapter live smoke (optional live keys)", () => {
 
     expect(response.message.content.length).toBeGreaterThan(0);
     expect(response.stopReason).toBe("end_turn");
-    expect(response.usage.totalTokens).toBeGreaterThan(0);
+    expect(response.usage?.totalTokens).toBeGreaterThan(0);
   });
 });

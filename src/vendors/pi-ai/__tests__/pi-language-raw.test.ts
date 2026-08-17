@@ -154,7 +154,7 @@ describe("PiLanguageRaw backend (QS-P3.3)", () => {
     expect(resp.message.content[0].type).toBe("text");
     expect((resp.message.content[0] as any).text).toBe("Direct chat response");
     expect(resp.stopReason).toBe("end_turn");
-    expect(resp.usage.totalTokens).toBe(8);
+    expect(resp.usage?.totalTokens).toBe(8);
   });
 
   it("streams reasoning thinking tokens and captures signature triple", async () => {

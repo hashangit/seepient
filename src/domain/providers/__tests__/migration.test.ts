@@ -46,4 +46,15 @@ describe("v1 to v2 Provider Config Migration (QS-P4.7)", () => {
     expect(config.modelAssignments.plan?.standard?.providerAccount).toBe("anthropic");
     expect(config.modelAssignments.plan?.standard?.model).toBe("claude-3-7-sonnet");
   });
+
+  it("selects provider-appropriate default model when model is not configured (no cross-provider mismatch)", () => {
+    const v1Config = {
+      defaultProvider: "anthropic",
+    };
+
+    const res = migrateV1ToV2(v1Config, { dryRun: true });
+    expect(res.dryRun).toBe(true);
+    expect(res.config.modelAssignments.plan?.standard?.providerAccount).toBe("anthropic");
+    expect(res.config.modelAssignments.plan?.standard?.model).toBe("claude-3-7-sonnet-20250219");
+  });
 });

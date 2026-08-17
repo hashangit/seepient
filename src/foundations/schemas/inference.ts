@@ -234,12 +234,17 @@ export type CanonicalMessage = Type.Static<typeof CanonicalMessageSchema>;
 
 // ── Usage ─────────────────────────────────────────────────────────────────
 export const UsageSchema = Type.Object({
-  promptTokens: Type.Integer({ minimum: 0 }),
-  completionTokens: Type.Integer({ minimum: 0 }),
-  totalTokens: Type.Integer({ minimum: 0 }),
-  cost: Type.Optional(Type.Number({ minimum: 0 })),
+  inputTokens: Type.Optional(Type.Integer({ minimum: 0 })),
+  outputTokens: Type.Optional(Type.Integer({ minimum: 0 })),
+  totalTokens: Type.Optional(Type.Integer({ minimum: 0 })),
+  promptTokens: Type.Optional(Type.Integer({ minimum: 0 })),
+  completionTokens: Type.Optional(Type.Integer({ minimum: 0 })),
+  cacheReadTokens: Type.Optional(Type.Integer({ minimum: 0 })),
+  cacheWriteTokens: Type.Optional(Type.Integer({ minimum: 0 })),
   cachedPromptTokens: Type.Optional(Type.Integer({ minimum: 0 })),
   reasoningTokens: Type.Optional(Type.Integer({ minimum: 0 })),
+  estimatedCost: Type.Optional(Type.Number({ minimum: 0 })),
+  cost: Type.Optional(Type.Number({ minimum: 0 })),
 });
 export type Usage = Type.Static<typeof UsageSchema>;
 
@@ -249,6 +254,9 @@ export const StopReasonSchema = Type.Union([
   Type.Literal("tool_use"),
   Type.Literal("max_tokens"),
   Type.Literal("stop_sequence"),
+  Type.Literal("timeout"),
+  Type.Literal("context_overflow"),
+  Type.Literal("safety"),
 ]);
 export type StopReason = Type.Static<typeof StopReasonSchema>;
 
@@ -289,7 +297,7 @@ export const StreamEventSchema = Type.Union([
   Type.Object({
     type: Type.Literal("finish"),
     stopReason: StopReasonSchema,
-    usage: UsageSchema,
+    usage: Type.Optional(UsageSchema),
   }),
   Type.Object({
     type: Type.Literal("error"),
@@ -297,6 +305,8 @@ export const StreamEventSchema = Type.Union([
       code: Type.String(),
       message: Type.String(),
       retryable: Type.Boolean(),
+      retryAfterMs: Type.Optional(Type.Integer({ minimum: 0 })),
+      providerDiagnostic: Type.Optional(Type.Unknown()),
     }),
     partialUsage: Type.Optional(UsageSchema),
   }),
@@ -312,7 +322,7 @@ export type StreamEvent = Type.Static<typeof StreamEventSchema>;
 export const InferenceResponseSchema = Type.Object({
   message: AssistantMessageSchema,
   stopReason: StopReasonSchema,
-  usage: UsageSchema,
+  usage: Type.Optional(UsageSchema),
   providerResponseId: Type.Optional(Type.String()),
 });
 export type InferenceResponse = Type.Static<typeof InferenceResponseSchema>;

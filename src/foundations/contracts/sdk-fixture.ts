@@ -63,7 +63,7 @@ export interface ModelAssignmentOverride {
 }
 
 // ── Agent — purpose restricted to AGENTIC language purposes ───────────
-export type AgentPurpose = "plan" | "text" | "coding" | "vision" | "commit";
+export type AgentPurpose = "plan" | "text" | "vision" | "commit";
 
 export interface AgentOptions {
   purpose: AgentPurpose; // NOT all purposes — media uses instance methods

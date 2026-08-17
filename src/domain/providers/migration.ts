@@ -11,6 +11,7 @@ export interface MigrationOptions {
 
 export interface MigrationResult {
   config: ProviderEffectiveConfig;
+  dryRun?: boolean;
   migratedCredentials: Array<{
     id: string;
     keyValue: string;
@@ -18,13 +19,21 @@ export interface MigrationResult {
   }>;
 }
 
+const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
+  openai: "gpt-4o",
+  anthropic: "claude-3-7-sonnet-20250219",
+  glm: "glm-4.7",
+  "openai-compatible": "gpt-4o",
+};
+
 /**
  * Migrates v1 configuration into v2 ProviderEffectiveConfig.
- * Preserves source provenance (meta.source) for all migrated credentials.
+ * Preserves source provenance (meta.source) for all migrated credentials,
+ * prevents cross-provider default model mismatches, and supports dry-run mode.
  */
 export function migrateV1ToV2(
   v1Config: any,
-  _options?: MigrationOptions,
+  options?: MigrationOptions,
 ): MigrationResult {
   const providers: Record<string, ProviderEntry> = {};
   const migratedCredentials: MigrationResult["migratedCredentials"] = [];
@@ -32,7 +41,10 @@ export function migrateV1ToV2(
   const defaultProvider =
     v1Config?.llm?.provider || v1Config?.defaultProvider || v1Config?.default || "openai";
   const defaultModel =
-    v1Config?.llm?.model || v1Config?.models?.[defaultProvider]?.model || "gpt-4o";
+    v1Config?.llm?.model ||
+    v1Config?.models?.[defaultProvider]?.model ||
+    DEFAULT_PROVIDER_MODELS[defaultProvider] ||
+    "gpt-4o";
 
   // Provider mappings
   const knownProviders = ["openai", "anthropic", "glm", "openai-compatible"];
@@ -79,7 +91,6 @@ export function migrateV1ToV2(
   const assignments: PurposeModelMap = {
     plan: { standard: { providerAccount: defaultProvider, model: defaultModel } },
     text: { standard: { providerAccount: defaultProvider, model: defaultModel } },
-    coding: { standard: { providerAccount: defaultProvider, model: defaultModel } },
     vision: { standard: { providerAccount: defaultProvider, model: defaultModel } },
     commit: { standard: { providerAccount: defaultProvider, model: defaultModel } },
     media: {
@@ -98,6 +109,7 @@ export function migrateV1ToV2(
 
   return {
     config,
+    dryRun: options?.dryRun,
     migratedCredentials,
   };
 }

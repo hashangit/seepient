@@ -14,7 +14,6 @@ import { SeepientError } from "../../foundations/errors.js";
 export type Purpose =
   | "plan"
   | "text"
-  | "coding"
   | "vision"
   | "commit"
   | "image-generation"
@@ -58,7 +57,6 @@ export async function resolveInvocationPlan(
   if (
     purpose === "plan" ||
     purpose === "text" ||
-    purpose === "coding" ||
     purpose === "vision" ||
     purpose === "commit" ||
     purpose === "dreaming" ||
