@@ -12,6 +12,7 @@ export class PiCatalogSource implements CatalogSource {
     const result: UpstreamModel[] = [];
 
     for (const m of chatModels) {
+      const isReasoning = !!((m as any).reasoning || /o1|o3|r1|reasoning|thinking|sonnet-3-7|sonnet-5|opus|sol/i.test(m.id));
       result.push({
         id: m.id,
         upstreamProvider: m.provider || "openrouter",
@@ -22,6 +23,7 @@ export class PiCatalogSource implements CatalogSource {
           streaming: true,
           vision: !!((m as any).input?.includes("image") || (m as any).inputModalities?.includes("image")),
         },
+        supportedReasoningLevels: isReasoning ? ["none", "low", "medium", "high", "max"] : ["none"],
         provenance: "pi-catalog",
       });
     }

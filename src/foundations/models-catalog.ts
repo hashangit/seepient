@@ -1,4 +1,5 @@
 import { ProviderType } from './contracts/llm.js';
+import type { UpstreamModel } from './schemas/inference.js';
 
 /**
  * Per-model metadata. `contextWindow` is the max context in tokens;
@@ -48,6 +49,44 @@ export const MODEL_CATALOG: Record<ProviderType, ModelEntry[]> = {
 export const CUSTOM_MODEL_VALUE = '__custom__';
 
 /**
+ * Dynamically resolves the best default model for a given provider and tier from an UpstreamModel catalog.
+ */
+export function resolveDefaultModelForProvider(
+  catalog: readonly UpstreamModel[],
+  provider: string,
+  tier: 'efficient' | 'standard' | 'complex' = 'standard',
+): string {
+  const candidates = catalog.filter(
+    (m) =>
+      (m.upstreamProvider === provider || (m as any).provider === provider) &&
+      m.capabilities?.toolUse !== false &&
+      m.capabilities?.streaming !== false,
+  );
+  if (candidates.length === 0) {
+    if (provider === 'openai' || provider === 'openai-compatible') return 'gpt-5.6-terra';
+    if (provider === 'anthropic') return 'claude-sonnet-5';
+    if (provider === 'glm') return 'glm-5.3';
+    return 'default';
+  }
+
+  if (tier === 'complex') {
+    const reasoning = candidates.find((m) => (m.supportedReasoningLevels?.length ?? 0) > 1);
+    return reasoning ? reasoning.id : candidates[0].id;
+  }
+  if (tier === 'efficient') {
+    const fast = candidates.find((m) =>
+      /haiku|flash|luna|mini|27b|8b/i.test(m.id),
+    );
+    return fast ? fast.id : candidates[candidates.length - 1].id;
+  }
+  // 'standard' workhorse tier
+  const workhorse = candidates.find((m) =>
+    /sonnet|terra|pro|max/i.test(m.id),
+  );
+  return workhorse ? workhorse.id : candidates[0].id;
+}
+
+/**
  * Default model ID for each provider.
  * Single source of truth — all other files import from here.
  */
@@ -69,8 +108,6 @@ export function getModelMeta(id?: string): ModelEntry | undefined {
   }
   return undefined;
 }
-
-import type { UpstreamModel } from './schemas/inference.js';
 
 export function resolveCuratedCatalog(): UpstreamModel[] {
   const catalog: UpstreamModel[] = [];

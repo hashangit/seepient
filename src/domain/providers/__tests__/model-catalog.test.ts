@@ -157,7 +157,7 @@ describe("Failure-safe Discovery & ModelCatalog (QS-P4.4 & P4.4a)", () => {
 
       const available = await catalog.listAvailableModels(config);
 
-      const gpt4o = available.find((m) => m.id === "gpt-4o");
+      const gpt4o = available.find((m) => m.id === "gpt-4o" && m.upstreamProvider === "openai");
       expect(gpt4o).toBeDefined();
       expect(gpt4o?.reachableVia).toEqual(["openai-prod", "openai-backup"]);
 

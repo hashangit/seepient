@@ -12,6 +12,7 @@ import { loadMergedConfig } from "../../../foundations/config.js";
 import { migrateV1ToV2 } from "../migration.js";
 import { CompositeCredentialStore } from "../credentials/composite-credential-store.js";
 import { applyDeepPatch, mergePatches } from "./deep-patch.js";
+import { resolveDefaultModelForProvider, resolveCuratedCatalog } from "../../../foundations/models-catalog.js";
 
 /**
  * Manages the runtime provider configuration store with optimistic concurrency locking (If-Match),
@@ -382,26 +383,27 @@ export async function getDefaultBaseConfigAsync(
     cachedBaseConfig = migrationResult.config;
     return cachedBaseConfig;
   } catch {
-    return {
-      schemaVersion: 2,
-      revision: 0,
-      updatedAt: new Date().toISOString(),
-      providers: {
-        openai: { adapter: "pi-ai", upstreamProvider: "openai", credential: { kind: "env", name: "OPENAI_API_KEY" } },
-        anthropic: { adapter: "pi-ai", upstreamProvider: "anthropic", credential: { kind: "env", name: "ANTHROPIC_API_KEY" } },
-        glm: { adapter: "pi-ai", upstreamProvider: "glm", credential: { kind: "env", name: "GLM_API_KEY" } },
-      },
-      modelAssignments: {
-        text: { standard: { providerAccount: "openai", model: "gpt-5.6-terra" } },
-        plan: { standard: { providerAccount: "openai", model: "gpt-5.6-sol" } },
-        vision: { standard: { providerAccount: "openai", model: "gpt-5.6-terra" } },
-        commit: { standard: { providerAccount: "openai", model: "gpt-5.6-luna" } },
-        media: { image: { providerAccount: "openai", model: "gpt-image-2" } },
-      },
-      retryPolicy: DEFAULT_RETRY_POLICY,
-    };
+      const cat = resolveCuratedCatalog();
+      return {
+        schemaVersion: 2,
+        revision: 0,
+        updatedAt: new Date().toISOString(),
+        providers: {
+          openai: { adapter: "pi-ai", upstreamProvider: "openai", credential: { kind: "env", name: "OPENAI_API_KEY" } },
+          anthropic: { adapter: "pi-ai", upstreamProvider: "anthropic", credential: { kind: "env", name: "ANTHROPIC_API_KEY" } },
+          glm: { adapter: "pi-ai", upstreamProvider: "glm", credential: { kind: "env", name: "GLM_API_KEY" } },
+        },
+        modelAssignments: {
+          text: { standard: { providerAccount: "openai", model: resolveDefaultModelForProvider(cat, "openai", "standard") } },
+          plan: { standard: { providerAccount: "openai", model: resolveDefaultModelForProvider(cat, "openai", "complex") } },
+          vision: { standard: { providerAccount: "openai", model: resolveDefaultModelForProvider(cat, "openai", "standard") } },
+          commit: { standard: { providerAccount: "openai", model: resolveDefaultModelForProvider(cat, "openai", "efficient") } },
+          media: { image: { providerAccount: "openai", model: "gpt-image-2" } },
+        },
+        retryPolicy: DEFAULT_RETRY_POLICY,
+      };
+    }
   }
-}
 
 export function getDefaultBaseConfig(
   credentialStore?: { put: (id: string, record: any, meta?: any) => Promise<void> },
@@ -428,6 +430,7 @@ export function getDefaultBaseConfig(
     cachedBaseConfig = migrationResult.config;
     return cachedBaseConfig;
   } catch {
+    const cat = resolveCuratedCatalog();
     return {
       schemaVersion: 2,
       revision: 0,
@@ -438,10 +441,10 @@ export function getDefaultBaseConfig(
         glm: { adapter: "pi-ai", upstreamProvider: "glm", credential: { kind: "env", name: "GLM_API_KEY" } },
       },
       modelAssignments: {
-        text: { standard: { providerAccount: "openai", model: "gpt-5.6-terra" } },
-        plan: { standard: { providerAccount: "openai", model: "gpt-5.6-sol" } },
-        vision: { standard: { providerAccount: "openai", model: "gpt-5.6-terra" } },
-        commit: { standard: { providerAccount: "openai", model: "gpt-5.6-luna" } },
+        text: { standard: { providerAccount: "openai", model: resolveDefaultModelForProvider(cat, "openai", "standard") } },
+        plan: { standard: { providerAccount: "openai", model: resolveDefaultModelForProvider(cat, "openai", "complex") } },
+        vision: { standard: { providerAccount: "openai", model: resolveDefaultModelForProvider(cat, "openai", "standard") } },
+        commit: { standard: { providerAccount: "openai", model: resolveDefaultModelForProvider(cat, "openai", "efficient") } },
         media: { image: { providerAccount: "openai", model: "gpt-image-2" } },
       },
       retryPolicy: DEFAULT_RETRY_POLICY,

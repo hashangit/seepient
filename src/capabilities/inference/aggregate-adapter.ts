@@ -19,12 +19,8 @@ import { PiLanguageRaw } from "../../vendors/pi-ai/pi-language-raw.js";
 import { PiImageRaw } from "../../vendors/pi-ai/pi-image-raw.js";
 import { GoogleImageRaw } from "../../vendors/google/google-image-raw.js";
 import { OpenAIImageRaw } from "../../vendors/openai/openai-image-raw.js";
-import { CURATED_MODELS } from "./catalog-merge.js";
+import { NATIVE_IMAGE_ANNOTATIONS } from "./catalog-merge.js";
 
-/**
- * Unified Aggregate Inference Adapter that composes peer vendor backends
- * and binds execution targets to capability-gated executors.
- */
 export class AggregateInferenceAdapter {
   readonly id = "seepient-aggregate";
 
@@ -47,7 +43,7 @@ export class AggregateInferenceAdapter {
     this.piImageBackend = customBackends?.piImage ?? new PiImageRaw();
     this.googleImageBackend = customBackends?.googleImage ?? new GoogleImageRaw();
     this.openaiImageBackend = customBackends?.openaiImage ?? new OpenAIImageRaw();
-    this.catalog = catalog ?? CURATED_MODELS;
+    this.catalog = catalog ?? [];
   }
 
   /**
@@ -80,9 +76,30 @@ export class AggregateInferenceAdapter {
     catalog?: readonly UpstreamModel[],
   ): UpstreamModel | undefined {
     const effectiveCatalog = catalog ?? this.catalog;
-    return effectiveCatalog.find(
-      (m) => m.id === target.model && m.upstreamProvider === target.upstreamProvider,
+    const found = effectiveCatalog.find(
+      (m) => m.id === target.model && (m.upstreamProvider === target.upstreamProvider || !target.upstreamProvider),
     );
+    if (found) return found;
+
+    const ann = NATIVE_IMAGE_ANNOTATIONS[target.model];
+    if (ann && (!ann.upstreamProvider || ann.upstreamProvider === target.upstreamProvider)) {
+      return {
+        id: target.model,
+        upstreamProvider: ann.upstreamProvider || target.upstreamProvider,
+        displayName: ann.displayName || target.model,
+        contextWindow: ann.contextWindow ?? 4096,
+        capabilities: {
+          toolUse: false,
+          streaming: false,
+          vision: false,
+          imageGenerate: true,
+          ...ann.capabilities,
+        },
+        supportedReasoningLevels: ["none"],
+        provenance: "seepient-curated",
+      };
+    }
+    return undefined;
   }
 
   private hasLanguageCapability(

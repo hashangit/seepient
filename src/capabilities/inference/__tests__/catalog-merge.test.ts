@@ -1,15 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { mergeCatalogs, CURATED_MODELS } from "../catalog-merge.js";
+import { mergeCatalogs, NATIVE_IMAGE_ANNOTATIONS } from "../catalog-merge.js";
 import type { CatalogSource } from "../../../foundations/contracts/backend-ports.js";
 import type { UpstreamModel } from "../../../foundations/schemas/inference.js";
 
 describe("Catalog merge (QS-P3.7)", () => {
-  it("includes curated models by default", async () => {
+  it("includes native image annotations by default", async () => {
     const merged = await mergeCatalogs([]);
-    expect(merged.length).toBeGreaterThanOrEqual(CURATED_MODELS.length);
-    expect(merged.some((m) => m.id === "gpt-4o")).toBe(true);
-    expect(merged.some((m) => m.id === "claude-3-7-sonnet-20250219")).toBe(true);
+    expect(merged.length).toBeGreaterThanOrEqual(Object.keys(NATIVE_IMAGE_ANNOTATIONS).length);
     expect(merged.some((m) => m.id === "dall-e-3")).toBe(true);
+    expect(merged.some((m) => m.id === "gpt-image-2")).toBe(true);
   });
 
   it("merges dynamic catalog source with curated models without duplicate IDs", async () => {

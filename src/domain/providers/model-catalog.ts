@@ -3,8 +3,10 @@ import type {
 } from "../../foundations/schemas/inference.js";
 import type { ProviderEffectiveConfig } from "../../foundations/schemas/provider-config.js";
 import type { CatalogSource } from "../../foundations/contracts/backend-ports.js";
-import { CURATED_MODELS, mergeCatalogs } from "../../capabilities/inference/catalog-merge.js";
+import { mergeCatalogs } from "../../capabilities/inference/catalog-merge.js";
 import { DiscoveryCache } from "./discovery-cache.js";
+
+import { PiCatalogSource } from "../../vendors/pi-ai/pi-catalog-source.js";
 
 export interface AvailableModel extends UpstreamModel {
   reachableVia: string[]; // configured account IDs that can reach this model
@@ -17,8 +19,8 @@ export class ModelCatalog {
   private sources: CatalogSource[];
   private discoveryCache: DiscoveryCache;
 
-  constructor(sources: CatalogSource[] = [], discoveryCache?: DiscoveryCache) {
-    this.sources = sources;
+  constructor(sources?: CatalogSource[], discoveryCache?: DiscoveryCache) {
+    this.sources = sources ?? [new PiCatalogSource()];
     this.discoveryCache = discoveryCache ?? new DiscoveryCache();
   }
 
