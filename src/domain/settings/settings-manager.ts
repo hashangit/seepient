@@ -8,6 +8,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { SeepientError } from '../../foundations/errors.js';
+import '../../domain/providers/model-catalog.js';
 import {
   SETTINGS_MAP,
   SETTINGS_SCHEMA,

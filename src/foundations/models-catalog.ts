@@ -110,15 +110,13 @@ export function resolveDefaultModel(
 ): string {
   const catalog = getSyncCatalogSnapshot();
   if (catalog.length > 0) {
-    try {
-      return resolveDefaultModelForProvider(catalog, provider, tier);
-    } catch {}
+    return resolveDefaultModelForProvider(catalog, provider, tier);
   }
-  // Initial fallback defaults when catalog is not yet initialized at module import time
-  if (provider === 'openai' || provider === 'openai-compatible') return 'gpt-5.6-terra';
-  if (provider === 'anthropic') return 'claude-sonnet-5';
-  if (provider === 'glm') return 'glm-5.3';
-  return 'default';
+  throw new SeepientError(
+    `No default model could be resolved for provider "${provider}": catalog snapshot is empty. Ensure catalog is initialized.`,
+    "NO_CANDIDATE_TARGETS",
+    false,
+  );
 }
 
 /**

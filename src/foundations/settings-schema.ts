@@ -151,14 +151,14 @@ export const CONFIG_PATH_TO_DOTKEY: Map<string, string> = new Map(
 const schemaEntries: [string, SettingsSchemaEntry][] = [
   // Providers
   ['providers.openai.apiKey', { type: 'string', secret: true, restartRequired: true, envVar: 'OPENAI_API_KEY' }],
-  ['providers.openai.model', { type: 'string', secret: false, default: DEFAULT_MODELS.openai, restartRequired: false, envVar: 'OPENAI_MODEL' }],
+  ['providers.openai.model', { type: 'string', secret: false, get default() { return DEFAULT_MODELS.openai; }, restartRequired: false, envVar: 'OPENAI_MODEL' }],
   ['providers.anthropic.apiKey', { type: 'string', secret: true, restartRequired: true, envVar: 'ANTHROPIC_API_KEY' }],
-  ['providers.anthropic.model', { type: 'string', secret: false, default: DEFAULT_MODELS.anthropic, restartRequired: false, envVar: 'ANTHROPIC_MODEL' }],
+  ['providers.anthropic.model', { type: 'string', secret: false, get default() { return DEFAULT_MODELS.anthropic; }, restartRequired: false, envVar: 'ANTHROPIC_MODEL' }],
   ['providers.glm.apiKey', { type: 'string', secret: true, restartRequired: true, envVar: 'GLM_API_KEY' }],
-  ['providers.glm.model', { type: 'string', secret: false, default: DEFAULT_MODELS.glm, restartRequired: false, envVar: 'GLM_MODEL' }],
+  ['providers.glm.model', { type: 'string', secret: false, get default() { return DEFAULT_MODELS.glm; }, restartRequired: false, envVar: 'GLM_MODEL' }],
   ['providers.openai-compat.apiKey', { type: 'string', secret: true, restartRequired: true, envVar: 'OPENAI_COMPAT_API_KEY' }],
   ['providers.openai-compat.baseUrl', { type: 'string', secret: false, restartRequired: true, envVar: 'OPENAI_COMPAT_BASE_URL' }],
-  ['providers.openai-compat.model', { type: 'string', secret: false, default: DEFAULT_MODELS['openai-compatible'], restartRequired: false, envVar: 'OPENAI_MODEL' }],
+  ['providers.openai-compat.model', { type: 'string', secret: false, get default() { return DEFAULT_MODELS['openai-compatible']; }, restartRequired: false, envVar: 'OPENAI_MODEL' }],
   ['provider', { type: 'enum', secret: false, enumValues: ['openai', 'openai-compatible', 'anthropic', 'glm'], default: 'openai-compatible', restartRequired: true, envVar: 'LLM_PROVIDER' }],
 
   // Image

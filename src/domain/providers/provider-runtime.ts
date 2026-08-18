@@ -701,12 +701,19 @@ export class ProviderRuntime extends EventEmitter {
 
         const result = await bound.images.generate(req, attemptOpts);
         this.recordSuccess(target.providerAccount, "image");
+        const catalogModel = plan.snapshot?.catalog.find(
+          (m) =>
+            m.id === target.model &&
+            (m.upstreamProvider === target.upstreamProvider ||
+              m.upstreamProvider === target.providerAccount),
+        );
+        const cost = calculateInferenceCost(result.usage, catalogModel?.pricing);
         this.emit("inference:success", redactObject({
           target,
           capability: "image",
           durationMs: Date.now() - startTime,
           usage: result.usage,
-          cost: result.usage?.cost,
+          cost,
         }));
         return result;
       } catch (err: any) {

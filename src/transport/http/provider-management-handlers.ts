@@ -458,23 +458,32 @@ export async function handleProbeProvider(
   }
 
   if (acc.baseUrl) {
-    const { validateEndpointUrl } = await import("./ssrf-validator.js");
+    const { safeSsrfFetch, validateEndpointUrl } = await import("./ssrf-validator.js");
     const allowPrivate = process.env.SEEPIENT_SSRF_ALLOW_PRIVATE === "1";
-    const val = await validateEndpointUrl(acc.baseUrl, { ssrfAllowPrivate: allowPrivate });
-    if (!val.valid) {
-      reachable = false;
-      ssrfBlocked = true;
-    } else if (full) {
+    if (full) {
       const start = Date.now();
       try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 2000);
-        const resp = await fetch(acc.baseUrl, { method: "HEAD", signal: controller.signal });
+        const resp = await safeSsrfFetch(
+          acc.baseUrl,
+          { method: "HEAD", signal: controller.signal },
+          { ssrfAllowPrivate: allowPrivate },
+        );
         clearTimeout(timeout);
         probeLatencyMs = Date.now() - start;
         reachable = resp.ok || resp.status < 500;
-      } catch {
+      } catch (err: any) {
         reachable = false;
+        if (err?.message?.includes("SSRF Blocked")) {
+          ssrfBlocked = true;
+        }
+      }
+    } else {
+      const val = await validateEndpointUrl(acc.baseUrl, { ssrfAllowPrivate: allowPrivate });
+      if (!val.valid) {
+        reachable = false;
+        ssrfBlocked = true;
       }
     }
   }
