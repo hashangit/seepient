@@ -11,9 +11,12 @@ import { hasScope } from "../auth/auth.js";
 import { validateEndpointUrl } from "./ssrf-validator.js";
 import { InferenceError } from "../../foundations/errors.js";
 
-function sendJSON(res: ServerResponse, status: number, body: unknown): void {
+function sendJSON(res: ServerResponse, status: number, body: unknown, revision?: number): void {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json");
+  if (revision !== undefined) {
+    res.setHeader("ETag", `"${revision}"`);
+  }
   res.end(JSON.stringify(body));
 }
 
@@ -21,10 +24,17 @@ function sendError(res: ServerResponse, status: number, code: string, message: s
   sendJSON(res, status, { error: { code, message } });
 }
 
-async function parseBody(req: IncomingMessage): Promise<string> {
+async function parseBody(req: IncomingMessage, maxBytes = 1024 * 1024): Promise<string> {
   return new Promise((resolve, reject) => {
     let data = "";
+    let bytes = 0;
     req.on("data", (chunk) => {
+      bytes += chunk.length;
+      if (bytes > maxBytes) {
+        req.destroy();
+        reject(new Error("PAYLOAD_TOO_LARGE"));
+        return;
+      }
       data += chunk;
     });
     req.on("end", () => resolve(data));
@@ -49,15 +59,19 @@ function isConflictError(err: any): boolean {
   );
 }
 
-function parseIfMatch(req: IncomingMessage, res: ServerResponse): number | null {
+function parseIfMatch(req: IncomingMessage, res: ServerResponse, currentRev?: number): number | null {
   const ifMatch = req.headers["if-match"];
   if (!ifMatch) {
     sendError(res, 428, "PRECONDITION_REQUIRED", "Header 'If-Match: <revision>' is required for mutations");
     return null;
   }
-  const rev = parseInt(ifMatch, 10);
+  if (ifMatch === "*") {
+    return currentRev ?? 0;
+  }
+  const clean = ifMatch.replace(/^"|"$/g, "");
+  const rev = parseInt(clean, 10);
   if (isNaN(rev)) {
-    sendError(res, 400, "BAD_REQUEST", "Invalid If-Match header value (must be an integer revision)");
+    sendError(res, 400, "BAD_REQUEST", "Invalid If-Match header value (must be an integer revision or '*')");
     return null;
   }
   return rev;
@@ -430,9 +444,19 @@ export async function handleProbeProvider(
 
   if (acc.baseUrl) {
     const { validateEndpointUrl } = await import("./ssrf-validator.js");
-    const val = await validateEndpointUrl(acc.baseUrl, { ssrfAllowPrivate: acc.ssrfAllowPrivate });
+    const allowPrivate = process.env.SEEPIENT_SSRF_ALLOW_PRIVATE === "1";
+    const val = await validateEndpointUrl(acc.baseUrl, { ssrfAllowPrivate: allowPrivate });
     if (!val.valid) {
       reachable = false;
+    } else if (full) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 2000);
+        await fetch(acc.baseUrl, { method: "HEAD", signal: controller.signal }).catch(() => {});
+        clearTimeout(timeout);
+      } catch {
+        reachable = false;
+      }
     }
   }
 
