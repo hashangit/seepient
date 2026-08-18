@@ -251,10 +251,13 @@ export async function handlePostProvider(
     release();
   }
 
+  const { clearBaseConfigCache } = await import("../../domain/providers/config-store/provider-config-store.js");
+  clearBaseConfigCache();
+
   broadcastSettingsChange(ctx, ['providers'], false, []);
 
   sendJSON(res, 201, {
-    provider: { type: providerType, apiKey: ctx.settingsManager.get(existingKey).value },
+    provider: { type: providerType, apiKey: "••••••••" },
     requiresRestart: false,
     restartAffected: [],
   });
@@ -296,10 +299,13 @@ export async function handlePatchProvider(
     release();
   }
 
+  const { clearBaseConfigCache } = await import("../../domain/providers/config-store/provider-config-store.js");
+  clearBaseConfigCache();
+
   broadcastSettingsChange(ctx, ['providers'], false, []);
 
   const result: Record<string, any> = { type: providerType };
-  result.apiKey = ctx.settingsManager.get(`${prefix}.apiKey`).value;
+  result.apiKey = "••••••••";
   if (providerType === 'openai-compatible') result.baseUrl = ctx.settingsManager.get(`${prefix}.baseUrl`).value;
   if (body.model) result.model = body.model;
 
@@ -343,6 +349,9 @@ export async function handleDeleteProvider(
   } finally {
     release();
   }
+
+  const { clearBaseConfigCache } = await import("../../domain/providers/config-store/provider-config-store.js");
+  clearBaseConfigCache();
 
   broadcastSettingsChange(ctx, ['providers'], false, []);
 

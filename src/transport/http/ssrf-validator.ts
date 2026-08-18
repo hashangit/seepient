@@ -138,3 +138,37 @@ export async function validateEndpointUrl(
 
   return { valid: true, resolvedIps: ips };
 }
+
+/**
+ * Executes an HTTP fetch with strict SSRF revalidation on every request and manual redirect hop.
+ */
+export async function safeSsrfFetch(
+  url: string | URL,
+  init?: RequestInit,
+  options: { ssrfAllowPrivate?: boolean } = {},
+): Promise<Response> {
+  const urlStr = url.toString();
+  const validation = await validateEndpointUrl(urlStr, options);
+  if (!validation.valid) {
+    throw new Error(`SSRF Blocked: ${validation.error}`);
+  }
+
+  const res = await fetch(urlStr, {
+    ...init,
+    redirect: "manual",
+  });
+
+  if (res.status >= 300 && res.status < 400) {
+    const location = res.headers.get("location");
+    if (location) {
+      const redirectUrl = new URL(location, urlStr).toString();
+      const redirectVal = await validateEndpointUrl(redirectUrl, options);
+      if (!redirectVal.valid) {
+        throw new Error(`SSRF Blocked redirect to: ${redirectVal.error}`);
+      }
+      return safeSsrfFetch(redirectUrl, init, options);
+    }
+  }
+
+  return res;
+}

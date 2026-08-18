@@ -114,7 +114,7 @@ export function resolveDefaultModel(
       return resolveDefaultModelForProvider(catalog, provider, tier);
     } catch {}
   }
-  // Safe fallbacks if catalog is not yet initialized
+  // Initial fallback defaults when catalog is not yet initialized at module import time
   if (provider === 'openai' || provider === 'openai-compatible') return 'gpt-5.6-terra';
   if (provider === 'anthropic') return 'claude-sonnet-5';
   if (provider === 'glm') return 'glm-5.3';
@@ -132,16 +132,21 @@ export function getModelMeta(id?: string): ModelEntry | undefined {
     (m) => m.id.toLowerCase() === lower || m.id.toLowerCase().endsWith('/' + lower),
   );
   if (!found) return undefined;
+  const pricing =
+    found.pricing &&
+    typeof found.pricing.promptPerMillion === 'number' &&
+    typeof found.pricing.completionPerMillion === 'number'
+      ? {
+          input: found.pricing.promptPerMillion,
+          output: found.pricing.completionPerMillion,
+        }
+      : undefined;
+
   return {
     id: found.id,
     name: found.displayName,
     contextWindow: found.contextWindow,
-    pricing: found.pricing
-      ? {
-          input: found.pricing.promptPerMillion ?? 0,
-          output: found.pricing.completionPerMillion ?? 0,
-        }
-      : undefined,
+    pricing,
   };
 }
 

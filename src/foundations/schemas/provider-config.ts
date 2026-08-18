@@ -184,20 +184,22 @@ export const ProviderEntryPatchSchema = Type.Partial(Type.Object({
 }));
 export type ProviderEntryPatch = Type.Static<typeof ProviderEntryPatchSchema>;
 
-export const ModelAssignmentPatchSchema = Type.Partial(Type.Object({
-  providerAccount: Nullable(Type.String()),
-  model: Nullable(Type.String()),
-  thinkingLevel: Nullable(ThinkingLevelSchema),
-  fallback: Nullable(
-    Type.Array(
-      Type.Object({
-        providerAccount: Type.String(),
-        model: Type.String(),
-        thinkingLevel: Type.Optional(ThinkingLevelSchema),
-      }),
+export const ModelAssignmentPatchSchema = Type.Object({
+  providerAccount: Type.String(),
+  model: Type.String(),
+  thinkingLevel: Type.Optional(Nullable(ThinkingLevelSchema)),
+  fallback: Type.Optional(
+    Nullable(
+      Type.Array(
+        Type.Object({
+          providerAccount: Type.String(),
+          model: Type.String(),
+          thinkingLevel: Type.Optional(ThinkingLevelSchema),
+        }),
+      ),
     ),
   ),
-}));
+});
 export type ModelAssignmentPatch = Type.Static<typeof ModelAssignmentPatchSchema>;
 
 export const TieredAssignmentsPatchSchema = Type.Partial(Type.Object({

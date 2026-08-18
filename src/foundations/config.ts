@@ -117,8 +117,14 @@ export function loadJsonConfig(filePath: string): { config: AppConfig; warning?:
  */
 export function loadMergedConfig(customCwd?: string): AppConfig {
   const global = loadJsonConfig(getGlobalConfigFile());
+  if (global.warning) {
+    console.warn(`[Seepient] ${global.warning}`);
+  }
   const cwd = customCwd || process.env.SEEPIENT_CWD || process.cwd();
   const local = loadJsonConfig(path.join(cwd, '.seepient', 'setting.json'));
+  if (local.warning) {
+    console.warn(`[Seepient] ${local.warning}`);
+  }
   return { ...global.config, ...local.config };
 }
 

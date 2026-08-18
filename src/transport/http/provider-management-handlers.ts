@@ -97,15 +97,20 @@ export async function handleGetProviderRuntime(
   }
 
   const snapshot = await runtime.createTurnSnapshot();
-  sendJSON(res, 200, {
-    revision: snapshot.revision,
-    updatedAt: new Date().toISOString(),
-    health: {},
-    sources: {
-      compiledDefault: true,
-      overlay: true,
+  sendJSON(
+    res,
+    200,
+    {
+      revision: snapshot.revision,
+      updatedAt: new Date().toISOString(),
+      health: {},
+      sources: {
+        compiledDefault: true,
+        overlay: true,
+      },
     },
-  });
+    snapshot.revision,
+  );
 }
 
 export async function handleGetAssignments(

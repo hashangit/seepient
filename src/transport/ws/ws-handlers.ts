@@ -180,7 +180,7 @@ export function handleConnection(
         break;
       case "list_providers":
         handleWsSettingsMessage(ws, msg as ListProvidersMessage, state, ctx, (sCtx) =>
-          handleWsListProviders(msg as ListProvidersMessage, ws, state, sCtx));
+          void handleWsListProviders(msg as ListProvidersMessage, ws, state, sCtx));
         break;
       case "set_provider":
         handleWsSettingsMessage(ws, msg as SetProviderMessage, state, ctx, (sCtx) =>
@@ -684,12 +684,12 @@ function requireWsScope(state: ConnectionState, scope: KeyScope): boolean {
 
 // ── WS Settings: list providers ─────────────────────────────────────────
 
-function handleWsListProviders(
+async function handleWsListProviders(
   msg: ListProvidersMessage,
   ws: WebSocket,
   state: ConnectionState,
   ctx: SettingsHandlerContext,
-): void {
+): Promise<void> {
   if (!requireWsScope(state, "agent:read")) {
     safeSend(ws, { type: "providers_list", id: msg.id, providers: {}, error: { code: "FORBIDDEN", message: "Requires agent:read scope" } } as any);
     return;
@@ -709,6 +709,20 @@ function handleWsListProviders(
       }
     }
   }
+
+  try {
+    const { getDefaultProviderRuntime } = await import("../../domain/providers/provider-runtime.js");
+    const snapshot = await getDefaultProviderRuntime().createTurnSnapshot();
+    const v2Providers = snapshot.config?.providers || {};
+    for (const [id, entry] of Object.entries(v2Providers)) {
+      if (!providers[id]) {
+        providers[id] = {
+          type: entry.upstreamProvider || entry.adapter || "custom",
+          baseUrl: entry.baseUrl,
+        };
+      }
+    }
+  } catch {}
 
   safeSend(ws, { type: "providers_list", id: msg.id, providers } as any);
 }
@@ -754,6 +768,9 @@ async function handleWsSetProvider(
     } finally {
       release();
     }
+
+    const { clearBaseConfigCache } = await import("../../domain/providers/config-store/provider-config-store.js");
+    clearBaseConfigCache();
   } catch (e: any) {
     safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "SET_ERROR", message: e.message } } as any);
     return;
@@ -791,6 +808,9 @@ async function handleWsRemoveProvider(
     } finally {
       release();
     }
+
+    const { clearBaseConfigCache } = await import("../../domain/providers/config-store/provider-config-store.js");
+    clearBaseConfigCache();
   } catch (e: any) {
     safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "RESET_ERROR", message: e.message } } as any);
     return;

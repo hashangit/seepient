@@ -95,7 +95,7 @@ export const NATIVE_IMAGE_ANNOTATIONS: Record<string, Partial<UpstreamModel>> = 
       streaming: false,
       vision: false,
       imageGenerate: true,
-      imageVariation: true,
+      imageVariation: false,
       imageEdit: true,
       imageMask: true,
       aspectRatios: ["1:1", "16:9", "9:16", "4:3", "3:4"],

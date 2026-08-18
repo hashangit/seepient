@@ -40,7 +40,7 @@ export function classifyInferenceError(
   // 2. Rate Limits & Quotas
   if (
     lower.includes("rate limit") ||
-    lower.includes("429") ||
+    /\b429\b/.test(lower) ||
     lower.includes("quota exceeded") ||
     lower.includes("resource_exhausted") ||
     lower.includes("too many requests")
@@ -53,13 +53,14 @@ export function classifyInferenceError(
 
   // 3. Authentication & Credentials
   if (
-    lower.includes("auth") ||
     lower.includes("unauthorized") ||
     lower.includes("api key") ||
     lower.includes("invalid key") ||
     lower.includes("permission_denied") ||
-    lower.includes("401") ||
-    lower.includes("403")
+    /\b401\b/.test(lower) ||
+    /\b403\b/.test(lower) ||
+    /\bauth\b/.test(lower) ||
+    lower.includes("authentication")
   ) {
     return { code: "auth", retryable: false };
   }
@@ -69,9 +70,9 @@ export function classifyInferenceError(
     lower.includes("overloaded") ||
     lower.includes("capacity") ||
     lower.includes("service unavailable") ||
-    lower.includes("503") ||
-    lower.includes("502") ||
-    lower.includes("500")
+    /\b503\b/.test(lower) ||
+    /\b502\b/.test(lower) ||
+    /\b500\b/.test(lower)
   ) {
     return { code: "overload", retryable: true };
   }
@@ -99,7 +100,6 @@ export function classifyInferenceError(
     lower.includes("econnrefused") ||
     lower.includes("enotfound") ||
     lower.includes("fetch failed") ||
-    lower.includes("network") ||
     lower.includes("socket hang up") ||
     lower.includes("connection reset") ||
     lower.includes("hang up")
@@ -112,7 +112,7 @@ export function classifyInferenceError(
     lower.includes("model not found") ||
     lower.includes("does not exist") ||
     lower.includes("unknown model") ||
-    lower.includes("404")
+    /\b404\b/.test(lower)
   ) {
     return { code: "unknown_model", retryable: false };
   }

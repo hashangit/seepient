@@ -60,7 +60,12 @@ export class ProviderConfigStore {
     if (this.overlayPath && fs.existsSync(this.overlayPath)) {
       try {
         const raw = fs.readFileSync(this.overlayPath, "utf-8");
-        this.currentOverlay = JSON.parse(raw);
+        const loaded = JSON.parse(raw);
+        this.currentOverlay = {
+          revision: loaded.revision ?? 0,
+          updatedAt: loaded.updatedAt || new Date().toISOString(),
+          patch: loaded.patch || {},
+        };
       } catch (err: any) {
         throw new SeepientError(
           `Failed to load overlay from ${this.overlayPath}: ${err.message}`,
@@ -104,8 +109,14 @@ export class ProviderConfigStore {
             const isDeadPid = data.pid && !isProcessAlive(data.pid);
             const isOld = data.createdAt && Date.now() - data.createdAt > 300_000;
             if (isDeadPid || isOld) {
-              fs.unlinkSync(lockPath);
-              continue;
+              const tmpStale = `${lockPath}.stale.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}`;
+              try {
+                fs.renameSync(lockPath, tmpStale);
+                fs.unlinkSync(tmpStale);
+                continue;
+              } catch {
+                continue;
+              }
             }
           } catch {
             continue;
@@ -134,7 +145,7 @@ export class ProviderConfigStore {
         this.currentOverlay = JSON.parse(raw);
       } catch {}
     }
-    return this.currentOverlay;
+    return JSON.parse(JSON.stringify(this.currentOverlay));
   }
 
   /**
@@ -364,14 +375,15 @@ export class ProviderConfigStore {
     const effective: ProviderEffectiveConfig = {
       schemaVersion: 2,
       revision: this.currentOverlay.revision,
-      updatedAt: this.currentOverlay.updatedAt,
+      updatedAt: this.currentOverlay.updatedAt || new Date().toISOString(),
       providers: mergedProviders,
       modelAssignments: mergedAssignments,
       retryPolicy: mergedRetry,
       ssrf: patch.ssrf === null ? undefined : (patch.ssrf !== undefined ? (patch.ssrf as any) : defaults.ssrf),
     };
 
-    return effective;
+    this.validateEffective(effective);
+    return JSON.parse(JSON.stringify(effective));
   }
 }
 
@@ -425,6 +437,13 @@ export async function getDefaultBaseConfigAsync(
   }
 
   baseConfigCache.set(cacheKey, migrationResult.config);
+
+  // Proactively sanitize legacy audit log on startup
+  try {
+    const { scrubAuditLog } = await import("../audit-log.js");
+    scrubAuditLog();
+  } catch {}
+
   return migrationResult.config;
 }
 

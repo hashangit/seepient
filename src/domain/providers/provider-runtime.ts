@@ -43,9 +43,10 @@ export function computeBackoffDelay(
   const mult = policy.backoffMultiplier ?? 2;
   const jitter = policy.backoffJitter ?? 0.25;
   const cap = policy.backoffCapMs ?? 30_000;
-  const rawDelay = Math.min(base * Math.pow(mult, attemptIndex), cap);
+  const rawDelay = base * Math.pow(mult, attemptIndex);
   const jitterFactor = 1 + (Math.random() * 2 - 1) * jitter;
-  return Math.max(0, Math.round(rawDelay * jitterFactor));
+  const jittered = Math.round(rawDelay * jitterFactor);
+  return Math.max(0, Math.min(cap, jittered));
 }
 
 export function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -85,6 +86,7 @@ async function* withIdleWatchdog(
   stream: AsyncIterable<StreamEvent>,
   idleTimeoutMs: number,
   signal?: AbortSignal,
+  abortController?: AbortController,
 ): AsyncIterable<StreamEvent> {
   if (idleTimeoutMs <= 0) {
     yield* stream;
@@ -94,10 +96,13 @@ async function* withIdleWatchdog(
   const iterator = stream[Symbol.asyncIterator]();
   try {
     while (true) {
-      if (signal?.aborted) {
+      if (signal?.aborted || abortController?.signal.aborted) {
+        const isTimeout =
+          signal?.reason?.name === "TimeoutError" ||
+          abortController?.signal.reason?.name === "TimeoutError";
         yield {
           type: "abort",
-          reason: signal.reason?.name === "TimeoutError" ? "timeout" : "user",
+          reason: isTimeout ? "timeout" : "user",
         };
         return;
       }
@@ -116,6 +121,15 @@ async function* withIdleWatchdog(
       if (timer) clearTimeout(timer);
 
       if (result.timedOut) {
+        if (abortController) {
+          const timeoutErr = new Error(
+            `Streaming response stalled: no chunk received within ${idleTimeoutMs}ms`,
+          );
+          timeoutErr.name = "TimeoutError";
+          try {
+            abortController.abort(timeoutErr);
+          } catch {}
+        }
         yield {
           type: "error",
           error: {
@@ -137,7 +151,12 @@ async function* withIdleWatchdog(
     }
   } finally {
     if (typeof iterator.return === "function") {
-      await iterator.return();
+      try {
+        await Promise.race([
+          iterator.return(),
+          new Promise((r) => setTimeout(r, 100)),
+        ]);
+      } catch {}
     }
   }
 }
@@ -438,17 +457,27 @@ export class ProviderRuntime extends EventEmitter {
         thinkingLevel: req.thinkingLevel ?? target.thinkingLevel,
       };
 
+      const attemptController = new AbortController();
+      if (opts?.signal) {
+        opts.signal.addEventListener("abort", () => {
+          try {
+            attemptController.abort(opts?.signal?.reason);
+          } catch {}
+        }, { once: true });
+      }
+
       const attemptTimeoutMs = opts?.timeoutMs ?? retryPolicy.operationTimeoutMs ?? 60_000;
       const attemptOpts: InferenceOptions = {
         ...opts,
         timeoutMs: attemptTimeoutMs,
+        signal: attemptController.signal,
       };
 
       const idleTimeoutMs = retryPolicy.streamingIdleTimeoutMs ?? 30_000;
 
       try {
         const rawStream = bound.language.stream(mergedReq, attemptOpts);
-        const guardedStream = withIdleWatchdog(rawStream, idleTimeoutMs, opts?.signal);
+        const guardedStream = withIdleWatchdog(rawStream, idleTimeoutMs, opts?.signal, attemptController);
 
         for await (const event of guardedStream) {
           if (event.type === "content_block_delta") {
@@ -676,6 +705,8 @@ export class ProviderRuntime extends EventEmitter {
           target,
           capability: "image",
           durationMs: Date.now() - startTime,
+          usage: result.usage,
+          cost: result.usage?.cost,
         }));
         return result;
       } catch (err: any) {

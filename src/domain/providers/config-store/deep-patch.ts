@@ -23,6 +23,14 @@ export function applyDeepPatch(target: any, patch: any, path: string[] = []): an
     return patch;
   }
 
+  if (
+    path.length === 0 &&
+    typeof patch.providerAccount === "string" &&
+    typeof patch.model === "string"
+  ) {
+    return patch;
+  }
+
   const result =
     typeof target === "object" && target !== null && !Array.isArray(target)
       ? Object.assign(Object.create(null), target)
@@ -34,7 +42,10 @@ export function applyDeepPatch(target: any, patch: any, path: string[] = []): an
     }
 
     const currentPath = [...path, key];
-    const isModelAssignmentSlot = currentPath.length === 3 && currentPath[0] === "modelAssignments";
+    const isModelAssignmentSlot =
+      (currentPath.length === 3 && currentPath[0] === "modelAssignments") ||
+      (currentPath.length === 2 && ["text", "plan", "coding", "vision", "commit", "media"].includes(currentPath[0])) ||
+      (patchVal && typeof patchVal === "object" && "providerAccount" in patchVal && "model" in patchVal);
 
     if (patchVal === null) {
       delete result[key];
