@@ -21,6 +21,7 @@ import type { PolicyStore } from '../../foundations/contracts/execution-brokers.
 import type { PolicySnapshot } from '../../foundations/contracts/execution-brokers.js';
 import { GLOBAL_WORKSPACE_ID } from '../../domain/permissions/policy-store.js';
 import { capabilityKey } from '../../domain/permissions/capability-store.js';
+import type { ProviderRuntime } from '../../domain/providers/provider-runtime.js';
 
 /**
  * Outcome of a single `Agent.chat()` turn. Returned so non-readline callers
@@ -56,6 +57,12 @@ export class Agent {
   private _workspaceRoot: string | null = null;
   private _policyProposals: Array<{ id: string; capability: Capability }> = [];
   private sessionId: string;
+  private providerRuntime?: any;
+
+  /** Attach custom or default ProviderRuntime */
+  setProviderRuntime(runtime: any): void {
+    this.providerRuntime = runtime;
+  }
 
   constructor(
     provider: LLMProvider,
@@ -563,14 +570,18 @@ export class Agent {
     };
 
     try {
+      const runtime = this.providerRuntime;
+      const snapshot = runtime ? await runtime.createTurnSnapshot() : undefined;
+
       const result = await runAgentLoop({
         provider: this.provider,
         model: this.model,
+        modelOverride: this.config?.hasExplicitModel ? this.model : undefined,
         messages: this.messages,
         toolDefs: getAllToolDefinitions(),
         maxSteps: 30,
         hooks: createHookExecutor(),
-        config: { ...this.config, agentName: 'cli' },
+        config: { ...this.config, agentName: 'cli', ...(runtime ? { runtime } : {}) },
         signal,
         approveTool: wrappedApproveTool,
         permissionLevel,
@@ -584,6 +595,8 @@ export class Agent {
         // Spec 008: when enablePermissionPipeline() was called, route through
         // the new Domain pipeline instead of the legacy matrix/grant branches.
         wiredPipeline: this._wiredPipeline ?? undefined,
+        providerRuntime: runtime,
+        turnSnapshot: snapshot,
       });
 
       spinner?.stop();
@@ -683,6 +696,11 @@ export class Agent {
   /** Public accessor for the active model name. */
   getModel(): string {
     return this.model;
+  }
+
+  /** Public accessor for the ProviderRuntime instance. */
+  getProviderRuntime(): ProviderRuntime | null {
+    return this.providerRuntime;
   }
 
   switchProvider(provider: LLMProvider, model: string) {

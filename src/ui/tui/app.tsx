@@ -20,6 +20,7 @@ import Spinner from 'ink-spinner';
 import { CommandPalette } from './components/command-palette.js';
 import { HelpDialog } from './overlays/help-dialog.js';
 import { ModelSelector, type ModelOption } from './overlays/model-selector.js';
+import { ModelManager } from './overlays/model-manager.js';
 import { SessionSelector, type SessionListItem } from './overlays/session-selector.js';
 import { SettingsEditor, type SettingItem } from './overlays/settings-overlay.js';
 import { messagesToFeedEntries } from './feed-serializer.js';
@@ -172,6 +173,47 @@ export function TuiApp({
       process.stdout.off('resize', onResize);
     };
   }, [resetView]);
+
+  const [modelSnapshot, setModelSnapshot] = useState<{ assignments?: any; providers?: any; catalog?: any } | null>(null);
+
+  useEffect(() => {
+    if (overlay === 'model') {
+      const runtime = agent.getProviderRuntime?.();
+      if (runtime) {
+        runtime.createTurnSnapshot().then((snap: any) => {
+          setModelSnapshot({
+            assignments: snap.assignments,
+            providers: snap.config.providers,
+            catalog: snap.catalog,
+          });
+        }).catch(() => {});
+      }
+    }
+  }, [overlay, agent]);
+
+  const handleUpdateAssignment = (purpose: string, tier: string, target: { providerAccount: string; model: string; thinkingLevel?: any }) => {
+    const runtime = agent.getProviderRuntime?.();
+    if (runtime) {
+      runtime.configStore.getOverlay().then((overlayDoc: any) => {
+        const patch = {
+          modelAssignments: {
+            [purpose]: {
+              [tier]: target,
+            },
+          },
+        };
+        return runtime.configStore.updateOverlay(patch as any, overlayDoc.revision);
+      }).then(() => {
+        return runtime.createTurnSnapshot();
+      }).then((snap: any) => {
+        setModelSnapshot({
+          assignments: snap.assignments,
+          providers: snap.config.providers,
+          catalog: snap.catalog,
+        });
+      }).catch(() => {});
+    }
+  };
 
   const didInit = useRef(false);
   useEffect(() => {
@@ -487,10 +529,13 @@ export function TuiApp({
         ) : overlay === 'help' ? (
           <HelpDialog onClose={() => setOverlay(null)} />
         ) : overlay === 'model' ? (
-          <ModelSelector
-            options={modelOptions}
-            currentModel={agent.getModel()}
-            onSwitch={(pt, m) => { setOverlay(null); void onSwitchModel(pt, m); }}
+          <ModelManager
+            assignments={modelSnapshot?.assignments}
+            providers={modelSnapshot?.providers}
+            catalog={modelSnapshot?.catalog}
+            activeAccount={providerType}
+            activeModel={agent.getModel()}
+            onUpdateAssignment={handleUpdateAssignment}
             onClose={() => setOverlay(null)}
           />
         ) : overlay === 'settings' ? (

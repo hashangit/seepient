@@ -117,7 +117,7 @@ export function handleConnection(
     activeProvider: null,
     activeModel: null,
     maxPermissionLevel: ctx.maxPermissionLevel,
-    apiKeyHash: hashKey(key.key),
+    apiKeyHash: key.keyHash ?? (key.key ? hashKey(key.key) : ""),
     apiKey: key,
   };
 
@@ -721,8 +721,8 @@ async function handleWsSetProvider(
   state: ConnectionState,
   ctx: SettingsHandlerContext,
 ): Promise<void> {
-  if (!requireWsScope(state, "admin")) {
-    safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "FORBIDDEN", message: "Requires admin scope" } } as any);
+  if (!requireWsScope(state, "provider:admin")) {
+    safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "FORBIDDEN", message: "Requires provider:admin scope" } } as any);
     return;
   }
 
@@ -735,9 +735,19 @@ async function handleWsSetProvider(
 
   const prefix = `providers.${providerType === "openai-compatible" ? "openai-compat" : providerType}`;
   try {
+    if (baseUrl && providerType === "openai-compatible") {
+      const { validateEndpointUrl } = await import("../http/ssrf-validator.js");
+      const val = await validateEndpointUrl(baseUrl);
+      if (!val.valid) {
+        safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "SSRF_BLOCKED", message: val.error } } as any);
+        return;
+      }
+    }
     if (apiKey) await ctx.settingsManager.set(`${prefix}.apiKey`, apiKey);
     if (model) await ctx.settingsManager.set(`${prefix}.model`, model);
-    if (baseUrl && providerType === "openai-compatible") await ctx.settingsManager.set(`${prefix}.baseUrl`, baseUrl);
+    if (baseUrl && providerType === "openai-compatible") {
+      await ctx.settingsManager.set(`${prefix}.baseUrl`, baseUrl);
+    }
   } catch (e: any) {
     safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "SET_ERROR", message: e.message } } as any);
     return;
@@ -754,8 +764,8 @@ async function handleWsRemoveProvider(
   state: ConnectionState,
   ctx: SettingsHandlerContext,
 ): Promise<void> {
-  if (!requireWsScope(state, "admin")) {
-    safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "FORBIDDEN", message: "Requires admin scope" } } as any);
+  if (!requireWsScope(state, "provider:admin")) {
+    safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "FORBIDDEN", message: "Requires provider:admin scope" } } as any);
     return;
   }
 

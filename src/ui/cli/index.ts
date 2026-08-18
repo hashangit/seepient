@@ -83,6 +83,14 @@ program
     await runSetup(options);
   });
 
+import { registerAuthCommands } from '../../transport/cli/commands/auth-cli.js';
+import { registerProvidersCommands } from '../../transport/cli/commands/providers-cli.js';
+import { registerModelsCommands } from '../../transport/cli/commands/models-cli.js';
+
+registerAuthCommands(program);
+registerProvidersCommands(program);
+registerModelsCommands(program);
+
 program
   .command('chat [query...]', { isDefault: true })
   .description('Start the AI agent (default)')

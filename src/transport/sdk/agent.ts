@@ -239,22 +239,28 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
 
     const maxSteps = opts.maxSteps ?? 10;
 
+    const runtime: any = (opts as any).providerRuntime;
+    const snapshot: any = runtime ? await runtime.createTurnSnapshot() : undefined;
+
     const result = await runAgentLoop({
       provider: llmProvider,
       model: model,
+      modelOverride: opts.model,
       messages,
       toolDefs,
       systemPrompt: systemPrompt,
       maxSteps,
       hooks: hookExecutor,
       signal: activeAbortController.signal,
-      config: opts.config,
+      config: { ...opts.config, ...(runtime ? { runtime } : {}) },
       metadata: opts.metadata,
       middleware: opts.middleware,
       approveTool: opts.approveTool,
       permissionLevel: opts.permissionLevel,
       grantStore: grantStore,
       wiredPipeline,
+      providerRuntime: runtime,
+      turnSnapshot: snapshot,
     });
 
     // Update cumulative usage from result
@@ -314,16 +320,20 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
     // Run the loop in the background — lock released in finally when done
     (async () => {
       try {
+        const runtime: any = (opts as any).providerRuntime;
+        const snapshot: any = runtime ? await runtime.createTurnSnapshot() : undefined;
+
         const result = await runAgentLoop({
           provider: llmProvider,
           model: model,
+          modelOverride: opts.model,
           messages,
           toolDefs,
           systemPrompt: systemPrompt,
           maxSteps,
           hooks: streamHookExecutor,
           signal: streamAbort.signal,
-          config: opts.config,
+          config: { ...opts.config, ...(runtime ? { runtime } : {}) },
           metadata: opts.metadata,
           middleware: opts.middleware,
           approveTool: opts.approveTool,
@@ -331,6 +341,8 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
           grantStore: grantStore,
           wiredPipeline,
           stream: true,
+          providerRuntime: runtime,
+          turnSnapshot: snapshot,
           onStep: (step) => {
             if (streamOptions?.onStep) streamOptions.onStep(step);
             // Streaming emits text_delta; non-streaming emits one complete

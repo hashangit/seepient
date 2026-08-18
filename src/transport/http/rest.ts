@@ -46,6 +46,8 @@ export interface RestHandlerContext {
   settingsHandlerContext?: SettingsHandlerContext;
   /** Gateway REST handler — delegated for all /v1/gateway/* routes */
   gatewayHandler?: (req: IncomingMessage, res: ServerResponse, path: string, method: string) => Promise<void>;
+  /** Provider runtime instance */
+  providerRuntime?: import("../../domain/providers/provider-runtime.js").ProviderRuntime;
 }
 
 interface ChatRequest {
@@ -126,14 +128,52 @@ function matchRoute(
     if (method === "PATCH") return { handler: "settings_patch", params: { category: settingsCategoryMatch[1] } };
   }
 
-  // Provider routes
+  // Provider v2 routes
+  if (method === "GET" && path === "/v1/provider-runtime") {
+    return { handler: "provider_runtime", params: {} };
+  }
+  if (method === "GET" && path === "/v1/catalog") {
+    return { handler: "catalog", params: {} };
+  }
+  if (method === "POST" && path === "/v1/models/resolve") {
+    return { handler: "models_resolve", params: {} };
+  }
+  if (path === "/v1/models/assignments") {
+    if (method === "GET") return { handler: "models_assignments", params: {} };
+  }
+  const assignmentMatch = path.match(/^\/v1\/models\/assignments\/([a-z-]+)(?:\/([a-z]+))?$/);
+  if (assignmentMatch) {
+    const purpose = assignmentMatch[1];
+    const tier = assignmentMatch[2];
+    if (method === "GET") return { handler: "models_assignments", params: { purpose, ...(tier ? { tier } : {}) } };
+    if (method === "PUT" && tier) return { handler: "models_assignment_put", params: { purpose, tier } };
+    if (method === "DELETE" && tier) return { handler: "models_assignment_delete", params: { purpose, tier } };
+  }
+
+  // Provider v2 accounts routes
+  if (method === "GET" && path === "/v1/providers") {
+    return { handler: "providers_v2_list", params: {} };
+  }
+  const providerV2Match = path.match(/^\/v1\/providers\/([a-zA-Z0-9_-]+)$/);
+  if (providerV2Match) {
+    const providerId = providerV2Match[1];
+    if (method === "GET") return { handler: "provider_v2_get", params: { providerId } };
+    if (method === "PUT") return { handler: "provider_v2_put", params: { providerId } };
+    if (method === "DELETE") return { handler: "provider_v2_delete", params: { providerId } };
+    if (method === "PATCH") return { handler: "provider_patch", params: { type: providerId } };
+  }
+  const probeMatch = path.match(/^\/v1\/providers\/([a-zA-Z0-9_-]+)\/probe$/);
+  if (method === "POST" && probeMatch) {
+    return { handler: "provider_probe", params: { providerId: probeMatch[1] } };
+  }
+  const refreshMatch = path.match(/^\/v1\/providers\/([a-zA-Z0-9_-]+)\/refresh-models$/);
+  if (method === "POST" && refreshMatch) {
+    return { handler: "provider_refresh_models", params: { providerId: refreshMatch[1] } };
+  }
+
+  // Legacy Provider routes
   if (method === "POST" && path === "/v1/providers") {
     return { handler: "provider_post", params: {} };
-  }
-  const providerMatch = path.match(/^\/v1\/providers\/([a-z-]+)$/);
-  if (providerMatch) {
-    if (method === "PATCH") return { handler: "provider_patch", params: { type: providerMatch[1] } };
-    if (method === "DELETE") return { handler: "provider_delete", params: { type: providerMatch[1] } };
   }
 
   // GET /v1/sessions/:id
@@ -164,11 +204,18 @@ export function createRestHandler(ctx: RestHandlerContext) {
     const route = matchRoute(req.url ?? "/", req.method ?? "GET");
 
     if (!route) {
-      sendError(res, 404, "NOT_FOUND", `No route for ${req.method} ${req.url}`);
+      const sanitizedPath = (req.url ?? "/").split("?")[0];
+      sendError(res, 404, "NOT_FOUND", `No route for ${req.method} ${sanitizedPath}`);
       return;
     }
 
     try {
+      const getRuntime = async () => {
+        if (ctx.providerRuntime) return ctx.providerRuntime;
+        const { getDefaultProviderRuntime } = await import("../../domain/providers/provider-runtime.js");
+        return getDefaultProviderRuntime();
+      };
+
       switch (route.handler) {
         case "health":
           await handleHealth(req, res, ctx);
@@ -194,6 +241,92 @@ export function createRestHandler(ctx: RestHandlerContext) {
         case "settings_patch":
           await handleSettingsPatch(req, res, ctx, route.params.category);
           break;
+        case "provider_runtime": {
+          const key = authMiddleware(req);
+          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
+          const { handleGetProviderRuntime } = await import("./provider-management-handlers.js");
+          await handleGetProviderRuntime(req, res, await getRuntime(), key);
+          break;
+        }
+        case "catalog": {
+          const key = authMiddleware(req);
+          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
+          const { handleGetCatalog } = await import("./provider-management-handlers.js");
+          await handleGetCatalog(req, res, await getRuntime(), key);
+          break;
+        }
+        case "models_resolve": {
+          const key = authMiddleware(req);
+          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
+          const { handleResolveModel } = await import("./provider-management-handlers.js");
+          await handleResolveModel(req, res, await getRuntime(), key);
+          break;
+        }
+        case "models_assignments": {
+          const key = authMiddleware(req);
+          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
+          const { handleGetAssignments } = await import("./provider-management-handlers.js");
+          await handleGetAssignments(req, res, await getRuntime(), key, route.params.purpose, route.params.tier);
+          break;
+        }
+        case "models_assignment_put": {
+          const key = authMiddleware(req);
+          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
+          const { handlePutAssignment } = await import("./provider-management-handlers.js");
+          await handlePutAssignment(req, res, await getRuntime(), key, route.params.purpose, route.params.tier);
+          break;
+        }
+        case "models_assignment_delete": {
+          const key = authMiddleware(req);
+          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
+          const { handleDeleteAssignment } = await import("./provider-management-handlers.js");
+          await handleDeleteAssignment(req, res, await getRuntime(), key, route.params.purpose, route.params.tier);
+          break;
+        }
+        case "providers_v2_list": {
+          const key = authMiddleware(req);
+          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
+          const { handleGetProviders } = await import("./provider-management-handlers.js");
+          await handleGetProviders(req, res, await getRuntime(), key);
+          break;
+        }
+        case "provider_v2_get": {
+          const key = authMiddleware(req);
+          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
+          const { handleGetProviders } = await import("./provider-management-handlers.js");
+          await handleGetProviders(req, res, await getRuntime(), key, route.params.providerId);
+          break;
+        }
+        case "provider_v2_put": {
+          const key = authMiddleware(req);
+          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
+          const { handlePutProvider } = await import("./provider-management-handlers.js");
+          await handlePutProvider(req, res, await getRuntime(), key, route.params.providerId);
+          break;
+        }
+        case "provider_v2_delete": {
+          const key = authMiddleware(req);
+          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
+          const { handleDeleteProvider } = await import("./provider-management-handlers.js");
+          await handleDeleteProvider(req, res, await getRuntime(), key, route.params.providerId);
+          break;
+        }
+        case "provider_probe": {
+          const key = authMiddleware(req);
+          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
+          const urlObj = new URL(req.url ?? "/", "http://localhost");
+          const full = urlObj.searchParams.get("full") === "true";
+          const { handleProbeProvider } = await import("./provider-management-handlers.js");
+          await handleProbeProvider(req, res, await getRuntime(), key, route.params.providerId, full);
+          break;
+        }
+        case "provider_refresh_models": {
+          const key = authMiddleware(req);
+          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
+          const { handleRefreshModels } = await import("./provider-management-handlers.js");
+          await handleRefreshModels(req, res, await getRuntime(), key, route.params.providerId);
+          break;
+        }
         case "provider_post":
           await handleProviderPost(req, res, ctx);
           break;
@@ -314,7 +447,7 @@ async function handleChat(
       skills: parsed.skills,
       // Spec 008: pass authenticated principal identity (hashed API key) so
       // the per-request pipeline constructor derives `principalId` from it.
-      apiKeyHash: hashKey(key.key),
+      apiKeyHash: key.keyHash ?? (key.key ? hashKey(key.key) : ""),
     } as any);
 
     sendJSON(res, 200, {
@@ -354,7 +487,7 @@ async function handleGetSession(
     return;
   }
 
-  const session = await ctx.sessionManager.getSession(sessionId, hashKey(key.key));
+  const session = await ctx.sessionManager.getSession(sessionId, key.keyHash ?? (key.key ? hashKey(key.key) : ""));
   if (!session) {
     sendError(res, 404, "NOT_FOUND", `Session ${sessionId} not found`);
     return;

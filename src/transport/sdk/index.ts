@@ -37,6 +37,15 @@ import * as path from 'path';
 // ── Re-exports ───────────────────────────────────────────────────────────
 
 export { createAgent } from "./agent.js";
+export { createSeepient } from "./seepient.js";
+export type {
+  Seepient,
+  CreateSeepientOptions,
+  AgentOptions as SeepientAgentOptions,
+  GenerateTextOptions as SeepientGenerateTextOptions,
+  GenerateImageOptions as SeepientGenerateImageOptions,
+  ResolveOptions as SeepientResolveOptions,
+} from "../../foundations/contracts/sdk-fixture.js";
 export { tool, CORE_TOOLS, COMM_TOOLS, ADVANCED_TOOLS, ALL_TOOLS } from "./tools.js";
 export { settings, SettingsError } from "./settings.js";
 export { configureProviders, loadProviderConfig, provider } from "../../domain/providers/provider-resolver.js";
@@ -204,23 +213,28 @@ export async function generateText(
     });
   }
 
-  // Run the agent loop
+  const runtime: any = (opts as any).providerRuntime;
+  const snapshot: any = runtime ? await runtime.createTurnSnapshot() : undefined;
+
   const result = await runAgentLoop({
     provider: llmProvider,
     model,
+    modelOverride: opts.model,
     messages,
     toolDefs,
     systemPrompt,
     maxSteps,
     hooks,
     signal: opts.signal,
-    config: opts.config,
+    config: { ...opts.config, ...(runtime ? { runtime } : {}) },
     metadata: opts.metadata,
     middleware: opts.middleware,
     approveTool: opts.approveTool,
     permissionLevel: opts.permissionLevel,
     grantStore: opts.grants?.length ? createSessionGrantStore(opts.grants) : undefined,
     wiredPipeline,
+    providerRuntime: runtime,
+    turnSnapshot: snapshot,
   });
 
   // Get the final text
@@ -315,25 +329,31 @@ export async function streamText(
     });
   }
 
+  const runtime: any = (opts as any).providerRuntime;
+  const snapshot: any = runtime ? await runtime.createTurnSnapshot() : undefined;
+
   // Run loop in background
   (async () => {
     try {
       const result = await runAgentLoop({
         provider: llmProvider,
         model,
+        modelOverride: opts.model,
         messages,
         toolDefs,
         systemPrompt,
         maxSteps,
         hooks,
         signal: abortController.signal,
-        config: opts.config,
+        config: { ...opts.config, ...(runtime ? { runtime } : {}) },
         metadata: opts.metadata,
         middleware: opts.middleware,
         approveTool: opts.approveTool,
         permissionLevel: opts.permissionLevel,
         grantStore: opts.grants?.length ? createSessionGrantStore(opts.grants) : undefined,
         wiredPipeline,
+        providerRuntime: runtime,
+        turnSnapshot: snapshot,
         onStep: (step) => {
           if (opts.onStep) opts.onStep(step);
           if (step.type === "text" && step.content) {

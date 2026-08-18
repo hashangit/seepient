@@ -227,6 +227,15 @@ export async function handlePostProvider(
     return;
   }
 
+  if (body.baseUrl && providerType === 'openai-compatible') {
+    const { validateEndpointUrl } = await import("./ssrf-validator.js");
+    const val = await validateEndpointUrl(body.baseUrl, { ssrfAllowPrivate: body.ssrfAllowPrivate });
+    if (!val.valid) {
+      sendError(res, 400, "SSRF_BLOCKED", val.error || "SSRF validation failed");
+      return;
+    }
+  }
+
   const release = await writeMutex.acquire();
   try {
     await ctx.settingsManager.set(existingKey, body.apiKey);
@@ -266,6 +275,15 @@ export async function handlePatchProvider(
 
   const body = await readBody(req);
   const prefix = `providers.${providerType === 'openai-compatible' ? 'openai-compat' : providerType}`;
+
+  if (body.baseUrl && providerType === 'openai-compatible') {
+    const { validateEndpointUrl } = await import("./ssrf-validator.js");
+    const val = await validateEndpointUrl(body.baseUrl, { ssrfAllowPrivate: body.ssrfAllowPrivate });
+    if (!val.valid) {
+      sendError(res, 400, "SSRF_BLOCKED", val.error || "SSRF validation failed");
+      return;
+    }
+  }
 
   const release = await writeMutex.acquire();
   try {

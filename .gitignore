@@ -49,3 +49,7 @@ docs/.vitepress/cache/
 
 # Local Seepient config (per-user settings, sessions, keys)
 .seepient/
+
+# Test media artifacts
+generated-*.png
+edited-*.png

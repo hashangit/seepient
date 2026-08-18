@@ -48,7 +48,7 @@ function handleGenerateApiKey(): void {
     label: "cli-generated",
     filePath,
   });
-  process.stdout.write(`Generated API key:\n\n  ${entry.key}\n\n`);
+  process.stdout.write(`Generated API key:\n\n  ${entry.rawKey ?? (entry as any).key}\n\n`);
   process.stdout.write(
     `Scopes: ${entry.scopes.join(", ")}\n` +
       `Created: ${entry.created}\n` +
