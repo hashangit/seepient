@@ -20,21 +20,25 @@ const M = (id: string, name: string, contextWindow: number, input: number, outpu
 export const MODEL_CATALOG: Record<ProviderType, ModelEntry[]> = {
   'openai-compatible': [], // No curated list — user provides their own model name
   openai: [
+    M('gpt-5.6-terra', 'GPT-5.6 Terra', 256000, 2.5, 10),
+    M('gpt-5.6-sol', 'GPT-5.6 Sol', 256000, 5, 20),
+    M('gpt-5.6-luna', 'GPT-5.6 Luna', 128000, 0.15, 0.6),
+    M('gpt-4o', 'GPT-4o', 128000, 2.5, 10),
+    M('gpt-4o-mini', 'GPT-4o Mini', 128000, 0.15, 0.6),
     M('gpt-5.4', 'GPT-5.4', 256000, 2.5, 10),
     M('gpt-5.4-pro', 'GPT-5.4 Pro', 256000, 5, 20),
     M('gpt-5.4-mini', 'GPT-5.4 Mini', 128000, 0.15, 0.6),
-    M('gpt-5.4-nano', 'GPT-5.4 Nano', 128000, 0.05, 0.2),
-    M('gpt-5.3-instant', 'GPT-5.3 Instant', 128000, 0.5, 2),
-    M('gpt-5.3-codex', 'GPT-5.3 Codex', 256000, 2, 8),
-    M('o3', 'o3', 200000, 5, 15),
-    M('o3-mini', 'o3 Mini', 200000, 1, 4),
   ],
   anthropic: [
+    M('claude-sonnet-5', 'Claude Sonnet 5', 500000, 3, 15),
+    M('claude-opus-5', 'Claude Opus 5', 500000, 15, 75),
+    M('claude-haiku-4-5', 'Claude Haiku 4.5', 200000, 0.8, 4),
     M('claude-sonnet-4-6-20260320', 'Claude Sonnet 4.6', 200000, 3, 15),
     M('claude-opus-4-6-20260320', 'Claude Opus 4.6', 200000, 15, 75),
-    M('claude-haiku-4-5-20251001', 'Claude Haiku 4.5', 200000, 0.8, 4),
   ],
   glm: [
+    M('glm-5.3', 'GLM-5.3', 256000, 1.5, 4.5),
+    M('glm-4.7', 'GLM-4.7', 128000, 1, 3),
     M('haiku', 'GLM-4.5 Air', 128000, 0.5, 1.5),
     M('sonnet', 'GLM-4.7', 128000, 1, 3),
     M('opus', 'GLM-5.1', 128000, 2, 6),
@@ -48,10 +52,10 @@ export const CUSTOM_MODEL_VALUE = '__custom__';
  * Single source of truth — all other files import from here.
  */
 export const DEFAULT_MODELS: Record<ProviderType, string> = {
-  openai: 'gpt-5.4',
-  anthropic: 'claude-sonnet-4-6-20260320',
-  glm: 'opus',
-  'openai-compatible': 'gpt-5.4',
+  openai: 'gpt-5.6-terra',
+  'openai-compatible': 'gpt-5.6-terra',
+  anthropic: 'claude-sonnet-5',
+  glm: 'glm-5.3',
 };
 
 /** Look up a model's metadata (context window + pricing) by id, across providers.

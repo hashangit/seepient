@@ -488,8 +488,31 @@ export async function handleRefreshModels(
     return;
   }
 
-  const models = snapshot.catalog.filter(
-    (m: any) => m.provider === providerId || m.upstreamProvider === providerId,
+  // Actively poll upstream /models and update discovery cache
+  const discoveryCache = runtime.modelCatalog.getDiscoveryCache();
+  try {
+    const credHandle = await runtime.credentialStore.resolve(acc.credential);
+    const context = {
+      providerAccount: providerId,
+      upstreamProvider: acc.upstreamProvider,
+      credential: credHandle,
+      baseUrl: acc.baseUrl,
+      compat: acc.compat,
+    };
+    if (acc.upstreamProvider === "openai" || acc.upstreamProvider === "openai-compatible") {
+      const { OpenAIDiscoverySource } = await import("../../vendors/openai/openai-discovery-source.js");
+      await discoveryCache.refreshAccount(context, new OpenAIDiscoverySource());
+    } else if (acc.upstreamProvider === "google") {
+      const { GoogleDiscoverySource } = await import("../../vendors/google/google-discovery-source.js");
+      await discoveryCache.refreshAccount(context, new GoogleDiscoverySource());
+    }
+  } catch {
+    // Failure-safe
+  }
+
+  const updatedCatalog = await runtime.modelCatalog.getAllModels();
+  const models = updatedCatalog.filter(
+    (m: any) => m.upstreamProvider === acc.upstreamProvider || m.upstreamProvider === providerId,
   );
 
   sendJSON(res, 200, {

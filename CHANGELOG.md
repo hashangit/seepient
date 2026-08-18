@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **Provider Management Redesign (Spec 010)**: Unified, production-grade provider management architecture replacing static SDK instances with instance-scoped `ProviderRuntime` and composable `AggregateInferenceAdapter`.
+  - **Purpose × Tier Routing**: Declarative mapping for language, vision, plan, commit, and image purposes with standard, complex, and efficient tiers.
+  - **August 2026 Models Baseline**: Default assignments updated to `gpt-5.6-terra`, `claude-sonnet-5`, `gemini-3.7-flash`, and `glm-5.3`.
+  - **Multi-Target Retries & Circuit-Breaker Cooldown**: Automatic ordered fallback traversal (`[selectedTarget, ...failureTargets]`) with per-`(account, capability)` cooldown tracking, strict streaming no-replay protection, and a ≤240s worst-case budget.
+  - **Usage & Cached Token Cost Accounting**: Accurate usage metrics and cost calculation tracking distinct input, output, cached prompt, and reasoning token dimensions.
+  - **Durable 0600 Audit Log**: Append-only `~/.seepient/audit.log` with `0600` permissions, `O_NOFOLLOW` symlink rejection, centralized secret redaction, and `fsync` before mutation commits.
+  - **SSRF Validation & Security**: Hardened IP/DNS resolution preventing local loopback / metadata reflection (`0.0.0.0/8`, `127.0.0.0/8`, `::1`, `169.254.169.254`) with server-controlled private network bypass flags.
+  - **REST v2 Management API & WebSocket Integration**: Scoped management endpoints (`/v1/providers`, `/v1/models`) supporting `If-Match` revision concurrency, `ETag` headers, active `/models` upstream polling, 1MB payload limits, and WebSocket `writeMutex` synchronization.
+  - **Instance-First SDK v2**: Async `createSeepient()` factory with lifecycle event hooks, stream cleanup, and explicit `dispose()`.
+
 * **TUI permission scope and lifetime UX (spec 011)**: under the existing
   `--permission-pipeline` switch, the TUI approval prompt now shows one
   screen of complete, Domain-issued approval choices — Allow this action

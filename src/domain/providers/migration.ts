@@ -22,11 +22,26 @@ export interface MigrationResult {
   }>;
 }
 
+export const V1_TO_V2_MODEL_MAP: Record<string, string> = {
+  "gpt-4o": "gpt-5.6-terra",
+  "gpt-4o-mini": "gpt-5.6-luna",
+  "gpt-5.4": "gpt-5.6-terra",
+  "claude-3-7-sonnet-20250219": "claude-sonnet-5",
+  "claude-3-7-sonnet": "claude-sonnet-5",
+  "claude-3-5-sonnet": "claude-sonnet-5",
+  "claude-3-5-haiku": "claude-haiku-4-5",
+  "gemini-2.5-flash": "gemini-3.7-flash",
+  "glm-4.7": "glm-5.3",
+  "sonnet": "glm-5.3",
+  "haiku": "glm-4.5-air",
+  "opus": "glm-5.3",
+};
+
 const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
-  openai: "gpt-4o",
-  anthropic: "claude-3-7-sonnet-20250219",
-  glm: "glm-4.7",
-  "openai-compatible": "gpt-4o",
+  openai: "gpt-5.6-terra",
+  anthropic: "claude-sonnet-5",
+  glm: "glm-5.3",
+  "openai-compatible": "gpt-5.6-terra",
 };
 
 const PROVIDER_ENV_MAP: Record<string, string> = {
@@ -50,11 +65,13 @@ export function migrateV1ToV2(
   const migratedCredentials: MigrationResult["migratedCredentials"] = [];
 
   const defaultProvider = (cfg.provider as LegacyProviderType) || "openai";
-  const defaultModel =
+  const explicitModel =
     cfg.model ||
-    (cfg.models as any)?.[defaultProvider]?.model ||
+    (cfg.models as any)?.[defaultProvider]?.model;
+  const defaultModel =
+    explicitModel ||
     DEFAULT_PROVIDER_MODELS[defaultProvider] ||
-    "gpt-4o";
+    "gpt-5.6-terra";
 
   const knownProviders: LegacyProviderType[] = ["openai", "anthropic", "glm", "openai-compatible"];
 

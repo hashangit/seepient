@@ -18,6 +18,46 @@ function cleanDefined<T extends Record<string, any>>(obj?: T): Partial<T> {
  * Curated upstream model catalog with baseline capabilities.
  */
 export const CURATED_MODELS: readonly UpstreamModel[] = [
+  // ── OpenAI ───────────────────────────────────────────────────────────────
+  {
+    id: "gpt-5.6-terra",
+    upstreamProvider: "openai",
+    displayName: "GPT-5.6 Terra",
+    contextWindow: 256_000,
+    capabilities: {
+      toolUse: true,
+      streaming: true,
+      vision: true,
+    },
+    supportedReasoningLevels: ["none", "low", "medium"],
+    provenance: "seepient-curated",
+  },
+  {
+    id: "gpt-5.6-sol",
+    upstreamProvider: "openai",
+    displayName: "GPT-5.6 Sol",
+    contextWindow: 256_000,
+    capabilities: {
+      toolUse: true,
+      streaming: true,
+      vision: true,
+    },
+    supportedReasoningLevels: ["low", "medium", "high", "max"],
+    provenance: "seepient-curated",
+  },
+  {
+    id: "gpt-5.6-luna",
+    upstreamProvider: "openai",
+    displayName: "GPT-5.6 Luna",
+    contextWindow: 128_000,
+    capabilities: {
+      toolUse: true,
+      streaming: true,
+      vision: true,
+    },
+    supportedReasoningLevels: ["none"],
+    provenance: "seepient-curated",
+  },
   {
     id: "gpt-4o",
     upstreamProvider: "openai",
@@ -112,6 +152,47 @@ export const CURATED_MODELS: readonly UpstreamModel[] = [
     },
     provenance: "seepient-curated",
   },
+
+  // ── Anthropic ─────────────────────────────────────────────────────────────
+  {
+    id: "claude-sonnet-5",
+    upstreamProvider: "anthropic",
+    displayName: "Claude Sonnet 5",
+    contextWindow: 500_000,
+    capabilities: {
+      toolUse: true,
+      streaming: true,
+      vision: true,
+    },
+    supportedReasoningLevels: ["none", "low", "medium", "high"],
+    provenance: "seepient-curated",
+  },
+  {
+    id: "claude-opus-5",
+    upstreamProvider: "anthropic",
+    displayName: "Claude Opus 5",
+    contextWindow: 500_000,
+    capabilities: {
+      toolUse: true,
+      streaming: true,
+      vision: true,
+    },
+    supportedReasoningLevels: ["low", "medium", "high", "max"],
+    provenance: "seepient-curated",
+  },
+  {
+    id: "claude-haiku-4-5",
+    upstreamProvider: "anthropic",
+    displayName: "Claude Haiku 4.5",
+    contextWindow: 200_000,
+    capabilities: {
+      toolUse: true,
+      streaming: true,
+      vision: true,
+    },
+    supportedReasoningLevels: ["none"],
+    provenance: "seepient-curated",
+  },
   {
     id: "claude-3-7-sonnet-20250219",
     upstreamProvider: "anthropic",
@@ -138,17 +219,32 @@ export const CURATED_MODELS: readonly UpstreamModel[] = [
     supportedReasoningLevels: ["none"],
     provenance: "seepient-curated",
   },
+
+  // ── Google ────────────────────────────────────────────────────────────────
   {
-    id: "gemini-2.5-flash",
+    id: "gemini-3.7-flash",
     upstreamProvider: "google",
-    displayName: "Gemini 2.5 Flash",
-    contextWindow: 1_000_000,
+    displayName: "Gemini 3.7 Flash",
+    contextWindow: 2_000_000,
     capabilities: {
       toolUse: true,
       streaming: true,
       vision: true,
     },
-    supportedReasoningLevels: ["none"],
+    supportedReasoningLevels: ["none", "low", "medium"],
+    provenance: "seepient-curated",
+  },
+  {
+    id: "gemini-3.1-pro",
+    upstreamProvider: "google",
+    displayName: "Gemini 3.1 Pro",
+    contextWindow: 2_000_000,
+    capabilities: {
+      toolUse: true,
+      streaming: true,
+      vision: true,
+    },
+    supportedReasoningLevels: ["low", "medium", "high", "max"],
     provenance: "seepient-curated",
   },
   {
@@ -169,6 +265,86 @@ export const CURATED_MODELS: readonly UpstreamModel[] = [
     provenance: "seepient-curated",
   },
   {
+    id: "gemini-2.5-flash",
+    upstreamProvider: "google",
+    displayName: "Gemini 2.5 Flash",
+    contextWindow: 1_000_000,
+    capabilities: {
+      toolUse: true,
+      streaming: true,
+      vision: true,
+    },
+    supportedReasoningLevels: ["none"],
+    provenance: "seepient-curated",
+  },
+
+  // ── Frontier Additions ────────────────────────────────────────────────────
+  {
+    id: "deepseek-v4-pro",
+    upstreamProvider: "deepseek",
+    displayName: "DeepSeek V4 Pro",
+    contextWindow: 256_000,
+    capabilities: {
+      toolUse: true,
+      streaming: true,
+      vision: true,
+    },
+    supportedReasoningLevels: ["none", "low", "medium", "high"],
+    provenance: "seepient-curated",
+  },
+  {
+    id: "deepseek-v4-flash",
+    upstreamProvider: "deepseek",
+    displayName: "DeepSeek V4 Flash",
+    contextWindow: 128_000,
+    capabilities: {
+      toolUse: true,
+      streaming: true,
+      vision: true,
+    },
+    supportedReasoningLevels: ["none"],
+    provenance: "seepient-curated",
+  },
+  {
+    id: "qwen-3.8-max",
+    upstreamProvider: "qwen",
+    displayName: "Qwen 3.8 Max",
+    contextWindow: 256_000,
+    capabilities: {
+      toolUse: true,
+      streaming: true,
+      vision: true,
+    },
+    supportedReasoningLevels: ["none", "low", "medium", "high"],
+    provenance: "seepient-curated",
+  },
+  {
+    id: "grok-4.6",
+    upstreamProvider: "xai",
+    displayName: "Grok 4.6",
+    contextWindow: 256_000,
+    capabilities: {
+      toolUse: true,
+      streaming: true,
+      vision: true,
+    },
+    supportedReasoningLevels: ["none", "low", "medium", "high"],
+    provenance: "seepient-curated",
+  },
+  {
+    id: "glm-5.3",
+    upstreamProvider: "glm",
+    displayName: "GLM 5.3",
+    contextWindow: 256_000,
+    capabilities: {
+      toolUse: true,
+      streaming: true,
+      vision: true,
+    },
+    supportedReasoningLevels: ["none", "low", "medium", "high"],
+    provenance: "seepient-curated",
+  },
+  {
     id: "glm-4.7",
     upstreamProvider: "glm",
     displayName: "GLM 4.7",
@@ -179,6 +355,19 @@ export const CURATED_MODELS: readonly UpstreamModel[] = [
       vision: false,
     },
     supportedReasoningLevels: ["none"],
+    provenance: "seepient-curated",
+  },
+  {
+    id: "kimi-k3",
+    upstreamProvider: "moonshot",
+    displayName: "Kimi K3",
+    contextWindow: 1_000_000,
+    capabilities: {
+      toolUse: true,
+      streaming: true,
+      vision: true,
+    },
+    supportedReasoningLevels: ["none", "low", "medium"],
     provenance: "seepient-curated",
   },
 ];

@@ -34,7 +34,16 @@ import type { InferenceAdapter } from "../../foundations/contracts/backend-ports
 export const MAX_RETRY_DURATION_MS = 240_000;
 
 export function calculateInferenceCost(
-  usage?: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number; reasoningTokens?: number },
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    promptTokens?: number;
+    completionTokens?: number;
+    cachedInputTokens?: number;
+    cachedPromptTokens?: number;
+    cacheReadTokens?: number;
+    reasoningTokens?: number;
+  },
   pricing?: any,
 ): number | undefined {
   if (!usage || !pricing) return undefined;
@@ -47,12 +56,13 @@ export function calculateInferenceCost(
     return undefined;
   }
 
-  const inputCost = inputPrice !== undefined ? ((usage.inputTokens ?? 0) * inputPrice) / 1_000_000 : 0;
-  const outputCost = outputPrice !== undefined ? ((usage.outputTokens ?? 0) * outputPrice) / 1_000_000 : 0;
-  const cachedCost =
-    cachedPrice !== undefined && usage.cachedInputTokens
-      ? (usage.cachedInputTokens * cachedPrice) / 1_000_000
-      : 0;
+  const inputCount = usage.inputTokens ?? usage.promptTokens ?? 0;
+  const outputCount = usage.outputTokens ?? usage.completionTokens ?? 0;
+  const cachedCount = usage.cachedPromptTokens ?? usage.cachedInputTokens ?? usage.cacheReadTokens ?? 0;
+
+  const inputCost = inputPrice !== undefined ? (inputCount * inputPrice) / 1_000_000 : 0;
+  const outputCost = outputPrice !== undefined ? (outputCount * outputPrice) / 1_000_000 : 0;
+  const cachedCost = cachedPrice !== undefined && cachedCount ? (cachedCount * cachedPrice) / 1_000_000 : 0;
   const reasoningCost =
     reasoningPrice !== undefined && usage.reasoningTokens
       ? (usage.reasoningTokens * reasoningPrice) / 1_000_000

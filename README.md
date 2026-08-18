@@ -195,40 +195,60 @@ Seepient Agent uses a hierarchical configuration system.
 - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GLM_API_KEY`: Provider API keys
 - `OPENAI_COMPAT_API_KEY`, `OPENAI_COMPAT_BASE_URL`, `OPENAI_COMPAT_MODEL`: OpenAI-compatible provider settings
 
-**Multi-Provider Configuration:**
-- `provider`: Active provider type (`openai-compatible`, `openai`, `anthropic`, `glm`)
-- `models`: Object containing per-provider configurations:
-  ```json
-  {
-    "models": {
-      "openai-compatible": { "apiKey": "...", "baseUrl": "...", "model": "gpt-4o" },
-      "openai": { "apiKey": "...", "model": "gpt-4o" },
-      "anthropic": { "apiKey": "...", "model": "claude-sonnet-4-5-20250929" },
-      "glm": { "apiKey": "...", "model": "sonnet" }
-    }
-  }
-  ```
+### Provider Management (v2 Architecture)
 
-**Legacy Keys (Backward Compatible):**
-- `apiKey`: Your OpenAI API Key (legacy, treated as `openai-compatible`).
-- `baseUrl`: Custom Base URL (e.g., for DeepSeek or LocalLLM).
-- `model`: Default model to use.
-- `tavilyApiKey`: API Key for Tavily Web Search.
-- `smtpHost`, `smtpPort`, `smtpUser`, `smtpPass`, `smtpFrom`: SMTP Email settings.
-- `feishuWebhook`, `dingtalkWebhook`, `wecomWebhook`: Notification webhooks.
+Seepient Agent v0.4.0 introduces unified Provider Management with purpose × tier routing, multi-target automatic fallback, circuit-breaker cooldowns, and credential stores:
 
-### Project-Level Config Example
-
-**Multi-Provider Configuration:**
+**Configuration (`~/.seepient/setting.json` or `.seepient/setting.json`):**
 ```json
 {
-  "provider": "anthropic",
-  "models": {
-    "openai": { "apiKey": "sk-...", "model": "gpt-4o" },
-    "anthropic": { "apiKey": "sk-ant-...", "model": "claude-sonnet-4-5-20250929" }
+  "providers": {
+    "openai": {
+      "adapter": "pi-ai",
+      "upstreamProvider": "openai",
+      "credential": { "kind": "env", "name": "OPENAI_API_KEY" }
+    },
+    "anthropic": {
+      "adapter": "pi-ai",
+      "upstreamProvider": "anthropic",
+      "credential": { "kind": "env", "name": "ANTHROPIC_API_KEY" }
+    },
+    "ollama-local": {
+      "adapter": "pi-ai",
+      "upstreamProvider": "openai",
+      "baseUrl": "http://127.0.0.1:11434/v1",
+      "ssrfAllowPrivate": true,
+      "credential": { "kind": "none" }
+    }
+  },
+  "modelAssignments": {
+    "text": {
+      "standard": {
+        "providerAccount": "openai",
+        "model": "gpt-5.6-terra",
+        "fallback": [{ "providerAccount": "anthropic", "model": "claude-sonnet-5" }]
+      },
+      "efficient": { "providerAccount": "openai", "model": "gpt-5.6-luna" }
+    },
+    "plan": { "standard": { "providerAccount": "openai", "model": "gpt-5.6-sol" } },
+    "media": { "image": { "providerAccount": "openai", "model": "gpt-image-2" } }
+  },
+  "retryPolicy": {
+    "maxAttempts": 3,
+    "cooldownThreshold": 3,
+    "cooldownDurationMs": 60000
   }
 }
 ```
+
+### CLI Commands for Models & Providers
+- `seepient models list`: List configured model assignments across purposes and tiers.
+- `seepient models set <purpose.tier> <account/model>`: Update an assignment (e.g. `seepient models set text.standard anthropic/claude-sonnet-5`).
+- `seepient models fallback <purpose.tier> <account/model>,...`: Configure ordered fallback candidates.
+- `seepient models status`: Display live status and thinking levels for active assignments.
+- `seepient models discover <account>`: Discover available models from the account's `/models` endpoint.
+- `seepient providers add/edit/remove/list`: Manage configured provider accounts.
+- `seepient auth login/logout/issue-token`: Manage credentials and scoped management tokens.
 
 **Legacy Configuration (Still Supported):**
 Create a file at `.seepient/setting.json`:

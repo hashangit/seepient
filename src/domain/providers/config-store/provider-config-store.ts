@@ -392,11 +392,11 @@ export async function getDefaultBaseConfigAsync(
         glm: { adapter: "pi-ai", upstreamProvider: "glm", credential: { kind: "env", name: "GLM_API_KEY" } },
       },
       modelAssignments: {
-        text: { standard: { providerAccount: "openai", model: "gpt-4o" } },
-        plan: { standard: { providerAccount: "openai", model: "gpt-4o" } },
-        vision: { standard: { providerAccount: "openai", model: "gpt-4o" } },
-        commit: { standard: { providerAccount: "openai", model: "gpt-4o" } },
-        media: { image: { providerAccount: "openai", model: "dall-e-3" } },
+        text: { standard: { providerAccount: "openai", model: "gpt-5.6-terra" } },
+        plan: { standard: { providerAccount: "openai", model: "gpt-5.6-sol" } },
+        vision: { standard: { providerAccount: "openai", model: "gpt-5.6-terra" } },
+        commit: { standard: { providerAccount: "openai", model: "gpt-5.6-luna" } },
+        media: { image: { providerAccount: "openai", model: "gpt-image-2" } },
       },
       retryPolicy: DEFAULT_RETRY_POLICY,
     };
@@ -438,11 +438,11 @@ export function getDefaultBaseConfig(
         glm: { adapter: "pi-ai", upstreamProvider: "glm", credential: { kind: "env", name: "GLM_API_KEY" } },
       },
       modelAssignments: {
-        text: { standard: { providerAccount: "openai", model: "gpt-4o" } },
-        plan: { standard: { providerAccount: "openai", model: "gpt-4o" } },
-        vision: { standard: { providerAccount: "openai", model: "gpt-4o" } },
-        commit: { standard: { providerAccount: "openai", model: "gpt-4o" } },
-        media: { image: { providerAccount: "openai", model: "dall-e-3" } },
+        text: { standard: { providerAccount: "openai", model: "gpt-5.6-terra" } },
+        plan: { standard: { providerAccount: "openai", model: "gpt-5.6-sol" } },
+        vision: { standard: { providerAccount: "openai", model: "gpt-5.6-terra" } },
+        commit: { standard: { providerAccount: "openai", model: "gpt-5.6-luna" } },
+        media: { image: { providerAccount: "openai", model: "gpt-image-2" } },
       },
       retryPolicy: DEFAULT_RETRY_POLICY,
     };

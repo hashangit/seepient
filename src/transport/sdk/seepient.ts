@@ -470,7 +470,7 @@ export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<
     },
 
     async dispose(): Promise<void> {
-      // Disposing SDK instance
+      runtime.removeAllListeners();
     },
   };
 }

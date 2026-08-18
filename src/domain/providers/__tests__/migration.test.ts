@@ -66,6 +66,6 @@ describe("v1 to v2 Provider Config Migration (QS-P4.7)", () => {
       name: "ANTHROPIC_API_KEY",
     });
     expect(res.config.modelAssignments.plan?.standard?.providerAccount).toBe("anthropic");
-    expect(res.config.modelAssignments.plan?.standard?.model).toBe("claude-3-7-sonnet-20250219");
+    expect(res.config.modelAssignments.plan?.standard?.model).toBe("claude-sonnet-5");
   });
 });

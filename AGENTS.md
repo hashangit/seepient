@@ -215,18 +215,11 @@ UI → Transport → Domain → Capabilities → Vendors
 | Auth | `src/transport/auth/` | API keys + scopes |
 | SDK transport | `src/transport/sdk/` | `generateText`, `streamText`, `createAgent`, option resolution |
 
-## Providers
+Unified provider architecture behind `ProviderRuntime` (`src/domain/providers/provider-runtime.ts`) and `AggregateInferenceAdapter` (`src/capabilities/inference/aggregate-adapter.ts`):
 
-4 providers behind the `LLMProvider` interface in `src/foundations/contracts/llm.ts`:
-
-| Type | Class | Location |
-|------|-------|----------|
-| `openai` | `OpenAIProvider` | `src/capabilities/llm/openai.ts` |
-| `openai-compatible` | `OpenAIProvider` | Same class, custom `baseUrl` |
-| `anthropic` | `AnthropicProvider` | `src/capabilities/llm/anthropic.ts` |
-| `glm` | `AnthropicProvider` | Same class, `api.z.ai/api/anthropic` base URL |
-
-GLM model aliases: `haiku` → `glm-4.5-air`, `sonnet` → `glm-4.7`, `opus` → `glm-5.1`.
+- **Inference Adapters**: Composable vendor backends (`PiLanguageRaw`, `PiImageRaw`, `GoogleImageRaw`, `OpenAIImageRaw`) under `src/vendors/`.
+- **Purpose × Tier Routing**: Standard, complex, efficient tiers across language, vision, plan, commit, and image purposes.
+- **Model Defaults**: `gpt-5.6-terra` (OpenAI), `claude-sonnet-5` (Anthropic), `gemini-3.7-flash` (Google), `glm-5.3` (GLM).
 
 ## Tools
 
@@ -374,13 +367,11 @@ shell commands, and other important information, read the current plan:
   (`instructions.agentsMd.enabled`, `instructions.agentsMd.maxBytes`); HTTP
   accepts explicit `workspaceRoot`. **AGENTS.md only — `.agents/skills/`
   discovery is a separate future spec.** Based on `008-upgrade` at a clean SHA.
-- **UPCOMING (planned, not yet in implementation)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/010-provider-management-redesign/plan.md`
-  — Provider management redesign: contract layer resolving the 5-blocker review
-  (canonical inference contracts, normative config schema, aggregate media
-  adapter ownership, Pi version pin, server security policy) + 4 planning gaps
-  (purpose dispatch inventory, v1→v2 migration, retry defaults, production
-  budgets). Implements the comparison doc's purpose × tier × thinking-level
-  selection model behind a `PiAiInferenceAdapter` + instance-scoped
-  `ProviderRuntime`. Phased P0-P7; architectural guideline lives in
-  `Provider-Management/llm-provider-management-comparison.md`.
+- **SHIPPED**: `~/Documents/Obsidian/Seepient/Implementation-Specs/010-provider-management-redesign/plan.md`
+  — Provider management redesign (Shipped): Canonical inference contracts,
+  normative v2 config schema with deep-patch overlay, aggregate inference
+  adapter with vendor image composition (Pi, Google, OpenAI), instance-first
+  async SDK v2 with event lifecycle, purpose × tier × thinking-level routing,
+  multi-target retry with circuit-breaker cooldown, durable 0600 audit log with
+  O_NOFOLLOW symlink rejection, SSRF validation, and TUI model manager.
 <!-- SPECKIT END -->
