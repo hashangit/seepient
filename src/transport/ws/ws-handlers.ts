@@ -34,7 +34,7 @@ import type {
   PermissionRequest,
 } from "../../foundations/contracts/permission-policy.js";
 import type { SettingsHandlerContext } from "../http/settings-handlers.js";
-import { handleWsGetSettings, handleWsUpdateSettings } from "../http/settings-handlers.js";
+import { handleWsGetSettings, handleWsUpdateSettings, writeMutex } from "../http/settings-handlers.js";
 
 // ── Active connections registry ──────────────────────────────────────
 
@@ -737,16 +737,22 @@ async function handleWsSetProvider(
   try {
     if (baseUrl && providerType === "openai-compatible") {
       const { validateEndpointUrl } = await import("../http/ssrf-validator.js");
-      const val = await validateEndpointUrl(baseUrl);
+      const allowPrivate = process.env.SEEPIENT_SSRF_ALLOW_PRIVATE === "1";
+      const val = await validateEndpointUrl(baseUrl, { ssrfAllowPrivate: allowPrivate });
       if (!val.valid) {
         safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "SSRF_BLOCKED", message: val.error } } as any);
         return;
       }
     }
-    if (apiKey) await ctx.settingsManager.set(`${prefix}.apiKey`, apiKey);
-    if (model) await ctx.settingsManager.set(`${prefix}.model`, model);
-    if (baseUrl && providerType === "openai-compatible") {
-      await ctx.settingsManager.set(`${prefix}.baseUrl`, baseUrl);
+    const release = await writeMutex.acquire();
+    try {
+      if (apiKey) await ctx.settingsManager.set(`${prefix}.apiKey`, apiKey);
+      if (model) await ctx.settingsManager.set(`${prefix}.model`, model);
+      if (baseUrl && providerType === "openai-compatible") {
+        await ctx.settingsManager.set(`${prefix}.baseUrl`, baseUrl);
+      }
+    } finally {
+      release();
     }
   } catch (e: any) {
     safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "SET_ERROR", message: e.message } } as any);

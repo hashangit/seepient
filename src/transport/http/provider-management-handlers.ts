@@ -285,7 +285,8 @@ export async function handlePutProvider(
   }
 
   if (body.baseUrl) {
-    const ssrfCheck = await validateEndpointUrl(body.baseUrl, { ssrfAllowPrivate: body.ssrfAllowPrivate });
+    const allowPrivate = process.env.SEEPIENT_SSRF_ALLOW_PRIVATE === "1";
+    const ssrfCheck = await validateEndpointUrl(body.baseUrl, { ssrfAllowPrivate: allowPrivate });
     if (!ssrfCheck.valid) {
       sendError(res, 400, "INVALID_ENDPOINT", ssrfCheck.error ?? "SSRF check failed");
       return;

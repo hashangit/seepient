@@ -327,10 +327,11 @@ export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<
                   content: [{ type: "text", text: fullText }],
                 });
               }
-            } catch (err) {
-              const idx = conversationMessages.lastIndexOf(userMsg);
-              if (idx >= 0) conversationMessages.splice(idx, 1);
-              throw err;
+            } finally {
+              if (!success) {
+                const idx = conversationMessages.lastIndexOf(userMsg);
+                if (idx >= 0) conversationMessages.splice(idx, 1);
+              }
             }
           }
 

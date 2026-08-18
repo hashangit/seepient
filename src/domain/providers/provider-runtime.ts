@@ -21,6 +21,7 @@ import {
   type Tier,
   resolveInvocationPlan,
 } from "./assignment-resolver.js";
+export type { TurnSnapshot, InvocationPlan };
 import {
   type ModelAssignmentOverride,
   DEFAULT_RETRY_POLICY,

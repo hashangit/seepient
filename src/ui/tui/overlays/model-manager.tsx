@@ -45,6 +45,7 @@ export function ModelManager({
   activeAccount = "default",
   activeModel = "gpt-4o",
   activeThinking = "none",
+  onUpdateAssignment,
   onClose,
 }: ModelManagerProps) {
   const theme = useTheme();
@@ -53,6 +54,14 @@ export function ModelManager({
   const [selectedSlotIndex, setSelectedSlotIndex] = useState(0);
 
   const activePurposes = PURPOSES.filter((p) => p.category === poolFilter || (poolFilter === "image" && p.category === "media"));
+
+  // Helper to find eligible models for capability
+  const eligibleModels = catalog.filter((m) => {
+    if (poolFilter === "image") {
+      return !!(m.capabilities?.imageGenerate || m.capabilities?.imageEdit);
+    }
+    return !!(m.capabilities?.streaming || m.capabilities?.toolUse);
+  });
 
   useInput((input, key) => {
     if (key.escape) {
@@ -69,6 +78,26 @@ export function ModelManager({
       setSelectedSlotIndex((i) => Math.max(0, i - 1));
     } else if (key.downArrow) {
       setSelectedSlotIndex((i) => Math.min(activePurposes.length * TIERS.length - 1, i + 1));
+    } else if ((key.return || input === " ") && onUpdateAssignment && eligibleModels.length > 0) {
+      const pIdx = Math.floor(selectedSlotIndex / TIERS.length);
+      const tIdx = selectedSlotIndex % TIERS.length;
+      const targetPurpose = activePurposes[pIdx];
+      const targetTier = TIERS[tIdx];
+
+      if (targetPurpose && !targetPurpose.status) {
+        const currentSlot = (assignments as any)?.[targetPurpose.id]?.[targetTier];
+        const currentModelId = currentSlot?.model;
+        const currentModelIdx = eligibleModels.findIndex((m) => m.id === currentModelId);
+        const nextModel = eligibleModels[(currentModelIdx + 1) % eligibleModels.length];
+        if (nextModel) {
+          const providerAcct = nextModel.upstreamProvider || Object.keys(providers)[0] || "default";
+          onUpdateAssignment(targetPurpose.id, targetTier, {
+            providerAccount: providerAcct,
+            model: nextModel.id,
+            thinkingLevel: currentSlot?.thinkingLevel ?? "none",
+          });
+        }
+      }
     }
   });
 
@@ -97,7 +126,7 @@ export function ModelManager({
         <Box flexDirection="column">
           <Box marginBottom={1}>
             <Text color={theme.fgDim}>
-              Purpose × Tier Assignments · Applies next turn boundary
+              Purpose × Tier Assignments · [Enter/Space] Cycle Model · Applies next turn boundary
             </Text>
           </Box>
 
@@ -124,13 +153,17 @@ export function ModelManager({
                   const modelStr = slot ? `${slot.providerAccount}/${slot.model}` : "(unconfigured)";
                   const thStr = slot?.thinkingLevel ? ` [thinking: ${slot.thinkingLevel}]` : "";
 
+                  // Check capabilities for capability gating
+                  const modelMeta = catalog.find((m) => m.id === slot?.model);
+                  const isGated = modelMeta && !modelMeta.capabilities?.toolUse && p.category === "language";
+
                   return (
                     <Box key={t} paddingLeft={2} backgroundColor={isSelected ? theme.blue : undefined}>
-                      <Text color={configured ? theme.green : theme.yellow}>
-                        {configured ? "● " : "○ "}
+                      <Text color={configured ? (isGated ? theme.yellow : theme.green) : theme.yellow}>
+                        {configured ? (isGated ? "▲ " : "● ") : "○ "}
                       </Text>
-                      <Text color={isSelected ? theme.bg : theme.fg} bold={isSelected}>
-                        {t.padEnd(12)} → {modelStr}{thStr}
+                      <Text color={isSelected ? theme.bg : (isGated ? theme.fgDim : theme.fg)} bold={isSelected}>
+                        {t.padEnd(12)} → {modelStr}{thStr} {isGated ? "(limited tools)" : ""}
                       </Text>
                     </Box>
                   );

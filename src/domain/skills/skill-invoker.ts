@@ -23,6 +23,10 @@ import type { LLMProvider } from '../../foundations/contracts/llm.js';
 import { createProvider } from '../../capabilities/llm/factory.js';
 import type { ProviderConfig } from '../../foundations/contracts/llm.js';
 
+import type { ProviderRuntime, TurnSnapshot } from '../providers/provider-runtime.js';
+import type { InvocationPlan } from '../providers/assignment-resolver.js';
+import type { ModelAssignmentOverride } from '../../foundations/schemas/provider-config.js';
+
 /**
  * Result of a skill invocation.
  *
@@ -40,6 +44,8 @@ export interface SkillInvocationResult {
   preferredProvider?: string;
   /** The preferred model (if any) */
   preferredModel?: string;
+  /** The resolved plan when runtime resolution is used */
+  plan?: InvocationPlan;
 }
 
 /**
@@ -266,4 +272,23 @@ export function createSkillProviderSwitcher(config: ProviderSwitcherConfig): Ski
       }
     },
   };
+}
+
+/**
+ * Resolves an InvocationPlan for a skill that requests a specific provider or model.
+ */
+export async function resolveSkillInvocationPlan(
+  runtime: ProviderRuntime,
+  skillResult: SkillInvocationResult,
+  snapshot?: TurnSnapshot,
+): Promise<InvocationPlan | null> {
+  if (!skillResult.preferredModel && !skillResult.preferredProvider) {
+    return null;
+  }
+  const snap = snapshot ?? (await runtime.createTurnSnapshot());
+  const override: ModelAssignmentOverride = {
+    providerAccount: skillResult.preferredProvider,
+    model: skillResult.preferredModel,
+  };
+  return runtime.resolvePlan(snap, "text", "standard", override);
 }

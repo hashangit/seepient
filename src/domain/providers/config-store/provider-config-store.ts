@@ -8,6 +8,9 @@ import type {
 } from "../../../foundations/schemas/provider-config.js";
 import { DEFAULT_RETRY_POLICY } from "../../../foundations/schemas/provider-config.js";
 import { SeepientError } from "../../../foundations/errors.js";
+import { loadMergedConfig } from "../../../foundations/config.js";
+import { migrateV1ToV2 } from "../migration.js";
+import { CompositeCredentialStore } from "../credentials/composite-credential-store.js";
 import { applyDeepPatch, mergePatches } from "./deep-patch.js";
 
 /**
@@ -285,6 +288,14 @@ export class ProviderConfigStore {
         fs.renameSync(tmp, this.overlayPath);
       }
 
+      const { recordProviderAuditEvent } = await import("../audit-log.js");
+      recordProviderAuditEvent({
+        timestamp: new Date().toISOString(),
+        action: "update_overlay",
+        revision: updatedOverlay.revision,
+        details: patch,
+      });
+
       this.currentOverlay = updatedOverlay;
       return this.currentOverlay;
     } finally {
@@ -336,12 +347,36 @@ export class ProviderConfigStore {
 /**
  * Synthesizes default v2 configuration from environment variables and legacy v1 configuration.
  */
-export function getDefaultBaseConfig(): ProviderEffectiveConfig {
+let cachedBaseConfig: ProviderEffectiveConfig | null = null;
+
+export function clearBaseConfigCache(): void {
+  cachedBaseConfig = null;
+}
+
+export function getDefaultBaseConfig(
+  credentialStore?: { put: (id: string, record: any, meta?: any) => Promise<void> },
+  customCwd?: string,
+): ProviderEffectiveConfig {
+  if (cachedBaseConfig) {
+    return cachedBaseConfig;
+  }
   try {
-    const { loadConfig } = require("../../../foundations/config.js");
-    const { migrateV1ToV2 } = require("../migration.js");
-    const v1Config = loadConfig();
-    return migrateV1ToV2(v1Config).config;
+    const v1Config = loadMergedConfig(customCwd);
+    const migrationResult = migrateV1ToV2(v1Config);
+
+    if (migrationResult.migratedCredentials && migrationResult.migratedCredentials.length > 0) {
+      const store = credentialStore ?? new CompositeCredentialStore();
+      for (const cred of migrationResult.migratedCredentials) {
+        store.put(
+          cred.id,
+          { kind: "api_key", keyValue: cred.keyValue },
+          { source: "migration" },
+        ).catch(() => {});
+      }
+    }
+
+    cachedBaseConfig = migrationResult.config;
+    return cachedBaseConfig;
   } catch {
     return {
       schemaVersion: 2,

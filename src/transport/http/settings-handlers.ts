@@ -43,7 +43,7 @@ class AsyncMutex {
   }
 }
 
-const writeMutex = new AsyncMutex();
+export const writeMutex = new AsyncMutex();
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -229,7 +229,8 @@ export async function handlePostProvider(
 
   if (body.baseUrl && providerType === 'openai-compatible') {
     const { validateEndpointUrl } = await import("./ssrf-validator.js");
-    const val = await validateEndpointUrl(body.baseUrl, { ssrfAllowPrivate: body.ssrfAllowPrivate });
+    const allowPrivate = process.env.SEEPIENT_SSRF_ALLOW_PRIVATE === "1";
+    const val = await validateEndpointUrl(body.baseUrl, { ssrfAllowPrivate: allowPrivate });
     if (!val.valid) {
       sendError(res, 400, "SSRF_BLOCKED", val.error || "SSRF validation failed");
       return;
@@ -278,7 +279,8 @@ export async function handlePatchProvider(
 
   if (body.baseUrl && providerType === 'openai-compatible') {
     const { validateEndpointUrl } = await import("./ssrf-validator.js");
-    const val = await validateEndpointUrl(body.baseUrl, { ssrfAllowPrivate: body.ssrfAllowPrivate });
+    const allowPrivate = process.env.SEEPIENT_SSRF_ALLOW_PRIVATE === "1";
+    const val = await validateEndpointUrl(body.baseUrl, { ssrfAllowPrivate: allowPrivate });
     if (!val.valid) {
       sendError(res, 400, "SSRF_BLOCKED", val.error || "SSRF validation failed");
       return;

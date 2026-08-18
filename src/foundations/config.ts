@@ -13,9 +13,15 @@ import { DEFAULT_MODELS } from './models-catalog.js';
 
 // ── Constants ──────────────────────────────────────────────────────────
 
-const GLOBAL_CONFIG_DIR = path.join(os.homedir(), '.seepient');
-const GLOBAL_CONFIG_FILE = path.join(GLOBAL_CONFIG_DIR, 'setting.json');
-const LOCAL_CONFIG_FILE = path.join(process.cwd(), '.seepient', 'setting.json');
+export function getGlobalConfigDir(): string {
+  return path.join(os.homedir(), '.seepient');
+}
+export function getGlobalConfigFile(): string {
+  return path.join(getGlobalConfigDir(), 'setting.json');
+}
+export function getLocalConfigFile(): string {
+  return path.join(process.cwd(), '.seepient', 'setting.json');
+}
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -62,14 +68,14 @@ export interface AppConfig {
  * Returns the config file path for the given scope.
  */
 export function getConfigPath(global?: boolean): string {
-  return global ? GLOBAL_CONFIG_FILE : LOCAL_CONFIG_FILE;
+  return global ? getGlobalConfigFile() : getLocalConfigFile();
 }
 
 /**
  * Returns the config directory path for the given scope.
  */
 export function getConfigDir(global?: boolean): string {
-  return global ? GLOBAL_CONFIG_DIR : path.join(process.cwd(), '.seepient');
+  return global ? getGlobalConfigDir() : path.join(process.cwd(), '.seepient');
 }
 
 /**
@@ -77,9 +83,9 @@ export function getConfigDir(global?: boolean): string {
  */
 export function getConfigPaths(): { global: string; local: string; globalDir: string } {
   return {
-    global: GLOBAL_CONFIG_FILE,
-    local: LOCAL_CONFIG_FILE,
-    globalDir: GLOBAL_CONFIG_DIR,
+    global: getGlobalConfigFile(),
+    local: getLocalConfigFile(),
+    globalDir: getGlobalConfigDir(),
   };
 }
 
@@ -109,9 +115,10 @@ export function loadJsonConfig(filePath: string): { config: AppConfig; warning?:
  * Load global and local configs and merge them.
  * Priority: local > global.
  */
-export function loadMergedConfig(): AppConfig {
-  const global = loadJsonConfig(GLOBAL_CONFIG_FILE);
-  const local = loadJsonConfig(LOCAL_CONFIG_FILE);
+export function loadMergedConfig(customCwd?: string): AppConfig {
+  const global = loadJsonConfig(getGlobalConfigFile());
+  const cwd = customCwd || process.env.SEEPIENT_CWD || process.cwd();
+  const local = loadJsonConfig(path.join(cwd, '.seepient', 'setting.json'));
   return { ...global.config, ...local.config };
 }
 
@@ -217,9 +224,9 @@ export function resolveActiveProviderType(
  * Save config to disk. If a local config exists, saves there; otherwise global.
  */
 export function saveConfig(config: AppConfig): void {
-  const targetFile = fs.existsSync(path.join(process.cwd(), '.seepient', 'setting.json'))
-    ? LOCAL_CONFIG_FILE
-    : GLOBAL_CONFIG_FILE;
+  const targetFile = fs.existsSync(getLocalConfigFile())
+    ? getLocalConfigFile()
+    : getGlobalConfigFile();
 
   writeConfigToPath(config, targetFile);
 }
