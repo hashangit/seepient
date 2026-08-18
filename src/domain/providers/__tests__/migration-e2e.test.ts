@@ -123,13 +123,12 @@ describe("Legacy Migration & Env Synthesis E2E (Discriminating GLM Test)", () =>
     expect(plan.selectedTarget.model).toBe("glm-4.7");
 
     const result = await runAgentLoop({
-      provider: {} as any,
+      runtime,
       model: "glm-4.7",
       messages: [{ id: "m1", role: "user", content: "hi", timestamp: Date.now() }],
       toolDefs: [],
       maxSteps: 1,
       hooks: createHookExecutor(),
-      providerRuntime: runtime,
       turnSnapshot: snapshot,
     });
 

@@ -6,7 +6,6 @@
  * are structured rather than printed to the console.
  */
 
-import type { LLMProvider } from "../../foundations/contracts/llm.js";
 import type {
   AgentCreateOptions,
   AgentResponse,
@@ -24,7 +23,7 @@ import type {
   Usage,
   SeepientError,
 } from "../../foundations/types.js";
-import { getProvider } from "../../domain/providers/provider-resolver.js";
+import { getDefaultProviderRuntime, type ProviderRuntime } from "../../domain/providers/provider-runtime.js";
 import { createHookExecutor } from "../../domain/hooks.js";
 import { StreamManager } from "../../domain/streaming/stream-manager.js";
 import { resolveTools, getAllToolDefinitions } from "./tools.js";
@@ -83,9 +82,8 @@ function wrapAsPersistenceBackend(store: SessionStore | PersistenceBackend): Per
  */
 export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgent> {
   const opts = options ?? {};
-
-  // Resolve provider
-  let { provider: llmProvider, model } = await getProvider(opts.provider, opts.model);
+  const runtime: ProviderRuntime = (opts as any).runtime ?? (opts as any).providerRuntime ?? getDefaultProviderRuntime();
+  let model = opts.model ?? "";
 
   // System prompt
   let systemPrompt = opts.systemPrompt ?? "You are a helpful assistant.";
@@ -239,12 +237,12 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
 
     const maxSteps = opts.maxSteps ?? 10;
 
-    const runtime: any = (opts as any).providerRuntime;
-    const snapshot: any = runtime ? await runtime.createTurnSnapshot() : undefined;
+    const snapshot = await runtime.createTurnSnapshot();
 
     const result = await runAgentLoop({
-      provider: llmProvider,
-      model: model,
+      runtime,
+      turnSnapshot: snapshot,
+      model,
       modelOverride: opts.model,
       messages,
       toolDefs,
@@ -252,15 +250,13 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
       maxSteps,
       hooks: hookExecutor,
       signal: activeAbortController.signal,
-      config: { ...opts.config, ...(runtime ? { runtime } : {}) },
+      config: { ...opts.config, runtime },
       metadata: opts.metadata,
       middleware: opts.middleware,
       approveTool: opts.approveTool,
       permissionLevel: opts.permissionLevel,
       grantStore: grantStore,
       wiredPipeline,
-      providerRuntime: runtime,
-      turnSnapshot: snapshot,
     });
 
     // Update cumulative usage from result
@@ -320,12 +316,12 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
     // Run the loop in the background — lock released in finally when done
     (async () => {
       try {
-        const runtime: any = (opts as any).providerRuntime;
-        const snapshot: any = runtime ? await runtime.createTurnSnapshot() : undefined;
+        const snapshot = await runtime.createTurnSnapshot();
 
         const result = await runAgentLoop({
-          provider: llmProvider,
-          model: model,
+          runtime,
+          turnSnapshot: snapshot,
+          model,
           modelOverride: opts.model,
           messages,
           toolDefs,
@@ -333,16 +329,13 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
           maxSteps,
           hooks: streamHookExecutor,
           signal: streamAbort.signal,
-          config: { ...opts.config, ...(runtime ? { runtime } : {}) },
+          config: { ...opts.config, runtime },
           metadata: opts.metadata,
           middleware: opts.middleware,
           approveTool: opts.approveTool,
           permissionLevel: opts.permissionLevel,
           grantStore: grantStore,
           wiredPipeline,
-          stream: true,
-          providerRuntime: runtime,
-          turnSnapshot: snapshot,
           onStep: (step) => {
             if (streamOptions?.onStep) streamOptions.onStep(step);
             // Streaming emits text_delta; non-streaming emits one complete
@@ -419,9 +412,7 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
   // ── switchProvider() ────────────────────────────────────────────────────
 
   async function switchProvider(providerType: string, newModel?: string): Promise<void> {
-    const result = await getProvider(providerType as any, newModel);
-    llmProvider = result.provider;
-    model = result.model;
+    model = newModel ?? providerType;
   }
 
   // ── setSystemPrompt() ───────────────────────────────────────────────────

@@ -19,9 +19,6 @@ import { parseInvocation, substituteArgs, type ParsedArgs } from '../../capabili
 import { type SkillRegistry, limitSkillBody } from '../../capabilities/skills/types.js';
 import { type SkillMetadata } from '../../foundations/types.js';
 import { resolveReferences } from '../../capabilities/skills/resolver.js';
-import type { LLMProvider } from '../../foundations/contracts/llm.js';
-import { createProvider } from '../../capabilities/llm/factory.js';
-import type { ProviderConfig } from '../../foundations/contracts/llm.js';
 
 import type { ProviderRuntime, TurnSnapshot } from '../providers/provider-runtime.js';
 import type { InvocationPlan } from '../providers/assignment-resolver.js';
@@ -169,110 +166,7 @@ export async function invokeSkill(options: {
 
 // ── Skill Provider Switcher ───────────────────────────────────────────
 
-/**
- * Configuration for creating a skill provider switcher.
- */
-export interface ProviderSwitcherConfig {
-  /** The current active provider */
-  provider: LLMProvider;
-  /** The current active model name */
-  model: string;
-  /** Available model configurations keyed by provider type */
-  models: Record<string, { apiKey: string; baseUrl?: string; model: string }>;
-}
 
-/**
- * A switcher that temporarily changes the active provider/model based on
- * skill preferences and can restore the original when done.
- */
-export interface SkillProviderSwitcher {
-  /** Switch provider if the skill requires it. Returns true if switched. */
-  switchIfNeeded(skillResult: SkillInvocationResult): Promise<boolean>;
-  /** Restore the original provider/model. */
-  restore(): void;
-  /** The current active provider. */
-  readonly activeProvider: LLMProvider;
-  /** The current active model name. */
-  readonly activeModel: string;
-}
-
-/**
- * Create a skill provider switcher that captures the original provider/model
- * state and can temporarily switch based on skill preferences.
- *
- * The switcher gracefully handles errors — if provider creation fails,
- * `switchIfNeeded` returns `false` instead of throwing.
- *
- * @example
- * ```ts
- * const switcher = createSkillProviderSwitcher({
- *   provider: currentProvider,
- *   model: 'gpt-4',
- *   models: config.models,
- * });
- *
- * const switched = await switcher.switchIfNeeded(skillResult);
- * try {
- *   await agent.chat(skillResult.prompt);
- * } finally {
- *   if (switched) switcher.restore();
- * }
- * ```
- */
-export function createSkillProviderSwitcher(config: ProviderSwitcherConfig): SkillProviderSwitcher {
-  let activeProvider = config.provider;
-  let activeModel = config.model;
-  let originalProvider: LLMProvider | null = null;
-  let originalModel: string | null = null;
-
-  return {
-    get activeProvider(): LLMProvider {
-      return activeProvider;
-    },
-    get activeModel(): string {
-      return activeModel;
-    },
-
-    async switchIfNeeded(skillResult: SkillInvocationResult): Promise<boolean> {
-      if (!skillResult.providerSwitchNeeded) return false;
-      if (!skillResult.preferredProvider || !skillResult.preferredModel) return false;
-
-      const providerType = skillResult.preferredProvider;
-      const providerModelConfig = config.models[providerType];
-      if (!providerModelConfig?.apiKey) return false;
-
-      try {
-        const newProvider = await createProvider({
-          type: providerType as ProviderConfig['type'],
-          apiKey: providerModelConfig.apiKey,
-          model: skillResult.preferredModel,
-          baseUrl: providerModelConfig.baseUrl,
-        });
-
-        // Capture originals before overwriting (only on first switch)
-        if (!originalProvider) {
-          originalProvider = activeProvider;
-          originalModel = activeModel;
-        }
-
-        activeProvider = newProvider;
-        activeModel = skillResult.preferredModel;
-        return true;
-      } catch {
-        return false;
-      }
-    },
-
-    restore(): void {
-      if (originalProvider) {
-        activeProvider = originalProvider;
-        activeModel = originalModel ?? activeModel;
-        originalProvider = null;
-        originalModel = null;
-      }
-    },
-  };
-}
 
 /**
  * Resolves an InvocationPlan for a skill that requests a specific provider or model.

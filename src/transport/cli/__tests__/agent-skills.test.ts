@@ -7,7 +7,11 @@
  * and clearConversation() re-seeds with one copy.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { LLMProvider } from '../../../foundations/contracts/llm.js';
+import { createMockRuntime } from '../../../domain/__tests__/test-doubles.js';
+
+function mockRuntime(): any {
+  return createMockRuntime([{ content: 'ok' }]);
+}
 
 // Mock runAgentLoop: appends an assistant message and returns a minimal result.
 function mockRunAgentLoop() {
@@ -31,10 +35,6 @@ function mockRunAgentLoop() {
   return fn;
 }
 
-function mockProvider(): LLMProvider {
-  return { chat: vi.fn().mockResolvedValue({ content: 'ok' }) } as unknown as LLMProvider;
-}
-
 describe('CLI Agent skill catalog injection', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -44,7 +44,7 @@ describe('CLI Agent skill catalog injection', () => {
   it('initializeSkills appends the catalog to the system message exactly once', async () => {
     const runLoop = mockRunAgentLoop();
     const { Agent } = await import('../agent.js');
-    const agent = new Agent(mockProvider(), 'test-model', {}, 'BASE_PROMPT');
+    const agent = new Agent(mockRuntime(), 'test-model', {}, 'BASE_PROMPT');
     await agent.initializeSkills();
 
     const messages = agent.getMessages();
@@ -71,7 +71,7 @@ describe('CLI Agent skill catalog injection', () => {
   it('clearConversation re-seeds the system message with one catalog copy', async () => {
     mockRunAgentLoop();
     const { Agent } = await import('../agent.js');
-    const agent = new Agent(mockProvider(), 'test-model', {}, 'BASE_PROMPT');
+    const agent = new Agent(mockRuntime(), 'test-model', {}, 'BASE_PROMPT');
     await agent.initializeSkills();
 
     // Simulate accumulation by manually appending (what the old bug did)
@@ -92,7 +92,7 @@ describe('CLI Agent skill catalog injection', () => {
   it('does not pass skillCatalog to runAgentLoop (catalog is injected by the agent, not the loop)', async () => {
     const runLoop = mockRunAgentLoop();
     const { Agent } = await import('../agent.js');
-    const agent = new Agent(mockProvider(), 'test-model', {}, 'BASE_PROMPT');
+    const agent = new Agent(mockRuntime(), 'test-model', {}, 'BASE_PROMPT');
     await agent.initializeSkills();
     await agent.chat('hi', undefined as any);
 

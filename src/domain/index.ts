@@ -6,10 +6,9 @@
 
 export {
   invokeSkill,
-  createSkillProviderSwitcher,
+  createRuntimeSkillProviderSwitcher,
+  resolveSkillInvocationPlan,
   type SkillInvocationResult,
-  type SkillProviderSwitcher,
-  type ProviderSwitcherConfig,
 } from './skills/skill-invoker.js';
 export { buildSkillCatalog } from './skills/skill-catalog.js';
 export {

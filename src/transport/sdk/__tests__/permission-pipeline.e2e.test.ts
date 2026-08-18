@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { generateText, createAgent } from "../index.js";
 import { Agent } from "../../cli/agent.js";
 import { createSnapshotStore } from "../../../foundations/hashline/snapshot-store.js";
+import { createMockRuntime } from "../../../domain/__tests__/test-doubles.js";
 
 let dir: string;
 beforeEach(() => {
@@ -51,27 +52,20 @@ describe("E2E: SDK createAgent with permissionPipeline", () => {
 });
 
 describe("E2E: CLI Agent.enablePermissionPipeline", () => {
-  function fakeProvider(): import("../../../foundations/contracts/llm.js").LLMProvider {
-    let called = false;
-    return {
-      async chat() {
-        if (!called) {
-          called = true;
-          return {
-            content: "",
-            tool_calls: [
-              { id: "tc1", name: "write_file", arguments: JSON.stringify({ path: join(dir, "x.txt"), content: "x" }), type: "function" },
-            ],
-          };
-        }
-        return { content: "done", tool_calls: [] };
+  function fakeRuntime() {
+    return createMockRuntime([
+      {
+        toolCalls: [
+          { id: "tc1", name: "write_file", args: { path: join(dir, "x.txt"), content: "x" } },
+        ],
       },
-    };
+      { content: "done" },
+    ]);
   }
 
   it("enablePermissionPipeline wires the new path; the boundary executes the real tool", async () => {
-    const provider = fakeProvider();
-    const agent = new Agent(provider, "test", { snapshotStore: createSnapshotStore() }, "sys", null, "openai");
+    const runtime = fakeRuntime();
+    const agent = new Agent(runtime, "test", { snapshotStore: createSnapshotStore() }, "sys", null, "openai");
     await agent.enablePermissionPipeline({ workspaceRoot: dir, modelProviderClass: "openai", auditRoot: dir, allowFallback: true });
     agent.setPipelineApproveTool(async () => true);
     expect(agent.isPermissionPipelineEnabled()).toBe(true);

@@ -70,9 +70,7 @@ export async function startTui({ queryParts, options }: StartTuiArgs): Promise<v
     }
   }
   const onSwitchModel = async (providerType: string, modelId: string): Promise<void> => {
-    const created = await createProviderFromApp(fullConfig, providerType as any, modelId);
-    if (!created) return;
-    agent.switchProvider(created.provider, created.model);
+    agent.switchProvider(providerType, modelId);
   };
 
   // Fresh settings list each time the overlay opens (so edits via /settings set

@@ -3,7 +3,6 @@ import ora from 'ora';
 import * as path from 'path';
 import { getAllToolDefinitions } from '../../domain/tool-executor.js';
 import { buildSystemPrompt } from '../../domain/prompts/system-prompts.js';
-import { LLMProvider, ProviderMessage } from '../../foundations/contracts/llm.js';
 import { initializeSkillRegistry, getSkillRegistry } from '../../capabilities/skills/index.js';
 import type { SkillRegistry } from '../../capabilities/skills/types.js';
 import { runAgentLoop } from '../../domain/agent-loop.js';
@@ -11,7 +10,6 @@ import { now } from '../../domain/context/message-convert.js';
 import { generateId } from '../../foundations/id.js';
 import { createHookExecutor } from '../../domain/hooks.js';
 import { buildSkillCatalog } from '../../domain/skills/skill-catalog.js';
-import { DEFAULT_MODELS } from '../../foundations/models-catalog.js';
 import type { Message, StepResult, Usage, ToolCall, ApproveToolFn, PermissionLevel, ProviderType, PersistenceBackend } from '../../foundations/types.js';
 import { persistSession } from '../../domain/sessions/session-store.js';
 import type { GrantStore } from '../../domain/grants.js';
@@ -38,7 +36,6 @@ export interface ChatResult {
 }
 
 export class Agent {
-  private provider: LLMProvider;
   private messages: Message[];
   private model: string;
   private config: any;
@@ -48,7 +45,7 @@ export class Agent {
   private abortController: AbortController | null = null;
   private _middleware: Middleware[] = [];
   private readonly systemPrompt: string;
-  private readonly providerType: ProviderType | undefined;
+  private readonly providerType: string | undefined;
   private readonly persistence: PersistenceBackend | null;
   private _grantStore: GrantStore | null = null;
   // Spec 008 protected policy store + pending proposals (T307).
@@ -57,22 +54,22 @@ export class Agent {
   private _workspaceRoot: string | null = null;
   private _policyProposals: Array<{ id: string; capability: Capability }> = [];
   private sessionId: string;
-  private providerRuntime?: any;
+  private providerRuntime: ProviderRuntime;
 
   /** Attach custom or default ProviderRuntime */
-  setProviderRuntime(runtime: any): void {
+  setProviderRuntime(runtime: ProviderRuntime): void {
     this.providerRuntime = runtime;
   }
 
   constructor(
-    provider: LLMProvider,
-    model: string = DEFAULT_MODELS['openai-compatible'],
+    runtime: ProviderRuntime,
+    model: string = '',
     config: any = {},
     systemPrompt?: string,
     persistence: PersistenceBackend | null = null,
-    providerType?: ProviderType,
+    providerType?: string,
   ) {
-    this.provider = provider;
+    this.providerRuntime = runtime;
     this.model = model;
     this.config = config;
     this.autoConfirm = !!config?.autoConfirm;
@@ -141,7 +138,7 @@ export class Agent {
   }
 
   /** Active provider type (for tokenizer accuracy display). */
-  getProviderType(): ProviderType | undefined {
+  getProviderType(): string | undefined {
     return this.providerType;
   }
 
@@ -571,17 +568,18 @@ export class Agent {
 
     try {
       const runtime = this.providerRuntime;
-      const snapshot = runtime ? await runtime.createTurnSnapshot() : undefined;
+      const snapshot = await runtime.createTurnSnapshot();
 
       const result = await runAgentLoop({
-        provider: this.provider,
+        runtime,
+        turnSnapshot: snapshot,
         model: this.model,
-        modelOverride: this.config?.hasExplicitModel ? this.model : undefined,
+        modelOverride: this.config?.hasExplicitModel || this.model ? this.model : undefined,
         messages: this.messages,
         toolDefs: getAllToolDefinitions(),
         maxSteps: 30,
         hooks: createHookExecutor(),
-        config: { ...this.config, agentName: 'cli', ...(runtime ? { runtime } : {}) },
+        config: { ...this.config, agentName: 'cli', runtime },
         signal,
         approveTool: wrappedApproveTool,
         permissionLevel,
@@ -589,14 +587,7 @@ export class Agent {
         grantStore: this._grantStore ?? undefined,
         middleware: this._middleware.length > 0 ? this._middleware : undefined,
         onStep: onStep ?? defaultOnStep,
-        // Stream only when the caller supplies its own onStep (TUI mode) — the
-        // readline default handler prints complete 'text' steps, not deltas.
-        stream: customSteps,
-        // Spec 008: when enablePermissionPipeline() was called, route through
-        // the new Domain pipeline instead of the legacy matrix/grant branches.
         wiredPipeline: this._wiredPipeline ?? undefined,
-        providerRuntime: runtime,
-        turnSnapshot: snapshot,
       });
 
       spinner?.stop();
@@ -627,7 +618,7 @@ export class Agent {
       if (this.persistence) {
         try {
           await persistSession(this.persistence, this.sessionId, this.messages, {
-            provider: this.providerType,
+            provider: this.providerType as ProviderType,
             model: this.model,
           });
         } catch { /* persistence is best-effort */ }
@@ -688,24 +679,22 @@ export class Agent {
     this.messages = messages;
   }
 
-  /** Public accessor for the active LLM provider. */
-  getProvider(): LLMProvider {
-    return this.provider;
-  }
-
   /** Public accessor for the active model name. */
   getModel(): string {
     return this.model;
   }
 
   /** Public accessor for the ProviderRuntime instance. */
-  getProviderRuntime(): ProviderRuntime | null {
+  getProviderRuntime(): ProviderRuntime {
     return this.providerRuntime;
   }
 
-  switchProvider(provider: LLMProvider, model: string) {
-    this.provider = provider;
-    this.model = model;
+  switchProvider(accountOrModel: string, model?: string) {
+    if (model) {
+      this.model = model;
+    } else {
+      this.model = accountOrModel;
+    }
   }
 
   abort(): void {

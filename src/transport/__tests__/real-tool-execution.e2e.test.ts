@@ -14,8 +14,7 @@ import { buildActionLifecycle } from "../../domain/permissions/action-lifecycle-
 import { buildLocalBoundary } from "../../capabilities/execution/build-local-boundary.js";
 import { InlineApprovalBroker, type InlineApprovalPresenter } from "../approval-brokers.js";
 import { createHookExecutor } from "../../domain/hooks.js";
-import type { LLMProvider, ProviderResponse } from "../../foundations/contracts/llm.js";
-import type { ToolDefinition } from "../../foundations/contracts/tool.js";
+import { createMockRuntime } from "../../domain/__tests__/test-doubles.js";
 
 let dir: string;
 beforeEach(() => {
@@ -23,20 +22,15 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-function fakeProvider(toolName: string, args: Record<string, unknown>): LLMProvider {
-  let called = false;
-  return {
-    async chat(): Promise<ProviderResponse> {
-      if (!called) {
-        called = true;
-        return {
-          content: "",
-          tool_calls: [{ id: "tc1", name: toolName, arguments: JSON.stringify(args) }],
-        };
-      }
-      return { content: "done", tool_calls: [] };
+function fakeRuntime(toolName: string, args: Record<string, unknown>) {
+  return createMockRuntime([
+    {
+      toolCalls: [{ id: "tc1", name: toolName, args }],
     },
-  };
+    {
+      text: "done",
+    },
+  ]);
 }
 
 describe("REAL tool execution through the new pipeline (reviewer fix #2)", () => {
@@ -65,10 +59,10 @@ describe("REAL tool execution through the new pipeline (reviewer fix #2)", () =>
       auditRoot: dir,
       artifacts: sharedArtifacts,
     });
-    const provider = fakeProvider("write_file", { path: targetPath, content: "hello from the new pipeline" });
+    const runtime = fakeRuntime("write_file", { path: targetPath, content: "hello from the new pipeline" });
 
     const result = await runAgentLoop({
-      provider,
+      runtime,
       model: "test",
       messages: [],
       toolDefs: [],
@@ -103,10 +97,10 @@ describe("REAL tool execution through the new pipeline (reviewer fix #2)", () =>
       auditRoot: dir,
       artifacts: sharedArtifacts,
     });
-    const provider = fakeProvider("write_file", { path: targetPath, content: "should not be written" });
+    const runtime = fakeRuntime("write_file", { path: targetPath, content: "should not be written" });
 
     await runAgentLoop({
-      provider,
+      runtime,
       model: "test",
       messages: [],
       toolDefs: [],
@@ -144,9 +138,9 @@ describe("REAL tool execution through the new pipeline (reviewer fix #2)", () =>
       artifacts: sharedArtifacts,
     });
     // get_current_datetime has an analyzer and runs through the pipeline cleanly.
-    const provider = fakeProvider("get_current_datetime", {});
+    const runtime = fakeRuntime("get_current_datetime", {});
     const result = await runAgentLoop({
-      provider,
+      runtime,
       model: "test",
       messages: [],
       toolDefs: [],

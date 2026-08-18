@@ -156,9 +156,9 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
   // defaultSessionPath()). Disabled backends can be added via registerBackend().
   fullConfig.hasExplicitModel = Boolean(options.model);
   const persistence = createPersistenceBackend({ type: 'file' });
-  const agent = new Agent(provider, model, fullConfig, systemPrompt, persistence, activeProviderType as ProviderType);
   const { getDefaultProviderRuntime } = await import('../../domain/providers/provider-runtime.js');
-  agent.setProviderRuntime(getDefaultProviderRuntime());
+  const runtime = getDefaultProviderRuntime();
+  const agent = new Agent(runtime, options.model ?? model, fullConfig, systemPrompt, persistence, activeProviderType as ProviderType);
 
   // Tool-approval grant store: project grants at <cwd>/.seepient/grants.json,
   // global at ~/.seepient/grants.json. Consulted by the agent loop so matching

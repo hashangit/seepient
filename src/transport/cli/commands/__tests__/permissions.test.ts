@@ -13,7 +13,7 @@ import { permissionsHandler } from "../permissions.js";
 import { Agent } from "../../agent.js";
 import { LocalPolicyStore, computeWorkspaceId, GLOBAL_WORKSPACE_ID } from "../../../../domain/permissions/policy-store.js";
 import { createSnapshotStore } from "../../../../foundations/hashline/snapshot-store.js";
-import type { LLMProvider } from "../../../../foundations/contracts/llm.js";
+import { createMockRuntime } from "../../../../domain/__tests__/test-doubles.js";
 import { SettingsManager } from "../../../../domain/settings/settings-manager.js";
 
 let dir: string;
@@ -24,13 +24,9 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 /** Minimal agent stub exposing the policy-store accessors the handler needs. */
 function makeAgent(): Agent {
-  const fakeProvider: LLMProvider = {
-    async chat() {
-      return { content: "", tool_calls: [] };
-    },
-  };
+  const fakeRuntime = createMockRuntime([{ content: "" }]);
   const agent = new Agent(
-    fakeProvider,
+    fakeRuntime,
     "model",
     { snapshotStore: createSnapshotStore() },
     "system prompt",

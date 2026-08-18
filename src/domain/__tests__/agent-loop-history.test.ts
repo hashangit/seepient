@@ -1,35 +1,24 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { runAgentLoop } from "../agent-loop.js";
 import { createHookExecutor } from "../hooks.js";
 import type { Message } from "../../foundations/types.js";
-import type { LLMProvider, ProviderResponse } from "../../foundations/contracts/llm.js";
-
-function createMockProvider(responses: ProviderResponse[]): LLMProvider {
-  let callIndex = 0;
-  return {
-    async chat(): Promise<ProviderResponse> {
-      const resp = responses[callIndex] ?? { content: "Done" };
-      callIndex++;
-      return resp;
-    },
-  };
-}
+import { createMockRuntime } from "./test-doubles.js";
 
 describe("agent-loop conversation history (QS-P0.2)", () => {
   it("does not insert duplicate assistant messages when response contains both text and tool calls", async () => {
-    const mockProvider = createMockProvider([
+    const mockRuntime = createMockRuntime([
       {
-        content: "I will check the files for you.",
-        tool_calls: [
+        text: "I will check the files for you.",
+        toolCalls: [
           {
             id: "call-1",
             name: "get_current_datetime",
-            arguments: "{}",
+            args: {},
           },
         ],
       },
       {
-        content: "The date has been verified.",
+        text: "The date has been verified.",
       },
     ]);
 
@@ -43,7 +32,7 @@ describe("agent-loop conversation history (QS-P0.2)", () => {
     ];
 
     const result = await runAgentLoop({
-      provider: mockProvider,
+      runtime: mockRuntime,
       model: "gpt-mock",
       messages,
       toolDefs: [],
@@ -67,9 +56,9 @@ describe("agent-loop conversation history (QS-P0.2)", () => {
   });
 
   it("records a single assistant message for pure text turns", async () => {
-    const mockProvider = createMockProvider([
+    const mockRuntime = createMockRuntime([
       {
-        content: "Hello! How can I help you today?",
+        text: "Hello! How can I help you today?",
       },
     ]);
 
@@ -83,7 +72,7 @@ describe("agent-loop conversation history (QS-P0.2)", () => {
     ];
 
     const result = await runAgentLoop({
-      provider: mockProvider,
+      runtime: mockRuntime,
       model: "gpt-mock",
       messages,
       toolDefs: [],

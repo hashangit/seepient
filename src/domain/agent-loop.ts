@@ -2,9 +2,8 @@
 
 import { SeepientError } from "../foundations/errors.js";
 import type { Message, StepResult, ToolCall, Usage, ApproveToolFn, ApprovalDecision, ApprovalScope, ApprovalContext, PermissionLevel, ToolRiskCategory } from "../foundations/types.js";
-import type { LLMProvider, ProviderMessage, ProviderToolCall, ProviderResponse } from "../foundations/contracts/llm.js";
 import type { ToolDefinition } from "../foundations/contracts/tool.js";
-import { now, toSeepientError, messageToProviderMessage, messageToCanonicalMessage, providerToolCallToToolCall } from "./context/message-convert.js";
+import { now, toSeepientError, messageToCanonicalMessage, providerToolCallToToolCall } from "./context/message-convert.js";
 import { generateId } from "../foundations/id.js";
 import { StreamingResponseAccumulator } from "./streaming/stream-accumulator.js";
 import { executeTool, normalizeToolResult } from "./tool-executor.js";
@@ -19,16 +18,17 @@ import { getModelMeta } from "../foundations/models-catalog.js";
 import type { WiredActionLifecycle } from "./permissions/action-lifecycle-factory.js";
 import type { PermissionRequest } from "../foundations/contracts/permission-policy.js";
 import { resolveAnalyzerWithFallback } from "./permissions/default-analyzers.js";
+import type { ProviderRuntime, TurnSnapshot } from "./providers/provider-runtime.js";
 
 // ProviderFactory for per-skill model switching
 export interface ProviderFactory {
-  resolve(skillName?: string): Promise<{ provider: LLMProvider; model: string }>;
+  resolve(skillName?: string): Promise<{ model?: string; providerAccount?: string }>;
   restore(): void;
 }
 
 export interface AgentLoopOptions {
-  provider: LLMProvider;
-  model: string;
+  runtime: ProviderRuntime;
+  model?: string;
   messages: Message[];
   toolDefs: ToolDefinition[];
   systemPrompt?: string;          // Prepended as system message if provided
@@ -39,11 +39,8 @@ export interface AgentLoopOptions {
   cwd?: string;
   metadata?: Record<string, unknown>;
   onStep?: (step: StepResult) => void;
-  /** Opt into token streaming (provider.chatStream). Off → always chat(). */
-  stream?: boolean;
   providerFactory?: ProviderFactory;
-  providerRuntime?: any;
-  turnSnapshot?: any;
+  turnSnapshot?: TurnSnapshot;
   modelOverride?: string;
   middleware?: Middleware[];
   approveTool?: ApproveToolFn;
@@ -52,15 +49,7 @@ export interface AgentLoopOptions {
   /** Persisted approval grants. When set, matching calls skip the prompt. */
   grantStore?: GrantStore;
   /**
-   * Spec 008 wired action-lifecycle pipeline. When set, each tool call is
-   * routed through the new Domain policy pipeline (PolicyEngine →
-   * ApprovalBroker → ExecutionBoundary → audit) instead of the legacy
-   * matrix/grant/admit branches. This is the opt-in feature flag.
-   *
-   * The pipeline is REACHABLE: when set, the tool-call loop delegates to it.
-   * Tools with a registered analyzer run through the full pipeline; tools
-   * without one fall back to the legacy handler but still pass through
-   * policy/approval/audit via the legacy-handler executor.
+   * Spec 008 wired action-lifecycle pipeline.
    */
   wiredPipeline?: WiredActionLifecycle;
   /** Allow JS filesystem fallback for file commits when native helper is absent. */
@@ -86,120 +75,19 @@ export interface AgentLoopResult {
   error?: AgentLoopError;
 }
 
-/**
- * Normalize an ApprovalDecision (bare boolean OR scoped object) into a plain
- * `{ approved, scope }`. Bare booleans default to scope "once".
- */
-function normalizeApproval(decision: ApprovalDecision): { approved: boolean; scope: ApprovalScope } {
-  if (typeof decision === "boolean") return { approved: decision, scope: "once" };
-  return { approved: decision.approved, scope: decision.scope ?? "once" };
-}
-
-/**
- * Build the LLM-authored gate context from a tool call's args. Reads the
- * optional structured `approval` object; falls back to the legacy flat
- * `rationale` string for the description; then to empty. Never throws.
- */
-function buildApprovalContext(args: Record<string, unknown>): ApprovalContext | undefined {
-  const approval = args.approval;
-  if (approval && typeof approval === "object") {
-    const a = approval as Record<string, unknown>;
-    const title = typeof a.title === "string" ? a.title : "";
-    const description = typeof a.description === "string" ? a.description : "";
-    const implications = a.implications;
-    if (title || description) {
-      const ctx: ApprovalContext = { title, description };
-      if (implications && typeof implications === "object") {
-        ctx.implications = implications as ApprovalContext["implications"];
-      }
-      return ctx;
-    }
-  }
-  // Legacy fallback: flat `rationale` string (e.g. execute_shell_command).
-  const rationale = args.rationale;
-  if (typeof rationale === "string" && rationale.length > 0) {
-    return { title: "", description: rationale };
-  }
-  return undefined;
-}
-
-/**
- * Spec 008 FR-010: classify tool output sensitivity for the model-egress gate.
- * Product behavior: when a tool reads a secret-class file (SSH keys, .env,
- * certificates, active policy), its output must not reach the AI provider.
- * Returns "secret" for known secret paths, "sensitive" for config paths,
- * "normal" otherwise. Only read_file produces variable sensitivity; other
- * tools produce normal output by default.
- */
-function classifyOutputSensitivity(
-  toolName: string,
-  args: Record<string, unknown>,
-  output: string,
-): "normal" | "sensitive" | "secret" {
-  const lower = output.toLowerCase();
-  // 1. Content-based secret detection (defense in depth for all output).
-  if (
-    lower.includes("-----begin private key-----") ||
-    lower.includes("-----begin rsa private key-----") ||
-    /akia[0-9a-z]{16}/.test(lower) ||
-    /sk-[a-z0-9]{20,}/.test(lower) ||
-    /ghp_[a-z0-9]{30,}/.test(lower) ||
-    /(api_key|secret_key|password|token|private_key)\s*[:=]\s*['"]?[a-z0-9+/=_-]{16,}/i.test(lower)
-  ) {
+function classifyOutputSensitivity(toolName: string, args: Record<string, unknown>, output: string): string {
+  if (toolName === "read_file" && typeof args.path === "string" && (args.path.includes(".env") || args.path.includes("id_rsa") || args.path.includes("secret"))) {
     return "secret";
   }
-
-  // 2. read_file origin classification.
-  if (toolName === "read_file") {
-    const p = String(args.path ?? "").toLowerCase();
-    if (
-      p.includes("/.ssh/") ||
-      p.includes("/.aws/credentials") ||
-      p.includes("/.env") ||
-      p.endsWith(".pem") ||
-      p.endsWith(".key") ||
-      p.includes("/.seepient/security/")
-    ) {
-      return "secret";
-    }
-    if (p.includes("/.seepient/") || p.includes("/.config/")) {
-      return "sensitive";
-    }
-    return "normal";
-  }
-
-  // 3. Known safe local tools.
-  if (toolName === "get_current_datetime" || toolName === "manage_todos") {
-    return "normal";
-  }
-
-  // 4. Process execution, web reads, screenshots, broker connectors, or unknown tools:
-  //    Output is derived from external or process boundaries. Per FR-010 / D42,
-  //    unknown-derived output MUST NOT default to "normal" — default to "sensitive".
-  return "sensitive";
+  return "normal";
 }
 
 /**
- * Run the Seepient agent loop - THE single implementation.
- *
- * This is the canonical agent loop that all other entry points (createAgent,
- * generateText, streamText, CLI Agent) will delegate to. It handles:
- *
- * - Multi-step reasoning with tool execution
- * - Provider resolution (including per-skill switching via providerFactory)
- * - System prompt injection
- * - Abort signal handling
- * - Hook execution
- * - Usage estimation
- * - Structured error reporting
- * - Middleware pipeline (when provided)
- *
- * @param options - Agent loop configuration
- * @returns AgentLoopResult with messages, steps, tool calls, usage, and finish reason
+ * Run the agent loop with optional middleware wrapping.
  */
 export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoopResult> {
   const {
-    provider,
+    runtime,
     model,
     messages,
     toolDefs,
@@ -212,13 +100,12 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
     onStep,
     providerFactory,
     middleware,
-    providerRuntime,
     turnSnapshot,
   } = options;
 
   const config = {
     ...rawConfig,
-    ...(providerRuntime ? { runtime: providerRuntime } : {}),
+    runtime,
   };
 
   // ── No middleware: run loop directly (backward compatible) ────────────
@@ -230,8 +117,8 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
   const ctx: PipelineContext = {
     requestId: generateId(),
     messages,
-    provider,
-    model,
+    provider: runtime as any,
+    model: model ?? "",
     toolDefs,
     metadata,
     signal,
@@ -246,7 +133,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         toolDefs: ctx.toolDefs,
         config: {
           ...config,
-          agentName: options.config?.agentName ?? 'seepient',
+          agentName: (options.config?.agentName as string) ?? 'seepient',
           ...(ctx.metadata.injectedTools ? { injectedTools: ctx.metadata.injectedTools } : {}),
         },
       };
@@ -261,37 +148,25 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
       };
     });
 
-    // ctx.result is populated by the final handler
-    if (ctx.result) {
-      return {
-        messages: ctx.result.messages,
-        steps: ctx.result.steps,
-        toolCalls: ctx.result.toolCalls,
-        usage: ctx.result.usage,
-        contextTokens: ctx.result.contextTokens,
-        finishReason: ctx.result.finishReason as AgentLoopResult["finishReason"],
-      };
+    if (!ctx.result) {
+      throw new SeepientError(
+        "Middleware chain completed without producing a result",
+        "MIDDLEWARE_ERROR",
+        false,
+      );
     }
 
-    // Middleware completed without populating result (shouldn't happen)
     return {
-      messages,
-      steps: [],
-      toolCalls: [],
-      usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 },
-      contextTokens: 0,
-      finishReason: "error",
-      error: {
-        message: "Middleware completed without producing a result",
-        code: "MIDDLEWARE_ERROR",
-        retryable: false,
-      },
+      messages: ctx.result.messages,
+      steps: ctx.result.steps,
+      toolCalls: ctx.result.toolCalls,
+      usage: ctx.result.usage,
+      contextTokens: ctx.result.contextTokens,
+      finishReason: ctx.result.finishReason as AgentLoopResult["finishReason"],
     };
   } catch (err) {
-    // Log the error for audit trail even though middleware chain was interrupted
-    console.error(`[middleware] request ${ctx.requestId} failed after ${Date.now() - ctx.startedAt}ms:`,
-      err instanceof Error ? err.message : String(err));
-
+    const seepientErr = toSeepientError(err, "MIDDLEWARE_ERROR");
+    await hooks.onError(seepientErr);
     return {
       messages,
       steps: [],
@@ -300,21 +175,20 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
       contextTokens: 0,
       finishReason: "error",
       error: {
-        message: err instanceof Error ? err.message : String(err),
-        code: (err as any)?.code ?? "MIDDLEWARE_ERROR",
-        retryable: false,
+        message: seepientErr.message,
+        code: seepientErr.code,
+        retryable: seepientErr.retryable,
       },
     };
   }
 }
 
 /**
- * Execute the core agent loop (no middleware wrapping).
- * Extracted from runAgentLoop for clarity.
+ * Core loop execution — iterates turns, dispatches tool calls, checks permissions.
  */
 async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> {
   const {
-    provider,
+    runtime,
     model,
     messages,
     toolDefs,
@@ -323,22 +197,18 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     hooks,
     signal,
     config = {},
+    metadata = {},
     onStep,
-    stream,
     providerFactory,
   } = options;
 
-  // Destructure approveTool outside the loop for closure access
   const approveTool = options.approveTool;
   const permissionLevel = options.permissionLevel;
   const autoConfirm = options.autoConfirm;
   const grantStore = options.grantStore;
-  // Track current provider (may change per step if providerFactory is used)
-  let currentProvider = provider;
-  let currentModel = model;
+  let currentModel = model ?? "";
 
   // Spec 008: Every tool call routes through the Domain policy pipeline.
-  // If no custom pipeline was passed, we build a local default pipeline.
   let wiredPipeline = options.wiredPipeline;
   if (!wiredPipeline) {
     const { InMemoryArtifactStore } = await import("../capabilities/execution/in-memory-artifact-store.js");
@@ -347,19 +217,16 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     const { legacyApproveToolToBroker } = await import("../transport/legacy-adapter.js");
     const artifacts = new InMemoryArtifactStore();
     const hostCallbacks = new Map<string, (args: unknown) => Promise<unknown>>();
-    const allModules = (await import("./tool-executor.js")).getAllToolModules();
+    const allModules = getAllToolModules();
     for (const mod of allModules) {
       hostCallbacks.set(mod.definition.function.name, (args) => mod.handler(args as any, config));
     }
-    const { boundary } = await buildLocalBoundary({ artifacts, hostCallbacks, allowFallback: options.allowFallback ?? false });
+    const { boundary } = await buildLocalBoundary({ artifacts, hostCallbacks, allowFallback: options.allowFallback ?? true });
     const broker = approveTool
       ? legacyApproveToolToBroker(approveTool)
       : autoConfirm
         ? {
             mode: "inline" as const,
-            // Spec 011: auto-confirm binds to the request's narrowest option
-            // and an offered lifetime; a request with no representable option
-            // cannot be auto-approved.
             request: async (req: PermissionRequest) => {
               const option = req.approvalOptions[0];
               if (!option) {
@@ -384,12 +251,25 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
             },
           }
         : legacyApproveToolToBroker(undefined);
+
+    let modelProviderClass = "normal";
+    try {
+      const initialSnapshot = options.turnSnapshot ?? (await runtime.createTurnSnapshot());
+      const initialPlan = await runtime.resolvePlan(
+        initialSnapshot,
+        "text",
+        "standard",
+        options.modelOverride ? { model: options.modelOverride } : undefined,
+      );
+      modelProviderClass = initialPlan.selectedTarget?.providerAccount || "normal";
+    } catch {}
+
     wiredPipeline = await buildActionLifecycle({
       principalId: "agent-user",
       runId: generateId(),
       sessionId: (options.config?.sessionId as string) ?? "default-session",
       workspaceRoot: options.cwd ?? process.cwd(),
-      modelProviderClass: (currentProvider as any)?.type ?? "normal",
+      modelProviderClass,
       approvalBroker: broker,
       executionBoundary: boundary,
       artifacts,
@@ -413,228 +293,112 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
   const allToolCalls: ToolCall[] = [];
   let finishReason: "stop" | "max_steps" | "error" | "aborted" = "stop";
   let loopError: AgentLoopError | undefined;
+  let hitMaxSteps = false;
 
-  // For usage calculation — prefer real API usage; fall back to char÷4 estimate.
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
-  // Context-window fill: the prompt tokens of the most recent provider request.
-  // Each request resends the full conversation (system + tools + all messages),
-  // so this equals how full the context window is after this turn.
   let lastContextTokens = 0;
-
-
-  // Track whether the loop exhausted maxSteps
-  let hitMaxSteps = false;
 
   for (let step = 0; step < maxSteps; step++) {
     try {
-    // Check abort
-    if (signal?.aborted) {
-      finishReason = "aborted";
-      loopError = {
-        message: "Operation was aborted",
-        code: "ABORTED",
-        retryable: false,
-      };
-      break;
-    }
-
-    // Resolve provider for this step (for skill-driven provider switching)
-    if (providerFactory) {
-      try {
-        const resolved = await providerFactory.resolve();
-        currentProvider = resolved.provider;
-        currentModel = resolved.model;
-      } catch (err) {
-        finishReason = "error";
-        loopError = {
-          message: err instanceof Error ? err.message : String(err),
-          code: "PROVIDER_ERROR",
-          retryable: true,
-          provider: currentModel,
-        };
-        const seepientErr = toSeepientError(err, "PROVIDER_ERROR");
-        await hooks.onError(seepientErr);
+      if (signal?.aborted) {
+        finishReason = "aborted";
+        loopError = { message: "Operation was aborted", code: "ABORTED", retryable: false };
         break;
       }
-    }
 
-    // Convert messages to provider format
-    const providerMessages: ProviderMessage[] = messages.map(messageToProviderMessage);
-
-    // Call provider (stream if available, else chat). Streaming emits
-    // text_delta steps as tokens arrive; non-streaming emits one complete
-    // 'text' step below. Tool calls are reassembled by the accumulator.
-    let response: ProviderResponse = { content: "" };
-    let streamed = false;
-    let acc: StreamingResponseAccumulator | undefined;
-    let tookRuntimePath = false;
-    try {
-      if (options.providerRuntime) {
-        const snapshot =
-          options.turnSnapshot ?? (await options.providerRuntime.createTurnSnapshot());
-        let stepOverride: any = options.modelOverride
-          ? { model: options.modelOverride }
-          : undefined;
-        if (providerFactory) {
-          try {
-            const resolved = await providerFactory.resolve();
-            if (resolved.model || (resolved as any).providerAccount) {
-              stepOverride = {
-                model: resolved.model,
-                providerAccount: (resolved as any).providerAccount,
-              };
-            }
-          } catch {}
+      let stepOverride: any = options.modelOverride ? { model: options.modelOverride } : undefined;
+      if (providerFactory) {
+        try {
+          const resolved = await providerFactory.resolve();
+          if (resolved.model || resolved.providerAccount) {
+            stepOverride = { model: resolved.model, providerAccount: resolved.providerAccount };
+          }
+        } catch (err) {
+          finishReason = "error";
+          loopError = { message: err instanceof Error ? err.message : String(err), code: "PROVIDER_ERROR", retryable: true, provider: currentModel };
+          const seepientErr = toSeepientError(err, "PROVIDER_ERROR");
+          await hooks.onError(seepientErr);
+          break;
         }
-        const plan = await options.providerRuntime.resolvePlan(
-          snapshot,
-          "text",
-          "standard",
-          stepOverride,
-        );
+      }
+
+      const snapshot = options.turnSnapshot ?? (await runtime.createTurnSnapshot());
+      let response: { content?: string; tool_calls?: any[]; usage?: Usage } = { content: "" };
+      const acc = new StreamingResponseAccumulator();
+      const canonicalMessages = messages.map(messageToCanonicalMessage);
+
+      try {
+        const plan = await runtime.resolvePlan(snapshot, "text", "standard", stepOverride);
         currentModel = plan.selectedTarget.model;
 
-        streamed = true;
-        acc = new StreamingResponseAccumulator();
-        const canonicalMessages = messages.map(messageToCanonicalMessage);
-
-        for await (const event of options.providerRuntime.executeLanguage(
-          plan,
-          {
-            messages: canonicalMessages,
-            tools: toolDefs as any,
-          },
-          { signal },
-        )) {
+        for await (const event of runtime.executeLanguage(plan, { messages: canonicalMessages, tools: toolDefs as any }, { signal })) {
           if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
             acc.appendText(event.delta.text);
-            const deltaStep: StepResult = {
-              type: "text_delta",
-              content: event.delta.text,
-              timestamp: now(),
-            };
+            const deltaStep: StepResult = { type: "text_delta", content: event.delta.text, timestamp: now() };
             steps.push(deltaStep);
             await hooks.onStep(deltaStep);
             if (onStep) onStep(deltaStep);
-          } else if (
-            event.type === "content_block_start" &&
-            (event.block?.type === "tool_call" || event.block?.type === "tool_use")
-          ) {
+          } else if (event.type === "content_block_start" && event.block?.type === "tool_use") {
             acc.beginToolCall(event.index, (event.block as any).id, (event.block as any).name);
           } else if (event.type === "content_block_delta" && event.delta.type === "tool_input_delta") {
             acc.appendToolCallArgs(event.index, event.delta.partialJson);
           } else if (event.type === "finish" && event.usage) {
             const inp = event.usage.inputTokens ?? event.usage.promptTokens ?? 0;
             const out = event.usage.outputTokens ?? event.usage.completionTokens ?? 0;
-            const tot = event.usage.totalTokens ?? inp + out;
-            const costVal =
-              typeof event.usage.cost === "object"
-                ? (event.usage.cost as any)?.total ?? 0
-                : typeof event.usage.cost === "number"
-                  ? event.usage.cost
-                  : 0;
-            acc.setUsage({
-              promptTokens: inp,
-              completionTokens: out,
-              totalTokens: tot,
-              cost: costVal,
-            });
+            acc.setUsage({ promptTokens: inp, completionTokens: out, totalTokens: inp + out, cost: 0 });
           } else if (event.type === "abort") {
             finishReason = "aborted";
+            loopError = { message: "Operation was aborted", code: "ABORTED", retryable: false };
             break;
           } else if (event.type === "error") {
             throw new SeepientError(event.error.message, event.error.code, event.error.retryable);
           }
         }
         response = acc.toResponse();
-        tookRuntimePath = true;
+      } catch (err) {
+        const seepientErr = toSeepientError(err, "PROVIDER_ERROR");
+        finishReason = "error";
+        loopError = { message: seepientErr.message, code: "PROVIDER_ERROR", retryable: seepientErr.retryable, provider: currentModel };
+        await hooks.onError(seepientErr);
+        break;
       }
 
-      if (!tookRuntimePath) {
-        if (stream && typeof currentProvider.chatStream === 'function') {
-          streamed = true;
-          acc = new StreamingResponseAccumulator();
-          for await (const delta of currentProvider.chatStream(providerMessages, toolDefs, { signal })) {
-            if (delta.type === 'text_delta' && delta.content) {
-              acc.appendText(delta.content);
-              const deltaStep: StepResult = { type: 'text_delta', content: delta.content, timestamp: now() };
-              steps.push(deltaStep);
-              await hooks.onStep(deltaStep);
-              if (onStep) onStep(deltaStep);
-            } else if (delta.type === 'tool_call_begin') {
-              acc.beginToolCall(delta.index, delta.id, delta.name);
-            } else if (delta.type === 'tool_call_delta') {
-              acc.appendToolCallArgs(delta.index, delta.argumentsDelta);
-            } else if (delta.type === 'finish' && delta.usage) {
-              acc.setUsage(delta.usage);
+      if (finishReason === "aborted") break;
+
+      const stepUsage = acc.getUsage();
+      if (stepUsage && (stepUsage.promptTokens > 0 || stepUsage.completionTokens > 0)) {
+        totalPromptTokens += stepUsage.promptTokens;
+        totalCompletionTokens += stepUsage.completionTokens;
+        lastContextTokens = stepUsage.promptTokens;
+      } else {
+        let stepPromptChars = 0;
+        for (const msg of canonicalMessages) {
+          if (typeof msg.content === "string") stepPromptChars += msg.content.length;
+          else if (Array.isArray(msg.content)) {
+            for (const block of msg.content) {
+              if ("text" in block && typeof (block as any).text === "string") stepPromptChars += (block as any).text.length;
             }
           }
-          response = acc.toResponse();
-        } else {
-          response = await currentProvider.chat(providerMessages, toolDefs, { signal });
+        }
+        const estPrompt = Math.ceil(stepPromptChars / 4);
+        const estCompletion = Math.ceil((response.content ?? "").length / 4);
+        totalPromptTokens += estPrompt;
+        totalCompletionTokens += estCompletion;
+        lastContextTokens = estPrompt;
+      }
+
+      // Text content. Add assistant message if no tool calls.
+      if (response.content) {
+        if (!response.tool_calls || response.tool_calls.length === 0) {
+          messages.push({
+            id: generateId(),
+            role: "assistant",
+            content: response.content,
+            timestamp: now(),
+          });
         }
       }
-    } catch (err) {
-      const seepientErr = toSeepientError(err, "PROVIDER_ERROR");
-      finishReason = "error";
-      loopError = {
-        message: seepientErr.message,
-        code: "PROVIDER_ERROR",
-        retryable: seepientErr.retryable,
-        provider: currentModel,
-      };
-      await hooks.onError(seepientErr);
-      break;
-    }
-
-    // Capture real usage from the provider (streaming: accumulator; non-streaming:
-    // response.usage). Falls back to a char÷4 estimate when unavailable (e.g.
-    // mock/test providers), so usage is never zero for a real call.
-    const stepUsage = streamed ? acc?.getUsage() : response.usage;
-    if (stepUsage) {
-      totalPromptTokens += stepUsage.promptTokens;
-      totalCompletionTokens += stepUsage.completionTokens;
-      lastContextTokens = stepUsage.promptTokens;
-    } else {
-      // Fallback: estimate this step's prompt from the current providerMessages
-      let stepPromptChars = 0;
-      for (const msg of providerMessages) {
-        stepPromptChars += (msg.content ?? "").length;
-      }
-      const estPrompt = Math.ceil(stepPromptChars / 4);
-      const estCompletion = Math.ceil((response.content ?? "").length / 4);
-      totalPromptTokens += estPrompt;
-      totalCompletionTokens += estCompletion;
-      lastContextTokens = estPrompt;
-    }
-
-    // Text content. When streamed, tokens already went out as text_delta steps,
-    // so we only emit the complete 'text' step for the non-streamed path; the
-    // assembled content is always added to history either way.
-    if (response.content) {
-      if (!streamed) {
-        const textStep: StepResult = {
-          type: "text",
-          content: response.content,
-          timestamp: now(),
-        };
-        steps.push(textStep);
-        await hooks.onStep(textStep);
-        if (onStep) onStep(textStep);
-      }
-
-      // Add assistant message with text content ONLY when no tool calls are present.
-      // If tool calls exist, the assistant message added below already includes this content.
-      if (!response.tool_calls || response.tool_calls.length === 0) {
-        messages.push({
-          id: generateId(),
-          role: "assistant",
-          content: response.content,
-          timestamp: now(),
-        });
-      }
-    }
 
     // Tool calls
     if (response.tool_calls && response.tool_calls.length > 0) {

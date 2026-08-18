@@ -58,13 +58,12 @@ describe("Skill Runtime Switching (Site #8, P5.4)", () => {
 
     // Step 1: Default turn execution (gpt-4o)
     const result1 = await runAgentLoop({
-      provider: {} as any,
+      runtime,
       model: "gpt-4o",
       messages: [{ id: "m1", role: "user", content: "hello", timestamp: Date.now() }],
       toolDefs: [],
       maxSteps: 1,
       hooks: createHookExecutor(),
-      providerRuntime: runtime,
       turnSnapshot: snapshot,
       providerFactory: switcher as any,
     });
@@ -83,13 +82,12 @@ describe("Skill Runtime Switching (Site #8, P5.4)", () => {
     });
 
     const result2 = await runAgentLoop({
-      provider: {} as any,
+      runtime,
       model: "gpt-4o",
       messages: [{ id: "m2", role: "user", content: "review this code", timestamp: Date.now() }],
       toolDefs: [],
       maxSteps: 1,
       hooks: createHookExecutor(),
-      providerRuntime: runtime,
       turnSnapshot: snapshot,
       providerFactory: switcher as any,
     });
@@ -101,13 +99,12 @@ describe("Skill Runtime Switching (Site #8, P5.4)", () => {
     // Restore switcher and verify target returns to gpt-4o
     switcher.restore();
     const result3 = await runAgentLoop({
-      provider: {} as any,
+      runtime,
       model: "gpt-4o",
       messages: [{ id: "m3", role: "user", content: "back to normal", timestamp: Date.now() }],
       toolDefs: [],
       maxSteps: 1,
       hooks: createHookExecutor(),
-      providerRuntime: runtime,
       turnSnapshot: snapshot,
       providerFactory: switcher as any,
     });

@@ -406,7 +406,7 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
           modelProviderClass: (opts.provider ?? "openai") as string,
         });
       }
-      serverStreamText({ ...opts, wiredPipeline }, serverPermissionLevel, gatewayMiddleware).catch((err) => {
+      serverStreamText({ ...opts, wiredPipeline }, serverPermissionLevel, gatewayMiddleware).catch((err: any) => {
         opts.onError({
           code: "STREAM_ERROR",
           message: err instanceof Error ? err.message : "Stream failed",

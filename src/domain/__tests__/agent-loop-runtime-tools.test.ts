@@ -114,15 +114,12 @@ describe("Agent Loop Runtime Tool Injection & Propagation", () => {
 
     const snapshot = await runtime.createTurnSnapshot();
     const result = await runAgentLoop({
-      provider: {
-        chat: vi.fn(),
-      } as any,
+      runtime,
       model: "gpt-4o",
       messages: [{ id: "m1", role: "user", content: "hello", timestamp: Date.now() }],
       toolDefs: [],
       maxSteps: 1,
       hooks: createHookExecutor(),
-      providerRuntime: runtime,
       turnSnapshot: snapshot,
     });
 
@@ -177,13 +174,12 @@ describe("Agent Loop Runtime Tool Injection & Propagation", () => {
 
     const snapshot = await runtime.createTurnSnapshot();
     const result = await runAgentLoop({
-      provider: {} as any,
+      runtime,
       model: "gpt-4o",
       messages: [{ id: "m1", role: "user", content: "hello", timestamp: Date.now() }],
       toolDefs: [],
       maxSteps: 1,
       hooks: createHookExecutor(),
-      providerRuntime: runtime,
       turnSnapshot: snapshot,
     });
 

@@ -5,7 +5,6 @@
  * tool factories, provider helpers, and skill utilities.
  */
 
-import type { LLMProvider, ProviderMessage, ProviderToolCall } from "../../foundations/contracts/llm.js";
 import type {
   GenerateTextOptions,
   GenerateTextResult,
@@ -17,7 +16,7 @@ import type {
   Usage,
   SeepientError,
 } from "../../foundations/types.js";
-import { getProvider } from "../../domain/providers/provider-resolver.js";
+import { getDefaultProviderRuntime, type ProviderRuntime } from "../../domain/providers/provider-runtime.js";
 import { createHookExecutor } from "../../domain/hooks.js";
 import { StreamManager } from "../../domain/streaming/stream-manager.js";
 import { resolveTools, getAllToolDefinitions } from "./tools.js";
@@ -48,8 +47,7 @@ export type {
 } from "../../foundations/contracts/sdk-fixture.js";
 export { tool, CORE_TOOLS, COMM_TOOLS, ADVANCED_TOOLS, ALL_TOOLS } from "./tools.js";
 export { settings, SettingsError } from "./settings.js";
-export { configureProviders, loadProviderConfig, provider } from "../../domain/providers/provider-resolver.js";
-export { createSkillProviderSwitcher } from "../../domain/skills/skill-invoker.js";
+export { createRuntimeSkillProviderSwitcher } from "../../domain/skills/skill-invoker.js";
 export type { SSEOptions } from "./http.js";
 
 // Re-export middleware pipeline
@@ -116,10 +114,7 @@ export {
   createMemoryStore,
 } from "../../domain/sessions/session-store.js";
 
-export type {
-  SkillProviderSwitcher,
-  ProviderSwitcherConfig,
-} from "../../domain/skills/skill-invoker.js";
+
 
 // ── generateText ─────────────────────────────────────────────────────────
 
@@ -171,9 +166,7 @@ export async function generateText(
 ): Promise<GenerateTextResult> {
   const opts = options ?? {};
   const maxSteps = opts.maxSteps ?? 10;
-
-  // Resolve provider
-  const { provider: llmProvider, model } = await getProvider(opts.provider, opts.model);
+  const runtime: ProviderRuntime = (opts as any).runtime ?? (opts as any).providerRuntime ?? getDefaultProviderRuntime();
 
   // Resolve tools
   const toolDefs = opts.tools ? resolveTools(opts.tools) : getAllToolDefinitions();
@@ -213,12 +206,12 @@ export async function generateText(
     });
   }
 
-  const runtime: any = (opts as any).providerRuntime;
-  const snapshot: any = runtime ? await runtime.createTurnSnapshot() : undefined;
+  const snapshot = await runtime.createTurnSnapshot();
 
   const result = await runAgentLoop({
-    provider: llmProvider,
-    model,
+    runtime,
+    turnSnapshot: snapshot,
+    model: opts.model,
     modelOverride: opts.model,
     messages,
     toolDefs,
@@ -226,15 +219,13 @@ export async function generateText(
     maxSteps,
     hooks,
     signal: opts.signal,
-    config: { ...opts.config, ...(runtime ? { runtime } : {}) },
+    config: { ...opts.config, runtime },
     metadata: opts.metadata,
     middleware: opts.middleware,
     approveTool: opts.approveTool,
     permissionLevel: opts.permissionLevel,
     grantStore: opts.grants?.length ? createSessionGrantStore(opts.grants) : undefined,
     wiredPipeline,
-    providerRuntime: runtime,
-    turnSnapshot: snapshot,
   });
 
   // Get the final text
@@ -282,9 +273,7 @@ export async function streamText(
 ): Promise<StreamTextResult> {
   const opts = options ?? {};
   const maxSteps = opts.maxSteps ?? 10;
-
-  // Resolve provider
-  const { provider: llmProvider, model } = await getProvider(opts.provider, opts.model);
+  const runtime: ProviderRuntime = (opts as any).providerRuntime ?? getDefaultProviderRuntime();
 
   // Resolve tools
   const toolDefs = opts.tools ? resolveTools(opts.tools) : getAllToolDefinitions();
@@ -329,15 +318,15 @@ export async function streamText(
     });
   }
 
-  const runtime: any = (opts as any).providerRuntime;
-  const snapshot: any = runtime ? await runtime.createTurnSnapshot() : undefined;
-
   // Run loop in background
   (async () => {
     try {
+      const snapshot = await runtime.createTurnSnapshot();
+
       const result = await runAgentLoop({
-        provider: llmProvider,
-        model,
+        runtime,
+        turnSnapshot: snapshot,
+        model: opts.model,
         modelOverride: opts.model,
         messages,
         toolDefs,
@@ -345,15 +334,13 @@ export async function streamText(
         maxSteps,
         hooks,
         signal: abortController.signal,
-        config: { ...opts.config, ...(runtime ? { runtime } : {}) },
+        config: { ...opts.config, runtime },
         metadata: opts.metadata,
         middleware: opts.middleware,
         approveTool: opts.approveTool,
         permissionLevel: opts.permissionLevel,
         grantStore: opts.grants?.length ? createSessionGrantStore(opts.grants) : undefined,
         wiredPipeline,
-        providerRuntime: runtime,
-        turnSnapshot: snapshot,
         onStep: (step) => {
           if (opts.onStep) opts.onStep(step);
           if (step.type === "text" && step.content) {

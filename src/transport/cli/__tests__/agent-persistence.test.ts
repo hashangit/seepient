@@ -7,10 +7,10 @@
  * mocked so no real provider call is made.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { LLMProvider } from '../../../foundations/contracts/llm.js';
+import { createMockRuntime } from '../../../domain/__tests__/test-doubles.js';
 
-function mockProvider(): LLMProvider {
-  return { chat: vi.fn().mockResolvedValue({ content: 'ok' }) } as unknown as LLMProvider;
+function mockRuntime(): any {
+  return createMockRuntime([{ content: 'ok' }]);
 }
 
 // Mock runAgentLoop: appends an assistant message to the messages array
@@ -60,7 +60,7 @@ describe("CLI Agent persistence", () => {
     const { MemoryPersistenceBackend } = await import('../../../domain/sessions/session-store.js');
 
     const backend = new MemoryPersistenceBackend();
-    const agent = new Agent(mockProvider(), 'gpt-test', {}, 'sys-prompt', backend, 'openai');
+    const agent = new Agent(mockRuntime(), 'gpt-test', {}, 'sys-prompt', backend, 'openai');
 
     await agent.chat('hi');
 
@@ -79,7 +79,7 @@ describe("CLI Agent persistence", () => {
     const { MemoryPersistenceBackend } = await import('../../../domain/sessions/session-store.js');
 
     const backend = new MemoryPersistenceBackend();
-    const agent = new Agent(mockProvider(), 'gpt-test', {}, 'sys', backend);
+    const agent = new Agent(mockRuntime(), 'gpt-test', {}, 'sys', backend);
 
     const result = await agent.chat('partial turn');
     expect(result.finishReason).toBe('aborted');
@@ -99,7 +99,7 @@ describe("CLI Agent persistence", () => {
     const { MemoryPersistenceBackend } = await import('../../../domain/sessions/session-store.js');
 
     const backend = new MemoryPersistenceBackend();
-    const agent = new Agent(mockProvider(), 'gpt-test', {}, 'sys', backend);
+    const agent = new Agent(mockRuntime(), 'gpt-test', {}, 'sys', backend);
     await agent.chat('first turn');
     const oldId = agent.getSessionId();
 
@@ -119,12 +119,12 @@ describe("CLI Agent persistence", () => {
     const { MemoryPersistenceBackend } = await import('../../../domain/sessions/session-store.js');
 
     const backend = new MemoryPersistenceBackend();
-    const agent = new Agent(mockProvider(), 'gpt-test', {}, 'sys', backend);
+    const agent = new Agent(mockRuntime(), 'gpt-test', {}, 'sys', backend);
     await agent.chat('turn one');
     const savedId = agent.getSessionId();
 
     // A fresh agent resumes by id.
-    const agent2 = new Agent(mockProvider(), 'gpt-test', {}, 'sys', backend);
+    const agent2 = new Agent(mockRuntime(), 'gpt-test', {}, 'sys', backend);
     const loaded = await agent2.loadSession(savedId);
     expect(loaded).toBe(true);
     expect(agent2.getSessionId()).toBe(savedId);
@@ -134,7 +134,7 @@ describe("CLI Agent persistence", () => {
   it("loadSession returns false for an unknown id", async () => {
     const { Agent } = await import('../agent.js');
     const { MemoryPersistenceBackend } = await import('../../../domain/sessions/session-store.js');
-    const agent = new Agent(mockProvider(), 'gpt-test', {}, 'sys', new MemoryPersistenceBackend());
+    const agent = new Agent(mockRuntime(), 'gpt-test', {}, 'sys', new MemoryPersistenceBackend());
     expect(await agent.loadSession('does-not-exist')).toBe(false);
   });
 
@@ -148,7 +148,7 @@ describe("CLI Agent persistence", () => {
       messages: [{ id: 'u1', role: 'user', content: 'hi', timestamp: 0 }],
       createdAt: 0, updatedAt: 0,
     });
-    const agent = new Agent(mockProvider(), 'gpt-test', {}, 'my sys prompt', backend);
+    const agent = new Agent(mockRuntime(), 'gpt-test', {}, 'my sys prompt', backend);
     const loaded = await agent.loadSession('no-sys');
     expect(loaded).toBe(true);
     const roles = agent.getMessages().map((m) => m.role);

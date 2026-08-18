@@ -94,13 +94,12 @@ describe("Agent Loop Execution via ProviderRuntime (QS-P5.3c)", () => {
 
     const steps: any[] = [];
     const result = await runAgentLoop({
-      provider: mockDummyProvider,
+      runtime,
       model: "gpt-4o",
       messages: [{ id: "1", role: "user", content: "Hi", timestamp: Date.now() }],
       toolDefs: [],
       maxSteps: 3,
       hooks: createHookExecutor(),
-      providerRuntime: runtime,
       onStep: (step) => steps.push(step),
     });
 
@@ -219,13 +218,12 @@ describe("Agent Loop Execution via ProviderRuntime (QS-P5.3c)", () => {
     ];
 
     const result = await runAgentLoop({
-      provider: { chat: async () => ({ role: "assistant", content: "" }), chatStream: async function* () {} },
+      runtime,
       model: "gpt-4o",
       messages: [{ id: "1", role: "user", content: "What is 2+2?", timestamp: Date.now() }],
       toolDefs: mockToolDefs,
       maxSteps: 5,
       hooks: createHookExecutor(),
-      providerRuntime: runtime,
     });
 
     expect(callCount).toBe(2);

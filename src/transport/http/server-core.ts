@@ -4,7 +4,7 @@ import { createHookExecutor } from "../../domain/hooks.js";
 import { resolveTools, getAllToolDefinitions } from "../../domain/tool-executor.js";
 import { now } from "../../domain/context/message-convert.js";
 import { generateId } from "../../foundations/id.js";
-import { getProvider } from "../../domain/providers/provider-resolver.js";
+import { getDefaultProviderRuntime, type ProviderRuntime } from "../../domain/providers/provider-runtime.js";
 import type { Middleware } from "../../foundations/contracts/middleware.js";
 import { initializeSkillRegistry } from "../../capabilities/skills/index.js";
 import { buildSkillCatalog } from "../../domain/skills/skill-catalog.js";
@@ -46,8 +46,7 @@ export async function serverGenerateText(
   permissionLevel: PermissionLevel,
   middleware?: Middleware[],
 ): Promise<GenerateTextResult> {
-  // Resolve provider
-  const { provider: llmProvider, model } = await getProvider(options.provider, options.model);
+  const runtime: ProviderRuntime = (options as any).providerRuntime ?? getDefaultProviderRuntime();
 
   // Resolve tools
   const toolDefs = options.tools ? resolveTools(options.tools) : getAllToolDefinitions();
@@ -75,18 +74,12 @@ export async function serverGenerateText(
     timestamp: now(),
   });
 
-  // Run the agent loop
-  let runtime: any = (options as any).providerRuntime;
-  let snapshot: any;
-  if (!runtime && !options.provider) {
-    const { getDefaultProviderRuntime } = await import("../../domain/providers/provider-runtime.js");
-    runtime = getDefaultProviderRuntime();
-    snapshot = await runtime.createTurnSnapshot();
-  }
+  const snapshot = await runtime.createTurnSnapshot();
 
   const result = await runAgentLoop({
-    provider: llmProvider,
-    model: options.model ?? model,
+    runtime,
+    turnSnapshot: snapshot,
+    model: options.model,
     modelOverride: options.model,
     messages,
     toolDefs,
@@ -94,10 +87,8 @@ export async function serverGenerateText(
     hooks,
     permissionLevel,
     middleware,
-    config: { agentName: "server", ...(runtime ? { runtime } : {}) },
+    config: { agentName: "server", runtime },
     wiredPipeline: options.wiredPipeline,
-    providerRuntime: runtime,
-    turnSnapshot: snapshot,
   });
 
   // Extract final text from last assistant message
@@ -116,10 +107,12 @@ export async function serverGenerateText(
   };
 }
 
+export { handleAgentChatStream as serverStreamText };
+
 /**
- * Server-side streamText using core agent loop directly.
+ * Handle POST /api/agent/chat with streaming.
  */
-export async function serverStreamText(
+export async function handleAgentChatStream(
   opts: {
     message: string;
     model?: string;
@@ -127,17 +120,12 @@ export async function serverStreamText(
     tools?: string[];
     maxSteps?: number;
     skills?: string[];
-    sessionId?: string;
-    /**
-     * Spec 008: when set, route every tool call through the wired pipeline.
-     * The pipeline is constructed at server startup (bootstrap) and passed
-     * in here; serverStreamText itself is stateless.
-     */
-    wiredPipeline?: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle;
     permissionLevel?: PermissionLevel;
     approveTool?: ApproveToolFn;
-    onText: (delta: string) => void;
-    onToolCall: (tool: { name: string; args: Record<string, unknown>; callId: string }) => void;
+    /** Spec 008 wired pipeline (constructed by createServer). */
+    wiredPipeline?: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle;
+    onText: (chunk: string) => void;
+    onToolCall: (call: { name: string; args: any; callId: string }) => void;
     onToolResult: (result: { callId: string; output: string; success: boolean }) => void;
     onStep: (step: StepResult) => void;
     onError: (error: { code: string; message: string }) => void;
@@ -147,7 +135,7 @@ export async function serverStreamText(
   serverPermissionLevel?: PermissionLevel,
   middleware?: Middleware[],
 ): Promise<void> {
-  const { provider: llmProvider, model } = await getProvider(opts.provider, opts.model);
+  const runtime: ProviderRuntime = (opts as any).providerRuntime ?? getDefaultProviderRuntime();
   const toolDefs = opts.tools ? resolveTools(opts.tools) : getAllToolDefinitions();
   const hooks = createHookExecutor();
 
@@ -172,17 +160,12 @@ export async function serverStreamText(
   let accumulatedText = "";
 
   try {
-    let runtime: any = (opts as any).providerRuntime;
-    let snapshot: any;
-    if (!runtime && !opts.provider) {
-      const { getDefaultProviderRuntime } = await import("../../domain/providers/provider-runtime.js");
-      runtime = getDefaultProviderRuntime();
-      snapshot = await runtime.createTurnSnapshot();
-    }
+    const snapshot = await runtime.createTurnSnapshot();
 
     const result = await runAgentLoop({
-      provider: llmProvider,
-      model: opts.model ?? model,
+      runtime,
+      turnSnapshot: snapshot,
+      model: opts.model,
       modelOverride: opts.model,
       messages,
       toolDefs,
@@ -190,13 +173,10 @@ export async function serverStreamText(
       hooks,
       permissionLevel: opts.permissionLevel ?? serverPermissionLevel,
       approveTool: opts.approveTool,
-      stream: true,
       signal: opts.signal,
       middleware: middleware ?? [],
-      config: { agentName: "server", ...(runtime ? { runtime } : {}) },
+      config: { agentName: "server", runtime },
       wiredPipeline: opts.wiredPipeline,
-      providerRuntime: runtime,
-      turnSnapshot: snapshot,
       onStep: (step) => {
         if ((step.type === "text" || step.type === "text_delta") && step.content) {
           accumulatedText += step.content;

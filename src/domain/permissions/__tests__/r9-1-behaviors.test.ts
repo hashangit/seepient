@@ -620,20 +620,19 @@ describe("R9.1 Integration Wiring Verification", () => {
 
     wired.analyzers["secret_tool"] = customAnalyzer as any;
 
-    let providerCalled = false;
-    const provider: any = {
-      type: "openai",
-      async chat() {
-        if (!providerCalled) {
-          providerCalled = true;
-          return { content: "", tool_calls: [{ id: "c1", name: "secret_tool", arguments: "{}", type: "function" }] };
-        }
-        return { content: "done", tool_calls: [] };
+    const { createMockRuntime } = await import("../../__tests__/test-doubles.js");
+
+    const runtime = createMockRuntime([
+      {
+        toolCalls: [{ id: "c1", name: "secret_tool", args: {} }],
       },
-    };
+      {
+        text: "done",
+      },
+    ]);
 
     const result = await runAgentLoop({
-      provider,
+      runtime,
       model: "gpt-4o",
       hooks: createHookExecutor(),
       messages: [{ id: "m1", role: "user", content: "run secret_tool", timestamp: Date.now() }],

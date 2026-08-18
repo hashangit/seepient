@@ -50,10 +50,10 @@ import type {
   ExecutionBackendCapabilities,
   ExecutionResult,
 } from "../../foundations/contracts/execution-boundary.js";
-import type { LLMProvider, ProviderResponse } from "../../foundations/contracts/llm.js";
-import type { ToolDefinition } from "../../foundations/contracts/tool.js";
 import type { ToolResult } from "../../foundations/types.js";
+import type { ToolDefinition } from "../../foundations/contracts/tool.js";
 import { createHookExecutor } from "../../domain/hooks.js";
+import { createMockRuntime } from "../../domain/__tests__/test-doubles.js";
 
 let dir: string;
 beforeEach(() => {
@@ -61,27 +61,22 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-/** A provider that issues ONE tool call then stops. */
-function fakeProvider(toolName: string, args: Record<string, unknown>): LLMProvider {
-  let called = false;
-  return {
-    async chat(_messages, _tools): Promise<ProviderResponse> {
-      if (!called) {
-        called = true;
-        return {
-          content: "",
-          tool_calls: [
-            {
-              id: "tc1",
-              name: toolName,
-              arguments: JSON.stringify(args),
-            },
-          ],
-        };
-      }
-      return { content: "done", tool_calls: [] };
+/** A provider runtime that issues ONE tool call then stops. */
+function fakeRuntime(toolName: string, args: Record<string, unknown>) {
+  return createMockRuntime([
+    {
+      toolCalls: [
+        {
+          id: "tc1",
+          name: toolName,
+          args,
+        },
+      ],
     },
-  };
+    {
+      text: "done",
+    },
+  ]);
 }
 
 /** A boundary that RECORDS every execute() call — the proof instrument. */
@@ -154,7 +149,7 @@ async function wirePipeline(opts: {
 }
 
 /** Common option shape for runAgentLoop. */
-function loopOpts(overrides: Partial<Parameters<typeof runAgentLoop>[0]> & { provider: LLMProvider }) {
+function loopOpts(overrides: Partial<Parameters<typeof runAgentLoop>[0]> & { runtime: any }) {
   return {
     model: "test-model",
     messages: [],
@@ -179,11 +174,11 @@ describe("E2E: runAgentLoop routes through the wired pipeline", () => {
       principal: set({ kind: "commit-file", path: capPath }, defaultEgress),
       ceiling: set({ kind: "commit-file", path: capPath }, defaultEgress),
     });
-    const provider = fakeProvider("write_file", { path: targetPath, content: "hi" });
+    const runtime = fakeRuntime("write_file", { path: targetPath, content: "hi" });
 
     await runAgentLoop(
       loopOpts({
-        provider,
+        runtime,
         wiredPipeline: wired,
       }),
     );
@@ -211,11 +206,11 @@ describe("E2E: runAgentLoop routes through the wired pipeline", () => {
       principal: set(),
       ceiling: set(),
     });
-    const provider = fakeProvider("write_file", { path: targetPath, content: "x" });
+    const runtime = fakeRuntime("write_file", { path: targetPath, content: "x" });
 
     const result = await runAgentLoop(
       loopOpts({
-        provider,
+        runtime,
         wiredPipeline: wired,
         autoConfirm: true, // would bypass everything in the legacy path
       }),
@@ -237,7 +232,7 @@ describe("E2E: runAgentLoop routes through the wired pipeline", () => {
       principal: set(),
       ceiling: set(),
     });
-    const provider = fakeProvider("write_file", { path: targetPath, content: "x" });
+    const runtime = fakeRuntime("write_file", { path: targetPath, content: "x" });
     let afterToolCallCount = 0;
     const hooks = createHookExecutor({
       afterToolCall: async () => { afterToolCallCount++; },
@@ -245,7 +240,7 @@ describe("E2E: runAgentLoop routes through the wired pipeline", () => {
 
     await runAgentLoop(
       loopOpts({
-        provider,
+        runtime,
         wiredPipeline: wired,
         hooks,
       }),
@@ -279,9 +274,9 @@ describe("E2E: runAgentLoop routes through the wired pipeline", () => {
       principal: set({ kind: "commit-file", path: capPath }, defaultEgress),
       ceiling: set({ kind: "commit-file", path: capPath }, defaultEgress),
     });
-    const provider = fakeProvider("write_file", { path: targetPath, content: "x" });
+    const runtime = fakeRuntime("write_file", { path: targetPath, content: "x" });
 
-    const result = await runAgentLoop(loopOpts({ provider, wiredPipeline: wired }));
+    const result = await runAgentLoop(loopOpts({ runtime, wiredPipeline: wired }));
 
     expect(boundary.calls.length).toBe(1); // dispatched exactly once
     const toolStep = result.steps.find((s) => s.type === "tool_call");
@@ -295,9 +290,9 @@ describe("E2E: runAgentLoop routes through the wired pipeline", () => {
       broker: new NoneApprovalBroker(),
       boundary,
     });
-    const provider = fakeProvider("unregistered_unknown_tool", {});
+    const runtime = fakeRuntime("unregistered_unknown_tool", {});
 
-    await runAgentLoop(loopOpts({ provider, wiredPipeline: wired }));
+    await runAgentLoop(loopOpts({ runtime, wiredPipeline: wired }));
 
     // Boundary NOT called (no analyzer); the legacy handler ran instead.
     expect(boundary.calls.length).toBe(0);
@@ -326,9 +321,9 @@ describe("E2E: runAgentLoop routes through the wired pipeline", () => {
       ceiling: set({ kind: "commit-file", path: capPath }, defaultEgress),
       principal: set(), // no caller-supplied policy — must come from the store
     });
-    const provider = fakeProvider("write_file", { path: targetPath, content: "x" });
+    const runtime = fakeRuntime("write_file", { path: targetPath, content: "x" });
 
-    await runAgentLoop(loopOpts({ provider, wiredPipeline: wired }));
+    await runAgentLoop(loopOpts({ runtime, wiredPipeline: wired }));
 
     // The store-approved capability let the call through even though the
     // caller passed no principal policy and the broker would deny.
@@ -346,9 +341,9 @@ describe("E2E: runAgentLoop routes through the wired pipeline", () => {
       ceiling: set({ kind: "commit-file", path: capPath }),
       principal: set({ kind: "commit-file", path: capPath }),
     });
-    const provider = fakeProvider("write_file", { path: targetPath, content: "x" });
+    const runtime = fakeRuntime("write_file", { path: targetPath, content: "x" });
 
-    const result = await runAgentLoop(loopOpts({ provider, wiredPipeline: wired }));
+    const result = await runAgentLoop(loopOpts({ runtime, wiredPipeline: wired }));
     // Because deploymentCeiling lacks model-egress, policy denies execution up front!
     expect(boundary.calls.length).toBe(0);
     const toolMsg = result.messages.find((m) => m.role === "tool");

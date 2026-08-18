@@ -218,7 +218,7 @@ export async function runChat(queryParts: string[], options: any) {
   const cmdRegistry = buildCommandRegistry(agent, fullConfig, activeProviderType, gatewayInstance);
 
   // Lazy-loaded modules (hoisted outside the loop to avoid repeated import overhead)
-  const { invokeSkill, createSkillProviderSwitcher } = await import('../../domain/skills/skill-invoker.js');
+  const { invokeSkill, createRuntimeSkillProviderSwitcher } = await import('../../domain/skills/skill-invoker.js');
 
   try {
     while (true) {
@@ -251,15 +251,11 @@ export async function runChat(queryParts: string[], options: any) {
 
           if (skillResult) {
             console.log(chalk.cyan(`Loading skill: ${skillResult.skill.name}`));
-            const switcher = createSkillProviderSwitcher({
-              provider: agent.getProvider(),
-              model: agent.getModel(),
-              models: fullConfig.models ?? {},
-            });
+            const switcher = createRuntimeSkillProviderSwitcher(agent.getProviderRuntime());
             const switched = await switcher.switchIfNeeded(skillResult);
 
-            if (switched) {
-              agent.switchProvider(switcher.activeProvider, switcher.activeModel);
+            if (switched && skillResult.preferredModel) {
+              agent.switchProvider(skillResult.preferredProvider ?? "", skillResult.preferredModel);
             }
 
             try {
@@ -267,7 +263,6 @@ export async function runChat(queryParts: string[], options: any) {
             } finally {
               if (switched) {
                 switcher.restore();
-                agent.switchProvider(switcher.activeProvider, switcher.activeModel);
               }
             }
             continue;

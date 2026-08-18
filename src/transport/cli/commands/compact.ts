@@ -61,7 +61,7 @@ export const compactHandler: CommandHandler = async (ctx) => {
     let result;
     try {
       result = await runAgentLoop({
-        provider: agent.getProvider(),
+        runtime: agent.getProviderRuntime(),
         model: agent.getModel(),
         messages: summaryMessages,
         toolDefs: [], // no tools during summarization

@@ -14,7 +14,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Agent } from "../agent.js";
-import type { LLMProvider } from "../../../foundations/contracts/llm.js";
 import type {
   ExecutionBoundary,
   ExecutionResult,
@@ -31,9 +30,10 @@ import {
   GLOBAL_WORKSPACE_ID,
 } from "../../../domain/permissions/policy-store.js";
 import { buildActionLifecycle } from "../../../domain/permissions/action-lifecycle-factory.js";
+import { createMockRuntime } from "../../../domain/__tests__/test-doubles.js";
 
-function mockProvider(): LLMProvider {
-  return { chat: vi.fn().mockResolvedValue({ content: "ok" }) } as unknown as LLMProvider;
+function mockRuntime(): any {
+  return createMockRuntime([{ content: "ok" }]);
 }
 
 const LOCAL_BACKEND: ExecutionBackendCapabilities = {
@@ -126,7 +126,7 @@ describe("administrative mutations preserve WAL history (round 8 P0)", () => {
     await unresolvedGrant(audit, store, "action-A", "mut-A");
     // The exact administrative flow from src/transport/cli/agent.ts:
     // approvePolicyProposal builds `{ version: 1, capabilities }` ONLY.
-    const agent = new Agent(mockProvider(), "gpt-test", {}, "sys");
+    const agent = new Agent(mockRuntime(), "gpt-test", {}, "sys");
     agent.setPolicyStore(store, "ws-1");
     await agent.stagePolicyProposal({ kind: "commit-file", path: "/p/b.txt" });
     const proposal = agent.listPolicyProposals()[0];
@@ -149,7 +149,7 @@ describe("administrative mutations preserve WAL history (round 8 P0)", () => {
     const audit = new LocalAuditStore({ root: dir });
     const store = new LocalPolicyStore({ root: join(dir, "policy") });
     await unresolvedGrant(audit, store, "action-A", "mut-A");
-    const agent = new Agent(mockProvider(), "gpt-test", {}, "sys");
+    const agent = new Agent(mockRuntime(), "gpt-test", {}, "sys");
     agent.setPolicyStore(store, "ws-1");
     const before = await store.read("ws-1");
     const afterRevoke = await agent.revokePolicyCapability(before.policy.capabilities[0], before.version);
@@ -187,7 +187,7 @@ describe("administrative mutations preserve WAL history (round 8 P0)", () => {
       },
       { idempotencyKey: "action-A:policy-grant-intent" },
     );
-    const agent = new Agent(mockProvider(), "gpt-test", {}, "sys");
+    const agent = new Agent(mockRuntime(), "gpt-test", {}, "sys");
     agent.setPolicyStore(store, "ws-1");
     const globalBefore = await store.read(GLOBAL_WORKSPACE_ID);
     await agent.revokeGlobalPolicyCapability(globalBefore.policy.capabilities[0], globalBefore.version);
@@ -211,7 +211,7 @@ describe("administrative mutations preserve WAL history (round 8 P0)", () => {
       { version: 1, capabilities: [cap, { kind: "commit-file", path: "/p/b.txt" }] },
       actor,
     );
-    const agent = new Agent(mockProvider(), "gpt-test", {}, "sys");
+    const agent = new Agent(mockRuntime(), "gpt-test", {}, "sys");
     agent.setPolicyStore(store, "ws-1");
     await expect(
       agent.revokePolicyCapability(cap, 1),

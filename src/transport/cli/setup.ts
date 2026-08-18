@@ -559,7 +559,7 @@ export async function handleModelsCommand(
       if (selected === activeProvider) {
         const reloaded = await createProviderFromApp(config, selected);
         if (reloaded) {
-          agent.switchProvider(reloaded.provider, reloaded.model);
+          agent.switchProvider(selected, reloaded.model);
           console.log(chalk.green(`Reloaded ${selected} with updated config.`));
         }
       }
@@ -578,7 +578,7 @@ export async function handleModelsCommand(
             activeProvider = remaining[0];
             const switched = await createProviderFromApp(config, activeProvider);
             if (switched) {
-              agent.switchProvider(switched.provider, switched.model);
+              agent.switchProvider(activeProvider, switched.model);
               console.log(chalk.green(`Switched active provider to ${activeProvider}.`));
             }
             // Update config.provider to reflect new active provider
@@ -588,11 +588,8 @@ export async function handleModelsCommand(
           }
         }
         // Ensure config.provider doesn't reference a removed provider
-        if (config.provider && !config.models?.[config.provider as ProviderType]?.apiKey) {
-          const remaining = Object.keys(config.models || {}).filter(
-            k => (config.models as any)[k]?.apiKey
-          ) as ProviderType[];
-          config.provider = remaining.length > 0 ? remaining[0] : undefined;
+        if (config.provider === selected) {
+          delete config.provider;
         }
         saveConfig(config);
         return activeProvider;
@@ -650,7 +647,7 @@ export async function handleModelsCommand(
     config.models[selected]!.model = model;
     const created = await createProviderFromApp(config, selected, model);
     if (created) {
-      agent.switchProvider(created.provider, created.model);
+      agent.switchProvider(selected, created.model);
       console.log(chalk.green(`Switched to ${selected} (${model})`));
       return selected;
     } else {

@@ -5,25 +5,9 @@ import * as path from "path";
 import { runAgentLoop } from "../agent-loop.js";
 import { createHookExecutor } from "../hooks.js";
 import { registerTool } from "../tool-executor.js";
-import type { LLMProvider, StreamDelta } from "../../foundations/contracts/llm.js";
 import type { ToolDefinition } from "../../foundations/contracts/tool.js";
 import type { Message } from "../../foundations/types.js";
-
-/** Mock provider: yields `firstCall` deltas, then a bare finish on later calls
- *  so the loop terminates after one tool round. */
-function provider(firstCall: StreamDelta[]): LLMProvider {
-  let call = 0;
-  return {
-    async chat() {
-      throw new Error("chat() must not be called in stream mode");
-    },
-    async *chatStream() {
-      const deltas = call === 0 ? firstCall : [{ type: "finish" as const }];
-      call++;
-      for (const d of deltas) yield d;
-    },
-  };
-}
+import { createMockRuntime } from "./test-doubles.js";
 
 const userMsg = (content: string): Message => ({ id: "u1", role: "user", content, timestamp: 0 });
 
@@ -51,24 +35,33 @@ describe("tool-result metadata channel", () => {
       }),
     });
 
+    const mockRuntime = createMockRuntime([
+      {
+        toolCalls: [
+          {
+            id: "tc1",
+            name: TOOL,
+            args: {},
+          },
+        ],
+      },
+      {
+        text: "Done",
+      },
+    ]);
+
     const result = await runAgentLoop({
-      provider: provider([
-        { type: "tool_call_begin", index: 0, id: "tc1", name: TOOL },
-        { type: "tool_call_delta", index: 0, argumentsDelta: "{}" },
-        { type: "finish", usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0 } },
-      ]),
+      runtime: mockRuntime,
       model: "test",
       messages: [userMsg("run it")],
       toolDefs: [toolDef],
       maxSteps: 5,
       hooks: createHookExecutor(),
-      stream: true,
       autoConfirm: true,
     });
 
     // The tool_call step carries the metadata for adapters to render.
     const toolStep = result.steps.find((s) => s.type === "tool_call" && s.toolCall?.name === TOOL);
-    console.log("TOOL STEPS:", JSON.stringify(result.steps, null, 2));
     expect(toolStep).toBeDefined();
 
     // The tool-result message sent back to the provider contains ONLY the
@@ -100,25 +93,32 @@ describe("write_file through the agent loop", () => {
           },
         },
       };
-      const args = JSON.stringify({ path: file, content: "from loop\nline2" });
+      const args = { path: file, content: "from loop\nline2" };
+      const mockRuntime = createMockRuntime([
+        {
+          toolCalls: [
+            {
+              id: "tc1",
+              name: "write_file",
+              args,
+            },
+          ],
+        },
+        {
+          text: "Done",
+        },
+      ]);
       const result = await runAgentLoop({
-        provider: provider([
-          { type: "tool_call_begin", index: 0, id: "tc1", name: "write_file" },
-          { type: "tool_call_delta", index: 0, argumentsDelta: args },
-          { type: "finish", usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0 } },
-        ]),
+        runtime: mockRuntime,
         model: "test",
         messages: [userMsg("write it")],
         toolDefs: [writeDef],
         cwd: dir,
         maxSteps: 5,
         hooks: createHookExecutor(),
-        stream: true,
         autoConfirm: true,
-        allowFallback: true,
       });
       const step = result.steps.find((s) => s.type === "tool_call" && s.toolCall?.name === "write_file");
-      console.log("TEST 2 STEPS:", JSON.stringify(result.steps, null, 2));
       expect(step).toBeDefined();
       expect(step?.metadata).toMatchObject({ path: file, isNewFile: true, newContent: "from loop\nline2" });
 

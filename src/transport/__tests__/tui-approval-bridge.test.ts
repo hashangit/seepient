@@ -199,28 +199,21 @@ describe("native TUI bridge (T015)", () => {
   });
 
   it("missing native broker denies as approval-unavailable — no legacy fallback (FR-017)", async () => {
-    let providerCalls = 0;
-    const provider = {
-      async chat() {
-        providerCalls++;
-        if (providerCalls === 1) {
-          return {
-            content: "",
-            tool_calls: [
-              {
-                id: "tc1",
-                name: "write_file",
-                arguments: JSON.stringify({ path: join(dir, "x.txt"), content: "x" }),
-                type: "function",
-              },
-            ],
-          };
-        }
-        return { content: "done", tool_calls: [] };
+    const { createMockRuntime } = await import("../../domain/__tests__/test-doubles.js");
+    const runtime = createMockRuntime([
+      {
+        toolCalls: [
+          {
+            id: "tc1",
+            name: "write_file",
+            args: { path: join(dir, "x.txt"), content: "x" },
+          },
+        ],
       },
-    };
+      { content: "done" },
+    ]);
     const agent = new Agent(
-      provider as never,
+      runtime,
       "test",
       { snapshotStore: createSnapshotStore() },
       "sys",

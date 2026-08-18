@@ -215,15 +215,15 @@ function validateTargetCapabilities(
       : undefined);
 
   if (!catalogModel) {
-    if (catalog.length > 0) {
-      const candidates = catalog
-        .filter(
-          (m) =>
-            m.upstreamProvider === upstreamProvider ||
-            m.upstreamProvider === aliased ||
-            m.upstreamProvider === accountName,
-        )
-        .map((m) => m.id);
+    const candidates = catalog
+      .filter(
+        (m) =>
+          m.upstreamProvider === upstreamProvider ||
+          m.upstreamProvider === aliased ||
+          m.upstreamProvider === accountName,
+      )
+      .map((m) => m.id);
+    if (candidates.length > 0) {
       const suggestions = candidates.slice(0, 3).join(", ");
       throw new InferenceError({
         code: "unknown_model",
