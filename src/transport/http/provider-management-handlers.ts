@@ -59,14 +59,22 @@ function isConflictError(err: any): boolean {
   );
 }
 
-function parseIfMatch(req: IncomingMessage, res: ServerResponse, currentRev?: number): number | null {
+async function parseIfMatch(
+  req: IncomingMessage,
+  res: ServerResponse,
+  runtime?: ProviderRuntime,
+): Promise<number | null> {
   const ifMatch = req.headers["if-match"];
   if (!ifMatch) {
     sendError(res, 428, "PRECONDITION_REQUIRED", "Header 'If-Match: <revision>' is required for mutations");
     return null;
   }
   if (ifMatch === "*") {
-    return currentRev ?? 0;
+    if (runtime) {
+      const overlay = await runtime.configStore.getOverlay();
+      return overlay.revision;
+    }
+    return 0;
   }
   const clean = ifMatch.replace(/^"|"$/g, "");
   const rev = parseInt(clean, 10);
@@ -155,7 +163,7 @@ export async function handlePutAssignment(
     return;
   }
 
-  const expectedRev = parseIfMatch(req, res);
+  const expectedRev = await parseIfMatch(req, res, runtime);
   if (expectedRev === null) return;
 
   let bodyText: string;
@@ -183,7 +191,7 @@ export async function handlePutAssignment(
       } as any,
     };
     const result = await runtime.updateOverlay(patch, expectedRev);
-    sendJSON(res, 200, { revision: result.revision, assignment: body });
+    sendJSON(res, 200, { revision: result.revision, assignment: body }, result.revision);
   } catch (err: any) {
     if (isConflictError(err)) {
       sendError(res, 409, "CONFLICT", err.message);
@@ -207,7 +215,7 @@ export async function handleDeleteAssignment(
     return;
   }
 
-  const expectedRev = parseIfMatch(req, res);
+  const expectedRev = await parseIfMatch(req, res, runtime);
   if (expectedRev === null) return;
 
   try {
@@ -219,7 +227,7 @@ export async function handleDeleteAssignment(
       } as any,
     };
     const result = await runtime.updateOverlay(patch, expectedRev);
-    sendJSON(res, 200, { revision: result.revision, deleted: true });
+    sendJSON(res, 200, { revision: result.revision, deleted: true }, result.revision);
   } catch (err: any) {
     if (isConflictError(err)) {
       sendError(res, 409, "CONFLICT", err.message);
@@ -254,7 +262,7 @@ export async function handleGetProviders(
   }
 
   if (!providerId) {
-    sendJSON(res, 200, sanitized);
+    sendJSON(res, 200, sanitized, snapshot.revision);
     return;
   }
 
@@ -263,7 +271,7 @@ export async function handleGetProviders(
     return;
   }
 
-  sendJSON(res, 200, sanitized[providerId]);
+  sendJSON(res, 200, sanitized[providerId], snapshot.revision);
 }
 
 export async function handlePutProvider(
@@ -279,7 +287,7 @@ export async function handlePutProvider(
     return;
   }
 
-  const expectedRev = parseIfMatch(req, res);
+  const expectedRev = await parseIfMatch(req, res, runtime);
   if (expectedRev === null) return;
 
   let bodyText: string;
@@ -314,7 +322,7 @@ export async function handlePutProvider(
       } as any,
     };
     const result = await runtime.updateOverlay(patch, expectedRev);
-    sendJSON(res, 200, { revision: result.revision, provider: { ...body, credential: { kind: "redacted" } } });
+    sendJSON(res, 200, { revision: result.revision, provider: { ...body, credential: { kind: "redacted" } } }, result.revision);
   } catch (err: any) {
     if (isConflictError(err)) {
       sendError(res, 409, "CONFLICT", err.message);
@@ -337,7 +345,7 @@ export async function handleDeleteProvider(
     return;
   }
 
-  const expectedRev = parseIfMatch(req, res);
+  const expectedRev = await parseIfMatch(req, res, runtime);
   if (expectedRev === null) return;
 
   try {
@@ -347,7 +355,7 @@ export async function handleDeleteProvider(
       } as any,
     };
     const result = await runtime.updateOverlay(patch, expectedRev);
-    sendJSON(res, 200, { revision: result.revision, deleted: true });
+    sendJSON(res, 200, { revision: result.revision, deleted: true }, result.revision);
   } catch (err: any) {
     if (isConflictError(err)) {
       sendError(res, 409, "CONFLICT", err.message);
@@ -369,7 +377,7 @@ export async function handleGetCatalog(
   }
 
   const snapshot = await runtime.createTurnSnapshot();
-  sendJSON(res, 200, snapshot.catalog);
+  sendJSON(res, 200, snapshot.catalog, snapshot.revision);
 }
 
 export async function handleResolveModel(
@@ -405,7 +413,7 @@ export async function handleResolveModel(
     sendJSON(res, 200, {
       selectedTarget: plan.selectedTarget,
       failureTargets: plan.failureTargets,
-    });
+    }, snapshot.revision);
   } catch (err: any) {
     sendError(res, 400, "RESOLUTION_FAILED", err.message);
   }
@@ -434,6 +442,8 @@ export async function handleProbeProvider(
 
   let authValid = false;
   let reachable = true;
+  let ssrfBlocked = false;
+  let probeLatencyMs: number | undefined;
 
   try {
     const handle = await runtime.credentialStore.resolve(acc.credential);
@@ -448,12 +458,16 @@ export async function handleProbeProvider(
     const val = await validateEndpointUrl(acc.baseUrl, { ssrfAllowPrivate: allowPrivate });
     if (!val.valid) {
       reachable = false;
+      ssrfBlocked = true;
     } else if (full) {
+      const start = Date.now();
       try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 2000);
-        await fetch(acc.baseUrl, { method: "HEAD", signal: controller.signal }).catch(() => {});
+        const resp = await fetch(acc.baseUrl, { method: "HEAD", signal: controller.signal });
         clearTimeout(timeout);
+        probeLatencyMs = Date.now() - start;
+        reachable = resp.ok || resp.status < 500;
       } catch {
         reachable = false;
       }
@@ -464,6 +478,8 @@ export async function handleProbeProvider(
     providerId,
     reachable,
     authValid,
+    blocked: ssrfBlocked ? "ssrf" : undefined,
+    latencyMs: probeLatencyMs,
     probedAt: new Date().toISOString(),
     mode: full ? "full" : "shallow",
   });
@@ -481,44 +497,19 @@ export async function handleRefreshModels(
     return;
   }
 
-  const snapshot = await runtime.createTurnSnapshot();
-  const acc = snapshot.config?.providers?.[providerId];
-  if (!acc) {
-    sendError(res, 404, "NOT_FOUND", `Provider "${providerId}" not configured`);
-    return;
-  }
-
-  // Actively poll upstream /models and update discovery cache
-  const discoveryCache = runtime.modelCatalog.getDiscoveryCache();
   try {
-    const credHandle = await runtime.credentialStore.resolve(acc.credential);
-    const context = {
-      providerAccount: providerId,
-      upstreamProvider: acc.upstreamProvider,
-      credential: credHandle,
-      baseUrl: acc.baseUrl,
-      compat: acc.compat,
-    };
-    if (acc.upstreamProvider === "openai" || acc.upstreamProvider === "openai-compatible") {
-      const { OpenAIDiscoverySource } = await import("../../vendors/openai/openai-discovery-source.js");
-      await discoveryCache.refreshAccount(context, new OpenAIDiscoverySource());
-    } else if (acc.upstreamProvider === "google") {
-      const { GoogleDiscoverySource } = await import("../../vendors/google/google-discovery-source.js");
-      await discoveryCache.refreshAccount(context, new GoogleDiscoverySource());
+    const modelIds = await runtime.refreshModels(providerId);
+    sendJSON(res, 200, {
+      providerId,
+      refreshedAt: new Date().toISOString(),
+      discoveredModelsCount: modelIds.length,
+      models: modelIds,
+    });
+  } catch (err: any) {
+    if (err?.code === "unconfigured_provider") {
+      sendError(res, 404, "NOT_FOUND", `Provider "${providerId}" not configured`);
+    } else {
+      sendError(res, 400, "BAD_REQUEST", err?.message || "Model discovery failed");
     }
-  } catch {
-    // Failure-safe
   }
-
-  const updatedCatalog = await runtime.modelCatalog.getAllModels();
-  const models = updatedCatalog.filter(
-    (m: any) => m.upstreamProvider === acc.upstreamProvider || m.upstreamProvider === providerId,
-  );
-
-  sendJSON(res, 200, {
-    providerId,
-    refreshedAt: new Date().toISOString(),
-    discoveredModelsCount: models.length,
-    models: models.map((m) => m.id),
-  });
 }

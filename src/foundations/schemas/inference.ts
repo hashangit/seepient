@@ -17,6 +17,7 @@ export const PricingSchema = Type.Object({
   promptPerMillion: Type.Optional(Type.Number({ minimum: 0 })),
   completionPerMillion: Type.Optional(Type.Number({ minimum: 0 })),
   cachedPromptPerMillion: Type.Optional(Type.Number({ minimum: 0 })),
+  cacheWritePerMillion: Type.Optional(Type.Number({ minimum: 0 })),
   reasoningPerMillion: Type.Optional(Type.Number({ minimum: 0 })),
   imagePerItem: Type.Optional(Type.Number({ minimum: 0 })),
 });
@@ -255,9 +256,10 @@ export const StopReasonSchema = Type.Union([
   Type.Literal("tool_use"),
   Type.Literal("max_tokens"),
   Type.Literal("stop_sequence"),
-  Type.Literal("timeout"),
   Type.Literal("context_overflow"),
   Type.Literal("safety"),
+  Type.Literal("error"),
+  Type.Literal("other"),
 ]);
 export type StopReason = Type.Static<typeof StopReasonSchema>;
 
@@ -307,6 +309,7 @@ export const StreamEventSchema = Type.Union([
     type: Type.Literal("finish"),
     stopReason: StopReasonSchema,
     usage: Type.Optional(UsageSchema),
+    providerResponseId: Type.Optional(Type.String()),
   }),
   Type.Object({
     type: Type.Literal("error"),
@@ -321,7 +324,9 @@ export const StreamEventSchema = Type.Union([
   }),
   Type.Object({
     type: Type.Literal("abort"),
-    reason: Type.Optional(Type.String()),
+    reason: Type.Optional(
+      Type.Union([Type.Literal("user"), Type.Literal("timeout"), Type.Literal("shutdown")]),
+    ),
     partialUsage: Type.Optional(UsageSchema),
   }),
 ]);

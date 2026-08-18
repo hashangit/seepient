@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { SeepientError } from "../../foundations/errors.js";
+import { redact, redactUrlCredentials } from "../../foundations/security/redact.js";
 
 export interface ProviderAuditEvent {
   timestamp: string;
@@ -11,46 +12,7 @@ export interface ProviderAuditEvent {
 }
 
 export function redactObject(obj: any): any {
-  if (obj === null || obj === undefined) return obj;
-  if (typeof obj === "string") {
-    if (obj.startsWith("sk-") || obj.startsWith("Bearer ") || /^gsk_[a-zA-Z0-9]+/.test(obj)) {
-      return "[REDACTED]";
-    }
-    return obj;
-  }
-  if (typeof obj !== "object") return obj;
-  if (Array.isArray(obj)) return obj.map(redactObject);
-
-  const result: Record<string, any> = {};
-  for (const [k, v] of Object.entries(obj)) {
-    const lk = k.toLowerCase();
-    // Do not redact token count metrics
-    if (lk.endsWith("tokens") || lk === "tokens") {
-      result[k] = v;
-      continue;
-    }
-    if (
-      lk === "credential" ||
-      lk.includes("apikey") ||
-      lk.includes("secret") ||
-      lk.includes("password") ||
-      (lk.includes("token") && !lk.includes("tokens")) ||
-      lk.includes("authcontext")
-    ) {
-      if (typeof v === "object" && v !== null) {
-        result[k] = { kind: (v as any).kind ?? (v as any).ref?.kind ?? "redacted", id: "[REDACTED]" };
-      } else {
-        result[k] = "[REDACTED]";
-      }
-    } else if (typeof v === "object") {
-      result[k] = redactObject(v);
-    } else if (typeof v === "string" && (v.startsWith("sk-") || v.includes("secret"))) {
-      result[k] = "[REDACTED]";
-    } else {
-      result[k] = v;
-    }
-  }
-  return result;
+  return redact(obj);
 }
 
 /**
@@ -77,11 +39,20 @@ export function recordProviderAuditEvent(event: ProviderAuditEvent, customAuditP
         false,
       );
     }
+    // Repair loose permissions if needed
+    try {
+      if (process.platform !== "win32") {
+        const mode = lstat.mode & 0o777;
+        if (mode !== 0o600) {
+          fs.chmodSync(auditPath, 0o600);
+        }
+      }
+    } catch {}
   }
 
   const redactedEvent = {
     ...event,
-    details: redactObject(event.details),
+    details: redact(event.details),
   };
 
   const line = JSON.stringify(redactedEvent) + "\n";
@@ -116,3 +87,41 @@ export function recordProviderAuditEvent(event: ProviderAuditEvent, customAuditP
     }
   }
 }
+
+/**
+ * Scrubs existing audit log of sensitive patterns in-place.
+ */
+export function scrubAuditLog(customAuditPath?: string): void {
+  const auditPath =
+    customAuditPath ??
+    process.env.SEEPIENT_AUDIT_LOG_PATH ??
+    path.join(os.homedir(), ".seepient", "audit.log");
+
+  if (!fs.existsSync(auditPath)) return;
+
+  const lstat = fs.lstatSync(auditPath);
+  if (lstat.isSymbolicLink()) return;
+
+  const content = fs.readFileSync(auditPath, "utf-8");
+  const lines = content.split("\n");
+  const scrubbedLines: string[] = [];
+
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    try {
+      const parsed = JSON.parse(line);
+      const cleaned = redact(parsed);
+      scrubbedLines.push(JSON.stringify(cleaned));
+    } catch {
+      scrubbedLines.push(redact(line));
+    }
+  }
+
+  const tmpPath = `${auditPath}.scrub.${Date.now()}.tmp`;
+  const fd = fs.openSync(tmpPath, fs.constants.O_CREAT | fs.constants.O_WRONLY | fs.constants.O_TRUNC, 0o600);
+  fs.writeSync(fd, scrubbedLines.join("\n") + (scrubbedLines.length ? "\n" : ""));
+  fs.fsyncSync(fd);
+  fs.closeSync(fd);
+  fs.renameSync(tmpPath, auditPath);
+}
+

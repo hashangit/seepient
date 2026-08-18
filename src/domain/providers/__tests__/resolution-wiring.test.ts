@@ -47,10 +47,10 @@ describe("Resolution Sites Wiring (QS-P5.2)", () => {
     // Site 4-7 / SDK per-call overrides
     const sdkPlan = await runtime.resolvePlan(snapshot, "text", "standard", {
       providerAccount: "backup-anthropic",
-      model: "claude-3-7-sonnet",
+      model: "claude-sonnet-5",
     });
     expect(sdkPlan.selectedTarget.providerAccount).toBe("backup-anthropic");
-    expect(sdkPlan.selectedTarget.model).toBe("claude-3-7-sonnet");
+    expect(sdkPlan.selectedTarget.model).toBe("claude-sonnet-5");
   });
 
   it("Site 8 & 9: skill override resolution produces independent InvocationPlan", async () => {
@@ -88,10 +88,10 @@ describe("Resolution Sites Wiring (QS-P5.2)", () => {
 
     const skillOverridePlan = await runtime.resolvePlan(snapshot, "text", "standard", {
       providerAccount: "anthropic-specialist",
-      model: "claude-3-5-sonnet",
+      model: "claude-sonnet-5",
     });
     expect(skillOverridePlan.selectedTarget.providerAccount).toBe("anthropic-specialist");
-    expect(skillOverridePlan.selectedTarget.model).toBe("claude-3-5-sonnet");
+    expect(skillOverridePlan.selectedTarget.model).toBe("claude-sonnet-5");
   });
 
   it("handles unconfigured purpose cleanly by throwing UNCONFIGURED_PURPOSE", async () => {

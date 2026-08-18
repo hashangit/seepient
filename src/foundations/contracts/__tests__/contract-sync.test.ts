@@ -61,7 +61,7 @@ const _assertAgentPurposeValues: AssertEqual<
 
 const _assertStopReasonValues: AssertEqual<
   StopReason,
-  "end_turn" | "tool_use" | "max_tokens" | "stop_sequence" | "timeout" | "context_overflow" | "safety"
+  "end_turn" | "tool_use" | "max_tokens" | "stop_sequence" | "context_overflow" | "safety" | "error" | "other"
 > = true;
 
 describe("contract sync and schema validation (QS-P1.1, QS-P1.2, QS-P1.3)", () => {
@@ -153,7 +153,7 @@ describe("contract sync and schema validation (QS-P1.1, QS-P1.2, QS-P1.3)", () =
     expect(
       validateStream({
         type: "abort",
-        reason: "User cancelled",
+        reason: "user",
       }),
     ).toBe(true);
   });

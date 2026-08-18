@@ -123,6 +123,7 @@ Current layout of the Obsidian vault (annotated):
 │   ├── data-model.md                 # PurposeModelMap, ResolvedInvocation, dispatch inventory
 │   ├── migration.md                  # v1→v2 config migration, lazy sessions, SDK deprecation
 │   ├── quickstart.md                 # Per-phase validation scenarios + production budgets
+│   ├── remediation-plan.md           # Post-P7 review fix plan: WS0-WS10 (secret-leak blocker, catalog-native redesign, Pi pin bump, OMP enrichment)
 │   └── contracts/                    # inference-adapter, canonical-messages, provider-config, credential-store, server-management-api, public-sdk
 ├── Website Planning/                 # Public website strategy and delivery planning
 │   ├── implementation_planv0.1.md    # Original kinetic-design exploration
@@ -217,9 +218,9 @@ UI → Transport → Domain → Capabilities → Vendors
 
 Unified provider architecture behind `ProviderRuntime` (`src/domain/providers/provider-runtime.ts`) and `AggregateInferenceAdapter` (`src/capabilities/inference/aggregate-adapter.ts`):
 
-- **Inference Adapters**: Composable vendor backends (`PiLanguageRaw`, `PiImageRaw`, `GoogleImageRaw`, `OpenAIImageRaw`) under `src/vendors/`.
+- **Inference Adapters**: Composable vendor backends (`PiLanguageRaw`, `PiImageRaw`, `GoogleImageRaw`, `OpenAIImageRaw`, `OmpCatalogSource`) under `src/vendors/`.
 - **Purpose × Tier Routing**: Standard, complex, efficient tiers across language, vision, plan, commit, and image purposes.
-- **Model Defaults**: `gpt-5.6-terra` (OpenAI), `claude-sonnet-5` (Anthropic), `gemini-3.7-flash` (Google), `glm-5.3` (GLM).
+- **Model Resolution**: Policy-driven selection over the community catalog (`@earendil-works/pi-ai` 0.84.2 + `@oh-my-pi/pi-catalog` lazy enrichment). Zero self-maintained model lists.
 
 ## Tools
 
@@ -248,7 +249,7 @@ Env vars per provider: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GLM_API_KEY`, `OP
 
 - **No bundler** — plain `tsc` to ES2022 NodeNext. Dev via `tsx`.
 - **Package exports** — `seepient` (SDK), `seepient/server`. Binaries: `seepient` (CLI), `seepient-server`.
-- **Vitest test suite** — 1067 tests across 104 files; CI gates publish on test pass
+- **Vitest test suite** — 1239 tests across 152 files; CI gates publish on test pass
 - **Errors carry metadata** — `code` (machine-readable) + `retryable` flag on all `SeepientError` subclasses.
 - **Hook errors are non-fatal** — never crash the agent loop.
 - **Dynamic provider imports** — unused provider SDKs stay out of memory.

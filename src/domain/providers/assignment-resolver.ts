@@ -10,6 +10,7 @@ import type {
 import type { UpstreamModel, ThinkingLevel } from "../../foundations/schemas/inference.js";
 import type { ProviderEffectiveConfig } from "../../foundations/schemas/provider-config.js";
 import { SeepientError, InferenceError } from "../../foundations/errors.js";
+import { normalizeProviderName } from "../../foundations/models-catalog.js";
 
 export type Purpose =
   | "plan"
@@ -191,48 +192,93 @@ function validateTargetCapabilities(
   modelId: string,
   thinkingLevel?: ThinkingLevel,
 ): void {
+  const aliased = normalizeProviderName(upstreamProvider);
+  const matchingProvider = (m: UpstreamModel) =>
+    m.upstreamProvider === upstreamProvider ||
+    m.upstreamProvider === aliased ||
+    m.upstreamProvider === accountName;
+
   const catalogModel =
     catalog.find(
       (m) =>
-        m.id === modelId &&
-        (m.upstreamProvider === upstreamProvider || m.upstreamProvider === accountName),
-    ) || (catalog.length > 0 && !upstreamProvider ? catalog.find((m) => m.id === modelId) : undefined);
+        matchingProvider(m) &&
+        (m.id.toLowerCase() === modelId.toLowerCase() ||
+          m.id.toLowerCase().startsWith(modelId.toLowerCase() + "-") ||
+          modelId.toLowerCase().startsWith(m.id.toLowerCase() + "-")),
+    ) ||
+    (catalog.length > 0 && !upstreamProvider
+      ? catalog.find(
+          (m) =>
+            m.id.toLowerCase() === modelId.toLowerCase() ||
+            m.id.toLowerCase().startsWith(modelId.toLowerCase() + "-"),
+        )
+      : undefined);
 
-  if (catalogModel) {
-    if (
-      (purpose === "text" || purpose === "plan" || purpose === "commit" || purpose === "vision") &&
-      catalogModel.capabilities.toolUse === false
-    ) {
+  if (!catalogModel) {
+    if (catalog.length > 0) {
+      const candidates = catalog
+        .filter(
+          (m) =>
+            m.upstreamProvider === upstreamProvider ||
+            m.upstreamProvider === aliased ||
+            m.upstreamProvider === accountName,
+        )
+        .map((m) => m.id);
+      const suggestions = candidates.slice(0, 3).join(", ");
       throw new InferenceError({
-        code: "unsupported_capability",
-        message: `Model "${modelId}" does not support tool use required for purpose "${purpose}"`,
+        code: "unknown_model",
+        message: `Unknown model "${modelId}" for provider account "${accountName}". Did you mean: ${suggestions || "none"}? You can also declare custom models in settings.`,
         providerAccount: accountName,
         model: modelId,
         retryable: false,
       });
     }
+    return;
+  }
 
-    if (purpose === "image-generation" && catalogModel.capabilities.imageGenerate === false) {
+  if (
+    (purpose === "text" || purpose === "plan" || purpose === "commit") &&
+    catalogModel.capabilities.toolUse === false
+  ) {
+    throw new InferenceError({
+      code: "unsupported_capability",
+      message: `Model "${modelId}" does not support tool use required for purpose "${purpose}"`,
+      providerAccount: accountName,
+      model: modelId,
+      retryable: false,
+    });
+  }
+
+  if (purpose === "vision" && catalogModel.capabilities.vision === false) {
+    throw new InferenceError({
+      code: "unsupported_capability",
+      message: `Model "${modelId}" does not support vision required for purpose "vision"`,
+      providerAccount: accountName,
+      model: modelId,
+      retryable: false,
+    });
+  }
+
+  if (purpose === "image-generation" && catalogModel.capabilities.imageGenerate === false) {
+    throw new InferenceError({
+      code: "unsupported_capability",
+      message: `Model "${modelId}" does not support image generation`,
+      providerAccount: accountName,
+      model: modelId,
+      retryable: false,
+    });
+  }
+
+  if (thinkingLevel && thinkingLevel !== "none") {
+    const supported = catalogModel.supportedReasoningLevels || ["none"];
+    if (!supported.includes(thinkingLevel)) {
       throw new InferenceError({
-        code: "unsupported_capability",
-        message: `Model "${modelId}" does not support image generation`,
+        code: "unsupported_thinking_level",
+        message: `Model "${modelId}" does not support thinking level "${thinkingLevel}". Supported: ${supported.join(", ")}`,
         providerAccount: accountName,
         model: modelId,
         retryable: false,
       });
-    }
-
-    if (thinkingLevel && thinkingLevel !== "none") {
-      const supported = catalogModel.supportedReasoningLevels || ["none"];
-      if (!supported.includes(thinkingLevel)) {
-        throw new InferenceError({
-          code: "unsupported_thinking_level",
-          message: `Model "${modelId}" does not support thinking level "${thinkingLevel}". Supported: ${supported.join(", ")}`,
-          providerAccount: accountName,
-          model: modelId,
-          retryable: false,
-        });
-      }
     }
   }
 }

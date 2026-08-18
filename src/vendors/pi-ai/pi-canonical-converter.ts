@@ -15,6 +15,8 @@ import type {
   Context as PiContext,
 } from "@earendil-works/pi-ai";
 
+import { InferenceError } from "../../foundations/errors.js";
+
 export interface PiConvertedContext {
   systemPrompt?: string;
   messages: PiMessage[];
@@ -63,6 +65,12 @@ export function canonicalToPiContext(
               data: block.data,
             });
           }
+        } else {
+          throw new InferenceError({
+            code: "unsupported_capability",
+            message: `Block type "${(block as any).type}" is not supported by Pi language adapter`,
+            retryable: false,
+          });
         }
       }
       const userMsg: PiUserMessage = {
@@ -99,6 +107,12 @@ export function canonicalToPiContext(
             name: block.name,
             arguments: parsedArgs,
           });
+        } else {
+          throw new InferenceError({
+            code: "unsupported_capability",
+            message: `Assistant block type "${(block as any).type}" is not supported by Pi language adapter`,
+            retryable: false,
+          });
         }
       }
 
@@ -133,6 +147,13 @@ export function canonicalToPiContext(
 
       for (const block of blocks) {
         if (!block) continue;
+        if (block.type && block.type !== "tool_result") {
+          throw new InferenceError({
+            code: "unsupported_capability",
+            message: `Tool block type "${block.type}" is not supported by Pi language adapter`,
+            retryable: false,
+          });
+        }
         const toolUseId = block.toolUseId ?? (msg as any).toolCallId ?? "tool-call";
         let textParts: PiTextContent[] = [];
         if (Array.isArray(block.content)) {

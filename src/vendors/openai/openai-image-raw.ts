@@ -9,6 +9,7 @@ import type {
   ImageResult,
 } from "../../foundations/schemas/inference.js";
 import { InferenceError } from "../../foundations/errors.js";
+import { classifyInferenceError } from "../../foundations/errors/error-classifier.js";
 import { canonicalToOpenAIImageParams } from "./openai-canonical-converter.js";
 
 /**
@@ -129,34 +130,30 @@ export class OpenAIImageRaw implements ImageBackend {
       } catch (err: any) {
         if (err instanceof InferenceError) throw err;
         const status = err.status || err.response?.status;
-        let code: any = "invalid_request";
-        let retryable = false;
+        const isTimeout =
+          err.name === "TimeoutError" ||
+          err.message?.includes("timed out") ||
+          (opts?.signal?.reason?.name === "TimeoutError");
 
-        if (status === 401 || status === 403) {
-          code = "auth";
-        } else if (status === 429) {
-          code = "rate_limit";
-          retryable = true;
-        } else if (
-          err.name === "AbortError" ||
-          err.name === "APIUserAbortError" ||
-          err.message?.includes("aborted") ||
-          err.message?.includes("timed out")
-        ) {
-          code = "timeout";
-          const isTimeout = err.message?.includes("timed out") || (opts?.signal?.reason?.name === "TimeoutError");
-          retryable = isTimeout;
-        } else if (status && status >= 500) {
-          code = "provider_unavailable";
-          retryable = true;
+        if (opts?.signal?.aborted && !isTimeout) {
+          throw new InferenceError({
+            code: "invalid_request",
+            message: opts.signal.reason?.message || "OpenAI image request aborted by user",
+            providerAccount: target.providerAccount,
+            model: target.model,
+            retryable: false,
+            cause: err,
+          });
         }
 
+        const classified = classifyInferenceError(err, isTimeout, status);
         throw new InferenceError({
-          code,
+          code: classified.code,
           message: err.message || "OpenAI image request failed",
           providerAccount: target.providerAccount,
           model: target.model,
-          retryable,
+          retryable: classified.retryable,
+          retryAfterMs: classified.retryAfterMs,
           cause: err,
         });
       }

@@ -33,6 +33,115 @@ import type { InferenceAdapter } from "../../foundations/contracts/backend-ports
 
 export const MAX_RETRY_DURATION_MS = 240_000;
 
+import type { RetryPolicy } from "../../foundations/schemas/provider-config.js";
+
+export function computeBackoffDelay(
+  attemptIndex: number,
+  policy: RetryPolicy,
+): number {
+  const base = policy.backoffBaseMs ?? 500;
+  const mult = policy.backoffMultiplier ?? 2;
+  const jitter = policy.backoffJitter ?? 0.25;
+  const cap = policy.backoffCapMs ?? 30_000;
+  const rawDelay = Math.min(base * Math.pow(mult, attemptIndex), cap);
+  const jitterFactor = 1 + (Math.random() * 2 - 1) * jitter;
+  return Math.max(0, Math.round(rawDelay * jitterFactor));
+}
+
+export function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  if (signal?.aborted) {
+    return Promise.reject(
+      new InferenceError({
+        code: "invalid_request",
+        message: signal.reason?.message || "Operation aborted",
+        retryable: false,
+      }),
+    );
+  }
+  return new Promise((resolve, reject) => {
+    let timer: NodeJS.Timeout | undefined;
+    const onAbort = () => {
+      if (timer) clearTimeout(timer);
+      reject(
+        new InferenceError({
+          code: "invalid_request",
+          message: signal?.reason?.message || "Operation aborted",
+          retryable: false,
+        }),
+      );
+    };
+    timer = setTimeout(() => {
+      if (signal) signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    if (signal) {
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+  });
+}
+
+async function* withIdleWatchdog(
+  stream: AsyncIterable<StreamEvent>,
+  idleTimeoutMs: number,
+  signal?: AbortSignal,
+): AsyncIterable<StreamEvent> {
+  if (idleTimeoutMs <= 0) {
+    yield* stream;
+    return;
+  }
+
+  const iterator = stream[Symbol.asyncIterator]();
+  try {
+    while (true) {
+      if (signal?.aborted) {
+        yield {
+          type: "abort",
+          reason: signal.reason?.name === "TimeoutError" ? "timeout" : "user",
+        };
+        return;
+      }
+
+      let timer: NodeJS.Timeout | undefined;
+      const timeoutPromise = new Promise<{ done: boolean; value?: StreamEvent; timedOut?: boolean }>(
+        (resolve) => {
+          timer = setTimeout(() => resolve({ done: false, timedOut: true }), idleTimeoutMs);
+        },
+      );
+
+      const nextPromise: Promise<{ done: boolean; value?: StreamEvent; timedOut?: boolean }> = iterator
+        .next()
+        .then((res) => ({ done: res.done ?? false, value: res.value, timedOut: false }));
+      const result = await Promise.race([nextPromise, timeoutPromise]);
+      if (timer) clearTimeout(timer);
+
+      if (result.timedOut) {
+        yield {
+          type: "error",
+          error: {
+            code: "timeout",
+            message: `Streaming response stalled: no chunk received within ${idleTimeoutMs}ms`,
+            retryable: true,
+          },
+        };
+        return;
+      }
+
+      if (result.done) {
+        return;
+      }
+
+      if (result.value) {
+        yield result.value;
+      }
+    }
+  } finally {
+    if (typeof iterator.return === "function") {
+      await iterator.return();
+    }
+  }
+}
+
 export function calculateInferenceCost(
   usage?: {
     inputTokens?: number;
@@ -109,7 +218,14 @@ export class ProviderRuntime extends EventEmitter {
 
   getHealth(account: string, capability: string): CapabilityHealth {
     const key = this.healthKey(account, capability);
-    return this.healthMap.get(key) ?? { consecutiveFailures: 0 };
+    const health = this.healthMap.get(key);
+    if (!health) return { consecutiveFailures: 0 };
+    if (health.cooldownUntil && health.cooldownUntil <= Date.now()) {
+      const reset = { consecutiveFailures: 0 };
+      this.healthMap.set(key, reset);
+      return reset;
+    }
+    return health;
   }
 
   private recordSuccess(account: string, capability: string): void {
@@ -124,7 +240,10 @@ export class ProviderRuntime extends EventEmitter {
     cooldownDurationMs = 60_000,
   ): void {
     const key = this.healthKey(account, capability);
-    const existing = this.healthMap.get(key) ?? { consecutiveFailures: 0 };
+    let existing = this.healthMap.get(key) ?? { consecutiveFailures: 0 };
+    if (existing.cooldownUntil && existing.cooldownUntil <= Date.now()) {
+      existing = { consecutiveFailures: 0 };
+    }
     const consecutive = existing.consecutiveFailures + 1;
     const cooldownUntil = consecutive >= cooldownThreshold ? Date.now() + cooldownDurationMs : undefined;
 
@@ -174,7 +293,20 @@ export class ProviderRuntime extends EventEmitter {
     override?: ModelAssignmentOverride,
   ): Promise<InvocationPlan> {
     const plan = await resolveInvocationPlan(snapshot, this.credentialStore, purpose, tier, override);
-    this.emit("plan:resolved", redactObject({ purpose, tier, plan }));
+    if (this.listenerCount("plan:resolved") > 0) {
+      this.emit("plan:resolved", {
+        purpose,
+        tier,
+        selectedTarget: {
+          providerAccount: plan.selectedTarget.providerAccount,
+          model: plan.selectedTarget.model,
+        },
+        failureTargets: plan.failureTargets.map((t) => ({
+          providerAccount: t.providerAccount,
+          model: t.model,
+        })),
+      });
+    }
     return plan;
   }
 
@@ -188,11 +320,15 @@ export class ProviderRuntime extends EventEmitter {
   ): AsyncIterable<StreamEvent> {
     const targets = [plan.selectedTarget, ...plan.failureTargets];
     const retryPolicy = plan.snapshot?.config?.retryPolicy ?? DEFAULT_RETRY_POLICY;
+    const maxAttempts = Math.min(
+      targets.length,
+      retryPolicy.maxAttempts ?? DEFAULT_RETRY_POLICY.maxAttempts,
+    );
     const startTime = Date.now();
 
     let lastError: any;
 
-    for (let i = 0; i < targets.length; i++) {
+    for (let i = 0; i < maxAttempts; i++) {
       if (Date.now() - startTime > MAX_RETRY_DURATION_MS) {
         yield {
           type: "error",
@@ -208,7 +344,7 @@ export class ProviderRuntime extends EventEmitter {
       const target = targets[i];
       const health = this.getHealth(target.providerAccount, "language");
 
-      if (health.cooldownUntil && health.cooldownUntil > Date.now() && i < targets.length - 1) {
+      if (health.cooldownUntil && health.cooldownUntil > Date.now() && i < maxAttempts - 1) {
         // Skip cooled down target if we have another fallback available
         this.emit("inference:fallback", redactObject({
           fromTarget: target,
@@ -229,19 +365,23 @@ export class ProviderRuntime extends EventEmitter {
         bound = await this.adapter.bind(target, plan.snapshot?.catalog);
       } catch (err: any) {
         lastError = err;
-        this.recordFailure(
-          target.providerAccount,
-          "language",
-          retryPolicy.cooldownThreshold,
-          retryPolicy.cooldownDurationMs,
-        );
+        const isUnsupported =
+          err instanceof InferenceError && err.code === "unsupported_capability";
+        if (!isUnsupported) {
+          this.recordFailure(
+            target.providerAccount,
+            "language",
+            retryPolicy.cooldownThreshold,
+            retryPolicy.cooldownDurationMs,
+          );
+        }
         this.emit("inference:failure", redactObject({
           target,
           capability: "language",
           error: err.message,
           retryable: err instanceof InferenceError ? err.retryable : true,
         }));
-        if (err instanceof InferenceError && !err.retryable) {
+        if (err instanceof InferenceError && !err.retryable && !isUnsupported) {
           yield {
             type: "error",
             error: {
@@ -251,6 +391,15 @@ export class ProviderRuntime extends EventEmitter {
             },
           };
           return;
+        }
+        if (i < maxAttempts - 1) {
+          const delay = computeBackoffDelay(i, retryPolicy);
+          try {
+            await abortableSleep(delay, opts?.signal);
+          } catch {
+            yield { type: "abort", reason: "user" };
+            return;
+          }
         }
         continue;
       }
@@ -263,18 +412,21 @@ export class ProviderRuntime extends EventEmitter {
           model: target.model,
           retryable: false,
         });
-        this.recordFailure(
-          target.providerAccount,
-          "language",
-          retryPolicy.cooldownThreshold,
-          retryPolicy.cooldownDurationMs,
-        );
         this.emit("inference:failure", redactObject({
           target,
           capability: "language",
           error: lastError.message,
           retryable: false,
         }));
+        if (i < maxAttempts - 1) {
+          const delay = computeBackoffDelay(i, retryPolicy);
+          try {
+            await abortableSleep(delay, opts?.signal);
+          } catch {
+            yield { type: "abort", reason: "user" };
+            return;
+          }
+        }
         continue;
       }
 
@@ -286,8 +438,19 @@ export class ProviderRuntime extends EventEmitter {
         thinkingLevel: req.thinkingLevel ?? target.thinkingLevel,
       };
 
+      const attemptTimeoutMs = opts?.timeoutMs ?? retryPolicy.operationTimeoutMs ?? 60_000;
+      const attemptOpts: InferenceOptions = {
+        ...opts,
+        timeoutMs: attemptTimeoutMs,
+      };
+
+      const idleTimeoutMs = retryPolicy.streamingIdleTimeoutMs ?? 30_000;
+
       try {
-        for await (const event of bound.language.stream(mergedReq, opts)) {
+        const rawStream = bound.language.stream(mergedReq, attemptOpts);
+        const guardedStream = withIdleWatchdog(rawStream, idleTimeoutMs, opts?.signal);
+
+        for await (const event of guardedStream) {
           if (event.type === "content_block_delta") {
             emittedAnyDelta = true;
           }
@@ -309,20 +472,7 @@ export class ProviderRuntime extends EventEmitter {
           }
           if (event.type === "error") {
             hadError = true;
-            this.recordFailure(
-              target.providerAccount,
-              "language",
-              retryPolicy.cooldownThreshold,
-              retryPolicy.cooldownDurationMs,
-            );
-            this.emit("inference:failure", redactObject({
-              target,
-              capability: "language",
-              error: event.error.message,
-              retryable: event.error.retryable,
-            }));
-
-            if (!emittedAnyDelta && i < targets.length - 1 && event.error.retryable) {
+            if (!emittedAnyDelta && i < maxAttempts - 1 && event.error.retryable) {
               // Fallback to next candidate if no tokens were emitted yet
               this.emit("inference:fallback", redactObject({
                 fromTarget: target,
@@ -337,7 +487,19 @@ export class ProviderRuntime extends EventEmitter {
                 retryable: true,
               });
             } else {
-              // Yield error and terminate stream immediately
+              // Terminal error on this stream
+              this.recordFailure(
+                target.providerAccount,
+                "language",
+                retryPolicy.cooldownThreshold,
+                retryPolicy.cooldownDurationMs,
+              );
+              this.emit("inference:failure", redactObject({
+                target,
+                capability: "language",
+                error: event.error.message,
+                retryable: event.error.retryable,
+              }));
               yield event;
               return;
             }
@@ -351,16 +513,25 @@ export class ProviderRuntime extends EventEmitter {
         }
       } catch (err: any) {
         lastError = err;
-        this.recordFailure(
-          target.providerAccount,
-          "language",
-          retryPolicy.cooldownThreshold,
-          retryPolicy.cooldownDurationMs,
-        );
+        const isUnsupported =
+          err instanceof InferenceError && err.code === "unsupported_capability";
+        if (!isUnsupported) {
+          this.recordFailure(
+            target.providerAccount,
+            "language",
+            retryPolicy.cooldownThreshold,
+            retryPolicy.cooldownDurationMs,
+          );
+        }
+        this.emit("inference:failure", redactObject({
+          target,
+          capability: "language",
+          error: err.message,
+          retryable: err instanceof InferenceError ? err.retryable : true,
+        }));
 
         const isRetryable = err instanceof InferenceError ? err.retryable : true;
         if (opts?.signal?.aborted && opts.signal.reason?.name !== "TimeoutError") {
-          // User aborted — do not fall through to next targets
           yield {
             type: "abort",
             reason: "user",
@@ -368,7 +539,7 @@ export class ProviderRuntime extends EventEmitter {
           return;
         }
 
-        if (emittedAnyDelta || i === targets.length - 1 || !isRetryable) {
+        if (emittedAnyDelta || i === maxAttempts - 1 || !isRetryable) {
           yield {
             type: "error",
             error: {
@@ -378,6 +549,16 @@ export class ProviderRuntime extends EventEmitter {
             },
           };
           return;
+        }
+
+        if (i < maxAttempts - 1) {
+          const delay = computeBackoffDelay(i, retryPolicy);
+          try {
+            await abortableSleep(delay, opts?.signal);
+          } catch {
+            yield { type: "abort", reason: "user" };
+            return;
+          }
         }
       }
     }
@@ -437,10 +618,14 @@ export class ProviderRuntime extends EventEmitter {
     }
 
     const retryPolicy = plan.snapshot?.config?.retryPolicy ?? DEFAULT_RETRY_POLICY;
+    const maxAttempts = Math.min(
+      targets.length,
+      retryPolicy.maxAttempts ?? DEFAULT_RETRY_POLICY.maxAttempts,
+    );
     const startTime = Date.now();
     let lastError: any;
 
-    for (let i = 0; i < targets.length; i++) {
+    for (let i = 0; i < maxAttempts; i++) {
       if (Date.now() - startTime > MAX_RETRY_DURATION_MS) {
         throw new InferenceError({
           code: "timeout",
@@ -452,7 +637,7 @@ export class ProviderRuntime extends EventEmitter {
       const target = targets[i];
 
       const health = this.getHealth(target.providerAccount, "image");
-      if (health.cooldownUntil && health.cooldownUntil > Date.now() && i < targets.length - 1) {
+      if (health.cooldownUntil && health.cooldownUntil > Date.now() && i < maxAttempts - 1) {
         this.emit("inference:fallback", redactObject({
           fromTarget: target,
           toTarget: targets[i + 1],
@@ -467,6 +652,12 @@ export class ProviderRuntime extends EventEmitter {
         attemptIndex: i,
       }));
 
+      const attemptTimeoutMs = opts?.timeoutMs ?? retryPolicy.operationTimeoutMs ?? 60_000;
+      const attemptOpts: InferenceOptions = {
+        ...opts,
+        timeoutMs: attemptTimeoutMs,
+      };
+
       try {
         const bound = await this.adapter.bind(target, plan.snapshot?.catalog);
         if (!bound.images) {
@@ -479,7 +670,7 @@ export class ProviderRuntime extends EventEmitter {
           });
         }
 
-        const result = await bound.images.generate(req, opts);
+        const result = await bound.images.generate(req, attemptOpts);
         this.recordSuccess(target.providerAccount, "image");
         this.emit("inference:success", redactObject({
           target,
@@ -489,12 +680,16 @@ export class ProviderRuntime extends EventEmitter {
         return result;
       } catch (err: any) {
         lastError = err;
-        this.recordFailure(
-          target.providerAccount,
-          "image",
-          retryPolicy.cooldownThreshold,
-          retryPolicy.cooldownDurationMs,
-        );
+        const isUnsupportedCap =
+          err instanceof InferenceError && err.code === "unsupported_capability";
+        if (!isUnsupportedCap) {
+          this.recordFailure(
+            target.providerAccount,
+            "image",
+            retryPolicy.cooldownThreshold,
+            retryPolicy.cooldownDurationMs,
+          );
+        }
         this.emit("inference:failure", redactObject({
           target,
           capability: "image",
@@ -502,15 +697,16 @@ export class ProviderRuntime extends EventEmitter {
           retryable: err instanceof InferenceError ? err.retryable : true,
         }));
 
-        const isUnsupportedCap =
-          err instanceof InferenceError && err.code === "unsupported_capability";
         const isRetryable = err instanceof InferenceError ? err.retryable : true;
         const canFallback =
-          (isRetryable || isUnsupportedCap) && !opts?.signal?.aborted && i < targets.length - 1;
+          (isRetryable || isUnsupportedCap) && !opts?.signal?.aborted && i < maxAttempts - 1;
 
         if (!canFallback) {
           throw err;
         }
+
+        const delay = computeBackoffDelay(i, retryPolicy);
+        await abortableSleep(delay, opts?.signal);
       }
     }
 
@@ -545,6 +741,50 @@ export class ProviderRuntime extends EventEmitter {
       message: "Video generation is coming soon in v2",
       retryable: false,
     });
+  }
+
+  /**
+   * Refreshes dynamic models for a provider account using discovery sources.
+   */
+  async refreshModels(providerAccount: string): Promise<string[]> {
+    const config = await this.configStore.getEffectiveConfig();
+    const acc = config.providers?.[providerAccount];
+    if (!acc) {
+      throw new InferenceError({
+        code: "unconfigured_provider",
+        message: `Provider account "${providerAccount}" is not configured`,
+        retryable: false,
+      });
+    }
+
+    const discoveryCache = this.modelCatalog.getDiscoveryCache();
+    try {
+      const credHandle = await this.credentialStore.resolve(acc.credential);
+      const context = {
+        providerAccount,
+        upstreamProvider: acc.upstreamProvider,
+        credential: credHandle,
+        baseUrl: acc.baseUrl,
+        compat: acc.compat,
+      };
+
+      if (acc.upstreamProvider === "openai" || acc.upstreamProvider === "openai-compatible") {
+        const { OpenAIDiscoverySource } = await import("../../vendors/openai/openai-discovery-source.js");
+        await discoveryCache.refreshAccount(context, new OpenAIDiscoverySource());
+      } else if (acc.upstreamProvider === "google") {
+        const { GoogleDiscoverySource } = await import("../../vendors/google/google-discovery-source.js");
+        await discoveryCache.refreshAccount(context, new GoogleDiscoverySource());
+      }
+    } catch {
+      // Failure-safe discovery
+    }
+
+    const userDeclared = extractUserDeclaredModels(config);
+    const updatedCatalog = await this.modelCatalog.getAllModels(userDeclared);
+    const models = updatedCatalog.filter(
+      (m: any) => m.upstreamProvider === acc.upstreamProvider || m.upstreamProvider === providerAccount,
+    );
+    return models.map((m) => m.id);
   }
 
   /**

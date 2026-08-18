@@ -8,10 +8,7 @@ import { ProviderRuntime, getDefaultProviderRuntime } from "../../domain/provide
 import { ProviderConfigStore } from "../../domain/providers/config-store/provider-config-store.js";
 import { MemoryCredentialStore } from "../../domain/providers/credentials/memory-credential-store.js";
 import { AggregateInferenceAdapter } from "../../capabilities/inference/aggregate-adapter.js";
-import { PiLanguageRaw } from "../../vendors/pi-ai/pi-language-raw.js";
-import { OpenAIImageRaw } from "../../vendors/openai/openai-image-raw.js";
-import { GoogleImageRaw } from "../../vendors/google/google-image-raw.js";
-import { resolveCuratedCatalog } from "../../foundations/models-catalog.js";
+import { getSyncBuiltinCatalog } from "../../domain/providers/model-catalog.js";
 import { InferenceError, InferenceErrorCode } from "../../foundations/errors.js";
 import type {
   Seepient,
@@ -35,36 +32,39 @@ import type {
 import type { PurposeModelMap } from "../../foundations/schemas/provider-config.js";
 
 export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<Seepient> {
-  let runtime: ProviderRuntime;
-
-  if (!opts.providers && !opts.modelAssignments && !opts.credentials && !opts.overlayFile) {
-    runtime = getDefaultProviderRuntime();
-  } else {
-    const configStore = new ProviderConfigStore(opts.overlayFile ?? ":memory:");
-    if (opts.providers || opts.modelAssignments) {
-      await configStore.updateOverlay(
-        {
-          providers: opts.providers as any,
-          modelAssignments: opts.modelAssignments as any,
-          retryPolicy: opts.retryPolicy as any,
-        },
-        0,
-      );
-    }
-
-    const credentialStore = opts.credentials ?? new MemoryCredentialStore();
-    const adapter = opts.adapter ?? new AggregateInferenceAdapter({
-      language: new PiLanguageRaw(),
-      openaiImage: new OpenAIImageRaw(),
-      googleImage: new GoogleImageRaw(),
-    });
-
-    runtime = new ProviderRuntime({
-      configStore,
-      credentialStore,
-      adapter,
-    });
+  const configStore = new ProviderConfigStore(opts.overlayFile ?? ":memory:");
+  if (opts.providers || opts.modelAssignments || opts.retryPolicy) {
+    const currentOverlay = await configStore.getOverlay();
+    await configStore.updateOverlay(
+      {
+        providers: opts.providers as any,
+        modelAssignments: opts.modelAssignments as any,
+        retryPolicy: opts.retryPolicy as any,
+      },
+      currentOverlay.revision,
+    );
   }
+
+  const credentialStore = opts.credentials ?? new MemoryCredentialStore();
+  const adapter = opts.adapter ?? new AggregateInferenceAdapter();
+
+  const runtime = new ProviderRuntime({
+    configStore,
+    credentialStore,
+    adapter,
+  });
+
+  let isDisposed = false;
+
+  const ensureNotDisposed = () => {
+    if (isDisposed) {
+      throw new InferenceError({
+        code: "invalid_request",
+        message: "Seepient instance has been disposed",
+        retryable: false,
+      });
+    }
+  };
 
   const initialSnapshot = await runtime.createTurnSnapshot();
   (runtime as any).currentAssignments = initialSnapshot.assignments;
@@ -460,7 +460,7 @@ export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<
 
     async getCatalog(): Promise<readonly UpstreamModel[]> {
       const snapshot = await runtime.createTurnSnapshot();
-      return snapshot.catalog.length > 0 ? snapshot.catalog : resolveCuratedCatalog();
+      return snapshot.catalog.length > 0 ? snapshot.catalog : getSyncBuiltinCatalog();
     },
 
     async reload(): Promise<{ revision: number }> {
@@ -470,6 +470,7 @@ export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<
     },
 
     async dispose(): Promise<void> {
+      isDisposed = true;
       runtime.removeAllListeners();
     },
   };

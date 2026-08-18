@@ -9,6 +9,7 @@ import type {
   ImageResult,
 } from "../../foundations/schemas/inference.js";
 import { InferenceError } from "../../foundations/errors.js";
+import { classifyInferenceError } from "../../foundations/errors/error-classifier.js";
 import { canonicalToGoogleImagePayload } from "./google-canonical-converter.js";
 
 /**
@@ -30,16 +31,6 @@ export class GoogleImageRaw implements ImageBackend {
 
     let onAbort: (() => void) | undefined;
     try {
-      if (opts?.signal?.aborted) {
-        throw new InferenceError({
-          code: "timeout",
-          message: opts.signal.reason?.message || "Operation aborted",
-          providerAccount: target.providerAccount,
-          model: target.model,
-          retryable: false,
-        });
-      }
-
       const secret = await lease.secret();
       if (secret.kind !== "api_key") {
         throw new InferenceError({
@@ -57,10 +48,25 @@ export class GoogleImageRaw implements ImageBackend {
           apiKey: secret.value,
         });
 
+      if (opts?.signal?.aborted) {
+        const timeout = opts.signal.reason?.name === "TimeoutError";
+        throw new InferenceError({
+          code: timeout ? "timeout" : "invalid_request",
+          message: opts.signal.reason?.message || (timeout ? "Google image request timed out" : "Google image request aborted by user"),
+          providerAccount: target.providerAccount,
+          model: target.model,
+          retryable: timeout,
+        });
+      }
+
       const controller = new AbortController();
       onAbort = () => controller.abort(opts?.signal?.reason);
       if (opts?.signal) {
-        opts.signal.addEventListener("abort", onAbort);
+        if (opts.signal.aborted) {
+          controller.abort(opts.signal.reason);
+        } else {
+          opts.signal.addEventListener("abort", onAbort);
+        }
       }
       const payload = canonicalToGoogleImagePayload(req);
       const signal = controller.signal;
@@ -101,9 +107,14 @@ export class GoogleImageRaw implements ImageBackend {
         }
       } catch (err: any) {
         if (err instanceof InferenceError) throw err;
-        if (signal?.aborted) {
+        const isTimeout =
+          err.name === "TimeoutError" ||
+          err.message?.includes("timed out") ||
+          (signal?.reason?.name === "TimeoutError");
+
+        if (signal?.aborted && !isTimeout) {
           throw new InferenceError({
-            code: "timeout",
+            code: "invalid_request",
             message: signal.reason?.message || "Google image request aborted by user",
             providerAccount: target.providerAccount,
             model: target.model,
@@ -122,22 +133,14 @@ export class GoogleImageRaw implements ImageBackend {
             cause: err,
           });
         }
-        if (/api key|auth|credential/i.test(msg)) {
-          throw new InferenceError({
-            code: "auth",
-            message: msg,
-            providerAccount: target.providerAccount,
-            model: target.model,
-            retryable: false,
-            cause: err,
-          });
-        }
+        const classified = classifyInferenceError(err, isTimeout);
         throw new InferenceError({
-          code: "network",
-          message: msg,
+          code: classified.code,
+          message: msg || "Google image generation failed",
           providerAccount: target.providerAccount,
           model: target.model,
-          retryable: true,
+          retryable: classified.retryable,
+          retryAfterMs: classified.retryAfterMs,
           cause: err,
         });
       }

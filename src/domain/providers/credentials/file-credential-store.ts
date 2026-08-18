@@ -126,6 +126,10 @@ export class FileCredentialStore implements CredentialStore {
     const file = this.filePath(id);
     if (!fs.existsSync(file)) return undefined;
     try {
+      const stat = fs.lstatSync(file);
+      if (stat.isSymbolicLink()) {
+        throw new Error(`Security Violation: Symlinked credential file is rejected: ${file}`);
+      }
       const raw = fs.readFileSync(file, "utf-8");
       const parsed = JSON.parse(raw) as StoredFilePayload;
       return {
@@ -156,8 +160,25 @@ export class FileCredentialStore implements CredentialStore {
     };
 
     const tmpFile = `${file}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
-    fs.writeFileSync(tmpFile, JSON.stringify(payload, null, 2), { mode: 0o600 });
+    const fd = fs.openSync(tmpFile, fs.constants.O_CREAT | fs.constants.O_WRONLY | fs.constants.O_EXCL, 0o600);
+    try {
+      fs.writeFileSync(fd, JSON.stringify(payload, null, 2));
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
     fs.renameSync(tmpFile, file);
+
+    try {
+      const dirFd = fs.openSync(this.baseDir, fs.constants.O_RDONLY);
+      try {
+        fs.fsyncSync(dirFd);
+      } finally {
+        fs.closeSync(dirFd);
+      }
+    } catch {
+      // Ignored if directory fsync is not supported by underlying filesystem
+    }
   }
 
   async list(): Promise<CredentialRecord[]> {
@@ -169,6 +190,9 @@ export class FileCredentialStore implements CredentialStore {
       if (!f.endsWith(".json")) continue;
       const fullPath = path.join(this.baseDir, f);
       try {
+        const stat = fs.lstatSync(fullPath);
+        if (stat.isSymbolicLink()) continue;
+
         const raw = fs.readFileSync(fullPath, "utf-8");
         const parsed = JSON.parse(raw) as StoredFilePayload;
         records.push({

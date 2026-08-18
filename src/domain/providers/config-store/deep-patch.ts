@@ -6,10 +6,11 @@
  * - Primitive / Object value in patch: overrides / deep-merges into target.
  * - `null` in patch: deletes / unsets the corresponding field or map entry.
  * - Arrays in patch: replaced wholesale unless `null` (which unsets).
+ * - `modelAssignments.<purpose>.<tier>` slots: replaced wholesale per slot.
  */
 const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
-export function applyDeepPatch(target: any, patch: any): any {
+export function applyDeepPatch(target: any, patch: any, path: string[] = []): any {
   if (patch === undefined) {
     return target;
   }
@@ -32,12 +33,19 @@ export function applyDeepPatch(target: any, patch: any): any {
       continue;
     }
 
+    const currentPath = [...path, key];
+    const isModelAssignmentSlot = currentPath.length === 3 && currentPath[0] === "modelAssignments";
+
     if (patchVal === null) {
       delete result[key];
-    } else if (Array.isArray(patchVal) || (patchVal && typeof patchVal === "object" && typeof (patchVal as any).kind === "string")) {
+    } else if (
+      isModelAssignmentSlot ||
+      Array.isArray(patchVal) ||
+      (patchVal && typeof patchVal === "object" && typeof (patchVal as any).kind === "string")
+    ) {
       result[key] = patchVal;
     } else if (typeof patchVal === "object") {
-      result[key] = applyDeepPatch(result[key], patchVal);
+      result[key] = applyDeepPatch(result[key], patchVal, currentPath);
     } else {
       result[key] = patchVal;
     }
@@ -49,7 +57,7 @@ export function applyDeepPatch(target: any, patch: any): any {
 /**
  * Merges two patch documents, preserving explicit `null` unsetting markers in the resulting patch.
  */
-export function mergePatches(targetPatch: any, newPatch: any): any {
+export function mergePatches(targetPatch: any, newPatch: any, path: string[] = []): any {
   if (newPatch === undefined) {
     return targetPatch;
   }
@@ -67,12 +75,19 @@ export function mergePatches(targetPatch: any, newPatch: any): any {
       continue;
     }
 
+    const currentPath = [...path, key];
+    const isModelAssignmentSlot = currentPath.length === 3 && currentPath[0] === "modelAssignments";
+
     if (patchVal === null) {
       result[key] = null;
-    } else if (Array.isArray(patchVal) || (patchVal && typeof patchVal === "object" && typeof (patchVal as any).kind === "string")) {
+    } else if (
+      isModelAssignmentSlot ||
+      Array.isArray(patchVal) ||
+      (patchVal && typeof patchVal === "object" && typeof (patchVal as any).kind === "string")
+    ) {
       result[key] = patchVal;
     } else if (typeof patchVal === "object") {
-      result[key] = mergePatches(result[key], patchVal);
+      result[key] = mergePatches(result[key], patchVal, currentPath);
     } else {
       result[key] = patchVal;
     }

@@ -21,14 +21,14 @@ describe("Phase 7: Production Reliability (QS-P7.1 - QS-P7.5)", () => {
             standard: {
               providerAccount: "primary",
               model: "gpt-4o",
-              fallback: [{ providerAccount: "secondary", model: "claude-3-5-sonnet" }],
+              fallback: [{ providerAccount: "secondary", model: "claude-sonnet-5" }],
             },
           },
         },
         retryPolicy: {
           maxAttempts: 3,
-          initialBackoffMs: 10,
-          maxBackoffMs: 50,
+          backoffBaseMs: 10,
+          backoffCapMs: 50,
           backoffMultiplier: 1.5,
           cooldownThreshold: 2,
           cooldownDurationMs: 5000,
@@ -81,7 +81,7 @@ describe("Phase 7: Production Reliability (QS-P7.1 - QS-P7.5)", () => {
         events.push(event);
       }
 
-      expect(attempts).toEqual(["primary:gpt-4o", "secondary:claude-3-5-sonnet"]);
+      expect(attempts).toEqual(["primary:gpt-4o", "secondary:claude-sonnet-5"]);
       expect(events.some((e) => e.type === "content_block_delta")).toBe(true);
 
       // Check health: primary has 1 failure
@@ -96,7 +96,270 @@ describe("Phase 7: Production Reliability (QS-P7.1 - QS-P7.5)", () => {
       // Execution 3: primary is in cooldown -> directly skips to secondary
       attempts.length = 0;
       for await (const _ of runtime.executeLanguage(plan, { messages: [] })) {}
-      expect(attempts).toEqual(["secondary:claude-3-5-sonnet"]);
+      expect(attempts).toEqual(["secondary:claude-sonnet-5"]);
+    });
+
+    it("B-5: caps retry attempts at maxAttempts even with 5 fallbacks configured", async () => {
+      const attempts: string[] = [];
+      const configStore = new ProviderConfigStore(":memory:");
+      await configStore.updateOverlay({
+        providers: {
+          p1: { adapter: "pi-ai", upstreamProvider: "openai", credential: { kind: "none" } },
+          p2: { adapter: "pi-ai", upstreamProvider: "openai", credential: { kind: "none" } },
+          p3: { adapter: "pi-ai", upstreamProvider: "openai", credential: { kind: "none" } },
+          p4: { adapter: "pi-ai", upstreamProvider: "openai", credential: { kind: "none" } },
+          p5: { adapter: "pi-ai", upstreamProvider: "openai", credential: { kind: "none" } },
+        },
+        modelAssignments: {
+          text: {
+            standard: {
+              providerAccount: "p1",
+              model: "gpt-4o",
+              fallback: [
+                { providerAccount: "p2", model: "gpt-4o" },
+                { providerAccount: "p3", model: "gpt-4o" },
+                { providerAccount: "p4", model: "gpt-4o" },
+                { providerAccount: "p5", model: "gpt-4o" },
+              ],
+            },
+          },
+        },
+        retryPolicy: {
+          maxAttempts: 2, // Only 2 attempts allowed
+          backoffBaseMs: 1,
+          backoffCapMs: 10,
+          backoffMultiplier: 2,
+          cooldownThreshold: 5,
+          cooldownDurationMs: 1000,
+        },
+      }, 0);
+
+      const adapter: InferenceAdapter = {
+        id: "test-adapter",
+        async bind(target: InferenceTarget) {
+          attempts.push(target.providerAccount);
+          throw new InferenceError({
+            code: "rate_limit",
+            message: "Overloaded",
+            providerAccount: target.providerAccount,
+            model: target.model,
+            retryable: true,
+          });
+        },
+      };
+
+      const runtime = new ProviderRuntime({ configStore, adapter });
+      const snapshot = await runtime.createTurnSnapshot();
+      const plan = await runtime.resolvePlan(snapshot, "text", "standard");
+
+      const events: any[] = [];
+      for await (const event of runtime.executeLanguage(plan, { messages: [] })) {
+        events.push(event);
+      }
+
+      // Must have stopped after exactly 2 attempts
+      expect(attempts).toEqual(["p1", "p2"]);
+      expect(events[0].type).toBe("error");
+    });
+
+    it("B-5: user abort exits immediately without sleeping", async () => {
+      const configStore = new ProviderConfigStore(":memory:");
+      await configStore.updateOverlay({
+        providers: {
+          p1: { adapter: "pi-ai", upstreamProvider: "openai", credential: { kind: "none" } },
+          p2: { adapter: "pi-ai", upstreamProvider: "openai", credential: { kind: "none" } },
+        },
+        modelAssignments: {
+          text: {
+            standard: {
+              providerAccount: "p1",
+              model: "gpt-4o",
+              fallback: [{ providerAccount: "p2", model: "gpt-4o" }],
+            },
+          },
+        },
+        retryPolicy: {
+          maxAttempts: 2,
+          backoffBaseMs: 10_000, // 10 second backoff
+          backoffCapMs: 10_000,
+          backoffMultiplier: 1,
+        },
+      }, 0);
+
+      const abortCtrl = new AbortController();
+
+      const adapter: InferenceAdapter = {
+        id: "test-adapter",
+        async bind(target: InferenceTarget) {
+          // Abort right after first failure
+          abortCtrl.abort();
+          throw new InferenceError({
+            code: "rate_limit",
+            message: "Retry needed",
+            providerAccount: target.providerAccount,
+            model: target.model,
+            retryable: true,
+          });
+        },
+      };
+
+      const runtime = new ProviderRuntime({ configStore, adapter });
+      const snapshot = await runtime.createTurnSnapshot();
+      const plan = await runtime.resolvePlan(snapshot, "text", "standard");
+
+      const start = Date.now();
+      const events: any[] = [];
+      for await (const event of runtime.executeLanguage(plan, { messages: [] }, { signal: abortCtrl.signal })) {
+        events.push(event);
+      }
+      const elapsed = Date.now() - start;
+
+      // Must have exited immediately (under 200ms) instead of waiting for 10s backoff
+      expect(elapsed).toBeLessThan(500);
+      expect(events[0].type).toBe("abort");
+    });
+
+    it("B-8: cooldown state machine records single failure, resets on expiry, and ignores unsupported_capability", async () => {
+      const configStore = new ProviderConfigStore(":memory:");
+      await configStore.updateOverlay({
+        providers: {
+          p1: { adapter: "pi-ai", upstreamProvider: "openai", credential: { kind: "none" } },
+          p2: { adapter: "pi-ai", upstreamProvider: "anthropic", credential: { kind: "none" } },
+        },
+        modelAssignments: {
+          text: {
+            standard: {
+              providerAccount: "p1",
+              model: "gpt-4o",
+              fallback: [{ providerAccount: "p2", model: "claude-sonnet-5" }],
+            },
+          },
+        },
+        retryPolicy: {
+          maxAttempts: 2,
+          backoffBaseMs: 1,
+          backoffCapMs: 5,
+          cooldownThreshold: 3,
+          cooldownDurationMs: 50, // 50ms quick expiry
+        },
+      }, 0);
+
+      let failType: "stream_error" | "unsupported_cap" = "stream_error";
+      let failureEventsCount = 0;
+
+      const adapter: InferenceAdapter = {
+        id: "test-adapter",
+        async bind(target: InferenceTarget) {
+          if (failType === "unsupported_cap") {
+            return {
+              target,
+              // No language support
+            } as any;
+          }
+          return {
+            target,
+            language: {
+              async *stream() {
+                yield {
+                  type: "error",
+                  error: {
+                    code: "rate_limit",
+                    message: "Rate limited stream",
+                    retryable: true,
+                  },
+                };
+              },
+            },
+          } as unknown as BoundAdapter;
+        },
+      };
+
+      const runtime = new ProviderRuntime({ configStore, adapter });
+      runtime.on("inference:failure", () => {
+        failureEventsCount++;
+      });
+
+      const snapshot = await runtime.createTurnSnapshot();
+      const plan = await runtime.resolvePlan(snapshot, "text", "standard");
+
+      // 1. First execution: stream error on p1, then stream error on p2
+      for await (const _ of runtime.executeLanguage(plan, { messages: [] })) {}
+
+      // Exactly 1 failure recorded for p1 (not 2 from double-recording)
+      expect(runtime.getHealth("p1", "language").consecutiveFailures).toBe(1);
+
+      // 2. Unsupported capability test: does NOT increase consecutiveFailures
+      failType = "unsupported_cap";
+      for await (const _ of runtime.executeLanguage(plan, { messages: [] })) {}
+      expect(runtime.getHealth("p1", "language").consecutiveFailures).toBe(1);
+
+      // 3. Cooldown expiry reset test:
+      // Drive failures to threshold (3)
+      failType = "stream_error";
+      for await (const _ of runtime.executeLanguage(plan, { messages: [] })) {}
+      for await (const _ of runtime.executeLanguage(plan, { messages: [] })) {}
+      expect(runtime.getHealth("p1", "language").consecutiveFailures).toBe(3);
+      expect(runtime.getHealth("p1", "language").cooldownUntil).toBeDefined();
+
+      // Wait for cooldown to expire (50ms)
+      await new Promise((r) => setTimeout(r, 60));
+
+      // After expiry, getHealth resets consecutiveFailures to 0
+      expect(runtime.getHealth("p1", "language").consecutiveFailures).toBe(0);
+      expect(runtime.getHealth("p1", "language").cooldownUntil).toBeUndefined();
+    });
+
+    it("S-9: streaming idle watchdog aborts stalled stream after streamingIdleTimeoutMs", async () => {
+      const configStore = new ProviderConfigStore(":memory:");
+      await configStore.updateOverlay({
+        providers: {
+          p1: { adapter: "pi-ai", upstreamProvider: "openai", credential: { kind: "none" } },
+        },
+        modelAssignments: {
+          text: {
+            standard: {
+              providerAccount: "p1",
+              model: "gpt-4o",
+            },
+          },
+        },
+        retryPolicy: {
+          maxAttempts: 1,
+          streamingIdleTimeoutMs: 50, // 50ms idle watchdog
+        },
+      }, 0);
+
+      const adapter: InferenceAdapter = {
+        id: "test-adapter",
+        async bind(target: InferenceTarget) {
+          return {
+            target,
+            language: {
+              async *stream() {
+                yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "chunk 1" } };
+                // Stall for 200ms (longer than 50ms idle timeout)
+                await new Promise((r) => setTimeout(r, 200));
+                yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "chunk 2" } };
+              },
+            },
+          } as unknown as BoundAdapter;
+        },
+      };
+
+      const runtime = new ProviderRuntime({ configStore, adapter });
+      const snapshot = await runtime.createTurnSnapshot();
+      const plan = await runtime.resolvePlan(snapshot, "text", "standard");
+
+      const events: any[] = [];
+      for await (const event of runtime.executeLanguage(plan, { messages: [] })) {
+        events.push(event);
+      }
+
+      expect(events.some((e) => e.type === "content_block_delta")).toBe(true);
+      const errorEvent = events.find((e) => e.type === "error");
+      expect(errorEvent).toBeDefined();
+      expect(errorEvent.error.code).toBe("timeout");
+      expect(errorEvent.error.message).toContain("Streaming response stalled");
     });
 
     it("does not replay or fallback after first stream delta has been emitted", async () => {

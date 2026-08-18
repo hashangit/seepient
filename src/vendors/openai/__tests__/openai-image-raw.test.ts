@@ -189,7 +189,8 @@ describe("OpenAIImageRaw backend (QS-P3.6)", () => {
       expect.fail("Should have thrown");
     } catch (e: any) {
       expect(e).toBeInstanceOf(InferenceError);
-      expect(e.code).toBe("timeout");
+      expect(e.code).toBe("invalid_request");
+      expect(e.retryable).toBe(false);
     }
   });
 

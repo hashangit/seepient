@@ -237,10 +237,10 @@ describe("ProviderRuntime (QS-P4.6)", () => {
     // 2. Skill override plan resolved from the SAME snapshot
     const skillPlan = await runtime.resolvePlan(snapshot, "text", "standard", {
       providerAccount: "anthropic-backup",
-      model: "claude-3-7-sonnet",
+      model: "claude-sonnet-5",
     });
     expect(skillPlan.selectedTarget.providerAccount).toBe("anthropic-backup");
-    expect(skillPlan.selectedTarget.model).toBe("claude-3-7-sonnet");
+    expect(skillPlan.selectedTarget.model).toBe("claude-sonnet-5");
 
     // Both plans are pinned to the same snapshot revision
     expect(basePlan.snapshot?.revision).toBe(snapshot.revision);

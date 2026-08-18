@@ -10,12 +10,8 @@ import type {
 import type { ToolDefinition } from '../../foundations/contracts/tool.js';
 import type { InferenceTarget } from '../../foundations/contracts/backend-ports.js';
 import { PiLanguageRaw } from '../../vendors/pi-ai/pi-language-raw.js';
-
-export const GLM_MODEL_MAP: Record<string, string> = {
-  haiku: 'glm-4.5-air',
-  sonnet: 'glm-4.7',
-  opus: 'glm-5.3',
-};
+import { resolveDefaultModel } from '../../foundations/models-catalog.js';
+import { SeepientError } from '../../foundations/errors.js';
 
 class BridgedLLMProvider implements LLMProvider {
   name: string;
@@ -55,27 +51,37 @@ class BridgedLLMProvider implements LLMProvider {
     };
   }
 
-  private convertMessages(messages: ProviderMessage[]) {
+  private convertMessages(messages: ProviderMessage[]): any[] {
     return messages.map((m) => {
-      const content: any[] = [];
-      if (m.content) {
-        content.push({ type: "text" as const, text: m.content });
+      if (m.role === "assistant" && m.tool_calls && m.tool_calls.length > 0) {
+        return {
+          role: "assistant",
+          content: [
+            ...(m.content ? [{ type: "text", text: m.content }] : []),
+            ...m.tool_calls.map((tc) => ({
+              type: "tool_use",
+              id: tc.id,
+              name: tc.name,
+              input: JSON.parse(tc.arguments || "{}"),
+            })),
+          ],
+        };
       }
-      if (m.tool_calls) {
-        for (const tc of m.tool_calls) {
-          let input = {};
-          try { input = JSON.parse(tc.arguments); } catch {}
-          content.push({
-            type: "tool_use" as const,
-            id: tc.id,
-            name: tc.name,
-            input,
-          });
-        }
+      if (m.role === "tool") {
+        return {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              toolUseId: m.tool_call_id,
+              content: m.content,
+            },
+          ],
+        };
       }
       return {
-        role: m.role as any,
-        content,
+        role: m.role,
+        content: m.content,
       };
     });
   }
@@ -127,8 +133,16 @@ class BridgedLLMProvider implements LLMProvider {
     }, { signal: options?.signal });
 
     for await (const event of stream) {
-      if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-        yield { type: "text_delta", content: event.delta.text };
+      if (event.type === "content_block_delta") {
+        if (event.delta.type === "text_delta") {
+          yield { type: "text_delta", content: event.delta.text };
+        } else if (event.delta.type === "tool_input_delta") {
+          yield {
+            type: "tool_call_delta",
+            index: event.index,
+            argumentsDelta: event.delta.partialJson,
+          };
+        }
       } else if (event.type === "content_block_start" && event.block.type === "tool_use") {
         yield {
           type: "tool_call_begin",
@@ -163,12 +177,23 @@ export async function createProvider(config: ProviderConfig): Promise<LLMProvide
       return new BridgedLLMProvider(config.apiKey, config.model, 'openai', config.baseUrl);
     case 'anthropic':
       return new BridgedLLMProvider(config.apiKey, config.model, 'anthropic');
-    case 'glm':
+    case 'glm': {
+      let resolvedModel = config.model;
+      if (!resolvedModel || resolvedModel === 'sonnet') {
+        resolvedModel = resolveDefaultModel('glm', 'standard');
+      } else if (resolvedModel === 'haiku') {
+        resolvedModel = resolveDefaultModel('glm', 'efficient');
+      } else if (resolvedModel === 'opus') {
+        resolvedModel = resolveDefaultModel('glm', 'complex');
+      }
       return new BridgedLLMProvider(
         config.apiKey,
-        GLM_MODEL_MAP[config.model] || config.model,
+        resolvedModel,
         'glm',
         'https://api.z.ai/api/anthropic',
       );
+    }
+    default:
+      throw new SeepientError(`Unknown provider type: ${(config as any).type}`, 'INVALID_CONFIG', false);
   }
 }

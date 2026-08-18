@@ -41,9 +41,11 @@ export type InferenceErrorCode =
   | "timeout"
   | "network"
   | "overload"
+  | "content_policy"
   | "malformed_response"
   | "internal_adapter"
   | "model_not_found"
+  | "unknown_model"
   | "unconfigured_provider"
   | "unconfigured_purpose";
 
@@ -51,6 +53,7 @@ export interface InferenceErrorOptions {
   code: InferenceErrorCode;
   message: string;
   retryable?: boolean;
+  retryAfterMs?: number;
   providerAccount?: string;
   model?: string;
   cause?: unknown;
@@ -62,12 +65,14 @@ export interface InferenceErrorOptions {
 export class InferenceError extends SeepientError {
   providerAccount?: string;
   model?: string;
+  retryAfterMs?: number;
 
   constructor(opts: InferenceErrorOptions) {
     super(opts.message, opts.code, opts.retryable ?? false);
     this.name = "InferenceError";
     this.providerAccount = opts.providerAccount;
     this.model = opts.model;
+    this.retryAfterMs = opts.retryAfterMs;
     if (opts.cause) {
       this.cause = opts.cause;
     }

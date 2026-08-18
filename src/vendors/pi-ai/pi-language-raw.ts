@@ -22,6 +22,7 @@ import type {
   ToolUseBlock,
 } from "../../foundations/schemas/inference.js";
 import { InferenceError } from "../../foundations/errors.js";
+import { classifyInferenceError } from "../../foundations/errors/error-classifier.js";
 import {
   canonicalToPiContext,
   canonicalToPiMessages,
@@ -382,6 +383,16 @@ export class PiLanguageRaw implements LanguageBackend {
             lastStopReason = mapPiStopReasonToCanonical(event.reason);
             lastUsage = mapPiUsageToCanonical(event.message?.usage);
           } else if (event.type === "error") {
+            if (event.error?.usage) {
+              lastUsage = mapPiUsageToCanonical(event.error.usage);
+            }
+
+            // Drain open blocks before yielding abort/error (B-11)
+            for (const idx of openBlocks) {
+              yield { type: "content_block_stop", index: idx };
+            }
+            openBlocks.clear();
+
             if (event.reason === "aborted") {
               yield {
                 type: "abort",
@@ -390,13 +401,14 @@ export class PiLanguageRaw implements LanguageBackend {
               };
               return;
             }
-            const classified = classifyPiError(event.error?.errorMessage || "", isTimeout());
+            const classified = classifyInferenceError(event.error?.errorMessage || "", isTimeout());
             yield {
               type: "error",
               error: {
                 code: classified.code,
                 message: event.error?.errorMessage || "Pi inference error",
                 retryable: classified.retryable,
+                retryAfterMs: classified.retryAfterMs,
               },
               partialUsage: lastUsage,
             };
@@ -407,6 +419,7 @@ export class PiLanguageRaw implements LanguageBackend {
         for (const idx of openBlocks) {
           yield { type: "content_block_stop", index: idx };
         }
+        openBlocks.clear();
 
         yield {
           type: "finish",
@@ -414,6 +427,11 @@ export class PiLanguageRaw implements LanguageBackend {
           usage: lastUsage ?? { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
         };
       } catch (err: any) {
+        for (const idx of openBlocks) {
+          yield { type: "content_block_stop", index: idx };
+        }
+        openBlocks.clear();
+
         if (signal?.aborted) {
           const timeout = isTimeout();
           if (timeout) {
@@ -430,18 +448,20 @@ export class PiLanguageRaw implements LanguageBackend {
             yield {
               type: "abort",
               reason: "user",
+              partialUsage: lastUsage,
             };
           }
           return;
         }
 
-        const classified = classifyPiError(err?.message || "", isTimeout());
+        const classified = classifyInferenceError(err?.message || "", isTimeout());
         yield {
           type: "error",
           error: {
             code: classified.code,
             message: err?.message || "Pi language stream failed",
             retryable: classified.retryable,
+            retryAfterMs: classified.retryAfterMs,
           },
           partialUsage: lastUsage,
         };
@@ -502,13 +522,14 @@ export class PiLanguageRaw implements LanguageBackend {
           finalReason = event.reason;
         } else if (event.type === "error") {
           const timeout = isTimeout();
-          const classified = classifyPiError(event.error?.errorMessage || "", timeout);
+          const classified = classifyInferenceError(event.error?.errorMessage || "", timeout);
           throw new InferenceError({
             code: event.reason === "aborted" ? "timeout" : (classified.code as any),
             message: event.error?.errorMessage || "Pi chat request failed",
             providerAccount: target.providerAccount,
             model: target.model,
             retryable: event.reason === "aborted" ? true : classified.retryable,
+            retryAfterMs: classified.retryAfterMs,
           });
         }
       }
@@ -565,47 +586,34 @@ export class PiLanguageRaw implements LanguageBackend {
         usage,
         providerResponseId: finalMessage.responseId,
       };
+    } catch (err: any) {
+      if (err instanceof InferenceError) {
+        throw err;
+      }
+      if (signal?.aborted) {
+        const timeout = isTimeout();
+        throw new InferenceError({
+          code: timeout ? "timeout" : "invalid_request",
+          message: err?.message || (timeout ? "Pi chat request timed out" : "Operation aborted"),
+          providerAccount: target.providerAccount,
+          model: target.model,
+          retryable: timeout,
+          cause: err,
+        });
+      }
+      const classified = classifyInferenceError(err?.message || "", isTimeout());
+      throw new InferenceError({
+        code: classified.code as any,
+        message: err?.message || "Pi chat request failed",
+        providerAccount: target.providerAccount,
+        model: target.model,
+        retryable: classified.retryable,
+        retryAfterMs: classified.retryAfterMs,
+        cause: err,
+      });
     } finally {
       cleanup();
       await lease.release();
     }
   }
-}
-
-function classifyPiError(msg: string, isTimeout: boolean): { code: string; retryable: boolean } {
-  if (isTimeout) return { code: "timeout", retryable: true };
-  const lower = (msg || "").toLowerCase();
-  if (
-    lower.includes("401") ||
-    lower.includes("unauthorized") ||
-    lower.includes("invalid api key") ||
-    lower.includes("invalid_api_key") ||
-    lower.includes("403") ||
-    lower.includes("forbidden")
-  ) {
-    return { code: "auth", retryable: false };
-  }
-  if (
-    lower.includes("429") ||
-    lower.includes("rate limit") ||
-    lower.includes("rate_limit") ||
-    lower.includes("quota")
-  ) {
-    return { code: "rate_limit", retryable: true };
-  }
-  if (
-    lower.includes("model not found") ||
-    lower.includes("does not exist") ||
-    lower.includes("404")
-  ) {
-    return { code: "model_not_found", retryable: false };
-  }
-  if (
-    lower.includes("context length") ||
-    lower.includes("maximum context") ||
-    lower.includes("context_length_exceeded")
-  ) {
-    return { code: "context_overflow", retryable: false };
-  }
-  return { code: "network", retryable: true };
 }

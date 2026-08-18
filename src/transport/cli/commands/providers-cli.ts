@@ -8,7 +8,7 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import { ProviderConfigStore } from "../../../domain/providers/config-store/provider-config-store.js";
-import { resolveCuratedCatalog } from "../../../foundations/models-catalog.js";
+import { getSyncBuiltinCatalog } from "../../../domain/providers/model-catalog.js";
 import { validateEndpointUrl } from "../../http/ssrf-validator.js";
 
 export function registerProvidersCommands(program: Command): void {
@@ -22,7 +22,7 @@ export function registerProvidersCommands(program: Command): void {
       const store = new ProviderConfigStore();
       const config = await store.getEffectiveConfig();
       const accounts = (config.providers || {}) as Record<string, any>;
-      const catalog = resolveCuratedCatalog();
+      const catalog = getSyncBuiltinCatalog();
 
       const accountEntries = Object.entries(accounts);
       if (accountEntries.length === 0) {

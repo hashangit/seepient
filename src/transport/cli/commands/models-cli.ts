@@ -8,7 +8,6 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import { ProviderConfigStore } from "../../../domain/providers/config-store/provider-config-store.js";
-import { resolveCuratedCatalog } from "../../../foundations/models-catalog.js";
 import { getDefaultProviderRuntime } from "../../../domain/providers/provider-runtime.js";
 import { generateImagesStructured } from "../../../capabilities/media/media.js";
 
@@ -103,8 +102,9 @@ export function registerModelsCommands(program: Command): void {
       });
 
       const store = new ProviderConfigStore();
+      const config = await store.getEffectiveConfig();
       const overlay = await store.getOverlay();
-      const existing = (overlay.patch?.modelAssignments as any)?.[purpose]?.[tier] ?? { providerAccount: "default", model: "gpt-4o" };
+      const existing = (config.modelAssignments as any)?.[purpose]?.[tier] ?? { providerAccount: "default", model: "gpt-4o" };
 
       await store.updateOverlay(
         {
@@ -210,11 +210,14 @@ export function registerModelsCommands(program: Command): void {
     .action(async (accountId) => {
       console.log(chalk.cyan(`Refreshing model list for provider account "${accountId}"...`));
       const runtime = getDefaultProviderRuntime();
-      const snapshot = await runtime.createTurnSnapshot();
-      const models = snapshot.catalog.filter((m: any) => m.provider === accountId || m.upstreamProvider === accountId);
-      console.log(chalk.green(`✓ Successfully discovered ${models.length} model(s) for "${accountId}".`));
-      for (const m of models) {
-        console.log(`  - ${m.id} (${m.displayName})`);
+      try {
+        const modelIds = await runtime.refreshModels(accountId);
+        console.log(chalk.green(`✓ Successfully discovered ${modelIds.length} model(s) for "${accountId}".`));
+        for (const id of modelIds) {
+          console.log(`  - ${id}`);
+        }
+      } catch (e: any) {
+        console.log(chalk.red(`Error discovering models for "${accountId}": ${e.message}`));
       }
     });
 

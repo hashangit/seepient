@@ -1,18 +1,39 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { Value } from "typebox/value";
 import type {
   OverlayDocument,
   ProviderLayerPatch,
   ProviderEffectiveConfig,
 } from "../../../foundations/schemas/provider-config.js";
-import { DEFAULT_RETRY_POLICY } from "../../../foundations/schemas/provider-config.js";
+import {
+  ProviderLayerPatchSchema,
+  ProviderEffectiveConfigSchema,
+  DEFAULT_RETRY_POLICY,
+} from "../../../foundations/schemas/provider-config.js";
 import { SeepientError } from "../../../foundations/errors.js";
-import { loadMergedConfig } from "../../../foundations/config.js";
+import { loadMergedConfig, applyEnvOverrides } from "../../../foundations/config.js";
 import { migrateV1ToV2 } from "../migration.js";
 import { CompositeCredentialStore } from "../credentials/composite-credential-store.js";
 import { applyDeepPatch, mergePatches } from "./deep-patch.js";
-import { resolveDefaultModelForProvider, resolveCuratedCatalog } from "../../../foundations/models-catalog.js";
+import { resolveDefaultModelForProvider } from "../../../foundations/models-catalog.js";
+import { getSyncBuiltinCatalog } from "../model-catalog.js";
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err: any) {
+    return err.code === "EPERM";
+  }
+}
+
+export interface ConfigViolation {
+  path: string;
+  message: string;
+  value?: unknown;
+}
 
 /**
  * Manages the runtime provider configuration store with optimistic concurrency locking (If-Match),
@@ -40,140 +61,87 @@ export class ProviderConfigStore {
       try {
         const raw = fs.readFileSync(this.overlayPath, "utf-8");
         this.currentOverlay = JSON.parse(raw);
-        if (typeof this.currentOverlay?.revision !== "number") {
-          throw new Error("Invalid overlay document: missing numeric revision");
-        }
       } catch (err: any) {
         throw new SeepientError(
-          `Failed to load provider configuration overlay from ${this.overlayPath}: ${err.message}`,
-          "CORRUPT_STORAGE",
+          `Failed to load overlay from ${this.overlayPath}: ${err.message}`,
+          "STORAGE_ERROR",
           false,
         );
       }
     }
   }
 
-  private reloadFromDisk(): void {
+  /**
+   * Acquires a file lock using O_CREAT | O_EXCL.
+   */
+  private async acquireLock(lockPath: string, timeoutMs = 2000): Promise<number> {
+    const start = Date.now();
+    const noFollow = fs.constants.O_NOFOLLOW !== undefined ? fs.constants.O_NOFOLLOW : 0;
+    while (Date.now() - start < timeoutMs) {
+      try {
+        const fd = fs.openSync(
+          lockPath,
+          fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY | noFollow,
+          0o600,
+        );
+        fs.writeSync(fd, JSON.stringify({ pid: process.pid, createdAt: Date.now() }));
+        return fd;
+      } catch (err: any) {
+        if (err.code === "EEXIST") {
+          try {
+            const raw = fs.readFileSync(lockPath, "utf-8");
+            if (!raw.trim()) {
+              fs.unlinkSync(lockPath);
+              continue;
+            }
+            let data: any;
+            try {
+              data = JSON.parse(raw);
+            } catch {
+              fs.unlinkSync(lockPath);
+              continue;
+            }
+            const isDeadPid = data.pid && !isProcessAlive(data.pid);
+            const isOld = data.createdAt && Date.now() - data.createdAt > 300_000;
+            if (isDeadPid || isOld) {
+              fs.unlinkSync(lockPath);
+              continue;
+            }
+          } catch {
+            continue;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        } else {
+          throw new SeepientError(
+            `Failed to acquire lock on ${lockPath}: ${err.message}`,
+            "LOCK_FAILED",
+            true,
+          );
+        }
+      }
+    }
+    throw new SeepientError(
+      `Configuration store locked by active process after ${timeoutMs}ms on ${lockPath}`,
+      "LOCK_TIMEOUT",
+      true,
+    );
+  }
+
+  async getOverlay(): Promise<OverlayDocument> {
     if (this.overlayPath && fs.existsSync(this.overlayPath)) {
       try {
         const raw = fs.readFileSync(this.overlayPath, "utf-8");
-        const parsed = JSON.parse(raw);
-        if (typeof parsed?.revision === "number") {
-          this.currentOverlay = parsed;
-        }
-      } catch (err: any) {
-        throw new SeepientError(
-          `Failed to reload provider configuration overlay from ${this.overlayPath}: ${err.message}`,
-          "CORRUPT_STORAGE",
-          false,
-        );
-      }
+        this.currentOverlay = JSON.parse(raw);
+      } catch {}
     }
+    return this.currentOverlay;
   }
 
   /**
-   * Retrieves the current overlay document.
+   * Validates a patch against the ProviderLayerPatch schema using TypeBox Value.Errors.
+   * Throws a CONFIG_VIOLATION error with JSON-pointer paths if the patch is invalid.
    */
-  async getOverlay(): Promise<OverlayDocument> {
-    this.reloadFromDisk();
-    return JSON.parse(JSON.stringify(this.currentOverlay));
-  }
-
-  private acquireLock(lockPath: string): number {
-    const lockInfo = JSON.stringify({ pid: process.pid, createdAt: Date.now() });
-    try {
-      const fd = fs.openSync(lockPath, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_RDWR, 0o600);
-      fs.writeSync(fd, Buffer.from(lockInfo, "utf8"));
-      fs.fsyncSync(fd);
-      return fd;
-    } catch (err: any) {
-      if (err.code === "EEXIST") {
-        try {
-          const raw = fs.readFileSync(lockPath, "utf8");
-          let isAlive = false;
-          let isStale = true;
-          if (raw.trim().length > 0) {
-            try {
-              const existing = JSON.parse(raw);
-              isAlive = Boolean(existing?.pid && this.isPidAlive(existing.pid));
-              isStale = Date.now() - (existing?.createdAt || 0) > 300_000;
-            } catch {
-              // Corrupt lock file is treated as stale/abandoned
-              isAlive = false;
-              isStale = true;
-            }
-          }
-
-          if (!isAlive || isStale) {
-            const staleTmp = `${lockPath}.stale.${Date.now()}.${Math.random().toString(36).slice(2)}`;
-            try {
-              fs.renameSync(lockPath, staleTmp);
-            } catch {
-              throw new SeepientError(
-                `Configuration store locked by concurrent process: ${lockPath}`,
-                "LOCKED",
-                true,
-              );
-            }
-
-            // Verify the renamed lock matches what we inspected (prevent stealing a fresh lock)
-            try {
-              const renamedRaw = fs.readFileSync(staleTmp, "utf8");
-              if (raw.trim() !== renamedRaw.trim()) {
-                // Lock was replaced with a new one before rename! Restore and abort
-                try {
-                  fs.renameSync(staleTmp, lockPath);
-                } catch {
-                  // Ignore
-                }
-                throw new SeepientError(
-                  `Configuration store locked by concurrent process: ${lockPath}`,
-                  "LOCKED",
-                  true,
-                );
-              }
-              fs.unlinkSync(staleTmp);
-            } catch (vErr: any) {
-              if (vErr instanceof SeepientError) throw vErr;
-              try {
-                fs.unlinkSync(staleTmp);
-              } catch {
-                // Ignore
-              }
-            }
-
-            const fd = fs.openSync(lockPath, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_RDWR, 0o600);
-            fs.writeSync(fd, Buffer.from(lockInfo, "utf8"));
-            fs.fsyncSync(fd);
-            return fd;
-          }
-        } catch (innerErr: any) {
-          if (innerErr instanceof SeepientError) throw innerErr;
-        }
-        throw new SeepientError(
-          `Configuration store locked by concurrent process: ${lockPath}`,
-          "LOCKED",
-          true,
-        );
-      }
-      throw err;
-    }
-  }
-
-  private isPidAlive(pid: number): boolean {
-    try {
-      process.kill(pid, 0);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Validates a patch against the ProviderLayerPatch schema.
-   * Throws a ConfigViolation error if the patch is invalid.
-   */
-  validatePatch(patch: unknown): void {
+  validatePatch(patch: unknown): ConfigViolation[] {
     if (!patch || typeof patch !== "object") {
       throw new SeepientError(
         "ConfigViolation: patch must be a non-null object",
@@ -184,49 +152,76 @@ export class ProviderConfigStore {
     const p = patch as any;
     if (p.providers && typeof p.providers === "object") {
       for (const [providerId, entry] of Object.entries(p.providers)) {
-        if (entry === null || entry === undefined) continue;
-        if (typeof entry !== "object") {
-          throw new SeepientError(
-            `ConfigViolation: provider entry for "${providerId}" must be an object or null`,
-            "CONFIG_VIOLATION",
-            false,
-          );
-        }
-        const e = entry as any;
-        if (e.credential !== undefined && e.credential !== null) {
-          const cred = e.credential;
-          const validKinds = ["env", "seepient", "keychain", "externalsecret", "none"];
-          if (!cred.kind || !validKinds.includes(cred.kind)) {
-            throw new SeepientError(
-              `ConfigViolation: invalid credential kind "${cred.kind}" for provider "${providerId}"`,
-              "CONFIG_VIOLATION",
-              false,
-            );
-          }
-          if (cred.kind === "seepient" && (!cred.id || typeof cred.id !== "string")) {
-            throw new SeepientError(
-              `ConfigViolation: credential of kind "seepient" requires string property "id" for provider "${providerId}"`,
-              "CONFIG_VIOLATION",
-              false,
-            );
-          }
-          if (cred.kind === "env" && (!cred.name || typeof cred.name !== "string")) {
-            throw new SeepientError(
-              `ConfigViolation: credential of kind "env" requires string property "name" for provider "${providerId}"`,
-              "CONFIG_VIOLATION",
-              false,
-            );
-          }
-          if (cred.kind === "keychain" && (!cred.account || typeof cred.account !== "string")) {
-            throw new SeepientError(
-              `ConfigViolation: credential of kind "keychain" requires string property "account" for provider "${providerId}"`,
-              "CONFIG_VIOLATION",
-              false,
-            );
+        if (entry && typeof entry === "object") {
+          const e = entry as any;
+          if (e.credential && typeof e.credential === "object") {
+            const cred = e.credential;
+            if (cred.kind === "seepient" && (!cred.id || typeof cred.id !== "string")) {
+              throw new SeepientError(
+                `ConfigViolation: credential of kind "seepient" requires string property "id" for provider "${providerId}"`,
+                "CONFIG_VIOLATION",
+                false,
+              );
+            }
+            if (cred.kind === "env" && (!cred.name || typeof cred.name !== "string")) {
+              throw new SeepientError(
+                `ConfigViolation: credential of kind "env" requires string property "name" for provider "${providerId}"`,
+                "CONFIG_VIOLATION",
+                false,
+              );
+            }
+            if (cred.kind === "keychain" && (!cred.account || typeof cred.account !== "string")) {
+              throw new SeepientError(
+                `ConfigViolation: credential of kind "keychain" requires string property "account" for provider "${providerId}"`,
+                "CONFIG_VIOLATION",
+                false,
+              );
+            }
           }
         }
       }
     }
+    const errors = [...Value.Errors(ProviderLayerPatchSchema, patch)];
+    if (errors.length > 0) {
+      const violations: ConfigViolation[] = errors.map((e: any) => ({
+        path: e.path ?? "",
+        message: e.message ?? "Validation error",
+        value: e.value,
+      }));
+      throw new SeepientError(
+        `ConfigViolation: patch contains ${errors.length} validation violation(s): ${violations.map((v) => `${v.path}: ${v.message}`).join("; ")}`,
+        "CONFIG_VIOLATION",
+        false,
+      );
+    }
+    return [];
+  }
+
+  /**
+   * Validates an effective config against the ProviderEffectiveConfig schema.
+   */
+  validateEffective(config: unknown): ConfigViolation[] {
+    if (!config || typeof config !== "object") {
+      throw new SeepientError(
+        "ConfigViolation: effective config must be a non-null object",
+        "CONFIG_VIOLATION",
+        false,
+      );
+    }
+    const errors = [...Value.Errors(ProviderEffectiveConfigSchema, config)];
+    if (errors.length > 0) {
+      const violations: ConfigViolation[] = errors.map((e: any) => ({
+        path: e.path ?? "",
+        message: e.message ?? "Validation error",
+        value: e.value,
+      }));
+      throw new SeepientError(
+        `ConfigViolation: effective config contains ${errors.length} validation violation(s): ${violations.map((v) => `${v.path}: ${v.message}`).join("; ")}`,
+        "CONFIG_VIOLATION",
+        false,
+      );
+    }
+    return [];
   }
 
   /**
@@ -238,7 +233,7 @@ export class ProviderConfigStore {
   ): Promise<OverlayDocument> {
     if (expectedRevision === undefined || expectedRevision === null || typeof expectedRevision !== "number") {
       throw new SeepientError(
-        "expectedRevision is required for overlay mutations (If-Match precondition requirement)",
+        "expectedRevision is required for optimistic concurrency control (If-Match).",
         "PRECONDITION_FAILED",
         false,
       );
@@ -249,21 +244,25 @@ export class ProviderConfigStore {
     let lockFd: number | undefined;
     let lockPath: string | undefined;
 
-    if (this.overlayPath) {
-      const dir = path.dirname(this.overlayPath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-      }
-      lockPath = `${this.overlayPath}.lock`;
-      lockFd = this.acquireLock(lockPath);
-    }
-
     try {
-      this.reloadFromDisk();
+      if (this.overlayPath) {
+        const dir = path.dirname(this.overlayPath);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+        }
+        lockPath = `${this.overlayPath}.lock`;
+        lockFd = await this.acquireLock(lockPath);
+
+        // Re-read latest overlay under lock
+        if (fs.existsSync(this.overlayPath)) {
+          const raw = fs.readFileSync(this.overlayPath, "utf-8");
+          this.currentOverlay = JSON.parse(raw);
+        }
+      }
 
       if (expectedRevision !== this.currentOverlay.revision) {
         throw new SeepientError(
-          `Overlay revision mismatch: expected revision ${expectedRevision} but current revision is ${this.currentOverlay.revision}`,
+          `Optimistic concurrency violation: expected revision ${expectedRevision}, but current revision is ${this.currentOverlay.revision}.`,
           "PRECONDITION_FAILED",
           false,
         );
@@ -297,6 +296,13 @@ export class ProviderConfigStore {
         fs.fsyncSync(fd);
         fs.closeSync(fd);
         fs.renameSync(tmp, this.overlayPath);
+
+        // Fsync parent directory for durability
+        try {
+          const dirFd = fs.openSync(path.dirname(this.overlayPath), fs.constants.O_RDONLY);
+          fs.fsyncSync(dirFd);
+          fs.closeSync(dirFd);
+        } catch {}
       }
 
       this.currentOverlay = updatedOverlay;
@@ -316,26 +322,46 @@ export class ProviderConfigStore {
               fs.unlinkSync(lockPath);
             }
           }
-        } catch {
-          // Ignore
-        }
+        } catch {}
       }
     }
   }
 
   /**
-   * Computes the effective config from the merged overlay and default policies.
-   * If baseDefaults is omitted, synthesizes defaults from environment and v1 config.
+   * Evaluates the effective runtime configuration by layering the overlay patch over defaults.
    */
-  async getEffectiveConfig(baseDefaults?: Partial<ProviderEffectiveConfig>): Promise<ProviderEffectiveConfig> {
-    this.reloadFromDisk();
-    const defaults = baseDefaults ?? (await getDefaultBaseConfigAsync());
-    const patch = this.currentOverlay.patch || {};
-    const mergedProviders = applyDeepPatch(defaults.providers || {}, patch.providers || {}) || {};
-    const mergedAssignments = applyDeepPatch(defaults.modelAssignments || {}, patch.modelAssignments || {}) || {};
-    const mergedRetry = applyDeepPatch(defaults.retryPolicy || DEFAULT_RETRY_POLICY, patch.retryPolicy || {}) || DEFAULT_RETRY_POLICY;
+  async getEffectiveConfig(
+    baseDefaultsOrCreds?:
+      | Partial<ProviderEffectiveConfig>
+      | { put: (id: string, record: any, meta?: any) => Promise<void> },
+    customCwd?: string,
+  ): Promise<ProviderEffectiveConfig> {
+    let defaults: ProviderEffectiveConfig;
+    if (baseDefaultsOrCreds && "providers" in baseDefaultsOrCreds) {
+      const standardDefaults = await getDefaultBaseConfigAsync(undefined, customCwd);
+      defaults = {
+        ...standardDefaults,
+        ...baseDefaultsOrCreds,
+        providers: baseDefaultsOrCreds.providers ?? standardDefaults.providers,
+      };
+    } else {
+      defaults = await getDefaultBaseConfigAsync(
+        baseDefaultsOrCreds as { put: (id: string, record: any, meta?: any) => Promise<void> } | undefined,
+        customCwd,
+      );
+    }
+    const overlay = await this.getOverlay();
+    const patch = overlay.patch;
 
-    return {
+    if (!patch || Object.keys(patch).length === 0) {
+      return defaults;
+    }
+
+    const mergedProviders = applyDeepPatch(defaults.providers, patch.providers || {});
+    const mergedAssignments = applyDeepPatch(defaults.modelAssignments, patch.modelAssignments || {});
+    const mergedRetry = applyDeepPatch(defaults.retryPolicy, patch.retryPolicy || {});
+
+    const effective: ProviderEffectiveConfig = {
       schemaVersion: 2,
       revision: this.currentOverlay.revision,
       updatedAt: this.currentOverlay.updatedAt,
@@ -344,31 +370,42 @@ export class ProviderConfigStore {
       retryPolicy: mergedRetry,
       ssrf: patch.ssrf === null ? undefined : (patch.ssrf !== undefined ? (patch.ssrf as any) : defaults.ssrf),
     };
+
+    return effective;
   }
 }
 
 /**
  * Synthesizes default v2 configuration from environment variables and legacy v1 configuration.
  */
-let cachedBaseConfig: ProviderEffectiveConfig | null = null;
+const baseConfigCache = new Map<string, ProviderEffectiveConfig>();
 
 export function clearBaseConfigCache(): void {
-  cachedBaseConfig = null;
+  baseConfigCache.clear();
 }
 
 export async function getDefaultBaseConfigAsync(
   credentialStore?: { put: (id: string, record: any, meta?: any) => Promise<void> },
   customCwd?: string,
 ): Promise<ProviderEffectiveConfig> {
-  if (cachedBaseConfig) {
-    return cachedBaseConfig;
+  const cacheKey = customCwd ?? "default";
+  if (baseConfigCache.has(cacheKey)) {
+    return baseConfigCache.get(cacheKey)!;
   }
-  try {
-    const v1Config = loadMergedConfig(customCwd);
-    const migrationResult = migrateV1ToV2(v1Config);
 
-    if (migrationResult.migratedCredentials && migrationResult.migratedCredentials.length > 0) {
-      const store = credentialStore ?? new CompositeCredentialStore();
+  let v1Config: any;
+  try {
+    v1Config = applyEnvOverrides(loadMergedConfig(customCwd));
+  } catch (err: any) {
+    console.warn(`[Seepient] Failed to parse configuration file: ${err.message}. Using default fallback.`);
+    v1Config = {};
+  }
+
+  const migrationResult = migrateV1ToV2(v1Config);
+
+  if (migrationResult.migratedCredentials && migrationResult.migratedCredentials.length > 0) {
+    const store = credentialStore ?? new CompositeCredentialStore();
+    try {
       await Promise.all(
         migrationResult.migratedCredentials.map((cred) =>
           store.put(
@@ -378,76 +415,36 @@ export async function getDefaultBaseConfigAsync(
           ),
         ),
       );
-    }
-
-    cachedBaseConfig = migrationResult.config;
-    return cachedBaseConfig;
-  } catch {
-      const cat = resolveCuratedCatalog();
-      return {
-        schemaVersion: 2,
-        revision: 0,
-        updatedAt: new Date().toISOString(),
-        providers: {
-          openai: { adapter: "pi-ai", upstreamProvider: "openai", credential: { kind: "env", name: "OPENAI_API_KEY" } },
-          anthropic: { adapter: "pi-ai", upstreamProvider: "anthropic", credential: { kind: "env", name: "ANTHROPIC_API_KEY" } },
-          glm: { adapter: "pi-ai", upstreamProvider: "glm", credential: { kind: "env", name: "GLM_API_KEY" } },
-        },
-        modelAssignments: {
-          text: { standard: { providerAccount: "openai", model: resolveDefaultModelForProvider(cat, "openai", "standard") } },
-          plan: { standard: { providerAccount: "openai", model: resolveDefaultModelForProvider(cat, "openai", "complex") } },
-          vision: { standard: { providerAccount: "openai", model: resolveDefaultModelForProvider(cat, "openai", "standard") } },
-          commit: { standard: { providerAccount: "openai", model: resolveDefaultModelForProvider(cat, "openai", "efficient") } },
-          media: { image: { providerAccount: "openai", model: "gpt-image-2" } },
-        },
-        retryPolicy: DEFAULT_RETRY_POLICY,
-      };
+    } catch (err: any) {
+      throw new SeepientError(
+        `CORRUPT_STORAGE: Failed to persist migrated credentials: ${err.message}`,
+        "CORRUPT_STORAGE",
+        false,
+      );
     }
   }
+
+  baseConfigCache.set(cacheKey, migrationResult.config);
+  return migrationResult.config;
+}
 
 export function getDefaultBaseConfig(
   credentialStore?: { put: (id: string, record: any, meta?: any) => Promise<void> },
   customCwd?: string,
 ): ProviderEffectiveConfig {
-  if (cachedBaseConfig) {
-    return cachedBaseConfig;
+  const cacheKey = customCwd ?? "default";
+  if (baseConfigCache.has(cacheKey)) {
+    return baseConfigCache.get(cacheKey)!;
   }
+
+  let v1Config: any;
   try {
-    const v1Config = loadMergedConfig(customCwd);
-    const migrationResult = migrateV1ToV2(v1Config);
-
-    if (migrationResult.migratedCredentials && migrationResult.migratedCredentials.length > 0) {
-      const store = credentialStore ?? new CompositeCredentialStore();
-      for (const cred of migrationResult.migratedCredentials) {
-        store.put(
-          cred.id,
-          { kind: "api_key", keyValue: cred.keyValue },
-          { source: "migration" },
-        ).catch(() => {});
-      }
-    }
-
-    cachedBaseConfig = migrationResult.config;
-    return cachedBaseConfig;
+    v1Config = applyEnvOverrides(loadMergedConfig(customCwd));
   } catch {
-    const cat = resolveCuratedCatalog();
-    return {
-      schemaVersion: 2,
-      revision: 0,
-      updatedAt: new Date().toISOString(),
-      providers: {
-        openai: { adapter: "pi-ai", upstreamProvider: "openai", credential: { kind: "env", name: "OPENAI_API_KEY" } },
-        anthropic: { adapter: "pi-ai", upstreamProvider: "anthropic", credential: { kind: "env", name: "ANTHROPIC_API_KEY" } },
-        glm: { adapter: "pi-ai", upstreamProvider: "glm", credential: { kind: "env", name: "GLM_API_KEY" } },
-      },
-      modelAssignments: {
-        text: { standard: { providerAccount: "openai", model: resolveDefaultModelForProvider(cat, "openai", "standard") } },
-        plan: { standard: { providerAccount: "openai", model: resolveDefaultModelForProvider(cat, "openai", "complex") } },
-        vision: { standard: { providerAccount: "openai", model: resolveDefaultModelForProvider(cat, "openai", "standard") } },
-        commit: { standard: { providerAccount: "openai", model: resolveDefaultModelForProvider(cat, "openai", "efficient") } },
-        media: { image: { providerAccount: "openai", model: "gpt-image-2" } },
-      },
-      retryPolicy: DEFAULT_RETRY_POLICY,
-    };
+    v1Config = {};
   }
+
+  const migrationResult = migrateV1ToV2(v1Config);
+  baseConfigCache.set(cacheKey, migrationResult.config);
+  return migrationResult.config;
 }

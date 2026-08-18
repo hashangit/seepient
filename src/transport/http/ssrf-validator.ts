@@ -66,8 +66,8 @@ export function isPrivateIp(ip: string): boolean {
     const second = parseInt(parts[1], 10);
     if (second >= 64 && second <= 127) return true;
   }
-  // IPv6 ULA (fc00::/7) and link-local (fe80::/10)
-  if (norm.startsWith("fc") || norm.startsWith("fd") || norm.startsWith("fe80")) {
+  // IPv6 ULA (fc00::/7) and link-local (fe80::/10 covers fe80..febf)
+  if (norm.startsWith("fc") || norm.startsWith("fd") || /^fe[89ab]/i.test(norm)) {
     return true;
   }
   return false;
@@ -76,14 +76,13 @@ export function isPrivateIp(ip: string): boolean {
 export function isMetadataIp(ip: string): boolean {
   const norm = normalizeIp(ip);
   if (norm.startsWith(METADATA_IP_PREFIX)) return true;
-  if (norm.includes("169.254.")) return true;
   return false;
 }
 
 export async function validateEndpointUrl(
   rawUrl: string,
   options: { ssrfAllowPrivate?: boolean } = {},
-): Promise<{ valid: boolean; error?: string }> {
+): Promise<{ valid: boolean; resolvedIps?: string[]; error?: string }> {
   let parsed: URL;
   try {
     parsed = new URL(rawUrl);
@@ -100,8 +99,8 @@ export async function validateEndpointUrl(
   // Explicit check for cloud metadata hostnames
   if (
     hostname === "169.254.169.254" ||
-    hostname.includes("metadata.google.internal") ||
-    hostname.includes("169.254")
+    hostname === "metadata.google.internal" ||
+    hostname.endsWith(".metadata.google.internal")
   ) {
     return { valid: false, error: "Access to cloud metadata endpoints is permanently forbidden" };
   }
@@ -137,5 +136,5 @@ export async function validateEndpointUrl(
     }
   }
 
-  return { valid: true };
+  return { valid: true, resolvedIps: ips };
 }

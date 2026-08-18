@@ -5,7 +5,6 @@
  * Extracted from provider-resolver.ts for single-responsibility.
  */
 
-import { GLM_MODEL_MAP } from "../../capabilities/llm/factory.js";
 import { DEFAULT_MODELS } from "../../foundations/models-catalog.js";
 import type { MultiProviderConfig, ProviderType } from "../../foundations/types.js";
 
@@ -87,20 +86,13 @@ export function resolveDefaultModel(type: ProviderType): string {
   return env("LLM_MODEL") ?? env("SEEPIENT_MODEL") ?? DEFAULT_MODELS[type];
 }
 
-// ── GLM model alias resolution ───────────────────────────────────────
+import { resolveDefaultModel as resolveDefaultModelFromCatalog } from "../../foundations/models-catalog.js";
 
-/**
- * Resolve a GLM model alias or model name to the actual model identifier.
- *
- * Looks up the model in the GLM_MODEL_MAP (e.g. "haiku" -> "glm-4.5-air",
- * "sonnet" -> "glm-4.7", "opus" -> "glm-5.1"). If the model is not found in
- * the map, it is returned unchanged.
- *
- * @param model - Model name or alias to resolve.
- * @returns The resolved model identifier.
- */
 export function resolveGLMModel(model: string): string {
-  return GLM_MODEL_MAP[model] ?? model;
+  if (model === "haiku") return resolveDefaultModelFromCatalog("glm", "efficient");
+  if (model === "sonnet") return resolveDefaultModelFromCatalog("glm", "standard");
+  if (model === "opus") return resolveDefaultModelFromCatalog("glm", "complex");
+  return model;
 }
 
 // ── Full env-based resolution ────────────────────────────────────────

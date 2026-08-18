@@ -79,7 +79,7 @@ describe("Skill Runtime Switching (Site #8, P5.4)", () => {
       skill: { name: "code-review", description: "review code", tags: [] },
       providerSwitchNeeded: true,
       preferredProvider: "anthropic",
-      preferredModel: "claude-3-5-sonnet-20241022",
+      preferredModel: "claude-sonnet-5",
     });
 
     const result2 = await runAgentLoop({
@@ -95,7 +95,7 @@ describe("Skill Runtime Switching (Site #8, P5.4)", () => {
     });
 
     expect(result2.finishReason).toBe("stop");
-    expect(executedModels[1]).toBe("claude-3-5-sonnet-20241022");
+    expect(executedModels[1]).toBe("claude-sonnet-5");
     expect(executedAccounts[1]).toBe("anthropic");
 
     // Restore switcher and verify target returns to gpt-4o

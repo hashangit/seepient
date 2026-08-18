@@ -1,11 +1,10 @@
 import { ProviderType } from './contracts/llm.js';
 import type { UpstreamModel } from './schemas/inference.js';
+import { SeepientError } from './errors.js';
 
 /**
  * Per-model metadata. `contextWindow` is the max context in tokens;
- * `pricing` is USD per 1M tokens (input / output). Pricing is approximate and
- * editable — providers change it often; this is a reasonable default for the
- * footer's cost + context-window display.
+ * `pricing` is USD per 1M tokens (input / output).
  */
 export interface ModelEntry {
   id: string;
@@ -14,180 +13,186 @@ export interface ModelEntry {
   pricing?: { input: number; output: number }; // $ / 1M tokens
 }
 
-const M = (id: string, name: string, contextWindow: number, input: number, output: number): ModelEntry => ({
-  id, name, contextWindow, pricing: { input, output },
-});
-
-export const MODEL_CATALOG: Record<ProviderType, ModelEntry[]> = {
-  'openai-compatible': [], // No curated list — user provides their own model name
-  openai: [
-    M('gpt-5.6-terra', 'GPT-5.6 Terra', 256000, 2.5, 10),
-    M('gpt-5.6-sol', 'GPT-5.6 Sol', 256000, 5, 20),
-    M('gpt-5.6-luna', 'GPT-5.6 Luna', 128000, 0.15, 0.6),
-    M('gpt-4o', 'GPT-4o', 128000, 2.5, 10),
-    M('gpt-4o-mini', 'GPT-4o Mini', 128000, 0.15, 0.6),
-    M('gpt-5.4', 'GPT-5.4', 256000, 2.5, 10),
-    M('gpt-5.4-pro', 'GPT-5.4 Pro', 256000, 5, 20),
-    M('gpt-5.4-mini', 'GPT-5.4 Mini', 128000, 0.15, 0.6),
-  ],
-  anthropic: [
-    M('claude-sonnet-5', 'Claude Sonnet 5', 500000, 3, 15),
-    M('claude-opus-5', 'Claude Opus 5', 500000, 15, 75),
-    M('claude-haiku-4-5', 'Claude Haiku 4.5', 200000, 0.8, 4),
-    M('claude-sonnet-4-6-20260320', 'Claude Sonnet 4.6', 200000, 3, 15),
-    M('claude-opus-4-6-20260320', 'Claude Opus 4.6', 200000, 15, 75),
-  ],
-  glm: [
-    M('glm-5.3', 'GLM-5.3', 256000, 1.5, 4.5),
-    M('glm-4.7', 'GLM-4.7', 128000, 1, 3),
-    M('haiku', 'GLM-4.5 Air', 128000, 0.5, 1.5),
-    M('sonnet', 'GLM-4.7', 128000, 1, 3),
-    M('opus', 'GLM-5.1', 128000, 2, 6),
-  ],
-};
-
 export const CUSTOM_MODEL_VALUE = '__custom__';
 
 /**
+ * Provider alias mapping between Seepient provider types and upstream community catalog identifiers.
+ * e.g. 'glm' in Seepient routes to 'zai' in the Pi/community catalog.
+ */
+export const PROVIDER_ALIASES: Record<string, string> = {
+  glm: 'zai',
+  'openai-compatible': 'openai',
+};
+
+export function normalizeProviderName(provider: string): string {
+  return PROVIDER_ALIASES[provider] || provider;
+}
+
+export type CatalogAccessor = () => readonly UpstreamModel[];
+
+let globalCatalogAccessor: CatalogAccessor | null = null;
+
+export function registerCatalogAccessor(accessor: CatalogAccessor): void {
+  globalCatalogAccessor = accessor;
+}
+
+export function getSyncCatalogSnapshot(): readonly UpstreamModel[] {
+  if (globalCatalogAccessor) {
+    return globalCatalogAccessor();
+  }
+  return [];
+}
+
+/**
  * Dynamically resolves the best default model for a given provider and tier from an UpstreamModel catalog.
+ * Fails loudly with an actionable UNCONFIGURED_PROVIDER error when no candidates match.
  */
 export function resolveDefaultModelForProvider(
   catalog: readonly UpstreamModel[],
   provider: string,
   tier: 'efficient' | 'standard' | 'complex' = 'standard',
 ): string {
+  const aliased = normalizeProviderName(provider);
   const candidates = catalog.filter(
     (m) =>
-      (m.upstreamProvider === provider || (m as any).provider === provider) &&
+      (m.upstreamProvider === provider ||
+        m.upstreamProvider === aliased ||
+        (m as any).provider === provider ||
+        (m as any).provider === aliased) &&
       m.capabilities?.toolUse !== false &&
       m.capabilities?.streaming !== false,
   );
+
   if (candidates.length === 0) {
-    if (provider === 'openai' || provider === 'openai-compatible') return 'gpt-5.6-terra';
-    if (provider === 'anthropic') return 'claude-sonnet-5';
-    if (provider === 'glm') return 'glm-5.3';
-    return 'default';
+    throw new SeepientError(
+      `No candidate models found in catalog for provider "${provider}". Please configure a valid model.`,
+      'UNCONFIGURED_PROVIDER',
+      false,
+    );
   }
 
   if (tier === 'complex') {
-    const reasoning = candidates.find((m) => (m.supportedReasoningLevels?.length ?? 0) > 1);
+    const reasoning =
+      candidates.find((m) => /opus|sol|r1|o1|o3|thinking|max/i.test(m.id)) ||
+      candidates.find((m) => m.supportedReasoningLevels && m.supportedReasoningLevels.length > 1);
     return reasoning ? reasoning.id : candidates[0].id;
   }
+
   if (tier === 'efficient') {
     const fast = candidates.find((m) =>
-      /haiku|flash|luna|mini|27b|8b/i.test(m.id),
+      /haiku|flash|luna|mini|27b|8b|4\.5-air|air/i.test(m.id),
     );
     return fast ? fast.id : candidates[candidates.length - 1].id;
   }
-  // 'standard' workhorse tier
-  const workhorse = candidates.find((m) =>
-    /sonnet|terra|pro|max/i.test(m.id),
-  );
-  return workhorse ? workhorse.id : candidates[0].id;
+
+  if (tier === 'standard') {
+    const standards = candidates.filter((m) =>
+      /sonnet|terra|pro|5\.3|5\.4/i.test(m.id),
+    );
+    if (standards.length > 0) {
+      const highest =
+        standards.find((m) => /sonnet-5|terra|5\.3/i.test(m.id)) ||
+        standards[standards.length - 1];
+      return highest.id;
+    }
+    return candidates[0].id;
+  }
+
+  return candidates[0].id;
 }
 
 /**
- * Default model ID for each provider.
- * Single source of truth — all other files import from here.
+ * Synchronous policy default model resolver helper using available catalog snapshot.
+ */
+export function resolveDefaultModel(
+  provider: string,
+  tier: 'efficient' | 'standard' | 'complex' = 'standard',
+): string {
+  const catalog = getSyncCatalogSnapshot();
+  if (catalog.length > 0) {
+    try {
+      return resolveDefaultModelForProvider(catalog, provider, tier);
+    } catch {}
+  }
+  // Safe fallbacks if catalog is not yet initialized
+  if (provider === 'openai' || provider === 'openai-compatible') return 'gpt-5.6-terra';
+  if (provider === 'anthropic') return 'claude-sonnet-5';
+  if (provider === 'glm') return 'glm-5.3';
+  return 'default';
+}
+
+/**
+ * Look up a model's metadata (context window + pricing) by id across the community catalog snapshot.
+ */
+export function getModelMeta(id?: string): ModelEntry | undefined {
+  if (!id || typeof id !== 'string') return undefined;
+  const catalog = getSyncCatalogSnapshot();
+  const lower = id.toLowerCase();
+  const found = catalog.find(
+    (m) => m.id.toLowerCase() === lower || m.id.toLowerCase().endsWith('/' + lower),
+  );
+  if (!found) return undefined;
+  return {
+    id: found.id,
+    name: found.displayName,
+    contextWindow: found.contextWindow,
+    pricing: found.pricing
+      ? {
+          input: found.pricing.promptPerMillion ?? 0,
+          output: found.pricing.completionPerMillion ?? 0,
+        }
+      : undefined,
+  };
+}
+
+/**
+ * Dynamic policy-backed defaults proxy.
  */
 export const DEFAULT_MODELS: Record<ProviderType, string> = {
-  openai: 'gpt-5.6-terra',
-  'openai-compatible': 'gpt-5.6-terra',
-  anthropic: 'claude-sonnet-5',
-  glm: 'glm-5.3',
+  get openai() {
+    return resolveDefaultModel('openai', 'standard');
+  },
+  get 'openai-compatible'() {
+    return resolveDefaultModel('openai-compatible', 'standard');
+  },
+  get anthropic() {
+    return resolveDefaultModel('anthropic', 'standard');
+  },
+  get glm() {
+    return resolveDefaultModel('glm', 'standard');
+  },
 };
 
-/** Look up a model's metadata (context window + pricing) by id, across providers.
- *  Case-insensitive — model ids may arrive display-cased (e.g. "Opus" vs "opus"). */
-export function getModelMeta(id?: string): ModelEntry | undefined {
-  if (!id || typeof id !== "string") return undefined;
-  const lower = id.toLowerCase();
-  for (const list of Object.values(MODEL_CATALOG)) {
-    const found = list.find((m) => m.id.toLowerCase() === lower);
-    if (found) return found;
-  }
-  return undefined;
-}
-
-export function resolveCuratedCatalog(): UpstreamModel[] {
-  const catalog: UpstreamModel[] = [];
-  for (const [pType, models] of Object.entries(MODEL_CATALOG)) {
-    for (const m of models) {
-      catalog.push({
+/**
+ * Dynamic catalog entries grouped by provider type for CLI setup and TUI.
+ */
+export const MODEL_CATALOG: Record<ProviderType, ModelEntry[]> = new Proxy(
+  {} as Record<ProviderType, ModelEntry[]>,
+  {
+    get(_target, prop: string) {
+      if (typeof prop !== 'string') return undefined;
+      const catalog = getSyncCatalogSnapshot();
+      const aliased = normalizeProviderName(prop);
+      const matched = catalog.filter(
+        (m) => m.upstreamProvider === aliased || m.upstreamProvider === prop,
+      );
+      return matched.map((m) => ({
         id: m.id,
-        upstreamProvider: pType,
-        displayName: m.name,
-        contextWindow: m.contextWindow ?? 128_000,
-        capabilities: {
-          toolUse: true,
-          streaming: true,
-          vision: m.id.includes("vision") || m.id.includes("gpt-5") || m.id.includes("claude-sonnet") || m.id.includes("o3"),
-        },
+        name: m.displayName,
+        contextWindow: m.contextWindow,
         pricing: m.pricing
           ? {
-              promptPerMillion: m.pricing.input,
-              completionPerMillion: m.pricing.output,
+              input: m.pricing.promptPerMillion ?? 0,
+              output: m.pricing.completionPerMillion ?? 0,
             }
           : undefined,
-        provenance: "seepient-curated",
-      });
-    }
-  }
-
-  // Curated image models
-  catalog.push(
-    {
-      id: "dall-e-3",
-      upstreamProvider: "openai",
-      displayName: "DALL-E 3",
-      contextWindow: 4096,
-      capabilities: {
-        toolUse: false,
-        streaming: false,
-        vision: false,
-        imageGenerate: true,
-        imageVariation: false,
-        imageEdit: false,
-        imageMask: false,
-        aspectRatios: ["1:1", "16:9", "9:16"],
-      },
-      provenance: "seepient-curated",
+      }));
     },
-    {
-      id: "dall-e-2",
-      upstreamProvider: "openai",
-      displayName: "DALL-E 2",
-      contextWindow: 4096,
-      capabilities: {
-        toolUse: false,
-        streaming: false,
-        vision: false,
-        imageGenerate: true,
-        imageVariation: true,
-        imageEdit: true,
-        imageMask: true,
-        aspectRatios: ["1:1"],
-      },
-      provenance: "seepient-curated",
+    ownKeys() {
+      return ['openai', 'anthropic', 'glm', 'openai-compatible'];
     },
-    {
-      id: "imagen-3.0-generate-002",
-      upstreamProvider: "google",
-      displayName: "Imagen 3",
-      contextWindow: 4096,
-      capabilities: {
-        toolUse: false,
-        streaming: false,
-        vision: false,
-        imageGenerate: true,
-        imageVariation: false,
-        imageEdit: false,
-        imageMask: false,
-        aspectRatios: ["1:1", "16:9", "9:16", "4:3", "3:4"],
-      },
-      provenance: "seepient-curated",
+    getOwnPropertyDescriptor() {
+      return { enumerable: true, configurable: true };
     },
-  );
-
-  return catalog;
-}
+  },
+);

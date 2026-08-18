@@ -24,7 +24,7 @@ export const UserDeclaredModelSchema = Type.Object({
     video: Type.Optional(Type.Boolean()),
   }),
   supportedReasoningLevels: Type.Optional(Type.Array(ThinkingLevelSchema)),
-  verificationStatus: Type.Literal("unverified"),
+  verificationStatus: Type.Optional(Type.Literal("unverified")),
 });
 export type UserDeclaredModel = Type.Static<typeof UserDeclaredModelSchema>;
 
@@ -33,7 +33,7 @@ export const ProviderEntrySchema = Type.Object({
   adapter: Type.Union([Type.Literal("pi-ai"), Type.Literal("vercel-ai"), Type.String()]),
   upstreamProvider: Type.String(),
   credential: CredentialRefSchema,
-  baseUrl: Type.Optional(Type.String({ format: "uri" })),
+  baseUrl: Type.Optional(Type.String()),
   compat: Type.Optional(
     Type.Union([
       Type.Literal("openai"),
@@ -76,7 +76,7 @@ export const ModelAssignmentOverrideSchema = Type.Object({
 export type ModelAssignmentOverride = Type.Static<typeof ModelAssignmentOverrideSchema>;
 
 export const TieredAssignmentsSchema = Type.Object({
-  standard: ModelAssignmentSchema,
+  standard: Type.Optional(ModelAssignmentSchema),
   efficient: Type.Optional(ModelAssignmentSchema),
   complex: Type.Optional(ModelAssignmentSchema),
 });
@@ -84,7 +84,7 @@ export type TieredAssignments = Type.Static<typeof TieredAssignmentsSchema>;
 
 export const PurposeModelMapSchema = Type.Object({
   plan: Type.Optional(TieredAssignmentsSchema),
-  text: TieredAssignmentsSchema,
+  text: Type.Optional(TieredAssignmentsSchema),
   coding: Type.Optional(TieredAssignmentsSchema),
   vision: Type.Optional(TieredAssignmentsSchema),
   commit: Type.Optional(TieredAssignmentsSchema),
@@ -102,14 +102,14 @@ export type PurposeModelMap = Type.Static<typeof PurposeModelMapSchema>;
 // ── Retry Policy ──────────────────────────────────────────────────────────
 export const RetryPolicySchema = Type.Object({
   maxAttempts: Type.Integer({ minimum: 1, maximum: 5, default: 3 }),
-  operationTimeoutMs: Type.Integer({ minimum: 1000, maximum: 300_000, default: 60_000 }),
-  streamingIdleTimeoutMs: Type.Integer({ minimum: 1000, maximum: 120_000, default: 30_000 }),
-  backoffBaseMs: Type.Integer({ minimum: 100, maximum: 10_000, default: 500 }),
+  operationTimeoutMs: Type.Integer({ minimum: 0, maximum: 300_000, default: 60_000 }),
+  streamingIdleTimeoutMs: Type.Integer({ minimum: 0, maximum: 120_000, default: 30_000 }),
+  backoffBaseMs: Type.Integer({ minimum: 0, maximum: 10_000, default: 500 }),
   backoffMultiplier: Type.Number({ minimum: 1, maximum: 4, default: 2 }),
   backoffJitter: Type.Number({ minimum: 0, maximum: 1, default: 0.25 }),
-  backoffCapMs: Type.Integer({ minimum: 1000, maximum: 120_000, default: 30_000 }),
+  backoffCapMs: Type.Integer({ minimum: 0, maximum: 120_000, default: 30_000 }),
   cooldownThreshold: Type.Integer({ minimum: 1, maximum: 10, default: 3 }),
-  cooldownDurationMs: Type.Integer({ minimum: 1000, maximum: 600_000, default: 60_000 }),
+  cooldownDurationMs: Type.Integer({ minimum: 0, maximum: 600_000, default: 60_000 }),
 });
 export type RetryPolicy = Type.Static<typeof RetryPolicySchema>;
 
@@ -133,8 +133,14 @@ export const SsrfPolicySchema = Type.Object({
     Type.Union([Type.Literal("http:"), Type.Literal("https:")]),
     { default: ["https:"] },
   ),
+  customDnsResolver: Type.Optional(Type.String()),
 });
 export type SsrfPolicy = Type.Static<typeof SsrfPolicySchema>;
+
+export const DEFAULT_SSRF_POLICY: SsrfPolicy = {
+  allowPrivateNetworks: false,
+  allowedProtocols: ["https:"],
+};
 
 // ── Effective Config ──────────────────────────────────────────────────────
 export const ProviderEffectiveConfigSchema = Type.Object({
@@ -156,11 +162,11 @@ export const NullableHeadersPatchSchema = Type.Optional(
   ]),
 );
 
-export const ProviderEntryPatchSchema = Type.Object({
+export const ProviderEntryPatchSchema = Type.Partial(Type.Object({
   adapter: Nullable(Type.Union([Type.Literal("pi-ai"), Type.Literal("vercel-ai"), Type.String()])),
   upstreamProvider: Nullable(Type.String()),
   credential: Nullable(CredentialRefSchema),
-  baseUrl: Nullable(Type.String({ format: "uri" })),
+  baseUrl: Nullable(Type.String()),
   compat: Nullable(
     Type.Union([
       Type.Literal("openai"),
@@ -175,10 +181,10 @@ export const ProviderEntryPatchSchema = Type.Object({
   tls: Nullable(Type.Object({ rejectUnauthorized: Type.Boolean() })),
   ssrfAllowPrivate: Nullable(Type.Boolean()),
   models: Nullable(Type.Record(Type.String(), UserDeclaredModelSchema)),
-});
+}));
 export type ProviderEntryPatch = Type.Static<typeof ProviderEntryPatchSchema>;
 
-export const ModelAssignmentPatchSchema = Type.Object({
+export const ModelAssignmentPatchSchema = Type.Partial(Type.Object({
   providerAccount: Nullable(Type.String()),
   model: Nullable(Type.String()),
   thinkingLevel: Nullable(ThinkingLevelSchema),
@@ -191,53 +197,53 @@ export const ModelAssignmentPatchSchema = Type.Object({
       }),
     ),
   ),
-});
+}));
 export type ModelAssignmentPatch = Type.Static<typeof ModelAssignmentPatchSchema>;
 
-export const TieredAssignmentsPatchSchema = Type.Object({
+export const TieredAssignmentsPatchSchema = Type.Partial(Type.Object({
   standard: Nullable(ModelAssignmentPatchSchema),
   efficient: Nullable(ModelAssignmentPatchSchema),
   complex: Nullable(ModelAssignmentPatchSchema),
-});
+}));
 export type TieredAssignmentsPatch = Type.Static<typeof TieredAssignmentsPatchSchema>;
 
-export const PurposeModelMapPatchSchema = Type.Object({
+export const PurposeModelMapPatchSchema = Type.Partial(Type.Object({
   plan: Nullable(TieredAssignmentsPatchSchema),
   text: Nullable(TieredAssignmentsPatchSchema),
   coding: Nullable(TieredAssignmentsPatchSchema),
   vision: Nullable(TieredAssignmentsPatchSchema),
   commit: Nullable(TieredAssignmentsPatchSchema),
   media: Nullable(
-    Type.Object({
+    Type.Partial(Type.Object({
       image: Nullable(ModelAssignmentPatchSchema),
       speech: Nullable(ModelAssignmentPatchSchema),
       transcription: Nullable(ModelAssignmentPatchSchema),
       video: Nullable(ModelAssignmentPatchSchema),
-    }),
+    })),
   ),
-});
+}));
 export type PurposeModelMapPatch = Type.Static<typeof PurposeModelMapPatchSchema>;
 
-export const RetryPolicyPatchSchema = Type.Object({
+export const RetryPolicyPatchSchema = Type.Partial(Type.Object({
   maxAttempts: Nullable(Type.Integer({ minimum: 1, maximum: 5 })),
-  operationTimeoutMs: Nullable(Type.Integer({ minimum: 1000, maximum: 300_000 })),
-  streamingIdleTimeoutMs: Nullable(Type.Integer({ minimum: 1000, maximum: 120_000 })),
-  backoffBaseMs: Nullable(Type.Integer({ minimum: 100, maximum: 10_000 })),
+  operationTimeoutMs: Nullable(Type.Integer({ minimum: 0, maximum: 300_000 })),
+  streamingIdleTimeoutMs: Nullable(Type.Integer({ minimum: 0, maximum: 120_000 })),
+  backoffBaseMs: Nullable(Type.Integer({ minimum: 0, maximum: 10_000 })),
   backoffMultiplier: Nullable(Type.Number({ minimum: 1, maximum: 4 })),
   backoffJitter: Nullable(Type.Number({ minimum: 0, maximum: 1 })),
-  backoffCapMs: Nullable(Type.Integer({ minimum: 1000, maximum: 120_000 })),
+  backoffCapMs: Nullable(Type.Integer({ minimum: 0, maximum: 120_000 })),
   cooldownThreshold: Nullable(Type.Integer({ minimum: 1, maximum: 10 })),
-  cooldownDurationMs: Nullable(Type.Integer({ minimum: 1000, maximum: 600_000 })),
-});
+  cooldownDurationMs: Nullable(Type.Integer({ minimum: 0, maximum: 600_000 })),
+}));
 export type RetryPolicyPatch = Type.Static<typeof RetryPolicyPatchSchema>;
 
-export const ProviderLayerPatchSchema = Type.Object({
+export const ProviderLayerPatchSchema = Type.Partial(Type.Object({
   schemaVersion: Type.Optional(Type.Literal(2)),
   providers: Nullable(Type.Record(Type.String(), Type.Union([ProviderEntryPatchSchema, Type.Null()]))),
   modelAssignments: Nullable(PurposeModelMapPatchSchema),
   retryPolicy: Nullable(RetryPolicyPatchSchema),
   ssrf: Nullable(SsrfPolicySchema),
-});
+}));
 export type ProviderLayerPatch = Type.Static<typeof ProviderLayerPatchSchema>;
 
 export const OverlayDocumentSchema = Type.Object({

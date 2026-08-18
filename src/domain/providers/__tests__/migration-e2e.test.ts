@@ -59,7 +59,7 @@ describe("Legacy Migration & Env Synthesis E2E (Discriminating GLM Test)", () =>
       kind: "seepient",
       id: "glm-migrated",
     });
-    expect(effective.modelAssignments.text.standard).toEqual({
+    expect(effective.modelAssignments.text?.standard).toEqual({
       providerAccount: "glm",
       model: "glm-4.7",
     });

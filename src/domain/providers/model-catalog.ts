@@ -6,7 +6,9 @@ import type { CatalogSource } from "../../foundations/contracts/backend-ports.js
 import { mergeCatalogs } from "../../capabilities/inference/catalog-merge.js";
 import { DiscoveryCache } from "./discovery-cache.js";
 
-import { PiCatalogSource } from "../../vendors/pi-ai/pi-catalog-source.js";
+import { PiCatalogSource, getSyncBuiltinCatalog } from "../../vendors/pi-ai/pi-catalog-source.js";
+
+export { getSyncBuiltinCatalog };
 
 export interface AvailableModel extends UpstreamModel {
   reachableVia: string[]; // configured account IDs that can reach this model

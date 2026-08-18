@@ -15,18 +15,25 @@ import type {
   ImageResult,
 } from "../../foundations/schemas/inference.js";
 import { InferenceError } from "../../foundations/errors.js";
+import { classifyInferenceError } from "../../foundations/errors/error-classifier.js";
 
 /** Combine AbortSignal and timeoutMs into a single effective AbortSignal */
-function resolveSignal(opts?: InferenceOptions): { signal?: AbortSignal; cleanup: () => void } {
+function resolveSignal(opts?: InferenceOptions): {
+  signal?: AbortSignal;
+  cleanup: () => void;
+  isTimeout: () => boolean;
+} {
   if (!opts?.timeoutMs && !opts?.signal) {
-    return { signal: undefined, cleanup: () => {} };
+    return { signal: undefined, cleanup: () => {}, isTimeout: () => false };
   }
 
   const controller = new AbortController();
   let timer: NodeJS.Timeout | undefined;
+  let timedOut = false;
 
   if (opts.timeoutMs && opts.timeoutMs > 0) {
     timer = setTimeout(() => {
+      timedOut = true;
       controller.abort(new Error(`Operation timed out after ${opts.timeoutMs}ms`));
     }, opts.timeoutMs);
   }
@@ -46,6 +53,7 @@ function resolveSignal(opts?: InferenceOptions): { signal?: AbortSignal; cleanup
       if (timer) clearTimeout(timer);
       if (opts.signal) opts.signal.removeEventListener("abort", onAbort);
     },
+    isTimeout: () => timedOut || (opts?.signal?.reason?.name === "TimeoutError"),
   };
 }
 
@@ -65,16 +73,17 @@ export class PiImageRaw implements ImageBackend {
     opts?: InferenceOptions,
   ): Promise<ImageResult> {
     const lease = target.credential.acquireLease();
-    const { signal, cleanup } = resolveSignal(opts);
+    const { signal, cleanup, isTimeout } = resolveSignal(opts);
 
     try {
       if (signal?.aborted) {
+        const timeout = isTimeout();
         throw new InferenceError({
-          code: "timeout",
-          message: signal.reason?.message || "Operation aborted",
+          code: timeout ? "timeout" : "invalid_request",
+          message: signal.reason?.message || (timeout ? "Pi image request timed out" : "Operation aborted"),
           providerAccount: target.providerAccount,
           model: target.model,
-          retryable: false,
+          retryable: timeout,
         });
       }
 
@@ -124,21 +133,24 @@ export class PiImageRaw implements ImageBackend {
         );
       } catch (err: any) {
         if (signal?.aborted) {
+          const timeout = isTimeout();
           throw new InferenceError({
-            code: "timeout",
-            message: signal.reason?.message || "Pi image request timed out",
+            code: timeout ? "timeout" : "invalid_request",
+            message: signal.reason?.message || (timeout ? "Pi image request timed out" : "Pi image request aborted by user"),
             providerAccount: target.providerAccount,
             model: target.model,
-            retryable: true,
+            retryable: timeout,
             cause: err,
           });
         }
+        const classified = classifyInferenceError(err?.message || "", false);
         throw new InferenceError({
-          code: "network",
+          code: classified.code,
           message: err?.message || "Pi image generation failed",
           providerAccount: target.providerAccount,
           model: target.model,
-          retryable: true,
+          retryable: classified.retryable,
+          retryAfterMs: classified.retryAfterMs,
           cause: err,
         });
       }
