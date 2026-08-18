@@ -61,20 +61,41 @@ export async function generateImagesStructured(
 ): Promise<StructuredImageResult> {
   if (config.runtime) {
     try {
+      const mode = req.mode ?? (req.imagePath && req.maskPath ? "edit" : req.imagePath ? "variation" : "text-to-image");
+
+      if (mode === "text-to-image" && (!req.prompt || req.prompt.trim() === "")) {
+        return {
+          success: false,
+          files: [],
+          error: "Error: Prompt cannot be empty for image generation.",
+          errorType: "invalid_request",
+          status: 400,
+        };
+      }
+
+      if ((mode === "variation" || mode === "edit") && (!req.imagePath || !fs.existsSync(req.imagePath))) {
+        return {
+          success: false,
+          files: [],
+          error: `Error: Input image path "${req.imagePath}" not found.`,
+          errorType: "invalid_request",
+          status: 400,
+        };
+      }
+
       const runtime = config.runtime;
       const snapshot = await runtime.createTurnSnapshot();
-      const plan = await runtime.resolvePlan(
-        snapshot,
-        "image-generation",
-        undefined,
-        req.model ? { model: req.model } : undefined,
-      );
-      const operation = req.mode === "variation" ? "variation" : req.mode === "edit" ? "edit" : "generate";
+      const plan = await runtime.resolvePlan(snapshot, "image-generation");
+      const operation = mode === "variation" ? "variation" : mode === "edit" ? "edit" : "generate";
 
-      let aspectRatio: any;
-      if (req.size === "1792x1024" || req.size === "1536x1024") aspectRatio = "16:9";
-      else if (req.size === "1024x1792" || req.size === "1024x1536") aspectRatio = "9:16";
-      else if (req.size === "1024x1024") aspectRatio = "1:1";
+      let aspectRatio: any = "1:1";
+      if (req.size === "1792x1024" || req.size === "1536x1024" || req.size === "2560x1440") {
+        aspectRatio = "16:9";
+      } else if (req.size === "1024x1792" || req.size === "1024x1536" || req.size === "1440x2560") {
+        aspectRatio = "9:16";
+      } else if (req.size === "1024x1024" || req.size === "2048x2048" || req.size === "512x512" || req.size === "256x256") {
+        aspectRatio = "1:1";
+      }
 
       let inputImage: any;
       if (req.imagePath && fs.existsSync(req.imagePath)) {
@@ -102,6 +123,7 @@ export async function generateImagesStructured(
           count: req.n || 1,
           qualityPreset: req.quality === "hd" || req.quality === "high" ? "high" : "standard",
           aspectRatio,
+          style: req.style === "natural" ? "natural" : "vivid",
           inputImage,
           mask,
         },
@@ -121,8 +143,9 @@ export async function generateImagesStructured(
         const img = result.images[i];
         const fileName = `generated-${Date.now()}-${i + 1}.png`;
         const filePath = path.join(resolvedOutputDir, fileName);
-        if (img.base64) {
-          fs.writeFileSync(filePath, Buffer.from(img.base64, "base64"));
+        const rawBase64 = (img as any).bytes ?? img.base64;
+        if (rawBase64) {
+          fs.writeFileSync(filePath, Buffer.from(rawBase64, "base64"));
           generatedFiles.push(filePath);
         } else if (img.url) {
           await downloadImage(img.url, filePath, config.signal);
@@ -135,12 +158,32 @@ export async function generateImagesStructured(
         files: generatedFiles,
       };
     } catch (err: any) {
+      let errorType: StructuredImageResult["errorType"] = "invalid_request";
+      let status = 400;
+      if (err.code === "auth") {
+        errorType = "auth";
+        status = 401;
+      } else if (err.code === "rate_limit") {
+        errorType = "rate_limit";
+        status = 429;
+      } else if (err.code === "timeout") {
+        errorType = "timeout";
+        status = 408;
+      } else if (
+        err.code === "provider_unavailable" ||
+        err.code === "network" ||
+        err.code === "overload"
+      ) {
+        errorType = "provider_unavailable";
+        status = 503;
+      }
+
       return {
         success: false,
         files: [],
         error: `Error generating image: ${err.message}`,
-        errorType: err.code === "auth" ? "auth" : "invalid_request",
-        status: err.code === "auth" ? 401 : 400,
+        errorType,
+        status,
       };
     }
   }
@@ -473,6 +516,7 @@ RULES:
       if (optimizedText.trim()) {
         return optimizedText.trim();
       }
+      return "Error: Failed to generate optimized prompt from runtime.";
     } catch (err: any) {
       return `Error optimizing prompt: ${err.message}`;
     }

@@ -121,16 +121,33 @@ export function canonicalToPiContext(
       };
       piMessages.push(assistantMsg);
     } else if (msg.role === "tool") {
-      for (const block of msg.content) {
-        const textParts: PiTextContent[] = block.content
-          .filter((c): c is { type: "text"; text: string } => c.type === "text")
-          .map((c) => ({ type: "text" as const, text: c.text }));
+      const blocks: any[] = Array.isArray(msg.content)
+        ? msg.content
+        : [
+            {
+              type: "tool_result",
+              toolUseId: (msg as any).toolCallId ?? (msg as any).id ?? "tool-call",
+              content: [{ type: "text", text: String((msg as any).content ?? "") }],
+            },
+          ];
 
-        const toolName = toolNameMap.get(block.toolUseId) ?? "tool";
+      for (const block of blocks) {
+        if (!block) continue;
+        const toolUseId = block.toolUseId ?? (msg as any).toolCallId ?? "tool-call";
+        let textParts: PiTextContent[] = [];
+        if (Array.isArray(block.content)) {
+          textParts = block.content
+            .filter((c: any): c is { type: "text"; text: string } => c && c.type === "text")
+            .map((c: any) => ({ type: "text" as const, text: String(c.text ?? "") }));
+        } else if (typeof block.content === "string") {
+          textParts = [{ type: "text" as const, text: block.content }];
+        }
+
+        const toolName = toolNameMap.get(toolUseId) ?? "tool";
 
         const toolResultMsg: PiToolResultMessage = {
           role: "toolResult",
-          toolCallId: block.toolUseId,
+          toolCallId: toolUseId,
           toolName,
           content: textParts.length > 0 ? textParts : [{ type: "text", text: "" }],
           isError: block.isError ?? false,

@@ -26,11 +26,13 @@ import {
   DEFAULT_RETRY_POLICY,
 } from "../../foundations/schemas/provider-config.js";
 
+import type { InferenceAdapter } from "../../foundations/contracts/backend-ports.js";
+
 export interface ProviderRuntimeOptions {
   configStore?: ProviderConfigStore;
   credentialStore?: CredentialStore;
   modelCatalog?: ModelCatalog;
-  adapter?: AggregateInferenceAdapter;
+  adapter?: AggregateInferenceAdapter | InferenceAdapter;
 }
 
 export interface CapabilityHealth {
@@ -46,7 +48,7 @@ export class ProviderRuntime {
   readonly configStore: ProviderConfigStore;
   readonly credentialStore: CredentialStore;
   readonly modelCatalog: ModelCatalog;
-  readonly adapter: AggregateInferenceAdapter;
+  readonly adapter: AggregateInferenceAdapter | InferenceAdapter;
 
   private healthMap = new Map<string, CapabilityHealth>();
 
@@ -97,7 +99,9 @@ export class ProviderRuntime {
     const catalog = await this.modelCatalog.getAllModels(userDeclared);
 
     // Synchronize catalog with aggregate adapter so dynamic models route accurately
-    this.adapter.updateCatalog(catalog);
+    if ("updateCatalog" in this.adapter && typeof (this.adapter as any).updateCatalog === "function") {
+      (this.adapter as any).updateCatalog(catalog);
+    }
 
     return {
       revision: config.revision,
@@ -281,13 +285,51 @@ export class ProviderRuntime {
     req: ImageRequest,
     opts?: InferenceOptions,
   ): Promise<ImageResult> {
-    const targets = [plan.selectedTarget, ...plan.failureTargets];
-    const retryPolicy = plan.snapshot?.config?.retryPolicy ?? DEFAULT_RETRY_POLICY;
+    const op = req.operation ?? "generate";
+    const capKey =
+      op === "variation"
+        ? "imageVariation"
+        : op === "edit"
+          ? "imageEdit"
+          : op === "mask"
+            ? "imageMask"
+            : "imageGenerate";
 
+    const allTargets = [plan.selectedTarget, ...plan.failureTargets];
+    const catalog = plan.snapshot?.catalog || [];
+
+    // Filter targets that support the requested operation
+    const targets = allTargets.filter((t) => {
+      const cm = catalog.find(
+        (m) =>
+          m.id === t.model &&
+          (m.upstreamProvider === t.upstreamProvider || m.upstreamProvider === t.providerAccount),
+      );
+      if (!cm) return true;
+      return (cm.capabilities as any)[capKey] !== false;
+    });
+
+    if (targets.length === 0) {
+      throw new InferenceError({
+        code: "unsupported_capability",
+        message: `No configured target supports image operation "${op}" for target ${plan.selectedTarget.providerAccount}:${plan.selectedTarget.model}`,
+        providerAccount: plan.selectedTarget.providerAccount,
+        model: plan.selectedTarget.model,
+        retryable: false,
+      });
+    }
+
+    const retryPolicy = plan.snapshot?.config?.retryPolicy ?? DEFAULT_RETRY_POLICY;
     let lastError: any;
 
     for (let i = 0; i < targets.length; i++) {
       const target = targets[i];
+
+      const health = this.getHealth(target.providerAccount, "image");
+      if (health.cooldownUntil && health.cooldownUntil > Date.now() && i < targets.length - 1) {
+        continue;
+      }
+
       try {
         const bound = await this.adapter.bind(target, plan.snapshot?.catalog);
         if (!bound.images) {
@@ -312,9 +354,11 @@ export class ProviderRuntime {
           retryPolicy.cooldownDurationMs,
         );
 
-        const isUnsupportedCap = err instanceof InferenceError && err.code === "unsupported_capability";
+        const isUnsupportedCap =
+          err instanceof InferenceError && err.code === "unsupported_capability";
         const isRetryable = err instanceof InferenceError ? err.retryable : true;
-        const canFallback = (isRetryable || isUnsupportedCap) && !opts?.signal?.aborted && i < targets.length - 1;
+        const canFallback =
+          (isRetryable || isUnsupportedCap) && !opts?.signal?.aborted && i < targets.length - 1;
 
         if (!canFallback) {
           throw err;
@@ -353,6 +397,16 @@ export class ProviderRuntime {
       message: "Video generation is coming soon in v2",
       retryable: false,
     });
+  }
+
+  /**
+   * Updates the provider configuration overlay with optimistic concurrency control.
+   */
+  async updateOverlay(
+    patch: import("../../foundations/schemas/provider-config.js").ProviderLayerPatch,
+    expectedRevision: number,
+  ): Promise<import("../../foundations/schemas/provider-config.js").OverlayDocument> {
+    return this.configStore.updateOverlay(patch, expectedRevision);
   }
 }
 

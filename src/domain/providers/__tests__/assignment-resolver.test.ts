@@ -178,7 +178,7 @@ describe("AssignmentResolver (QS-P4.5)", () => {
     }
   });
 
-  it("validates capabilities of failureTargets during resolution", async () => {
+  it("skips invalid or incapable failureTargets without failing primary target", async () => {
     const snap: TurnSnapshot = {
       ...mockSnapshot,
       catalog: [
@@ -216,8 +216,8 @@ describe("AssignmentResolver (QS-P4.5)", () => {
       },
     };
 
-    await expect(
-      resolveInvocationPlan(snap, credentialStore, "text", "standard"),
-    ).rejects.toThrow(/does not support tool use/);
+    const plan = await resolveInvocationPlan(snap, credentialStore, "text", "standard");
+    expect(plan.selectedTarget.model).toBe("gpt-4o");
+    expect(plan.failureTargets.length).toBe(0); // Incapable fallback was safely skipped
   });
 });

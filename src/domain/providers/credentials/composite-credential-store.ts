@@ -74,6 +74,22 @@ export class CompositeCredentialStore implements CredentialStore {
     }
 
     if (ref.kind === "seepient") {
+      try {
+        const handle = await this.fileStore.resolve(ref);
+        if (await handle.isResolvable()) {
+          return handle;
+        }
+      } catch {
+        // Attempt keychain lookup if file store fails
+      }
+      try {
+        const handle = await this.keychainStore.resolve(ref);
+        if (await handle.isResolvable()) {
+          return handle;
+        }
+      } catch {
+        // Fall through to error
+      }
       return this.fileStore.resolve(ref);
     }
 
@@ -101,7 +117,9 @@ export class CompositeCredentialStore implements CredentialStore {
   }
 
   async get(id: string): Promise<CredentialRecord | undefined> {
-    return this.getWriteStore().get(id);
+    const fromWrite = await this.getWriteStore().get(id);
+    if (fromWrite) return fromWrite;
+    return this.fileStore.get(id);
   }
 
   async put(id: string, record: PersistedCredentialRecord, meta?: CredentialMeta): Promise<void> {

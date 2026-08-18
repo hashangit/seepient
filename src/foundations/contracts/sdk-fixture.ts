@@ -18,6 +18,7 @@ import type {
 } from "../schemas/provider-config.js";
 import type { CredentialStore } from "./credential-store.js";
 import type { CredentialRef } from "../schemas/credential-store.js";
+import type { InferenceAdapter } from "./backend-ports.js";
 
 export type ProviderId = string;
 export type { StopReason };
@@ -53,6 +54,7 @@ export interface CreateSeepientOptions {
     cooldownDurationMs: number;
   }>;
   strict?: boolean;
+  adapter?: InferenceAdapter;
 }
 
 // ── Override (explicit precedence) ────────────────────────────────────

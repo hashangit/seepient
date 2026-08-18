@@ -7,6 +7,7 @@ export const ThinkingLevelSchema = Type.Union([
   Type.Literal("low"),
   Type.Literal("medium"),
   Type.Literal("high"),
+  Type.Literal("xhigh"),
   Type.Literal("max"),
 ]);
 export type ThinkingLevel = Type.Static<typeof ThinkingLevelSchema>;

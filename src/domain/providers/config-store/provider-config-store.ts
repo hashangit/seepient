@@ -166,6 +166,66 @@ export class ProviderConfigStore {
   }
 
   /**
+   * Validates a patch against the ProviderLayerPatch schema.
+   * Throws a ConfigViolation error if the patch is invalid.
+   */
+  validatePatch(patch: unknown): void {
+    if (!patch || typeof patch !== "object") {
+      throw new SeepientError(
+        "ConfigViolation: patch must be a non-null object",
+        "CONFIG_VIOLATION",
+        false,
+      );
+    }
+    const p = patch as any;
+    if (p.providers && typeof p.providers === "object") {
+      for (const [providerId, entry] of Object.entries(p.providers)) {
+        if (entry === null || entry === undefined) continue;
+        if (typeof entry !== "object") {
+          throw new SeepientError(
+            `ConfigViolation: provider entry for "${providerId}" must be an object or null`,
+            "CONFIG_VIOLATION",
+            false,
+          );
+        }
+        const e = entry as any;
+        if (e.credential !== undefined && e.credential !== null) {
+          const cred = e.credential;
+          const validKinds = ["env", "seepient", "keychain", "externalsecret", "none"];
+          if (!cred.kind || !validKinds.includes(cred.kind)) {
+            throw new SeepientError(
+              `ConfigViolation: invalid credential kind "${cred.kind}" for provider "${providerId}"`,
+              "CONFIG_VIOLATION",
+              false,
+            );
+          }
+          if (cred.kind === "seepient" && (!cred.id || typeof cred.id !== "string")) {
+            throw new SeepientError(
+              `ConfigViolation: credential of kind "seepient" requires string property "id" for provider "${providerId}"`,
+              "CONFIG_VIOLATION",
+              false,
+            );
+          }
+          if (cred.kind === "env" && (!cred.name || typeof cred.name !== "string")) {
+            throw new SeepientError(
+              `ConfigViolation: credential of kind "env" requires string property "name" for provider "${providerId}"`,
+              "CONFIG_VIOLATION",
+              false,
+            );
+          }
+          if (cred.kind === "keychain" && (!cred.account || typeof cred.account !== "string")) {
+            throw new SeepientError(
+              `ConfigViolation: credential of kind "keychain" requires string property "account" for provider "${providerId}"`,
+              "CONFIG_VIOLATION",
+              false,
+            );
+          }
+        }
+      }
+    }
+  }
+
+  /**
    * Applies a deep patch to the overlay document with mandatory optimistic concurrency check (If-Match).
    */
   async updateOverlay(
@@ -179,6 +239,8 @@ export class ProviderConfigStore {
         false,
       );
     }
+
+    this.validatePatch(patch);
 
     let lockFd: number | undefined;
     let lockPath: string | undefined;
@@ -224,18 +286,14 @@ export class ProviderConfigStore {
       }
 
       this.currentOverlay = updatedOverlay;
-      return JSON.parse(JSON.stringify(this.currentOverlay));
+      return this.currentOverlay;
     } finally {
-      if (lockFd !== undefined && lockPath) {
+      if (lockFd !== undefined) {
         try {
           fs.closeSync(lockFd);
-        } catch {
-          // Ignore
-        }
-        try {
-          if (fs.existsSync(lockPath)) {
+          if (lockPath && fs.existsSync(lockPath)) {
             const raw = fs.readFileSync(lockPath, "utf8");
-            if (raw.trim().length > 0) {
+            if (raw) {
               const existing = JSON.parse(raw);
               if (existing?.pid === process.pid) {
                 fs.unlinkSync(lockPath);
@@ -253,13 +311,15 @@ export class ProviderConfigStore {
 
   /**
    * Computes the effective config from the merged overlay and default policies.
+   * If baseDefaults is omitted, synthesizes defaults from environment and v1 config.
    */
   async getEffectiveConfig(baseDefaults?: Partial<ProviderEffectiveConfig>): Promise<ProviderEffectiveConfig> {
     this.reloadFromDisk();
+    const defaults = baseDefaults ?? getDefaultBaseConfig();
     const patch = this.currentOverlay.patch || {};
-    const mergedProviders = applyDeepPatch(baseDefaults?.providers || {}, patch.providers || {}) || {};
-    const mergedAssignments = applyDeepPatch(baseDefaults?.modelAssignments || {}, patch.modelAssignments || {}) || {};
-    const mergedRetry = applyDeepPatch(baseDefaults?.retryPolicy || DEFAULT_RETRY_POLICY, patch.retryPolicy || {}) || DEFAULT_RETRY_POLICY;
+    const mergedProviders = applyDeepPatch(defaults.providers || {}, patch.providers || {}) || {};
+    const mergedAssignments = applyDeepPatch(defaults.modelAssignments || {}, patch.modelAssignments || {}) || {};
+    const mergedRetry = applyDeepPatch(defaults.retryPolicy || DEFAULT_RETRY_POLICY, patch.retryPolicy || {}) || DEFAULT_RETRY_POLICY;
 
     return {
       schemaVersion: 2,
@@ -268,7 +328,38 @@ export class ProviderConfigStore {
       providers: mergedProviders,
       modelAssignments: mergedAssignments,
       retryPolicy: mergedRetry,
-      ssrf: patch.ssrf === null ? undefined : (patch.ssrf !== undefined ? (patch.ssrf as any) : baseDefaults?.ssrf),
+      ssrf: patch.ssrf === null ? undefined : (patch.ssrf !== undefined ? (patch.ssrf as any) : defaults.ssrf),
+    };
+  }
+}
+
+/**
+ * Synthesizes default v2 configuration from environment variables and legacy v1 configuration.
+ */
+export function getDefaultBaseConfig(): ProviderEffectiveConfig {
+  try {
+    const { loadConfig } = require("../../../foundations/config.js");
+    const { migrateV1ToV2 } = require("../migration.js");
+    const v1Config = loadConfig();
+    return migrateV1ToV2(v1Config).config;
+  } catch {
+    return {
+      schemaVersion: 2,
+      revision: 0,
+      updatedAt: new Date().toISOString(),
+      providers: {
+        openai: { adapter: "pi-ai", upstreamProvider: "openai", credential: { kind: "env", name: "OPENAI_API_KEY" } },
+        anthropic: { adapter: "pi-ai", upstreamProvider: "anthropic", credential: { kind: "env", name: "ANTHROPIC_API_KEY" } },
+        glm: { adapter: "pi-ai", upstreamProvider: "glm", credential: { kind: "env", name: "GLM_API_KEY" } },
+      },
+      modelAssignments: {
+        text: { standard: { providerAccount: "openai", model: "gpt-4o" } },
+        plan: { standard: { providerAccount: "openai", model: "gpt-4o" } },
+        vision: { standard: { providerAccount: "openai", model: "gpt-4o" } },
+        commit: { standard: { providerAccount: "openai", model: "gpt-4o" } },
+        media: { image: { providerAccount: "openai", model: "dall-e-3" } },
+      },
+      retryPolicy: DEFAULT_RETRY_POLICY,
     };
   }
 }

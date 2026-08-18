@@ -22,7 +22,6 @@ import {
   loadMergedConfig,
   resolveActiveProviderType,
 } from "../../foundations/config.js";
-import { getDefaultProviderRuntime } from "./provider-runtime.js";
 
 // Re-export AppConfig so the provider-resolver → core/index chain works
 export type { AppConfig };

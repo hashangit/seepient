@@ -64,3 +64,88 @@ export function getModelMeta(id: string): ModelEntry | undefined {
   }
   return undefined;
 }
+
+import type { UpstreamModel } from './schemas/inference.js';
+
+export function resolveCuratedCatalog(): UpstreamModel[] {
+  const catalog: UpstreamModel[] = [];
+  for (const [pType, models] of Object.entries(MODEL_CATALOG)) {
+    for (const m of models) {
+      catalog.push({
+        id: m.id,
+        upstreamProvider: pType,
+        displayName: m.name,
+        contextWindow: m.contextWindow ?? 128_000,
+        capabilities: {
+          toolUse: true,
+          streaming: true,
+          vision: m.id.includes("vision") || m.id.includes("gpt-5") || m.id.includes("claude-sonnet") || m.id.includes("o3"),
+        },
+        pricing: m.pricing
+          ? {
+              promptPerMillion: m.pricing.input,
+              completionPerMillion: m.pricing.output,
+            }
+          : undefined,
+        provenance: "seepient-curated",
+      });
+    }
+  }
+
+  // Curated image models
+  catalog.push(
+    {
+      id: "dall-e-3",
+      upstreamProvider: "openai",
+      displayName: "DALL-E 3",
+      contextWindow: 4096,
+      capabilities: {
+        toolUse: false,
+        streaming: false,
+        vision: false,
+        imageGenerate: true,
+        imageVariation: false,
+        imageEdit: false,
+        imageMask: false,
+        aspectRatios: ["1:1", "16:9", "9:16"],
+      },
+      provenance: "seepient-curated",
+    },
+    {
+      id: "dall-e-2",
+      upstreamProvider: "openai",
+      displayName: "DALL-E 2",
+      contextWindow: 4096,
+      capabilities: {
+        toolUse: false,
+        streaming: false,
+        vision: false,
+        imageGenerate: true,
+        imageVariation: true,
+        imageEdit: true,
+        imageMask: true,
+        aspectRatios: ["1:1"],
+      },
+      provenance: "seepient-curated",
+    },
+    {
+      id: "imagen-3.0-generate-002",
+      upstreamProvider: "google",
+      displayName: "Imagen 3",
+      contextWindow: 4096,
+      capabilities: {
+        toolUse: false,
+        streaming: false,
+        vision: false,
+        imageGenerate: true,
+        imageVariation: false,
+        imageEdit: false,
+        imageMask: false,
+        aspectRatios: ["1:1", "16:9", "9:16", "4:3", "3:4"],
+      },
+      provenance: "seepient-curated",
+    },
+  );
+
+  return catalog;
+}

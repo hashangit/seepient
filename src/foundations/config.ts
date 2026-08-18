@@ -24,6 +24,7 @@ export interface AppConfig {
   apiKey?: string;
   baseUrl?: string;
   model?: string;
+  hasExplicitModel?: boolean;
   models?: {
     'openai-compatible'?: { apiKey: string; baseUrl: string; model: string; };
     openai?: { apiKey: string; model: string; };

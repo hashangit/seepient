@@ -74,10 +74,15 @@ function resolveSignal(opts?: InferenceOptions): ResolvedSignalInfo {
 
 function mapPiUsageToCanonical(piUsage?: any): Usage | undefined {
   if (!piUsage) return undefined;
+  const input = piUsage.input ?? piUsage.promptTokens ?? 0;
+  const output = piUsage.output ?? piUsage.completionTokens ?? 0;
+  const total = piUsage.totalTokens ?? (input + output);
   return {
-    promptTokens: piUsage.input ?? 0,
-    completionTokens: piUsage.output ?? 0,
-    totalTokens: piUsage.totalTokens ?? ((piUsage.input ?? 0) + (piUsage.output ?? 0)),
+    inputTokens: input,
+    outputTokens: output,
+    totalTokens: total,
+    promptTokens: input,
+    completionTokens: output,
     cachedPromptTokens: piUsage.cacheRead ?? undefined,
     reasoningTokens: piUsage.reasoning ?? undefined,
     cost: piUsage.cost?.total ?? undefined,

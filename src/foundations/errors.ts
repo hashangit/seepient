@@ -42,7 +42,10 @@ export type InferenceErrorCode =
   | "network"
   | "overload"
   | "malformed_response"
-  | "internal_adapter";
+  | "internal_adapter"
+  | "model_not_found"
+  | "unconfigured_provider"
+  | "unconfigured_purpose";
 
 export interface InferenceErrorOptions {
   code: InferenceErrorCode;

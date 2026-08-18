@@ -4,7 +4,7 @@ import { SeepientError } from "../foundations/errors.js";
 import type { Message, StepResult, ToolCall, Usage, ApproveToolFn, ApprovalDecision, ApprovalScope, ApprovalContext, PermissionLevel, ToolRiskCategory } from "../foundations/types.js";
 import type { LLMProvider, ProviderMessage, ProviderToolCall, ProviderResponse } from "../foundations/contracts/llm.js";
 import type { ToolDefinition } from "../foundations/contracts/tool.js";
-import { now, toSeepientError, messageToProviderMessage, providerToolCallToToolCall } from "./context/message-convert.js";
+import { now, toSeepientError, messageToProviderMessage, messageToCanonicalMessage, providerToolCallToToolCall } from "./context/message-convert.js";
 import { generateId } from "../foundations/id.js";
 import { StreamingResponseAccumulator } from "./streaming/stream-accumulator.js";
 import { executeTool, normalizeToolResult } from "./tool-executor.js";
@@ -44,6 +44,7 @@ export interface AgentLoopOptions {
   providerFactory?: ProviderFactory;
   providerRuntime?: any;
   turnSnapshot?: any;
+  modelOverride?: string;
   middleware?: Middleware[];
   approveTool?: ApproveToolFn;
   permissionLevel?: PermissionLevel;
@@ -206,16 +207,23 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
     maxSteps,
     hooks,
     signal,
-    config = {},
+    config: rawConfig = {},
     metadata = {},
     onStep,
     providerFactory,
     middleware,
+    providerRuntime,
+    turnSnapshot,
   } = options;
+
+  const config = {
+    ...rawConfig,
+    ...(providerRuntime ? { runtime: providerRuntime } : {}),
+  };
 
   // ── No middleware: run loop directly (backward compatible) ────────────
   if (!middleware || middleware.length === 0) {
-    return executeLoop(options);
+    return executeLoop({ ...options, config });
   }
 
   // ── With middleware: wrap loop in pipeline ────────────────────────────
@@ -237,7 +245,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         ...options,
         toolDefs: ctx.toolDefs,
         config: {
-          ...options.config,
+          ...config,
           agentName: options.config?.agentName ?? 'seepient',
           ...(ctx.metadata.injectedTools ? { injectedTools: ctx.metadata.injectedTools } : {}),
         },
@@ -338,7 +346,12 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     const { buildLocalBoundary } = await import("../capabilities/execution/build-local-boundary.js");
     const { legacyApproveToolToBroker } = await import("../transport/legacy-adapter.js");
     const artifacts = new InMemoryArtifactStore();
-    const { boundary } = await buildLocalBoundary({ artifacts, allowFallback: options.allowFallback ?? false });
+    const hostCallbacks = new Map<string, (args: unknown) => Promise<unknown>>();
+    const allModules = (await import("./tool-executor.js")).getAllToolModules();
+    for (const mod of allModules) {
+      hostCallbacks.set(mod.definition.function.name, (args) => mod.handler(args as any, config));
+    }
+    const { boundary } = await buildLocalBoundary({ artifacts, hostCallbacks, allowFallback: options.allowFallback ?? false });
     const broker = approveTool
       ? legacyApproveToolToBroker(approveTool)
       : autoConfirm
@@ -452,26 +465,28 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     // Call provider (stream if available, else chat). Streaming emits
     // text_delta steps as tokens arrive; non-streaming emits one complete
     // 'text' step below. Tool calls are reassembled by the accumulator.
-    let response: ProviderResponse;
+    let response: ProviderResponse = { content: "" };
     let streamed = false;
     let acc: StreamingResponseAccumulator | undefined;
+    let tookRuntimePath = false;
     try {
       if (options.providerRuntime) {
-        streamed = true;
-        acc = new StreamingResponseAccumulator();
         const snapshot =
           options.turnSnapshot ?? (await options.providerRuntime.createTurnSnapshot());
-        const plan = await options.providerRuntime.resolvePlan(snapshot, "text", "standard", {
-          model: currentModel,
-        });
+        const explicitOverride =
+          options.modelOverride
+            ? { model: options.modelOverride }
+            : undefined;
+        const plan = await options.providerRuntime.resolvePlan(
+          snapshot,
+          "text",
+          "standard",
+          explicitOverride,
+        );
 
-        const canonicalMessages = messages.map((m) => ({
-          role: m.role as "user" | "assistant" | "system",
-          content:
-            typeof m.content === "string"
-              ? [{ type: "text" as const, text: m.content }]
-              : (m.content as any),
-        }));
+        streamed = true;
+        acc = new StreamingResponseAccumulator();
+        const canonicalMessages = messages.map(messageToCanonicalMessage);
 
         for await (const event of options.providerRuntime.executeLanguage(
           plan,
@@ -491,46 +506,67 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
             steps.push(deltaStep);
             await hooks.onStep(deltaStep);
             if (onStep) onStep(deltaStep);
-          } else if (event.type === "content_block_start" && (event.block?.type === "tool_call" || event.block?.type === "tool_use")) {
+          } else if (
+            event.type === "content_block_start" &&
+            (event.block?.type === "tool_call" || event.block?.type === "tool_use")
+          ) {
             acc.beginToolCall(event.index, (event.block as any).id, (event.block as any).name);
           } else if (event.type === "content_block_delta" && event.delta.type === "tool_input_delta") {
             acc.appendToolCallArgs(event.index, event.delta.partialJson);
           } else if (event.type === "finish" && event.usage) {
+            const inp = event.usage.inputTokens ?? event.usage.promptTokens ?? 0;
+            const out = event.usage.outputTokens ?? event.usage.completionTokens ?? 0;
+            const tot = event.usage.totalTokens ?? inp + out;
+            const costVal =
+              typeof event.usage.cost === "object"
+                ? (event.usage.cost as any)?.total ?? 0
+                : typeof event.usage.cost === "number"
+                  ? event.usage.cost
+                  : 0;
             acc.setUsage({
-              promptTokens: event.usage.inputTokens,
-              completionTokens: event.usage.outputTokens,
-              totalTokens: event.usage.totalTokens,
-              cost: event.usage.cost?.total ?? 0,
+              promptTokens: inp,
+              completionTokens: out,
+              totalTokens: tot,
+              cost: costVal,
             });
+          } else if (event.type === "abort") {
+            finishReason = "aborted";
+            break;
           } else if (event.type === "error") {
             throw new SeepientError(event.error.message, event.error.code, event.error.retryable);
           }
         }
         response = acc.toResponse();
-      } else if (stream && typeof currentProvider.chatStream === 'function') {
-        streamed = true;
-        acc = new StreamingResponseAccumulator();
-        for await (const delta of currentProvider.chatStream(providerMessages, toolDefs, { signal })) {
-          if (delta.type === 'text_delta' && delta.content) {
-            acc.appendText(delta.content);
-            const deltaStep: StepResult = { type: 'text_delta', content: delta.content, timestamp: now() };
-            steps.push(deltaStep);
-            await hooks.onStep(deltaStep);
-            if (onStep) onStep(deltaStep);
-          } else if (delta.type === 'tool_call_begin') {
-            acc.beginToolCall(delta.index, delta.id, delta.name);
-          } else if (delta.type === 'tool_call_delta') {
-            acc.appendToolCallArgs(delta.index, delta.argumentsDelta);
-          } else if (delta.type === 'finish' && delta.usage) {
-            acc.setUsage(delta.usage);
+        tookRuntimePath = true;
+      }
+
+      if (!tookRuntimePath) {
+        if (stream && typeof currentProvider.chatStream === 'function') {
+          streamed = true;
+          acc = new StreamingResponseAccumulator();
+          for await (const delta of currentProvider.chatStream(providerMessages, toolDefs, { signal })) {
+            if (delta.type === 'text_delta' && delta.content) {
+              acc.appendText(delta.content);
+              const deltaStep: StepResult = { type: 'text_delta', content: delta.content, timestamp: now() };
+              steps.push(deltaStep);
+              await hooks.onStep(deltaStep);
+              if (onStep) onStep(deltaStep);
+            } else if (delta.type === 'tool_call_begin') {
+              acc.beginToolCall(delta.index, delta.id, delta.name);
+            } else if (delta.type === 'tool_call_delta') {
+              acc.appendToolCallArgs(delta.index, delta.argumentsDelta);
+            } else if (delta.type === 'finish' && delta.usage) {
+              acc.setUsage(delta.usage);
+            }
           }
+          response = acc.toResponse();
+        } else {
+          response = await currentProvider.chat(providerMessages, toolDefs, { signal });
         }
-        response = acc.toResponse();
-      } else {
-        response = await currentProvider.chat(providerMessages, toolDefs, { signal });
       }
     } catch (err) {
       const seepientErr = toSeepientError(err, "PROVIDER_ERROR");
+      finishReason = "error";
       loopError = {
         message: seepientErr.message,
         code: "PROVIDER_ERROR",
@@ -782,7 +818,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
         }
       }
 
-      if (finishReason === "aborted") break;
+      if ((finishReason as string) === "aborted" || (finishReason as string) === "error") break;
 
       // Continue the loop to get the next response
       // Mark if this was the last allowed iteration
@@ -793,7 +829,9 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     }
 
     // No tool calls — we're done
-    finishReason = "stop";
+    if ((finishReason as string) !== "aborted" && (finishReason as string) !== "error") {
+      finishReason = "stop";
+    }
     break;
     } finally {
       if (providerFactory) providerFactory.restore();

@@ -77,10 +77,15 @@ export async function resolveInvocationPlan(
   } else {
     // Single-slot media purposes (image-generation -> media.image, etc.)
     const mediaMap = assignments.media;
-    if (purpose === "image-generation") assignment = mediaMap?.image ?? assignments["image-generation"];
-    else if (purpose === "tts") assignment = mediaMap?.speech ?? assignments.tts;
-    else if (purpose === "stt") assignment = mediaMap?.transcription ?? assignments.stt;
-    else if (purpose === "video-generation") assignment = mediaMap?.video ?? assignments["video-generation"];
+    if (purpose === "image-generation") {
+      assignment = assignments["image-generation"]?.standard ?? assignments["image-generation"] ?? mediaMap?.image;
+    } else if (purpose === "tts") {
+      assignment = assignments.tts?.standard ?? assignments.tts ?? mediaMap?.speech;
+    } else if (purpose === "stt") {
+      assignment = assignments.stt?.standard ?? assignments.stt ?? mediaMap?.transcription;
+    } else if (purpose === "video-generation") {
+      assignment = assignments["video-generation"]?.standard ?? assignments["video-generation"] ?? mediaMap?.video;
+    }
   }
 
   // Synthesize assignment if full override is provided without purpose mapping
@@ -93,11 +98,11 @@ export async function resolveInvocationPlan(
   }
 
   if (!assignment) {
-    throw new SeepientError(
-      `No model assignment configured for purpose "${purpose}" (tier "${tier}")`,
-      "UNCONFIGURED_PURPOSE",
-      false,
-    );
+    throw new InferenceError({
+      code: "unconfigured_purpose",
+      message: `No model assignment configured for purpose "${purpose}" (tier "${tier}")`,
+      retryable: false,
+    });
   }
 
   // Apply partial or complete overrides
@@ -107,11 +112,13 @@ export async function resolveInvocationPlan(
 
   const mainAcc = accounts[effectiveAccount];
   if (!mainAcc) {
-    throw new SeepientError(
-      `Provider account "${effectiveAccount}" is not configured`,
-      "UNRESOLVABLE_CREDENTIAL",
-      false,
-    );
+    throw new InferenceError({
+      code: "unconfigured_provider",
+      message: `Provider account "${effectiveAccount}" is not configured`,
+      providerAccount: effectiveAccount,
+      model: effectiveModel,
+      retryable: false,
+    });
   }
 
   // Capability gating & thinking level validation on selected target (QS-P5.1)
@@ -139,8 +146,10 @@ export async function resolveInvocationPlan(
   const failureTargets: InferenceTarget[] = [];
   if (!override?.model && !override?.providerAccount) {
     for (const fb of assignment.fallback || []) {
-      const fbAcc = accounts[fb.providerAccount];
-      if (fbAcc) {
+      try {
+        const fbAcc = accounts[fb.providerAccount];
+        if (!fbAcc) continue;
+
         // Validate fallback target capabilities
         validateTargetCapabilities(
           snapshot.catalog,
@@ -161,6 +170,8 @@ export async function resolveInvocationPlan(
           compat: fbAcc.compat,
           thinkingLevel: fb.thinkingLevel as ThinkingLevel,
         });
+      } catch {
+        // Fallback target resolution is best-effort — a failing fallback never fails the primary target
       }
     }
   }

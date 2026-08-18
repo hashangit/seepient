@@ -92,3 +92,8 @@ export type ImageBackendResolver = (
   op: ImageOperation,
   req: ImageRequest,
 ) => ImageBackend | undefined;
+
+export interface InferenceAdapter {
+  readonly id: string;
+  bind(target: InferenceTarget, catalog?: readonly UpstreamModel[]): Promise<BoundAdapter>;
+}
