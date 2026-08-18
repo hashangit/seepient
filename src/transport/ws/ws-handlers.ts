@@ -783,9 +783,14 @@ async function handleWsRemoveProvider(
 
   const prefix = `providers.${msg.providerType === "openai-compatible" ? "openai-compat" : msg.providerType}`;
   try {
-    await ctx.settingsManager.reset(`${prefix}.apiKey`);
-    try { await ctx.settingsManager.reset(`${prefix}.model`); } catch { /* may not exist */ }
-    try { await ctx.settingsManager.reset(`${prefix}.baseUrl`); } catch { /* may not exist */ }
+    const release = await writeMutex.acquire();
+    try {
+      await ctx.settingsManager.reset(`${prefix}.apiKey`);
+      try { await ctx.settingsManager.reset(`${prefix}.model`); } catch { /* may not exist */ }
+      try { await ctx.settingsManager.reset(`${prefix}.baseUrl`); } catch { /* may not exist */ }
+    } finally {
+      release();
+    }
   } catch (e: any) {
     safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "RESET_ERROR", message: e.message } } as any);
     return;

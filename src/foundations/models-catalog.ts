@@ -56,7 +56,8 @@ export const DEFAULT_MODELS: Record<ProviderType, string> = {
 
 /** Look up a model's metadata (context window + pricing) by id, across providers.
  *  Case-insensitive — model ids may arrive display-cased (e.g. "Opus" vs "opus"). */
-export function getModelMeta(id: string): ModelEntry | undefined {
+export function getModelMeta(id?: string): ModelEntry | undefined {
+  if (!id || typeof id !== "string") return undefined;
   const lower = id.toLowerCase();
   for (const list of Object.values(MODEL_CATALOG)) {
     const found = list.find((m) => m.id.toLowerCase() === lower);

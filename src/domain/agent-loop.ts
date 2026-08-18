@@ -473,16 +473,27 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
       if (options.providerRuntime) {
         const snapshot =
           options.turnSnapshot ?? (await options.providerRuntime.createTurnSnapshot());
-        const explicitOverride =
-          options.modelOverride
-            ? { model: options.modelOverride }
-            : undefined;
+        let stepOverride: any = options.modelOverride
+          ? { model: options.modelOverride }
+          : undefined;
+        if (providerFactory) {
+          try {
+            const resolved = await providerFactory.resolve();
+            if (resolved.model || (resolved as any).providerAccount) {
+              stepOverride = {
+                model: resolved.model,
+                providerAccount: (resolved as any).providerAccount,
+              };
+            }
+          } catch {}
+        }
         const plan = await options.providerRuntime.resolvePlan(
           snapshot,
           "text",
           "standard",
-          explicitOverride,
+          stepOverride,
         );
+        currentModel = plan.selectedTarget.model;
 
         streamed = true;
         acc = new StreamingResponseAccumulator();

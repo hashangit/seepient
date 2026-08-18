@@ -292,3 +292,26 @@ export async function resolveSkillInvocationPlan(
   };
   return runtime.resolvePlan(snap, "text", "standard", override);
 }
+
+/**
+ * Creates a provider switcher for ProviderRuntime that switches model/account per step.
+ */
+export function createRuntimeSkillProviderSwitcher(runtime: ProviderRuntime) {
+  let activeOverride: { model?: string; providerAccount?: string } | null = null;
+  return {
+    async switchIfNeeded(skillResult: SkillInvocationResult): Promise<boolean> {
+      if (!skillResult.providerSwitchNeeded) return false;
+      activeOverride = {
+        model: skillResult.preferredModel,
+        providerAccount: skillResult.preferredProvider,
+      };
+      return true;
+    },
+    restore(): void {
+      activeOverride = null;
+    },
+    async resolve(): Promise<{ model?: string; providerAccount?: string }> {
+      return activeOverride ?? {};
+    },
+  };
+}

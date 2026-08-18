@@ -90,9 +90,19 @@ export function ModelManager({
         const currentModelIdx = eligibleModels.findIndex((m) => m.id === currentModelId);
         const nextModel = eligibleModels[(currentModelIdx + 1) % eligibleModels.length];
         if (nextModel) {
-          const providerAcct = nextModel.upstreamProvider || Object.keys(providers)[0] || "default";
+          const matchingAccount =
+            Object.entries(providers).find(
+              ([acct, info]) =>
+                acct === nextModel.upstreamProvider ||
+                (info as any).upstreamProvider === nextModel.upstreamProvider ||
+                (info as any).adapter === nextModel.upstreamProvider,
+            )?.[0] ||
+            Object.keys(providers)[0] ||
+            nextModel.upstreamProvider ||
+            "default";
+
           onUpdateAssignment(targetPurpose.id, targetTier, {
-            providerAccount: providerAcct,
+            providerAccount: matchingAccount,
             model: nextModel.id,
             thinkingLevel: currentSlot?.thinkingLevel ?? "none",
           });

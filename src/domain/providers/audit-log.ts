@@ -61,11 +61,23 @@ export function recordProviderAuditEvent(event: ProviderAuditEvent, customAuditP
 
   const line = JSON.stringify(redactedEvent) + "\n";
   let fd: number | null = null;
+  const noFollow = fs.constants.O_NOFOLLOW !== undefined ? fs.constants.O_NOFOLLOW : 0;
   try {
-    fd = fs.openSync(auditPath, fs.constants.O_CREAT | fs.constants.O_WRONLY | fs.constants.O_APPEND, 0o600);
+    fd = fs.openSync(
+      auditPath,
+      fs.constants.O_CREAT | fs.constants.O_WRONLY | fs.constants.O_APPEND | noFollow,
+      0o600,
+    );
     fs.writeSync(fd, line);
     fs.fsyncSync(fd);
   } catch (err: any) {
+    if (err.code === "ELOOP" || err.code === "EMLINK" || err.code === "EEXIST") {
+      throw new SeepientError(
+        `Audit log at ${auditPath} is a symbolic link or loop. Refusing to write.`,
+        "SECURITY_ERROR",
+        false,
+      );
+    }
     throw new SeepientError(
       `Failed to write durable audit log: ${err.message}`,
       "AUDIT_WRITE_FAILED",

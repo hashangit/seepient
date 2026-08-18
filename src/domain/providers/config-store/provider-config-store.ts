@@ -278,6 +278,16 @@ export class ProviderConfigStore {
         patch: newPatch,
       };
 
+      // 1. Record audit event BEFORE renaming overlay to active path
+      const { recordProviderAuditEvent } = await import("../audit-log.js");
+      recordProviderAuditEvent({
+        timestamp: new Date().toISOString(),
+        action: "update_overlay",
+        revision: updatedOverlay.revision,
+        details: patch,
+      });
+
+      // 2. Commit overlay document durably to disk
       if (this.overlayPath) {
         const tmp = `${this.overlayPath}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
         const fd = fs.openSync(tmp, fs.constants.O_CREAT | fs.constants.O_WRONLY | fs.constants.O_TRUNC, 0o600);
@@ -287,14 +297,6 @@ export class ProviderConfigStore {
         fs.closeSync(fd);
         fs.renameSync(tmp, this.overlayPath);
       }
-
-      const { recordProviderAuditEvent } = await import("../audit-log.js");
-      recordProviderAuditEvent({
-        timestamp: new Date().toISOString(),
-        action: "update_overlay",
-        revision: updatedOverlay.revision,
-        details: patch,
-      });
 
       this.currentOverlay = updatedOverlay;
       return this.currentOverlay;
@@ -326,7 +328,7 @@ export class ProviderConfigStore {
    */
   async getEffectiveConfig(baseDefaults?: Partial<ProviderEffectiveConfig>): Promise<ProviderEffectiveConfig> {
     this.reloadFromDisk();
-    const defaults = baseDefaults ?? getDefaultBaseConfig();
+    const defaults = baseDefaults ?? (await getDefaultBaseConfigAsync());
     const patch = this.currentOverlay.patch || {};
     const mergedProviders = applyDeepPatch(defaults.providers || {}, patch.providers || {}) || {};
     const mergedAssignments = applyDeepPatch(defaults.modelAssignments || {}, patch.modelAssignments || {}) || {};
@@ -351,6 +353,54 @@ let cachedBaseConfig: ProviderEffectiveConfig | null = null;
 
 export function clearBaseConfigCache(): void {
   cachedBaseConfig = null;
+}
+
+export async function getDefaultBaseConfigAsync(
+  credentialStore?: { put: (id: string, record: any, meta?: any) => Promise<void> },
+  customCwd?: string,
+): Promise<ProviderEffectiveConfig> {
+  if (cachedBaseConfig) {
+    return cachedBaseConfig;
+  }
+  try {
+    const v1Config = loadMergedConfig(customCwd);
+    const migrationResult = migrateV1ToV2(v1Config);
+
+    if (migrationResult.migratedCredentials && migrationResult.migratedCredentials.length > 0) {
+      const store = credentialStore ?? new CompositeCredentialStore();
+      await Promise.all(
+        migrationResult.migratedCredentials.map((cred) =>
+          store.put(
+            cred.id,
+            { kind: "api_key", keyValue: cred.keyValue },
+            { source: "migration" },
+          ),
+        ),
+      );
+    }
+
+    cachedBaseConfig = migrationResult.config;
+    return cachedBaseConfig;
+  } catch {
+    return {
+      schemaVersion: 2,
+      revision: 0,
+      updatedAt: new Date().toISOString(),
+      providers: {
+        openai: { adapter: "pi-ai", upstreamProvider: "openai", credential: { kind: "env", name: "OPENAI_API_KEY" } },
+        anthropic: { adapter: "pi-ai", upstreamProvider: "anthropic", credential: { kind: "env", name: "ANTHROPIC_API_KEY" } },
+        glm: { adapter: "pi-ai", upstreamProvider: "glm", credential: { kind: "env", name: "GLM_API_KEY" } },
+      },
+      modelAssignments: {
+        text: { standard: { providerAccount: "openai", model: "gpt-4o" } },
+        plan: { standard: { providerAccount: "openai", model: "gpt-4o" } },
+        vision: { standard: { providerAccount: "openai", model: "gpt-4o" } },
+        commit: { standard: { providerAccount: "openai", model: "gpt-4o" } },
+        media: { image: { providerAccount: "openai", model: "dall-e-3" } },
+      },
+      retryPolicy: DEFAULT_RETRY_POLICY,
+    };
+  }
 }
 
 export function getDefaultBaseConfig(

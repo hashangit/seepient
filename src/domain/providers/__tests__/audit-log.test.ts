@@ -42,6 +42,27 @@ describe("Provider Audit Log (P6.20)", () => {
     expect(entry.details.provider).toBe("openai");
     expect(entry.details.apiKey).toBe("[REDACTED]");
     expect(entry.details.token).toBe("[REDACTED]");
+
+    // Verify 0600 mode
+    const stat = fs.statSync(auditLogPath);
+    if (process.platform !== "win32") {
+      expect(stat.mode & 0o777).toBe(0o600);
+    }
+  });
+
+  it("refuses to write and throws SECURITY_ERROR when audit log is a symlink", async () => {
+    const targetFile = path.join(tempDir, "real-audit.log");
+    fs.writeFileSync(targetFile, "existing");
+    fs.symlinkSync(targetFile, auditLogPath);
+
+    expect(() => {
+      recordProviderAuditEvent({
+        timestamp: new Date().toISOString(),
+        action: "create_credential",
+        revision: 1,
+        details: { provider: "openai" },
+      });
+    }).toThrowError(/symbolic link/i);
   });
 
   it("records audit log when ProviderConfigStore.updateOverlay executes", async () => {
