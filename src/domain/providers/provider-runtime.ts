@@ -480,7 +480,7 @@ export class ProviderRuntime extends EventEmitter {
         const guardedStream = withIdleWatchdog(rawStream, idleTimeoutMs, opts?.signal, attemptController);
 
         for await (const event of guardedStream) {
-          if (event.type === "content_block_delta") {
+          if (event.type === "content_block_delta" || (event as { type: string }).type === "tool_input_delta") {
             emittedAnyDelta = true;
           }
           if (event.type === "finish" && event.usage) {

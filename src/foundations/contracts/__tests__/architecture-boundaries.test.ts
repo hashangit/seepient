@@ -238,4 +238,20 @@ describe("architecture boundaries (spec 008, T008)", () => {
     }
     expect(violations, violations.join("\n")).toEqual([]);
   });
+
+  it("Transport and UI never import from src/vendors/ (S-12)", () => {
+    const violations: string[] = [];
+    for (const f of files) {
+      const rel = relative(ROOT, f).replace(/\\/g, "/");
+      if (!rel.startsWith("transport/") && !rel.startsWith("ui/")) continue;
+      if (rel.endsWith(".test.ts") || rel.endsWith(".test.tsx")) continue;
+      const src = readFileSync(f, "utf8");
+      for (const spec of moduleSpecifiers(src)) {
+        if (spec.includes("/vendors/") || spec.startsWith("vendors/")) {
+          violations.push(`${rel} imports directly from vendors: ${spec}`);
+        }
+      }
+    }
+    expect(violations, violations.join("\n")).toEqual([]);
+  });
 });

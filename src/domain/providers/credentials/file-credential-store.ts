@@ -33,7 +33,9 @@ export class FileCredentialStore implements CredentialStore {
 
   constructor(customBaseDir?: string) {
     this.baseDir =
-      customBaseDir ?? path.join(os.homedir(), ".seepient", "credentials");
+      customBaseDir ??
+      process.env.SEEPIENT_CREDENTIALS_PATH ??
+      path.join(os.homedir(), ".seepient", "credentials");
   }
 
   private ensureDir(): void {

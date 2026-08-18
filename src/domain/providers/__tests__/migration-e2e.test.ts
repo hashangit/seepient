@@ -1,28 +1,36 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { ProviderConfigStore, clearBaseConfigCache } from "../config-store/provider-config-store.js";
 import { ProviderRuntime } from "../provider-runtime.js";
 import { CompositeCredentialStore } from "../credentials/composite-credential-store.js";
+import { FileCredentialStore } from "../credentials/file-credential-store.js";
 import { runAgentLoop } from "../../agent-loop.js";
 import { createHookExecutor } from "../../hooks.js";
 
 describe("Legacy Migration & Env Synthesis E2E (Discriminating GLM Test)", () => {
-  const origEnv = { ...process.env };
   let tempHome: string;
+  let credDir: string;
 
   beforeEach(() => {
     tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "seepient-mig-test-"));
-    process.env = { ...origEnv, HOME: tempHome, USERPROFILE: tempHome, SEEPIENT_CWD: tempHome };
-    delete process.env.OPENAI_API_KEY;
-    delete process.env.ANTHROPIC_API_KEY;
-    delete process.env.GLM_API_KEY;
+    credDir = path.join(tempHome, ".seepient", "credentials");
+    fs.mkdirSync(credDir, { recursive: true });
+
+    vi.stubEnv("HOME", tempHome);
+    vi.stubEnv("USERPROFILE", tempHome);
+    vi.stubEnv("SEEPIENT_CWD", tempHome);
+    vi.stubEnv("SEEPIENT_CREDENTIALS_PATH", credDir);
+    vi.stubEnv("SEEPIENT_AUDIT_LOG_PATH", path.join(tempHome, ".seepient", "audit.log"));
+    vi.stubEnv("OPENAI_API_KEY", "");
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    vi.stubEnv("GLM_API_KEY", "");
     clearBaseConfigCache();
   });
 
   afterEach(() => {
-    process.env = origEnv;
+    vi.unstubAllEnvs();
     clearBaseConfigCache();
     try {
       fs.rmSync(tempHome, { recursive: true, force: true });
@@ -49,9 +57,10 @@ describe("Legacy Migration & Env Synthesis E2E (Discriminating GLM Test)", () =>
       "utf-8",
     );
 
-    const credentialStore = new CompositeCredentialStore();
+    const fileStore = new FileCredentialStore(credDir);
+    const credentialStore = new CompositeCredentialStore({ file: fileStore });
     const configStore = new ProviderConfigStore(":memory:");
-    const effective = await configStore.getEffectiveConfig();
+    const effective = await configStore.getEffectiveConfig(credentialStore, tempHome);
 
     // Verify migration synthesized GLM as default, NOT hardcoded OpenAI
     expect(effective.providers.glm).toBeDefined();

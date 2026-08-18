@@ -10,7 +10,6 @@ import { SeepientError } from "../../../foundations/errors.js";
 describe("Acceptance Tests: B-2, B-3, S-1, S-2", () => {
   let tmpDir: string;
   let overlayPath: string;
-  const originalEnv = { ...process.env };
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "seepient-b2s2-test-"));
@@ -19,15 +18,15 @@ describe("Acceptance Tests: B-2, B-3, S-1, S-2", () => {
   });
 
   afterEach(() => {
-    process.env = { ...originalEnv };
+    vi.unstubAllEnvs();
     clearBaseConfigCache();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
   describe("B-2: Environment Variable Projection & Overlay Precedence", () => {
     it("projects LLM_PROVIDER=anthropic and ANTHROPIC_API_KEY into effective config", async () => {
-      process.env.LLM_PROVIDER = "anthropic";
-      process.env.ANTHROPIC_API_KEY = "sk-ant-api-test-key-123456";
+      vi.stubEnv("LLM_PROVIDER", "anthropic");
+      vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-api-test-key-123456");
 
       const store = new ProviderConfigStore(overlayPath);
       const effective = await store.getEffectiveConfig();
@@ -37,8 +36,8 @@ describe("Acceptance Tests: B-2, B-3, S-1, S-2", () => {
     });
 
     it("overlay patch takes precedence over environment variable projection", async () => {
-      process.env.LLM_PROVIDER = "anthropic";
-      process.env.ANTHROPIC_API_KEY = "sk-ant-api-test-key-123456";
+      vi.stubEnv("LLM_PROVIDER", "anthropic");
+      vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-api-test-key-123456");
 
       const store = new ProviderConfigStore(overlayPath);
       await store.updateOverlay(

@@ -419,6 +419,64 @@ describe("Phase 7: Production Reliability (QS-P7.1 - QS-P7.5)", () => {
       expect(events.some((e) => e.type === "error")).toBe(true);
     });
 
+    it("does not replay or fallback after tool_input_delta has been emitted (P1 #2)", async () => {
+      const configStore = new ProviderConfigStore(":memory:");
+      await configStore.updateOverlay({
+        providers: {
+          primary: { adapter: "pi-ai", upstreamProvider: "openai", credential: { kind: "none" } },
+          secondary: { adapter: "pi-ai", upstreamProvider: "anthropic", credential: { kind: "none" } },
+        },
+        modelAssignments: {
+          text: {
+            standard: {
+              providerAccount: "primary",
+              model: "gpt-4o",
+              fallback: [{ providerAccount: "secondary", model: "claude-3-5-sonnet" }],
+            },
+          },
+        },
+      }, 0);
+
+      const attempts: string[] = [];
+      const adapter: InferenceAdapter = {
+        id: "test-adapter",
+        async bind(target: InferenceTarget) {
+          attempts.push(`${target.providerAccount}:${target.model}`);
+          return {
+            target,
+            language: {
+              async *stream() {
+                yield {
+                  type: "tool_input_delta",
+                  callId: "call-1",
+                  index: 0,
+                  delta: '{"command":"ls"',
+                };
+                // Failure after emitting tool input delta
+                yield {
+                  type: "error",
+                  error: { code: "network_error", message: "Mid-stream stall", retryable: true },
+                };
+              },
+            },
+          } as unknown as BoundAdapter;
+        },
+      };
+
+      const runtime = new ProviderRuntime({ configStore, adapter });
+      const snapshot = await runtime.createTurnSnapshot();
+      const plan = await runtime.resolvePlan(snapshot, "text", "standard");
+
+      const events: any[] = [];
+      for await (const event of runtime.executeLanguage(plan, { messages: [] })) {
+        events.push(event);
+      }
+
+      // Assert: secondary was NOT attempted because tool arguments were already partially emitted
+      expect(attempts).toEqual(["primary:gpt-4o"]);
+      expect(events.some((e) => e.type === "error")).toBe(true);
+    });
+
     it("does not retry non-retryable errors", async () => {
       const configStore = new ProviderConfigStore(":memory:");
       await configStore.updateOverlay({
