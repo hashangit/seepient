@@ -10,17 +10,42 @@ export interface ProviderAuditEvent {
   details: Record<string, any>;
 }
 
-function redactObject(obj: any): any {
+export function redactObject(obj: any): any {
   if (obj === null || obj === undefined) return obj;
+  if (typeof obj === "string") {
+    if (obj.startsWith("sk-") || obj.startsWith("Bearer ") || /^gsk_[a-zA-Z0-9]+/.test(obj)) {
+      return "[REDACTED]";
+    }
+    return obj;
+  }
   if (typeof obj !== "object") return obj;
   if (Array.isArray(obj)) return obj.map(redactObject);
 
   const result: Record<string, any> = {};
   for (const [k, v] of Object.entries(obj)) {
-    if (k.toLowerCase().includes("key") || k.toLowerCase().includes("secret") || k.toLowerCase().includes("token") || k.toLowerCase().includes("pass")) {
-      result[k] = "[REDACTED]";
+    const lk = k.toLowerCase();
+    // Do not redact token count metrics
+    if (lk.endsWith("tokens") || lk === "tokens") {
+      result[k] = v;
+      continue;
+    }
+    if (
+      lk === "credential" ||
+      lk.includes("apikey") ||
+      lk.includes("secret") ||
+      lk.includes("password") ||
+      (lk.includes("token") && !lk.includes("tokens")) ||
+      lk.includes("authcontext")
+    ) {
+      if (typeof v === "object" && v !== null) {
+        result[k] = { kind: (v as any).kind ?? (v as any).ref?.kind ?? "redacted", id: "[REDACTED]" };
+      } else {
+        result[k] = "[REDACTED]";
+      }
     } else if (typeof v === "object") {
       result[k] = redactObject(v);
+    } else if (typeof v === "string" && (v.startsWith("sk-") || v.includes("secret"))) {
+      result[k] = "[REDACTED]";
     } else {
       result[k] = v;
     }

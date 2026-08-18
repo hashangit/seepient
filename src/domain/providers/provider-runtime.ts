@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import type {
   LanguageRequest,
   InferenceOptions,
@@ -26,8 +27,39 @@ import {
   type ModelAssignmentOverride,
   DEFAULT_RETRY_POLICY,
 } from "../../foundations/schemas/provider-config.js";
+import { redactObject } from "./audit-log.js";
 
 import type { InferenceAdapter } from "../../foundations/contracts/backend-ports.js";
+
+export const MAX_RETRY_DURATION_MS = 240_000;
+
+export function calculateInferenceCost(
+  usage?: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number; reasoningTokens?: number },
+  pricing?: any,
+): number | undefined {
+  if (!usage || !pricing) return undefined;
+  const inputPrice = pricing.promptPerMillion ?? pricing.input;
+  const outputPrice = pricing.completionPerMillion ?? pricing.output;
+  const cachedPrice = pricing.cachedPromptPerMillion ?? pricing.cachedInput;
+  const reasoningPrice = pricing.reasoningPerMillion ?? pricing.reasoning;
+
+  if (inputPrice === undefined && outputPrice === undefined) {
+    return undefined;
+  }
+
+  const inputCost = inputPrice !== undefined ? ((usage.inputTokens ?? 0) * inputPrice) / 1_000_000 : 0;
+  const outputCost = outputPrice !== undefined ? ((usage.outputTokens ?? 0) * outputPrice) / 1_000_000 : 0;
+  const cachedCost =
+    cachedPrice !== undefined && usage.cachedInputTokens
+      ? (usage.cachedInputTokens * cachedPrice) / 1_000_000
+      : 0;
+  const reasoningCost =
+    reasoningPrice !== undefined && usage.reasoningTokens
+      ? (usage.reasoningTokens * reasoningPrice) / 1_000_000
+      : 0;
+
+  return inputCost + outputCost + cachedCost + reasoningCost;
+}
 
 export interface ProviderRuntimeOptions {
   configStore?: ProviderConfigStore;
@@ -45,7 +77,7 @@ export interface CapabilityHealth {
  * Central ProviderRuntime managing turn snapshots, plan resolution, execution dispatch,
  * and multi-target retries with cooldown tracking and dynamic catalog synchronization.
  */
-export class ProviderRuntime {
+export class ProviderRuntime extends EventEmitter {
   readonly configStore: ProviderConfigStore;
   readonly credentialStore: CredentialStore;
   readonly modelCatalog: ModelCatalog;
@@ -54,6 +86,7 @@ export class ProviderRuntime {
   private healthMap = new Map<string, CapabilityHealth>();
 
   constructor(options?: ProviderRuntimeOptions) {
+    super();
     this.configStore = options?.configStore ?? new ProviderConfigStore();
     this.credentialStore = options?.credentialStore ?? new CompositeCredentialStore();
     this.modelCatalog = options?.modelCatalog ?? new ModelCatalog();
@@ -89,6 +122,14 @@ export class ProviderRuntime {
       consecutiveFailures: consecutive,
       cooldownUntil,
     });
+
+    if (cooldownUntil !== undefined) {
+      this.emit("cooldown:engaged", redactObject({
+        providerAccount: account,
+        capability,
+        cooldownUntil,
+      }));
+    }
   }
 
   /**
@@ -122,7 +163,9 @@ export class ProviderRuntime {
     tier: Tier = "standard",
     override?: ModelAssignmentOverride,
   ): Promise<InvocationPlan> {
-    return resolveInvocationPlan(snapshot, this.credentialStore, purpose, tier, override);
+    const plan = await resolveInvocationPlan(snapshot, this.credentialStore, purpose, tier, override);
+    this.emit("plan:resolved", redactObject({ purpose, tier, plan }));
+    return plan;
   }
 
   /**
@@ -135,17 +178,41 @@ export class ProviderRuntime {
   ): AsyncIterable<StreamEvent> {
     const targets = [plan.selectedTarget, ...plan.failureTargets];
     const retryPolicy = plan.snapshot?.config?.retryPolicy ?? DEFAULT_RETRY_POLICY;
+    const startTime = Date.now();
 
     let lastError: any;
 
     for (let i = 0; i < targets.length; i++) {
+      if (Date.now() - startTime > MAX_RETRY_DURATION_MS) {
+        yield {
+          type: "error",
+          error: {
+            code: "timeout",
+            message: "Inference retry duration exceeded 240s budget",
+            retryable: false,
+          },
+        };
+        return;
+      }
+
       const target = targets[i];
       const health = this.getHealth(target.providerAccount, "language");
 
       if (health.cooldownUntil && health.cooldownUntil > Date.now() && i < targets.length - 1) {
         // Skip cooled down target if we have another fallback available
+        this.emit("inference:fallback", redactObject({
+          fromTarget: target,
+          toTarget: targets[i + 1],
+          reason: "Target in cooldown",
+        }));
         continue;
       }
+
+      this.emit("inference:attempt", redactObject({
+        target,
+        capability: "language",
+        attemptIndex: i,
+      }));
 
       let bound: BoundAdapter;
       try {
@@ -158,6 +225,12 @@ export class ProviderRuntime {
           retryPolicy.cooldownThreshold,
           retryPolicy.cooldownDurationMs,
         );
+        this.emit("inference:failure", redactObject({
+          target,
+          capability: "language",
+          error: err.message,
+          retryable: err instanceof InferenceError ? err.retryable : true,
+        }));
         if (err instanceof InferenceError && !err.retryable) {
           yield {
             type: "error",
@@ -186,6 +259,12 @@ export class ProviderRuntime {
           retryPolicy.cooldownThreshold,
           retryPolicy.cooldownDurationMs,
         );
+        this.emit("inference:failure", redactObject({
+          target,
+          capability: "language",
+          error: lastError.message,
+          retryable: false,
+        }));
         continue;
       }
 
@@ -202,6 +281,22 @@ export class ProviderRuntime {
           if (event.type === "content_block_delta") {
             emittedAnyDelta = true;
           }
+          if (event.type === "finish" && event.usage) {
+            const catalogModel = plan.snapshot?.catalog.find(
+              (m) =>
+                m.id === target.model &&
+                (m.upstreamProvider === target.upstreamProvider ||
+                  m.upstreamProvider === target.providerAccount),
+            );
+            const cost = calculateInferenceCost(event.usage, catalogModel?.pricing);
+            this.emit("inference:success", redactObject({
+              target,
+              capability: "language",
+              durationMs: Date.now() - startTime,
+              usage: event.usage,
+              cost,
+            }));
+          }
           if (event.type === "error") {
             hadError = true;
             this.recordFailure(
@@ -210,9 +305,20 @@ export class ProviderRuntime {
               retryPolicy.cooldownThreshold,
               retryPolicy.cooldownDurationMs,
             );
+            this.emit("inference:failure", redactObject({
+              target,
+              capability: "language",
+              error: event.error.message,
+              retryable: event.error.retryable,
+            }));
 
             if (!emittedAnyDelta && i < targets.length - 1 && event.error.retryable) {
               // Fallback to next candidate if no tokens were emitted yet
+              this.emit("inference:fallback", redactObject({
+                fromTarget: target,
+                toTarget: targets[i + 1],
+                reason: event.error.message,
+              }));
               throw new InferenceError({
                 code: event.error.code as any,
                 message: event.error.message,
@@ -321,15 +427,35 @@ export class ProviderRuntime {
     }
 
     const retryPolicy = plan.snapshot?.config?.retryPolicy ?? DEFAULT_RETRY_POLICY;
+    const startTime = Date.now();
     let lastError: any;
 
     for (let i = 0; i < targets.length; i++) {
+      if (Date.now() - startTime > MAX_RETRY_DURATION_MS) {
+        throw new InferenceError({
+          code: "timeout",
+          message: "Image retry duration exceeded 240s budget",
+          retryable: false,
+        });
+      }
+
       const target = targets[i];
 
       const health = this.getHealth(target.providerAccount, "image");
       if (health.cooldownUntil && health.cooldownUntil > Date.now() && i < targets.length - 1) {
+        this.emit("inference:fallback", redactObject({
+          fromTarget: target,
+          toTarget: targets[i + 1],
+          reason: "Target in cooldown",
+        }));
         continue;
       }
+
+      this.emit("inference:attempt", redactObject({
+        target,
+        capability: "image",
+        attemptIndex: i,
+      }));
 
       try {
         const bound = await this.adapter.bind(target, plan.snapshot?.catalog);
@@ -345,6 +471,11 @@ export class ProviderRuntime {
 
         const result = await bound.images.generate(req, opts);
         this.recordSuccess(target.providerAccount, "image");
+        this.emit("inference:success", redactObject({
+          target,
+          capability: "image",
+          durationMs: Date.now() - startTime,
+        }));
         return result;
       } catch (err: any) {
         lastError = err;
@@ -354,6 +485,12 @@ export class ProviderRuntime {
           retryPolicy.cooldownThreshold,
           retryPolicy.cooldownDurationMs,
         );
+        this.emit("inference:failure", redactObject({
+          target,
+          capability: "image",
+          error: err.message,
+          retryable: err instanceof InferenceError ? err.retryable : true,
+        }));
 
         const isUnsupportedCap =
           err instanceof InferenceError && err.code === "unsupported_capability";
