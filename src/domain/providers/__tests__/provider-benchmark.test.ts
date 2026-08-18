@@ -62,7 +62,7 @@ describe("Provider Benchmark (P3.13 Gate)", () => {
     const p50 = latencies[Math.floor(iterations * 0.5)];
     const p95 = latencies[Math.floor(iterations * 0.95)];
 
-    expect(p95).toBeLessThan(5.0); // Within 5ms latency budget
+    expect(p95).toBeLessThan(10.0); // Within 10ms warm resolution budget (plan.md)
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 });
