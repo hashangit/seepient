@@ -7,6 +7,7 @@
 
 import type { ProviderRuntime } from "../../domain/providers/provider-runtime.js";
 import type { AvailableModel } from "../../domain/providers/model-catalog.js";
+export type { AvailableModel };
 import type {
   CredentialRef,
 } from "../../foundations/schemas/credential-store.js";
@@ -66,9 +67,10 @@ export interface AccountInput {
   accountId: string;
   upstreamProvider: string;
   credential:
-    | { mode: "paste"; keyValue: string }
+    | { mode: "paste"; keyValue?: string; keyText?: string }
     | { mode: "env"; varName: string }
-    | { mode: "none" };
+    | { mode: "none" }
+    | { mode: "preserve" };
   baseUrl?: string;
   compat?: "openai" | "anthropic" | "google" | "openai-responses";
   /** Explicit local-endpoint affordance (R5): only set when the UI confirmed. */
@@ -79,6 +81,7 @@ export interface AssignmentTarget {
   providerAccount: string;
   model: string;
   thinkingLevel?: ThinkingLevel;
+  fallback?: Array<{ providerAccount: string; model: string }>;
 }
 
 export type SaveResult = { ok: true; state: ManagerState } | { ok: false; error: UiError };
@@ -188,6 +191,13 @@ function mapError(err: unknown, retried = false): UiError {
   }
   if (code === "unconfigured_provider") return { code: "unconfigured_provider", message };
   if (code === "unknown_model") return { code: "unknown_model", message };
+  if (code === "unconfigured_purpose" || code === "unknown_purpose") {
+    return {
+      code: "unconfigured_purpose",
+      message,
+      hint: "Assign a model to this purpose slot first with setAssignment",
+    };
+  }
   if (code === "CONFIG_VIOLATION" || code === "invalid_request") {
     return { code: "validation_failed", message };
   }
@@ -291,15 +301,15 @@ export function createProviderManagerApi(
     try {
       if (ref.kind === "seepient" || ref.kind === "keychain") {
         const id = ref.kind === "seepient" ? ref.id : ref.account;
+        const raw = creds().getRecord ? await creds().getRecord!(id).catch(() => undefined) : undefined;
         const rec = await creds().get(id).catch(() => undefined);
-        const isOAuth = rec?.materialKind === "oauth";
+        const isOAuth = raw?.kind === "oauth" || rec?.materialKind === "oauth";
         const handle = await creds().resolve(ref);
         const resolvable = await handle.isResolvable();
-        if (!resolvable) {
+        if (!resolvable && !raw) {
           return { health: "missing", credentialKind: isOAuth ? "oauth" : ref.kind };
         }
         if (isOAuth) {
-          const raw = await creds().getRecord?.(id);
           if (raw && raw.kind === "oauth" && raw.expires && raw.expires < Date.now()) {
             return { health: "expired", credentialKind: "oauth" };
           }
@@ -359,17 +369,33 @@ export function createProviderManagerApi(
         };
       }
     }
-    const ref: CredentialRef =
-      input.credential.mode === "paste" ? { kind: "seepient", id: input.accountId }
-      : input.credential.mode === "env" ? { kind: "env", name: input.credential.varName }
-      : { kind: "none" };
+
+    const snapshot = await runtime.createTurnSnapshot();
+    const existingEntry = snapshot.config.providers?.[input.accountId];
+
+    let ref: CredentialRef;
+    if (input.credential.mode === "preserve") {
+      if (!existingEntry) {
+        return {
+          ok: false,
+          error: { code: "unconfigured_provider", message: `Account "${input.accountId}" not found.` },
+        };
+      }
+      ref = (existingEntry.credential as CredentialRef) ?? { kind: "none" };
+    } else if (input.credential.mode === "paste") {
+      ref = { kind: "seepient", id: input.accountId };
+    } else if (input.credential.mode === "env") {
+      ref = { kind: "env", name: input.credential.varName };
+    } else {
+      ref = { kind: "none" };
+    }
 
     const preExisting = await creds().get(input.accountId).catch(() => undefined);
     if (input.credential.mode === "paste") {
       try {
         await creds().put(
           input.accountId,
-          { kind: "api_key", keyValue: input.credential.keyValue },
+          { kind: "api_key", keyValue: input.credential.keyValue ?? input.credential.keyText ?? "" },
           { source: "disk" },
         );
       } catch (err) {
@@ -494,6 +520,7 @@ export function createProviderManagerApi(
       providerAccount: target.providerAccount,
       model: target.model,
       ...(target.thinkingLevel ? { thinkingLevel: target.thinkingLevel } : {}),
+      ...(target.fallback && target.fallback.length > 0 ? { fallback: target.fallback } : {}),
     };
     const patch =
       def.tiered
@@ -528,10 +555,16 @@ export function createProviderManagerApi(
   ): Promise<ResolutionPreview | UiError & { ok: false }> {
     try {
       const snapshot = await runtime.createTurnSnapshot();
-      const plan = await runtime.resolvePlan(snapshot, purpose as any, tier as any);
-      const def = PURPOSE_BY_ID.get(purpose)!;
+      let resolverPurpose: string = purpose;
+      if (purpose === "media.image") resolverPurpose = "image-generation";
+      else if (purpose === "media.speech") resolverPurpose = "tts";
+      else if (purpose === "media.transcription") resolverPurpose = "stt";
+      else if (purpose === "media.video") resolverPurpose = "video-generation";
+
+      const plan = await runtime.resolvePlan(snapshot, resolverPurpose as any, tier as any);
+      const def = PURPOSE_BY_ID.get(purpose);
       const assignments = snapshot.assignments as any;
-      const direct = def.tiered ? assignments?.[purpose]?.[tier] : assignments?.media?.[purpose.slice("media.".length)];
+      const direct = def?.tiered ? assignments?.[purpose]?.[tier] : assignments?.media?.[purpose.slice("media.".length)];
       return {
         selectedTarget: {
           providerAccount: plan.selectedTarget.providerAccount,
@@ -728,7 +761,17 @@ export function createProviderManagerApi(
     }
     // Delete credential record from credential store.
     // Provider entry in config stays intact, but health becomes "missing"
-    await creds().delete(accountId).catch(() => {});
+    try {
+      await creds().delete(accountId);
+    } catch (err: any) {
+      return {
+        ok: false,
+        error: {
+          code: "storage_error",
+          message: `Failed to delete credentials for "${accountId}": ${err?.message || String(err)}`,
+        },
+      };
+    }
     return { ok: true, state: await getState() };
   }
 

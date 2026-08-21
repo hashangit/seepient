@@ -119,7 +119,7 @@ export function registerProvidersCommands(program: Command): void {
         process.exit(1);
       }
 
-      const credential = opts.credential ? parseCredentialMode(opts.credential) : { mode: "none" as const };
+      const credential = opts.credential ? parseCredentialMode(opts.credential) : { mode: "preserve" as const };
       const res = await api.saveAccount({
         accountId: id,
         upstreamProvider: opts.upstream ?? existing.upstreamProvider,

@@ -72,4 +72,63 @@ describe("CLI Provider Subcommands Integration (QS-P6.1 & QS-P6.2)", () => {
     expect(loginCmd).toBeDefined();
     expect(loginCmd?.options.map((o) => o.long)).toContain("--env-var");
   });
+
+  it("resolves coding and media.image purposes correctly via ProviderManagerApi", async () => {
+    const { createProviderManagerApi } = await import("../provider-manager-api.js");
+    const { getDefaultProviderRuntime } = await import("../../../domain/providers/provider-runtime.js");
+    const runtime = getDefaultProviderRuntime();
+    const api = createProviderManagerApi(runtime);
+
+    // Save test account
+    await api.saveAccount({
+      accountId: "cli-test-openai",
+      upstreamProvider: "openai",
+      credential: { mode: "paste", keyValue: "sk-test" },
+    });
+
+    // Set text.standard, coding.standard, and media.image
+    const assignRes1 = await api.setAssignment("text", "standard", {
+      providerAccount: "cli-test-openai",
+      model: "gpt-4o",
+    });
+    expect(assignRes1.ok).toBe(true);
+
+    const assignRes2 = await api.setAssignment("media.image", null, {
+      providerAccount: "cli-test-openai",
+      model: "dall-e-3",
+      fallback: [{ providerAccount: "cli-test-openai", model: "dall-e-2" }],
+    });
+    expect(assignRes2.ok).toBe(true);
+
+    // Verify resolvePreview for coding falls back to text or resolves
+    const codingPreview = await api.resolvePreview("coding", "standard");
+    expect((codingPreview as any).selectedTarget?.providerAccount).toBe("cli-test-openai");
+
+    // Verify resolvePreview for media.image resolves to dall-e-3
+    const mediaPreview = await api.resolvePreview("media.image", undefined);
+    expect((mediaPreview as any).selectedTarget?.model).toBe("dall-e-3");
+
+    // Verify fallback is preserved in state
+    const state = await api.getState();
+    expect((state.assignments as any).media?.image?.fallback).toEqual([
+      { providerAccount: "cli-test-openai", model: "dall-e-2" },
+    ]);
+
+    // Verify providers edit with mode: preserve keeps credential
+    const editRes = await api.saveAccount({
+      accountId: "cli-test-openai",
+      upstreamProvider: "openai",
+      credential: { mode: "preserve" },
+      baseUrl: "https://api.openai.com/v1",
+    });
+    expect(editRes.ok).toBe(true);
+    if (editRes.ok) {
+      const acct = editRes.state.accounts.find((a) => a.id === "cli-test-openai");
+      expect(acct?.credentialKind).toBe("seepient");
+      expect(acct?.health).toBe("ok");
+    }
+
+    // Clean up
+    await api.deleteAccount("cli-test-openai", { force: true });
+  });
 });

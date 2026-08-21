@@ -15,6 +15,7 @@ import { normalizeProviderName } from "../../foundations/models-catalog.js";
 export type Purpose =
   | "plan"
   | "text"
+  | "coding"
   | "vision"
   | "commit"
   | "image-generation"
@@ -22,7 +23,11 @@ export type Purpose =
   | "tts"
   | "stt"
   | "dreaming"
-  | "data";
+  | "data"
+  | "media.image"
+  | "media.speech"
+  | "media.transcription"
+  | "media.video";
 
 export type Tier = "efficient" | "standard" | "complex";
 
@@ -59,12 +64,13 @@ export async function resolveInvocationPlan(
   if (
     purpose === "plan" ||
     purpose === "text" ||
+    purpose === "coding" ||
     purpose === "vision" ||
     purpose === "commit" ||
     purpose === "dreaming" ||
     purpose === "data"
   ) {
-    const tiered = assignments[purpose];
+    const tiered = assignments[purpose] ?? (purpose === "coding" ? assignments.text : undefined);
     if (tiered) {
       // Selection fallback: requested -> standard -> efficient -> complex
       const tierOrder: Tier[] = [tier, "standard", "efficient", "complex"];
@@ -76,15 +82,15 @@ export async function resolveInvocationPlan(
       }
     }
   } else {
-    // Single-slot media purposes (image-generation -> media.image, etc.)
+    // Single-slot media purposes (image-generation / media.image, etc.)
     const mediaMap = assignments.media;
-    if (purpose === "image-generation") {
+    if (purpose === "image-generation" || purpose === "media.image") {
       assignment = assignments["image-generation"]?.standard ?? assignments["image-generation"] ?? mediaMap?.image;
-    } else if (purpose === "tts") {
+    } else if (purpose === "tts" || purpose === "media.speech") {
       assignment = assignments.tts?.standard ?? assignments.tts ?? mediaMap?.speech;
-    } else if (purpose === "stt") {
+    } else if (purpose === "stt" || purpose === "media.transcription") {
       assignment = assignments.stt?.standard ?? assignments.stt ?? mediaMap?.transcription;
-    } else if (purpose === "video-generation") {
+    } else if (purpose === "video-generation" || purpose === "media.video") {
       assignment = assignments["video-generation"]?.standard ?? assignments["video-generation"] ?? mediaMap?.video;
     }
   }

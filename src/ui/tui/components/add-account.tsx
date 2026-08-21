@@ -51,6 +51,7 @@ export function AddAccount({
   const [baseUrl, setBaseUrl] = useState("");
   const [allowPrivate, setAllowPrivate] = useState(false);
   const [compatIdx, setCompatIdx] = useState(0);
+  const [savedId, setSavedId] = useState("");
   const [feedback, setFeedback] = useState<{ kind: "idle" | "busy" | "error"; message: string }>({ kind: "idle", message: "" });
 
   const rows = useMemo(() => {
@@ -69,8 +70,9 @@ export function AddAccount({
 
   async function save(): Promise<void> {
     setFeedback({ kind: "busy", message: "Saving account…" });
+    const finalId = accountId || defaultId;
     const input: AccountInput = {
-      accountId: accountId || defaultId,
+      accountId: finalId,
       upstreamProvider: upstream === "custom" ? "openai-compatible" : upstream,
       credential:
         credentialMode === "paste" ? { mode: "paste", keyValue: secret }
@@ -81,15 +83,13 @@ export function AddAccount({
       ...(upstream === "custom" && allowPrivate ? { allowPrivate: true } : {}),
     };
     const err = await onSaveAccount(input);
-    if (!err) setPhase("done");
-    else setFeedback({ kind: "error", message: `${err.code}: ${err.message}` });
-  }
-
-  function textInput(input: string, key: any, set: (s: string) => void, next: () => void, back: () => void): void {
-    if (key.escape) { back(); return; }
-    if (key.return) { next(); return; }
-    if (key.backspace || key.delete) { set(input.slice(0, -1)); return; }
-    if (input && !key.ctrl && !key.meta && input.length >= 1 && input >= " ") set(input);
+    if (!err) {
+      setSavedId(finalId);
+      setFeedback({ kind: "idle", message: "" });
+      setPhase("done");
+    } else {
+      setFeedback({ kind: "error", message: `${err.code}: ${err.message}` });
+    }
   }
 
   useInput((input, key) => {
@@ -292,7 +292,7 @@ export function AddAccount({
   // done
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={theme.green} paddingLeft={1} paddingRight={1}>
-      <Text color={theme.green}>✓ Account saved: {accountId || defaultId}</Text>
+      <Text color={theme.green}>✓ Account saved: {savedId || accountId || defaultId}</Text>
       <Text color={theme.fgDim}>Verify it from the Providers tab: [2] Test account.</Text>
       <Text color={theme.fgDim}>Esc back</Text>
     </Box>

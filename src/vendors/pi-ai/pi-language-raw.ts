@@ -96,6 +96,48 @@ function mapPiStopReasonToCanonical(reason?: string): StopReason {
   return "end_turn";
 }
 
+async function resolveSecretApiKey(
+  secret: any,
+  target: InferenceTarget,
+): Promise<string | undefined> {
+  if (!secret) return undefined;
+  if (secret.kind === "api_key") {
+    return secret.value;
+  }
+  if (secret.kind === "pi_oauth" || secret.kind === "oauth") {
+    let oauthRecord = secret;
+    if (oauthRecord.expires && Date.now() >= oauthRecord.expires - 60000 && oauthRecord.refresh) {
+      try {
+        const { getOAuthFlow } = await import("./pi-auth-adapter.js");
+        const flow = await getOAuthFlow(target.upstreamProvider);
+        if (flow && typeof (flow as any).refresh === "function") {
+          const refreshed = await (flow as any).refresh(oauthRecord.refresh);
+          if (refreshed?.access) {
+            oauthRecord = {
+              ...oauthRecord,
+              access: refreshed.access,
+              refresh: refreshed.refresh ?? oauthRecord.refresh,
+              expires: refreshed.expires ?? Date.now() + 3600000,
+            };
+            if ((target.credential as any)?.store?.put) {
+              await (target.credential as any).store.put(target.providerAccount, {
+                kind: "oauth",
+                access: oauthRecord.access,
+                refresh: oauthRecord.refresh,
+                expires: oauthRecord.expires,
+              }).catch(() => {});
+            }
+          }
+        }
+      } catch {
+        // Fall back to current access token
+      }
+    }
+    return oauthRecord.access;
+  }
+  return undefined;
+}
+
 /**
  * Pi AI raw language backend implementation.
  */
@@ -222,7 +264,7 @@ export class PiLanguageRaw implements LanguageBackend {
       }
 
       const secret = await lease.secret();
-      const apiKey = secret.kind === "api_key" ? secret.value : undefined;
+      const apiKey = await resolveSecretApiKey(secret, target);
 
       const { model, context, streamOptions } = this.prepareInvocation(
         target,
@@ -493,7 +535,7 @@ export class PiLanguageRaw implements LanguageBackend {
       }
 
       const secret = await lease.secret();
-      const apiKey = secret.kind === "api_key" ? secret.value : undefined;
+      const apiKey = await resolveSecretApiKey(secret, target);
 
       const { model, context, streamOptions } = this.prepareInvocation(
         target,

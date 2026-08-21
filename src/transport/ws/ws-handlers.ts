@@ -742,29 +742,32 @@ async function handleWsSetProvider(
       }
     }
     const { getDefaultProviderRuntime } = await import("../../domain/providers/provider-runtime.js");
+    const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
     const runtime = getDefaultProviderRuntime();
-    const configStore = runtime.getConfigStore();
-    const overlay = await configStore.getOverlay();
-    await configStore.updateOverlay({
-      providers: {
-        [providerType]: {
-          adapter: "pi-ai",
-          upstreamProvider: providerType,
-          ...(baseUrl ? { baseUrl } : {}),
-          ...(apiKey ? { credential: { kind: "direct", value: apiKey } } : {}),
-        },
-      },
-      ...(model ? {
-        modelAssignments: {
-          text: {
-            standard: {
-              providerAccount: providerType,
-              model,
-            },
-          },
-        } as any,
-      } : {}),
-    }, overlay.revision);
+    const api = createProviderManagerApi(runtime);
+
+    const saveRes = await api.saveAccount({
+      accountId: providerType,
+      upstreamProvider: providerType,
+      credential: apiKey ? { mode: "paste", keyValue: apiKey } : { mode: "none" },
+      baseUrl,
+    });
+
+    if (!saveRes.ok) {
+      safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: saveRes.error.code, message: saveRes.error.message } } as any);
+      return;
+    }
+
+    if (model) {
+      const assignRes = await api.setAssignment("text", "standard", {
+        providerAccount: providerType,
+        model,
+      });
+      if (!assignRes.ok) {
+        safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: assignRes.error.code, message: assignRes.error.message } } as any);
+        return;
+      }
+    }
   } catch (e: any) {
     safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "SET_ERROR", message: e.message } } as any);
     return;
@@ -793,14 +796,21 @@ async function handleWsRemoveProvider(
 
   try {
     const { getDefaultProviderRuntime } = await import("../../domain/providers/provider-runtime.js");
+    const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
     const runtime = getDefaultProviderRuntime();
-    const configStore = runtime.getConfigStore();
-    const overlay = await configStore.getOverlay();
-    const currentProviders = { ...((overlay.patch?.providers as any) || {}) };
-    delete currentProviders[msg.providerType];
-    await configStore.updateOverlay({
-      providers: currentProviders,
-    }, overlay.revision);
+    const api = createProviderManagerApi(runtime);
+    const delRes = await api.deleteAccount(msg.providerType, { force: true });
+    if (!delRes.ok) {
+      safeSend(ws, {
+        type: "settings_updated",
+        id: msg.id,
+        error: {
+          code: "blocked" in delRes ? "BLOCKED" : delRes.error.code,
+          message: "blocked" in delRes ? `Account referenced by slots: ${delRes.referencingSlots.join(", ")}` : delRes.error.message,
+        },
+      } as any);
+      return;
+    }
   } catch (e: any) {
     safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "RESET_ERROR", message: e.message } } as any);
     return;

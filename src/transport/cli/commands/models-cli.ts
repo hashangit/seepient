@@ -89,7 +89,10 @@ export function registerModelsCommands(program: Command): void {
 
       let purpose: string;
       let tier: string | undefined = undefined;
-      if (slot.includes(".")) {
+      if (slot.startsWith("media.")) {
+        purpose = slot;
+        tier = undefined;
+      } else if (slot.includes(".")) {
         const parts = slot.split(".");
         purpose = parts[0];
         tier = parts[1];
@@ -137,7 +140,10 @@ export function registerModelsCommands(program: Command): void {
 
       let purpose: string;
       let tier: string | null = null;
-      if (slot.includes(".")) {
+      if (slot.startsWith("media.")) {
+        purpose = slot;
+        tier = null;
+      } else if (slot.includes(".")) {
         const parts = slot.split(".");
         purpose = parts[0];
         tier = parts[1];
@@ -198,9 +204,17 @@ export function registerModelsCommands(program: Command): void {
             }
           }
         } else {
-          const assign = (state.assignments as any)?.[p.id];
+          const sub = p.id.startsWith("media.") ? p.id.slice("media.".length) : p.id;
+          const assign = (state.assignments as any)?.[p.id] ?? (state.assignments as any)?.media?.[sub];
           if (assign) {
             console.log(`    ${"single".padEnd(12)} → ${chalk.green(`${assign.providerAccount}/${assign.model}`)}`);
+          } else if (opts.resolved) {
+            const preview: any = await api.resolvePreview(p.id, undefined);
+            if (preview?.selectedTarget) {
+              console.log(`    ${"single".padEnd(12)} → ${chalk.dim(`${preview.selectedTarget.providerAccount}/${preview.selectedTarget.model} (via ${preview.via})`)}`);
+            } else {
+              console.log(`    ${"single".padEnd(12)} → ${chalk.yellow("unassigned")}`);
+            }
           } else {
             console.log(`    ${"single".padEnd(12)} → ${chalk.yellow("unassigned")}`);
           }
@@ -213,12 +227,19 @@ export function registerModelsCommands(program: Command): void {
     .command("fallback <slot> <targets>")
     .description("Configure ordered fallback models for a slot (e.g. text.standard openai/gpt-4o-mini,anthropic/haiku)")
     .action(async (slot, targets) => {
-      const parts = slot.split(".");
-      if (parts.length !== 2) {
-        console.error(chalk.red(`Invalid slot format "${slot}". Expected format: <purpose>.<tier>`));
+      let purpose: string;
+      let tier: string | null = null;
+      if (slot.startsWith("media.")) {
+        purpose = slot;
+        tier = null;
+      } else if (slot.includes(".")) {
+        const parts = slot.split(".");
+        purpose = parts[0];
+        tier = parts[1];
+      } else {
+        console.error(chalk.red(`Invalid slot format "${slot}". Expected format: <purpose>.<tier> or <media.purpose>`));
         process.exit(1);
       }
-      const [purpose, tier] = parts;
 
       const fallbackList = targets.split(",").map((t: string) => {
         const trimmed = t.trim();
@@ -232,14 +253,15 @@ export function registerModelsCommands(program: Command): void {
       const runtime = getDefaultProviderRuntime();
       const api = createProviderManagerApi(runtime);
       const state = await api.getState();
-      const existing = (state.assignments as any)?.[purpose]?.[tier];
+      const sub = purpose.startsWith("media.") ? purpose.slice("media.".length) : purpose;
+      const existing = tier ? (state.assignments as any)?.[purpose]?.[tier] : ((state.assignments as any)?.[purpose] ?? (state.assignments as any)?.media?.[sub]);
 
       if (!existing) {
         console.error(chalk.red(`Error: Cannot set fallbacks on unassigned slot "${slot}". Assign a primary model first with seepient models set ${slot} <target>.`));
         process.exit(1);
       }
 
-      const res = await api.setAssignment(purpose as PurposeId, tier as Tier, {
+      const res = await api.setAssignment(purpose as PurposeId, tier as Tier | null, {
         ...existing,
         fallback: fallbackList,
       });

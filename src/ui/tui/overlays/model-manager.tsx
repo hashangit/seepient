@@ -257,7 +257,7 @@ export function ModelManager({
               ? `✓ ${acct.id}: auth ok${r.reachable === false ? " · endpoint unreachable" : ""}`
               : `⚠ ${acct.id}: could not authenticate`,
           });
-        });
+        }).catch((e) => setFeedback({ kind: "error", message: String(e) }));
         return;
       }
       if (isNum && num === 3) {
@@ -273,7 +273,7 @@ export function ModelManager({
           } else if (r.error) {
             setFeedback({ kind: "error", message: `${r.error.code}: ${r.error.message}` });
           }
-        });
+        }).catch((e) => setFeedback({ kind: "error", message: String(e) }));
         return;
       }
       if (isNum && num === 4) {
@@ -281,7 +281,7 @@ export function ModelManager({
           if (r.ok) { setState(r.state); setFeedback({ kind: "success", message: `✓ removed ${acct.id}` }); void load(); }
           else if ("blocked" in r) setOverlay({ kind: "remove-confirm", accountId: acct.id, slots: r.referencingSlots });
           else setFeedback({ kind: "error", message: `${r.error.code}: ${r.error.message}` });
-        });
+        }).catch((e) => setFeedback({ kind: "error", message: String(e) }));
         return;
       }
       return;
@@ -617,8 +617,9 @@ function RemoveConfirm({
     if (input === "1") {
       void api.deleteAccount(accountId, { force: true }).then((r) => {
         if (r.ok) onDone(`✓ removed ${accountId}`);
+        else if ("error" in r) onDone(`Error: ${r.error.message}`);
         else onCancel();
-      });
+      }).catch((e) => onDone(`Error: ${String(e)}`));
     }
   });
   return null;

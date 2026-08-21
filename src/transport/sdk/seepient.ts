@@ -268,7 +268,6 @@ export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<
             });
 
             snapshot = await runtime.createTurnSnapshot();
-            (runtime as any).currentAssignments = snapshot.assignments;
             plan = await runtime.resolvePlan(
               snapshot,
               agentOpts.purpose,
@@ -298,7 +297,6 @@ export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<
           conversationMessages.push(userMsg);
 
           const snapshot = await runtime.createTurnSnapshot();
-          (runtime as any).currentAssignments = snapshot.assignments;
           const plan = await runtime.resolvePlan(
             snapshot,
             agentOpts.purpose,

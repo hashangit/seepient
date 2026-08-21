@@ -299,7 +299,7 @@ export function TuiApp({
       return;
     }
     if (trimmed.startsWith('/login ') || trimmed === '/login') {
-      const provider = trimmed.startsWith('/login ') ? trimmed.slice('/login '.length).trim() : 'anthropic';
+      const provider = trimmed.startsWith('/login ') ? trimmed.slice('/login '.length).trim() : undefined;
       setModelPrefill(undefined);
       setModelSignIn(provider);
       setModelTab('providers');
@@ -314,7 +314,7 @@ export function TuiApp({
       }
       const res = await managerApi.logoutAccount(account);
       if (res.ok) {
-        feed.appendEntry({ kind: 'info', content: `✓ Logged out account "${account}". Associated model slots are now unstaffed.` });
+        feed.appendEntry({ kind: 'info', content: `✓ Logged out account "${account}". Associated credentials removed.` });
       } else {
         feed.appendEntry({ kind: 'error', message: `Logout failed: ${res.error.message}` });
       }

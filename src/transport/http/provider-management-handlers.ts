@@ -257,11 +257,12 @@ export async function handleGetProviders(
   const snapshot = await runtime.createTurnSnapshot();
   const accounts = snapshot.config?.providers || {};
 
-  // Redact credentials
+  // Redact credentials and sensitive headers
   const sanitized: Record<string, any> = {};
   for (const [id, acc] of Object.entries(accounts)) {
+    const { headers: _h, ...rest } = acc as any;
     sanitized[id] = {
-      ...acc,
+      ...rest,
       credential: { kind: acc.credential?.kind ?? "redacted" },
     };
   }
@@ -461,7 +462,10 @@ export async function handleOAuthStart(
     },
   };
 
-  const loginPromise = flow.login(interaction as any);
+  const loginPromise = flow.login(interaction as any).catch((err) => {
+    // Background rejection should not terminate process
+    return Promise.reject(err);
+  });
 
   // Wait a brief tick (50ms) to allow interaction.notify to populate device_code
   await new Promise((resolve) => setTimeout(resolve, 50));
@@ -527,6 +531,7 @@ export async function handleOAuthComplete(
     return;
   }
 
+  let credentialPersisted = false;
   try {
     const timeoutPromise = new Promise((_, reject) =>
       setTimeout(() => reject(new Error("OAUTH_PENDING")), 5000),
@@ -545,6 +550,7 @@ export async function handleOAuthComplete(
       refresh: credResult.refresh ?? "",
       expires: credResult.expires ?? Date.now() + 3600_000,
     });
+    credentialPersisted = true;
 
     const patch = {
       providers: {
@@ -556,8 +562,17 @@ export async function handleOAuthComplete(
       } as any,
     };
 
-    const overlay = await runtime.configStore.getOverlay();
-    const result = await runtime.updateOverlay(patch, overlay.revision);
+    let result: any;
+    for (let retry = 0; retry < 2; retry++) {
+      try {
+        const overlay = await runtime.configStore.getOverlay();
+        result = await runtime.updateOverlay(patch, overlay.revision);
+        break;
+      } catch (err: any) {
+        if (retry === 0) continue;
+        throw err;
+      }
+    }
 
     pendingOAuthAttempts.delete(attemptId);
     sendJSON(
@@ -574,6 +589,9 @@ export async function handleOAuthComplete(
       result.revision,
     );
   } catch (err: any) {
+    if (credentialPersisted) {
+      await runtime.credentialStore.delete(providerId).catch(() => {});
+    }
     if (err.message === "OAUTH_PENDING") {
       sendError(res, 202, "OAUTH_PENDING", "Authorization still pending in browser");
       return;

@@ -102,21 +102,11 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
       console.error(chalk.red("No provider configured. Set API key env vars (OPENAI_API_KEY / ANTHROPIC_API_KEY / GLM_API_KEY / OPENAI_COMPAT_API_KEY or <NAME>_API_KEY) or configure via `seepient models set text.standard <account>/<model>`."));
       process.exit(1);
     } else {
-      const inquirer = await import('inquirer');
-      const { doSetup } = await inquirer.default.prompt([
-        {
-          type: 'confirm',
-          name: 'doSetup',
-          message: 'Would you like to run the setup wizard now?',
-          default: true
-        }
-      ]);
+      await runSetup();
+      effectiveConfig = await runtime.getConfigStore().getEffectiveConfig();
+      hasProviders = Object.keys(effectiveConfig.providers || {}).length > 0;
 
-      if (doSetup) {
-        await runSetup();
-        effectiveConfig = await runtime.getConfigStore().getEffectiveConfig();
-        hasProviders = Object.keys(effectiveConfig.providers || {}).length > 0;
-      } else {
+      if (!hasProviders) {
         console.error(chalk.red("Provider configuration is required to proceed."));
         process.exit(1);
       }

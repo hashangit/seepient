@@ -162,9 +162,8 @@ export function SetupWizard({ api, settings, onFinish, onExitSetup }: SetupWizar
     const num = parseInt(input ?? "", 10);
     const isNum = !Number.isNaN(num) && input !== "" && input !== " ";
 
-    if (sub === "add" || sub === "picker") {
-      if (key.escape) setSub("menu");
-      return; // sub-components own their input
+    if (sub === "add" || sub === "picker" || sub === "sign-in") {
+      return; // sub-components own their input including Esc
     }
 
     if (sub === "group" && activeGroup) {
@@ -395,8 +394,8 @@ export async function runSetupWizard(options: {
   const project = options.project === true;
   const sm = new SettingsManager({
     config: applyEnvOverrides(loadMergedConfig()),
-    projectConfigPath: project ? paths.local : paths.local,
-    globalConfigPath: paths.global,
+    projectConfigPath: project ? paths.local : undefined,
+    globalConfigPath: project ? undefined : paths.global,
     projectConfig: loadJsonConfig(paths.local) as Record<string, any>,
     globalConfig: loadJsonConfig(paths.global) as Record<string, any>,
   });

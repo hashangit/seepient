@@ -10,11 +10,11 @@ import { Box, Text, useInput } from "ink";
 import { useTheme } from "../hooks/use-theme.js";
 import type {
   AssignmentTarget,
+  AvailableModel,
   PurposeDef,
   PurposeId,
   UiError,
 } from "../../../transport/cli/provider-manager-api.js";
-import type { AvailableModel } from "../../../domain/providers/model-catalog.js";
 import type { PurposeModelMap } from "../../../foundations/schemas/provider-config.js";
 
 const MAX_VISIBLE = 10;

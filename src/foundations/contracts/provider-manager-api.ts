@@ -59,7 +59,8 @@ export interface AccountInput {
   credential:
     | { mode: "paste"; keyValue?: string; keyText?: string }
     | { mode: "env"; varName: string }
-    | { mode: "none" };
+    | { mode: "none" }
+    | { mode: "preserve" };
   baseUrl?: string;
   allowPrivate?: boolean;
   compat?: "openai" | "anthropic" | "google" | "openai-responses";
