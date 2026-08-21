@@ -11,6 +11,8 @@ import type {
   ProviderManagerApi, ManagerState, SaveResult, DeleteResult,
 } from "../../../../transport/cli/provider-manager-api.js";
 
+import type { AvailableModel } from "../../../../domain/providers/model-catalog.js";
+
 const ENTER = "\r";
 const TAB = "\t";
 const DOWN = "\u001B[B";
@@ -22,13 +24,13 @@ async function type(inst: { stdin: { write(s: string): void } }, s: string): Pro
   await delay();
 }
 
-function model(id: string, provider: string, over: Record<string, unknown> = {}) {
+function model(id: string, provider: string, over: Record<string, unknown> = {}): AvailableModel {
   return {
     id, upstreamProvider: provider, displayName: id, contextWindow: 200_000,
     capabilities: { toolUse: true, streaming: true, vision: false, ...((over as any).capabilities ?? {}) },
-    supportedReasoningLevels: ["none", "low", "high"], provenance: "pi-catalog",
+    supportedReasoningLevels: ["none", "low", "high"] as const, provenance: "pi-catalog" as const,
     reachableVia: [], ...over, ...( (over as any).capabilities ? { capabilities: { toolUse: true, streaming: true, vision: false, ...(over as any).capabilities } } : {}),
-  };
+  } as AvailableModel;
 }
 
 function baseState(): ManagerState {

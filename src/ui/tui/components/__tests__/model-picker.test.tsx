@@ -9,6 +9,8 @@ import React from "react";
 import { ModelPicker } from "../model-picker.js";
 import type { PurposeDef, PurposeId, AssignmentTarget } from "../../../../transport/cli/provider-manager-api.js";
 
+import type { AvailableModel } from "../../../../domain/providers/model-catalog.js";
+
 const UP = "\u001B[A";
 const DOWN = "\u001B[B";
 const ENTER = "\r";
@@ -22,18 +24,18 @@ async function type(inst: { stdin: { write(s: string): void } }, s: string): Pro
   await delay();
 }
 
-function model(id: string, provider: string, over: Record<string, unknown> = {}) {
+function model(id: string, provider: string, over: Record<string, unknown> = {}): AvailableModel {
   return {
     id,
     upstreamProvider: provider,
     displayName: id.replace(/-/g, " "),
     contextWindow: 200_000,
     capabilities: { toolUse: true, streaming: true, vision: false },
-    supportedReasoningLevels: ["none", "low", "high"],
-    provenance: "pi-catalog",
+    supportedReasoningLevels: ["none", "low", "high"] as const,
+    provenance: "pi-catalog" as const,
     reachableVia: [],
     ...over,
-  };
+  } as AvailableModel;
 }
 
 function fixtures() {

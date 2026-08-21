@@ -99,7 +99,7 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
     console.log(chalk.yellow("No provider configuration found."));
 
     if (isNonInteractive()) {
-      console.error(chalk.red("No provider configured. Set API key env vars (OPENAI_API_KEY / ANTHROPIC_API_KEY / GLM_API_KEY) or provide a config file."));
+      console.error(chalk.red("No provider configured. Set API key env vars (OPENAI_API_KEY / ANTHROPIC_API_KEY / GLM_API_KEY / OPENAI_COMPAT_API_KEY or <NAME>_API_KEY) or configure via `seepient models set text.standard <account>/<model>`."));
       process.exit(1);
     } else {
       const inquirer = await import('inquirer');

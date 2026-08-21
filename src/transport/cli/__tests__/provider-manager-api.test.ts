@@ -138,7 +138,7 @@ describe("saveAccount credential-first ordering (contract §6.2)", () => {
     let calls = 0;
     class FlakyStore extends ProviderConfigStore {
       constructor() { super(":memory:"); }
-      override async updateOverlay(patch: ProviderLayerPatch, rev: number) {
+      override async updateOverlay(patch: ProviderLayerPatch, rev: number): Promise<any> {
         calls++;
         throw new SeepientError(`Optimistic concurrency violation: expected revision ${rev}, but current revision is ${rev}.`, "PRECONDITION_FAILED", false);
       }
@@ -260,9 +260,9 @@ describe("resolvePreview (contract §6.6)", () => {
     await ctx.api.setAssignment("text", "standard", { providerAccount: "acme-main", model: "model-tool" });
 
     const set = await ctx.api.resolvePreview("text", "standard");
-    expect(set.via).toBe("requested");
+    expect("via" in set && set.via).toBe("requested");
     const chain = await ctx.api.resolvePreview("text", "efficient");
-    expect(chain.via).toBe("fallback-chain");
+    expect("via" in chain && chain.via).toBe("fallback-chain");
   });
 });
 
@@ -282,6 +282,6 @@ describe("refreshModels passthrough", () => {
     const { api } = makeApi();
     const res = await api.refreshModels("ghost");
     expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.error.code).toBe("unconfigured_provider");
+    if (!res.ok) expect(res.error?.code).toBe("unconfigured_provider");
   });
 });

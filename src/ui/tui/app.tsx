@@ -20,6 +20,7 @@ import Spinner from 'ink-spinner';
 import { CommandPalette } from './components/command-palette.js';
 import { HelpDialog } from './overlays/help-dialog.js';
 import { ModelManager } from './overlays/model-manager.js';
+import { SetupWizard } from './setup-wizard.js';
 import { createProviderManagerApi } from '../../transport/cli/provider-manager-api.js';
 import { getDefaultProviderRuntime } from '../../domain/providers/provider-runtime.js';
 import { SessionSelector, type SessionListItem } from './overlays/session-selector.js';
@@ -44,7 +45,7 @@ export interface TuiCommandOutcome {
   exit?: boolean;
 }
 
-type Overlay = 'palette' | 'help' | 'model' | 'settings' | 'sessions' | null;
+type Overlay = 'palette' | 'help' | 'model' | 'settings' | 'sessions' | 'setup' | null;
 
 /** Strip ANSI escapes — handler output is chalk-styled for the readline path. */
 function stripAnsi(text: string): string {
@@ -175,14 +176,19 @@ export function TuiApp({
 
   // 013: the model manager dock talks to the ProviderManagerApi controller —
   // one semantic core shared with the wizard, CLI handlers, and SDK (R15).
+  const [sessionNotice, setSessionNotice] = useState<string | null>(null);
   const managerApi = useMemo(
     () =>
       createProviderManagerApi(agent.getProviderRuntime() ?? getDefaultProviderRuntime(), {
-        switchProvider: (account, model) => agent.switchProvider(account, model),
+        switchProvider: (account, model) => {
+          agent.switchProvider(account, model);
+          setSessionNotice(`${account}/${model} — session, not saved`);
+        },
       }),
     [agent],
   );
   const [modelTab, setModelTab] = useState<'jobs' | 'providers' | 'now'>('jobs');
+  const [modelPrefill, setModelPrefill] = useState<string | undefined>(undefined);
 
   const didInit = useRef(false);
   useEffect(() => {
@@ -278,14 +284,21 @@ export function TuiApp({
       setOverlay('help');
       return;
     }
-    if (trimmed === '/models' || trimmed === '/model') {
+    if (trimmed.startsWith('/model ') || trimmed === '/model' || trimmed === '/models') {
+      const search = trimmed.startsWith('/model ') ? trimmed.slice('/model '.length).trim() : undefined;
+      setModelPrefill(search);
       setModelTab('jobs');
       setOverlay('model');
       return;
     }
     if (trimmed === '/providers') {
+      setModelPrefill(undefined);
       setModelTab('providers');
       setOverlay('model');
+      return;
+    }
+    if (trimmed === '/setup') {
+      setOverlay('setup');
       return;
     }
     if (trimmed === '/sessions' || trimmed === '/session') {
@@ -345,10 +358,16 @@ export function TuiApp({
 
   // Palette includes synthetic entries that open overlays.
   const paletteCommands: Suggestion[] = [
-    ...commands,
+    ...commands.map((c) => {
+      if (c.name === 'models' || c.name === 'model') {
+        return { ...c, description: `Switch model (currently ${providerType}/${agent.getModel()})` };
+      }
+      return c;
+    }),
     { name: 'shortcuts', description: 'Keyboard reference' },
     { name: 'model', description: `Switch model (currently ${providerType}/${agent.getModel()})` },
     { name: 'providers', description: 'Manage provider accounts' },
+    { name: 'setup', description: 'Run setup wizard' },
     { name: 'settings', description: 'View settings' },
     { name: 'sessions', description: 'Resume / delete a session' },
   ];
@@ -357,11 +376,15 @@ export function TuiApp({
     if (name === 'shortcuts') {
       setOverlay('help');
     } else if (name === 'model') {
+      setModelPrefill(undefined);
       setModelTab('jobs');
       setOverlay('model');
     } else if (name === 'providers') {
+      setModelPrefill(undefined);
       setModelTab('providers');
       setOverlay('model');
+    } else if (name === 'setup') {
+      setOverlay('setup');
     } else if (name === 'settings') {
       setSettingsList(getSettingsList());
       setOverlay('settings');
@@ -513,8 +536,28 @@ export function TuiApp({
             api={managerApi}
             activeAccount={providerType}
             activeModel={agent.getModel()}
+            sessionNotice={sessionNotice ?? undefined}
+            prefill={modelPrefill}
             initialTab={modelTab}
-            onClose={() => setOverlay(null)}
+            onClose={() => {
+              setModelPrefill(undefined);
+              setOverlay(null);
+            }}
+          />
+        ) : overlay === 'setup' ? (
+          <SetupWizard
+            api={managerApi}
+            settings={{
+              get: async (k) => {
+                const item = settingsList.find((s) => s.dotKey === k);
+                return item?.value;
+              },
+              set: async (k, v) => {
+                await handleSetSetting(k, v);
+              },
+            }}
+            onFinish={() => setOverlay(null)}
+            onExitSetup={() => setOverlay(null)}
           />
         ) : overlay === 'settings' ? (
           <SettingsEditor settings={settingsList} onSet={handleSetSetting} onClose={() => setOverlay(null)} />

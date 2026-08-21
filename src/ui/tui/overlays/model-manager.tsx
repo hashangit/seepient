@@ -11,7 +11,8 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Box, Text, useInput } from 'ink';
-import { useTheme } from '../hooks/use-theme.js';
+import { render } from 'ink';
+import { ThemeProvider, useTheme } from '../hooks/use-theme.js';
 import { ModelPicker } from '../components/model-picker.js';
 import { AddAccount } from '../components/add-account.js';
 import type {
@@ -24,13 +25,15 @@ export interface ModelManagerProps {
   activeAccount?: string;
   activeModel?: string;
   activeThinking?: string;
+  sessionNotice?: string;
+  prefill?: string;
   initialTab?: "jobs" | "providers" | "now";
   onClose: () => void;
 }
 
 type Tab = "jobs" | "providers" | "now";
 type Overlay =
-  | { kind: "picker"; purpose: PurposeId; tier: Tier | null; title: string }
+  | { kind: "picker"; purpose: PurposeId; tier: Tier | null; title: string; prefill?: string }
   | { kind: "thinking"; purpose: PurposeId; tier: Tier | null; levels: string[]; current?: string; target: AssignmentTarget }
   | { kind: "add-account"; prefill?: string }
   | { kind: "remove-confirm"; accountId: string; slots: string[] }
@@ -53,13 +56,17 @@ const BADGE: Record<string, string> = {
 };
 
 export function ModelManager({
-  api, activeAccount, activeModel, activeThinking, initialTab = "jobs", onClose,
+  api, activeAccount, activeModel, activeThinking, sessionNotice, prefill, initialTab = "jobs", onClose,
 }: ModelManagerProps) {
   const theme = useTheme();
   const [state, setState] = useState<ManagerState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>(initialTab);
-  const [overlay, setOverlay] = useState<Overlay>(null);
+  const [overlay, setOverlay] = useState<Overlay>(() =>
+    prefill !== undefined
+      ? { kind: "picker", purpose: "text", tier: "standard", title: "Assign text·standard", prefill }
+      : null,
+  );
   const [slotIdx, setSlotIdx] = useState(0);
   const [provIdx, setProvIdx] = useState(0);
   const [fallbacks, setFallbacks] = useState<Record<string, string>>({});
@@ -294,6 +301,7 @@ export function ModelManager({
         assignments={state.assignments}
         models={state.models}
         activePurpose={overlay.purpose}
+        prefill={overlay.prefill}
         onAssign={(t) => assign(overlay.purpose, overlay.tier, t)}
         onSessionSwitch={(acct, mdl) => {
           try {
@@ -451,6 +459,7 @@ export function ModelManager({
       <Text>Active account: <Text bold color={theme.green}>{activeAccount ?? "—"}</Text></Text>
       <Text>Serving model:  <Text bold color={theme.green}>{activeModel ?? "—"}</Text></Text>
       <Text>Thinking level: <Text bold color={theme.purple}>{activeThinking ?? "none"}</Text></Text>
+      {sessionNotice ? <Text color={theme.yellow}>Session override: {sessionNotice}</Text> : null}
       <Text color={theme.fgDim}>Config revision {state.revision} · changes apply next turn</Text>
       <Box marginTop={1}>
         <Text color={theme.fgDim}> [1] Refresh </Text>
@@ -517,3 +526,42 @@ function ThinkingEditor({
     </Box>
   );
 }
+
+/** Standalone runner for REPL / CLI interactive `/models` command (T029). */
+export async function runModelManagerStandalone(options: {
+  api?: ProviderManagerApi;
+  activeAccount?: string;
+  activeModel?: string;
+  activeThinking?: string;
+  initialTab?: "jobs" | "providers" | "now";
+  onSwitchProvider?: (account: string, model?: string) => void;
+} = {}): Promise<void> {
+  const { getDefaultProviderRuntime } = await import("../../../domain/providers/provider-runtime.js");
+  const { createProviderManagerApi } = await import("../../../transport/cli/provider-manager-api.js");
+  const runtime = getDefaultProviderRuntime();
+  const api = options.api ?? createProviderManagerApi(
+    runtime,
+    options.onSwitchProvider ? { switchProvider: options.onSwitchProvider } : undefined,
+  );
+
+  await new Promise<void>((resolve) => {
+    let instance: ReturnType<typeof render>;
+    instance = render(
+      <ThemeProvider>
+        <ModelManager
+          api={api}
+          activeAccount={options.activeAccount}
+          activeModel={options.activeModel}
+          activeThinking={options.activeThinking}
+          initialTab={options.initialTab}
+          onClose={() => {
+            instance.unmount();
+            resolve();
+          }}
+        />
+      </ThemeProvider>,
+      { exitOnCtrlC: true },
+    );
+  });
+}
+
