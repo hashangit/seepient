@@ -106,15 +106,22 @@ Current layout of the Obsidian vault (annotated):
 │       ├── contracts/                # agents-md-loader.md, domain-composer.md, resolve-system-context.md, system-prompt-composition.md
 │       ├── quickstart.md             # ~37 deterministic scenarios (no process.chdir, no chmod, no grep -v)
 │       └── tasks.md                  # 40 dependency-ordered tasks, 14 regression gates
-│   └── 011-tui-permission-scope-ux/       # Multi-tab TUI permission scope & duration UX
-│       ├── spec.md                   # Problem statement, requirements, scope
-│       ├── plan.md                   # Phased implementation plan
-│       ├── tasks.md                  # Dependency-ordered implementation tasks
-│       ├── research.md               # Contract and authority-boundary decisions
-│       ├── data-model.md             # Request, option, decision, and lifecycle model
-│       ├── contracts/                # Policy-option and TUI prompt contracts
-│       ├── quickstart.md             # Automated and manual validation scenarios
-│       └── checklists/requirements.md # Specification quality checklist
+│   ├── 011-tui-permission-scope-ux/       # Multi-tab TUI permission scope & duration UX
+│   │   ├── spec.md                   # Problem statement, requirements, scope
+│   │   ├── plan.md                   # Phased implementation plan
+│   │   ├── tasks.md                  # Dependency-ordered implementation tasks
+│   │   ├── research.md               # Contract and authority-boundary decisions
+│   │   ├── data-model.md             # Request, option, decision, and lifecycle model
+│   │   ├── contracts/                # Policy-option and TUI prompt contracts
+│   │   ├── quickstart.md             # Automated and manual validation scenarios
+│   │   └── checklists/requirements.md # Specification quality checklist
+│   └── 012-unified-media-generation-engine/  # Unified media engine: Vercel AI SDK + Fal + local pillars
+│       ├── spec.md                   # Four pillars, scope decisions M1–M10, success criteria
+│       ├── plan.md                   # P0–P7 phased plan (schemas → vendors → runtime → catalog → surfaces → legacy collapse)
+│       ├── research.md               # SDK surface research (Vercel AI SDK, fal Platform API v1, LocalAI) + D1–D8
+│       ├── data-model.md             # Media schemas, ports, backend registry, capability classifier, dispatch inventory
+│       ├── quickstart.md             # Per-phase validation scenarios + production budgets
+│       └── contracts/                # media-inference, media-schemas, media-catalog, media-surfaces
 ├── 010-provider-management-redesign/ # Provider mgmt redesign: contracts + runtime + purpose/tier routing
 │   ├── spec.md                       # Problem, 5 blockers + 4 gaps, scope decisions, success criteria
 │   ├── plan.md                       # P0-P7 phased plan (contracts → Pi adapter → runtime → resolution → surfaces → reliability)
@@ -124,6 +131,7 @@ Current layout of the Obsidian vault (annotated):
 │   ├── migration.md                  # v1→v2 config migration, lazy sessions, SDK deprecation
 │   ├── quickstart.md                 # Per-phase validation scenarios + production budgets
 │   ├── remediation-plan.md           # Post-P7 review fix plan: WS0-WS10 (secret-leak blocker, catalog-native redesign, Pi pin bump, OMP enrichment)
+│   ├── cleanup-plan.md               # v1 demolition: P0-P9 phased removal of legacy provider path (bridges, dual paths, v1 config)
 │   └── contracts/                    # inference-adapter, canonical-messages, provider-config, credential-store, server-management-api, public-sdk
 ├── Website Planning/                 # Public website strategy and delivery planning
 │   ├── implementation_planv0.1.md    # Original kinetic-design exploration
@@ -356,6 +364,20 @@ shell commands, and other important information, read the current plan:
   and a governed self-evolution activation boundary. Six-item reviewer
   correction: see decisions D45–D47. Prior
   plan: `specs/007-tui-parity-upgrade/` (TUI parity — shipped).
+- **UPCOMING (planned, not yet in implementation)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/012-unified-media-generation-engine/plan.md`
+  — Unified media generation engine (planned; starts after 010 lands on `main`,
+  branch `012-media-engine`): extends the 010 provider architecture to image,
+  video, speech, and transcription across four pillars — pi-ai (text, status
+  quo), Vercel AI SDK (OpenAI/Gemini/local image + OpenAI TTS/STT with existing
+  keys), `@fal-ai/client` (advanced media gateway via `fal.subscribe`
+  passthrough), and local OpenAI-compatible endpoints (custom `baseURL`).
+  Catalogs stay provider-owned: fal models via the fal Platform API v1,
+  OpenAI/Google/local via `/v1/models` discovery plus a pattern-based
+  capability classifier — zero curated media lists, user declarations as
+  last-wins override. Runtime media stubs become real attempt loops
+  (video: 600 s budget); per-unit pricing wired; SDK methods
+  `generateVideo`/`synthesizeSpeech`/`transcribe` published; legacy
+  direct-OpenAI media paths deleted.
 - **UPCOMING (planned, not yet in implementation)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/009-agents-md-alignment/plan.md`
   — AGENTS.md standard alignment (v3, scope-narrowed after R2 review):
   Codex-compatible startup discovery (root → cwd walk, one file per directory,
