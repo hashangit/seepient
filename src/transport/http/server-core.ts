@@ -1,4 +1,4 @@
-import type { ProviderType, GenerateTextResult, Usage, Message, PermissionLevel, ApproveToolFn, StepResult } from "../../foundations/types.js";
+import type { GenerateTextResult, Usage, Message, PermissionLevel, ApproveToolFn, StepResult } from "../../foundations/types.js";
 import { runAgentLoop } from "../../domain/agent-loop.js";
 import { createHookExecutor } from "../../domain/hooks.js";
 import { resolveTools, getAllToolDefinitions } from "../../domain/tool-executor.js";
@@ -36,7 +36,7 @@ export async function serverGenerateText(
   options: {
     message: string;
     model?: string;
-    provider?: ProviderType;
+    provider?: string;
     tools?: string[];
     maxSteps?: number;
     skills?: string[];
@@ -116,7 +116,7 @@ export async function handleAgentChatStream(
   opts: {
     message: string;
     model?: string;
-    provider?: ProviderType;
+    provider?: string;
     tools?: string[];
     maxSteps?: number;
     skills?: string[];

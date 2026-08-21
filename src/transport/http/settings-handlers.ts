@@ -85,7 +85,6 @@ async function readBody(req: IncomingMessage): Promise<any> {
 }
 
 const VALID_CATEGORIES: Set<string> = new Set(SETTINGS_CATEGORIES.map(c => c.key));
-const VALID_PROVIDER_TYPES = new Set(['openai', 'anthropic', 'glm', 'openai-compatible']);
 
 // ── REST Handlers ─────────────────────────────────────────────────────────
 
@@ -110,6 +109,36 @@ export async function handleGetSettings(
 
   const all = ctx.settingsManager.listByCategory();
   sendJSON(res, 200, all);
+}
+
+export async function handleGetSettingsSchema(
+  req: IncomingMessage,
+  res: ServerResponse,
+  _ctx: SettingsHandlerContext,
+): Promise<void> {
+  const apiKey = (req as any).apiKey as ApiKeyEntry | undefined;
+  if (!requireScope(res, apiKey, 'agent:read')) return;
+
+  const categories = SETTINGS_CATEGORIES.map(c => ({
+    key: c.key,
+    label: c.label,
+    description: c.description,
+  }));
+
+  const settings = Array.from(SETTINGS_SCHEMA.entries()).map(([dotKey, entry]) => ({
+    dotKey,
+    category: SETTINGS_MAP.get(dotKey)?.category ?? 'general',
+    label: SETTINGS_MAP.get(dotKey)?.label ?? dotKey,
+    type: entry.type,
+    defaultValue: entry.default,
+    enumValues: entry.enumValues,
+    min: entry.min,
+    max: entry.max,
+    secret: entry.secret ?? false,
+    restartRequired: entry.restartRequired ?? false,
+  }));
+
+  sendJSON(res, 200, { categories, settings });
 }
 
 export async function handlePatchSettings(
@@ -138,7 +167,6 @@ export async function handlePatchSettings(
         try {
           await ctx.settingsManager.set(dotKey, String(value));
           applied[cat][key] = ctx.settingsManager.get(dotKey).value;
-          // Check restart requirement via schema
           const schema = SETTINGS_SCHEMA.get(dotKey);
           if (schema?.restartRequired) {
             requiresRestart = true;
@@ -160,202 +188,9 @@ export async function handlePatchSettings(
     return;
   }
 
-  // Broadcast change notification
   broadcastSettingsChange(ctx, Object.keys(updates), requiresRestart, restartAffected);
 
   sendJSON(res, 200, { applied, requiresRestart, restartAffected });
-}
-
-export async function handleGetSettingsSchema(
-  req: IncomingMessage,
-  res: ServerResponse,
-  ctx: SettingsHandlerContext,
-): Promise<void> {
-  const apiKey = (req as any).apiKey as ApiKeyEntry | undefined;
-  if (!requireScope(res, apiKey, 'agent:read')) return;
-
-  // Build a simple JSON schema from SETTINGS_SCHEMA
-  const properties: Record<string, any> = {};
-  for (const [dotKey, schema] of SETTINGS_SCHEMA) {
-    const prop: any = {};
-    if (schema.type === 'number') prop.type = 'integer';
-    else if (schema.type === 'boolean') prop.type = 'boolean';
-    else if (schema.type === 'enum') { prop.type = 'string'; prop.enum = schema.enumValues; }
-    else prop.type = 'string';
-    if (schema.secret) prop.writeOnly = true;
-    if (schema.default !== undefined) prop.default = schema.default;
-    properties[dotKey] = prop;
-  }
-
-  sendJSON(res, 200, {
-    $schema: 'https://json-schema.org/draft/2020-12/schema',
-    title: 'Seepient Agent Settings',
-    type: 'object',
-    properties,
-  });
-}
-
-export async function handlePostProvider(
-  req: IncomingMessage,
-  res: ServerResponse,
-  ctx: SettingsHandlerContext,
-): Promise<void> {
-  const apiKey = (req as any).apiKey as ApiKeyEntry | undefined;
-  if (!requireScope(res, apiKey, 'admin')) return;
-
-  const body = await readBody(req);
-  const providerType = body.type;
-  if (!providerType || !VALID_PROVIDER_TYPES.has(providerType)) {
-    sendError(res, 422, 'VALIDATION_ERROR', 'Invalid or missing provider type');
-    return;
-  }
-
-  // Check if already exists
-  const existingKey = `providers.${providerType === 'openai-compatible' ? 'openai-compat' : providerType}.apiKey`;
-  const existing = ctx.settingsManager.get(existingKey);
-  if (existing.value != null) {
-    sendError(res, 409, 'CONFLICT', `Provider "${providerType}" is already configured. Use PATCH to update.`);
-    return;
-  }
-
-  if (!body.apiKey) {
-    sendError(res, 422, 'VALIDATION_ERROR', 'apiKey is required');
-    return;
-  }
-  if (providerType === 'openai-compatible' && !body.baseUrl) {
-    sendError(res, 422, 'VALIDATION_ERROR', 'baseUrl is required for openai-compatible');
-    return;
-  }
-
-  if (body.baseUrl && providerType === 'openai-compatible') {
-    const { validateEndpointUrl } = await import("./ssrf-validator.js");
-    const allowPrivate = process.env.SEEPIENT_SSRF_ALLOW_PRIVATE === "1";
-    const val = await validateEndpointUrl(body.baseUrl, { ssrfAllowPrivate: allowPrivate });
-    if (!val.valid) {
-      sendError(res, 400, "SSRF_BLOCKED", val.error || "SSRF validation failed");
-      return;
-    }
-  }
-
-  const release = await writeMutex.acquire();
-  try {
-    await ctx.settingsManager.set(existingKey, body.apiKey);
-    if (body.model) {
-      const modelKey = `providers.${providerType === 'openai-compatible' ? 'openai-compat' : providerType}.model`;
-      await ctx.settingsManager.set(modelKey, body.model);
-    }
-    if (body.baseUrl && providerType === 'openai-compatible') {
-      await ctx.settingsManager.set('providers.openai-compat.baseUrl', body.baseUrl);
-    }
-  } finally {
-    release();
-  }
-
-  const { clearBaseConfigCache } = await import("../../domain/providers/config-store/provider-config-store.js");
-  clearBaseConfigCache();
-
-  broadcastSettingsChange(ctx, ['providers'], false, []);
-
-  sendJSON(res, 201, {
-    provider: { type: providerType, apiKey: "••••••••" },
-    requiresRestart: false,
-    restartAffected: [],
-  });
-}
-
-export async function handlePatchProvider(
-  req: IncomingMessage,
-  res: ServerResponse,
-  ctx: SettingsHandlerContext,
-  providerType: string,
-): Promise<void> {
-  const apiKey = (req as any).apiKey as ApiKeyEntry | undefined;
-  if (!requireScope(res, apiKey, 'admin')) return;
-
-  if (!VALID_PROVIDER_TYPES.has(providerType)) {
-    sendError(res, 404, 'NOT_FOUND', `Unknown provider type: ${providerType}`);
-    return;
-  }
-
-  const body = await readBody(req);
-  const prefix = `providers.${providerType === 'openai-compatible' ? 'openai-compat' : providerType}`;
-
-  if (body.baseUrl && providerType === 'openai-compatible') {
-    const { validateEndpointUrl } = await import("./ssrf-validator.js");
-    const allowPrivate = process.env.SEEPIENT_SSRF_ALLOW_PRIVATE === "1";
-    const val = await validateEndpointUrl(body.baseUrl, { ssrfAllowPrivate: allowPrivate });
-    if (!val.valid) {
-      sendError(res, 400, "SSRF_BLOCKED", val.error || "SSRF validation failed");
-      return;
-    }
-  }
-
-  const release = await writeMutex.acquire();
-  try {
-    if (body.apiKey) await ctx.settingsManager.set(`${prefix}.apiKey`, body.apiKey);
-    if (body.model) await ctx.settingsManager.set(`${prefix}.model`, body.model);
-    if (body.baseUrl && providerType === 'openai-compatible') await ctx.settingsManager.set(`${prefix}.baseUrl`, body.baseUrl);
-  } finally {
-    release();
-  }
-
-  const { clearBaseConfigCache } = await import("../../domain/providers/config-store/provider-config-store.js");
-  clearBaseConfigCache();
-
-  broadcastSettingsChange(ctx, ['providers'], false, []);
-
-  const result: Record<string, any> = { type: providerType };
-  result.apiKey = "••••••••";
-  if (providerType === 'openai-compatible') result.baseUrl = ctx.settingsManager.get(`${prefix}.baseUrl`).value;
-  if (body.model) result.model = body.model;
-
-  sendJSON(res, 200, { provider: result, requiresRestart: false, restartAffected: [] });
-}
-
-export async function handleDeleteProvider(
-  req: IncomingMessage,
-  res: ServerResponse,
-  ctx: SettingsHandlerContext,
-  providerType: string,
-): Promise<void> {
-  const apiKey = (req as any).apiKey as ApiKeyEntry | undefined;
-  if (!requireScope(res, apiKey, 'admin')) return;
-
-  if (!VALID_PROVIDER_TYPES.has(providerType)) {
-    sendError(res, 404, 'NOT_FOUND', `Unknown provider type: ${providerType}`);
-    return;
-  }
-
-  const prefix = `providers.${providerType === 'openai-compatible' ? 'openai-compat' : providerType}`;
-
-  // Check how many providers have keys configured
-  let configuredCount = 0;
-  for (const pType of ['openai', 'anthropic', 'glm', 'openai-compatible']) {
-    const p = `providers.${pType === 'openai-compatible' ? 'openai-compat' : pType}.apiKey`;
-    const val = ctx.settingsManager.get(p);
-    if (val.value != null) configuredCount++;
-  }
-
-  if (configuredCount <= 1) {
-    sendError(res, 422, 'VALIDATION_ERROR', 'Cannot remove the last configured provider.');
-    return;
-  }
-
-  const release = await writeMutex.acquire();
-  try {
-    await ctx.settingsManager.reset(`${prefix}.apiKey`);
-    try { await ctx.settingsManager.reset(`${prefix}.model`); } catch { /* may not exist */ }
-    try { await ctx.settingsManager.reset(`${prefix}.baseUrl`); } catch { /* may not exist */ }
-  } finally {
-    release();
-  }
-
-  const { clearBaseConfigCache } = await import("../../domain/providers/config-store/provider-config-store.js");
-  clearBaseConfigCache();
-
-  broadcastSettingsChange(ctx, ['providers'], false, []);
-
-  sendJSON(res, 200, { removed: providerType, requiresRestart: false, restartAffected: [] });
 }
 
 // ── WS Handlers ───────────────────────────────────────────────────────────

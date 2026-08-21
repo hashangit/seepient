@@ -8,7 +8,6 @@
 import type { IncomingMessage } from "http";
 import type { Duplex } from "stream";
 import type {
-  ProviderType,
   Message,
   Usage,
   PermissionLevel,
@@ -57,7 +56,7 @@ export interface ChatMessage {
   message: string;
   options?: {
     model?: string;
-    provider?: ProviderType;
+    provider?: string;
     tools?: string[];
     maxSteps?: number;
     skills?: string[];
@@ -92,7 +91,7 @@ export interface ReconnectMessage {
 
 export interface SwitchProviderMessage {
   type: "switch_provider";
-  provider: ProviderType;
+  provider: string;
   model?: string;
 }
 
@@ -326,7 +325,7 @@ export interface WebSocketHandlerContext {
   streamText: (options: {
     message: string;
     model?: string;
-    provider?: ProviderType;
+    provider?: string;
     tools?: string[];
     maxSteps?: number;
     skills?: string[];
@@ -341,7 +340,7 @@ export interface WebSocketHandlerContext {
     onDone: (result: { text: string; usage: Usage; finishReason: string }) => void;
     signal?: AbortSignal;
   }) => void;
-  listModels: () => Record<ProviderType, string[]>;
+  listModels: () => Record<string, string[]>;
   listSkills: () => { name: string; description: string; tags: string[] }[];
   maxPermissionLevel?: PermissionLevel;
   settingsHandlerContext?: import("../http/settings-handlers.js").SettingsHandlerContext;
@@ -352,7 +351,7 @@ export interface WebSocketHandlerContext {
 export interface ConnectionState {
   sessionId: string | null;
   currentAbortController: AbortController | null;
-  activeProvider: ProviderType | null;
+  activeProvider: string | null;
   activeModel: string | null;
   permissionLevel?: PermissionLevel;
   maxPermissionLevel?: PermissionLevel;

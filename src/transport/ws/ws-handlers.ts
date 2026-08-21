@@ -684,11 +684,11 @@ function requireWsScope(state: ConnectionState, scope: KeyScope): boolean {
 
 // ── WS Settings: list providers ─────────────────────────────────────────
 
-async function handleWsListProviders(
+export async function handleWsListProviders(
   msg: ListProvidersMessage,
   ws: WebSocket,
   state: ConnectionState,
-  ctx: SettingsHandlerContext,
+  _ctx: SettingsHandlerContext,
 ): Promise<void> {
   if (!requireWsScope(state, "agent:read")) {
     safeSend(ws, { type: "providers_list", id: msg.id, providers: {}, error: { code: "FORBIDDEN", message: "Requires agent:read scope" } } as any);
@@ -696,31 +696,16 @@ async function handleWsListProviders(
   }
 
   const providers: Record<string, any> = {};
-  for (const pType of ["openai", "anthropic", "glm", "openai-compatible"]) {
-    const prefix = `providers.${pType === "openai-compatible" ? "openai-compat" : pType}`;
-    const apiKeyVal = ctx.settingsManager.get(`${prefix}.apiKey`).value;
-    if (apiKeyVal != null) {
-      providers[pType] = { type: pType };
-      const model = ctx.settingsManager.get(`${prefix}.model`).value;
-      if (model) providers[pType].model = model;
-      if (pType === "openai-compatible") {
-        const baseUrl = ctx.settingsManager.get(`${prefix}.baseUrl`).value;
-        if (baseUrl) providers[pType].baseUrl = baseUrl;
-      }
-    }
-  }
 
   try {
     const { getDefaultProviderRuntime } = await import("../../domain/providers/provider-runtime.js");
     const snapshot = await getDefaultProviderRuntime().createTurnSnapshot();
     const v2Providers = snapshot.config?.providers || {};
     for (const [id, entry] of Object.entries(v2Providers)) {
-      if (!providers[id]) {
-        providers[id] = {
-          type: entry.upstreamProvider || entry.adapter || "custom",
-          baseUrl: entry.baseUrl,
-        };
-      }
+      providers[id] = {
+        type: entry.upstreamProvider || entry.adapter || "custom",
+        baseUrl: entry.baseUrl,
+      };
     }
   } catch {}
 
@@ -733,7 +718,7 @@ async function handleWsSetProvider(
   msg: SetProviderMessage,
   ws: WebSocket,
   state: ConnectionState,
-  ctx: SettingsHandlerContext,
+  _ctx: SettingsHandlerContext,
 ): Promise<void> {
   if (!requireWsScope(state, "provider:admin")) {
     safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "FORBIDDEN", message: "Requires provider:admin scope" } } as any);
@@ -741,15 +726,13 @@ async function handleWsSetProvider(
   }
 
   const { type: providerType, apiKey, baseUrl, model } = msg.provider;
-  const VALID_PROVIDER_TYPES = new Set(["openai", "anthropic", "glm", "openai-compatible"]);
-  if (!providerType || !VALID_PROVIDER_TYPES.has(providerType)) {
+  if (!providerType) {
     safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "VALIDATION_ERROR", message: "Invalid provider type" } } as any);
     return;
   }
 
-  const prefix = `providers.${providerType === "openai-compatible" ? "openai-compat" : providerType}`;
   try {
-    if (baseUrl && providerType === "openai-compatible") {
+    if (baseUrl) {
       const { validateEndpointUrl } = await import("../http/ssrf-validator.js");
       const allowPrivate = process.env.SEEPIENT_SSRF_ALLOW_PRIVATE === "1";
       const val = await validateEndpointUrl(baseUrl, { ssrfAllowPrivate: allowPrivate });
@@ -758,19 +741,30 @@ async function handleWsSetProvider(
         return;
       }
     }
-    const release = await writeMutex.acquire();
-    try {
-      if (apiKey) await ctx.settingsManager.set(`${prefix}.apiKey`, apiKey);
-      if (model) await ctx.settingsManager.set(`${prefix}.model`, model);
-      if (baseUrl && providerType === "openai-compatible") {
-        await ctx.settingsManager.set(`${prefix}.baseUrl`, baseUrl);
-      }
-    } finally {
-      release();
-    }
-
-    const { clearBaseConfigCache } = await import("../../domain/providers/config-store/provider-config-store.js");
-    clearBaseConfigCache();
+    const { getDefaultProviderRuntime } = await import("../../domain/providers/provider-runtime.js");
+    const runtime = getDefaultProviderRuntime();
+    const configStore = runtime.getConfigStore();
+    const overlay = await configStore.getOverlay();
+    await configStore.updateOverlay({
+      providers: {
+        [providerType]: {
+          adapter: "pi-ai",
+          upstreamProvider: providerType,
+          ...(baseUrl ? { baseUrl } : {}),
+          ...(apiKey ? { credential: { kind: "direct", value: apiKey } } : {}),
+        },
+      },
+      ...(model ? {
+        modelAssignments: {
+          text: {
+            standard: {
+              providerAccount: providerType,
+              model,
+            },
+          },
+        } as any,
+      } : {}),
+    }, overlay.revision);
   } catch (e: any) {
     safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "SET_ERROR", message: e.message } } as any);
     return;
@@ -785,32 +779,28 @@ async function handleWsRemoveProvider(
   msg: RemoveProviderMessage,
   ws: WebSocket,
   state: ConnectionState,
-  ctx: SettingsHandlerContext,
+  _ctx: SettingsHandlerContext,
 ): Promise<void> {
   if (!requireWsScope(state, "provider:admin")) {
     safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "FORBIDDEN", message: "Requires provider:admin scope" } } as any);
     return;
   }
 
-  const VALID_PROVIDER_TYPES = new Set(["openai", "anthropic", "glm", "openai-compatible"]);
-  if (!msg.providerType || !VALID_PROVIDER_TYPES.has(msg.providerType)) {
+  if (!msg.providerType) {
     safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "VALIDATION_ERROR", message: "Invalid provider type" } } as any);
     return;
   }
 
-  const prefix = `providers.${msg.providerType === "openai-compatible" ? "openai-compat" : msg.providerType}`;
   try {
-    const release = await writeMutex.acquire();
-    try {
-      await ctx.settingsManager.reset(`${prefix}.apiKey`);
-      try { await ctx.settingsManager.reset(`${prefix}.model`); } catch { /* may not exist */ }
-      try { await ctx.settingsManager.reset(`${prefix}.baseUrl`); } catch { /* may not exist */ }
-    } finally {
-      release();
-    }
-
-    const { clearBaseConfigCache } = await import("../../domain/providers/config-store/provider-config-store.js");
-    clearBaseConfigCache();
+    const { getDefaultProviderRuntime } = await import("../../domain/providers/provider-runtime.js");
+    const runtime = getDefaultProviderRuntime();
+    const configStore = runtime.getConfigStore();
+    const overlay = await configStore.getOverlay();
+    const currentProviders = { ...((overlay.patch?.providers as any) || {}) };
+    delete currentProviders[msg.providerType];
+    await configStore.updateOverlay({
+      providers: currentProviders,
+    }, overlay.revision);
   } catch (e: any) {
     safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "RESET_ERROR", message: e.message } } as any);
     return;

@@ -7,7 +7,6 @@
 
 import type { IncomingMessage, ServerResponse } from "http";
 import type {
-  ProviderType,
   SkillMetadata,
   GenerateTextResult,
 } from "../../foundations/types.js";
@@ -17,9 +16,6 @@ import {
   handleGetSettings,
   handlePatchSettings,
   handleGetSettingsSchema,
-  handlePostProvider,
-  handlePatchProvider,
-  handleDeleteProvider,
   type SettingsHandlerContext,
 } from "./settings-handlers.js";
 
@@ -33,13 +29,13 @@ export interface RestHandlerContext {
   generateText: (options: {
     message: string;
     model?: string;
-    provider?: ProviderType;
+    provider?: string;
     tools?: string[];
     maxSteps?: number;
     skills?: string[];
   }) => Promise<GenerateTextResult>;
   /** List available models grouped by provider */
-  listModels: () => Record<ProviderType, string[]>;
+  listModels: () => Record<string, string[]>;
   /** List available skill metadata */
   listSkills: () => SkillMetadata[];
   /** Settings handler context — required for settings/provider routes */
@@ -53,7 +49,7 @@ export interface RestHandlerContext {
 interface ChatRequest {
   message: string;
   model?: string;
-  provider?: ProviderType;
+  provider?: string;
   tools?: string[];
   maxSteps?: number;
   skills?: string[];
@@ -160,7 +156,6 @@ function matchRoute(
     if (method === "GET") return { handler: "provider_v2_get", params: { providerId } };
     if (method === "PUT") return { handler: "provider_v2_put", params: { providerId } };
     if (method === "DELETE") return { handler: "provider_v2_delete", params: { providerId } };
-    if (method === "PATCH") return { handler: "provider_patch", params: { type: providerId } };
   }
   const probeMatch = path.match(/^\/v1\/providers\/([a-zA-Z0-9_-]+)\/probe$/);
   if (method === "POST" && probeMatch) {
@@ -169,11 +164,6 @@ function matchRoute(
   const refreshMatch = path.match(/^\/v1\/providers\/([a-zA-Z0-9_-]+)\/refresh-models$/);
   if (method === "POST" && refreshMatch) {
     return { handler: "provider_refresh_models", params: { providerId: refreshMatch[1] } };
-  }
-
-  // Legacy Provider routes
-  if (method === "POST" && path === "/v1/providers") {
-    return { handler: "provider_post", params: {} };
   }
 
   // GET /v1/sessions/:id
@@ -327,15 +317,6 @@ export function createRestHandler(ctx: RestHandlerContext) {
           await handleRefreshModels(req, res, await getRuntime(), key, route.params.providerId);
           break;
         }
-        case "provider_post":
-          await handleProviderPost(req, res, ctx);
-          break;
-        case "provider_patch":
-          await handleProviderPatch(req, res, ctx, route.params.type);
-          break;
-        case "provider_delete":
-          await handleProviderDelete(req, res, ctx, route.params.type);
-          break;
         case "gateway":
           if (!ctx.gatewayHandler) {
             sendError(res, 503, "SERVICE_UNAVAILABLE", "Gateway not configured");
@@ -548,48 +529,4 @@ async function handleSettingsPatch(
   const sCtx = getSettingsCtx(ctx);
   if (!sCtx) { sendError(res, 503, "SERVICE_UNAVAILABLE", "Settings not configured"); return; }
   await handlePatchSettings(req, res, sCtx, category);
-}
-
-async function handleProviderPost(
-  req: IncomingMessage,
-  res: ServerResponse,
-  ctx: RestHandlerContext,
-): Promise<void> {
-  const key = authMiddleware(req);
-  if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); return; }
-  (req as any).apiKey = key;
-
-  const sCtx = getSettingsCtx(ctx);
-  if (!sCtx) { sendError(res, 503, "SERVICE_UNAVAILABLE", "Settings not configured"); return; }
-  await handlePostProvider(req, res, sCtx);
-}
-
-async function handleProviderPatch(
-  req: IncomingMessage,
-  res: ServerResponse,
-  ctx: RestHandlerContext,
-  type: string,
-): Promise<void> {
-  const key = authMiddleware(req);
-  if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); return; }
-  (req as any).apiKey = key;
-
-  const sCtx = getSettingsCtx(ctx);
-  if (!sCtx) { sendError(res, 503, "SERVICE_UNAVAILABLE", "Settings not configured"); return; }
-  await handlePatchProvider(req, res, sCtx, type);
-}
-
-async function handleProviderDelete(
-  req: IncomingMessage,
-  res: ServerResponse,
-  ctx: RestHandlerContext,
-  type: string,
-): Promise<void> {
-  const key = authMiddleware(req);
-  if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); return; }
-  (req as any).apiKey = key;
-
-  const sCtx = getSettingsCtx(ctx);
-  if (!sCtx) { sendError(res, 503, "SERVICE_UNAVAILABLE", "Settings not configured"); return; }
-  await handleDeleteProvider(req, res, sCtx, type);
 }

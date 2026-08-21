@@ -12,8 +12,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { homedir } from "os";
 
-import type { ProviderType, PermissionLevel } from "../../foundations/types.js";
-import { configureProviders, resolveFromEnv } from "../../domain/providers/provider-resolver.js";
+import type { PermissionLevel } from "../../foundations/types.js";
+import { getSyncBuiltinCatalog } from "../../domain/providers/model-catalog.js";
 import { serverGenerateText, serverStreamText } from "./server-core.js";
 import { createRestHandler, type RestHandlerContext } from "./rest.js";
 import { setupWebSocket, closeWebSocket, type WebSocketHandlerContext } from "../ws/websocket.js";
@@ -22,7 +22,6 @@ import { ServerSessionManager } from "./session-store.js";
 import { SettingsManager } from "../../domain/settings/settings-manager.js";
 import type { SettingsHandlerContext } from "./settings-handlers.js";
 import { loadMergedConfig, getConfigPaths, loadJsonConfig } from "../../foundations/config.js";
-import { MODEL_CATALOG } from "../../foundations/models-catalog.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -67,29 +66,18 @@ function resolvePort(options?: ServerOptions): number {
   return 7337;
 }
 
-// ── Provider initialization ────────────────────────────────────────────
-
-function initializeProvidersFromEnv(): void {
-  const config = resolveFromEnv();
-  if (config) {
-    configureProviders(config);
-  }
-}
-
-function listModels(): Record<ProviderType, string[]> {
-  const result: Record<ProviderType, string[]> = {
-    openai: [],
-    anthropic: [],
-    glm: [],
-    "openai-compatible": [],
-  };
-
-  for (const [provider, entries] of Object.entries(MODEL_CATALOG)) {
-    if (provider in result) {
-      result[provider as ProviderType] = entries.map((e) => e.id);
+// ── Model listing ──────────────────────────────────────────────────────
+ 
+function listModels(): Record<string, string[]> {
+  const models = getSyncBuiltinCatalog();
+  const result: Record<string, string[]> = {};
+  for (const m of models) {
+    const p = m.upstreamProvider || "default";
+    if (!result[p]) {
+      result[p] = [];
     }
+    result[p].push(m.id);
   }
-
   return result;
 }
 
@@ -156,9 +144,6 @@ function handlePreflight(
 export async function createServer(options?: ServerOptions): Promise<http.Server> {
   const version = resolveVersion();
   const startTime = Date.now();
-
-  // Initialize providers from environment
-  initializeProvidersFromEnv();
 
   const serverPermissionLevel = options?.permissionLevel ?? "moderate";
 
