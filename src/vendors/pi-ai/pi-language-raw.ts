@@ -132,12 +132,16 @@ async function resolveSecretApiKey(
 
             const store = credentialStore ?? (target.credential as any)?.store;
             if (store && typeof store.put === "function") {
-              await store.put(target.providerAccount, {
-                kind: "oauth",
-                access,
-                refresh,
-                expires,
-              }).catch(() => {});
+              try {
+                await store.put(target.providerAccount, {
+                  kind: "oauth",
+                  access,
+                  refresh,
+                  expires,
+                });
+              } catch (err: any) {
+                console.warn(`[PiLanguageRaw] Failed to persist refreshed OAuth token for "${target.providerAccount}": ${err?.message}`);
+              }
             }
           }
         }
@@ -172,21 +176,10 @@ export class PiLanguageRaw implements LanguageBackend {
     const providerName = target.upstreamProvider === "glm" ? "zai" : target.upstreamProvider;
     let model = this.models.getModel(providerName, target.model) as Model<Api> | undefined;
 
-    const knownPiProviders = new Set([
-      "openai",
-      "anthropic",
-      "google",
-      "openrouter",
-      "zai",
-      "groq",
-      "mistral",
-      "cerebras",
-      "together",
-      "deepseek",
-      "bedrock",
-      "opencode",
-    ]);
-    const isKnown = knownPiProviders.has(providerName) || Boolean(model);
+    const isKnown =
+      Boolean(model) ||
+      (typeof this.models.getProviders === "function" &&
+        this.models.getProviders().some((p) => p.id === providerName));
     const piProvider = model ? (model.provider || providerName) : (isKnown ? providerName : "openai");
 
     if (!isKnown && !target.baseUrl) {

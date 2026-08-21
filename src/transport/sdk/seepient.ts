@@ -45,7 +45,7 @@ export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<
   }
 
   const credentialStore = opts.credentials ?? new MemoryCredentialStore();
-  const adapter = opts.adapter ?? new AggregateInferenceAdapter();
+  const adapter = opts.adapter ?? new AggregateInferenceAdapter(undefined, undefined, credentialStore);
 
   const runtime = new ProviderRuntime({
     configStore,
