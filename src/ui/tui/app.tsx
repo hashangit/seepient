@@ -19,8 +19,9 @@ import { Footer } from './components/footer.js';
 import Spinner from 'ink-spinner';
 import { CommandPalette } from './components/command-palette.js';
 import { HelpDialog } from './overlays/help-dialog.js';
-import { ModelSelector, type ModelOption } from './overlays/model-selector.js';
 import { ModelManager } from './overlays/model-manager.js';
+import { createProviderManagerApi } from '../../transport/cli/provider-manager-api.js';
+import { getDefaultProviderRuntime } from '../../domain/providers/provider-runtime.js';
 import { SessionSelector, type SessionListItem } from './overlays/session-selector.js';
 import { SettingsEditor, type SettingItem } from './overlays/settings-overlay.js';
 import { messagesToFeedEntries } from './feed-serializer.js';
@@ -66,8 +67,6 @@ interface TuiAppProps {
   gatewayOn: boolean;
   skillCount: number;
   mcpCount: number;
-  modelOptions: ModelOption[];
-  onSwitchModel: (providerType: string, modelId: string) => Promise<void>;
   getSettingsList: () => SettingItem[];
   onSetSetting: (dotKey: string, value: string) => Promise<void>;
   listSessions: () => Promise<SessionListItem[]>;
@@ -89,7 +88,7 @@ interface TuiAppProps {
  */
 export function TuiApp({
   agent, permissionLevel, initialQuery, onExit, dispatchCommand, commands, skills, resetView,
-  providerType, gatewayOn, skillCount, mcpCount, modelOptions, onSwitchModel, getSettingsList, onSetSetting,
+  providerType, gatewayOn, skillCount, mcpCount, getSettingsList, onSetSetting,
   listSessions, onSwitchSession, onDeleteSession, onExportSession, onTranscriptSession, onRenameSession, getSessionId,
 }: TuiAppProps) {
   const theme = useTheme();
@@ -174,46 +173,16 @@ export function TuiApp({
     };
   }, [resetView]);
 
-  const [modelSnapshot, setModelSnapshot] = useState<{ assignments?: any; providers?: any; catalog?: any } | null>(null);
-
-  useEffect(() => {
-    if (overlay === 'model') {
-      const runtime = agent.getProviderRuntime?.();
-      if (runtime) {
-        runtime.createTurnSnapshot().then((snap: any) => {
-          setModelSnapshot({
-            assignments: snap.assignments,
-            providers: snap.config.providers,
-            catalog: snap.catalog,
-          });
-        }).catch(() => {});
-      }
-    }
-  }, [overlay, agent]);
-
-  const handleUpdateAssignment = (purpose: string, tier: string, target: { providerAccount: string; model: string; thinkingLevel?: any }) => {
-    const runtime = agent.getProviderRuntime?.();
-    if (runtime) {
-      runtime.configStore.getOverlay().then((overlayDoc: any) => {
-        const patch = {
-          modelAssignments: {
-            [purpose]: {
-              [tier]: target,
-            },
-          },
-        };
-        return runtime.configStore.updateOverlay(patch as any, overlayDoc.revision);
-      }).then(() => {
-        return runtime.createTurnSnapshot();
-      }).then((snap: any) => {
-        setModelSnapshot({
-          assignments: snap.assignments,
-          providers: snap.config.providers,
-          catalog: snap.catalog,
-        });
-      }).catch(() => {});
-    }
-  };
+  // 013: the model manager dock talks to the ProviderManagerApi controller —
+  // one semantic core shared with the wizard, CLI handlers, and SDK (R15).
+  const managerApi = useMemo(
+    () =>
+      createProviderManagerApi(agent.getProviderRuntime() ?? getDefaultProviderRuntime(), {
+        switchProvider: (account, model) => agent.switchProvider(account, model),
+      }),
+    [agent],
+  );
+  const [modelTab, setModelTab] = useState<'jobs' | 'providers' | 'now'>('jobs');
 
   const didInit = useRef(false);
   useEffect(() => {
@@ -310,6 +279,12 @@ export function TuiApp({
       return;
     }
     if (trimmed === '/models' || trimmed === '/model') {
+      setModelTab('jobs');
+      setOverlay('model');
+      return;
+    }
+    if (trimmed === '/providers') {
+      setModelTab('providers');
       setOverlay('model');
       return;
     }
@@ -372,7 +347,8 @@ export function TuiApp({
   const paletteCommands: Suggestion[] = [
     ...commands,
     { name: 'shortcuts', description: 'Keyboard reference' },
-    { name: 'model', description: 'Switch model' },
+    { name: 'model', description: `Switch model (currently ${providerType}/${agent.getModel()})` },
+    { name: 'providers', description: 'Manage provider accounts' },
     { name: 'settings', description: 'View settings' },
     { name: 'sessions', description: 'Resume / delete a session' },
   ];
@@ -381,6 +357,10 @@ export function TuiApp({
     if (name === 'shortcuts') {
       setOverlay('help');
     } else if (name === 'model') {
+      setModelTab('jobs');
+      setOverlay('model');
+    } else if (name === 'providers') {
+      setModelTab('providers');
       setOverlay('model');
     } else if (name === 'settings') {
       setSettingsList(getSettingsList());
@@ -530,12 +510,10 @@ export function TuiApp({
           <HelpDialog onClose={() => setOverlay(null)} />
         ) : overlay === 'model' ? (
           <ModelManager
-            assignments={modelSnapshot?.assignments}
-            providers={modelSnapshot?.providers}
-            catalog={modelSnapshot?.catalog}
+            api={managerApi}
             activeAccount={providerType}
             activeModel={agent.getModel()}
-            onUpdateAssignment={handleUpdateAssignment}
+            initialTab={modelTab}
             onClose={() => setOverlay(null)}
           />
         ) : overlay === 'settings' ? (
