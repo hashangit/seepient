@@ -2,17 +2,14 @@ import { describe, it, expect } from "vitest";
 import {
   estimateTokens,
   toSeepientError,
-  messageToProviderMessage,
-  providerToolCallToToolCall,
+  messageToCanonicalMessage,
 } from "../message-convert.js";
 import { SeepientError, ProviderError, ToolError } from "../../../foundations/errors.js";
 
 describe("estimateTokens", () => {
   it("uses BPE tokenization (delegates to countTokens)", () => {
-    // estimateTokens now uses real BPE via gpt-tokenizer, not chars÷4.
     expect(estimateTokens("")).toBe(0);
     expect(estimateTokens("hello world")).toBe(2);
-    // Longer text yields more tokens
     expect(estimateTokens("this is a longer sentence")).toBeGreaterThan(
       estimateTokens("short"),
     );
@@ -39,89 +36,28 @@ describe("toSeepientError", () => {
   });
 
   it("sets retryable=true for PROVIDER_ERROR on default path", () => {
-    const err = toSeepientError("x", "PROVIDER_ERROR");
-    // The switch case creates a ProviderError, but the default path is covered
-    // by testing a code that falls through:
     const generic = toSeepientError("x", "PROVIDER_ERROR");
     expect(generic.retryable).toBe(true);
   });
 });
 
-describe("messageToProviderMessage", () => {
-  it("converts a simple text message", () => {
-    const msg = {
-      id: "1",
-      role: "user" as const,
-      content: "hello",
-      timestamp: 1000,
-    };
-    const pm = messageToProviderMessage(msg);
-    expect(pm.role).toBe("user");
-    expect(pm.content).toBe("hello");
-    expect(pm.tool_calls).toBeUndefined();
-    expect(pm.tool_call_id).toBeUndefined();
-  });
+describe("messageToCanonicalMessage", () => {
+  it("converts user and assistant messages to canonical format", () => {
+    const userMsg = { id: "1", role: "user" as const, content: "hello", timestamp: 1000 };
+    const canonUser = messageToCanonicalMessage(userMsg);
+    expect(canonUser.role).toBe("user");
+    expect(canonUser.content[0]).toEqual({ type: "text", text: "hello" });
 
-  it("converts tool calls with JSON-stringified arguments", () => {
-    const msg = {
+    const assistantMsg = {
       id: "2",
       role: "assistant" as const,
-      content: "",
-      timestamp: 1000,
-      toolCalls: [
-        { id: "tc1", name: "read_file", arguments: { path: "/tmp/x" } },
-      ],
-    };
-    const pm = messageToProviderMessage(msg);
-    expect(pm.tool_calls).toHaveLength(1);
-    expect(pm.tool_calls![0].id).toBe("tc1");
-    expect(pm.tool_calls![0].name).toBe("read_file");
-    expect(pm.tool_calls![0].arguments).toBe('{"path":"/tmp/x"}');
-  });
-
-  it("preserves tool_call_id", () => {
-    const msg = {
-      id: "3",
-      role: "tool" as const,
-      content: "file contents",
-      timestamp: 1000,
-      toolCallId: "tc1",
-    };
-    const pm = messageToProviderMessage(msg);
-    expect(pm.tool_call_id).toBe("tc1");
-  });
-
-  it("omits tool_calls when array is empty", () => {
-    const msg = {
-      id: "4",
-      role: "assistant" as const,
       content: "hi",
+      toolCalls: [{ id: "call_1", name: "read_file", arguments: { path: "a.txt" } }],
       timestamp: 1000,
-      toolCalls: [],
     };
-    const pm = messageToProviderMessage(msg);
-    expect(pm.tool_calls).toBeUndefined();
-  });
-});
-
-describe("providerToolCallToToolCall", () => {
-  it("parses JSON arguments", () => {
-    const tc = providerToolCallToToolCall({
-      id: "tc1",
-      name: "read_file",
-      arguments: '{"path":"/tmp/x"}',
-    });
-    expect(tc.id).toBe("tc1");
-    expect(tc.name).toBe("read_file");
-    expect(tc.arguments).toEqual({ path: "/tmp/x" });
-  });
-
-  it("falls back to raw arguments on invalid JSON", () => {
-    const tc = providerToolCallToToolCall({
-      id: "tc2",
-      name: "tool",
-      arguments: "not-json",
-    });
-    expect(tc.arguments).toEqual({ raw: "not-json" });
+    const canonAssistant = messageToCanonicalMessage(assistantMsg);
+    expect(canonAssistant.role).toBe("assistant");
+    expect(canonAssistant.content[0]).toEqual({ type: "text", text: "hi" });
+    expect(canonAssistant.content[1]).toEqual({ type: "tool_use", id: "call_1", name: "read_file", input: { path: "a.txt" } });
   });
 });

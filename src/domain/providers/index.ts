@@ -5,7 +5,3 @@ export * from "./discovery-cache.js";
 export * from "./model-catalog.js";
 export * from "./assignment-resolver.js";
 export * from "./provider-runtime.js";
-export * from "./migration.js";
-export * from "./provider-config.js";
-export * from "./provider-env.js";
-export * from "./provider-resolver.js";

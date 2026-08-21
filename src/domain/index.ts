@@ -34,9 +34,6 @@ export {
 
 // Export all types from types.ts
 export type {
-  // Provider
-  ProviderType,
-  MultiProviderConfig,
   // Messages
   Message,
   ToolCall,
@@ -77,38 +74,13 @@ export type {
 // class export comes from ./errors.js above. The `export type` block omits
 // SeepientError intentionally to avoid a duplicate value export.
 
-// Export provider resolver functions
-export {
-  provider,
-  configureProviders,
-  getProviderConfig,
-  getDefaultProviderType,
-  getDefaultProvider,
-  getProvider,
-  resolveProviderConfigFromApp,
-  resolveFromEnv,
-  resolveFromConfigFile,
-  migrateLegacyConfig,
-  addProvider,
-  updateProviderConfig,
-  removeProvider,
-  resolveGLMModel,
-} from './providers/provider-resolver.js';
-
-export type {
-  ResolvedProviderConfig,
-  AppConfig,
-} from './providers/provider-resolver.js';
-
 // Export message conversion helpers
 export { generateId } from '../foundations/id.js';
 export {
   now,
   estimateTokens,
   toSeepientError,
-  messageToProviderMessage,
-  providerToolCallToToolCall,
-  providerResponseToMessages,
+  messageToCanonicalMessage,
 } from './context/message-convert.js';
 
 // Export tool executor

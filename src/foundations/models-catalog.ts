@@ -1,4 +1,3 @@
-import { ProviderType } from './contracts/llm.js';
 import type { UpstreamModel } from './schemas/inference.js';
 import { SeepientError } from './errors.js';
 
@@ -148,54 +147,4 @@ export function getModelMeta(id?: string): ModelEntry | undefined {
   };
 }
 
-/**
- * Dynamic policy-backed defaults proxy.
- */
-export const DEFAULT_MODELS: Record<ProviderType, string> = {
-  get openai() {
-    return resolveDefaultModel('openai', 'standard');
-  },
-  get 'openai-compatible'() {
-    return resolveDefaultModel('openai-compatible', 'standard');
-  },
-  get anthropic() {
-    return resolveDefaultModel('anthropic', 'standard');
-  },
-  get glm() {
-    return resolveDefaultModel('glm', 'standard');
-  },
-};
 
-/**
- * Dynamic catalog entries grouped by provider type for CLI setup and TUI.
- */
-export const MODEL_CATALOG: Record<ProviderType, ModelEntry[]> = new Proxy(
-  {} as Record<ProviderType, ModelEntry[]>,
-  {
-    get(_target, prop: string) {
-      if (typeof prop !== 'string') return undefined;
-      const catalog = getSyncCatalogSnapshot();
-      const aliased = normalizeProviderName(prop);
-      const matched = catalog.filter(
-        (m) => m.upstreamProvider === aliased || m.upstreamProvider === prop,
-      );
-      return matched.map((m) => ({
-        id: m.id,
-        name: m.displayName,
-        contextWindow: m.contextWindow,
-        pricing: m.pricing
-          ? {
-              input: m.pricing.promptPerMillion ?? 0,
-              output: m.pricing.completionPerMillion ?? 0,
-            }
-          : undefined,
-      }));
-    },
-    ownKeys() {
-      return ['openai', 'anthropic', 'glm', 'openai-compatible'];
-    },
-    getOwnPropertyDescriptor() {
-      return { enumerable: true, configurable: true };
-    },
-  },
-);

@@ -23,12 +23,10 @@ describe("Seepient smoke test — module resolution", () => {
   });
 
   it("provider modules import without error", async () => {
-    const { getProvider, configureProviders } = await import("../domain/providers/provider-resolver.js");
-    const { createProvider } = await import("../capabilities/llm/factory.js");
+    const { ProviderRuntime, ProviderConfigStore } = await import("../domain/providers/index.js");
 
-    expect(typeof getProvider).toBe("function");
-    expect(typeof configureProviders).toBe("function");
-    expect(typeof createProvider).toBe("function");
+    expect(typeof ProviderRuntime).toBe("function");
+    expect(typeof ProviderConfigStore).toBe("function");
   });
 
   it("tool executor imports without error", async () => {

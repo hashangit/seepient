@@ -13,9 +13,6 @@ import {
   DEFAULT_RETRY_POLICY,
 } from "../../../foundations/schemas/provider-config.js";
 import { SeepientError } from "../../../foundations/errors.js";
-import { loadMergedConfig, applyEnvOverrides } from "../../../foundations/config.js";
-import { migrateV1ToV2 } from "../migration.js";
-import { CompositeCredentialStore } from "../credentials/composite-credential-store.js";
 import { applyDeepPatch, mergePatches } from "./deep-patch.js";
 import { resolveDefaultModelForProvider } from "../../../foundations/models-catalog.js";
 import { getSyncBuiltinCatalog } from "../model-catalog.js";
@@ -388,7 +385,7 @@ export class ProviderConfigStore {
 }
 
 /**
- * Synthesizes default v2 configuration from environment variables and legacy v1 configuration.
+ * Synthesizes default v2 configuration from environment variables.
  */
 const baseConfigCache = new Map<string, ProviderEffectiveConfig>();
 
@@ -396,8 +393,82 @@ export function clearBaseConfigCache(): void {
   baseConfigCache.clear();
 }
 
+export function synthesizeEnvProviders(): Record<string, any> {
+  const providers: Record<string, any> = {};
+
+  if (process.env.OPENAI_API_KEY) {
+    providers["openai"] = {
+      adapter: "pi-ai",
+      upstreamProvider: "openai",
+      credential: { kind: "env", name: "OPENAI_API_KEY" },
+    };
+  }
+
+  if (process.env.ANTHROPIC_API_KEY) {
+    providers["anthropic"] = {
+      adapter: "pi-ai",
+      upstreamProvider: "anthropic",
+      credential: { kind: "env", name: "ANTHROPIC_API_KEY" },
+    };
+  }
+
+  if (process.env.GLM_API_KEY) {
+    providers["glm"] = {
+      adapter: "pi-ai",
+      upstreamProvider: "glm",
+      credential: { kind: "env", name: "GLM_API_KEY" },
+    };
+  }
+
+  if (process.env.OPENAI_COMPAT_API_KEY || process.env.OPENAI_COMPAT_BASE_URL) {
+    providers["openai-compatible"] = {
+      adapter: "pi-ai",
+      upstreamProvider: "openai-compatible",
+      baseUrl: process.env.OPENAI_COMPAT_BASE_URL || "https://api.openai.com/v1",
+      credential: { kind: "env", name: "OPENAI_COMPAT_API_KEY" },
+    };
+  }
+
+  return providers;
+}
+
+export function synthesizeBaseConfig(): ProviderEffectiveConfig {
+  const providers = synthesizeEnvProviders();
+  const modelAssignments: any = { text: {} };
+
+  const catalog = getSyncBuiltinCatalog();
+  const firstAccount = Object.keys(providers)[0];
+  if (firstAccount) {
+    try {
+      const defaultModel = resolveDefaultModelForProvider(
+        catalog,
+        providers[firstAccount].upstreamProvider || firstAccount,
+        "standard",
+      );
+      modelAssignments.text.standard = {
+        providerAccount: firstAccount,
+        model: defaultModel,
+      };
+    } catch {
+      modelAssignments.text.standard = {
+        providerAccount: firstAccount,
+        model: "default",
+      };
+    }
+  }
+
+  return {
+    schemaVersion: 2,
+    revision: 0,
+    updatedAt: new Date().toISOString(),
+    providers,
+    modelAssignments,
+    retryPolicy: DEFAULT_RETRY_POLICY,
+  };
+}
+
 export async function getDefaultBaseConfigAsync(
-  credentialStore?: { put: (id: string, record: any, meta?: any) => Promise<void> },
+  _credentialStore?: { put: (id: string, record: any, meta?: any) => Promise<void> },
   customCwd?: string,
 ): Promise<ProviderEffectiveConfig> {
   const cacheKey = customCwd ?? "default";
@@ -405,38 +476,8 @@ export async function getDefaultBaseConfigAsync(
     return baseConfigCache.get(cacheKey)!;
   }
 
-  let v1Config: any;
-  try {
-    v1Config = applyEnvOverrides(loadMergedConfig(customCwd));
-  } catch (err: any) {
-    console.warn(`[Seepient] Failed to parse configuration file: ${err.message}. Using default fallback.`);
-    v1Config = {};
-  }
-
-  const migrationResult = migrateV1ToV2(v1Config);
-
-  if (migrationResult.migratedCredentials && migrationResult.migratedCredentials.length > 0) {
-    const store = credentialStore ?? new CompositeCredentialStore();
-    try {
-      await Promise.all(
-        migrationResult.migratedCredentials.map((cred) =>
-          store.put(
-            cred.id,
-            { kind: "api_key", keyValue: cred.keyValue },
-            { source: "migration" },
-          ),
-        ),
-      );
-    } catch (err: any) {
-      throw new SeepientError(
-        `CORRUPT_STORAGE: Failed to persist migrated credentials: ${err.message}`,
-        "CORRUPT_STORAGE",
-        false,
-      );
-    }
-  }
-
-  baseConfigCache.set(cacheKey, migrationResult.config);
+  const baseConfig = synthesizeBaseConfig();
+  baseConfigCache.set(cacheKey, baseConfig);
 
   // Proactively sanitize legacy audit log on startup
   try {
@@ -444,11 +485,11 @@ export async function getDefaultBaseConfigAsync(
     scrubAuditLog();
   } catch {}
 
-  return migrationResult.config;
+  return baseConfig;
 }
 
 export function getDefaultBaseConfig(
-  credentialStore?: { put: (id: string, record: any, meta?: any) => Promise<void> },
+  _credentialStore?: { put: (id: string, record: any, meta?: any) => Promise<void> },
   customCwd?: string,
 ): ProviderEffectiveConfig {
   const cacheKey = customCwd ?? "default";
@@ -456,14 +497,7 @@ export function getDefaultBaseConfig(
     return baseConfigCache.get(cacheKey)!;
   }
 
-  let v1Config: any;
-  try {
-    v1Config = applyEnvOverrides(loadMergedConfig(customCwd));
-  } catch {
-    v1Config = {};
-  }
-
-  const migrationResult = migrateV1ToV2(v1Config);
-  baseConfigCache.set(cacheKey, migrationResult.config);
-  return migrationResult.config;
+  const baseConfig = synthesizeBaseConfig();
+  baseConfigCache.set(cacheKey, baseConfig);
+  return baseConfig;
 }

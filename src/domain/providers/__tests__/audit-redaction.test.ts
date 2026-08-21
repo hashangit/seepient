@@ -108,6 +108,23 @@ describe("WS0 (SEC-1): Security Redaction in Audit Log and Observability", () =>
 
     const overlayPath = path.join(tempDir, "overlay.json");
     const configStore = new ProviderConfigStore(overlayPath);
+    await configStore.updateOverlay({
+      providers: {
+        openai: {
+          adapter: "pi-ai",
+          upstreamProvider: "openai",
+          credential: { kind: "seepient", id: "openai_key" },
+        },
+      },
+      modelAssignments: {
+        text: {
+          standard: {
+            providerAccount: "openai",
+            model: "gpt-4o",
+          },
+        },
+      } as any,
+    }, 0);
     const catalog = new ModelCatalog();
 
     const runtime = new ProviderRuntime({

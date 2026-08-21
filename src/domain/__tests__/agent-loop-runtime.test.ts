@@ -6,7 +6,6 @@ import { ProviderConfigStore } from "../providers/config-store/provider-config-s
 import { AggregateInferenceAdapter } from "../../capabilities/inference/aggregate-adapter.js";
 import { createHookExecutor } from "../hooks.js";
 import type { LanguageBackend } from "../../foundations/contracts/backend-ports.js";
-import type { LLMProvider } from "../../foundations/contracts/llm.js";
 
 describe("Agent Loop Execution via ProviderRuntime (QS-P5.3c)", () => {
   it("streams language tokens through ProviderRuntime.executeLanguage", async () => {
@@ -86,12 +85,6 @@ describe("Agent Loop Execution via ProviderRuntime (QS-P5.3c)", () => {
       credentialStore: credStore,
       adapter,
     });
-
-    const mockDummyProvider: LLMProvider = {
-      chat: async () => ({ role: "assistant", content: "" }),
-      chatStream: async function* () {},
-    };
-
     const steps: any[] = [];
     const result = await runAgentLoop({
       runtime,

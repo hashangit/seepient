@@ -4,10 +4,8 @@ import {
   resolveDefaultModelForProvider,
   normalizeProviderName,
   getModelMeta,
-  DEFAULT_MODELS,
 } from "../../../foundations/models-catalog.js";
 import { getSyncBuiltinCatalog } from "../model-catalog.js";
-import { migrateV1ToV2, resolveMigratedModel } from "../migration.js";
 import { resolveInvocationPlan, type TurnSnapshot } from "../assignment-resolver.js";
 import { MemoryCredentialStore } from "../credentials/memory-credential-store.js";
 import { InferenceError } from "../../../foundations/errors.js";
@@ -101,31 +99,6 @@ describe("WS2 (R-3..R-9): Catalog-Native Redesign & Policy Defaults", () => {
     expect(() => {
       resolveDefaultModelForProvider(FROZEN_CATALOG_FIXTURE, "nonexistent-provider", "standard");
     }).toThrowError(/No candidate models found in catalog for provider/);
-  });
-
-  it("migrates dynamically without static model map", () => {
-    // Shorthand "sonnet" for GLM -> remapped to GLM default with note
-    const glmRes = resolveMigratedModel("glm", "sonnet");
-    expect(glmRes.model).toBe("glm-5.3");
-    expect(glmRes.remapped).toBe(true);
-
-    // Exact catalog model -> preserved as-is
-    const exactRes = resolveMigratedModel("openai", "gpt-5.6-terra");
-    expect(exactRes.model).toBe("gpt-5.6-terra");
-    expect(exactRes.remapped).toBe(false);
-
-    // Full v1 migration test
-    const v1Config = {
-      provider: "glm",
-      model: "sonnet",
-      apiKey: "glm-secret-key",
-    } as any;
-
-    const migrated = migrateV1ToV2(v1Config);
-    expect(migrated.config.providers.glm).toBeDefined();
-    expect(migrated.config.modelAssignments.text?.standard?.providerAccount).toBe("glm");
-    expect(migrated.config.modelAssignments.text?.standard?.model).toBe("glm-5.3");
-    expect(migrated.remapNotes?.glm).toContain("Remapped v1 model");
   });
 
   it("fails closed in assignment-resolver for unknown models and vision capability mismatch", async () => {
