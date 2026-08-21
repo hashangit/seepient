@@ -147,7 +147,13 @@ export function createCliApproveTool(
   };
 }
 
-export async function chatWithInterrupt(agent: Agent, input: string, config?: any, permissionLevel?: PermissionLevel): Promise<void> {
+export async function chatWithInterrupt(
+  agent: Agent,
+  input: string,
+  config?: any,
+  permissionLevel?: PermissionLevel,
+  providerFactory?: import('../../domain/agent-loop.js').ProviderFactory,
+): Promise<void> {
   const handle = setupInterrupt(agent);
   const approveTool = config ? createCliApproveTool(config, handle, permissionLevel) : undefined;
   // Spec 008: when the pipeline is enabled, the broker consults this approveTool.
@@ -155,7 +161,7 @@ export async function chatWithInterrupt(agent: Agent, input: string, config?: an
     agent.setPipelineApproveTool(approveTool);
   }
   try {
-    await agent.chat(input, handle.signal, approveTool, permissionLevel);
+    await agent.chat(input, handle.signal, approveTool, permissionLevel, undefined, providerFactory);
   } finally {
     handle.teardown();
   }
@@ -254,12 +260,14 @@ export async function runChat(queryParts: string[], options: any) {
             const switcher = createRuntimeSkillProviderSwitcher(agent.getProviderRuntime());
             const switched = await switcher.switchIfNeeded(skillResult);
 
-            if (switched && skillResult.preferredModel) {
-              agent.switchProvider(skillResult.preferredProvider ?? "", skillResult.preferredModel);
-            }
-
             try {
-              await chatWithInterrupt(agent, skillResult.prompt, fullConfig, permissionLevel);
+              await chatWithInterrupt(
+                agent,
+                skillResult.prompt,
+                fullConfig,
+                permissionLevel,
+                switched ? switcher : undefined,
+              );
             } finally {
               if (switched) {
                 switcher.restore();

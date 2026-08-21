@@ -99,4 +99,28 @@ describe('CLI Agent skill catalog injection', () => {
     const opts = runLoop.mock.calls[0][0];
     expect(opts.skillCatalog).toBeUndefined();
   });
+
+  it('passes providerFactory for turn-scoped model switching without permanently mutating agent.getModel()', async () => {
+    const runLoop = mockRunAgentLoop();
+    const { Agent } = await import('../agent.js');
+    const agent = new Agent(mockRuntime(), 'base-model', {}, 'BASE_PROMPT');
+
+    const fakeSwitcher = {
+      resolve: vi.fn().mockResolvedValue({ model: 'skill-preferred-model', providerAccount: 'skill-account' }),
+      restore: vi.fn(),
+    };
+
+    // Chat turn with skill provider factory
+    await agent.chat('use skill', undefined as any, undefined, undefined, undefined, fakeSwitcher);
+
+    expect(runLoop).toHaveBeenCalledTimes(1);
+    expect(runLoop.mock.calls[0][0].providerFactory).toBe(fakeSwitcher);
+    expect(agent.getModel()).toBe('base-model');
+
+    // Subsequent normal turn
+    await agent.chat('next turn', undefined as any);
+    expect(runLoop).toHaveBeenCalledTimes(2);
+    expect(runLoop.mock.calls[1][0].providerFactory).toBeUndefined();
+    expect(agent.getModel()).toBe('base-model');
+  });
 });

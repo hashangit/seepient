@@ -41,7 +41,7 @@ export interface AgentLoopOptions {
   onStep?: (step: StepResult) => void;
   providerFactory?: ProviderFactory;
   turnSnapshot?: TurnSnapshot;
-  modelOverride?: string;
+  modelOverride?: string | { model?: string; providerAccount?: string };
   middleware?: Middleware[];
   approveTool?: ApproveToolFn;
   permissionLevel?: PermissionLevel;
@@ -255,11 +255,16 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     let modelProviderClass = "normal";
     try {
       const initialSnapshot = options.turnSnapshot ?? (await runtime.createTurnSnapshot());
+      const initialOverride = options.modelOverride
+        ? typeof options.modelOverride === "string"
+          ? { model: options.modelOverride }
+          : options.modelOverride
+        : undefined;
       const initialPlan = await runtime.resolvePlan(
         initialSnapshot,
         "text",
         "standard",
-        options.modelOverride ? { model: options.modelOverride } : undefined,
+        initialOverride,
       );
       modelProviderClass = initialPlan.selectedTarget?.providerAccount || "normal";
     } catch {}
@@ -299,15 +304,19 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
   let totalCompletionTokens = 0;
   let lastContextTokens = 0;
 
-  for (let step = 0; step < maxSteps; step++) {
-    try {
+  try {
+    for (let step = 0; step < maxSteps; step++) {
       if (signal?.aborted) {
         finishReason = "aborted";
         loopError = { message: "Operation was aborted", code: "ABORTED", retryable: false };
         break;
       }
 
-      let stepOverride: any = options.modelOverride ? { model: options.modelOverride } : undefined;
+      let stepOverride: any = options.modelOverride
+        ? typeof options.modelOverride === "string"
+          ? { model: options.modelOverride }
+          : options.modelOverride
+        : undefined;
       if (providerFactory) {
         try {
           const resolved = await providerFactory.resolve();
@@ -603,14 +612,14 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
       continue;
     }
 
-    // No tool calls — we're done
-    if ((finishReason as string) !== "aborted" && (finishReason as string) !== "error") {
-      finishReason = "stop";
+      // No tool calls — we're done
+      if ((finishReason as string) !== "aborted" && (finishReason as string) !== "error") {
+        finishReason = "stop";
+      }
+      break;
     }
-    break;
-    } finally {
-      if (providerFactory) providerFactory.restore();
-    }
+  } finally {
+    if (providerFactory) providerFactory.restore();
   }
 
   // The loop ran all iterations with tool calls on the last one

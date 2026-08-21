@@ -5,7 +5,7 @@ import { getAllToolDefinitions } from '../../domain/tool-executor.js';
 import { buildSystemPrompt } from '../../domain/prompts/system-prompts.js';
 import { initializeSkillRegistry, getSkillRegistry } from '../../capabilities/skills/index.js';
 import type { SkillRegistry } from '../../capabilities/skills/types.js';
-import { runAgentLoop } from '../../domain/agent-loop.js';
+import { runAgentLoop, type ProviderFactory } from '../../domain/agent-loop.js';
 import { now } from '../../domain/context/message-convert.js';
 import { generateId } from '../../foundations/id.js';
 import { createHookExecutor } from '../../domain/hooks.js';
@@ -36,8 +36,9 @@ export interface ChatResult {
 }
 
 export class Agent {
-  private messages: Message[];
+  private messages: Message[] = [];
   private model: string;
+  private providerAccount?: string;
   private config: any;
   private autoConfirm: boolean;
   private skillRegistry: SkillRegistry | null = null;
@@ -529,6 +530,7 @@ export class Agent {
     approveTool?: ApproveToolFn,
     permissionLevel?: PermissionLevel,
     onStep?: (step: StepResult) => void,
+    providerFactory?: ProviderFactory,
   ): Promise<ChatResult> {
     // @path references are resolved by the caller (repl.ts / use-agent.ts),
     // not here — one resolution site per caller (T022).
@@ -574,7 +576,9 @@ export class Agent {
         runtime,
         turnSnapshot: snapshot,
         model: this.model,
-        modelOverride: this.config?.hasExplicitModel || this.model ? this.model : undefined,
+        modelOverride: this.providerAccount || this.config?.hasExplicitModel || this.model
+          ? { model: this.model || undefined, providerAccount: this.providerAccount }
+          : undefined,
         messages: this.messages,
         toolDefs: getAllToolDefinitions(),
         maxSteps: 30,
@@ -588,6 +592,7 @@ export class Agent {
         middleware: this._middleware.length > 0 ? this._middleware : undefined,
         onStep: onStep ?? defaultOnStep,
         wiredPipeline: this._wiredPipeline ?? undefined,
+        providerFactory,
       });
 
       spinner?.stop();
@@ -691,10 +696,17 @@ export class Agent {
 
   switchProvider(accountOrModel: string, model?: string) {
     if (model) {
+      this.providerAccount = accountOrModel || undefined;
       this.model = model;
     } else {
+      this.providerAccount = undefined;
       this.model = accountOrModel;
     }
+  }
+
+  /** Public accessor for the active provider account name. */
+  getProviderAccount(): string | undefined {
+    return this.providerAccount;
   }
 
   abort(): void {
