@@ -6,11 +6,7 @@
  * respects the `skills: false` opt-out. runAgentLoop is mocked.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { LLMProvider } from '../../../foundations/contracts/llm.js';
-
-function mockProvider(): LLMProvider {
-  return { chat: vi.fn().mockResolvedValue({ content: 'ok' }) } as unknown as LLMProvider;
-}
+import { createMockRuntime } from '../../../domain/__tests__/test-doubles.js';
 
 function mockRunAgentLoop() {
   const fn = vi.fn().mockImplementation(async (opts: any) => {
@@ -33,18 +29,10 @@ function mockRunAgentLoop() {
   return fn;
 }
 
-// Mock getProvider so createAgent doesn't need real API credentials.
-function mockGetProvider() {
-  vi.doMock('../../../domain/providers/provider-resolver.js', () => ({
-    getProvider: vi.fn().mockResolvedValue({ provider: mockProvider(), model: 'test-model' }),
-  }));
-}
-
 describe('SDK createAgent skill support', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
-    mockGetProvider();
   });
 
   it('initializes the skill registry and injects catalog into the system message', async () => {
