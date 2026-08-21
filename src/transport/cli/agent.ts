@@ -10,7 +10,7 @@ import { now } from '../../domain/context/message-convert.js';
 import { generateId } from '../../foundations/id.js';
 import { createHookExecutor } from '../../domain/hooks.js';
 import { buildSkillCatalog } from '../../domain/skills/skill-catalog.js';
-import type { Message, StepResult, Usage, ToolCall, ApproveToolFn, PermissionLevel, ProviderType, PersistenceBackend } from '../../foundations/types.js';
+import type { Message, StepResult, Usage, ToolCall, ApproveToolFn, PermissionLevel, PersistenceBackend } from '../../foundations/types.js';
 import { persistSession } from '../../domain/sessions/session-store.js';
 import type { GrantStore } from '../../domain/grants.js';
 import type { Middleware } from '../../foundations/contracts/middleware.js';
@@ -623,7 +623,7 @@ export class Agent {
       if (this.persistence) {
         try {
           await persistSession(this.persistence, this.sessionId, this.messages, {
-            provider: this.providerType as ProviderType,
+            provider: this.providerType,
             model: this.model,
           });
         } catch { /* persistence is best-effort */ }

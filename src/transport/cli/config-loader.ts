@@ -13,8 +13,6 @@ import {
   getConfigPath,
   getConfigDir,
   getConfigPaths,
-  migrateLegacyFormat,
-  resolveActiveProviderType,
   saveConfig as coreSaveConfig,
   writeConfigToPath as coreWriteConfigToPath,
   maskSecret,
@@ -28,8 +26,6 @@ export {
   getConfigPath,
   getConfigDir,
   getConfigPaths,
-  migrateLegacyFormat,
-  resolveActiveProviderType,
   maskSecret,
 };
 

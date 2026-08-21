@@ -25,9 +25,8 @@ import { SettingsManager, SettingsError } from '../settings-manager.js';
 
 describe('settings-schema', () => {
   it('has entries for all expected settings', () => {
-    // At minimum: 10 provider + 7 image + 5 smtp + 1 search + 6 notifications + 2 agent = 31
-    expect(SETTINGS_MAP.size).toBeGreaterThanOrEqual(30);
-    expect(SETTINGS_SCHEMA.size).toBeGreaterThanOrEqual(30);
+    expect(SETTINGS_MAP.size).toBeGreaterThanOrEqual(18);
+    expect(SETTINGS_SCHEMA.size).toBeGreaterThanOrEqual(18);
   });
 
   it('every SETTINGS_MAP entry has a corresponding SETTINGS_SCHEMA entry', () => {
@@ -68,7 +67,7 @@ describe('settings-schema', () => {
   });
 
   it('isSecretField identifies secret fields', () => {
-    expect(isSecretField('providers.openai.apiKey')).toBe(true);
+    expect(isSecretField('image.apiKey')).toBe(true);
     expect(isSecretField('smtp.pass')).toBe(true);
     expect(isSecretField('search.tavilyApiKey')).toBe(true);
     expect(isSecretField('smtp.host')).toBe(false);
@@ -76,8 +75,6 @@ describe('settings-schema', () => {
   });
 
   it('isRestartRequired identifies restart-required fields', () => {
-    expect(isRestartRequired('providers.openai.apiKey')).toBe(true);
-    expect(isRestartRequired('provider')).toBe(true);
     expect(isRestartRequired('smtp.host')).toBe(false);
     expect(isRestartRequired('agent.permissionLevel')).toBe(false);
   });
@@ -88,9 +85,6 @@ describe('settings-schema', () => {
     expect(permKeys).toContain('agent.autoConfirm');
     expect(permKeys).toContain('permissions.autonomousMode');
     expect(permKeys).toContain('permissions.approvalTimeoutMs');
-
-    const providerKeys = getSettingsByCategory('providers');
-    expect(providerKeys.length).toBeGreaterThanOrEqual(8);
   });
 
   it('permissions.approvalTimeoutMs defaults to ten minutes and validates bounds', () => {
@@ -113,18 +107,9 @@ describe('settings-schema', () => {
   });
 
   it('ENV_VAR_MAP has entries for settings with env var overrides', () => {
-    expect(ENV_VAR_MAP.get('providers.openai.apiKey')).toBe('OPENAI_API_KEY');
     expect(ENV_VAR_MAP.get('smtp.host')).toBe('SMTP_HOST');
     expect(ENV_VAR_MAP.get('agent.permissionLevel')).toBe('SEEPIENT_PERMISSION');
     expect(ENV_VAR_MAP.get('permissions.approvalTimeoutMs')).toBe('SEEPIENT_APPROVAL_TIMEOUT_MS');
-  });
-
-  it('provider dot-keys map to correct AppConfig paths', () => {
-    const openai = getSettingEntry('providers.openai.apiKey');
-    expect(openai!.configPath).toEqual(['models', 'openai', 'apiKey']);
-
-    const compat = getSettingEntry('providers.openai-compat.baseUrl');
-    expect(compat!.configPath).toEqual(['models', 'openai-compatible', 'baseUrl']);
   });
 });
 
@@ -160,9 +145,9 @@ describe('SettingsManager', () => {
 
   it('get() masks secret fields', () => {
     const mgr = createTestManager({
-      models: { openai: { apiKey: 'sk-abcdef1234567890' } },
+      imageApiKey: 'sk-abcdef1234567890',
     });
-    const result = mgr.get('providers.openai.apiKey');
+    const result = mgr.get('image.apiKey');
     expect(result.masked).toBe(true);
     expect(result.value).toBe('sk-...7890');
   });
@@ -238,7 +223,6 @@ describe('SettingsManager', () => {
   it('listByCategory() groups by category', () => {
     const mgr = createTestManager();
     const grouped = mgr.listByCategory();
-    expect(Object.keys(grouped)).toContain('providers');
     expect(Object.keys(grouped)).toContain('permissions');
     expect(grouped.permissions.length).toBeGreaterThanOrEqual(2);
   });
@@ -268,21 +252,6 @@ describe('SettingsManager', () => {
     unsub();
     await mgr.set('smtp.host', 'test.com');
     expect(changes).toHaveLength(0);
-  });
-
-  it('deep merge preserves sibling provider config', async () => {
-    const mgr = createTestManager({
-      models: {
-        openai: { apiKey: 'sk-openai-key', model: 'gpt-5.4' },
-        anthropic: { apiKey: 'sk-ant-key', model: 'claude-sonnet' },
-      },
-    });
-
-    await mgr.set('providers.openai.model', 'gpt-4o');
-
-    // Anthropic config should be preserved
-    const anthropicKey = mgr.get('providers.anthropic.apiKey');
-    expect(anthropicKey.value).toBe('sk-...-key');
   });
 
   it('origin resolution checks env vars', () => {

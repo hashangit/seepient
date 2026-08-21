@@ -15,7 +15,6 @@ import type {
   Message,
   PersistenceBackend,
   PersistenceConfig,
-  ProviderType,
   SessionData,
   SessionStore,
 } from "../../foundations/types.js";
@@ -221,7 +220,7 @@ export async function persistSession(
   backend: PersistenceBackend,
   sessionId: string,
   messages: Message[],
-  opts?: { provider?: ProviderType; model?: string; metadata?: Record<string, unknown> },
+  opts?: { provider?: string; model?: string; metadata?: Record<string, unknown> },
 ): Promise<void> {
   await backend.save(sessionId, {
     id: sessionId,

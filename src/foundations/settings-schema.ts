@@ -5,12 +5,9 @@
  * AppConfig paths, validation rules, env var overrides, and metadata.
  */
 
-import { DEFAULT_MODELS } from "./models-catalog.js";
-
 // ── Types ──────────────────────────────────────────────────────────────
 
 export type SettingsCategory =
-  | 'providers'
   | 'permissions'
   | 'tools'
   | 'notifications'
@@ -43,11 +40,6 @@ export const SETTINGS_CATEGORIES: {
   label: string;
   description: string;
 }[] = [
-  {
-    key: 'providers',
-    label: 'Providers & Models',
-    description: 'LLM provider configuration (API keys, models, base URLs)',
-  },
   {
     key: 'permissions',
     label: 'Permissions & Safety',
@@ -83,18 +75,6 @@ export const SETTINGS_CATEGORIES: {
 // ── Settings Map ───────────────────────────────────────────────────────
 
 const entries: [string, SettingsMapEntry][] = [
-  // Providers
-  ['providers.openai.apiKey', { dotKey: 'providers.openai.apiKey', configPath: ['models', 'openai', 'apiKey'], category: 'providers', label: 'OpenAI API Key' }],
-  ['providers.openai.model', { dotKey: 'providers.openai.model', configPath: ['models', 'openai', 'model'], category: 'providers', label: 'OpenAI Model' }],
-  ['providers.anthropic.apiKey', { dotKey: 'providers.anthropic.apiKey', configPath: ['models', 'anthropic', 'apiKey'], category: 'providers', label: 'Anthropic API Key' }],
-  ['providers.anthropic.model', { dotKey: 'providers.anthropic.model', configPath: ['models', 'anthropic', 'model'], category: 'providers', label: 'Anthropic Model' }],
-  ['providers.glm.apiKey', { dotKey: 'providers.glm.apiKey', configPath: ['models', 'glm', 'apiKey'], category: 'providers', label: 'GLM API Key' }],
-  ['providers.glm.model', { dotKey: 'providers.glm.model', configPath: ['models', 'glm', 'model'], category: 'providers', label: 'GLM Model' }],
-  ['providers.openai-compat.apiKey', { dotKey: 'providers.openai-compat.apiKey', configPath: ['models', 'openai-compatible', 'apiKey'], category: 'providers', label: 'OpenAI-Compatible API Key' }],
-  ['providers.openai-compat.baseUrl', { dotKey: 'providers.openai-compat.baseUrl', configPath: ['models', 'openai-compatible', 'baseUrl'], category: 'providers', label: 'OpenAI-Compatible Base URL' }],
-  ['providers.openai-compat.model', { dotKey: 'providers.openai-compat.model', configPath: ['models', 'openai-compatible', 'model'], category: 'providers', label: 'OpenAI-Compatible Model' }],
-  ['provider', { dotKey: 'provider', configPath: ['provider'], category: 'providers', label: 'Active Provider' }],
-
   // Image
   ['image.apiKey', { dotKey: 'image.apiKey', configPath: ['imageApiKey'], category: 'tools', label: 'Image Generation API Key' }],
   ['image.baseUrl', { dotKey: 'image.baseUrl', configPath: ['imageBaseUrl'], category: 'tools', label: 'Image Generation Base URL' }],
@@ -149,18 +129,6 @@ export const CONFIG_PATH_TO_DOTKEY: Map<string, string> = new Map(
 // ── Settings Schema ────────────────────────────────────────────────────
 
 const schemaEntries: [string, SettingsSchemaEntry][] = [
-  // Providers
-  ['providers.openai.apiKey', { type: 'string', secret: true, restartRequired: true, envVar: 'OPENAI_API_KEY' }],
-  ['providers.openai.model', { type: 'string', secret: false, get default() { return DEFAULT_MODELS.openai; }, restartRequired: false, envVar: 'OPENAI_MODEL' }],
-  ['providers.anthropic.apiKey', { type: 'string', secret: true, restartRequired: true, envVar: 'ANTHROPIC_API_KEY' }],
-  ['providers.anthropic.model', { type: 'string', secret: false, get default() { return DEFAULT_MODELS.anthropic; }, restartRequired: false, envVar: 'ANTHROPIC_MODEL' }],
-  ['providers.glm.apiKey', { type: 'string', secret: true, restartRequired: true, envVar: 'GLM_API_KEY' }],
-  ['providers.glm.model', { type: 'string', secret: false, get default() { return DEFAULT_MODELS.glm; }, restartRequired: false, envVar: 'GLM_MODEL' }],
-  ['providers.openai-compat.apiKey', { type: 'string', secret: true, restartRequired: true, envVar: 'OPENAI_COMPAT_API_KEY' }],
-  ['providers.openai-compat.baseUrl', { type: 'string', secret: false, restartRequired: true, envVar: 'OPENAI_COMPAT_BASE_URL' }],
-  ['providers.openai-compat.model', { type: 'string', secret: false, get default() { return DEFAULT_MODELS['openai-compatible']; }, restartRequired: false, envVar: 'OPENAI_MODEL' }],
-  ['provider', { type: 'enum', secret: false, enumValues: ['openai', 'openai-compatible', 'anthropic', 'glm'], default: 'openai-compatible', restartRequired: true, envVar: 'LLM_PROVIDER' }],
-
   // Image
   ['image.apiKey', { type: 'string', secret: true, restartRequired: false }],
   ['image.baseUrl', { type: 'string', secret: false, restartRequired: false }],

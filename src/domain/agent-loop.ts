@@ -3,7 +3,7 @@
 import { SeepientError } from "../foundations/errors.js";
 import type { Message, StepResult, ToolCall, Usage, ApproveToolFn, ApprovalDecision, ApprovalScope, ApprovalContext, PermissionLevel, ToolRiskCategory } from "../foundations/types.js";
 import type { ToolDefinition } from "../foundations/contracts/tool.js";
-import { now, toSeepientError, messageToCanonicalMessage, providerToolCallToToolCall } from "./context/message-convert.js";
+import { now, toSeepientError, messageToCanonicalMessage } from "./context/message-convert.js";
 import { generateId } from "../foundations/id.js";
 import { StreamingResponseAccumulator } from "./streaming/stream-accumulator.js";
 import { executeTool, normalizeToolResult } from "./tool-executor.js";
@@ -411,7 +411,19 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
 
     // Tool calls
     if (response.tool_calls && response.tool_calls.length > 0) {
-      const assistantToolCalls = response.tool_calls.map(providerToolCallToToolCall);
+      const assistantToolCalls: ToolCall[] = response.tool_calls.map((tc) => {
+        let args: Record<string, unknown>;
+        try {
+          args = JSON.parse(tc.arguments);
+        } catch {
+          args = { raw: tc.arguments };
+        }
+        return {
+          id: tc.id,
+          name: tc.name,
+          arguments: args,
+        };
+      });
       allToolCalls.push(...assistantToolCalls);
 
       // Add assistant message with tool calls

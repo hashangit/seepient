@@ -50,10 +50,10 @@ describe('schema-manager round-trip', () => {
   });
 
   it('persists dotKey to correct AppConfig path', async () => {
-    const m = mgr({ models: { openai: { apiKey: 'sk-old' } } });
-    await m.set('providers.openai.apiKey', 'sk-new123456');
+    const m = mgr({ imageApiKey: 'sk-old' });
+    await m.set('image.apiKey', 'sk-new123456');
     const file = JSON.parse(await fs.readFile(configPath, 'utf-8'));
-    expect(file.models.openai.apiKey).toBe('sk-new123456');
+    expect(file.imageApiKey).toBe('sk-new123456');
   });
 
   it('env var takes priority in origin resolution', () => {
@@ -71,8 +71,8 @@ describe('schema-manager round-trip', () => {
 
 describe('secret masking', () => {
   it('masks 8+ char secrets as first3...last4', () => {
-    const m = mgr({ models: { openai: { apiKey: 'sk-abcdefgh1234567890' } } });
-    const r = m.get('providers.openai.apiKey');
+    const m = mgr({ imageApiKey: 'sk-abcdefgh1234567890' });
+    const r = m.get('image.apiKey');
     expect(r.value).toBe('sk-...7890');
     expect(r.masked).toBe(true);
   });
@@ -108,7 +108,7 @@ describe('validation', () => {
   });
 
   it('rejects invalid URL for baseUrl fields', async () => {
-    await expect(mgr().set('providers.openai-compat.baseUrl', 'not-a-url')).rejects.toThrow('must be a valid URL');
+    await expect(mgr().set('image.baseUrl', 'not-a-url')).rejects.toThrow('must be a valid URL');
   });
 
   it('rejects invalid hostname for smtp.host', async () => {
@@ -142,17 +142,6 @@ describe('persistence', () => {
     const m = mgr({ smtpHost: 'test.com', smtpPort: 587 });
     await m.resetAll();
     expect(m.get('smtp.host').value).toBeUndefined();
-  });
-
-  it('deep merge preserves sibling providers', async () => {
-    const m = mgr({
-      models: {
-        openai: { apiKey: 'sk-openai-key', model: 'gpt-5.4' },
-        anthropic: { apiKey: 'sk-ant-key' },
-      },
-    });
-    await m.set('providers.openai.model', 'gpt-4o');
-    expect(m.get('providers.anthropic.apiKey').value).toBe('sk-...-key');
   });
 });
 

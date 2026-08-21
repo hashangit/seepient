@@ -23,13 +23,12 @@ import { getDefaultProviderRuntime } from '../../domain/providers/provider-runti
 import {
   loadJsonConfig,
   applyEnvOverrides,
-  migrateLegacyFormat,
   getConfigPaths,
   getConfigDir,
 } from './config-loader.js';
 import { runSetup } from './setup.js';
 import { isNonInteractive } from '../../foundations/environment.js';
-import type { PermissionLevel, PersistenceBackend, ProviderType, GrantScope } from '../../foundations/types.js';
+import type { PermissionLevel, PersistenceBackend, GrantScope } from '../../foundations/types.js';
 import { createPersistenceBackend } from '../../domain/sessions/session-store.js';
 import { resolvePermissionLevel } from '../../domain/permission.js';
 import { GrantStore } from '../../domain/grants.js';
@@ -88,12 +87,7 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
     console.warn(`Warning: --headless overrides ${flag}. All tools will be auto-approved.`);
   }
 
-  // 3. Auto-migrate legacy config format (top-level apiKey/baseUrl/model)
-  //    Must run BEFORE applyEnvOverrides, which initializes models={} and would
-  //    block the !config.models guard in migrateLegacyFormat.
-  fullConfig = migrateLegacyFormat(fullConfig, { model: options.model });
-
-  // 4. Apply env var overrides for tool settings
+  // 3. Apply env var overrides for tool settings
   fullConfig = applyEnvOverrides(fullConfig);
 
   // 5. Load provider config via ProviderRuntime

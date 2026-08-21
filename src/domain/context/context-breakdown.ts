@@ -7,7 +7,7 @@
  * corrected (×1.2 / ×1.15) for Anthropic / GLM.
  */
 
-import type { Message, ProviderType } from '../../foundations/types.js';
+import type { Message } from '../../foundations/types.js';
 import type { ToolDefinition } from '../../foundations/contracts/tool.js';
 import type { ContextBreakdown, ContextBreakdownPart } from '../../foundations/contracts/context.js';
 import { countTokens } from '../../capabilities/tokenizer/tokenizer.js';
@@ -34,7 +34,7 @@ export function buildContextBreakdown(opts: {
   providerType?: string;
 }): ContextBreakdown {
   const { messages, toolDefs, skillCatalog, model, contextWindow, providerType } = opts;
-  const pt = providerType as ProviderType | undefined;
+  const pt = providerType;
 
   const sysMessage = messages.find((m) => m.role === 'system');
   // System prompt = the full system message content MINUS the skill catalog

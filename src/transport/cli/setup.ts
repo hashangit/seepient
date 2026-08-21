@@ -201,7 +201,7 @@ export async function runSetup(options: any = {}): Promise<void> {
         type: 'input',
         name: 'imageBaseUrl',
         message: 'Enter Image Service Base URL:',
-        default: currentConfig.imageBaseUrl || currentConfig.baseUrl || 'https://api.openai.com/v1'
+        default: currentConfig.imageBaseUrl || 'https://api.openai.com/v1'
       },
       {
         type: 'input',

@@ -7,8 +7,18 @@
  * so `runAgentLoop` receives well-formed, complete tool calls to execute.
  */
 
-import type { ProviderResponse, ProviderToolCall } from '../../foundations/contracts/llm.js';
 import type { Usage } from '../../foundations/types.js';
+
+export interface AccumulatedToolCall {
+  id: string;
+  name: string;
+  arguments: string;
+}
+
+export interface AccumulatedResponse {
+  content?: string;
+  tool_calls?: AccumulatedToolCall[];
+}
 
 interface ToolCallAcc {
   index: number;
@@ -54,8 +64,8 @@ export class StreamingResponseAccumulator {
     return this.usage;
   }
 
-  toResponse(): ProviderResponse {
-    const tool_calls: ProviderToolCall[] = [...this.toolCalls.values()]
+  toResponse(): AccumulatedResponse {
+    const tool_calls: AccumulatedToolCall[] = [...this.toolCalls.values()]
       .sort((a, b) => a.index - b.index)
       .map((tc) => ({ id: tc.id, name: tc.name, arguments: tc.argumentsBuffer }));
     return {

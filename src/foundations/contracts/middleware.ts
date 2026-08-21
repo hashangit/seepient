@@ -7,7 +7,6 @@
  */
 
 import type { Message, Usage, StepResult, ToolCall } from "../types.js";
-import type { LLMProvider } from "./llm.js";
 import type { ToolDefinition } from "./tool.js";
 
 // ── Pipeline Context ─────────────────────────────────────────────────────
@@ -17,8 +16,8 @@ export interface PipelineContext {
   requestId: string;
   /** Input messages (mutable — middleware can inspect or modify) */
   messages: Message[];
-  /** Resolved provider */
-  provider: LLMProvider;
+  /** Resolved provider or runtime */
+  provider?: unknown;
   /** Model identifier */
   model: string;
   /** Tool definitions available for this request */

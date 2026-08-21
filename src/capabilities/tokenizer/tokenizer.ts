@@ -18,10 +18,9 @@
  */
 
 import { encode } from '../../vendors/gpt-tokenizer.js';
-import type { ProviderType } from '../../foundations/types.js';
 
 /** Correction multiplier applied to BPE counts per provider family. */
-const CORRECTION_FACTOR: Partial<Record<ProviderType, number>> = {
+const CORRECTION_FACTOR: Record<string, number> = {
   openai: 1.0,
   'openai-compatible': 1.0,
   anthropic: 1.2,
@@ -33,7 +32,7 @@ const CORRECTION_FACTOR: Partial<Record<ProviderType, number>> = {
  * Falls back to chars÷4 on encode errors (rare unicode edge cases).
  * Empty/undefined input returns 0.
  */
-export function countTokens(text: string, providerType?: ProviderType): number {
+export function countTokens(text: string, providerType?: string): number {
   if (!text) return 0;
   let raw: number;
   try {

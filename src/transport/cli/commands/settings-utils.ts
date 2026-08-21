@@ -195,9 +195,6 @@ export function renderCategoryStatus(categoryKey: SettingsCategory, manager: Set
     return v !== undefined && v !== null && v !== '';
   }).length;
 
-  if (categoryKey === 'providers') {
-    return `[${configured}/${keys.length}]`;
-  }
   if (configured === 0) return '[not set]';
   if (configured === keys.length) return '[configured]';
   return '[partially configured]';

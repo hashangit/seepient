@@ -5,8 +5,6 @@
  * to this contract instead of importing each other.
  */
 
-import type { ProviderType } from '../types.js';
-
 export interface ContextBreakdownPart {
   /** Display label, e.g. "System Prompt". */
   label: string;
@@ -25,5 +23,5 @@ export interface ContextBreakdown {
   /** Active model name (for display). */
   model: string;
   /** Provider type (for display). */
-  providerType?: ProviderType;
+  providerType?: string;
 }

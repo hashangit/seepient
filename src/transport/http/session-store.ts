@@ -11,7 +11,7 @@
  * the `metadata` field of SessionData.
  */
 
-import type { ProviderType, Message, SessionData, PersistenceBackend } from "../../foundations/types.js";
+import type { Message, SessionData, PersistenceBackend } from "../../foundations/types.js";
 import { createPersistenceBackend } from "../../domain/sessions/session-store.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -111,7 +111,7 @@ export class ServerSessionManager {
    */
   async createSession(
     apiKey: string,
-    provider?: ProviderType,
+    provider?: string,
     model?: string,
   ): Promise<SessionData> {
     const keyHash = hashKey(apiKey);

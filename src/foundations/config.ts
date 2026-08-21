@@ -8,8 +8,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { ProviderType } from './contracts/llm.js';
-import { DEFAULT_MODELS } from './models-catalog.js';
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -26,17 +24,7 @@ export function getLocalConfigFile(): string {
 // ── Types ──────────────────────────────────────────────────────────────
 
 export interface AppConfig {
-  provider?: ProviderType;
-  apiKey?: string;
-  baseUrl?: string;
-  model?: string;
   hasExplicitModel?: boolean;
-  models?: {
-    'openai-compatible'?: { apiKey: string; baseUrl: string; model: string; };
-    openai?: { apiKey: string; model: string; };
-    anthropic?: { apiKey: string; model: string; };
-    glm?: { apiKey: string; model: string; };
-  };
   // Image gen (always OpenAI)
   imageApiKey?: string;
   imageBaseUrl?: string;
@@ -155,73 +143,7 @@ export function applyEnvOverrides(config: AppConfig): AppConfig {
     }
   }
 
-  // Provider API keys — inject into models map from env vars
-  if (!config.models) config.models = {};
-
-  if (process.env.OPENAI_API_KEY) {
-    config.models.openai = {
-      apiKey: process.env.OPENAI_API_KEY,
-      model: process.env.OPENAI_MODEL || config.models.openai?.model || DEFAULT_MODELS.openai,
-    };
-  }
-  if (process.env.OPENAI_COMPAT_API_KEY) {
-    config.models['openai-compatible'] = {
-      apiKey: process.env.OPENAI_COMPAT_API_KEY,
-      baseUrl: process.env.OPENAI_COMPAT_BASE_URL || process.env.OPENAI_BASE_URL || config.models['openai-compatible']?.baseUrl || 'https://api.openai.com/v1',
-      model: process.env.OPENAI_COMPAT_MODEL || process.env.LLM_MODEL || process.env.SEEPIENT_MODEL || config.models['openai-compatible']?.model || DEFAULT_MODELS['openai-compatible'],
-    };
-  }
-  if (process.env.ANTHROPIC_API_KEY) {
-    config.models.anthropic = {
-      apiKey: process.env.ANTHROPIC_API_KEY,
-      model: process.env.ANTHROPIC_MODEL || config.models.anthropic?.model || DEFAULT_MODELS.anthropic,
-    };
-  }
-  if (process.env.GLM_API_KEY) {
-    config.models.glm = {
-      apiKey: process.env.GLM_API_KEY,
-      model: process.env.GLM_MODEL || config.models.glm?.model || DEFAULT_MODELS.glm,
-    };
-  }
-
   return config;
-}
-
-/**
- * Auto-migrate legacy config format (top-level apiKey/baseUrl/model) to the
- * models map format used by the current architecture.
- */
-export function migrateLegacyFormat(
-  config: AppConfig,
-  options?: { model?: string },
-): AppConfig {
-  if (!config.models && (config.apiKey || process.env.OPENAI_API_KEY)) {
-    config.models = {
-      openai: {
-        apiKey: process.env.OPENAI_API_KEY || config.apiKey || '',
-        model: options?.model || process.env.OPENAI_MODEL || config.model || DEFAULT_MODELS.openai,
-      },
-    };
-    if (!config.provider) config.provider = 'openai';
-  }
-  return config;
-}
-
-/**
- * Resolve the active provider type from CLI flags, env vars, and config.
- * Checks LLM_PROVIDER env var as a standard alias for SEEPIENT_PROVIDER.
- */
-export function resolveActiveProviderType(
-  config: AppConfig,
-  options?: { provider?: string },
-): ProviderType {
-  return (
-    (options?.provider as ProviderType) ||
-    (process.env.LLM_PROVIDER as ProviderType) ||
-    (process.env.SEEPIENT_PROVIDER as ProviderType) ||
-    config.provider ||
-    'openai'
-  );
 }
 
 // ── Save ───────────────────────────────────────────────────────────────

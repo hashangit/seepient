@@ -8,18 +8,6 @@
 import type { SeepientError as SeepientErrorType } from "./errors.js";
 import type { Middleware } from "./contracts/middleware.js";
 
-// ── Provider ──────────────────────────────────────────────────────────
-
-export type ProviderType = "openai" | "anthropic" | "glm" | "openai-compatible";
-
-export interface MultiProviderConfig {
-  openai?: { apiKey: string; model?: string };
-  anthropic?: { apiKey: string; model?: string };
-  glm?: { apiKey: string; model?: string };
-  "openai-compatible"?: { apiKey: string; baseUrl: string; model?: string };
-  default: ProviderType;
-}
-
 // ── Permissions ────────────────────────────────────────────────────────
 
 export type ToolRiskCategory = "safe" | "edit" | "communications" | "destructive";
@@ -187,7 +175,7 @@ export interface GrantSpec {
 
 export interface GenerateTextOptions {
   model?: string;
-  provider?: ProviderType;
+  provider?: string;
   systemPrompt?: string;
   tools?: string[] | UserToolDefinition[];
   skills?: string[] | boolean;
@@ -255,7 +243,7 @@ export interface StreamTextResult {
 
 export interface AgentCreateOptions {
   model?: string;
-  provider?: ProviderType;
+  provider?: string;
   systemPrompt?: string;
   tools?: string[] | UserToolDefinition[];
   skills?: string[] | boolean;
@@ -277,7 +265,7 @@ export interface AgentCreateOptions {
 export interface SdkAgent {
   chat(message: string): Promise<AgentResponse>;
   chatStream(message: string, options?: StreamTextOptions): Promise<StreamTextResult>;
-  switchProvider(provider: ProviderType, model?: string): Promise<void>;
+  switchProvider(provider: string, model?: string): Promise<void>;
   setSystemPrompt(prompt: string): void;
   setTools(tools: string[]): void;
   abort(): void;
@@ -336,7 +324,7 @@ export interface SessionData {
   messages: Message[];
   createdAt: number;
   updatedAt: number;
-  provider?: ProviderType;
+  provider?: string;
   model?: string;
   /** Arbitrary metadata for backends or consumers (e.g., TTL, apiKeyHash). */
   metadata?: Record<string, unknown>;

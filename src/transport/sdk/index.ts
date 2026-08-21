@@ -79,8 +79,6 @@ export const gateway = {
 
 // Re-export all types
 export type {
-  ProviderType,
-  MultiProviderConfig,
   Message,
   ToolCall,
   StepResult,
