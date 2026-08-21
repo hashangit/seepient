@@ -155,23 +155,11 @@ export class PiLanguageRaw implements LanguageBackend {
     signal?: AbortSignal,
     opts?: InferenceOptions,
   ) {
-    const knownPiProviders = new Set([
-      "openai",
-      "anthropic",
-      "google",
-      "openrouter",
-      "zai",
-      "groq",
-      "mistral",
-      "cerebras",
-      "together",
-      "deepseek",
-      "bedrock",
-    ]);
-
     const providerName = target.upstreamProvider === "glm" ? "zai" : target.upstreamProvider;
-    const isKnown = knownPiProviders.has(providerName);
-    const piProvider = isKnown ? providerName : "openai";
+    let model = this.models.getModel(providerName, target.model) as Model<Api> | undefined;
+
+    const isKnown = (typeof this.models.getProvider === "function" && Boolean(this.models.getProvider(providerName))) || Boolean(model);
+    const piProvider = model ? (model.provider || providerName) : (isKnown ? providerName : "openai");
 
     if (!isKnown && !target.baseUrl) {
       throw new InferenceError({
@@ -182,8 +170,6 @@ export class PiLanguageRaw implements LanguageBackend {
         retryable: false,
       });
     }
-
-    let model = this.models.getModel(piProvider, target.model) as Model<Api> | undefined;
 
     const effectiveThinking = req.thinkingLevel ?? target.thinkingLevel;
     const isThinking = Boolean(effectiveThinking && effectiveThinking !== "none");

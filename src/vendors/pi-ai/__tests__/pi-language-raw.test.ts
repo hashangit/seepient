@@ -375,4 +375,47 @@ describe("PiLanguageRaw backend (QS-P3.3)", () => {
     expect(capturedModel.cost).toBeDefined();
     expect(Array.isArray(capturedModel.cost.tiers)).toBe(true); // Guarantees calculateCost doesn't crash!
   });
+
+  it("handles built-in pi-ai catalog providers like opencode without requiring an explicit baseUrl", async () => {
+    let capturedModel: any;
+    const credential = createMockCredential("sk-opencode");
+
+    // Real PiLanguageRaw with actual builtinModels
+    const backend = new PiLanguageRaw();
+    const target: InferenceTarget = {
+      providerAccount: "my-opencode-account",
+      upstreamProvider: "opencode",
+      model: "hy3-free",
+      credential,
+    };
+
+    // Spy on stream to verify prepared invocation
+    (backend as any).models.stream = (model: any) => {
+      capturedModel = model;
+      return (async function* () {
+        yield {
+          type: "done",
+          reason: "stop",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Hello from OpenCode" }],
+            usage: { input: 5, output: 5, totalTokens: 10 },
+          },
+        };
+      })();
+    };
+
+    const events = [];
+    for await (const ev of backend.chatStream(target, {
+      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+    })) {
+      events.push(ev);
+    }
+
+    expect(capturedModel).toBeDefined();
+    expect(capturedModel.id).toBe("hy3-free");
+    expect(capturedModel.provider).toBe("opencode");
+    expect(capturedModel.baseUrl).toBe("https://opencode.ai/zen/v1");
+  });
 });
+
