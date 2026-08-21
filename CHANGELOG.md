@@ -7,6 +7,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.4.4] - 2026-08-21
+
+**Seepient v0.4.4** is a major architectural milestone introducing the **Provider Management Redesign (Spec 010)** and a complete greenfield modernization of the entire inference and model routing stack. This release replaces static SDK singletons with an instance-scoped `ProviderRuntime`, composable `AggregateInferenceAdapter`, declarative Purpose × Tier routing, August 2026 baseline models with dynamic upstream catalog discovery, multi-target resilience with circuit-breaker cooldowns, real-time cached token and reasoning cost accounting, hardened SSRF guards, durable `0600` audit logging, and instance-first SDK v2. All legacy v1 provider baggage, obsolete flags, and dual execution branches have been cleanly removed.
+
+---
+
+### 🔧 What's New
+
+#### 1. Unified Provider Management & Purpose × Tier Routing (Spec 010)
+* **Instance-Scoped Runtime**: Single unified `ProviderRuntime` powering CLI, TUI, REPL, HTTP server, WebSocket, and SDK.
+* **Declarative Purpose × Tier Matrix**: Route requests across `text`, `vision`, `plan`, `commit`, and `media` (image) purposes with `standard`, `complex`, and `efficient` tiers.
+* **Vendor Inference Adapters**: Composable vendor backends (`PiLanguageRaw`, `PiImageRaw`, `GoogleImageRaw`, `OpenAIImageRaw`, `OmpCatalogSource`) isolated under `src/vendors/`.
+
+#### 2. August 2026 Baseline & Live Upstream Discovery
+* **Updated Model Baselines**: Default assignments updated to latest generation models (`gpt-5.6-terra`, `claude-sonnet-5`, `gemini-3.7-flash`, `glm-5.3`).
+* **Zero Self-Maintained Model Lists**: Dynamic model catalog discovery powered by `@earendil-works/pi-ai` 0.84.2 and lazy upstream enrichment via `@oh-my-pi/pi-catalog`.
+* **Active Upstream Polling**: Live `/models` endpoint probing across configured provider accounts with automatic alias normalization.
+
+#### 3. Multi-Target Retries, Fallbacks & Circuit-Breaker Cooldowns
+* **Ordered Fallback Traversal**: Transparently routes through fallback candidate chains (`[selectedTarget, ...failureTargets]`) on transient API failures or rate limits.
+* **Circuit-Breaker Cooldown Tracking**: Per-`(account, capability)` cooldown states with jittered exponential backoff and strict ≤240s total execution budget.
+* **Streaming No-Replay Protection**: Prevents duplicate partial message replay during mid-stream recovery.
+
+#### 4. Cost Accounting & Reasoning Token Metrics
+* **Multi-Dimensional Token Metrics**: Live tracking of input, output, cached prompt, and reasoning/thinking tokens.
+* **Dynamic Pricing Calculation**: Real-time USD cost calculation calculated from live catalog pricing data.
+
+#### 5. Hardened Security & Isolation
+* **SSRF Guarding**: Robust IP/DNS validation rejecting private loopback, link-local, and cloud metadata reflections (`0.0.0.0/8`, `127.0.0.0/8`, `::1`, `169.254.169.254`) with explicit per-provider opt-in (`ssrfAllowPrivate`).
+* **Durable 0600 Audit Log**: Append-only `~/.seepient/audit.log` with `0600` file permissions, `O_NOFOLLOW` symlink rejection, centralized secret redaction, and `fsync` before mutation commits.
+* **Atomic TOCTOU Locks**: Lockfile-protected storage mutations with automatic stale-lock self-healing.
+
+#### 6. Surface Parity & Instance-First SDK v2
+* **CLI Management**: New first-class CLI commands: `seepient models list|set|fallback|status|discover`, `seepient providers add|edit|remove|list`, and `seepient auth login|logout|issue-token`.
+* **REST v2 & WebSocket Parity**: Scoped management endpoints (`/v1/providers`, `/v1/models`) supporting `If-Match` revision concurrency, `ETag` caching, 1MB payload limits, and WebSocket `writeMutex` stream synchronization.
+* **SDK v2 (`createSeepient`)**: Programmatic entry point with lifecycle hooks, turn-scoped skill switching, and clean resource disposal.
+
+#### 7. Clean-Slate Greenfield Cleanup
+* **Zero Legacy Baggage**: Complete removal of legacy `LLMProvider` base classes, static provider singletons, obsolete config bridges, and dual execution branches.
+* **Strict Boundary Enforcement**: Enforced `no-legacy-imports` regression test guard across the entire codebase.
+
+---
+
+### 🚀 How This Improves Your Experience
+
+| Area | Before (v0.4.3) | Now (v0.4.4) | Why It Matters |
+| :--- | :--- | :--- | :--- |
+| **Model Routing** | Hardcoded provider singletons | Purpose × Tier routing (`text.standard`, `plan`, `media`) | Seamlessly match tasks to the best model & tier |
+| **Catalog & Models** | Static model enum lists | Dynamic upstream discovery (`pi-catalog`) | Instant access to new models without software updates |
+| **Reliability** | Fails on API rate-limit/error | Auto-fallback traversal & circuit-breaker cooldowns | Uninterrupted agent runs during provider outages |
+| **Cost Tracking** | Basic input/output token counts | Input, output, cached prompt, & reasoning accounting | Full visibility into exact usage and dollar cost |
+| **Security** | Standard network requests | SSRF metadata guards & 0600 fsync audit logging | Enterprise-grade safety for local and cloud workflows |
+| **SDK & Server** | Static functions | Instance-scoped `createSeepient` + REST v2 ETag APIs | Clean lifecycle control, test isolation, & concurrency |
+
+---
+
+### 🚀 Upgrade
+
+| How you installed | Action |
+| :--- | :--- |
+| npm | `npm install -g seepient@latest` |
+| Homebrew | `brew upgrade seepient` |
+| pnpm | `pnpm add -g seepient` |
+
+---
+
+### Technical Details
+
 ### Added
 
 * **Provider Management Redesign (Spec 010)**: Unified, production-grade provider management architecture replacing static SDK instances with instance-scoped `ProviderRuntime` and composable `AggregateInferenceAdapter`.
@@ -19,48 +87,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **REST v2 Management API & WebSocket Integration**: Scoped management endpoints (`/v1/providers`, `/v1/models`) supporting `If-Match` revision concurrency, `ETag` headers, active `/models` upstream polling, 1MB payload limits, and WebSocket `writeMutex` synchronization.
   - **Instance-First SDK v2**: Async `createSeepient()` factory with lifecycle event hooks, stream cleanup, and explicit `dispose()`.
 
-* **TUI permission scope and lifetime UX (spec 011)**: under the existing
-  `--permission-pipeline` switch, the TUI approval prompt now shows one
-  screen of complete, Domain-issued approval choices — Allow this action
-  once, Allow this exact action until I close Seepient, and a safely
-  bounded session choice when one is enforceable (bounded/action is never
-  offered). The typed `PermissionRequest` (options + complete choices)
-  flows through a native approval bridge (`setPipelineApprovalBroker`) into
-  the prompt, which returns only a choice ID; the broker resolves it and
-  adds actor identity and decision time, and `ActionLifecycle` validates
-  the option/lifetime pair before issuing the final envelope with the
-  selected option's capabilities exactly. Each choice carries a
-  plain-language authority summary covering the complete capability delta,
-  including mixed-capability actions. Bounded process choices use
-  executable + subcommand matchers only — shells, interpreters, package
-  managers, and build drivers never receive an executable-wide session
-  choice — and candidates are ordered by authority containment (never
-  capability count); incomparable candidates are omitted rather than
-  silently picked. The least-privilege choice is marked Recommended but is
-  never pre-approved; one explicit Enter approves the focused row. Local
-  prompts get a ten-minute default deadline — configurable via the
-  `permissions.approvalTimeoutMs` setting (immediate settlement on
-  parent abort, session close, request replacement, or digest change), and
-  a containment preflight fails `approval-unavailable` with a setup message
-  before a prompt is shown when the platform sandbox is missing (visible
-  in `/permissions status`). Action approvals are consumed once and never
-  retained; session choices stay in the long-lived active set until
-  revocation. Forged, stale, expired, or revoked selections fail closed,
-  and inline approval performs no grants or protected-policy writes. The
-  flag-off legacy prompt is unchanged. `/permissions status` shows the
-  containment backend, writable root, and the live active-session authority
-  set (session approvals are held in memory and never written as legacy
-  grants). The macOS sandbox allow list includes the exec-time shell
-  architecture-selection shim (/private/var/select), eliminating the
-  non-fatal "Error opening /private/var/select/sh: Operation not
-  permitted" dyld noise on every sandboxed shell spawn (regression
-  canary asserts clean stderr). Persistent project/global grants are written through a
-  crash-safe WAL: a durable outbox intent precedes the policy mutation
-  (per-process pending files are reloaded and reconciled on restart), the
-  policy snapshot carries a store-owned append-only per-mutation history
-  (survives administrative approve/revoke mutations; digest-covered), and
-  recovery finalizes every unresolved grant by its unique mutation ID —
-  never by version-plus-capability inference.
+### Changed
+
+* **Agent Loop**: Single execution path wired to `ProviderRuntime` and `AggregateInferenceAdapter` with turn-scoped skill switching and strict `providerAccount` preservation.
+* **CLI & TUI**: Rewired CLI bootstrap, setup wizard, REPL `/models`, and TUI provider account mappings to v2 runtime.
+* **Settings & Config**: Base configuration rewired to dynamic v2 environment synthesis with zero static model arrays.
+
+### Removed
+
+* **Legacy Provider Core**: Demolished legacy `LLMProvider` abstract classes, static provider singletons, v1 config adapters, and obsolete settings dot-keys.
+* **Legacy Imports**: Cleaned up all legacy import paths and added `no-legacy-imports` regression test enforcement.
+
+---
 
 ## [v0.4.3] - 2026-08-14
 

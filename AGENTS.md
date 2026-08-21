@@ -153,6 +153,15 @@ Current layout of the Obsidian vault (annotated):
 │       ├── data-model.md             # Media schemas, ports, backend registry, capability classifier, dispatch inventory
 │       ├── quickstart.md             # Per-phase validation scenarios + production budgets
 │       └── contracts/                # media-inference, media-schemas, media-catalog, media-surfaces
+│   ├── 013-provider-management-tui/  # Shared provider mgmt TUI: /models dock upgrade + setup wizard rebuild (013)
+│   │   ├── spec.md                   # Product spec: 6 prioritized stories, FR-001–FR-024, success criteria
+│   │   ├── plan.md                   # M1–M5 build order; verified current-state findings; binding rules R1–R13
+│   │   ├── tasks.md                  # T001–T036 dependency-ordered work orders (test-first, per-phase gates)
+│   │   ├── research.md               # oh-my-pi provider-TUI study (/providers, /model, ModelBrowser) + decision ledger D1–D15
+│   │   ├── data-model.md             # Persisted shapes (ProviderEntry, CredentialRef, PurposeModelMap) + UI view models
+│   │   ├── quickstart.md             # QS-M1–QS-M5 manual validation scenarios + production budgets
+│   │   ├── checklists/requirements.md # Specification quality checklist (validated)
+│   │   └── contracts/                # provider-manager-api, model-manager-dock, setup-wizard
 ├── 010-provider-management-redesign/ # Provider mgmt redesign: contracts + runtime + purpose/tier routing
 │   ├── spec.md                       # Problem, 5 blockers + 4 gaps, scope decisions, success criteria
 │   ├── plan.md                       # P0-P7 phased plan (contracts → Pi adapter → runtime → resolution → surfaces → reliability)
@@ -386,7 +395,20 @@ Keep `CONTEXT.md` under 20 lines total. Do NOT summarize the full conversation �
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-- **ACTIVE PLAN**: `~/Documents/Obsidian/Seepient/Implementation-Specs/008-permission-system-redesign/plan.md`
+- **ACTIVE PLAN**: `~/Documents/Obsidian/Seepient/Implementation-Specs/013-provider-management-tui/plan.md`
+  — Provider management TUI (013): one shared, catalog-driven provider/model
+  management experience over the existing v2 provider runtime (zero domain or
+  schema changes). Shared ModelPicker + AddAccount components power the
+  rebuilt in-TUI `/models` dock (jobs board with real pickers, live providers
+  tab, capability/thinking gating, reachability dimming via `reachableVia`)
+  and the rebuilt setup wizard (searchable catalog provider list, credential
+  modes paste/env/keyless, extras via SettingsManager — deletes the hardcoded
+  four-provider menu, discarded model answers, cycling picker, dead-end
+  commands, silent save errors, and the extras settings-clobber bug). REPL
+  `/models` rerouted to the same manager. Binding rules R1–R13 in plan.md;
+  tasks T001–T036 in tasks.md (test-first, per-phase gates); UX contracts in
+  contracts/ (provider-manager-api, model-manager-dock, setup-wizard).
+- **IN-FLIGHT PLAN (implementation underway)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/008-permission-system-redesign/plan.md`
   — Permission system redesign R9.1: analyzer-only tools, one Domain policy and
   execution boundary, native exact commits, typed effect/secret/model-egress
   brokers, external Docker worker scheduler (localhost mTLS in R9.1, multi-host

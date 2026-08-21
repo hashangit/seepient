@@ -30,8 +30,10 @@ Unlike "screen-seeing" agents (such as OpenClaw) that rely on visual interpretat
 
 ## Features
 
-- 🤖 **Multi-Provider Support**: Switch between OpenAI, Anthropic Claude, GLM, or any OpenAI-compatible endpoint
-- 🔄 **Runtime Provider Switching**: Change AI providers mid-conversation with `/models` command
+- 🤖 **Multi-Provider & Purpose × Tier Routing**: Route tasks across `text`, `vision`, `plan`, `commit`, and `media` (image) with `standard`, `complex`, and `efficient` tiers (OpenAI, Anthropic Claude, Google Gemini, GLM, Ollama, DeepSeek, LocalLLM).
+- 🔄 **Dynamic Catalog & Live Discovery**: Zero static model lists — dynamic upstream catalog discovery via `@earendil-works/pi-ai` and `@oh-my-pi/pi-catalog` with automatic `/models` polling.
+- 🛡️ **Multi-Target Resilience & Fallbacks**: Automatic ordered retry traversal (`[selectedTarget, ...failureTargets]`) with circuit-breaker cooldowns per `(account, capability)` and streaming no-replay guards.
+- 💰 **Precision Cost & Reasoning Accounting**: Real-time tracking of input, output, cached prompt, and reasoning/thinking tokens with dynamic live pricing calculation.
 - 📜 **Headless Execution**: No browsers, no GUIs. Pure terminal efficiency.
 - 🚀 **Non-Interactive Mode**: Intelligent flag handling (`-y`, `--no-interactive`) for zero-touch automation.
 - 📂 **Universal Control**: From simple file I/O to complex system administration.
@@ -39,13 +41,13 @@ Unlike "screen-seeing" agents (such as OpenClaw) that rely on visual interpretat
 - 🌐 **Web Search**: Integrated with Tavily for real-time information retrieval.
 - 🕒 **Time Accuracy**: Built-in tool to get precise system date and time for correct temporal context.
 - 📧 **Communication**: Send emails and push notifications to chat groups automatically.
-- 📦 **TypeScript SDK**: Programmatic access via `createAgent`, `streamText`, `generateText`.
-- 🖥 **Server Mode**: Standalone HTTP/WebSocket server with API key auth and session management.
-- 🛠 **Skills System**: Loadable skill packs from directories with `@path` file references and custom tool creation.
+- 📦 **TypeScript SDK v2**: Programmatic access via `createSeepient`, `createAgent`, `streamText`, `generateText`.
+- 🖥 **Server Mode**: Standalone HTTP/WebSocket server with REST v2 management API (`/v1/providers`, `/v1/models` with ETag/If-Match), API key auth, and session management.
+- 🛠 **Skills System**: Loadable skill packs from directories with `@path` file references, turn-scoped skill switching, and custom tool creation.
 - 🛡️ **Security & Permission Pipeline**: Single Domain-owned enforcement pipeline (`PolicyEngine` → `ApprovalBroker` → `ExecutionBoundary` → `AuditRecorder`) default-on across CLI, TUI, SDK, and HTTP/WebSocket server.
-- 🔒 **Fail-Closed Isolation**: Process containment (macOS Seatbelt / Linux Bubblewrap via `@anthropic-ai/sandbox-runtime`) and exact-file write helpers default to fail-closed (`ISOLATION_UNAVAILABLE` & `EXACT_COMMIT_UNAVAILABLE`).
-- 💾 **Durable Approvals & Audit**: File-locked, atomic NDJSON stores (`~/.seepient/security/`) ensure approvals, replay ledgers, and outbox logs survive process restarts and socket reconnects.
-- 🐳 **Server Worker Backend**: ephemereal Docker worker container scheduler with mTLS transport, Ed25519/HMAC signed dispatches, and secret-free worker execution environments.
+- 🔒 **Fail-Closed Isolation & SSRF Defense**: Process containment (macOS Seatbelt / Linux Bubblewrap) and exact-file write helpers fail closed; SSRF guards prevent metadata reflection.
+- 💾 **Durable Approvals & 0600 Audit**: File-locked atomic NDJSON stores and append-only `0600` audit logs (`~/.seepient/audit.log`) with fsync before mutation commits.
+- 🐳 **Server Worker Backend**: ephemeral Docker worker container scheduler with mTLS transport, Ed25519/HMAC signed dispatches, and secret-free worker execution environments.
 - 🖥️ **Interactive TUI**: In a TTY, a full-screen Ink/React UI — bordered always-on input, streaming feed, session manager, message queue/`/steer`, and inline `write_file` diffs (atomic, crash-safe writes).
 ## Tech Stack
 - **Runtime**: Node.js
@@ -197,7 +199,7 @@ Seepient Agent uses a hierarchical configuration system.
 
 ### Provider Management (v2 Architecture)
 
-Seepient Agent v0.4.0 introduces unified Provider Management with purpose × tier routing, multi-target automatic fallback, circuit-breaker cooldowns, and credential stores:
+Seepient Agent v0.4.4 features unified Provider Management with purpose × tier routing, dynamic upstream catalog discovery, multi-target automatic fallback, circuit-breaker cooldowns, and credential stores:
 
 **Configuration (`~/.seepient/setting.json` or `.seepient/setting.json`):**
 ```json
@@ -250,16 +252,7 @@ Seepient Agent v0.4.0 introduces unified Provider Management with purpose × tie
 - `seepient providers add/edit/remove/list`: Manage configured provider accounts.
 - `seepient auth login/logout/issue-token`: Manage credentials and scoped management tokens.
 
-**Legacy Configuration (Still Supported):**
-Create a file at `.seepient/setting.json`:
-```json
-{
-  "model": "gpt-3.5-turbo",
-  "baseUrl": "https://api.deepseek.com/v1"
-}
-```
-
-> **⚠️ Security Warning**: If you store your `apiKey` or secrets in `.seepient/setting.json`, make sure to add `.seepient/` to your `.gitignore` file to prevent leaking secrets!
+> **⚠️ Security Note**: Never commit API keys or secrets in plaintext into git repositories. Use environment variables (e.g., `OPENAI_API_KEY`) or `seepient auth login` with system keychain storage.
 
 ## Integrations
 
@@ -358,24 +351,23 @@ const result = await generateText('Extract the top 3 issues from these logs', {
 console.log(result.text);
 ```
 
-### Getting Started (SDK)
+### Programmatic Instance (SDK v2)
 
-Before first use, configure providers from your CLI config (or env vars):
+Use `createSeepient` for instance-scoped lifecycle control, custom tool registration, and stream handling:
 
 ```ts
-import { configureProviders, loadProviderConfig } from 'seepient';
+import { createSeepient } from 'seepient';
 
-const config = loadProviderConfig(); // reads ~/.seepient/setting.json + .seepient/setting.json + env
-if (config) {
-  configureProviders(config);
-}
+// Initialize with automatic settings resolution (~/.seepient/setting.json or env vars)
+const seepient = await createSeepient();
 
-// Now safe to call
-import { generateText } from 'seepient';
-const result = await generateText('Hello, world!');
+// One-shot generation with purpose/tier routing
+const response = await seepient.generateText('Explain quantum computing in three bullet points');
+console.log(response.text);
+
+// Clean disposal of runtime resources
+await seepient.dispose();
 ```
-
-Without this step, `generateText` defaults to OpenAI using `OPENAI_API_KEY` if present, or throws a "no provider configured" error otherwise.
 
 ### Custom Tools
 ```ts
