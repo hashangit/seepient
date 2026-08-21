@@ -1,13 +1,5 @@
-/**
- * Seepient CLI — /models Command Handler
- *
- * In non-interactive mode, lists configured providers (returns output).
- * In interactive mode, launches the provider/model wizard (owns stdin) — the
- * TUI defers this command.
- */
-
 import chalk from 'chalk';
-import { ProviderType } from '../../../foundations/contracts/llm.js';
+import { getDefaultProviderRuntime } from '../../../domain/providers/provider-runtime.js';
 import { handleModelsCommand } from '../setup.js';
 import { isNonInteractive } from '../../../foundations/environment.js';
 import { Agent } from '../agent.js';
@@ -15,24 +7,24 @@ import type { CommandHandler } from './registry.js';
 
 export function modelsHandler(agent: Agent, config: any, activeProviderType: string): CommandHandler {
   const handler: CommandHandler = async () => {
+    const runtime = agent.getProviderRuntime() ?? getDefaultProviderRuntime();
+    const effectiveConfig = await runtime.getConfigStore().getEffectiveConfig();
+    const providers = Object.entries(effectiveConfig.providers || {});
+
     if (isNonInteractive()) {
-      const configured = Object.keys(config.models || {}).filter(
-        (k) => (config.models as any)?.[k]?.apiKey,
-      );
-      if (configured.length === 0) {
+      if (providers.length === 0) {
         return { output: chalk.yellow('No providers configured. Set API key env vars to add providers.') };
       }
       const lines = [chalk.bold.cyan('Configured Providers:')];
-      for (const p of configured) {
-        const model = (config.models as any)?.[p]?.model || 'unknown';
-        const marker = p === activeProviderType ? chalk.green(' (active)') : '';
-        lines.push(`  ${p} (${model})${marker}`);
+      const activeAccount = agent.getProviderAccount() || activeProviderType;
+      for (const [id, prov] of providers) {
+        const marker = id === activeAccount ? chalk.green(' (active)') : '';
+        lines.push(`  ${id} (${(prov as any).upstreamProvider || (prov as any).adapter})${marker}`);
       }
-      lines.push(chalk.dim('\nUse --provider <name> flag or LLM_PROVIDER env var to switch.'));
       return { output: lines.join('\n') };
     }
     // Interactive wizard — owns stdout/stdin; the TUI defers this command.
-    await handleModelsCommand(agent, config, activeProviderType as ProviderType);
+    await handleModelsCommand(agent, config, activeProviderType);
     return {};
   };
   return handler;

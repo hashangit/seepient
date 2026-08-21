@@ -231,6 +231,14 @@ export class ProviderRuntime extends EventEmitter {
     this.adapter = options?.adapter ?? new AggregateInferenceAdapter();
   }
 
+  getConfigStore(): ProviderConfigStore {
+    return this.configStore;
+  }
+
+  getCredentialStore(): CredentialStore {
+    return this.credentialStore;
+  }
+
   private healthKey(account: string, capability: string): string {
     return `${account}:${capability}`;
   }

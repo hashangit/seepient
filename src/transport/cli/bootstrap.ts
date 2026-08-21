@@ -19,11 +19,7 @@ import * as os from 'os';
 
 import { Agent } from './agent.js';
 import { resolveLaunchMode, selectSystemPrompt } from '../../domain/prompts/system-prompts.js';
-import {
-  configureProviders,
-  loadProviderConfig,
-  getProvider,
-} from '../../domain/providers/provider-resolver.js';
+import { getDefaultProviderRuntime } from '../../domain/providers/provider-runtime.js';
 import {
   loadJsonConfig,
   applyEnvOverrides,
@@ -100,11 +96,12 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
   // 4. Apply env var overrides for tool settings
   fullConfig = applyEnvOverrides(fullConfig);
 
-  // 5. Load provider config via unified resolution
-  const cliProvider = options.provider;
-  let multiConfig = loadProviderConfig(fullConfig, cliProvider);
+  // 5. Load provider config via ProviderRuntime
+  const runtime = getDefaultProviderRuntime();
+  let effectiveConfig = await runtime.getConfigStore().getEffectiveConfig();
+  let hasProviders = Object.keys(effectiveConfig.providers || {}).length > 0;
 
-  if (!multiConfig) {
+  if (!hasProviders) {
     console.log(chalk.yellow("No provider configuration found."));
 
     if (isNonInteractive()) {
@@ -123,9 +120,8 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
 
       if (doSetup) {
         await runSetup();
-        const newConfig = loadJsonConfig(GLOBAL_CONFIG_FILE);
-        Object.assign(fullConfig, newConfig);
-        multiConfig = loadProviderConfig(fullConfig, cliProvider);
+        effectiveConfig = await runtime.getConfigStore().getEffectiveConfig();
+        hasProviders = Object.keys(effectiveConfig.providers || {}).length > 0;
       } else {
         console.error(chalk.red("Provider configuration is required to proceed."));
         process.exit(1);
@@ -133,19 +129,30 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
     }
   }
 
-  if (!multiConfig) {
-    console.error(chalk.red("Provider configuration is still missing. Exiting."));
-    process.exit(1);
+  const cliProvider = options.provider as string | undefined;
+  const snapshot = await runtime.createTurnSnapshot();
+  let resolvedModel = options.model || '';
+  let activeProviderType = cliProvider || '';
+
+  try {
+    const plan = await runtime.resolvePlan(
+      snapshot,
+      'text',
+      'standard',
+      options.model || cliProvider ? { model: options.model, providerAccount: cliProvider } : undefined,
+    );
+    resolvedModel = plan.selectedTarget.model;
+    activeProviderType = plan.selectedTarget.providerAccount;
+  } catch {
+    if (!activeProviderType) {
+      activeProviderType = Object.keys(effectiveConfig.providers || {})[0] || 'default';
+    }
+    if (!resolvedModel) {
+      resolvedModel = options.model || 'default';
+    }
   }
 
-  configureProviders(multiConfig);
-
-  // Active provider: CLI --provider flag → multiConfig.default
-  const activeProviderType = (cliProvider as string) ?? multiConfig.default;
-
-  // getProvider handles model override so it's baked into the provider instance
-  const { provider, model } = await getProvider(activeProviderType as any, options.model);
-  const providerConfig = { type: activeProviderType, model };
+  const providerConfig = { type: activeProviderType, model: resolvedModel };
   // Select system prompt by launch mode: interactive (TUI/readline in a TTY)
   // gets the interactive coding-agent prompt; headless/docker/piped keep
   // the Docker-native prompt unchanged.
@@ -156,9 +163,10 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
   // defaultSessionPath()). Disabled backends can be added via registerBackend().
   fullConfig.hasExplicitModel = Boolean(options.model);
   const persistence = createPersistenceBackend({ type: 'file' });
-  const { getDefaultProviderRuntime } = await import('../../domain/providers/provider-runtime.js');
-  const runtime = getDefaultProviderRuntime();
-  const agent = new Agent(runtime, options.model ?? model, fullConfig, systemPrompt, persistence, activeProviderType as ProviderType);
+  const agent = new Agent(runtime, options.model ?? resolvedModel, fullConfig, systemPrompt, persistence, activeProviderType);
+  if (cliProvider) {
+    agent.switchProvider(cliProvider, options.model ?? resolvedModel);
+  }
 
   // Tool-approval grant store: project grants at <cwd>/.seepient/grants.json,
   // global at ~/.seepient/grants.json. Consulted by the agent loop so matching
