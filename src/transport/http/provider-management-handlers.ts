@@ -462,10 +462,9 @@ export async function handleOAuthStart(
     },
   };
 
-  const loginPromise = flow.login(interaction as any).catch((err) => {
-    // Background rejection should not terminate process
-    return Promise.reject(err);
-  });
+  const loginPromise = flow.login(interaction as any);
+  // Attach a no-op handler so an abandoned/rejected background flow doesn't trigger unhandledRejection
+  loginPromise.catch(() => {});
 
   // Wait a brief tick (50ms) to allow interaction.notify to populate device_code
   await new Promise((resolve) => setTimeout(resolve, 50));

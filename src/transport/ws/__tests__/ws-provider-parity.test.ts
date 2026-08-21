@@ -78,4 +78,31 @@ describe("WS Provider Parity (FR-040 / T057)", () => {
     expect(messages.length).toBe(1);
     expect(messages[0].error?.code).toBe("FORBIDDEN");
   });
+
+  it("handleWsRemoveProvider enforces scope check", async () => {
+    const { handleWsRemoveProvider } = await import("../ws-handlers.js");
+    const messages: any[] = [];
+    const mockWs: WebSocket = {
+      readyState: 1,
+      send: (data: string) => { messages.push(JSON.parse(data)); },
+    } as any;
+
+    const state: ConnectionState = {
+      id: "conn-no-admin",
+      authenticated: true,
+      apiKey: { rawKey: "k", label: "test", scopes: ["provider:read"], createdAt: new Date().toISOString() },
+      createdAt: Date.now(),
+      lastPing: Date.now(),
+    };
+
+    await handleWsRemoveProvider(
+      { type: "settings_updated", id: "req-rem-1", providerType: "anthropic" } as any,
+      mockWs,
+      state,
+      {} as any,
+    );
+
+    expect(messages.length).toBe(1);
+    expect(messages[0].error?.code).toBe("FORBIDDEN");
+  });
 });

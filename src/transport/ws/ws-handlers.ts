@@ -714,7 +714,7 @@ export async function handleWsListProviders(
 
 // ── WS Settings: set provider ───────────────────────────────────────────
 
-async function handleWsSetProvider(
+export async function handleWsSetProvider(
   msg: SetProviderMessage,
   ws: WebSocket,
   state: ConnectionState,
@@ -778,7 +778,7 @@ async function handleWsSetProvider(
 
 // ── WS Settings: remove provider ────────────────────────────────────────
 
-async function handleWsRemoveProvider(
+export async function handleWsRemoveProvider(
   msg: RemoveProviderMessage,
   ws: WebSocket,
   state: ConnectionState,
@@ -799,7 +799,7 @@ async function handleWsRemoveProvider(
     const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
     const runtime = getDefaultProviderRuntime();
     const api = createProviderManagerApi(runtime);
-    const delRes = await api.deleteAccount(msg.providerType, { force: true });
+    const delRes = await api.deleteAccount(msg.providerType, { force: (msg as any).force === true });
     if (!delRes.ok) {
       safeSend(ws, {
         type: "settings_updated",
@@ -807,6 +807,7 @@ async function handleWsRemoveProvider(
         error: {
           code: "blocked" in delRes ? "BLOCKED" : delRes.error.code,
           message: "blocked" in delRes ? `Account referenced by slots: ${delRes.referencingSlots.join(", ")}` : delRes.error.message,
+          referencingSlots: "blocked" in delRes ? delRes.referencingSlots : undefined,
         },
       } as any);
       return;

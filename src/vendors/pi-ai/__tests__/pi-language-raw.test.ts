@@ -417,5 +417,62 @@ describe("PiLanguageRaw backend (QS-P3.3)", () => {
     expect(capturedModel.provider).toBe("opencode");
     expect(capturedModel.baseUrl).toBe("https://opencode.ai/zen/v1");
   });
+
+  it("extracts access token from nested piAuthContext in pi_oauth secrets", async () => {
+    let capturedApiKey: string | undefined;
+    const mockCredential: CredentialHandle = {
+      id: "oauth-test",
+      ref: { kind: "seepient", id: "oauth-test" },
+      activeLeaseCount: 0,
+      async isResolvable() { return true; },
+      acquireLease() {
+        return {
+          leaseId: "lease-oauth",
+          isReleased: false,
+          async secret() {
+            return {
+              kind: "pi_oauth",
+              piAuthContext: {
+                access: "oauth-bearer-token-12345",
+                refresh: "refresh-token-xyz",
+                expires: Date.now() + 3600_000,
+              },
+            };
+          },
+          async release() {},
+        };
+      },
+    };
+
+    const mockModels = {
+      getModel: (_p: any, _m: any) => ({ id: "claude-3-5-sonnet", provider: "anthropic" }),
+      stream: (model: any, _ctx: any, opts: any) => {
+        capturedApiKey = opts?.apiKey;
+        return (async function* () {
+          yield {
+            type: "done",
+            reason: "stop",
+            message: { role: "assistant", content: [{ type: "text", text: "ok" }] },
+          };
+        })();
+      },
+    };
+
+    const backend = new PiLanguageRaw(mockModels as any);
+    const target: InferenceTarget = {
+      providerAccount: "oauth-account",
+      upstreamProvider: "anthropic",
+      model: "claude-3-5-sonnet",
+      credential: mockCredential,
+    };
+
+    for await (const _ of backend.chatStream(target, {
+      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+    })) {
+      // consume
+    }
+
+    expect(capturedApiKey).toBe("oauth-bearer-token-12345");
+  });
 });
 

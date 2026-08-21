@@ -8,7 +8,6 @@ import { ProviderRuntime, getDefaultProviderRuntime } from "../../domain/provide
 import { ProviderConfigStore } from "../../domain/providers/config-store/provider-config-store.js";
 import { MemoryCredentialStore } from "../../domain/providers/credentials/memory-credential-store.js";
 import { AggregateInferenceAdapter } from "../../capabilities/inference/aggregate-adapter.js";
-import { getSyncBuiltinCatalog } from "../../domain/providers/model-catalog.js";
 import { InferenceError, InferenceErrorCode } from "../../foundations/errors.js";
 import type {
   Seepient,

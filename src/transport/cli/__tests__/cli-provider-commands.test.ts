@@ -73,10 +73,15 @@ describe("CLI Provider Subcommands Integration (QS-P6.1 & QS-P6.2)", () => {
     expect(loginCmd?.options.map((o) => o.long)).toContain("--env-var");
   });
 
-  it("resolves coding and media.image purposes correctly via ProviderManagerApi", async () => {
+  it("resolves coding and media.image purposes correctly via ProviderManagerApi (hermetic)", async () => {
     const { createProviderManagerApi } = await import("../provider-manager-api.js");
-    const { getDefaultProviderRuntime } = await import("../../../domain/providers/provider-runtime.js");
-    const runtime = getDefaultProviderRuntime();
+    const { ProviderRuntime } = await import("../../../domain/providers/provider-runtime.js");
+    const { ProviderConfigStore } = await import("../../../domain/providers/config-store/provider-config-store.js");
+    const { MemoryCredentialStore } = await import("../../../domain/providers/credentials/memory-credential-store.js");
+
+    const configStore = new ProviderConfigStore(":memory:");
+    const credentialStore = new MemoryCredentialStore();
+    const runtime = new ProviderRuntime({ configStore, credentialStore });
     const api = createProviderManagerApi(runtime);
 
     // Save test account
@@ -127,8 +132,22 @@ describe("CLI Provider Subcommands Integration (QS-P6.1 & QS-P6.2)", () => {
       expect(acct?.credentialKind).toBe("seepient");
       expect(acct?.health).toBe("ok");
     }
+  });
 
-    // Clean up
-    await api.deleteAccount("cli-test-openai", { force: true });
+  it("parses models resolve media.image command argv correctly", async () => {
+    const program = new Command();
+    registerModelsCommands(program);
+    const modelsCmd = program.commands.find((c) => c.name() === "models");
+    const resolveCmd = modelsCmd?.commands.find((c) => c.name() === "resolve");
+    expect(resolveCmd).toBeDefined();
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await program.parseAsync(["node", "test", "models", "resolve", "media.image", "--json"]);
+      // Should have output JSON or handled resolution without unhandled syntax error
+      expect(logSpy).toHaveBeenCalled();
+    } finally {
+      logSpy.mockRestore();
+    }
   });
 });

@@ -99,32 +99,44 @@ function mapPiStopReasonToCanonical(reason?: string): StopReason {
 async function resolveSecretApiKey(
   secret: any,
   target: InferenceTarget,
+  credentialStore?: any,
+  signal?: AbortSignal,
 ): Promise<string | undefined> {
   if (!secret) return undefined;
   if (secret.kind === "api_key") {
     return secret.value;
   }
   if (secret.kind === "pi_oauth" || secret.kind === "oauth") {
-    let oauthRecord = secret;
-    if (oauthRecord.expires && Date.now() >= oauthRecord.expires - 60000 && oauthRecord.refresh) {
+    const rawCtx = secret.piAuthContext ?? secret;
+    let access = rawCtx.access;
+    let refresh = rawCtx.refresh;
+    let expires = rawCtx.expires;
+
+    // Check if token is expired or close to expiry (within 60 seconds)
+    if (expires && Date.now() >= expires - 60_000 && refresh) {
       try {
         const { getOAuthFlow } = await import("./pi-auth-adapter.js");
         const flow = await getOAuthFlow(target.upstreamProvider);
         if (flow && typeof (flow as any).refresh === "function") {
-          const refreshed = await (flow as any).refresh(oauthRecord.refresh);
+          const oauthCred = {
+            type: "oauth" as const,
+            access,
+            refresh,
+            expires,
+          };
+          const refreshed = await (flow as any).refresh(oauthCred, signal);
           if (refreshed?.access) {
-            oauthRecord = {
-              ...oauthRecord,
-              access: refreshed.access,
-              refresh: refreshed.refresh ?? oauthRecord.refresh,
-              expires: refreshed.expires ?? Date.now() + 3600000,
-            };
-            if ((target.credential as any)?.store?.put) {
-              await (target.credential as any).store.put(target.providerAccount, {
+            access = refreshed.access;
+            refresh = refreshed.refresh ?? refresh;
+            expires = refreshed.expires ?? Date.now() + 3_600_000;
+
+            const store = credentialStore ?? (target.credential as any)?.store;
+            if (store && typeof store.put === "function") {
+              await store.put(target.providerAccount, {
                 kind: "oauth",
-                access: oauthRecord.access,
-                refresh: oauthRecord.refresh,
-                expires: oauthRecord.expires,
+                access,
+                refresh,
+                expires,
               }).catch(() => {});
             }
           }
@@ -133,7 +145,7 @@ async function resolveSecretApiKey(
         // Fall back to current access token
       }
     }
-    return oauthRecord.access;
+    return access;
   }
   return undefined;
 }
@@ -143,9 +155,11 @@ async function resolveSecretApiKey(
  */
 export class PiLanguageRaw implements LanguageBackend {
   private models: Models;
+  private credentialStore?: any;
 
-  constructor(customModels?: Models) {
+  constructor(customModels?: Models, credentialStore?: any) {
     this.models = customModels ?? builtinModels();
+    this.credentialStore = credentialStore;
   }
 
   private prepareInvocation(
@@ -158,7 +172,21 @@ export class PiLanguageRaw implements LanguageBackend {
     const providerName = target.upstreamProvider === "glm" ? "zai" : target.upstreamProvider;
     let model = this.models.getModel(providerName, target.model) as Model<Api> | undefined;
 
-    const isKnown = (typeof this.models.getProvider === "function" && Boolean(this.models.getProvider(providerName))) || Boolean(model);
+    const knownPiProviders = new Set([
+      "openai",
+      "anthropic",
+      "google",
+      "openrouter",
+      "zai",
+      "groq",
+      "mistral",
+      "cerebras",
+      "together",
+      "deepseek",
+      "bedrock",
+      "opencode",
+    ]);
+    const isKnown = knownPiProviders.has(providerName) || Boolean(model);
     const piProvider = model ? (model.provider || providerName) : (isKnown ? providerName : "openai");
 
     if (!isKnown && !target.baseUrl) {
@@ -250,7 +278,7 @@ export class PiLanguageRaw implements LanguageBackend {
       }
 
       const secret = await lease.secret();
-      const apiKey = await resolveSecretApiKey(secret, target);
+      const apiKey = await resolveSecretApiKey(secret, target, this.credentialStore, signal);
 
       const { model, context, streamOptions } = this.prepareInvocation(
         target,
@@ -521,7 +549,7 @@ export class PiLanguageRaw implements LanguageBackend {
       }
 
       const secret = await lease.secret();
-      const apiKey = await resolveSecretApiKey(secret, target);
+      const apiKey = await resolveSecretApiKey(secret, target, this.credentialStore, signal);
 
       const { model, context, streamOptions } = this.prepareInvocation(
         target,
