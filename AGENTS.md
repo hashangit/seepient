@@ -60,6 +60,37 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
+## 5. In-Place Upgrades & No Legacy Baggage
+
+**Upgrade directly. Do not preserve obsolete paths.**
+
+- When modifying or iterating on a feature, rewrite and replace existing functions, components, and contracts directly in place rather than appending alternate implementations, `V2` suffixes, parallel helpers, or wrapper shims.
+- Do not keep backward compatibility shims, fallback branches, or deprecated functions unless explicitly instructed.
+- When an updated approach replaces an older mechanism, delete the legacy code paths, obsolete flags, and unused options immediately in the same change.
+
+## 6. Zero Tolerance for Dead Code & Bloat
+
+**Leave no orphans or obsolete baggage.**
+
+- Always remove unused imports, dead variables, obsolete handlers, orphaned types, and unreachable conditionals before completing an edit.
+- Clean up tests, fixtures, or mock data that tested obsolete code paths.
+- Apply dead-code detection discipline (e.g. `knip`, `ts-prune`) to ensure no unused exports, orphan files, or dangling dependencies remain.
+
+## 7. The Greenfield Rewrite Pattern
+
+**Prefer complete, clean replacement over additive patchworks.**
+
+- When significantly updating or refactoring a feature, avoid stacking incremental condition checks, flags, or wrapper shims on top of legacy code (which creates brittle, additive patchworks).
+- Treat significant iterations as a clean-slate replacement of the component/module: write the new streamlined implementation, replace the old code in place, and wire the callers directly.
+
+## 8. Pre-1.0 / Beta Lifecycle & Breaking Changes
+
+**Rapid improvement phase — no legacy shims before v1.0.0.**
+
+- **Pre-1.0 (Beta state)**: Seepient currently has no production consumers requiring backward compatibility guarantees. Do not add compatibility shims, fallback adapters, or deprecation wrappers during the pre-1.0 phase. Upgrade callers and consumers immediately to the new pattern.
+- **Documenting Breaking Changes**: When introducing breaking changes that require consumers of Seepient to update their code or configuration, document the changes with explicit transition/migration instructions. Consumers should always adapt to the new version rather than relying on legacy fallbacks.
+- **Post-1.0 Stability**: Once Seepient reaches its first stable release (`v1.0.0+`), transition to a standard deprecation policy (e.g. deprecation warning with backward compatibility retained for one minor version release before removal). Until then, bias entirely toward clean, unburdened, in-place upgrades.
+
 # Documentation Storage
 
 Documentation is split between the **Obsidian vault** (internal) and the **project repo** (consumer-facing). When unsure where a document belongs, default to the vault.
@@ -195,9 +226,9 @@ UI → Transport → Domain → Capabilities → Vendors
 | Agent loop | `src/domain/agent-loop.ts` | Single execution engine for all adapters |
 | Core types | `src/foundations/types.ts` | Messages, tools, hooks, agents, sessions |
 | Error hierarchy | `src/foundations/errors.ts` | `SeepientError` with `code` + `retryable` |
-| Contracts | `src/foundations/contracts/` | `LLMProvider`, `ToolModule`, `Middleware`, presentation contracts |
-| Settings schema | `src/foundations/settings-schema.ts` | 31 dot-key settings, validation, env vars |
-| Config + models | `src/foundations/config.ts` + `models-catalog.ts` | Merge layers + known-model list |
+| Contracts | `src/foundations/contracts/` | `ToolModule`, `Middleware`, presentation contracts |
+| Settings schema | `src/foundations/settings-schema.ts` | 22 dot-key settings, validation, env vars |
+| Config + models | `src/foundations/config.ts` + `models-catalog.ts` | Merge layers + catalog metadata accessors |
 | Hashline | `src/foundations/hashline/` | Hash-anchored patch language: grammar, parser, patcher, snapshots |
 | Tool executor | `src/domain/tool-executor.ts` | Registry, `tool()` factory, `resolveTools()`, groups |
 | Permission system | `src/domain/permission.ts` + `grants.ts` | Policy decisions: what runs, when to ask, what to remember |
@@ -207,9 +238,9 @@ UI → Transport → Domain → Capabilities → Vendors
 | Streaming | `src/domain/streaming/` | Shared queue, async iterables, SSE |
 | Sessions | `src/domain/sessions/session-store.ts` | `PersistenceBackend` factory + registry |
 | Settings manager | `src/domain/settings/settings-manager.ts` | get/set/reset/list, persistence, masking |
-| Provider resolution | `src/domain/providers/` | Choice, not calls — resolver, env, config |
+| Provider runtime | `src/domain/providers/` | Runtime, config store, credential store, resolver, catalog |
 | Context accounting | `src/domain/context/` | Context-breakdown, message-convert |
-| LLM providers | `src/capabilities/llm/` | Anthropic, OpenAI, GLM, OpenAI-compatible behind `LLMProvider` |
+| Inference adapters | `src/capabilities/inference/` | `AggregateInferenceAdapter` vendor routing |
 | Tools | `src/capabilities/tools/` | 15 built-in tool modules: shell, files, web, email, widgets, todos… |
 | Skills storage | `src/capabilities/skills/` | Registry, loader, parser, resolver, args |
 | Gateway | `src/capabilities/gateway/` | MCP/OpenAPI client, scorer, tool factory |
@@ -251,13 +282,13 @@ Domain orchestrates skill loading via `src/domain/skills/skill-invoker.ts` and `
 
 Multi-layer merge (highest wins): env vars → local `.seepient/setting.json` → global `~/.seepient/setting.json` → defaults. Managed by `src/domain/settings/settings-manager.ts`; schema in `src/foundations/settings-schema.ts`.
 
-Env vars per provider: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GLM_API_KEY`, `OPENAI_COMPAT_API_KEY` + `OPENAI_COMPAT_BASE_URL`. General: `LLM_PROVIDER`, `LLM_MODEL`. Legacy vars work with deprecation warnings.
+Env vars per provider: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GLM_API_KEY`, `OPENAI_COMPAT_API_KEY` + `OPENAI_COMPAT_BASE_URL`.
 
 ## Conventions
 
 - **No bundler** — plain `tsc` to ES2022 NodeNext. Dev via `tsx`.
 - **Package exports** — `seepient` (SDK), `seepient/server`. Binaries: `seepient` (CLI), `seepient-server`.
-- **Vitest test suite** — 1253 tests across 154 files; CI gates publish on test pass
+- **Vitest test suite** — 1231 tests across 152 files; CI gates publish on test pass
 - **Errors carry metadata** — `code` (machine-readable) + `retryable` flag on all `SeepientError` subclasses.
 - **Hook errors are non-fatal** — never crash the agent loop.
 - **Dynamic provider imports** — unused provider SDKs stay out of memory.
