@@ -66,8 +66,9 @@ export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<
     }
   };
 
-  const initialSnapshot = await runtime.createTurnSnapshot();
-  (runtime as any).currentAssignments = initialSnapshot.assignments;
+  const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
+  const managerApi = createProviderManagerApi(runtime);
+  let latestState = await managerApi.getState();
 
   return {
     async createAgent(agentOpts: AgentOptions): Promise<PublicAgent> {
@@ -455,18 +456,45 @@ export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<
     },
 
     getAssignments(): PurposeModelMap {
-      return (runtime as any).currentAssignments ?? {};
+      return latestState.assignments ?? {};
     },
 
     async getCatalog(): Promise<readonly UpstreamModel[]> {
       const snapshot = await runtime.createTurnSnapshot();
-      return snapshot.catalog.length > 0 ? snapshot.catalog : getSyncBuiltinCatalog();
+      return (await runtime.modelCatalog.listAvailableModels(snapshot.config)) as any;
     },
 
     async reload(): Promise<{ revision: number }> {
-      const snapshot = await runtime.createTurnSnapshot();
-      (runtime as any).currentAssignments = snapshot.assignments;
-      return { revision: snapshot.revision };
+      latestState = await managerApi.getState();
+      return { revision: latestState.revision };
+    },
+
+    async addProvider(input: any): Promise<any> {
+      ensureNotDisposed();
+      const res = await managerApi.saveAccount(input);
+      if (res.ok) latestState = res.state;
+      return res;
+    },
+
+    async removeProvider(id: string, opts?: { force?: boolean }): Promise<any> {
+      ensureNotDisposed();
+      const res = await managerApi.deleteAccount(id, opts);
+      if (res.ok) latestState = res.state;
+      return res;
+    },
+
+    async setAssignment(purpose: any, tier: any, target: any): Promise<any> {
+      ensureNotDisposed();
+      const res = await managerApi.setAssignment(purpose, tier, target);
+      if (res.ok) latestState = res.state;
+      return res;
+    },
+
+    async clearAssignment(purpose: any, tier: any): Promise<any> {
+      ensureNotDisposed();
+      const res = await managerApi.clearAssignment(purpose, tier);
+      if (res.ok) latestState = res.state;
+      return res;
     },
 
     async dispose(): Promise<void> {

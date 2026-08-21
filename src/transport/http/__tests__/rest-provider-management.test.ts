@@ -7,40 +7,33 @@ import { ProviderRuntime } from "../../../domain/providers/provider-runtime.js";
 import { AggregateInferenceAdapter } from "../../../capabilities/inference/aggregate-adapter.js";
 import { EventEmitter } from "events";
 
+import { Readable } from "stream";
+
 function createMockReqRes(method: string, url: string, headers: Record<string, string> = {}, body?: string) {
-  const req = new EventEmitter() as any;
+  const req = Readable.from(body ? [Buffer.from(body)] : []) as any;
   req.method = method;
   req.url = url;
   req.headers = headers;
 
-  const res = {
-    statusCode: 200,
-    headers: {} as Record<string, string>,
-    body: "",
-    setHeader(k: string, v: string) {
-      this.headers[k.toLowerCase()] = v;
-    },
-    writeHead(code: number, headers?: Record<string, string>) {
-      this.statusCode = code;
-      if (headers) {
-        for (const [k, v] of Object.entries(headers)) {
-          this.headers[k.toLowerCase()] = v;
-        }
+  const res = new EventEmitter() as any;
+  res.statusCode = 200;
+  res.headers = {};
+  res.body = "";
+  res.setHeader = function(k: string, v: string) {
+    this.headers[k.toLowerCase()] = v;
+  };
+  res.writeHead = function(code: number, headers?: Record<string, string>) {
+    this.statusCode = code;
+    if (headers) {
+      for (const [k, v] of Object.entries(headers)) {
+        this.headers[k.toLowerCase()] = v;
       }
-    },
-    end(data?: string) {
-      if (data) this.body += data;
-      this.emit("finish");
-    },
-  } as any;
-  Object.setPrototypeOf(res, EventEmitter.prototype);
-
-  setTimeout(() => {
-    if (body) {
-      req.emit("data", Buffer.from(body));
     }
-    req.emit("end");
-  }, 5);
+  };
+  res.end = function(data?: string) {
+    if (data) this.body += data;
+    this.emit("finish");
+  };
 
   return { req, res };
 }
@@ -183,5 +176,73 @@ describe("REST Provider Management v2 API (QS-P6.3 & QS-P6.4)", () => {
     });
 
     expect(res.statusCode).toBe(403);
+  });
+
+  it("GET /v1/catalog includes reachableVia per model (FR-036 / T053)", async () => {
+    // Configure an account
+    await credStore.put("openai", { kind: "api_key", keyValue: "sk-test-12345678901234567890" });
+    const ov = await configStore.getOverlay();
+    await configStore.updateOverlay(
+      {
+        providers: {
+          openai: {
+            adapter: "pi-ai",
+            upstreamProvider: "openai",
+            credential: { kind: "seepient", id: "openai" },
+          },
+        },
+      },
+      ov.revision,
+    );
+
+    const { req, res } = createMockReqRes("GET", "/v1/catalog", {
+      authorization: `Bearer ${readKey.rawKey}`,
+    });
+
+    await new Promise<void>((resolve) => {
+      res.on("finish", () => resolve());
+      handler(req, res);
+    });
+
+    expect(res.statusCode).toBe(200);
+    const catalog = JSON.parse(res.body);
+    expect(Array.isArray(catalog)).toBe(true);
+    expect(catalog.length).toBeGreaterThan(0);
+    expect(catalog[0]).toHaveProperty("reachableVia");
+    const openaiModel = catalog.find((m: any) => m.upstreamProvider === "openai");
+    if (openaiModel) {
+      expect(openaiModel.reachableVia).toContain("openai");
+    }
+  });
+
+  it("POST /v1/providers/:id/oauth/start requires provider:admin scope (T054)", async () => {
+    const { req, res } = createMockReqRes("POST", "/v1/providers/anthropic/oauth/start", {
+      authorization: `Bearer ${readKey.rawKey}`,
+    });
+
+    await new Promise<void>((resolve) => {
+      res.on("finish", () => resolve());
+      handler(req, res);
+    });
+
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("POST /v1/providers/:id/oauth/complete validates attemptId (T054)", async () => {
+    const { req, res } = createMockReqRes(
+      "POST",
+      "/v1/providers/anthropic/oauth/complete",
+      { authorization: `Bearer ${adminKey.rawKey}` },
+      JSON.stringify({ attemptId: "non-existent-attempt" }),
+    );
+
+    await new Promise<void>((resolve) => {
+      res.on("finish", () => resolve());
+      handler(req, res);
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.error.code).toBe("OAUTH_ATTEMPT_NOT_FOUND");
   });
 });

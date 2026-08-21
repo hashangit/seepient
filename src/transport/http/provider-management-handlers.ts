@@ -382,7 +382,205 @@ export async function handleGetCatalog(
   }
 
   const snapshot = await runtime.createTurnSnapshot();
-  sendJSON(res, 200, snapshot.catalog, snapshot.revision);
+  const availableModels = await runtime.modelCatalog.listAvailableModels(snapshot.config);
+
+  sendJSON(res, 200, availableModels, snapshot.revision);
+}
+
+interface PendingOAuthAttempt {
+  attemptId: string;
+  providerId: string;
+  upstream: string;
+  createdAt: number;
+  expiresAt: number;
+  userCode?: string;
+  verificationUrl?: string;
+  loginPromise?: Promise<any>;
+}
+
+const pendingOAuthAttempts = new Map<string, PendingOAuthAttempt>();
+
+function cleanExpiredAttempts(): void {
+  const now = Date.now();
+  for (const [id, att] of pendingOAuthAttempts.entries()) {
+    if (now > att.expiresAt) {
+      pendingOAuthAttempts.delete(id);
+    }
+  }
+}
+
+export async function handleOAuthStart(
+  req: IncomingMessage,
+  res: ServerResponse,
+  runtime: ProviderRuntime,
+  key: ApiKeyEntry,
+  providerId: string,
+): Promise<void> {
+  if (!checkDeploymentMode(res)) return;
+  if (!hasScope(key, "provider:admin")) {
+    sendError(res, 403, "FORBIDDEN", "API key lacks 'provider:admin' scope");
+    return;
+  }
+
+  cleanExpiredAttempts();
+
+  const { isOAuthSupported, getOAuthFlow } = await import(
+    "../../domain/providers/oauth-service.js"
+  );
+
+  const snapshot = await runtime.createTurnSnapshot();
+  const existing = snapshot.config.providers?.[providerId];
+  const upstream = existing?.upstreamProvider ?? providerId;
+
+  if (!isOAuthSupported(upstream)) {
+    sendError(res, 400, "OAUTH_UNSUPPORTED", `OAuth is not supported for provider "${upstream}"`);
+    return;
+  }
+
+  const flow = await getOAuthFlow(upstream);
+  if (!flow) {
+    sendError(res, 500, "OAUTH_FLOW_ERROR", `Could not initialize OAuth flow for "${upstream}"`);
+    return;
+  }
+
+  const attemptId = `oauth_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  let userCode: string | undefined;
+  let verificationUrl: string | undefined;
+  let expiresInMs = 600_000;
+
+  const interaction = {
+    prompt: async () => "",
+    notify: (event: any) => {
+      if (event.type === "device_code") {
+        userCode = event.userCode;
+        verificationUrl = event.verificationUri;
+        if (event.expiresInSeconds) expiresInMs = event.expiresInSeconds * 1000;
+      } else if (event.type === "auth_url") {
+        verificationUrl = event.url;
+      }
+    },
+  };
+
+  const loginPromise = flow.login(interaction as any);
+
+  // Wait a brief tick (50ms) to allow interaction.notify to populate device_code
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  pendingOAuthAttempts.set(attemptId, {
+    attemptId,
+    providerId,
+    upstream,
+    createdAt: Date.now(),
+    expiresAt: Date.now() + expiresInMs,
+    userCode,
+    verificationUrl,
+    loginPromise,
+  });
+
+  sendJSON(res, 200, {
+    attemptId,
+    userCode,
+    verificationUrl,
+    expiresInMs,
+  });
+}
+
+export async function handleOAuthComplete(
+  req: IncomingMessage,
+  res: ServerResponse,
+  runtime: ProviderRuntime,
+  key: ApiKeyEntry,
+  providerId: string,
+): Promise<void> {
+  if (!checkDeploymentMode(res)) return;
+  if (!hasScope(key, "provider:admin")) {
+    sendError(res, 403, "FORBIDDEN", "API key lacks 'provider:admin' scope");
+    return;
+  }
+
+  let bodyText: string;
+  try {
+    bodyText = await parseBody(req);
+  } catch {
+    sendError(res, 400, "BAD_REQUEST", "Failed to read request body");
+    return;
+  }
+
+  let body: any;
+  try {
+    body = JSON.parse(bodyText);
+  } catch {
+    sendError(res, 400, "BAD_REQUEST", "Invalid JSON in request body");
+    return;
+  }
+
+  const { attemptId } = body;
+  if (!attemptId || !pendingOAuthAttempts.has(attemptId)) {
+    sendError(res, 400, "OAUTH_ATTEMPT_NOT_FOUND", "OAuth attempt expired or not found");
+    return;
+  }
+
+  const attempt = pendingOAuthAttempts.get(attemptId)!;
+  if (Date.now() > attempt.expiresAt) {
+    pendingOAuthAttempts.delete(attemptId);
+    sendError(res, 400, "OAUTH_EXPIRED", "OAuth authorization expired");
+    return;
+  }
+
+  try {
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("OAUTH_PENDING")), 5000),
+    );
+    const credResult: any = await Promise.race([attempt.loginPromise, timeoutPromise]);
+
+    if (!credResult || credResult.type !== "oauth" || !credResult.access) {
+      pendingOAuthAttempts.delete(attemptId);
+      sendError(res, 400, "OAUTH_FAILED", "OAuth authorization did not return valid tokens");
+      return;
+    }
+
+    await runtime.credentialStore.put(providerId, {
+      kind: "oauth",
+      access: credResult.access,
+      refresh: credResult.refresh ?? "",
+      expires: credResult.expires ?? Date.now() + 3600_000,
+    });
+
+    const patch = {
+      providers: {
+        [providerId]: {
+          adapter: "pi-ai",
+          upstreamProvider: attempt.upstream,
+          credential: { kind: "seepient", id: providerId },
+        },
+      } as any,
+    };
+
+    const overlay = await runtime.configStore.getOverlay();
+    const result = await runtime.updateOverlay(patch, overlay.revision);
+
+    pendingOAuthAttempts.delete(attemptId);
+    sendJSON(
+      res,
+      200,
+      {
+        revision: result.revision,
+        provider: {
+          adapter: "pi-ai",
+          upstreamProvider: attempt.upstream,
+          credential: { kind: "redacted" },
+        },
+      },
+      result.revision,
+    );
+  } catch (err: any) {
+    if (err.message === "OAUTH_PENDING") {
+      sendError(res, 202, "OAUTH_PENDING", "Authorization still pending in browser");
+      return;
+    }
+    pendingOAuthAttempts.delete(attemptId);
+    sendError(res, 400, "OAUTH_FAILED", err.message || "OAuth login failed");
+  }
 }
 
 export async function handleResolveModel(

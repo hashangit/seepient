@@ -44,7 +44,14 @@ export type {
   GenerateTextOptions as SeepientGenerateTextOptions,
   GenerateImageOptions as SeepientGenerateImageOptions,
   ResolveOptions as SeepientResolveOptions,
+  AccountInput,
+  SaveResult,
+  DeleteResult,
+  AssignmentTarget,
+  PurposeId,
+  Tier,
 } from "../../foundations/contracts/sdk-fixture.js";
+export type { UiError } from "../../foundations/contracts/provider-manager-api.js";
 export { tool, CORE_TOOLS, COMM_TOOLS, ADVANCED_TOOLS, ALL_TOOLS } from "./tools.js";
 export { settings, SettingsError } from "./settings.js";
 export { createRuntimeSkillProviderSwitcher } from "../../domain/skills/skill-invoker.js";

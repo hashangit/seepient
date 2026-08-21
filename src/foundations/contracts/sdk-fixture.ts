@@ -117,6 +117,24 @@ export interface Agent {
   dispose(): Promise<void>;
 }
 
+import type {
+  AccountInput,
+  SaveResult,
+  DeleteResult,
+  AssignmentTarget,
+  PurposeId,
+  Tier,
+} from "./provider-manager-api.js";
+
+export type {
+  AccountInput,
+  SaveResult,
+  DeleteResult,
+  AssignmentTarget,
+  PurposeId,
+  Tier,
+};
+
 // ── Seepient instance ─────────────────────────────────────────────────
 export interface Seepient {
   createAgent(opts: AgentOptions): Promise<Agent>;
@@ -128,6 +146,12 @@ export interface Seepient {
   getCatalog(): Promise<readonly UpstreamModel[]>;
   reload(): Promise<{ revision: number }>;
   dispose(): Promise<void>;
+
+  // Management parity methods (013 / FR-038)
+  addProvider(input: AccountInput): Promise<SaveResult>;
+  removeProvider(id: string, opts?: { force?: boolean }): Promise<DeleteResult>;
+  setAssignment(purpose: PurposeId, tier: Tier | null, target: AssignmentTarget): Promise<SaveResult>;
+  clearAssignment(purpose: PurposeId, tier: Tier | null): Promise<SaveResult>;
 }
 
 export interface SeepientFactory {

@@ -128,7 +128,7 @@ function matchRoute(
   if (method === "GET" && path === "/v1/provider-runtime") {
     return { handler: "provider_runtime", params: {} };
   }
-  if (method === "GET" && path === "/v1/catalog") {
+  if (method === "GET" && (path === "/v1/catalog" || path === "/v1/models/catalog")) {
     return { handler: "catalog", params: {} };
   }
   if (method === "POST" && path === "/v1/models/resolve") {
@@ -149,6 +149,14 @@ function matchRoute(
   // Provider v2 accounts routes
   if (method === "GET" && path === "/v1/providers") {
     return { handler: "providers_v2_list", params: {} };
+  }
+  const oauthStartMatch = path.match(/^\/v1\/providers\/([a-zA-Z0-9_-]+)\/oauth\/start$/);
+  if (method === "POST" && oauthStartMatch) {
+    return { handler: "provider_oauth_start", params: { providerId: oauthStartMatch[1] } };
+  }
+  const oauthCompleteMatch = path.match(/^\/v1\/providers\/([a-zA-Z0-9_-]+)\/oauth\/complete$/);
+  if (method === "POST" && oauthCompleteMatch) {
+    return { handler: "provider_oauth_complete", params: { providerId: oauthCompleteMatch[1] } };
   }
   const providerV2Match = path.match(/^\/v1\/providers\/([a-zA-Z0-9_-]+)$/);
   if (providerV2Match) {
@@ -308,6 +316,20 @@ export function createRestHandler(ctx: RestHandlerContext) {
           const full = urlObj.searchParams.get("full") === "true";
           const { handleProbeProvider } = await import("./provider-management-handlers.js");
           await handleProbeProvider(req, res, await getRuntime(), key, route.params.providerId, full);
+          break;
+        }
+        case "provider_oauth_start": {
+          const key = authMiddleware(req);
+          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
+          const { handleOAuthStart } = await import("./provider-management-handlers.js");
+          await handleOAuthStart(req, res, await getRuntime(), key, route.params.providerId);
+          break;
+        }
+        case "provider_oauth_complete": {
+          const key = authMiddleware(req);
+          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
+          const { handleOAuthComplete } = await import("./provider-management-handlers.js");
+          await handleOAuthComplete(req, res, await getRuntime(), key, route.params.providerId);
           break;
         }
         case "provider_refresh_models": {
