@@ -248,6 +248,12 @@ UI → Transport → Domain → Capabilities → Vendors
 | Sessions | `src/domain/sessions/session-store.ts` | `PersistenceBackend` factory + registry |
 | Settings manager | `src/domain/settings/settings-manager.ts` | get/set/reset/list, persistence, masking |
 | Provider runtime | `src/domain/providers/` | Runtime, config store, credential store, resolver, catalog |
+| Provider controller | `src/transport/cli/provider-manager-api.ts` | Single semantic core for provider/account/slot management |
+| Model manager dock | `src/ui/tui/overlays/model-manager.tsx` | Multi-tab TUI dock: purpose board, accounts, catalog browse, search |
+| Model picker | `src/ui/tui/components/model-picker.tsx` | Search & filter model selector with reachability & pricing badges |
+| Add account flow | `src/ui/tui/components/add-account.tsx` | Multi-credential account configuration (paste, env, none, oauth) |
+| Setup wizard | `src/ui/tui/setup-wizard.tsx` | First-run onboarding wizard with preset bundles & slot recommendations |
+| OAuth adapter | `src/vendors/pi-ai/pi-auth-adapter.ts` | Pi AI OAuth flow bridge over Seepient CredentialStore |
 | Context accounting | `src/domain/context/` | Context-breakdown, message-convert |
 | Inference adapters | `src/capabilities/inference/` | `AggregateInferenceAdapter` vendor routing |
 | Tools | `src/capabilities/tools/` | 15 built-in tool modules: shell, files, web, email, widgets, todos… |
@@ -297,7 +303,7 @@ Env vars per provider: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GLM_API_KEY`, `OP
 
 - **No bundler** — plain `tsc` to ES2022 NodeNext. Dev via `tsx`.
 - **Package exports** — `seepient` (SDK), `seepient/server`. Binaries: `seepient` (CLI), `seepient-server`.
-- **Vitest test suite** — 1231 tests across 152 files; CI gates publish on test pass
+- **Vitest test suite** — 1317 tests across 160 files; CI gates publish on test pass
 - **Errors carry metadata** — `code` (machine-readable) + `retryable` flag on all `SeepientError` subclasses.
 - **Hook errors are non-fatal** — never crash the agent loop.
 - **Dynamic provider imports** — unused provider SDKs stay out of memory.

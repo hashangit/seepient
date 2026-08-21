@@ -32,13 +32,13 @@ export function registerModelsCommands(program: Command): void {
         list = list.filter(
           (m) =>
             m.id.toLowerCase().includes(q) ||
-            m.name.toLowerCase().includes(q) ||
+            m.displayName.toLowerCase().includes(q) ||
             m.upstreamProvider.toLowerCase().includes(q),
         );
       }
 
       if (opts.reachableOnly) {
-        list = list.filter((m) => m.reachable);
+        list = list.filter((m) => m.reachableVia.length > 0);
       }
 
       if (opts.json) {
@@ -54,26 +54,26 @@ export function registerModelsCommands(program: Command): void {
       console.log(chalk.bold.cyan(`\nAvailable Models in Catalog (${list.length}):\n`));
 
       for (const m of list) {
-        const reachBadge = m.reachable
-          ? chalk.green("● reachable")
+        const reachBadge = m.reachableVia.length > 0
+          ? chalk.green(`● reachable (${m.reachableVia.join(", ")})`)
           : chalk.yellow("○ unconfigured");
 
         const ctxStr = m.contextWindow ? `${Math.round(m.contextWindow / 1000)}k ctx` : "";
         const priceStr = m.pricing
-          ? `$${m.pricing.inputPer1M.toFixed(2)}/M in · $${m.pricing.outputPer1M.toFixed(2)}/M out`
+          ? `$${((m.pricing.promptPerMillion ?? 0)).toFixed(2)}/M in · $${((m.pricing.completionPerMillion ?? 0)).toFixed(2)}/M out`
           : "price unknown";
 
         const caps = [
           m.capabilities.toolUse !== false ? "tools" : "",
           m.capabilities.streaming !== false ? "stream" : "",
           m.capabilities.vision ? "vision" : "",
-          m.capabilities.reasoning ? "reasoning" : "",
+          m.supportedReasoningLevels && m.supportedReasoningLevels.some((l) => l !== "none") ? "reasoning" : "",
         ]
           .filter(Boolean)
           .join(", ");
 
         console.log(`  ${chalk.bold(m.id)} ${chalk.dim(`(${m.upstreamProvider})`)}  ${reachBadge}`);
-        console.log(`    ${chalk.dim(m.name)}`);
+        console.log(`    ${chalk.dim(m.displayName)}`);
         console.log(`    ${chalk.dim([ctxStr, priceStr, caps ? `[${caps}]` : ""].filter(Boolean).join(" · "))}`);
       }
       console.log("");
@@ -88,7 +88,7 @@ export function registerModelsCommands(program: Command): void {
       const api = createProviderManagerApi(runtime);
 
       let purpose: string;
-      let tier: string | null = null;
+      let tier: string | undefined = undefined;
       if (slot.includes(".")) {
         const parts = slot.split(".");
         purpose = parts[0];
@@ -97,15 +97,15 @@ export function registerModelsCommands(program: Command): void {
         purpose = slot;
       }
 
-      const res = await api.resolvePreview(purpose as PurposeId, tier as Tier | null);
+      const res = await api.resolvePreview(purpose as PurposeId, tier as Tier | undefined);
 
       if (opts.json) {
         console.log(JSON.stringify(res, null, 2));
         return;
       }
 
-      if ("ok" in res && res.ok === false) {
-        console.error(chalk.red(`Error (${res.error.code}): ${res.error.message}`));
+      if ("ok" in res && (res as any).ok === false) {
+        console.error(chalk.red(`Error (${(res as any).code}): ${(res as any).message}`));
         process.exit(1);
       }
 
@@ -338,13 +338,13 @@ export function registerModelsCommands(program: Command): void {
       const api = createProviderManagerApi(runtime);
       const res = await api.refreshModels(accountId);
 
-      if (res.ok) {
+      if (res.ok && res.discovered) {
         console.log(chalk.green(`✓ Successfully discovered ${res.discovered.length} model(s) for "${accountId}".`));
         for (const id of res.discovered) {
           console.log(`  - ${id}`);
         }
       } else {
-        console.log(chalk.red(`Error discovering models for "${accountId}": ${res.error.message}`));
+        console.log(chalk.red(`Error discovering models for "${accountId}": ${res.error?.message ?? "unknown error"}`));
       }
     });
 

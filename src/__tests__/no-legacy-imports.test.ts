@@ -72,6 +72,34 @@ describe("P8: No legacy provider imports or symbols regression guard", () => {
       label: "legacy configureProviders( call",
       regex: /\bconfigureProviders\s*\(/,
     },
+    {
+      label: "legacy ALL_PROVIDER_TYPES reference",
+      regex: /\bALL_PROVIDER_TYPES\b/,
+    },
+    {
+      label: "legacy OpenAI Official string",
+      regex: /['"]OpenAI Official['"]/,
+    },
+    {
+      label: "legacy Anthropic Official string",
+      regex: /['"]Anthropic Official['"]/,
+    },
+    {
+      label: "legacy GLM Code Plan string",
+      regex: /['"]GLM Code Plan['"]/,
+    },
+    {
+      label: "legacy defaultModelMap reference",
+      regex: /\bdefaultModelMap\b/,
+    },
+    {
+      label: "legacy claude-3-7-sonnet-latest literal",
+      regex: /['"]claude-3-7-sonnet-latest['"]/,
+    },
+    {
+      label: "legacy glm-4-plus literal",
+      regex: /['"]glm-4-plus['"]/,
+    },
   ];
 
   it("ensures no production source file contains banned legacy imports or symbols", () => {

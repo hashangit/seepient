@@ -25,6 +25,13 @@ export interface AccountView {
   modelCount: number;
 }
 
+export interface PurposeDef {
+  id: PurposeId;
+  label: string;
+  tiered: boolean;
+  requires: Array<"toolUse" | "vision" | "streaming" | "imageGenerate" | "tts" | "stt" | "video">;
+}
+
 export interface ManagerState {
   revision: number;
   accounts: AccountView[];
