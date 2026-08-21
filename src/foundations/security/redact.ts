@@ -18,7 +18,7 @@ const SENSITIVE_KEY_PATTERNS: readonly RegExp[] = [
 const SECRET_VALUE_PATTERNS: readonly RegExp[] = [
   /(?:sk-[a-zA-Z0-9_-]{20,})/g, // OpenAI API keys
   /(?:gsk_[a-zA-Z0-9_-]{20,})/g, // Groq / GLM API keys
-  /\b(?:ghp_[a-zA-Z0-9]{36})\b/g, // GitHub tokens
+  /\b(?:gh[pours]_[a-zA-Z0-9]{36,255})\b/g, // GitHub tokens (personal, oauth, user, server, refresh)
   /\b(?:xox[baprs]-[a-zA-Z0-9-]{10,})\b/g, // Slack tokens
   /\b(?:AIza[0-9A-Za-z-_]{35})\b/g, // Google API keys
   /Bearer\s+[a-zA-Z0-9._~+/-]+=*/gi, // Bearer tokens
@@ -60,8 +60,8 @@ export function isSensitiveKey(key: string): boolean {
 export function redactString(str: string): string {
   let result = redactUrlCredentials(str);
   result = result.replace(
-    /((?:access_token|refresh_token|refresh|access|api_key|apiKey|password)\s*[:=]\s*)[a-zA-Z0-9._~+/-]+/gi,
-    "$1[REDACTED]",
+    /((?:["']?(?:access_token|refresh_token|refresh|access|api_key|apiKey|password)["']?\s*[:=]\s*["']?))[a-zA-Z0-9._~+/-]+(["']?)/gi,
+    "$1[REDACTED]$2",
   );
   for (const pattern of SECRET_VALUE_PATTERNS) {
     result = result.replace(pattern, "[REDACTED]");

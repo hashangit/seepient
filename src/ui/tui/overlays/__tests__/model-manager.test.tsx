@@ -62,6 +62,7 @@ function fakeApi(overrides?: {
   state?: ManagerState;
   getState?: () => Promise<ManagerState>;
   setAssignment?: any;
+  clearAssignment?: any;
   resolvePreview?: any;
   deleteAccount?: any;
   signInWithProvider?: any;
@@ -80,7 +81,7 @@ function fakeApi(overrides?: {
       state = { ...state, assignments: { ...state.assignments, text: { standard: target } } as any };
       return { ok: true, state };
     }),
-    clearAssignment: async (): Promise<SaveResult> => ({ ok: true, state }),
+    clearAssignment: overrides?.clearAssignment ?? (async (): Promise<SaveResult> => ({ ok: true, state })),
     resolvePreview: overrides?.resolvePreview ?? (async () => ({
       selectedTarget: { providerAccount: "acme-main", model: "model-tool" },
       via: "fallback-chain" as const,
@@ -167,14 +168,19 @@ describe("Jobs board", () => {
   });
 
   it("clearing a slot reports applies-next-turn", async () => {
-    const { inst } = setup();
+    const clearAssignment = vi.fn(async (_p: any, _t: any): Promise<SaveResult> => ({
+      ok: true,
+      state: baseState(),
+    }));
+    const { inst } = setup({ clearAssignment } as any);
     await delay();
     await type(inst, DOWN); // board action focus (single slot row selected)
     await type(inst, DOWN);
     await type(inst, "3"); // Clear slot
-    await delay();
-    // fake clearAssignment returns state without change — assert feedback text
-    // (component shows success footer)
+    await vi.waitFor(() => {
+      expect(clearAssignment).toHaveBeenCalled();
+    });
+    expect(inst.lastFrame() ?? "").toMatch(/applies next turn|cleared/);
   });
 });
 
