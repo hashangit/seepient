@@ -104,12 +104,16 @@ export function registerModelsCommands(program: Command): void {
 
       if (opts.json) {
         console.log(JSON.stringify(res, null, 2));
+        if ("ok" in res && (res as any).ok === false) {
+          process.exitCode = 1;
+        }
         return;
       }
 
       if ("ok" in res && (res as any).ok === false) {
         console.error(chalk.red(`Error (${(res as any).code}): ${(res as any).message}`));
-        process.exit(1);
+        process.exitCode = 1;
+        return;
       }
 
       const preview = res as any;
@@ -124,7 +128,8 @@ export function registerModelsCommands(program: Command): void {
       if (preview.failureTargets && preview.failureTargets.length > 0) {
         console.log(chalk.yellow(`  Unresolvable targets:`));
         for (const f of preview.failureTargets) {
-          console.log(`    - ${f.providerAccount}/${f.model}: ${f.reason}`);
+          const reasonStr = f.reason ? `: ${f.reason}` : "";
+          console.log(`    - ${f.providerAccount}/${f.model}${reasonStr}`);
         }
       }
       console.log("");

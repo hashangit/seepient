@@ -690,8 +690,8 @@ export async function handleWsListProviders(
   state: ConnectionState,
   _ctx: SettingsHandlerContext,
 ): Promise<void> {
-  if (!requireWsScope(state, "agent:read")) {
-    safeSend(ws, { type: "providers_list", id: msg.id, providers: {}, error: { code: "FORBIDDEN", message: "Requires agent:read scope" } } as any);
+  if (!requireWsScope(state, "provider:read")) {
+    safeSend(ws, { type: "providers_list", id: msg.id, providers: {}, error: { code: "FORBIDDEN", message: "Requires provider:read scope" } } as any);
     return;
   }
 
@@ -699,12 +699,13 @@ export async function handleWsListProviders(
 
   try {
     const { getDefaultProviderRuntime } = await import("../../domain/providers/provider-runtime.js");
+    const { redactUrlCredentials } = await import("../../foundations/security/redact.js");
     const snapshot = await getDefaultProviderRuntime().createTurnSnapshot();
     const v2Providers = snapshot.config?.providers || {};
     for (const [id, entry] of Object.entries(v2Providers)) {
       providers[id] = {
         type: entry.upstreamProvider || entry.adapter || "custom",
-        baseUrl: entry.baseUrl,
+        baseUrl: entry.baseUrl ? redactUrlCredentials(entry.baseUrl) : undefined,
       };
     }
   } catch {}

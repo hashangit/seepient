@@ -47,6 +47,36 @@ export class MemoryCredentialStore implements CredentialStore {
       };
     }
 
+    if (ref.kind === "env") {
+      const varName = ref.name;
+      return {
+        id: `env:${varName}`,
+        ref,
+        activeLeaseCount: 0,
+        async isResolvable() {
+          return Boolean(process.env[varName]);
+        },
+        acquireLease(): CredentialLease {
+          return {
+            leaseId: `lease-env-${varName}`,
+            isReleased: false,
+            async secret(): Promise<CredentialSecret> {
+              const currentVal = process.env[varName];
+              if (!currentVal) {
+                throw new SeepientError(
+                  `Environment variable "${varName}" is not set`,
+                  "MISSING_ENV_VAR",
+                  false,
+                );
+              }
+              return { kind: "api_key", value: currentVal };
+            },
+            async release() {},
+          };
+        },
+      };
+    }
+
     if (ref.kind !== "seepient") {
       throw new SeepientError(
         `MemoryCredentialStore cannot resolve credential of kind "${ref.kind}"`,

@@ -141,7 +141,13 @@ export interface Seepient {
   generateText(opts: GenerateTextOptions): Promise<InferenceResponse>;
   streamText(opts: GenerateTextOptions): Promise<AsyncIterable<StreamEvent>>;
   generateImage(opts: GenerateImageOptions): Promise<ImageResult>;
-  resolve(opts: ResolveOptions): Promise<{ model: UpstreamModel; providerAccount: ProviderId; thinkingLevel?: ThinkingLevel }>;
+  resolve(opts: ResolveOptions): Promise<{
+    model: UpstreamModel;
+    providerAccount: ProviderId;
+    thinkingLevel?: ThinkingLevel;
+    via?: "requested" | "fallback-chain";
+    failureTargets?: Array<{ providerAccount: string; model: string }>;
+  }>;
   getAssignments(): PurposeModelMap;
   getCatalog(): Promise<readonly UpstreamModel[]>;
   reload(): Promise<{ revision: number }>;

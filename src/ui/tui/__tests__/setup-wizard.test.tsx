@@ -169,11 +169,56 @@ describe("SetupWizard — extras are per-key saves (T026, FR-006)", () => {
   });
 });
 
-describe("SetupWizard — exit", () => {
+describe("SetupWizard — exit & escape navigation (C4, SC-004)", () => {
   it("clean exit before any change goes straight out (no confirm)", async () => {
     const { inst, onExitSetup } = setup(freshState());
     await delay();
     await type(inst, "2"); // Exit setup (nothing dirty)
     expect(onExitSetup).toHaveBeenCalled();
+  });
+
+  it("navigates back one step on Escape across wizard steps (C4)", async () => {
+    const state = freshState();
+    state.accounts = [{ id: "acme", upstreamProvider: "acme", credentialKind: "none", health: "ok", modelCount: 1 }];
+    (state.assignments as any).text = { standard: { providerAccount: "acme", model: "model-tool" } };
+    const { inst } = setup(state);
+    await delay();
+
+    await type(inst, "1"); // welcome -> main
+    expect(inst.lastFrame() ?? "").toContain("Main model already set");
+
+    await type(inst, "1"); // main -> slots
+    expect(inst.lastFrame() ?? "").toContain("job slots are unstaffed");
+
+    await type(inst, "2"); // slots -> extras
+    expect(inst.lastFrame() ?? "").toContain("Optional integrations");
+
+    // Press Escape on extras -> should go back to slots
+    await type(inst, ESC);
+    expect(inst.lastFrame() ?? "").toContain("job slots are unstaffed");
+
+    // Press Escape on slots -> should go back to main
+    await type(inst, ESC);
+    expect(inst.lastFrame() ?? "").toContain("Main model already set");
+  });
+
+  it("preserves unedited settings during wizard run (SC-004)", async () => {
+    const state = freshState();
+    state.accounts = [{ id: "acme", upstreamProvider: "acme", credentialKind: "none", health: "ok", modelCount: 1 }];
+    (state.assignments as any).text = { standard: { providerAccount: "acme", model: "model-tool" } };
+    const { inst, settings, onFinish } = setup(state);
+    await delay();
+
+    await type(inst, "1"); // welcome -> main
+    await type(inst, "1"); // main -> slots
+    await type(inst, "2"); // slots -> extras
+    await type(inst, "5"); // extras -> summary (no extra keys entered)
+    await delay();
+    expect(inst.lastFrame() ?? "").toContain("Setup complete");
+    await type(inst, ENTER); // [1] Finish
+    await vi.waitFor(() => expect(onFinish).toHaveBeenCalled());
+
+    // SC-004: settings.set was never called for unedited settings
+    expect(settings.set).not.toHaveBeenCalled();
   });
 });

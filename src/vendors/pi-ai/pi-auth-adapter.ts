@@ -100,14 +100,12 @@ export class PiCredentialStoreAdapter implements PiCredentialStore {
   private enqueue<T>(providerId: string, task: () => Promise<T>): Promise<T> {
     const prev = this.chains.get(providerId) ?? Promise.resolve();
     const next = prev.then(task, task);
-    this.chains.set(
-      providerId,
-      next.finally(() => {
-        if (this.chains.get(providerId) === next) {
-          this.chains.delete(providerId);
-        }
-      }),
-    );
+    const tail = next.catch(() => {}).finally(() => {
+      if (this.chains.get(providerId) === tail) {
+        this.chains.delete(providerId);
+      }
+    });
+    this.chains.set(providerId, tail);
     return next;
   }
 
@@ -117,7 +115,9 @@ export class PiCredentialStoreAdapter implements PiCredentialStore {
       : undefined;
 
     if (!record) {
-      const rec = await this.seepientStore.get(providerId);
+      const rec = typeof this.seepientStore.get === "function"
+        ? await this.seepientStore.get(providerId)
+        : undefined;
       if (!rec) return undefined;
       return { type: rec.materialKind === "oauth" ? "oauth" : "api_key" } as PiCredential;
     }
@@ -139,7 +139,9 @@ export class PiCredentialStoreAdapter implements PiCredentialStore {
   }
 
   async list(_options?: AuthOperationOptions): Promise<readonly PiCredentialInfo[]> {
-    const records = await this.seepientStore.list();
+    const records = typeof this.seepientStore.list === "function"
+      ? await this.seepientStore.list()
+      : [];
     return records.map((r) => ({
       providerId: r.id,
       type: (r.materialKind === "oauth" ? "oauth" : "api_key") as PiCredential["type"],

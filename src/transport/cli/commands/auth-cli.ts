@@ -24,12 +24,16 @@ export function registerAuthCommands(program: Command): void {
     .action(async (providerId, opts) => {
       const runtime = getDefaultProviderRuntime();
       const api = createProviderManagerApi(runtime);
+      const state = await api.getState();
+      const existing = state.accounts.find((a) => a.id === providerId);
+      const upstreamProvider = existing ? existing.upstreamProvider : providerId;
 
       if (opts.key) {
         const res = await api.saveAccount({
           accountId: providerId,
-          upstreamProvider: providerId,
+          upstreamProvider,
           credential: { mode: "paste", keyValue: opts.key },
+          baseUrl: existing?.baseUrl,
         });
         if (!res.ok) {
           console.error(chalk.red(`Error (${res.error.code}): ${res.error.message}`));
@@ -42,8 +46,9 @@ export function registerAuthCommands(program: Command): void {
       if (opts.envVar) {
         const res = await api.saveAccount({
           accountId: providerId,
-          upstreamProvider: providerId,
+          upstreamProvider,
           credential: { mode: "env", varName: opts.envVar },
+          baseUrl: existing?.baseUrl,
         });
         if (!res.ok) {
           console.error(chalk.red(`Error (${res.error.code}): ${res.error.message}`));
@@ -61,8 +66,8 @@ export function registerAuthCommands(program: Command): void {
       }
 
       // Interactive TTY menu
-      const flows = await api.getAvailableOAuthFlows();
-      const hasOAuth = flows.includes(providerId.toLowerCase());
+      const { isOAuthSupported } = await import("../../../domain/providers/oauth-service.js");
+      const hasOAuth = isOAuthSupported(upstreamProvider);
 
       console.log(chalk.bold.cyan(`\nAuthenticate provider account "${providerId}":`));
       console.log(`  [1] Paste API key`);
@@ -82,8 +87,9 @@ export function registerAuthCommands(program: Command): void {
           }
           const res = await api.saveAccount({
             accountId: providerId,
-            upstreamProvider: providerId,
+            upstreamProvider,
             credential: { mode: "paste", keyValue: key },
+            baseUrl: existing?.baseUrl,
           });
           if (!res.ok) {
             console.error(chalk.red(`Error (${res.error.code}): ${res.error.message}`));
@@ -93,40 +99,42 @@ export function registerAuthCommands(program: Command): void {
         } else if (choice === "2") {
           const envName = (await rl.question("Environment variable name: ")).trim();
           if (!envName) {
-            console.error(chalk.red("Error: Variable name cannot be empty."));
+            console.error(chalk.red("Error: Environment variable name cannot be empty."));
             process.exit(1);
           }
           const res = await api.saveAccount({
             accountId: providerId,
-            upstreamProvider: providerId,
+            upstreamProvider,
             credential: { mode: "env", varName: envName },
+            baseUrl: existing?.baseUrl,
           });
           if (!res.ok) {
             console.error(chalk.red(`Error (${res.error.code}): ${res.error.message}`));
             process.exit(1);
           }
-          console.log(chalk.green(`✓ Successfully configured environment variable "${envName}" for "${providerId}"`));
+          console.log(chalk.green(`✓ Successfully configured env credential (${envName}) for "${providerId}"`));
         } else if (choice === "3" && hasOAuth) {
-          console.log(chalk.cyan(`\nInitiating sign-in flow for ${providerId}…`));
-          const res = await api.signInWithProvider(providerId, {
-            onDeviceCode: ({ userCode, verificationUrl }) => {
-              console.log(chalk.bold(`1. Open this URL in your browser: `) + chalk.cyan.underline(verificationUrl));
-              console.log(chalk.bold(`2. Enter confirmation code: `) + chalk.yellow.bold(userCode));
-              console.log(chalk.dim(`Waiting for authorization in browser…`));
+          console.log(chalk.cyan(`\nInitiating sign-in with ${upstreamProvider}...`));
+          const res = await api.signInWithProvider(upstreamProvider, {
+            onDeviceCode: (info) => {
+              console.log(chalk.bold(`\n1. Visit: ${chalk.underline.cyan(info.verificationUrl)}`));
+              console.log(chalk.bold(`2. Enter code: ${chalk.yellow.bold(info.userCode)}`));
+              console.log(chalk.dim(`\nWaiting for authorization (expires in ${Math.round(info.expiresInMs / 60000)}m)...`));
             },
             onBrowserOpen: (url) => {
-              console.log(chalk.bold(`Complete authentication in browser: `) + chalk.cyan.underline(url));
-              console.log(chalk.dim(`Waiting for browser callback…`));
+              console.log(chalk.bold(`\nComplete authorization in your browser:`));
+              console.log(chalk.underline.cyan(url));
+              console.log(chalk.dim("\nWaiting for callback..."));
             },
             onWaiting: () => {
-              console.log(chalk.dim(`Waiting for authorization…`));
+              process.stdout.write(chalk.dim("."));
             },
           });
           if (!res.ok) {
-            console.error(chalk.red(`\nError (${res.error.code}): ${res.error.message}`));
+            console.error(chalk.red(`\nSign-in failed (${res.error.code}): ${res.error.message}`));
             process.exit(1);
           }
-          console.log(chalk.green(`\n✓ Successfully signed in with ${providerId}`));
+          console.log(chalk.green(`\n✓ Successfully signed in with ${upstreamProvider}`));
         } else {
           console.error(chalk.red("Invalid option."));
           process.exit(1);
@@ -144,8 +152,12 @@ export function registerAuthCommands(program: Command): void {
       const api = createProviderManagerApi(runtime);
       const res = await api.logoutAccount(providerId);
       if (!res.ok) {
-        console.log(chalk.yellow(`Provider "${providerId}" is not configured.`));
-        return;
+        if (res.error.code === "account_not_found" || res.error.code === "credential_unavailable") {
+          console.log(chalk.yellow(`Provider "${providerId}" is not configured.`));
+          return;
+        }
+        console.error(chalk.red(`Error (${res.error.code}): ${res.error.message}`));
+        process.exit(1);
       }
       console.log(chalk.green(`✓ Successfully removed credential for provider account "${providerId}"`));
     });

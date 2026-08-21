@@ -17,16 +17,18 @@ describe("WS Provider Parity (FR-040 / T057)", () => {
     } as any;
 
     const state: ConnectionState = {
-      id: "conn-1",
-      authenticated: true,
+      sessionId: null,
+      currentAbortController: null,
+      activeProvider: null,
+      activeModel: null,
+      apiKeyHash: "hash-1",
       apiKey: {
+        keyHash: "hash-1",
         rawKey: "test-key",
         label: "test",
         scopes: ["agent:read", "provider:read"],
-        createdAt: new Date().toISOString(),
+        created: new Date().toISOString(),
       },
-      createdAt: Date.now(),
-      lastPing: Date.now(),
     };
 
     await handleWsListProviders(
@@ -56,16 +58,18 @@ describe("WS Provider Parity (FR-040 / T057)", () => {
     } as any;
 
     const state: ConnectionState = {
-      id: "conn-2",
-      authenticated: true,
+      sessionId: null,
+      currentAbortController: null,
+      activeProvider: null,
+      activeModel: null,
+      apiKeyHash: "hash-2",
       apiKey: {
+        keyHash: "hash-2",
         rawKey: "test-key-no-scope",
         label: "test",
         scopes: [],
-        createdAt: new Date().toISOString(),
+        created: new Date().toISOString(),
       },
-      createdAt: Date.now(),
-      lastPing: Date.now(),
     };
 
     await handleWsListProviders(
@@ -88,11 +92,12 @@ describe("WS Provider Parity (FR-040 / T057)", () => {
     } as any;
 
     const state: ConnectionState = {
-      id: "conn-no-admin",
-      authenticated: true,
-      apiKey: { rawKey: "k", label: "test", scopes: ["provider:read"], createdAt: new Date().toISOString() },
-      createdAt: Date.now(),
-      lastPing: Date.now(),
+      sessionId: null,
+      currentAbortController: null,
+      activeProvider: null,
+      activeModel: null,
+      apiKeyHash: "hash-3",
+      apiKey: { keyHash: "hash-3", rawKey: "k", label: "test", scopes: ["provider:read"], created: new Date().toISOString() },
     };
 
     await handleWsRemoveProvider(

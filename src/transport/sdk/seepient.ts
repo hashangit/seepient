@@ -19,6 +19,13 @@ import type {
   ResolveOptions,
   TurnResult,
   ModelAssignmentOverride,
+  ProviderId,
+  AccountInput,
+  SaveResult,
+  DeleteResult,
+  PurposeId,
+  Tier,
+  AssignmentTarget,
 } from "../../foundations/contracts/sdk-fixture.js";
 import type {
   ContentBlock,
@@ -27,6 +34,7 @@ import type {
   InferenceResponse,
   ImageResult,
   UpstreamModel,
+  ThinkingLevel,
 } from "../../foundations/schemas/inference.js";
 import type { PurposeModelMap } from "../../foundations/schemas/provider-config.js";
 
@@ -428,27 +436,35 @@ export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<
       };
     },
 
-    async resolve(opts: any): Promise<any> {
+    async resolve(opts: ResolveOptions): Promise<{
+      model: UpstreamModel;
+      providerAccount: ProviderId;
+      thinkingLevel?: ThinkingLevel;
+      via: "requested" | "fallback-chain";
+      failureTargets: Array<{ providerAccount: string; model: string }>;
+    }> {
       const snapshot = await runtime.createTurnSnapshot();
-      const plan = await runtime.resolvePlan(snapshot, opts.purpose, opts.tier, opts.override);
+      const plan = await runtime.resolvePlan(snapshot, opts.purpose as any, opts.tier, opts.override);
 
-      const model = snapshot.catalog.find((m: any) => m.id === plan.selectedTarget.model) ?? {
+      const model: UpstreamModel = (snapshot.catalog.find((m: any) => m.id === plan.selectedTarget.model) ?? {
         id: plan.selectedTarget.model,
         displayName: plan.selectedTarget.model,
-        provider: plan.selectedTarget.providerAccount,
+        upstreamProvider: plan.selectedTarget.providerAccount,
+        contextWindow: 128000,
         capabilities: {
-          reasoning: !!plan.selectedTarget.thinkingLevel,
-          images: opts.purpose === "image-generation",
+          toolUse: true,
           streaming: true,
           vision: false,
         },
         provenance: "user-declared" as const,
-      };
+      }) as any;
 
       return {
         model,
         providerAccount: plan.selectedTarget.providerAccount,
         thinkingLevel: plan.selectedTarget.thinkingLevel,
+        via: (plan as any).via ?? "requested",
+        failureTargets: [...(plan.failureTargets ?? [])] as Array<{ providerAccount: string; model: string }>,
       };
     },
 
@@ -466,28 +482,28 @@ export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<
       return { revision: latestState.revision };
     },
 
-    async addProvider(input: any): Promise<any> {
+    async addProvider(input: AccountInput): Promise<SaveResult> {
       ensureNotDisposed();
       const res = await managerApi.saveAccount(input);
       if (res.ok) latestState = res.state;
       return res;
     },
 
-    async removeProvider(id: string, opts?: { force?: boolean }): Promise<any> {
+    async removeProvider(id: string, opts?: { force?: boolean }): Promise<DeleteResult> {
       ensureNotDisposed();
       const res = await managerApi.deleteAccount(id, opts);
       if (res.ok) latestState = res.state;
       return res;
     },
 
-    async setAssignment(purpose: any, tier: any, target: any): Promise<any> {
+    async setAssignment(purpose: PurposeId, tier: Tier | null, target: AssignmentTarget): Promise<SaveResult> {
       ensureNotDisposed();
       const res = await managerApi.setAssignment(purpose, tier, target);
       if (res.ok) latestState = res.state;
       return res;
     },
 
-    async clearAssignment(purpose: any, tier: any): Promise<any> {
+    async clearAssignment(purpose: PurposeId, tier: Tier | null): Promise<SaveResult> {
       ensureNotDisposed();
       const res = await managerApi.clearAssignment(purpose, tier);
       if (res.ok) latestState = res.state;

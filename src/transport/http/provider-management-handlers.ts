@@ -10,6 +10,7 @@ import type { ApiKeyEntry } from "../auth/auth.js";
 import { hasScope } from "../auth/auth.js";
 import { validateEndpointUrl } from "./ssrf-validator.js";
 import { InferenceError } from "../../foundations/errors.js";
+import { redactUrlCredentials, redactString } from "../../foundations/security/redact.js";
 
 function sendJSON(res: ServerResponse, status: number, body: unknown, revision?: number): void {
   res.statusCode = status;
@@ -188,14 +189,11 @@ export async function handlePutAssignment(
   }
 
   try {
-    const patch = {
-      modelAssignments: {
-        [purpose]: {
-          [tier]: body,
-        },
-      } as any,
-    };
-    const result = await runtime.updateOverlay(patch, expectedRev);
+    const patch =
+      purpose.startsWith("media.")
+        ? { modelAssignments: { media: { [purpose.slice("media.".length)]: body } } }
+        : { modelAssignments: { [purpose]: { [tier]: body } } };
+    const result = await runtime.updateOverlay(patch as any, expectedRev);
     sendJSON(res, 200, { revision: result.revision, assignment: body }, result.revision);
   } catch (err: any) {
     if (isConflictError(err)) {
@@ -224,14 +222,11 @@ export async function handleDeleteAssignment(
   if (expectedRev === null) return;
 
   try {
-    const patch = {
-      modelAssignments: {
-        [purpose]: {
-          [tier]: null,
-        },
-      } as any,
-    };
-    const result = await runtime.updateOverlay(patch, expectedRev);
+    const patch =
+      purpose.startsWith("media.")
+        ? { modelAssignments: { media: { [purpose.slice("media.".length)]: null } } }
+        : { modelAssignments: { [purpose]: { [tier]: null } } };
+    const result = await runtime.updateOverlay(patch as any, expectedRev);
     sendJSON(res, 200, { revision: result.revision, deleted: true }, result.revision);
   } catch (err: any) {
     if (isConflictError(err)) {
@@ -263,6 +258,7 @@ export async function handleGetProviders(
     const { headers: _h, ...rest } = acc as any;
     sanitized[id] = {
       ...rest,
+      ...(rest.baseUrl ? { baseUrl: redactUrlCredentials(rest.baseUrl) } : {}),
       credential: { kind: acc.credential?.kind ?? "redacted" },
     };
   }
@@ -351,24 +347,34 @@ export async function handleDeleteProvider(
     return;
   }
 
-  const expectedRev = await parseIfMatch(req, res, runtime);
-  if (expectedRev === null) return;
+  const url = new URL(req.url ?? "", "http://localhost");
+  const force = url.searchParams.get("force") === "true";
 
-  try {
-    const patch = {
-      providers: {
-        [providerId]: null,
-      } as any,
-    };
-    const result = await runtime.updateOverlay(patch, expectedRev);
-    sendJSON(res, 200, { revision: result.revision, deleted: true }, result.revision);
-  } catch (err: any) {
-    if (isConflictError(err)) {
-      sendError(res, 409, "CONFLICT", err.message);
-    } else {
-      sendError(res, 400, "BAD_REQUEST", err.message);
+  const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
+  const api = createProviderManagerApi(runtime);
+  const result = await api.deleteAccount(providerId, { force });
+
+  if (!result.ok) {
+    if ("blocked" in result && result.blocked) {
+      sendJSON(res, 409, {
+        error: {
+          code: "BLOCKED",
+          message: `Cannot delete account "${providerId}" referenced by active slots. Pass ?force=true to delete anyway.`,
+          referencingSlots: result.referencingSlots,
+        },
+      });
+      return;
     }
+    const errObj = "error" in result ? result.error : undefined;
+    if (errObj?.code === "conflict") {
+      sendError(res, 409, "CONFLICT", errObj.message);
+      return;
+    }
+    sendError(res, 400, (errObj?.code || "BAD_REQUEST").toUpperCase(), errObj?.message || "Delete failed");
+    return;
   }
+
+  sendJSON(res, 200, { revision: result.state.revision, deleted: true }, result.state.revision);
 }
 
 export async function handleGetCatalog(
@@ -384,7 +390,6 @@ export async function handleGetCatalog(
 
   const snapshot = await runtime.createTurnSnapshot();
   const availableModels = await runtime.modelCatalog.listAvailableModels(snapshot.config);
-
   sendJSON(res, 200, availableModels, snapshot.revision);
 }
 
@@ -397,6 +402,7 @@ interface PendingOAuthAttempt {
   userCode?: string;
   verificationUrl?: string;
   loginPromise?: Promise<any>;
+  abortController?: AbortController;
 }
 
 const pendingOAuthAttempts = new Map<string, PendingOAuthAttempt>();
@@ -445,19 +451,29 @@ export async function handleOAuthStart(
   }
 
   const attemptId = `oauth_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-  let userCode: string | undefined;
-  let verificationUrl: string | undefined;
-  let expiresInMs = 600_000;
+  const abortController = new AbortController();
+  let notifyResolve: (info: { userCode?: string; verificationUrl?: string; expiresInSeconds?: number }) => void;
+  const notifyPromise = new Promise<{ userCode?: string; verificationUrl?: string; expiresInSeconds?: number }>(
+    (resolve) => {
+      notifyResolve = resolve;
+    },
+  );
 
   const interaction = {
+    signal: abortController.signal,
     prompt: async () => "",
     notify: (event: any) => {
       if (event.type === "device_code") {
-        userCode = event.userCode;
-        verificationUrl = event.verificationUri;
-        if (event.expiresInSeconds) expiresInMs = event.expiresInSeconds * 1000;
+        notifyResolve({
+          userCode: event.userCode ?? event.user_code,
+          verificationUrl: event.verificationUri ?? event.verification_uri ?? event.url,
+          expiresInSeconds: event.expiresInSeconds ?? event.expires_in,
+        });
       } else if (event.type === "auth_url") {
-        verificationUrl = event.url;
+        notifyResolve({
+          verificationUrl: event.url,
+          expiresInSeconds: event.expiresInSeconds ?? event.expires_in,
+        });
       }
     },
   };
@@ -466,8 +482,13 @@ export async function handleOAuthStart(
   // Attach a no-op handler so an abandoned/rejected background flow doesn't trigger unhandledRejection
   loginPromise.catch(() => {});
 
-  // Wait a brief tick (50ms) to allow interaction.notify to populate device_code
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  // Wait for notify event (up to 15s)
+  const timeoutPromise = new Promise<void>((resolve) => setTimeout(resolve, 15_000));
+  const notified = await Promise.race([notifyPromise, timeoutPromise]);
+
+  const expiresInMs = (notified?.expiresInSeconds ?? 600) * 1000;
+  const userCode = notified?.userCode;
+  const verificationUrl = notified?.verificationUrl;
 
   pendingOAuthAttempts.set(attemptId, {
     attemptId,
@@ -478,6 +499,7 @@ export async function handleOAuthStart(
     userCode,
     verificationUrl,
     loginPromise,
+    abortController,
   });
 
   sendJSON(res, 200, {
@@ -524,18 +546,31 @@ export async function handleOAuthComplete(
   }
 
   const attempt = pendingOAuthAttempts.get(attemptId)!;
+  if (attempt.providerId !== providerId) {
+    sendError(res, 400, "OAUTH_PROVIDER_MISMATCH", `Attempt was initiated for "${attempt.providerId}", not "${providerId}"`);
+    return;
+  }
+
   if (Date.now() > attempt.expiresAt) {
     pendingOAuthAttempts.delete(attemptId);
     sendError(res, 400, "OAUTH_EXPIRED", "OAuth authorization expired");
     return;
   }
 
+  let preExistingCredential: any = null;
+  try {
+    preExistingCredential = await runtime.credentialStore.get(providerId);
+  } catch {}
+
   let credentialPersisted = false;
   try {
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("OAUTH_PENDING")), 5000),
-    );
-    const credResult: any = await Promise.race([attempt.loginPromise, timeoutPromise]);
+    let timerId: any;
+    const timeoutPromise = new Promise((_, reject) => {
+      timerId = setTimeout(() => reject(new Error("OAUTH_PENDING")), 5000);
+    });
+    const credResult: any = await Promise.race([attempt.loginPromise, timeoutPromise]).finally(() => {
+      if (timerId) clearTimeout(timerId);
+    });
 
     if (!credResult || credResult.type !== "oauth" || !credResult.access) {
       pendingOAuthAttempts.delete(attemptId);
@@ -589,14 +624,18 @@ export async function handleOAuthComplete(
     );
   } catch (err: any) {
     if (credentialPersisted) {
-      await runtime.credentialStore.delete(providerId).catch(() => {});
+      if (preExistingCredential) {
+        await runtime.credentialStore.put(providerId, preExistingCredential).catch(() => {});
+      } else {
+        await runtime.credentialStore.delete(providerId).catch(() => {});
+      }
     }
     if (err.message === "OAUTH_PENDING") {
       sendError(res, 202, "OAUTH_PENDING", "Authorization still pending in browser");
       return;
     }
     pendingOAuthAttempts.delete(attemptId);
-    sendError(res, 400, "OAUTH_FAILED", err.message || "OAuth login failed");
+    sendError(res, 400, "OAUTH_FAILED", redactString(err?.message || "OAuth login failed"));
   }
 }
 
@@ -628,12 +667,25 @@ export async function handleResolveModel(
   }
 
   try {
+    const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
+    const api = createProviderManagerApi(runtime);
+    const resPreview = await api.resolvePreview(body.purpose, body.tier);
+    if ("ok" in resPreview && (resPreview as any).ok === false) {
+      sendError(res, 400, "RESOLUTION_FAILED", (resPreview as any).message);
+      return;
+    }
+    const preview = resPreview as any;
     const snapshot = await runtime.createTurnSnapshot();
-    const plan = await runtime.resolvePlan(snapshot, body.purpose, body.tier, body.override);
-    sendJSON(res, 200, {
-      selectedTarget: plan.selectedTarget,
-      failureTargets: plan.failureTargets,
-    }, snapshot.revision);
+    sendJSON(
+      res,
+      200,
+      {
+        selectedTarget: preview.selectedTarget,
+        via: preview.via,
+        failureTargets: preview.failureTargets,
+      },
+      snapshot.revision,
+    );
   } catch (err: any) {
     sendError(res, 400, "RESOLUTION_FAILED", err.message);
   }

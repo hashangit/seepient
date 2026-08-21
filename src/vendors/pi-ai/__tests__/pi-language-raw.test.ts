@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { PiLanguageRaw } from "../pi-language-raw.js";
 import type { AssistantMessageEvent } from "@earendil-works/pi-ai";
 import type { InferenceTarget } from "../../../foundations/contracts/backend-ports.js";
@@ -476,6 +476,22 @@ describe("PiLanguageRaw backend (QS-P3.3)", () => {
   });
 
   it("refreshes expired OAuth tokens and persists rotated credentials to credentialStore", async () => {
+    const authAdapter = await import("../pi-auth-adapter.js");
+    const mockFlow = {
+      name: "Anthropic OAuth",
+      refresh: vi.fn(async (cred: any) => {
+        expect(cred.type).toBe("oauth");
+        expect(cred.refresh).toBe("valid-refresh-token");
+        return {
+          type: "oauth",
+          access: "refreshed-oauth-token-999",
+          refresh: "new-refresh-token-000",
+          expires: Date.now() + 3600_000,
+        };
+      }),
+    };
+    vi.spyOn(authAdapter, "getOAuthFlow").mockResolvedValue(mockFlow as any);
+
     let capturedApiKey: string | undefined;
     const persistedRecords: any[] = [];
     const mockStore = {
@@ -537,8 +553,67 @@ describe("PiLanguageRaw backend (QS-P3.3)", () => {
       // consume
     }
 
-    // Verify token was extracted (or refreshed)
-    expect(capturedApiKey).toBeDefined();
+    // Verify token was refreshed and passed to stream
+    expect(capturedApiKey).toBe("refreshed-oauth-token-999");
+    expect(persistedRecords.length).toBe(1);
+    expect(persistedRecords[0].id).toBe("oauth-account-expired");
+    expect(persistedRecords[0].access).toBe("refreshed-oauth-token-999");
+    expect(persistedRecords[0].refresh).toBe("new-refresh-token-000");
+  });
+
+  it("throws oauth_expired InferenceError when token refresh fails", async () => {
+    const authAdapter = await import("../pi-auth-adapter.js");
+    const mockFlow = {
+      name: "Anthropic OAuth",
+      refresh: vi.fn(async () => {
+        throw new Error("invalid_grant: token revoked");
+      }),
+    };
+    vi.spyOn(authAdapter, "getOAuthFlow").mockResolvedValue(mockFlow as any);
+
+    const mockCredential: CredentialHandle = {
+      id: "oauth-test-revoked",
+      ref: { kind: "seepient", id: "oauth-test-revoked" },
+      activeLeaseCount: 0,
+      async isResolvable() { return true; },
+      acquireLease() {
+        return {
+          leaseId: "lease-oauth-revoked",
+          isReleased: false,
+          async secret() {
+            return {
+              kind: "pi_oauth",
+              piAuthContext: {
+                access: "expired-access-token",
+                refresh: "revoked-refresh-token",
+                expires: Date.now() - 10_000,
+              },
+            };
+          },
+          async release() {},
+        };
+      },
+    };
+
+    const mockModels = {
+      getProviders: () => [{ id: "anthropic" }],
+      getModel: (_p: any, _m: any) => ({ id: "claude-3-5-sonnet", provider: "anthropic" }),
+      stream: () => (async function* () {})(),
+    };
+
+    const backend = new PiLanguageRaw(mockModels as any);
+    const target: InferenceTarget = {
+      providerAccount: "oauth-account-revoked",
+      upstreamProvider: "anthropic",
+      model: "claude-3-5-sonnet",
+      credential: mockCredential,
+    };
+
+    await expect(async () => {
+      for await (const _ of backend.chatStream(target, {
+        messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      })) {}
+    }).rejects.toThrow(/OAuth session for "oauth-account-revoked" expired/);
   });
 });
 

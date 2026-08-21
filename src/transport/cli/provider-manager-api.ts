@@ -111,6 +111,7 @@ export interface ResolutionPreview {
 }
 
 export interface OAuthFlowCallbacks {
+  signal?: AbortSignal;
   onDeviceCode?(info: { userCode: string; verificationUrl: string; expiresInMs: number }): void;
   onBrowserOpen?(url: string): void;
   onWaiting?(): void;
@@ -372,39 +373,50 @@ export function createProviderManagerApi(
 
     const snapshot = await runtime.createTurnSnapshot();
     const existingEntry = snapshot.config.providers?.[input.accountId];
+    const preExisting = await creds().get(input.accountId).catch(() => undefined);
 
-    let ref: CredentialRef;
-    if (input.credential.mode === "preserve") {
-      if (!existingEntry) {
-        return {
-          ok: false,
-          error: { code: "unconfigured_provider", message: `Account "${input.accountId}" not found.` },
-        };
-      }
-      ref = (existingEntry.credential as CredentialRef) ?? { kind: "none" };
-    } else if (input.credential.mode === "paste") {
-      ref = { kind: "seepient", id: input.accountId };
-    } else if (input.credential.mode === "env") {
-      ref = { kind: "env", name: input.credential.varName };
-    } else {
-      ref = { kind: "none" };
+    if (input.credential.mode === "paste" && (!input.credential.keyValue || input.credential.keyValue.trim() === "")) {
+      return {
+        ok: false,
+        error: { code: "validation_failed", message: "API key cannot be empty." },
+      };
     }
 
-    const preExisting = await creds().get(input.accountId).catch(() => undefined);
+    let ref: CredentialRef;
     if (input.credential.mode === "paste") {
+      ref = { kind: "seepient", id: input.accountId };
       try {
         await creds().put(
           input.accountId,
-          { kind: "api_key", keyValue: input.credential.keyValue ?? input.credential.keyText ?? "" },
-          { source: "disk" },
+          { kind: "api_key", keyValue: input.credential.keyValue! },
+          { source: "disk", description: `Configured via seepient manager` },
         );
       } catch (err) {
-        const mapped = mapError(err);
+        return { ok: false, error: mapError(err) };
+      }
+    } else if (input.credential.mode === "env") {
+      ref = { kind: "env", name: input.credential.varName };
+    } else if (input.credential.mode === "none") {
+      ref = { kind: "none" };
+    } else if (input.credential.mode === "preserve") {
+      const resolvedRef =
+        (existingEntry?.credential as CredentialRef) ??
+        (preExisting ? { kind: "seepient", id: input.accountId } : undefined);
+      if (!resolvedRef) {
         return {
           ok: false,
-          error: { ...mapped, code: "credential_unavailable", hint: "Key not saved; account not created." },
+          error: {
+            code: "validation_failed",
+            message: `Cannot preserve credential: no existing entry for "${input.accountId}".`,
+          },
         };
       }
+      ref = resolvedRef;
+    } else {
+      return {
+        ok: false,
+        error: { code: "validation_failed", message: `Unknown credential mode.` },
+      };
     }
 
     const entry: ProviderEntryPatch = {
@@ -421,7 +433,17 @@ export function createProviderManagerApi(
     } catch (err) {
       // Roll back a credential we just created (R4): never leave an orphan.
       if (input.credential.mode === "paste" && !preExisting) {
-        await creds().delete(input.accountId).catch(() => {});
+        try {
+          await creds().delete(input.accountId);
+        } catch (rollbackErr: any) {
+          return {
+            ok: false,
+            error: {
+              code: "storage_error",
+              message: `Failed to save account "${input.accountId}" to config overlay. Cleanup error: ${redactString(rollbackErr?.message)}`,
+            },
+          };
+        }
       }
       const mapped = err as UiError;
       return { ok: false, error: mapped };
@@ -445,7 +467,22 @@ export function createProviderManagerApi(
       return { ok: false, error: err as UiError };
     }
     if (entry.credential?.kind === "seepient") {
-      await creds().delete(accountId).catch(() => {});
+      const seepId = (entry.credential as any).id;
+      const otherShares = Object.entries(snapshot.config.providers ?? {}).some(
+        ([id, p]) =>
+          id !== accountId &&
+          p.credential?.kind === "seepient" &&
+          (p.credential as any).id === seepId,
+      );
+      if (!otherShares) {
+        try {
+          await creds().delete(seepId);
+        } catch (credErr: any) {
+          console.warn(
+            `[ProviderManagerApi] Failed to delete credential for "${accountId}": ${credErr?.message}`,
+          );
+        }
+      }
     }
     return { ok: true, state: await getState() };
   }
@@ -639,6 +676,21 @@ export function createProviderManagerApi(
       };
     }
 
+    const isHeadless =
+      !process.stdin.isTTY &&
+      !callbacks.onPrompt &&
+      !callbacks.onDeviceCode &&
+      !callbacks.onBrowserOpen;
+    if (isHeadless) {
+      return {
+        ok: false,
+        error: {
+          code: "oauth_flow_failed",
+          message: `OAuth sign-in requires an interactive terminal. Configure ${upstream.toUpperCase()}_API_KEY or use --key.`,
+        },
+      };
+    }
+
     const flow = await getOAuthFlow(upstream);
     if (!flow) {
       return {
@@ -650,9 +702,10 @@ export function createProviderManagerApi(
       };
     }
 
-    const abortController = new AbortController();
+    const abortController = callbacks.signal ? undefined : new AbortController();
+    const signal = callbacks.signal ?? abortController!.signal;
     const interaction = {
-      signal: abortController.signal,
+      signal,
       prompt: async (p: any) => {
         if (callbacks.onPrompt) {
           return callbacks.onPrompt(p);
@@ -678,12 +731,31 @@ export function createProviderManagerApi(
     try {
       credResult = await flow.login(interaction as any);
     } catch (err: any) {
+      if (signal.aborted) {
+        return {
+          ok: false,
+          error: {
+            code: "oauth_flow_failed",
+            message: "OAuth sign-in was cancelled.",
+          },
+        };
+      }
       const msg = typeof err?.message === "string" ? err.message : String(err);
       return {
         ok: false,
         error: {
           code: "oauth_flow_failed",
           message: redactString(msg),
+        },
+      };
+    }
+
+    if (signal.aborted) {
+      return {
+        ok: false,
+        error: {
+          code: "oauth_flow_failed",
+          message: "OAuth sign-in was cancelled.",
         },
       };
     }
@@ -740,7 +812,17 @@ export function createProviderManagerApi(
       await occWrite({ providers: { [accountId]: entry } });
     } catch (err) {
       // Rollback credential on overlay failure (R4)
-      await creds().delete(accountId).catch(() => {});
+      try {
+        await creds().delete(accountId);
+      } catch (rollbackErr: any) {
+        return {
+          ok: false,
+          error: {
+            code: "storage_error",
+            message: `Failed to save account "${accountId}" to config overlay. Cleanup error: ${redactString(rollbackErr?.message)}`,
+          },
+        };
+      }
       return { ok: false, error: err as UiError };
     }
 
@@ -754,23 +836,26 @@ export function createProviderManagerApi(
       return {
         ok: false,
         error: {
-          code: "unconfigured_provider",
+          code: "account_not_found",
           message: `Account "${accountId}" not found.`,
         },
       };
     }
-    // Delete credential record from credential store.
-    // Provider entry in config stays intact, but health becomes "missing"
-    try {
-      await creds().delete(accountId);
-    } catch (err: any) {
-      return {
-        ok: false,
-        error: {
-          code: "storage_error",
-          message: `Failed to delete credentials for "${accountId}": ${err?.message || String(err)}`,
-        },
-      };
+    if (entry.credential?.kind === "seepient") {
+      const seepId = (entry.credential as any).id;
+      const otherShares = Object.entries(snapshot.config.providers ?? {}).some(
+        ([id, p]) =>
+          id !== accountId &&
+          p.credential?.kind === "seepient" &&
+          (p.credential as any).id === seepId,
+      );
+      if (!otherShares) {
+        try {
+          await creds().delete(seepId);
+        } catch (err: any) {
+          return { ok: false, error: mapError(err) };
+        }
+      }
     }
     return { ok: true, state: await getState() };
   }

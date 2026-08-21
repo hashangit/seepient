@@ -191,6 +191,29 @@ export function SetupWizard({ api, settings, onFinish, onExitSetup }: SetupWizar
     }
 
     // sub === menu
+    if (key.escape) {
+      switch (step) {
+        case "welcome":
+          tryExit();
+          return;
+        case "connect":
+          next("welcome");
+          return;
+        case "main":
+          next("connect");
+          return;
+        case "slots":
+          next("main");
+          return;
+        case "extras":
+          next("slots");
+          return;
+        case "summary":
+          next("extras");
+          return;
+      }
+    }
+
     switch (step) {
       case "welcome":
         if (key.return || (isNum && num === 1)) next(healthyAccounts.length > 0 ? "main" : "connect");

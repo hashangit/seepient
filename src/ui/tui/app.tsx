@@ -22,7 +22,6 @@ import { HelpDialog } from './overlays/help-dialog.js';
 import { ModelManager } from './overlays/model-manager.js';
 import { SetupWizard } from './setup-wizard.js';
 import { createProviderManagerApi } from '../../transport/cli/provider-manager-api.js';
-import { getDefaultProviderRuntime } from '../../domain/providers/provider-runtime.js';
 import { SessionSelector, type SessionListItem } from './overlays/session-selector.js';
 import { SettingsEditor, type SettingItem } from './overlays/settings-overlay.js';
 import { messagesToFeedEntries } from './feed-serializer.js';
@@ -179,7 +178,7 @@ export function TuiApp({
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
   const managerApi = useMemo(
     () =>
-      createProviderManagerApi(agent.getProviderRuntime() ?? getDefaultProviderRuntime(), {
+      createProviderManagerApi(agent.getProviderRuntime(), {
         switchProvider: (account, model) => {
           agent.switchProvider(account, model);
           setSessionNotice(`${account}/${model} — session, not saved`);

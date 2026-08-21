@@ -109,46 +109,70 @@ async function resolveSecretApiKey(
   if (secret.kind === "pi_oauth" || secret.kind === "oauth") {
     const rawCtx = secret.piAuthContext ?? secret;
     let access = rawCtx.access;
-    let refresh = rawCtx.refresh;
-    let expires = rawCtx.expires;
+    const refresh = rawCtx.refresh;
+    const expires = rawCtx.expires;
+
+    const isExpired =
+      typeof expires === "number"
+        ? expires === 0 || Date.now() >= expires - 60_000
+        : Boolean(refresh);
 
     // Check if token is expired or close to expiry (within 60 seconds)
-    if (expires && Date.now() >= expires - 60_000 && refresh) {
+    if (isExpired && refresh) {
       try {
-        const { getOAuthFlow } = await import("./pi-auth-adapter.js");
+        const { getOAuthFlow, createPiCredentialStore } = await import("./pi-auth-adapter.js");
         const flow = await getOAuthFlow(target.upstreamProvider);
         if (flow && typeof (flow as any).refresh === "function") {
           const oauthCred = {
             type: "oauth" as const,
-            access,
+            access: access ?? "",
             refresh,
-            expires,
+            expires: expires ?? 0,
           };
-          const refreshed = await (flow as any).refresh(oauthCred, signal);
-          if (refreshed?.access) {
-            access = refreshed.access;
-            refresh = refreshed.refresh ?? refresh;
-            expires = refreshed.expires ?? Date.now() + 3_600_000;
-
-            const store = credentialStore ?? (target.credential as any)?.store;
-            if (store && typeof store.put === "function") {
-              try {
-                await store.put(target.providerAccount, {
-                  kind: "oauth",
-                  access,
-                  refresh,
-                  expires,
-                });
-              } catch (err: any) {
-                console.warn(`[PiLanguageRaw] Failed to persist refreshed OAuth token for "${target.providerAccount}": ${err?.message}`);
+          const store = credentialStore ?? (target.credential as any)?.store;
+          if (store && (typeof store.modify === "function" || typeof store.put === "function")) {
+            const piStore = createPiCredentialStore(store);
+            const modified = await piStore.modify(target.providerAccount, async (curr) => {
+              const base = curr && curr.type === "oauth" ? curr : oauthCred;
+              const refreshed = await (flow as any).refresh(base, signal);
+              if (!refreshed?.access) {
+                throw new Error("OAuth token refresh returned empty access token");
               }
+              return refreshed;
+            });
+            if (modified && modified.type === "oauth") {
+              access = modified.access;
+            }
+          } else {
+            const refreshed = await (flow as any).refresh(oauthCred, signal);
+            if (refreshed?.access) {
+              access = refreshed.access;
+            } else {
+              throw new Error("OAuth token refresh returned empty access token");
             }
           }
         }
-      } catch {
-        // Fall back to current access token
+      } catch (err: any) {
+        throw new InferenceError({
+          code: "oauth_expired",
+          message: `OAuth session for "${target.providerAccount}" expired — sign in again (/login ${target.upstreamProvider}): ${err?.message ?? "refresh failed"}`,
+          providerAccount: target.providerAccount,
+          model: target.model,
+          retryable: false,
+        });
       }
     }
+
+    if (!access) {
+      throw new InferenceError({
+        code: "oauth_expired",
+        message: `OAuth session for "${target.providerAccount}" expired or has no access token — sign in again (/login ${target.upstreamProvider})`,
+        providerAccount: target.providerAccount,
+        model: target.model,
+        retryable: false,
+      });
+    }
+
     return access;
   }
   return undefined;

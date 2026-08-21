@@ -84,6 +84,7 @@ export function AddAccount({
     };
     const err = await onSaveAccount(input);
     if (!err) {
+      setSecret("");
       setSavedId(finalId);
       setFeedback({ kind: "idle", message: "" });
       setPhase("done");

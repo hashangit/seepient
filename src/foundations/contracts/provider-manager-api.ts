@@ -72,3 +72,47 @@ export interface AssignmentTarget {
   thinkingLevel?: ThinkingLevel;
   fallback?: Array<{ providerAccount: string; model: string }>;
 }
+
+export interface ProbeResult {
+  accountId: string;
+  authValid: boolean;
+  reachable?: boolean;
+  latencyMs?: number;
+  error?: UiError;
+}
+
+export interface RefreshResult {
+  ok: boolean;
+  discovered?: string[];
+  state?: ManagerState;
+  error?: UiError;
+}
+
+export interface ResolutionPreview {
+  selectedTarget: { providerAccount: string; model: string };
+  via: "requested" | "fallback-chain";
+  failureTargets: Array<{ providerAccount: string; model: string }>;
+}
+
+export interface OAuthFlowCallbacks {
+  signal?: AbortSignal;
+  onDeviceCode?(info: { userCode: string; verificationUrl: string; expiresInMs: number }): void;
+  onBrowserOpen?(url: string): void;
+  onWaiting?(): void;
+  onPrompt?(prompt: { type: string; message: string }): Promise<string>;
+}
+
+export interface ProviderManagerApi {
+  getState(): Promise<ManagerState>;
+  saveAccount(input: AccountInput): Promise<SaveResult>;
+  deleteAccount(accountId: string, opts?: { force?: boolean }): Promise<DeleteResult>;
+  setAssignment(purpose: PurposeId, tier: Tier | null, target: AssignmentTarget): Promise<SaveResult>;
+  clearAssignment(purpose: PurposeId, tier: Tier | null): Promise<SaveResult>;
+  resolvePreview(purpose: PurposeId, tier?: Tier): Promise<ResolutionPreview | UiError & { ok: false }>;
+  probeAccount(accountId: string): Promise<ProbeResult>;
+  refreshModels(accountId: string): Promise<RefreshResult>;
+  switchSessionModel(accountId: string, modelId: string): void;
+  signInWithProvider(upstream: string, callbacks: OAuthFlowCallbacks): Promise<SaveResult>;
+  logoutAccount(accountId: string): Promise<SaveResult>;
+  getAvailableOAuthFlows(): Promise<readonly string[]>;
+}

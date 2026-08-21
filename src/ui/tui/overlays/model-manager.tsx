@@ -9,7 +9,7 @@
  * through the ProviderManagerApi controller (R15) and end in visible feedback
  * (R3 — silence is a bug).
  */
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useInput } from 'ink';
 import { render } from 'ink';
 import { ThemeProvider, useTheme } from '../hooks/use-theme.js';
@@ -134,6 +134,10 @@ export function ModelManager({
     const a = state.assignments as any;
     const assigned = row.tier ? a?.[row.purpose.id]?.[row.tier] : a?.media?.[row.purpose.id.slice("media.".length)];
     if (!assigned) return { assigned: null, flag: "○", detail: "" };
+    const accountExists = state.accounts.some((acc) => acc.id === assigned.providerAccount);
+    if (!accountExists) {
+      return { assigned, flag: "▲", detail: `account "${assigned.providerAccount}" not connected` };
+    }
     const model = state.models.find((m) => m.id === assigned.model && m.reachableVia.includes(assigned.providerAccount));
     if (model) {
       const missing = row.purpose.requires.find((r) => !model.capabilities[r]);
@@ -144,6 +148,8 @@ export function ModelManager({
       if (assigned.thinkingLevel && !levels.includes(assigned.thinkingLevel)) {
         return { assigned, flag: "▲", detail: `thinking ${assigned.thinkingLevel} unsupported` };
       }
+    } else {
+      return { assigned, flag: "▲", detail: "model unreachable" };
     }
     return { assigned, flag: "●", detail: "" };
   }, [state]);
@@ -160,6 +166,7 @@ export function ModelManager({
     const configured = new Set(state.accounts.map((a) => a.upstreamProvider));
     return upstreams.filter((u) => !configured.has(u.id)).sort((x, y) => y.modelCount - x.modelCount).slice(0, 3);
   }, [state, upstreams]);
+
 
   // ── Mutations (all through the controller; visible feedback) ─────────────
   async function assign(purpose: PurposeId, tier: Tier | null, target: AssignmentTarget): Promise<UiError | null> {
@@ -337,18 +344,27 @@ export function ModelManager({
 
   if (overlay?.kind === "thinking") {
     return (
-      <ThinkingEditor
-        title={`Thinking for ${overlay.purpose}${overlay.tier ? `·${overlay.tier}` : ""}`}
-        levels={overlay.levels}
-        current={overlay.current}
-        onPick={(level) => {
-          void (async () => {
-            const err = await assign(overlay.purpose, overlay.tier, { ...overlay.target, thinkingLevel: level as any });
-            if (!err) setOverlay(null);
-          })();
-        }}
-        onClose={() => setOverlay(null)}
-      />
+      <Box flexDirection="column">
+        <ThinkingEditor
+          title={`Thinking for ${overlay.purpose}${overlay.tier ? `·${overlay.tier}` : ""}`}
+          levels={overlay.levels}
+          current={overlay.current}
+          onPick={(level) => {
+            void (async () => {
+              const err = await assign(overlay.purpose, overlay.tier, { ...overlay.target, thinkingLevel: level as any });
+              if (!err) setOverlay(null);
+            })();
+          }}
+          onClose={() => setOverlay(null)}
+        />
+        {feedback?.message ? (
+          <Box marginTop={1}>
+            <Text color={feedback.kind === "error" ? theme.red : feedback.kind === "success" ? theme.green : theme.fgDim}>
+              {feedback.message}
+            </Text>
+          </Box>
+        ) : null}
+      </Box>
     );
   }
 
@@ -518,10 +534,18 @@ export function SignInFlow({ upstream, api, onDone, onCancel }: SignInFlowProps)
   const [browserUrl, setBrowserUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const startedRef = useRef(false);
+  const abortControllerRef = useRef(new AbortController());
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
+  const onCancelRef = useRef(onCancel);
+  onCancelRef.current = onCancel;
+
   const start = useCallback(async () => {
     setStatus("initiating");
     setError(null);
     const res = await api.signInWithProvider(upstream, {
+      signal: abortControllerRef.current.signal,
       onDeviceCode: (info) => {
         setDeviceInfo(info);
         setStatus("device_code");
@@ -536,26 +560,38 @@ export function SignInFlow({ upstream, api, onDone, onCancel }: SignInFlowProps)
     });
 
     if (res.ok) {
-      onDone(`✓ Signed in with ${upstream}`);
+      onDoneRef.current(`✓ Signed in with ${upstream}`);
     } else {
+      if (abortControllerRef.current.signal.aborted) {
+        onCancelRef.current();
+        return;
+      }
       setError(res.error.message);
       setStatus("error");
     }
-  }, [upstream, api, onDone]);
+  }, [upstream, api]);
 
   useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
     void start();
+    return () => {
+      abortControllerRef.current.abort();
+    };
   }, [start]);
 
   useInput((input, key) => {
     if (key.escape) {
+      abortControllerRef.current.abort();
       onCancel();
       return;
     }
     if (status === "error") {
       if (input === "1") {
+        abortControllerRef.current = new AbortController();
         void start();
       } else if (input === "2") {
+        abortControllerRef.current.abort();
         onCancel();
       }
     }

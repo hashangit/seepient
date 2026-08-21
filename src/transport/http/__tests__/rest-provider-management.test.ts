@@ -245,4 +245,77 @@ describe("REST Provider Management v2 API (QS-P6.3 & QS-P6.4)", () => {
     const body = JSON.parse(res.body);
     expect(body.error.code).toBe("OAUTH_ATTEMPT_NOT_FOUND");
   });
+
+  it("POST /v1/providers/:id/oauth/start and complete full relay lifecycle (FR-037 / T054)", async () => {
+    // Mock getOAuthFlow
+    const oauthService = await import("../../../domain/providers/oauth-service.js");
+    const mockFlow = {
+      login: vi.fn(async (interaction: any) => {
+        expect(interaction.signal).toBeDefined();
+        setTimeout(() => {
+          interaction.notify({
+            type: "device_code",
+            userCode: "TEST-CODE-1234",
+            verificationUri: "https://anthropic.com/device",
+            expiresInSeconds: 300,
+          });
+        }, 10);
+        return {
+          type: "oauth",
+          access: "relayed-access-token",
+          refresh: "relayed-refresh-token",
+          expires: Date.now() + 3600_000,
+        };
+      }),
+    };
+    vi.spyOn(oauthService, "getOAuthFlow").mockResolvedValue(mockFlow as any);
+
+    // 1. Start relay
+    const startReq = createMockReqRes("POST", "/v1/providers/anthropic/oauth/start", {
+      authorization: `Bearer ${adminKey.rawKey}`,
+    });
+    await new Promise<void>((resolve) => {
+      startReq.res.on("finish", () => resolve());
+      handler(startReq.req, startReq.res);
+    });
+
+    expect(startReq.res.statusCode).toBe(200);
+    const startBody = JSON.parse(startReq.res.body);
+    expect(startBody.attemptId).toBeDefined();
+    expect(startBody.userCode).toBe("TEST-CODE-1234");
+    expect(startBody.verificationUrl).toBe("https://anthropic.com/device");
+
+    // 2. Complete mismatch provider check
+    const mismatchReq = createMockReqRes(
+      "POST",
+      "/v1/providers/openai/oauth/complete",
+      { authorization: `Bearer ${adminKey.rawKey}` },
+      JSON.stringify({ attemptId: startBody.attemptId }),
+    );
+    await new Promise<void>((resolve) => {
+      mismatchReq.res.on("finish", () => resolve());
+      handler(mismatchReq.req, mismatchReq.res);
+    });
+    expect(mismatchReq.res.statusCode).toBe(400);
+    const mismatchBody = JSON.parse(mismatchReq.res.body);
+    expect(mismatchBody.error.code).toBe("OAUTH_PROVIDER_MISMATCH");
+
+    // 3. Complete happy path
+    const completeReq = createMockReqRes(
+      "POST",
+      "/v1/providers/anthropic/oauth/complete",
+      { authorization: `Bearer ${adminKey.rawKey}` },
+      JSON.stringify({ attemptId: startBody.attemptId }),
+    );
+    await new Promise<void>((resolve) => {
+      completeReq.res.on("finish", () => resolve());
+      handler(completeReq.req, completeReq.res);
+    });
+    expect(completeReq.res.statusCode).toBe(200);
+
+    // Verify stored credential
+    const storedCred = await (credStore as any).getRecord("anthropic");
+    expect(storedCred).toBeDefined();
+    expect((storedCred as any).access).toBe("relayed-access-token");
+  });
 });
