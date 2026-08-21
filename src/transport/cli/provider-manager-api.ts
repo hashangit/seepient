@@ -26,8 +26,8 @@ export type PurposeId =
   | "plan" | "text" | "coding" | "vision" | "commit"
   | "media.image" | "media.speech" | "media.transcription" | "media.video";
 
-export type CredentialKind = "env" | "seepient" | "keychain" | "externalsecret" | "none";
-export type AccountHealth = "ok" | "missing" | "unverified";
+export type CredentialKind = "env" | "seepient" | "keychain" | "externalsecret" | "none" | "oauth";
+export type AccountHealth = "ok" | "missing" | "unverified" | "expired";
 
 export interface AccountView {
   id: string;
@@ -107,6 +107,13 @@ export interface ResolutionPreview {
   failureTargets: Array<{ providerAccount: string; model: string }>;
 }
 
+export interface OAuthFlowCallbacks {
+  onDeviceCode?(info: { userCode: string; verificationUrl: string; expiresInMs: number }): void;
+  onBrowserOpen?(url: string): void;
+  onWaiting?(): void;
+  onPrompt?(prompt: { type: string; message: string }): Promise<string>;
+}
+
 /** Structural — the TUI/REPL Agent satisfies this without importing its type here. */
 export interface SessionSwitcher {
   switchProvider(accountOrModel: string, model?: string): unknown;
@@ -122,6 +129,9 @@ export interface ProviderManagerApi {
   probeAccount(accountId: string): Promise<ProbeResult>;
   refreshModels(accountId: string): Promise<RefreshResult>;
   switchSessionModel(accountId: string, modelId: string): void;
+  signInWithProvider(upstream: string, callbacks: OAuthFlowCallbacks): Promise<SaveResult>;
+  logoutAccount(accountId: string): Promise<SaveResult>;
+  getAvailableOAuthFlows(): Promise<readonly string[]>;
 }
 
 // ── Purpose derivation (schema truth — R1/D15; the UI consumes, never re-lists) ──
@@ -272,13 +282,38 @@ export function createProviderManagerApi(
     throw mapError(lastErr, true);
   }
 
-  async function healthFor(ref: CredentialRef): Promise<AccountHealth> {
-    if (ref.kind === "none" || ref.kind === "externalsecret") return "unverified";
+  async function healthFor(
+    ref: CredentialRef,
+  ): Promise<{ health: AccountHealth; credentialKind: CredentialKind }> {
+    if (ref.kind === "none" || ref.kind === "externalsecret") {
+      return { health: "unverified", credentialKind: ref.kind };
+    }
     try {
+      if (ref.kind === "seepient" || ref.kind === "keychain") {
+        const id = ref.kind === "seepient" ? ref.id : ref.account;
+        const rec = await creds().get(id).catch(() => undefined);
+        const isOAuth = rec?.materialKind === "oauth";
+        const handle = await creds().resolve(ref);
+        const resolvable = await handle.isResolvable();
+        if (!resolvable) {
+          return { health: "missing", credentialKind: isOAuth ? "oauth" : ref.kind };
+        }
+        if (isOAuth) {
+          const raw = await creds().getRecord?.(id);
+          if (raw && raw.kind === "oauth" && raw.expires && raw.expires < Date.now()) {
+            return { health: "expired", credentialKind: "oauth" };
+          }
+          return { health: "ok", credentialKind: "oauth" };
+        }
+        return { health: "ok", credentialKind: ref.kind };
+      }
       const handle = await creds().resolve(ref);
-      return (await handle.isResolvable()) ? "ok" : "missing";
+      return {
+        health: (await handle.isResolvable()) ? "ok" : "missing",
+        credentialKind: ref.kind,
+      };
     } catch {
-      return "missing";
+      return { health: "missing", credentialKind: ref.kind };
     }
   }
 
@@ -291,14 +326,15 @@ export function createProviderManagerApi(
     const models = await runtime.modelCatalog.listAvailableModels(config);
     const accounts: AccountView[] = [];
     for (const [id, entry] of Object.entries(config.providers ?? {})) {
-      const ref = entry.credential as CredentialRef;
+      const ref = (entry.credential as CredentialRef) ?? { kind: "none" };
+      const h = await healthFor(ref);
       accounts.push({
         id,
         upstreamProvider: entry.upstreamProvider,
         ...(entry.baseUrl ? { baseUrl: sanitizeBaseUrl(entry.baseUrl) } : {}),
-        credentialKind: ref?.kind ?? "none",
+        credentialKind: h.credentialKind,
         ...(ref?.kind === "env" ? { credentialDetail: ref.name } : {}),
-        health: await healthFor(ref ?? { kind: "none" }),
+        health: h.health,
         modelCount: models.filter((m) => m.reachableVia.includes(id)).length,
       });
     }
@@ -553,6 +589,156 @@ export function createProviderManagerApi(
     sessionSwitcher.switchProvider(accountId, modelId);
   }
 
+  async function signInWithProvider(
+    upstream: string,
+    callbacks: OAuthFlowCallbacks,
+  ): Promise<SaveResult> {
+    const { getOAuthFlow, isOAuthSupported } = await import(
+      "../../domain/providers/oauth-service.js"
+    );
+    if (!isOAuthSupported(upstream)) {
+      return {
+        ok: false,
+        error: {
+          code: "oauth_flow_failed",
+          message: `OAuth sign-in is not supported for "${upstream}".`,
+        },
+      };
+    }
+
+    const flow = await getOAuthFlow(upstream);
+    if (!flow) {
+      return {
+        ok: false,
+        error: {
+          code: "oauth_flow_failed",
+          message: `Could not load OAuth flow for "${upstream}".`,
+        },
+      };
+    }
+
+    const abortController = new AbortController();
+    const interaction = {
+      signal: abortController.signal,
+      prompt: async (p: any) => {
+        if (callbacks.onPrompt) {
+          return callbacks.onPrompt(p);
+        }
+        return "";
+      },
+      notify: (event: any) => {
+        if (event.type === "device_code") {
+          callbacks.onDeviceCode?.({
+            userCode: event.userCode,
+            verificationUrl: event.verificationUri,
+            expiresInMs: (event.expiresInSeconds ?? 600) * 1000,
+          });
+        } else if (event.type === "auth_url") {
+          callbacks.onBrowserOpen?.(event.url);
+        } else if (event.type === "progress") {
+          callbacks.onWaiting?.();
+        }
+      },
+    };
+
+    let credResult: any;
+    try {
+      credResult = await flow.login(interaction as any);
+    } catch (err: any) {
+      const msg = typeof err?.message === "string" ? err.message : String(err);
+      return {
+        ok: false,
+        error: {
+          code: "oauth_flow_failed",
+          message: redactString(msg),
+        },
+      };
+    }
+
+    if (!credResult || credResult.type !== "oauth" || !credResult.access) {
+      return {
+        ok: false,
+        error: {
+          code: "oauth_flow_failed",
+          message: "OAuth flow did not return valid credentials.",
+        },
+      };
+    }
+
+    // Determine accountId
+    const snapshot = await runtime.createTurnSnapshot();
+    const existingAccounts = Object.keys(snapshot.config.providers ?? {});
+    let accountId = upstream;
+    let seq = 2;
+    while (existingAccounts.includes(accountId)) {
+      accountId = `${upstream}-${seq++}`;
+    }
+
+    // Persist OAuth credential in credential store (keychain-first/primary store)
+    try {
+      await creds().put(
+        accountId,
+        {
+          kind: "oauth",
+          access: credResult.access,
+          refresh: credResult.refresh ?? "",
+          expires: credResult.expires ?? Date.now() + 3600_000,
+        },
+        { source: "keychain", description: flow.name },
+      );
+    } catch (err: any) {
+      return {
+        ok: false,
+        error: {
+          code: "credential_unavailable",
+          message: `Failed to persist OAuth tokens: ${redactString(err?.message ?? "")}`,
+        },
+      };
+    }
+
+    // Add account to overlay
+    const entry: ProviderEntryPatch = {
+      adapter: "pi-ai",
+      upstreamProvider: upstream,
+      credential: { kind: "seepient", id: accountId },
+    };
+
+    try {
+      await occWrite({ providers: { [accountId]: entry } });
+    } catch (err) {
+      // Rollback credential on overlay failure (R4)
+      await creds().delete(accountId).catch(() => {});
+      return { ok: false, error: err as UiError };
+    }
+
+    return { ok: true, state: await getState() };
+  }
+
+  async function logoutAccount(accountId: string): Promise<SaveResult> {
+    const snapshot = await runtime.createTurnSnapshot();
+    const entry = snapshot.config.providers?.[accountId];
+    if (!entry) {
+      return {
+        ok: false,
+        error: {
+          code: "unconfigured_provider",
+          message: `Account "${accountId}" not found.`,
+        },
+      };
+    }
+    // Delete credential record from credential store.
+    // Provider entry in config stays intact, but health becomes "missing"
+    await creds().delete(accountId).catch(() => {});
+    return { ok: true, state: await getState() };
+  }
+
+  async function getAvailableOAuthFlows(): Promise<readonly string[]> {
+    const { AVAILABLE_OAUTH_FLOWS } = await import(
+      "../../domain/providers/oauth-service.js"
+    );
+    return AVAILABLE_OAUTH_FLOWS;
+  }
+
   return {
     getState,
     saveAccount,
@@ -563,6 +749,9 @@ export function createProviderManagerApi(
     probeAccount,
     refreshModels,
     switchSessionModel,
+    signInWithProvider,
+    logoutAccount,
+    getAvailableOAuthFlows,
     ...( { mapErrorForTest: mapError } as any),
   };
 }

@@ -28,6 +28,7 @@ export interface CredentialHandle {
 export interface CredentialStore {
   resolve(ref: CredentialRef): Promise<CredentialHandle>;
   get(id: string): Promise<CredentialRecord | undefined>;
+  getRecord?(id: string): Promise<PersistedCredentialRecord | undefined>;
   put(id: string, record: PersistedCredentialRecord, meta?: CredentialMeta): Promise<void>;
   list(): Promise<CredentialRecord[]>;
   delete(id: string): Promise<void>;

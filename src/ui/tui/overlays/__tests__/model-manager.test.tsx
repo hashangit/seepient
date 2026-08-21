@@ -64,6 +64,9 @@ function fakeApi(overrides?: {
   setAssignment?: any;
   resolvePreview?: any;
   deleteAccount?: any;
+  signInWithProvider?: any;
+  logoutAccount?: any;
+  getAvailableOAuthFlows?: any;
 }) {
   let state = overrides?.state ?? baseState();
   const api: ProviderManagerApi = {
@@ -86,6 +89,9 @@ function fakeApi(overrides?: {
     probeAccount: async () => ({ accountId: "acme-main", authValid: true }),
     refreshModels: async () => ({ ok: true, discovered: ["m1"], state }),
     switchSessionModel: vi.fn(),
+    signInWithProvider: overrides?.signInWithProvider ?? (async () => ({ ok: true, state })),
+    logoutAccount: overrides?.logoutAccount ?? (async () => ({ ok: true, state })),
+    getAvailableOAuthFlows: overrides?.getAvailableOAuthFlows ?? (async () => ["anthropic", "openai-codex"]),
   };
   return { api, get state() { return state; } };
 }
@@ -272,5 +278,51 @@ describe("resilience + feedback", () => {
     await delay(40);
     expect(ctx.api.switchSessionModel).toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe("OAuth Sign-in & Badges (Phase 9 US7)", () => {
+  it("renders ◐ sign-in badge for oauth accounts", async () => {
+    const state = baseState();
+    state.accounts.push({
+      id: "anthropic-sub",
+      upstreamProvider: "anthropic",
+      credentialKind: "oauth",
+      health: "ok",
+      modelCount: 4,
+    });
+    const { inst } = setup({ state }, { initialTab: "providers" });
+    await delay();
+    const frame = inst.lastFrame() ?? "";
+    expect(frame).toContain("anthropic-sub");
+    expect(frame).toContain("◐ sign-in · ok");
+  });
+
+  it("renders [1] Sign in again for expired oauth accounts", async () => {
+    const state = baseState();
+    state.accounts = [{
+      id: "anthropic-sub",
+      upstreamProvider: "anthropic",
+      credentialKind: "oauth",
+      health: "expired",
+      modelCount: 4,
+    }];
+    const { inst } = setup({ state }, { initialTab: "providers" });
+    await delay();
+    const frame = inst.lastFrame() ?? "";
+    expect(frame).toContain("[1] Sign in again");
+  });
+
+  it("opens SignInFlow screen on initialSignIn prop and shows device code", async () => {
+    const signInWithProvider = vi.fn(async (_u: string, cb: any) => {
+      cb.onDeviceCode?.({ userCode: "ABCD-1234", verificationUrl: "https://auth.example.com", expiresInMs: 60000 });
+      return new Promise<{ ok: true; state: ManagerState }>(() => {});
+    });
+    const { inst } = setup({ signInWithProvider } as any, { initialSignIn: "anthropic" });
+    await delay();
+    const frame = inst.lastFrame() ?? "";
+    expect(frame).toContain("Sign in with anthropic");
+    expect(frame).toContain("ABCD-1234");
+    expect(frame).toContain("https://auth.example.com");
   });
 });

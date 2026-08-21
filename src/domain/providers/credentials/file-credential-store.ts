@@ -17,8 +17,11 @@ import { SeepientError } from "../../../foundations/errors.js";
 
 interface StoredFilePayload {
   id: string;
-  materialKind: "api_key";
-  keyValue: string;
+  materialKind: "api_key" | "oauth";
+  keyValue?: string;
+  refresh?: string;
+  access?: string;
+  expires?: number;
   createdAt: string;
   updatedAt: string;
   meta?: CredentialMeta;
@@ -100,7 +103,17 @@ export class FileCredentialStore implements CredentialStore {
             try {
               const raw = fs.readFileSync(file, "utf-8");
               const parsed = JSON.parse(raw) as StoredFilePayload;
-              return { kind: "api_key", value: parsed.keyValue };
+              if (parsed.materialKind === "oauth") {
+                return {
+                  kind: "pi_oauth",
+                  piAuthContext: {
+                    refresh: parsed.refresh ?? "",
+                    access: parsed.access ?? "",
+                    expires: parsed.expires ?? 0,
+                  },
+                };
+              }
+              return { kind: "api_key", value: parsed.keyValue ?? "" };
             } catch (err: any) {
               throw new SeepientError(
                 `Failed to read credential "${credId}": ${err?.message}`,
@@ -146,6 +159,28 @@ export class FileCredentialStore implements CredentialStore {
     }
   }
 
+  async getRecord(id: string): Promise<PersistedCredentialRecord | undefined> {
+    const file = this.filePath(id);
+    if (!fs.existsSync(file)) return undefined;
+    try {
+      const stat = fs.lstatSync(file);
+      if (stat.isSymbolicLink()) return undefined;
+      const raw = fs.readFileSync(file, "utf-8");
+      const parsed = JSON.parse(raw) as StoredFilePayload;
+      if (parsed.materialKind === "oauth") {
+        return {
+          kind: "oauth",
+          refresh: parsed.refresh ?? "",
+          access: parsed.access ?? "",
+          expires: parsed.expires ?? 0,
+        };
+      }
+      return { kind: "api_key", keyValue: parsed.keyValue ?? "" };
+    } catch {
+      return undefined;
+    }
+  }
+
   async put(id: string, record: PersistedCredentialRecord, meta?: CredentialMeta): Promise<void> {
     this.ensureDir();
     const file = this.filePath(id);
@@ -154,8 +189,10 @@ export class FileCredentialStore implements CredentialStore {
 
     const payload: StoredFilePayload = {
       id,
-      materialKind: "api_key",
-      keyValue: record.keyValue,
+      materialKind: record.kind,
+      ...(record.kind === "api_key"
+        ? { keyValue: record.keyValue }
+        : { refresh: record.refresh, access: record.access, expires: record.expires }),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
       meta,

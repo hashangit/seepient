@@ -12,6 +12,7 @@ import { Box, Text, useInput } from "ink";
 import { ThemeProvider } from "./hooks/use-theme.js";
 import { AddAccount } from "./components/add-account.js";
 import { ModelPicker } from "./components/model-picker.js";
+import { SignInFlow } from "./overlays/model-manager.js";
 import type {
   ProviderManagerApi, ManagerState, PurposeId, Tier, AssignmentTarget, UiError, AccountInput,
 } from "../../transport/cli/provider-manager-api.js";
@@ -89,7 +90,9 @@ export interface SetupWizardProps {
 export function SetupWizard({ api, settings, onFinish, onExitSetup }: SetupWizardProps) {
   const [state, setState] = useState<ManagerState | null>(null);
   const [step, setStep] = useState<Step>("welcome");
-  const [sub, setSub] = useState<"menu" | "picker" | "add" | "group">("menu");
+  const [sub, setSub] = useState<"menu" | "picker" | "add" | "group" | "sign-in">("menu");
+  const [signInUpstream, setSignInUpstream] = useState<string>("");
+  const [oauthFlows, setOauthFlows] = useState<readonly string[]>([]);
   const [activeSlot, setActiveSlot] = useState<{ purpose: PurposeId; tier: Tier | null; key: string } | null>(null);
   const [activeGroup, setActiveGroup] = useState<WizardExtrasGroup | null>(null);
   const [fieldIdx, setFieldIdx] = useState(0);
@@ -100,7 +103,10 @@ export function SetupWizard({ api, settings, onFinish, onExitSetup }: SetupWizar
   const [confirmExit, setConfirmExit] = useState(false);
 
   const load = useCallback(async () => setState(await api.getState()), [api]);
-  useEffect(() => { void load().catch((e) => setError(String(e))); }, [load]);
+  useEffect(() => {
+    void load().catch((e) => setError(String(e)));
+    void api.getAvailableOAuthFlows?.().then((f) => setOauthFlows(f)).catch(() => {});
+  }, [load, api]);
 
   const mainAssigned = !!(state?.assignments as any)?.text?.standard;
   const emptySlots = useMemo(() => {
@@ -239,6 +245,11 @@ export function SetupWizard({ api, settings, onFinish, onExitSetup }: SetupWizar
       <AddAccount
         upstreams={upstreams}
         existingIds={state?.accounts.map((a) => a.id) ?? []}
+        canSignIn={(u) => oauthFlows.includes(u.toLowerCase())}
+        onSignIn={(u) => {
+          setSignInUpstream(u);
+          setSub("sign-in");
+        }}
         onSaveAccount={async (acctInput: AccountInput) => {
           const res = await api.saveAccount(acctInput);
           if (res.ok) {
@@ -249,6 +260,20 @@ export function SetupWizard({ api, settings, onFinish, onExitSetup }: SetupWizar
           return res.error;
         }}
         onClose={() => setSub("menu")}
+      />
+    );
+  }
+
+  if (sub === "sign-in") {
+    return (
+      <SignInFlow
+        upstream={signInUpstream}
+        api={api}
+        onDone={(msg) => {
+          setSub("menu");
+          void load();
+        }}
+        onCancel={() => setSub("menu")}
       />
     );
   }

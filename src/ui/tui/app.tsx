@@ -189,6 +189,7 @@ export function TuiApp({
   );
   const [modelTab, setModelTab] = useState<'jobs' | 'providers' | 'now'>('jobs');
   const [modelPrefill, setModelPrefill] = useState<string | undefined>(undefined);
+  const [modelSignIn, setModelSignIn] = useState<string | undefined>(undefined);
 
   const didInit = useRef(false);
   useEffect(() => {
@@ -297,6 +298,28 @@ export function TuiApp({
       setOverlay('model');
       return;
     }
+    if (trimmed.startsWith('/login ') || trimmed === '/login') {
+      const provider = trimmed.startsWith('/login ') ? trimmed.slice('/login '.length).trim() : 'anthropic';
+      setModelPrefill(undefined);
+      setModelSignIn(provider);
+      setModelTab('providers');
+      setOverlay('model');
+      return;
+    }
+    if (trimmed.startsWith('/logout ') || trimmed === '/logout') {
+      const account = trimmed.startsWith('/logout ') ? trimmed.slice('/logout '.length).trim() : undefined;
+      if (!account) {
+        feed.appendEntry({ kind: 'info', content: 'Usage: /logout <account-id>  (e.g. /logout anthropic)' });
+        return;
+      }
+      const res = await managerApi.logoutAccount(account);
+      if (res.ok) {
+        feed.appendEntry({ kind: 'info', content: `✓ Logged out account "${account}". Associated model slots are now unstaffed.` });
+      } else {
+        feed.appendEntry({ kind: 'error', message: `Logout failed: ${res.error.message}` });
+      }
+      return;
+    }
     if (trimmed === '/setup') {
       setOverlay('setup');
       return;
@@ -367,6 +390,8 @@ export function TuiApp({
     { name: 'shortcuts', description: 'Keyboard reference' },
     { name: 'model', description: `Switch model (currently ${providerType}/${agent.getModel()})` },
     { name: 'providers', description: 'Manage provider accounts' },
+    { name: 'login', description: 'Sign in with provider (OAuth / subscription)' },
+    { name: 'logout', description: 'Log out a provider account' },
     { name: 'setup', description: 'Run setup wizard' },
     { name: 'settings', description: 'View settings' },
     { name: 'sessions', description: 'Resume / delete a session' },
@@ -377,10 +402,22 @@ export function TuiApp({
       setOverlay('help');
     } else if (name === 'model') {
       setModelPrefill(undefined);
+      setModelSignIn(undefined);
       setModelTab('jobs');
       setOverlay('model');
     } else if (name === 'providers') {
       setModelPrefill(undefined);
+      setModelSignIn(undefined);
+      setModelTab('providers');
+      setOverlay('model');
+    } else if (name === 'login') {
+      setModelPrefill(undefined);
+      setModelSignIn('anthropic');
+      setModelTab('providers');
+      setOverlay('model');
+    } else if (name === 'logout') {
+      setModelPrefill(undefined);
+      setModelSignIn(undefined);
       setModelTab('providers');
       setOverlay('model');
     } else if (name === 'setup') {
@@ -538,9 +575,11 @@ export function TuiApp({
             activeModel={agent.getModel()}
             sessionNotice={sessionNotice ?? undefined}
             prefill={modelPrefill}
+            initialSignIn={modelSignIn}
             initialTab={modelTab}
             onClose={() => {
               setModelPrefill(undefined);
+              setModelSignIn(undefined);
               setOverlay(null);
             }}
           />

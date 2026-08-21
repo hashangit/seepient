@@ -235,6 +235,12 @@ export class KeychainCredentialStore implements CredentialStore {
                   false,
                 );
               }
+              try {
+                const parsed = JSON.parse(val);
+                if (parsed && typeof parsed === "object" && parsed.kind === "oauth") {
+                  return { kind: "pi_oauth", piAuthContext: parsed };
+                }
+              } catch {}
               return { kind: "api_key", value: val };
             } catch (err: any) {
               if (err instanceof SeepientError) throw err;
@@ -264,6 +270,23 @@ export class KeychainCredentialStore implements CredentialStore {
     return undefined;
   }
 
+  async getRecord(id: string): Promise<PersistedCredentialRecord | undefined> {
+    if (!this.provider) return undefined;
+    try {
+      const val = await this.provider.getPassword(this.defaultService, id);
+      if (!val) return undefined;
+      try {
+        const parsed = JSON.parse(val);
+        if (parsed && typeof parsed === "object" && parsed.kind === "oauth") {
+          return parsed as PersistedCredentialRecord;
+        }
+      } catch {}
+      return { kind: "api_key", keyValue: val };
+    } catch {
+      return undefined;
+    }
+  }
+
   async put(id: string, record: PersistedCredentialRecord, _meta?: CredentialMeta): Promise<void> {
     if (!this.provider) {
       throw new SeepientError(
@@ -273,7 +296,8 @@ export class KeychainCredentialStore implements CredentialStore {
       );
     }
     try {
-      await this.provider.setPassword(this.defaultService, id, record.keyValue);
+      const val = record.kind === "api_key" ? record.keyValue : JSON.stringify(record);
+      await this.provider.setPassword(this.defaultService, id, val);
     } catch (err: any) {
       throw new SeepientError(
         `OS Keychain put failed: ${err?.message}`,

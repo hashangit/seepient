@@ -52,6 +52,9 @@ function makeApi(state: ManagerState) {
     probeAccount: async () => ({ accountId: "acme", authValid: true }),
     refreshModels: async () => ({ ok: true, discovered: [], state }),
     switchSessionModel: () => {},
+    signInWithProvider: async () => ({ ok: true, state }),
+    logoutAccount: async () => ({ ok: true, state }),
+    getAvailableOAuthFlows: async () => ["anthropic"],
   };
   return { api, setAssignment, get state() { return state; } };
 }

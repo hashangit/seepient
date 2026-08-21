@@ -94,6 +94,9 @@ export class MemoryCredentialStore implements CredentialStore {
                 false,
               );
             }
+            if (entry.record.kind === "oauth") {
+              return { kind: "pi_oauth", piAuthContext: entry.record };
+            }
             return { kind: "api_key", value: entry.record.keyValue };
           },
           release: async (): Promise<void> => {
@@ -116,11 +119,15 @@ export class MemoryCredentialStore implements CredentialStore {
     if (!entry) return undefined;
     return {
       id,
-      materialKind: "api_key",
+      materialKind: entry.record.kind,
       createdAt: entry.createdAt,
       updatedAt: entry.updatedAt,
       meta: entry.meta,
     };
+  }
+
+  async getRecord(id: string): Promise<PersistedCredentialRecord | undefined> {
+    return this.entries.get(id)?.record;
   }
 
   async put(id: string, record: PersistedCredentialRecord, meta?: CredentialMeta): Promise<void> {
@@ -139,7 +146,7 @@ export class MemoryCredentialStore implements CredentialStore {
     for (const [id, entry] of this.entries.entries()) {
       records.push({
         id,
-        materialKind: "api_key",
+        materialKind: entry.record.kind,
         createdAt: entry.createdAt,
         updatedAt: entry.updatedAt,
         meta: entry.meta,

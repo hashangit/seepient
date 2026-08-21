@@ -27,6 +27,7 @@ export interface ModelManagerProps {
   activeThinking?: string;
   sessionNotice?: string;
   prefill?: string;
+  initialSignIn?: string;
   initialTab?: "jobs" | "providers" | "now";
   onClose: () => void;
 }
@@ -37,6 +38,7 @@ type Overlay =
   | { kind: "thinking"; purpose: PurposeId; tier: Tier | null; levels: string[]; current?: string; target: AssignmentTarget }
   | { kind: "add-account"; prefill?: string }
   | { kind: "remove-confirm"; accountId: string; slots: string[] }
+  | { kind: "sign-in"; upstream: string }
   | null;
 
 interface SlotRow {
@@ -49,6 +51,7 @@ type Feedback = { kind: "idle" | "success" | "error"; message: string; note?: st
 
 const BADGE: Record<string, string> = {
   seepient: "🔑 stored key",
+  oauth: "◐ sign-in",
   env: "ENV",
   keychain: "◈ keychain",
   externalsecret: "◈ external",
@@ -56,14 +59,16 @@ const BADGE: Record<string, string> = {
 };
 
 export function ModelManager({
-  api, activeAccount, activeModel, activeThinking, sessionNotice, prefill, initialTab = "jobs", onClose,
+  api, activeAccount, activeModel, activeThinking, sessionNotice, prefill, initialSignIn, initialTab = "jobs", onClose,
 }: ModelManagerProps) {
   const theme = useTheme();
   const [state, setState] = useState<ManagerState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>(initialTab);
   const [overlay, setOverlay] = useState<Overlay>(() =>
-    prefill !== undefined
+    initialSignIn
+      ? { kind: "sign-in", upstream: initialSignIn }
+      : prefill !== undefined
       ? { kind: "picker", purpose: "text", tier: "standard", title: "Assign text·standard", prefill }
       : null,
   );
@@ -71,6 +76,7 @@ export function ModelManager({
   const [provIdx, setProvIdx] = useState(0);
   const [fallbacks, setFallbacks] = useState<Record<string, string>>({});
   const [feedback, setFeedback] = useState<Feedback>({ kind: "idle", message: "" });
+  const [oauthFlows, setOauthFlows] = useState<readonly string[]>([]);
 
   const load = useCallback(async (): Promise<void> => {
     setLoadError(null);
@@ -102,7 +108,10 @@ export function ModelManager({
     }
   }, [api]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    void api.getAvailableOAuthFlows?.().then((f) => setOauthFlows(f)).catch(() => {});
+  }, [load, api]);
 
   // ── Derived board rows ────────────────────────────────────────────────────
   const slotRows: SlotRow[] = useMemo(() => {
@@ -231,7 +240,14 @@ export function ModelManager({
 
     if (tab === "providers") {
       const acct = state?.accounts[provIdx];
-      if (isNum && num === 1) { setOverlay({ kind: "add-account" }); return; }
+      if (isNum && num === 1) {
+        if (acct && acct.health === "expired" && acct.credentialKind === "oauth") {
+          setOverlay({ kind: "sign-in", upstream: acct.upstreamProvider });
+        } else {
+          setOverlay({ kind: "add-account" });
+        }
+        return;
+      }
       if (!acct) return;
       if (isNum && num === 2) {
         void api.probeAccount(acct.id).then((r) => {
@@ -342,12 +358,29 @@ export function ModelManager({
         upstreams={upstreams}
         existingIds={state.accounts.map((a) => a.id)}
         prefillUpstream={overlay.prefill}
+        canSignIn={(u) => oauthFlows.includes(u.toLowerCase())}
+        onSignIn={(u) => setOverlay({ kind: "sign-in", upstream: u })}
         onSaveAccount={async (input) => {
           const res = await api.saveAccount(input);
           if (res.ok) { setState(res.state); return null; }
           return res.error;
         }}
         onClose={() => setOverlay(null)}
+      />
+    );
+  }
+
+  if (overlay?.kind === "sign-in") {
+    return (
+      <SignInFlow
+        upstream={overlay.upstream}
+        api={api}
+        onDone={(msg) => {
+          setOverlay(null);
+          setFeedback({ kind: "success", message: msg });
+          void load();
+        }}
+        onCancel={() => setOverlay(null)}
       />
     );
   }
@@ -446,7 +479,9 @@ export function ModelManager({
           </Box>
         ) : null}
         <Box marginTop={1}>
-          <Text color={theme.fgDim}> [1] Add provider   [2] Test account   [3] Refresh models   [4] Remove account </Text>
+          <Text color={theme.fgDim}>
+            {` [1] ${state.accounts[provIdx]?.health === "expired" && state.accounts[provIdx]?.credentialKind === "oauth" ? "Sign in again" : "Add provider"}   [2] Test account   [3] Refresh models   [4] Remove account `}
+          </Text>
         </Box>
         {footer}
       </Box>
@@ -465,6 +500,104 @@ export function ModelManager({
         <Text color={theme.fgDim}> [1] Refresh </Text>
       </Box>
       {footer}
+    </Box>
+  );
+}
+
+export interface SignInFlowProps {
+  upstream: string;
+  api: ProviderManagerApi;
+  onDone: (msg: string) => void;
+  onCancel: () => void;
+}
+
+export function SignInFlow({ upstream, api, onDone, onCancel }: SignInFlowProps) {
+  const theme = useTheme();
+  const [status, setStatus] = useState<"initiating" | "device_code" | "waiting" | "error">("initiating");
+  const [deviceInfo, setDeviceInfo] = useState<{ userCode: string; verificationUrl: string; expiresInMs: number } | null>(null);
+  const [browserUrl, setBrowserUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const start = useCallback(async () => {
+    setStatus("initiating");
+    setError(null);
+    const res = await api.signInWithProvider(upstream, {
+      onDeviceCode: (info) => {
+        setDeviceInfo(info);
+        setStatus("device_code");
+      },
+      onBrowserOpen: (url) => {
+        setBrowserUrl(url);
+        setStatus("waiting");
+      },
+      onWaiting: () => {
+        setStatus("waiting");
+      },
+    });
+
+    if (res.ok) {
+      onDone(`✓ Signed in with ${upstream}`);
+    } else {
+      setError(res.error.message);
+      setStatus("error");
+    }
+  }, [upstream, api, onDone]);
+
+  useEffect(() => {
+    void start();
+  }, [start]);
+
+  useInput((input, key) => {
+    if (key.escape) {
+      onCancel();
+      return;
+    }
+    if (status === "error") {
+      if (input === "1") {
+        void start();
+      } else if (input === "2") {
+        onCancel();
+      }
+    }
+  });
+
+  if (status === "error") {
+    return (
+      <Box flexDirection="column" borderStyle="round" borderColor={theme.red} paddingLeft={1} paddingRight={1}>
+        <Text color={theme.red} bold>Sign in with {upstream} failed</Text>
+        <Text color={theme.fg}>{error}</Text>
+        <Box marginTop={1}>
+          <Text color={theme.fgDim}> [1] Try again   [2] Cancel (Esc) </Text>
+        </Box>
+      </Box>
+    );
+  }
+
+  if (status === "device_code" && deviceInfo) {
+    return (
+      <Box flexDirection="column" borderStyle="round" borderColor={theme.cyan} paddingLeft={1} paddingRight={1}>
+        <Text color={theme.cyan} bold>Sign in with {upstream}</Text>
+        <Text>1. Open this URL in your browser: <Text color={theme.blue} underline>{deviceInfo.verificationUrl}</Text></Text>
+        <Text>2. Enter confirmation code: <Text color={theme.yellow} bold>{deviceInfo.userCode}</Text></Text>
+        <Text color={theme.fgDim}>Waiting for authorization in browser… (Esc to cancel)</Text>
+      </Box>
+    );
+  }
+
+  if (status === "waiting" && browserUrl) {
+    return (
+      <Box flexDirection="column" borderStyle="round" borderColor={theme.cyan} paddingLeft={1} paddingRight={1}>
+        <Text color={theme.cyan} bold>Sign in with {upstream}</Text>
+        <Text>Complete authentication in your browser: <Text color={theme.blue} underline>{browserUrl}</Text></Text>
+        <Text color={theme.fgDim}>Waiting for browser callback… (Esc to cancel)</Text>
+      </Box>
+    );
+  }
+
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor={theme.cyan} paddingLeft={1} paddingRight={1}>
+      <Text color={theme.cyan} bold>Connecting to {upstream}…</Text>
+      <Text color={theme.fgDim}>Initiating sign-in flow… (Esc to cancel)</Text>
     </Box>
   );
 }

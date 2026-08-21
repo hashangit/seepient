@@ -9,6 +9,10 @@ const SENSITIVE_KEY_PATTERNS: readonly RegExp[] = [
   /authorization/i,
   /private[-_]?key/i,
   /credential/i,
+  /^refresh$/i,
+  /^access$/i,
+  /refresh[-_]?token/i,
+  /access[-_]?token/i,
 ];
 
 const SECRET_VALUE_PATTERNS: readonly RegExp[] = [
@@ -55,6 +59,10 @@ export function isSensitiveKey(key: string): boolean {
  */
 export function redactString(str: string): string {
   let result = redactUrlCredentials(str);
+  result = result.replace(
+    /((?:access_token|refresh_token|refresh|access|api_key|apiKey|password)\s*[:=]\s*)[a-zA-Z0-9._~+/-]+/gi,
+    "$1[REDACTED]",
+  );
   for (const pattern of SECRET_VALUE_PATTERNS) {
     result = result.replace(pattern, "[REDACTED]");
   }

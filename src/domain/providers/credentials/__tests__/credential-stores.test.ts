@@ -172,5 +172,32 @@ describe("CredentialStore implementations (QS-P4.1)", () => {
       expect(await noneLease.secret()).toEqual({ kind: "none" });
       await noneLease.release();
     });
+
+    it("stores and resolves oauth credentials across composite layers (T040)", async () => {
+      const memory = new MemoryCredentialStore();
+      const composite = new CompositeCredentialStore({
+        memory,
+        primaryWriteStore: "memory",
+      });
+
+      await composite.put("oauth-user", {
+        kind: "oauth",
+        access: "acc-123",
+        refresh: "ref-456",
+        expires: 1730000000,
+      });
+
+      const rec = await composite.get("oauth-user");
+      expect(rec).toBeDefined();
+      expect(rec?.materialKind).toBe("oauth");
+
+      const raw = await composite.getRecord("oauth-user");
+      expect(raw).toEqual({
+        kind: "oauth",
+        access: "acc-123",
+        refresh: "ref-456",
+        expires: 1730000000,
+      });
+    });
   });
 });

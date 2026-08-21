@@ -285,3 +285,91 @@ describe("refreshModels passthrough", () => {
     if (!res.ok) expect(res.error?.code).toBe("unconfigured_provider");
   });
 });
+
+describe("OAuth sign-in & logout (contract §6.8–6.10)", () => {
+  it("exposes available OAuth flows", async () => {
+    const { api } = makeApi();
+    const flows = await api.getAvailableOAuthFlows();
+    expect(flows).toContain("anthropic");
+    expect(flows).toContain("openai-codex");
+  });
+
+  it("handles unsupported OAuth provider with oauth_flow_failed", async () => {
+    const { api, credentialStore, configStore } = makeApi();
+    const res = await api.signInWithProvider("unsupported-llm", {});
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error.code).toBe("oauth_flow_failed");
+
+    // Zero persisted state (contract §6.8)
+    const eff = await configStore.getEffectiveConfig();
+    expect(eff.providers?.["unsupported-llm"]).toBeUndefined();
+    expect(await credentialStore.list()).toHaveLength(0);
+  });
+
+  it("getState never contains token material and reflects oauth credentialKind", async () => {
+    const { api, credentialStore, configStore } = makeApi();
+    await credentialStore.put("anthropic-oauth", {
+      kind: "oauth",
+      access: "access-token-secret-xyz",
+      refresh: "refresh-token-secret-abc",
+      expires: Date.now() + 3600_000,
+    });
+    await configStore.updateOverlay({
+      providers: {
+        "anthropic-oauth": {
+          adapter: "pi-ai",
+          upstreamProvider: "anthropic",
+          credential: { kind: "seepient", id: "anthropic-oauth" },
+        },
+      },
+    }, 0);
+
+    const state = await api.getState();
+    const acct = state.accounts.find((a) => a.id === "anthropic-oauth");
+    expect(acct).toBeDefined();
+    expect(acct?.credentialKind).toBe("oauth");
+    expect(acct?.health).toBe("ok");
+    expect(JSON.stringify(state)).not.toContain("access-token-secret-xyz");
+    expect(JSON.stringify(state)).not.toContain("refresh-token-secret-abc");
+  });
+
+  it("logoutAccount removes the oauth record and flags health missing", async () => {
+    const { api, credentialStore, configStore } = makeApi();
+    await credentialStore.put("anthropic-oauth", {
+      kind: "oauth",
+      access: "access-token-xyz",
+      refresh: "refresh-token-abc",
+      expires: Date.now() + 3600_000,
+    });
+    await configStore.updateOverlay({
+      providers: {
+        "anthropic-oauth": {
+          adapter: "pi-ai",
+          upstreamProvider: "anthropic",
+          credential: { kind: "seepient", id: "anthropic-oauth" },
+        },
+      },
+    }, 0);
+
+    const res = await api.logoutAccount("anthropic-oauth");
+    expect(res.ok).toBe(true);
+
+    const state = await api.getState();
+    const acct = state.accounts.find((a) => a.id === "anthropic-oauth");
+    expect(acct?.health).toBe("missing");
+    expect(await credentialStore.get("anthropic-oauth")).toBeUndefined();
+
+    // Second logout is a safe no-op
+    const res2 = await api.logoutAccount("anthropic-oauth");
+    expect(res2.ok).toBe(true);
+  });
+
+  it("redacts token material in synthetic error messages (contract §6.10)", async () => {
+    const { api } = makeApi();
+    const err = await (api as any).mapErrorForTest(
+      new Error("OAuth refresh failed with access_token: secret-access-123 and refresh: secret-refresh-456"),
+    );
+    expect(err.message).not.toContain("secret-access-123");
+    expect(err.message).not.toContain("secret-refresh-456");
+  });
+});
