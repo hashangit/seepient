@@ -19,8 +19,6 @@ import { bootstrapCliSession } from '../../transport/cli/bootstrap.js';
 import { buildCommandRegistry } from '../../transport/cli/commands/build-registry.js';
 import { warmInkReset, resetInkStatic, guardInkVersion } from './ink-reset.js';
 import { ThemeProvider } from './hooks/use-theme.js';
-import { MODEL_CATALOG } from '../../foundations/models-catalog.js';
-import { resolveProviderConfigFromApp, createProviderFromApp } from '../../domain/providers/provider-resolver.js';
 import type { ModelOption } from './overlays/model-selector.js';
 import type { SettingItem } from './overlays/settings-overlay.js';
 import { SettingsManager } from '../../domain/settings/settings-manager.js';
@@ -61,14 +59,19 @@ export async function startTui({ queryParts, options }: StartTuiArgs): Promise<v
   const skills: Suggestion[] = (agent.getSkillRegistry()?.getAll() ?? [])
     .map((s) => ({ name: s.name, description: s.description }));
 
-  // Model-selector options: catalog models for each CONFIGURED provider.
+  // Model-selector options: catalog models from the active ProviderRuntime.
   const modelOptions: ModelOption[] = [];
-  for (const pt of ['openai', 'anthropic', 'glm', 'openai-compatible'] as const) {
-    if (!resolveProviderConfigFromApp(fullConfig, pt)) continue;
-    for (const m of MODEL_CATALOG[pt]) {
-      modelOptions.push({ providerType: pt, modelId: m.id, modelName: m.name });
+  try {
+    const runtime = agent.getProviderRuntime();
+    const snapshot = await runtime.createTurnSnapshot();
+    for (const m of snapshot.catalog) {
+      modelOptions.push({
+        providerType: m.upstreamProvider || 'default',
+        modelId: m.id,
+        modelName: m.displayName || m.id,
+      });
     }
-  }
+  } catch {}
   const onSwitchModel = async (providerType: string, modelId: string): Promise<void> => {
     agent.switchProvider(providerType, modelId);
   };
