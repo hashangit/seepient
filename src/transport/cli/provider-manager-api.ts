@@ -903,7 +903,9 @@ export function createProviderManagerApi(
       return { ok: false, error: mapError(err) };
     }
     let accountId = callbacks.preferredAccountId?.trim() || upstream;
-    if (!callbacks.preferredAccountId) {
+    if (callbacks.preferredAccountId && existingAccounts.includes(accountId)) {
+      console.warn(`[notice] Overwriting existing provider account "${accountId}" with new OAuth login.`);
+    } else if (!callbacks.preferredAccountId) {
       let seq = 2;
       while (existingAccounts.includes(accountId)) {
         accountId = `${upstream}-${seq++}`;
@@ -947,6 +949,13 @@ export function createProviderManagerApi(
       try {
         await creds().delete(accountId);
       } catch {}
+      if (!existingAccounts.includes(accountId)) {
+        try {
+          await occMutate(async () => ({
+            providers: { [accountId]: null },
+          }));
+        } catch {}
+      }
       return saveRes;
     }
 

@@ -447,7 +447,7 @@ export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<
     }> {
       const res = await managerApi.resolvePreview(opts.purpose as PurposeId, opts.tier, opts.override);
       if ("ok" in res && res.ok === false) {
-        throw new SeepientError(res.message || "Resolution failed", res.code.toUpperCase(), false);
+        throw new SeepientError(res.message || "Resolution failed", res.code, false);
       }
       const preview = res as ResolutionPreview;
       const snapshot = await runtime.createTurnSnapshot();
