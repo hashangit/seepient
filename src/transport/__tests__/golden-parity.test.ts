@@ -166,14 +166,16 @@ describe("013 Golden Cross-Surface Parity (FR-039 / T056)", () => {
     expect(serverAssignments.text?.standard?.providerAccount).toBe("openai-main");
     expect(serverAssignments.text?.standard?.model).toBe("gpt-4o");
 
-    // ── Operation 4: Resolution Parity across Controller, SDK, and HTTP ──
+    // ── Operation 4: Resolution Parity across Controller, SDK, HTTP, and CLI ──
     const ctrlResolve = await controller.resolvePreview("text", "standard");
     expect("ok" in ctrlResolve && ctrlResolve.ok === false).toBe(false);
     const ctrlRes = ctrlResolve as any;
+    expect(ctrlRes.via).toBe("requested");
 
     const sdkResolve = await sdk.resolve({ purpose: "text", tier: "standard" });
     expect(sdkResolve.providerAccount).toBe("openai-main");
     expect(sdkResolve.model.id).toBe("gpt-4o");
+    expect(sdkResolve.via).toBe("requested");
 
     const { req: rResolve, res: resResolve } = createMockReqRes(
       "POST",
@@ -189,20 +191,75 @@ describe("013 Golden Cross-Surface Parity (FR-039 / T056)", () => {
     expect(ctrlRes.selectedTarget.model).toBe("gpt-4o");
     expect(serverResolve.selectedTarget.providerAccount).toBe("openai-main");
     expect(serverResolve.selectedTarget.model).toBe("gpt-4o");
+    expect(serverResolve.via).toBe("requested");
 
-    // ── Operation 5: Catalog Reachability Parity ───────────────────────
+    // 4d. CLI Surface resolution
+    const { Command } = await import("commander");
+    const { registerModelsCommands } = await import("../cli/commands/models-cli.js");
+    const cliProgram = new Command();
+    registerModelsCommands(cliProgram, controller);
+    let cliJsonOutput = "";
+    const logSpy = vi.spyOn(console, "log").mockImplementation((msg: string) => {
+      cliJsonOutput = msg;
+    });
+    try {
+      await cliProgram.parseAsync(["node", "test", "models", "resolve", "text.standard", "--json"]);
+      expect(cliJsonOutput).toBeDefined();
+      const cliParsed = JSON.parse(cliJsonOutput);
+      expect(cliParsed.selectedTarget.providerAccount).toBe("openai-main");
+      expect(cliParsed.selectedTarget.model).toBe("gpt-4o");
+      expect(cliParsed.via).toBe("requested");
+    } finally {
+      logSpy.mockRestore();
+    }
+
+    // ── Operation 5: Catalog Reachability & Probe Parity ──────────────
     const catSdk = await sdk.getCatalog();
     const { req: r3, res: res3 } = createMockReqRes("GET", "/v1/catalog", { authorization: `Bearer ${adminKey.rawKey}` });
     await new Promise<void>((resolve) => { res3.on("finish", () => resolve()); serverHandler(r3, res3); });
     const catServer = JSON.parse(res3.body);
 
     const modelCtrl = state1.models.find((m) => m.id === "gpt-4o" && m.upstreamProvider === "openai");
-    const modelSdk = (catSdk as any[]).find((m) => m.id === "gpt-4o" && m.upstreamProvider === "openai");
+    const modelSdk = catSdk.find((m) => m.id === "gpt-4o" && m.upstreamProvider === "openai");
     const modelServer = catServer.find((m: any) => m.id === "gpt-4o" && m.upstreamProvider === "openai");
 
     expect(modelCtrl?.reachableVia).toContain("openai-main");
     expect(modelSdk?.reachableVia).toContain("openai-main");
     expect(modelServer?.reachableVia).toContain("openai-main");
+
+    // 5b. Probe Parity across Controller, Server HTTP, and CLI
+    const probeCtrl = await controller.probeAccount("openai-main");
+    expect(probeCtrl.authValid).toBe(true);
+
+    const { req: rProbe, res: resProbe } = createMockReqRes(
+      "POST",
+      "/v1/providers/openai-main/probe",
+      { authorization: `Bearer ${adminKey.rawKey}` },
+    );
+    await new Promise<void>((resolve) => { resProbe.on("finish", () => resolve()); serverHandler(rProbe, resProbe); });
+    expect(resProbe.statusCode).toBe(200);
+    const serverProbe = JSON.parse(resProbe.body);
+    expect(serverProbe.authValid).toBe(true);
+
+    let cliProbeOutput = "";
+    const logSpyProbe = vi.spyOn(console, "log").mockImplementation((msg: string) => {
+      cliProbeOutput = msg;
+    });
+    try {
+      await cliProgram.parseAsync(["node", "test", "models", "probe", "openai-main", "--json"]);
+      expect(cliProbeOutput).toBeDefined();
+      const cliProbeParsed = JSON.parse(cliProbeOutput);
+      expect(cliProbeParsed.authValid).toBe(true);
+      expect(cliProbeParsed.accountId).toBe("openai-main");
+    } finally {
+      logSpyProbe.mockRestore();
+    }
+
+    // 5c. Deep Persisted Overlay Comparison Parity
+    const overlay1 = await configStore1.getOverlay();
+    const overlay3State = await configStore3.getOverlay();
+    expect(overlay1.patch.providers?.["openai-main"]).toEqual(overlay3State.patch.providers?.["openai-main"]);
+    expect(overlay1.patch.modelAssignments?.text?.standard).toEqual(overlay3State.patch.modelAssignments?.text?.standard);
 
     // ── Operation 6: Delete Blocking & Deletion Parity ────────────────
     // Controller blocked delete
@@ -210,11 +267,16 @@ describe("013 Golden Cross-Surface Parity (FR-039 / T056)", () => {
     expect(cBlockDel.ok).toBe(false);
     expect((cBlockDel as any).blocked).toBe(true);
 
+    // SDK blocked delete
+    const sBlockDel = await sdk.removeProvider("openai-main");
+    expect(sBlockDel.ok).toBe(false);
+    expect((sBlockDel as any).blocked).toBe(true);
+
     // Server HTTP blocked delete
     const { req: rDelBlock, res: resDelBlock } = createMockReqRes(
       "DELETE",
       "/v1/providers/openai-main",
-      { authorization: `Bearer ${adminKey.rawKey}` },
+      { authorization: `Bearer ${adminKey.rawKey}`, "if-match": "*" },
     );
     await new Promise<void>((resolve) => { resDelBlock.on("finish", () => resolve()); serverHandler(rDelBlock, resDelBlock); });
     expect(resDelBlock.statusCode).toBe(409);

@@ -124,7 +124,8 @@ describe("CLI Provider Subcommands Integration (QS-P6.1 & QS-P6.2)", () => {
       accountId: "cli-test-openai",
       upstreamProvider: "openai",
       credential: { mode: "preserve" },
-      baseUrl: "https://api.openai.com/v1",
+      baseUrl: "https://127.0.0.1:8080/v1",
+      allowPrivate: true,
     });
     expect(editRes.ok).toBe(true);
     if (editRes.ok) {
@@ -135,8 +136,18 @@ describe("CLI Provider Subcommands Integration (QS-P6.1 & QS-P6.2)", () => {
   });
 
   it("parses models resolve media.image command argv correctly", async () => {
+    const { createProviderManagerApi } = await import("../provider-manager-api.js");
+    const { ProviderRuntime } = await import("../../../domain/providers/provider-runtime.js");
+    const { ProviderConfigStore } = await import("../../../domain/providers/config-store/provider-config-store.js");
+    const { MemoryCredentialStore } = await import("../../../domain/providers/credentials/memory-credential-store.js");
+
+    const configStore = new ProviderConfigStore(":memory:");
+    const credentialStore = new MemoryCredentialStore();
+    const runtime = new ProviderRuntime({ configStore, credentialStore });
+    const api = createProviderManagerApi(runtime);
+
     const program = new Command();
-    registerModelsCommands(program);
+    registerModelsCommands(program, api);
     const modelsCmd = program.commands.find((c) => c.name() === "models");
     const resolveCmd = modelsCmd?.commands.find((c) => c.name() === "resolve");
     expect(resolveCmd).toBeDefined();
@@ -144,9 +155,40 @@ describe("CLI Provider Subcommands Integration (QS-P6.1 & QS-P6.2)", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
       await program.parseAsync(["node", "test", "models", "resolve", "media.image", "--json"]);
-      // Should have output JSON or handled resolution without unhandled syntax error
       expect(logSpy).toHaveBeenCalled();
     } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("sets process.exitCode = 1 when models resolve --json fails", async () => {
+    const { createProviderManagerApi } = await import("../provider-manager-api.js");
+    const { ProviderRuntime } = await import("../../../domain/providers/provider-runtime.js");
+    const { ProviderConfigStore } = await import("../../../domain/providers/config-store/provider-config-store.js");
+    const { MemoryCredentialStore } = await import("../../../domain/providers/credentials/memory-credential-store.js");
+
+    const configStore = new ProviderConfigStore(":memory:");
+    const credentialStore = new MemoryCredentialStore();
+    const runtime = new ProviderRuntime({ configStore, credentialStore });
+    const api = createProviderManagerApi(runtime);
+
+    // Mock resolvePreview to return a failure object
+    vi.spyOn(api, "resolvePreview").mockResolvedValueOnce({
+      ok: false,
+      code: "no_model_available",
+      message: "No model available",
+    } as any);
+
+    const program = new Command();
+    registerModelsCommands(program, api);
+
+    const origExitCode = process.exitCode;
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await program.parseAsync(["node", "test", "models", "resolve", "text.complex", "--json"]);
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.exitCode = origExitCode;
       logSpy.mockRestore();
     }
   });

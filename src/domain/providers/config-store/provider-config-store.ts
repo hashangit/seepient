@@ -45,7 +45,9 @@ export class ProviderConfigStore {
       this.overlayPath = undefined;
     } else {
       this.overlayPath =
-        customOverlayPath ?? path.join(os.homedir(), ".seepient", "providers-overlay.json");
+        customOverlayPath ??
+        process.env.SEEPIENT_OVERLAY_PATH ??
+        path.join(os.homedir(), ".seepient", "providers-overlay.json");
     }
 
     this.currentOverlay = {
@@ -66,7 +68,7 @@ export class ProviderConfigStore {
           };
         }
       } catch (err: any) {
-        if (err.code === "EPERM" || err.code === "EACCES" || err.code === "ENOENT") {
+        if (err.code === "ENOENT") {
           this.currentOverlay = {
             revision: 0,
             updatedAt: new Date().toISOString(),
@@ -307,9 +309,8 @@ export class ProviderConfigStore {
             details: patch,
           });
         } catch (auditErr: any) {
-          if (auditErr?.code !== "SECURITY_ERROR") {
-            // Non-fatal if sandbox blocks writing to homedir audit log during tests
-            console.warn(`[ProviderConfigStore] Audit write suppressed: ${auditErr?.message}`);
+          if ((process.env.VITEST || process.env.NODE_ENV === "test") && auditErr?.code !== "SECURITY_ERROR") {
+            console.warn(`[ProviderConfigStore] Audit write suppressed in test: ${auditErr?.message}`);
           } else {
             throw auditErr;
           }

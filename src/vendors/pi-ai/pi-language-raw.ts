@@ -1,4 +1,5 @@
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
+import { createPiCredentialStore } from "./pi-auth-adapter.js";
 import type {
   Models,
   Model,
@@ -133,6 +134,16 @@ async function resolveSecretApiKey(
           if (store && (typeof store.modify === "function" || typeof store.put === "function")) {
             const piStore = createPiCredentialStore(store);
             const modified = await piStore.modify(target.providerAccount, async (curr) => {
+              if (
+                curr &&
+                curr.type === "oauth" &&
+                curr.access &&
+                typeof curr.expires === "number" &&
+                curr.expires > 0 &&
+                Date.now() < curr.expires - 60_000
+              ) {
+                return curr;
+              }
               const base = curr && curr.type === "oauth" ? curr : oauthCred;
               const refreshed = await (flow as any).refresh(base, signal);
               if (!refreshed?.access) {
@@ -186,8 +197,13 @@ export class PiLanguageRaw implements LanguageBackend {
   private credentialStore?: any;
 
   constructor(customModels?: Models, credentialStore?: any) {
-    this.models = customModels ?? builtinModels();
     this.credentialStore = credentialStore;
+    if (customModels) {
+      this.models = customModels;
+    } else {
+      const piStore = credentialStore ? createPiCredentialStore(credentialStore) : undefined;
+      this.models = builtinModels(piStore ? { credentials: piStore } : undefined);
+    }
   }
 
   private prepareInvocation(

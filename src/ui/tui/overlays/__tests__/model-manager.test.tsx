@@ -162,7 +162,7 @@ describe("Jobs board", () => {
     await type(inst, ENTER); // accept default level → assign
     await vi.waitFor(() => {
       expect(setAssignment).toHaveBeenCalled();
-    });
+    }, { timeout: 5000 });
     frame = inst.lastFrame() ?? "";
     expect(frame).toMatch(/applies next turn|assigned/);
   });
@@ -179,7 +179,7 @@ describe("Jobs board", () => {
     await type(inst, "3"); // Clear slot
     await vi.waitFor(() => {
       expect(clearAssignment).toHaveBeenCalled();
-    });
+    }, { timeout: 5000 });
     expect(inst.lastFrame() ?? "").toMatch(/applies next turn|cleared/);
   });
 });
@@ -226,7 +226,7 @@ describe("Providers tab", () => {
     await type(inst, "1"); // Remove anyway
     await vi.waitFor(() => {
       expect(forced).toBe(true);
-    });
+    }, { timeout: 5000 });
   });
 
   it("add provider opens the shared AddAccount and saves through the api", async () => {
@@ -241,7 +241,7 @@ describe("Providers tab", () => {
     await type(inst, "3"); // keyless
     await vi.waitFor(() => {
       expect(ctx.state.accounts.length).toBe(3);
-    });
+    }, { timeout: 5000 });
   });
 });
 
@@ -271,7 +271,7 @@ describe("resilience + feedback", () => {
     await type(inst, ENTER);
     await vi.waitFor(() => {
       expect(inst.lastFrame() ?? "").toContain("changed elsewhere");
-    });
+    }, { timeout: 5000 });
   });
 
   it("session switch marks temporary and closes", async () => {

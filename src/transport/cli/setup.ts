@@ -34,7 +34,7 @@ export async function runSetup(options: { project?: boolean } = {}): Promise<voi
     console.log(chalk.yellow('Setup wizard requires an interactive terminal.'));
     console.log(chalk.dim('Set API keys via environment variables instead:'));
     console.log(chalk.dim('  OPENAI_API_KEY, ANTHROPIC_API_KEY, GLM_API_KEY, OPENAI_COMPAT_API_KEY'));
-    console.log(chalk.dim('  (or any provider env var: <NAME>_API_KEY)'));
+    console.log(chalk.dim('  (or configure custom env vars via `seepient providers add <id> --credential env:VAR_NAME`)'));
     console.log(chalk.dim('Or configure model assignments headlessly:'));
     console.log(chalk.dim('  seepient models set text.standard <account>/<model>'));
     console.log(chalk.dim('Or mount a config file at ~/.seepient/setting.json'));

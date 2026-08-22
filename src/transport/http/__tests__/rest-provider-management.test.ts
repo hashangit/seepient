@@ -318,4 +318,130 @@ describe("REST Provider Management v2 API (QS-P6.3 & QS-P6.4)", () => {
     expect(storedCred).toBeDefined();
     expect((storedCred as any).access).toBe("relayed-access-token");
   });
+
+  it("OAuth complete rollback preserves pre-existing api_key secret on failure (N1)", async () => {
+    // 1. Seed pre-existing API key credential
+    await credStore.put("openai-preexisting", {
+      kind: "api_key",
+      keyValue: "sk-original-secret-key-12345",
+    }, { source: "disk", description: "Original key" });
+
+    const oauthService = await import("../../../domain/providers/oauth-service.js");
+    const mockFlow = {
+      login: vi.fn(async (interaction: any) => {
+        setTimeout(() => {
+          interaction.notify({
+            type: "device_code",
+            userCode: "TEST-CODE-ROLLBACK",
+            verificationUri: "https://openai.com/device",
+            expiresInSeconds: 300,
+          });
+        }, 10);
+        // Simulate failure returning invalid credentials
+        return { type: "oauth", access: "" };
+      }),
+    };
+    vi.spyOn(oauthService, "getOAuthFlow").mockResolvedValue(mockFlow as any);
+
+    // Start relay for openai-preexisting
+    const startReq = createMockReqRes("POST", "/v1/providers/openai-preexisting/oauth/start", {
+      authorization: `Bearer ${adminKey.rawKey}`,
+    });
+    await new Promise<void>((resolve) => {
+      startReq.res.on("finish", () => resolve());
+      handler(startReq.req, startReq.res);
+    });
+    const startBody = JSON.parse(startReq.res.body);
+
+    // Complete fails due to invalid tokens
+    const completeReq = createMockReqRes(
+      "POST",
+      "/v1/providers/openai-preexisting/oauth/complete",
+      { authorization: `Bearer ${adminKey.rawKey}` },
+      JSON.stringify({ attemptId: startBody.attemptId }),
+    );
+    await new Promise<void>((resolve) => {
+      completeReq.res.on("finish", () => resolve());
+      handler(completeReq.req, completeReq.res);
+    });
+    expect(completeReq.res.statusCode).toBe(400);
+
+    // Assert pre-existing credential survived intact with original secret
+    const preserved = await (credStore as any).getRecord("openai-preexisting");
+    expect(preserved).toBeDefined();
+    expect(preserved.kind).toBe("api_key");
+    expect(preserved.keyValue).toBe("sk-original-secret-key-12345");
+  });
+
+  it("POST /v1/providers/:id/oauth/start fails fast on early login rejection (N6)", async () => {
+    const oauthService = await import("../../../domain/providers/oauth-service.js");
+    const mockFlow = {
+      login: vi.fn(async () => {
+        throw new Error("Immediate connection failure");
+      }),
+    };
+    vi.spyOn(oauthService, "getOAuthFlow").mockResolvedValue(mockFlow as any);
+
+    const startReq = createMockReqRes("POST", "/v1/providers/anthropic/oauth/start", {
+      authorization: `Bearer ${adminKey.rawKey}`,
+    });
+    await new Promise<void>((resolve) => {
+      startReq.res.on("finish", () => resolve());
+      handler(startReq.req, startReq.res);
+    });
+
+    expect(startReq.res.statusCode).toBe(400);
+    const body = JSON.parse(startReq.res.body);
+    expect(body.error.code).toBe("OAUTH_FLOW_ERROR");
+    expect(body.error.message).toContain("Immediate connection failure");
+  });
+
+  it("handles media.image assignment route with dot notation (R15)", async () => {
+    const putReq = createMockReqRes(
+      "PUT",
+      "/v1/models/assignments/media.image",
+      { authorization: `Bearer ${adminKey.rawKey}`, "if-match": "*" },
+      JSON.stringify({ providerAccount: "openai", model: "dall-e-3" }),
+    );
+    await new Promise<void>((resolve) => {
+      putReq.res.on("finish", () => resolve());
+      handler(putReq.req, putReq.res);
+    });
+    expect(putReq.res.statusCode).toBe(200);
+
+    const getReq = createMockReqRes(
+      "GET",
+      "/v1/models/assignments/media.image",
+      { authorization: `Bearer ${readKey.rawKey}` },
+    );
+    await new Promise<void>((resolve) => {
+      getReq.res.on("finish", () => resolve());
+      handler(getReq.req, getReq.res);
+    });
+    expect(getReq.res.statusCode).toBe(200);
+    const body = JSON.parse(getReq.res.body);
+    expect(body.model).toBe("dall-e-3");
+  });
+
+  it("PUT /v1/providers/:id routes through controller with sanitization and validation", async () => {
+    const putReq = createMockReqRes(
+      "PUT",
+      "/v1/providers/test-acct",
+      { authorization: `Bearer ${adminKey.rawKey}`, "if-match": "*" },
+      JSON.stringify({
+        upstreamProvider: "openai",
+        credential: { kind: "none" },
+        baseUrl: "http://127.0.0.1:9090/v1",
+        allowPrivate: true,
+      }),
+    );
+    await new Promise<void>((resolve) => {
+      putReq.res.on("finish", () => resolve());
+      handler(putReq.req, putReq.res);
+    });
+    expect(putReq.res.statusCode).toBe(200);
+    const body = JSON.parse(putReq.res.body);
+    expect(body.provider.id).toBe("test-acct");
+    expect(body.provider.credential.kind).toBe("none");
+  });
 });

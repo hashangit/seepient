@@ -16,6 +16,7 @@ import chalk from 'chalk';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as readline from 'readline/promises';
 
 import { Agent } from './agent.js';
 import { resolveLaunchMode, selectSystemPrompt } from '../../domain/prompts/system-prompts.js';
@@ -99,9 +100,19 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
     console.log(chalk.yellow("No provider configuration found."));
 
     if (isNonInteractive()) {
-      console.error(chalk.red("No provider configured. Set API key env vars (OPENAI_API_KEY / ANTHROPIC_API_KEY / GLM_API_KEY / OPENAI_COMPAT_API_KEY or <NAME>_API_KEY) or configure via `seepient models set text.standard <account>/<model>`."));
+      console.error(chalk.red("No provider configured. Set supported API key env vars (OPENAI_API_KEY / ANTHROPIC_API_KEY / GLM_API_KEY / OPENAI_COMPAT_API_KEY) or configure via `seepient providers add <id> --credential env:VAR_NAME`."));
       process.exit(1);
     } else {
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      try {
+        const ans = await rl.question(chalk.cyan("No provider configured. Run setup wizard now? [Y/n] "));
+        if (ans.trim().toLowerCase() === "n") {
+          console.log(chalk.dim("Setup skipped. You can configure providers anytime using `seepient setup` or `seepient providers add`."));
+          process.exit(0);
+        }
+      } finally {
+        rl.close();
+      }
       await runSetup();
       effectiveConfig = await runtime.getConfigStore().getEffectiveConfig();
       hasProviders = Object.keys(effectiveConfig.providers || {}).length > 0;

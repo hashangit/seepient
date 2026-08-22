@@ -70,26 +70,31 @@ export function AddAccount({
 
   async function save(): Promise<void> {
     setFeedback({ kind: "busy", message: "Saving account…" });
-    const finalId = accountId || defaultId;
-    const input: AccountInput = {
-      accountId: finalId,
-      upstreamProvider: upstream === "custom" ? "openai-compatible" : upstream,
-      credential:
-        credentialMode === "paste" ? { mode: "paste", keyValue: secret }
-        : credentialMode === "env" ? { mode: "env", varName: secret }
-        : { mode: "none" },
-      ...(upstream === "custom" && baseUrl ? { baseUrl } : {}),
-      ...(upstream === "custom" && COMPAT_OPTIONS[compatIdx] !== "none" ? { compat: COMPAT_OPTIONS[compatIdx] as any } : {}),
-      ...(upstream === "custom" && allowPrivate ? { allowPrivate: true } : {}),
-    };
-    const err = await onSaveAccount(input);
-    if (!err) {
-      setSecret("");
-      setSavedId(finalId);
-      setFeedback({ kind: "idle", message: "" });
-      setPhase("done");
-    } else {
-      setFeedback({ kind: "error", message: `${err.code}: ${err.message}` });
+    try {
+      const finalId = accountId || defaultId;
+      const input: AccountInput = {
+        accountId: finalId,
+        upstreamProvider: upstream === "custom" ? "openai-compatible" : upstream,
+        credential:
+          credentialMode === "paste" ? { mode: "paste", keyValue: secret }
+          : credentialMode === "env" ? { mode: "env", varName: secret }
+          : { mode: "none" },
+        ...(upstream === "custom" && baseUrl ? { baseUrl } : {}),
+        ...(upstream === "custom" && COMPAT_OPTIONS[compatIdx] !== "none" ? { compat: COMPAT_OPTIONS[compatIdx] as any } : {}),
+        ...(upstream === "custom" && allowPrivate ? { allowPrivate: true } : {}),
+      };
+      const err = await onSaveAccount(input);
+      if (!err) {
+        setSecret("");
+        setSavedId(finalId);
+        setFeedback({ kind: "idle", message: "" });
+        setPhase("done");
+      } else {
+        setFeedback({ kind: "error", message: `${err.code}: ${err.message}` });
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setFeedback({ kind: "error", message: `failed: ${msg}` });
     }
   }
 

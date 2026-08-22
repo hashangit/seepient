@@ -1,4 +1,3 @@
-// src/foundations/contracts/sdk-fixture.ts — COMPILING CONTRACT
 import type {
   ContentBlock,
   CanonicalMessage,
@@ -9,6 +8,7 @@ import type {
   Usage,
   ThinkingLevel,
   UpstreamModel,
+  AvailableModel,
   StopReason,
 } from "../schemas/inference.js";
 import type { ToolDefinition } from "./tool.js";
@@ -21,7 +21,7 @@ import type { CredentialRef } from "../schemas/credential-store.js";
 import type { InferenceAdapter } from "./backend-ports.js";
 
 export type ProviderId = string;
-export type { StopReason };
+export type { StopReason, AvailableModel };
 
 // ── Factory options (credentials OPTIONAL — zero-config compat) ────────
 export interface CreateSeepientOptions {
@@ -93,7 +93,7 @@ export interface GenerateImageOptions {
 }
 
 export interface ResolveOptions {
-  purpose: keyof PurposeModelMap;
+  purpose: PurposeId;
   tier?: "efficient" | "standard" | "complex";
   override?: ModelAssignmentOverride;
 }
@@ -142,14 +142,14 @@ export interface Seepient {
   streamText(opts: GenerateTextOptions): Promise<AsyncIterable<StreamEvent>>;
   generateImage(opts: GenerateImageOptions): Promise<ImageResult>;
   resolve(opts: ResolveOptions): Promise<{
-    model: UpstreamModel;
+    model: AvailableModel;
     providerAccount: ProviderId;
     thinkingLevel?: ThinkingLevel;
     via?: "requested" | "fallback-chain";
     failureTargets?: Array<{ providerAccount: string; model: string }>;
   }>;
   getAssignments(): PurposeModelMap;
-  getCatalog(): Promise<readonly UpstreamModel[]>;
+  getCatalog(): Promise<readonly AvailableModel[]>;
   reload(): Promise<{ revision: number }>;
   dispose(): Promise<void>;
 

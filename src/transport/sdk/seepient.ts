@@ -8,7 +8,8 @@ import { ProviderRuntime, getDefaultProviderRuntime } from "../../domain/provide
 import { ProviderConfigStore } from "../../domain/providers/config-store/provider-config-store.js";
 import { MemoryCredentialStore } from "../../domain/providers/credentials/memory-credential-store.js";
 import { AggregateInferenceAdapter } from "../../capabilities/inference/aggregate-adapter.js";
-import { InferenceError, InferenceErrorCode } from "../../foundations/errors.js";
+import { InferenceError, InferenceErrorCode, SeepientError } from "../../foundations/errors.js";
+import type { ResolutionPreview } from "../cli/provider-manager-api.js";
 import type {
   Seepient,
   CreateSeepientOptions,
@@ -26,6 +27,7 @@ import type {
   PurposeId,
   Tier,
   AssignmentTarget,
+  AvailableModel,
 } from "../../foundations/contracts/sdk-fixture.js";
 import type {
   ContentBlock,
@@ -437,34 +439,46 @@ export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<
     },
 
     async resolve(opts: ResolveOptions): Promise<{
-      model: UpstreamModel;
+      model: AvailableModel;
       providerAccount: ProviderId;
       thinkingLevel?: ThinkingLevel;
       via: "requested" | "fallback-chain";
       failureTargets: Array<{ providerAccount: string; model: string }>;
     }> {
+      const res = await managerApi.resolvePreview(opts.purpose as PurposeId, opts.tier, opts.override);
+      if ("ok" in res && res.ok === false) {
+        throw new SeepientError(res.message || "Resolution failed", res.code.toUpperCase(), false);
+      }
+      const preview = res as ResolutionPreview;
       const snapshot = await runtime.createTurnSnapshot();
-      const plan = await runtime.resolvePlan(snapshot, opts.purpose as any, opts.tier, opts.override);
+      const availableModels = await runtime.modelCatalog.listAvailableModels(snapshot.config);
+      const targetModelId = preview.selectedTarget.model;
+      const targetAcct = preview.selectedTarget.providerAccount;
 
-      const model: UpstreamModel = (snapshot.catalog.find((m: any) => m.id === plan.selectedTarget.model) ?? {
-        id: plan.selectedTarget.model,
-        displayName: plan.selectedTarget.model,
-        upstreamProvider: plan.selectedTarget.providerAccount,
-        contextWindow: 128000,
+      const foundModel =
+        availableModels.find((m) => m.id === targetModelId && m.reachableVia.includes(targetAcct)) ??
+        availableModels.find((m) => m.id === targetModelId);
+
+      const model: AvailableModel = foundModel ?? {
+        id: targetModelId,
+        displayName: targetModelId,
+        upstreamProvider: targetAcct,
+        contextWindow: 0,
         capabilities: {
-          toolUse: true,
-          streaming: true,
+          toolUse: false,
+          streaming: false,
           vision: false,
         },
-        provenance: "user-declared" as const,
-      }) as any;
+        provenance: "user-declared",
+        reachableVia: [targetAcct],
+      };
 
       return {
         model,
-        providerAccount: plan.selectedTarget.providerAccount,
-        thinkingLevel: plan.selectedTarget.thinkingLevel,
-        via: (plan as any).via ?? "requested",
-        failureTargets: [...(plan.failureTargets ?? [])] as Array<{ providerAccount: string; model: string }>,
+        providerAccount: preview.selectedTarget.providerAccount,
+        thinkingLevel: (preview.selectedTarget as any).thinkingLevel,
+        via: preview.via,
+        failureTargets: [...(preview.failureTargets ?? [])],
       };
     },
 
@@ -472,9 +486,9 @@ export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<
       return latestState.assignments ?? {};
     },
 
-    async getCatalog(): Promise<readonly UpstreamModel[]> {
+    async getCatalog(): Promise<readonly AvailableModel[]> {
       const snapshot = await runtime.createTurnSnapshot();
-      return (await runtime.modelCatalog.listAvailableModels(snapshot.config)) as any;
+      return runtime.modelCatalog.listAvailableModels(snapshot.config);
     },
 
     async reload(): Promise<{ revision: number }> {

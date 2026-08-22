@@ -95,6 +95,7 @@ export interface ResolutionPreview {
 }
 
 export interface OAuthFlowCallbacks {
+  preferredAccountId?: string;
   signal?: AbortSignal;
   onDeviceCode?(info: { userCode: string; verificationUrl: string; expiresInMs: number }): void;
   onBrowserOpen?(url: string): void;
@@ -104,11 +105,15 @@ export interface OAuthFlowCallbacks {
 
 export interface ProviderManagerApi {
   getState(): Promise<ManagerState>;
-  saveAccount(input: AccountInput): Promise<SaveResult>;
-  deleteAccount(accountId: string, opts?: { force?: boolean }): Promise<DeleteResult>;
-  setAssignment(purpose: PurposeId, tier: Tier | null, target: AssignmentTarget): Promise<SaveResult>;
-  clearAssignment(purpose: PurposeId, tier: Tier | null): Promise<SaveResult>;
-  resolvePreview(purpose: PurposeId, tier?: Tier): Promise<ResolutionPreview | UiError & { ok: false }>;
+  saveAccount(input: AccountInput, expectedRevision?: number): Promise<SaveResult>;
+  deleteAccount(accountId: string, opts?: { force?: boolean; expectedRevision?: number }): Promise<DeleteResult>;
+  setAssignment(purpose: PurposeId, tier: Tier | null, target: AssignmentTarget, expectedRevision?: number): Promise<SaveResult>;
+  clearAssignment(purpose: PurposeId, tier: Tier | null, expectedRevision?: number): Promise<SaveResult>;
+  resolvePreview(
+    purpose: PurposeId,
+    tier?: Tier,
+    override?: { providerAccount?: string; model?: string; thinkingLevel?: ThinkingLevel },
+  ): Promise<ResolutionPreview | UiError & { ok: false }>;
   probeAccount(accountId: string): Promise<ProbeResult>;
   refreshModels(accountId: string): Promise<RefreshResult>;
   switchSessionModel(accountId: string, modelId: string): void;

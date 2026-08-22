@@ -189,6 +189,7 @@ export function ModelManager({
     }
     if (overlay) return; // sub-overlays own their input
     if (key.escape) { onClose(); return; }
+    if (!state) return;
     if (key.tab) {
       setTab((t) => (t === "jobs" ? "providers" : t === "providers" ? "now" : "jobs"));
       return;
@@ -200,7 +201,7 @@ export function ModelManager({
     }
     if (key.downArrow) {
       if (tab === "jobs") setSlotIdx((i) => Math.min(slotRows.length - 1, i + 1));
-      else if (tab === "providers") setProvIdx((i) => Math.min(state!.accounts.length - 1, i + 1));
+      else if (tab === "providers") setProvIdx((i) => Math.min(state.accounts.length - 1, i + 1));
       return;
     }
     const num = parseInt(input ?? "", 10);
@@ -212,7 +213,7 @@ export function ModelManager({
       const openPicker = (): void =>
         setOverlay({ kind: "picker", purpose: row.purpose.id, tier: row.tier, title: `Assign ${row.key}` });
       const { assigned } = slotInfo(row);
-      const model = assigned ? state?.models.find((m) => m.id === assigned.model) : undefined;
+      const model = assigned ? state.models.find((m) => m.id === assigned.model) : undefined;
       if (key.return || (isNum && num === 1)) { openPicker(); return; }
       if (isNum && num === 2) {
         if (assigned && model) {
@@ -226,9 +227,13 @@ export function ModelManager({
       }
       if (isNum && num === 3) {
         void (async () => {
-          const res = await api.clearAssignment(row.purpose.id, row.tier);
-          if (res.ok) { setState(res.state); setFeedback({ kind: "success", message: "✓ cleared", note: "applies next turn" }); void load(); }
-          else setFeedback({ kind: "error", message: `${res.error.code}: ${res.error.message}` });
+          try {
+            const res = await api.clearAssignment(row.purpose.id, row.tier);
+            if (res.ok) { setState(res.state); setFeedback({ kind: "success", message: "✓ cleared", note: "applies next turn" }); void load(); }
+            else setFeedback({ kind: "error", message: `${res.error.code}: ${res.error.message}` });
+          } catch (err: any) {
+            setFeedback({ kind: "error", message: err.message });
+          }
         })();
         return;
       }
@@ -238,7 +243,11 @@ export function ModelManager({
             setFeedback({
               kind: "idle", message: `${row.key} → ${r.selectedTarget.providerAccount}/${r.selectedTarget.model} (${r.via})`,
             });
+          } else {
+            setFeedback({ kind: "error", message: "Preview unavailable" });
           }
+        }).catch((err: any) => {
+          setFeedback({ kind: "error", message: err.message });
         });
         return;
       }
@@ -351,8 +360,12 @@ export function ModelManager({
           current={overlay.current}
           onPick={(level) => {
             void (async () => {
-              const err = await assign(overlay.purpose, overlay.tier, { ...overlay.target, thinkingLevel: level as any });
-              if (!err) setOverlay(null);
+              try {
+                const err = await assign(overlay.purpose, overlay.tier, { ...overlay.target, thinkingLevel: level as any });
+                if (!err) setOverlay(null);
+              } catch (err: any) {
+                setFeedback({ kind: "error", message: err?.message ?? String(err) });
+              }
             })();
           }}
           onClose={() => setOverlay(null)}
@@ -544,29 +557,39 @@ export function SignInFlow({ upstream, api, onDone, onCancel }: SignInFlowProps)
   const start = useCallback(async () => {
     setStatus("initiating");
     setError(null);
-    const res = await api.signInWithProvider(upstream, {
-      signal: abortControllerRef.current.signal,
-      onDeviceCode: (info) => {
-        setDeviceInfo(info);
-        setStatus("device_code");
-      },
-      onBrowserOpen: (url) => {
-        setBrowserUrl(url);
-        setStatus("waiting");
-      },
-      onWaiting: () => {
-        setStatus("waiting");
-      },
-    });
+    try {
+      const res = await api.signInWithProvider(upstream, {
+        signal: abortControllerRef.current.signal,
+        onDeviceCode: (info) => {
+          setDeviceInfo(info);
+          setStatus("device_code");
+        },
+        onBrowserOpen: (url) => {
+          setBrowserUrl(url);
+          setStatus("waiting");
+        },
+        onWaiting: () => {
+          setStatus("waiting");
+        },
+      });
 
-    if (res.ok) {
-      onDoneRef.current(`✓ Signed in with ${upstream}`);
-    } else {
+      if (res.ok) {
+        onDoneRef.current(`✓ Signed in with ${upstream}`);
+      } else {
+        if (abortControllerRef.current.signal.aborted) {
+          onCancelRef.current();
+          return;
+        }
+        setError(res.error.message);
+        setStatus("error");
+      }
+    } catch (err: any) {
       if (abortControllerRef.current.signal.aborted) {
         onCancelRef.current();
         return;
       }
-      setError(res.error.message);
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
       setStatus("error");
     }
   }, [upstream, api]);

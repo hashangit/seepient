@@ -8,9 +8,17 @@ import {
   AVAILABLE_OAUTH_FLOWS,
   getOAuthFlow,
   isOAuthSupported,
+  getCanonicalOAuthFlowId,
+  FLOW_MAP,
 } from "../../vendors/pi-ai/pi-auth-adapter.js";
 
-export { AVAILABLE_OAUTH_FLOWS, getOAuthFlow, isOAuthSupported };
+export {
+  AVAILABLE_OAUTH_FLOWS,
+  getOAuthFlow,
+  isOAuthSupported,
+  getCanonicalOAuthFlowId,
+  FLOW_MAP,
+};
 
 export async function getAvailableOAuthFlows(): Promise<readonly string[]> {
   return AVAILABLE_OAUTH_FLOWS;

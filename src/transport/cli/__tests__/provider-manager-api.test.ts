@@ -2,8 +2,8 @@
  * 013 T004 — ProviderManagerApi controller unit tests (contract §6 matrix).
  * Runs against an in-memory config store + memory credential store.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { createProviderManagerApi } from "../provider-manager-api.js";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { createProviderManagerApi, mapError } from "../provider-manager-api.js";
 import { ProviderConfigStore } from "../../../domain/providers/config-store/provider-config-store.js";
 import { ProviderRuntime } from "../../../domain/providers/provider-runtime.js";
 import { MemoryCredentialStore } from "../../../domain/providers/credentials/memory-credential-store.js";
@@ -196,6 +196,45 @@ describe("deleteAccount blocked/force (contract §6.4)", () => {
     const envDel = await api.deleteAccount("acme-env", { force: true });
     expect(envDel.ok).toBe(true);
   });
+
+  it("handles custom credId and preserves shared credentials until last account deleted", async () => {
+    const { api, credentialStore, configStore, runtime } = makeApi();
+    withCatalogModels(runtime, MODELS);
+
+    // Save a credential under a shared id
+    await credentialStore.put("shared-cred-1", { kind: "api_key", keyValue: "secret-key" }, { source: "disk" });
+
+    // Seed two accounts in overlay pointing to the shared credential id
+    const currentOverlay = await configStore.getOverlay();
+    await configStore.updateOverlay(
+      {
+        providers: {
+          "acct-1": { adapter: "pi-ai", upstreamProvider: "acme", credential: { kind: "seepient", id: "shared-cred-1" } },
+          "acct-2": { adapter: "pi-ai", upstreamProvider: "acme", credential: { kind: "seepient", id: "shared-cred-1" } },
+          "acct-env": { adapter: "pi-ai", upstreamProvider: "other", credential: { kind: "env", name: "ENV_KEY" } },
+        },
+      },
+      currentOverlay.revision,
+    );
+
+    // Seed a credential under acct-env name to ensure env-account deletion doesn't delete it
+    await credentialStore.put("acct-env", { kind: "api_key", keyValue: "unrelated-key" }, { source: "disk" });
+
+    // Deleting acct-1 should NOT delete shared-cred-1 because acct-2 still uses it
+    const del1 = await api.deleteAccount("acct-1", { force: true });
+    expect(del1.ok).toBe(true);
+    expect(await credentialStore.get("shared-cred-1")).toBeDefined();
+
+    // Deleting acct-env should NOT touch the "acct-env" store entry because acct-env has credential.kind: "env"
+    const delEnv = await api.deleteAccount("acct-env", { force: true });
+    expect(delEnv.ok).toBe(true);
+    expect(await credentialStore.get("acct-env")).toBeDefined();
+
+    // Deleting acct-2 (last user of shared-cred-1) SHOULD clean up shared-cred-1
+    const del2 = await api.deleteAccount("acct-2", { force: true });
+    expect(del2.ok).toBe(true);
+    expect(await credentialStore.get("shared-cred-1")).toBeUndefined();
+  });
 });
 
 describe("setAssignment validation (contract §6.5)", () => {
@@ -268,8 +307,7 @@ describe("resolvePreview (contract §6.6)", () => {
 
 describe("error redaction (contract §6.7)", () => {
   it("scrubs key material and URL userinfo from mapped errors", async () => {
-    const { api } = makeApi();
-    const err = await (api as any).mapErrorForTest(
+    const err = mapError(
       new Error("request to https://me:hunter2@api.example/v1 failed with sk-abcdefghijklmnopqrst key"),
     );
     expect(err.message).not.toContain("hunter2");
@@ -364,12 +402,256 @@ describe("OAuth sign-in & logout (contract §6.8–6.10)", () => {
     expect(res2.ok).toBe(true);
   });
 
+  it("logoutAccount does not delete pasted api_key credentials", async () => {
+    const { api, credentialStore } = makeApi();
+    await api.saveAccount({
+      accountId: "anthropic-key",
+      upstreamProvider: "anthropic",
+      credential: { mode: "paste", keyValue: "sk-ant-12345" },
+    });
+
+    const recBefore = await credentialStore.get("anthropic-key");
+    expect(recBefore).toBeDefined();
+    expect(recBefore?.materialKind).toBe("api_key");
+
+    const logoutRes = await api.logoutAccount("anthropic-key");
+    expect(logoutRes.ok).toBe(true);
+
+    const recAfter = await credentialStore.get("anthropic-key");
+    expect(recAfter).toBeDefined(); // Key MUST be preserved!
+  });
+
+  it("saveAccount clears baseUrl and ssrfAllowPrivate when editing account with omitted fields", async () => {
+    const { api, configStore } = makeApi();
+    const saveRes = await api.saveAccount({
+      accountId: "custom-ep",
+      upstreamProvider: "openai",
+      credential: { mode: "none" },
+      baseUrl: "http://127.0.0.1:8080/v1",
+      allowPrivate: true,
+    });
+    expect(saveRes.ok).toBe(true);
+
+    let ov = await configStore.getOverlay();
+    expect((ov.patch.providers as any)?.["custom-ep"]?.baseUrl).toBe("http://127.0.0.1:8080/v1");
+    expect((ov.patch.providers as any)?.["custom-ep"]?.ssrfAllowPrivate).toBe(true);
+
+    // Edit account without baseUrl or allowPrivate
+    const editRes = await api.saveAccount({
+      accountId: "custom-ep",
+      upstreamProvider: "openai",
+      credential: { mode: "preserve" },
+    });
+    expect(editRes.ok).toBe(true);
+
+    ov = await configStore.getOverlay();
+    expect((ov.patch.providers as any)?.["custom-ep"]?.baseUrl).toBeNull();
+    expect((ov.patch.providers as any)?.["custom-ep"]?.ssrfAllowPrivate).toBeNull();
+
+    const state = await api.getState();
+    const acct = state.accounts.find((a) => a.id === "custom-ep");
+    expect(acct?.baseUrl).toBeUndefined();
+  });
+
+  it("sanitizeBaseUrl redacts query parameters containing secret keys", async () => {
+    const { api, runtime } = makeApi();
+    withCatalogModels(runtime, MODELS);
+    const saveRes = await api.saveAccount({
+      accountId: "query-key-acct",
+      upstreamProvider: "acme",
+      credential: { mode: "none" },
+      baseUrl: "http://127.0.0.1:8080/v1?api_key=secret-token-value&format=json",
+      allowPrivate: true,
+    });
+    expect(saveRes.ok).toBe(true);
+
+    const state = await api.getState();
+    const acct = state.accounts.find((a) => a.id === "query-key-acct");
+    expect(acct?.baseUrl).toBeDefined();
+    expect(acct?.baseUrl).not.toContain("secret-token-value");
+    expect(acct?.baseUrl).toContain("%5BREDACTED%5D");
+  });
+
   it("redacts token material in synthetic error messages (contract §6.10)", async () => {
-    const { api } = makeApi();
-    const err = await (api as any).mapErrorForTest(
+    const err = mapError(
       new Error("OAuth refresh failed with access_token: secret-access-123 and refresh: secret-refresh-456"),
     );
     expect(err.message).not.toContain("secret-access-123");
     expect(err.message).not.toContain("secret-refresh-456");
+  });
+
+  it("OCC retry re-validates against fresh state on concurrent mutation (B1)", async () => {
+    const { api, configStore, runtime } = makeApi();
+    withCatalogModels(runtime, MODELS);
+
+    // Add account "acme"
+    await api.saveAccount({
+      accountId: "acme",
+      upstreamProvider: "acme",
+      credential: { mode: "none" },
+    });
+
+    // Simulate concurrent mutation: before assigning slot, another process deletes account "acme"
+    // We hook into configStore to update overlay concurrently right before first updateOverlay
+    const origUpdate = configStore.updateOverlay.bind(configStore);
+    let intervened = false;
+    configStore.updateOverlay = async (patch: any, expectedRevision?: number) => {
+      if (!intervened) {
+        intervened = true;
+        // Concurrently delete acme account and increment revision
+        await origUpdate({ providers: { acme: null } }, expectedRevision ?? 0);
+      }
+      return origUpdate(patch, expectedRevision ?? 0);
+    };
+
+    // Attempting to set slot to deleted account should fail re-validation on OCC retry
+    const assignRes = await api.setAssignment("text", "standard", {
+      providerAccount: "acme",
+      model: "model-tool",
+    });
+
+    expect(assignRes.ok).toBe(false);
+    if (!assignRes.ok) {
+      expect(assignRes.error.code).toBe("validation_failed");
+      expect(assignRes.error.message).toContain('Account "acme" is not configured');
+    }
+  });
+
+  it("setAssignment validates fallback targets and rejects unconfigured accounts or unknown models", async () => {
+    const { api, runtime } = makeApi();
+    withCatalogModels(runtime, MODELS);
+
+    await api.saveAccount({
+      accountId: "acme",
+      upstreamProvider: "acme",
+      credential: { mode: "none" },
+    });
+
+    // Valid primary with unconfigured fallback account
+    const res1 = await api.setAssignment("text", "standard", {
+      providerAccount: "acme",
+      model: "model-tool",
+      fallback: [{ providerAccount: "nonexistent-acct", model: "model-tool" }],
+    });
+    expect(res1.ok).toBe(false);
+    if (!res1.ok) {
+      expect(res1.error.code).toBe("validation_failed");
+      expect(res1.error.message).toContain('Fallback account "nonexistent-acct" is not configured');
+    }
+
+    // Valid primary with unknown fallback model
+    const res2 = await api.setAssignment("text", "standard", {
+      providerAccount: "acme",
+      model: "model-tool",
+      fallback: [{ providerAccount: "acme", model: "typo/unknown-model" }],
+    });
+    expect(res2.ok).toBe(false);
+    if (!res2.ok) {
+      expect(res2.error.code).toBe("unknown_model");
+      expect(res2.error.message).toContain('Fallback model "typo/unknown-model" is not in the catalog');
+    }
+  });
+
+  it("saveAccount preserves pasted credential when encountering an OCC revision conflict", async () => {
+    const { api, credentialStore, configStore } = makeApi();
+
+    // Bump config revision to 1
+    await configStore.updateOverlay({ modelAssignments: { text: { standard: { providerAccount: "a", model: "m" } } } }, 0);
+
+    // Save with stale expectedRevision = 0 and paste mode
+    const saveRes = await api.saveAccount(
+      {
+        accountId: "conflict-key-acct",
+        upstreamProvider: "acme",
+        credential: { mode: "paste", keyValue: "sk-should-survive-conflict" },
+      },
+      0, // Stale revision
+    );
+
+    expect(saveRes.ok).toBe(false);
+    if (!saveRes.ok) {
+      expect(saveRes.error.code).toBe("conflict");
+    }
+
+    // Assert key is not deleted on conflict so client can retry with fresh revision
+    const rec = await credentialStore.getRecord("conflict-key-acct");
+    expect(rec).toBeDefined();
+    expect(rec?.kind).toBe("api_key");
+    expect((rec as any)?.keyValue).toBe("sk-should-survive-conflict");
+  });
+
+  it("P0 regression: signInWithProvider writes valid schema entry and produces valid effective config", async () => {
+    const { api, runtime, credentialStore, configStore } = makeApi();
+    withCatalogModels(runtime, [
+      {
+        id: "claude-3-7-sonnet",
+        upstreamProvider: "anthropic",
+        displayName: "Claude 3.7 Sonnet",
+        contextWindow: 200000,
+        capabilities: { toolUse: true, streaming: true, vision: true },
+        supportedReasoningLevels: ["none", "low", "high"],
+        provenance: "pi-catalog",
+        reachableVia: ["my-anthropic"],
+      },
+    ]);
+
+    const oauthModule = await import("../../../domain/providers/oauth-service.js");
+    const mockFlow = {
+      name: "Anthropic",
+      login: vi.fn(async () => ({
+        type: "oauth",
+        access: "mock-access-token-123",
+        refresh: "mock-refresh-token-456",
+        expires: Date.now() + 3600_000,
+      })),
+    };
+    const spy = vi.spyOn(oauthModule, "getOAuthFlow").mockResolvedValue(mockFlow as any);
+
+    try {
+      const res = await api.signInWithProvider("anthropic", {
+        preferredAccountId: "my-anthropic",
+        onBrowserOpen: () => {},
+      });
+
+      expect(res.ok).toBe(true);
+      if (!res.ok) return;
+
+      // 1. Assert overlay has required adapter and upstreamProvider
+      const overlay = await configStore.getOverlay();
+      const entry = (overlay.patch.providers as any)?.["my-anthropic"];
+      expect(entry).toBeDefined();
+      expect(entry.adapter).toBe("pi-ai");
+      expect(entry.upstreamProvider).toBe("anthropic");
+      expect(entry.credential).toEqual({ kind: "seepient", id: "my-anthropic" });
+
+      // 2. Assert getEffectiveConfig() passes without CONFIG_VIOLATION
+      const effective = await configStore.getEffectiveConfig();
+      expect(effective.providers["my-anthropic"]).toBeDefined();
+      expect(effective.providers["my-anthropic"].adapter).toBe("pi-ai");
+      expect(effective.providers["my-anthropic"].upstreamProvider).toBe("anthropic");
+
+      // 3. Assert runtime.createTurnSnapshot() runs cleanly
+      const snapshot = await runtime.createTurnSnapshot();
+      expect(snapshot.config.providers?.["my-anthropic"]).toBeDefined();
+
+      // 4. Assert getState() reflects healthy account with reachable models
+      const state = await api.getState();
+      const account = state.accounts.find((a) => a.id === "my-anthropic");
+      expect(account).toBeDefined();
+      expect(account?.health).toBe("ok");
+      expect(account?.credentialKind).toBe("oauth");
+      expect(account?.modelCount).toBe(1);
+
+      // 5. Assert credential was saved in credential store with hint
+      const cred = await credentialStore.getRecord("my-anthropic");
+      expect(cred).toBeDefined();
+      expect(cred?.kind).toBe("oauth");
+      expect((cred as any)?.access).toBe("mock-access-token-123");
+      expect((cred as any)?.refresh).toBe("mock-refresh-token-456");
+      const credMeta = await credentialStore.get("my-anthropic");
+      expect(credMeta?.meta?.providerAccountHint).toBe("anthropic");
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

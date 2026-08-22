@@ -137,13 +137,13 @@ function matchRoute(
   if (path === "/v1/models/assignments") {
     if (method === "GET") return { handler: "models_assignments", params: {} };
   }
-  const assignmentMatch = path.match(/^\/v1\/models\/assignments\/([a-z-]+)(?:\/([a-z]+))?$/);
+  const assignmentMatch = path.match(/^\/v1\/models\/assignments\/([a-z_.-]+)(?:\/([a-z]+))?$/);
   if (assignmentMatch) {
     const purpose = assignmentMatch[1];
     const tier = assignmentMatch[2];
     if (method === "GET") return { handler: "models_assignments", params: { purpose, ...(tier ? { tier } : {}) } };
-    if (method === "PUT" && tier) return { handler: "models_assignment_put", params: { purpose, tier } };
-    if (method === "DELETE" && tier) return { handler: "models_assignment_delete", params: { purpose, tier } };
+    if (method === "PUT") return { handler: "models_assignment_put", params: { purpose, ...(tier ? { tier } : {}) } };
+    if (method === "DELETE") return { handler: "models_assignment_delete", params: { purpose, ...(tier ? { tier } : {}) } };
   }
 
   // Provider v2 accounts routes

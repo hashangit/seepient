@@ -92,7 +92,8 @@ export function registerAuthCommands(program: Command): void {
             baseUrl: existing?.baseUrl,
           });
           if (!res.ok) {
-            console.error(chalk.red(`Error (${res.error.code}): ${res.error.message}`));
+            const hintText = res.error.hint ? ` (${res.error.hint})` : "";
+            console.error(chalk.red(`Error (${res.error.code}): ${res.error.message}${hintText}`));
             process.exit(1);
           }
           console.log(chalk.green(`✓ Successfully configured API key for "${providerId}"`));
@@ -109,13 +110,15 @@ export function registerAuthCommands(program: Command): void {
             baseUrl: existing?.baseUrl,
           });
           if (!res.ok) {
-            console.error(chalk.red(`Error (${res.error.code}): ${res.error.message}`));
+            const hintText = res.error.hint ? ` (${res.error.hint})` : "";
+            console.error(chalk.red(`Error (${res.error.code}): ${res.error.message}${hintText}`));
             process.exit(1);
           }
           console.log(chalk.green(`✓ Successfully configured env credential (${envName}) for "${providerId}"`));
         } else if (choice === "3" && hasOAuth) {
           console.log(chalk.cyan(`\nInitiating sign-in with ${upstreamProvider}...`));
           const res = await api.signInWithProvider(upstreamProvider, {
+            preferredAccountId: providerId,
             onDeviceCode: (info) => {
               console.log(chalk.bold(`\n1. Visit: ${chalk.underline.cyan(info.verificationUrl)}`));
               console.log(chalk.bold(`2. Enter code: ${chalk.yellow.bold(info.userCode)}`));
@@ -131,10 +134,11 @@ export function registerAuthCommands(program: Command): void {
             },
           });
           if (!res.ok) {
-            console.error(chalk.red(`\nSign-in failed (${res.error.code}): ${res.error.message}`));
+            const hintText = res.error.hint ? ` (${res.error.hint})` : "";
+            console.error(chalk.red(`\nSign-in failed (${res.error.code}): ${res.error.message}${hintText}`));
             process.exit(1);
           }
-          console.log(chalk.green(`\n✓ Successfully signed in with ${upstreamProvider}`));
+          console.log(chalk.green(`\n✓ Successfully signed in with ${upstreamProvider} as "${providerId}"`));
         } else {
           console.error(chalk.red("Invalid option."));
           process.exit(1);
@@ -147,16 +151,23 @@ export function registerAuthCommands(program: Command): void {
   authCmd
     .command("logout <provider>")
     .description("Remove credentials for a provider account")
-    .action(async (providerId) => {
+    .option("--json", "Output result as JSON")
+    .action(async (providerId, opts) => {
       const runtime = getDefaultProviderRuntime();
       const api = createProviderManagerApi(runtime);
       const res = await api.logoutAccount(providerId);
+      if (opts.json) {
+        console.log(JSON.stringify(res, null, 2));
+        if (!res.ok) process.exitCode = 1;
+        return;
+      }
       if (!res.ok) {
-        if (res.error.code === "account_not_found" || res.error.code === "credential_unavailable") {
+        if (res.error.code === "unconfigured_provider" || res.error.code === "credential_unavailable") {
           console.log(chalk.yellow(`Provider "${providerId}" is not configured.`));
           return;
         }
-        console.error(chalk.red(`Error (${res.error.code}): ${res.error.message}`));
+        const hintText = res.error.hint ? ` (${res.error.hint})` : "";
+        console.error(chalk.red(`Error (${res.error.code}): ${res.error.message}${hintText}`));
         process.exit(1);
       }
       console.log(chalk.green(`✓ Successfully removed credential for provider account "${providerId}"`));

@@ -16,9 +16,15 @@ function parseCredentialMode(raw?: string): AccountInput["credential"] {
     return { mode: "none" };
   }
   if (raw.startsWith("env:")) {
-    return { mode: "env", varName: raw.slice(4) };
+    const varName = raw.slice(4).trim();
+    if (!varName) {
+      console.error(chalk.red('Error: Missing environment variable name in --credential env:VAR_NAME'));
+      process.exit(1);
+    }
+    return { mode: "env", varName };
   }
-  return { mode: "none" };
+  console.error(chalk.red(`Error: Invalid credential mode "${raw}". Expected "env:VAR_NAME" or "none".`));
+  process.exit(1);
 }
 
 export function registerProvidersCommands(program: Command): void {
@@ -28,10 +34,27 @@ export function registerProvidersCommands(program: Command): void {
     .command("list")
     .description("List all configured provider accounts")
     .option("--pool <pool>", "Filter by capability pool: language | image")
+    .option("--json", "Output provider accounts as JSON")
     .action(async (opts) => {
       const runtime = getDefaultProviderRuntime();
       const api = createProviderManagerApi(runtime);
       const state = await api.getState();
+
+      if (opts.json) {
+        let accounts = state.accounts;
+        if (opts.pool) {
+          accounts = accounts.filter((acc) => {
+            const matchingModels = state.models.filter(
+              (m) => m.upstreamProvider === acc.upstreamProvider || m.upstreamProvider === acc.id,
+            );
+            const hasLanguage = matchingModels.length === 0 || matchingModels.some((m) => m.capabilities.toolUse !== false);
+            const hasImage = matchingModels.some((m: any) => m.capabilities?.imageGenerate || m.capabilities?.imageEdit);
+            return opts.pool === "language" ? hasLanguage : hasImage;
+          });
+        }
+        console.log(JSON.stringify(accounts, null, 2));
+        return;
+      }
 
       if (state.accounts.length === 0) {
         console.log(chalk.yellow("No provider accounts configured."));
@@ -56,6 +79,8 @@ export function registerProvidersCommands(program: Command): void {
           ? chalk.green("✓ configured")
           : acc.health === "missing"
           ? chalk.red("⚠ missing credential")
+          : acc.health === "expired"
+          ? chalk.red("⚠ expired")
           : chalk.yellow("○ unconfigured");
 
         console.log(`\n  ${chalk.bold(acc.id)} (${acc.upstreamProvider})`);
@@ -74,10 +99,10 @@ export function registerProvidersCommands(program: Command): void {
     .description("Add a new provider account")
     .requiredOption("--upstream <provider>", "Upstream provider (e.g. openai, anthropic, google, ollama)")
     .option("--credential <mode>", "Credential mode: env:VAR_NAME or none", "none")
-    .option("--adapter <adapter>", "Inference adapter to use", "pi-ai")
     .option("--url <baseUrl>", "Custom base URL endpoint")
     .option("--allow-private", "Allow connecting to private / localhost IP addresses (for Ollama/vLLM)")
     .option("--compat <compat>", "Wire protocol compatibility (openai | anthropic | google | openai-responses)")
+    .option("--json", "Output result as JSON")
     .action(async (id, opts) => {
       const runtime = getDefaultProviderRuntime();
       const api = createProviderManagerApi(runtime);
@@ -92,8 +117,15 @@ export function registerProvidersCommands(program: Command): void {
         compat: opts.compat,
       });
 
+      if (opts.json) {
+        console.log(JSON.stringify(res, null, 2));
+        if (!res.ok) process.exitCode = 1;
+        return;
+      }
+
       if (!res.ok) {
-        console.error(chalk.red(`Error (${res.error.code}): ${res.error.message}`));
+        const hintText = res.error.hint ? ` (${res.error.hint})` : "";
+        console.error(chalk.red(`Error (${res.error.code}): ${res.error.message}${hintText}`));
         process.exit(1);
       }
 
@@ -108,6 +140,7 @@ export function registerProvidersCommands(program: Command): void {
     .option("--url <baseUrl>", "Custom base URL endpoint")
     .option("--allow-private", "Allow connecting to private / localhost IP addresses")
     .option("--compat <compat>", "Wire protocol compatibility")
+    .option("--json", "Output result as JSON")
     .action(async (id, opts) => {
       const runtime = getDefaultProviderRuntime();
       const api = createProviderManagerApi(runtime);
@@ -115,22 +148,37 @@ export function registerProvidersCommands(program: Command): void {
       const existing = state.accounts.find((a) => a.id === id);
 
       if (!existing) {
+        if (opts.json) {
+          console.log(JSON.stringify({ ok: false, error: { code: "account_not_found", message: `Provider account "${id}" not found.` } }, null, 2));
+          process.exitCode = 1;
+          return;
+        }
         console.error(chalk.red(`Error: Provider account "${id}" not found.`));
         process.exit(1);
       }
+
+      const snapshot = await runtime.createTurnSnapshot();
+      const existingEntry = snapshot.config.providers?.[id];
 
       const credential = opts.credential ? parseCredentialMode(opts.credential) : { mode: "preserve" as const };
       const res = await api.saveAccount({
         accountId: id,
         upstreamProvider: opts.upstream ?? existing.upstreamProvider,
         credential,
-        baseUrl: opts.url ?? existing.baseUrl,
-        allowPrivate: opts.allowPrivate !== undefined ? !!opts.allowPrivate : undefined,
-        compat: opts.compat,
+        baseUrl: opts.url !== undefined ? opts.url : existingEntry?.baseUrl,
+        allowPrivate: opts.allowPrivate !== undefined ? Boolean(opts.allowPrivate) : existingEntry?.ssrfAllowPrivate,
+        compat: opts.compat !== undefined ? opts.compat : existingEntry?.compat,
       });
 
+      if (opts.json) {
+        console.log(JSON.stringify(res, null, 2));
+        if (!res.ok) process.exitCode = 1;
+        return;
+      }
+
       if (!res.ok) {
-        console.error(chalk.red(`Error (${res.error.code}): ${res.error.message}`));
+        const hintText = res.error.hint ? ` (${res.error.hint})` : "";
+        console.error(chalk.red(`Error (${res.error.code}): ${res.error.message}${hintText}`));
         process.exit(1);
       }
 
@@ -141,11 +189,18 @@ export function registerProvidersCommands(program: Command): void {
     .command("remove <id>")
     .description("Remove a provider account")
     .option("--force", "Force remove even if referenced by active model slots")
+    .option("--json", "Output result as JSON")
     .action(async (id, opts) => {
       const runtime = getDefaultProviderRuntime();
       const api = createProviderManagerApi(runtime);
 
       const res = await api.deleteAccount(id, { force: !!opts.force });
+      if (opts.json) {
+        console.log(JSON.stringify(res, null, 2));
+        if (!res.ok) process.exitCode = 1;
+        return;
+      }
+
       if (res.ok) {
         console.log(chalk.green(`✓ Successfully removed provider account "${id}"`));
         return;
@@ -160,7 +215,8 @@ export function registerProvidersCommands(program: Command): void {
         process.exit(1);
       }
 
-      console.error(chalk.red(`Error (${res.error.code}): ${res.error.message}`));
+      const hintText = res.error.hint ? ` (${res.error.hint})` : "";
+      console.error(chalk.red(`Error (${res.error.code}): ${res.error.message}${hintText}`));
       process.exit(1);
     });
 }

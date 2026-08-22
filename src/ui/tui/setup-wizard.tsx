@@ -135,21 +135,26 @@ export function SetupWizard({ api, settings, onFinish, onExitSetup }: SetupWizar
   }
 
   async function doAssign(purpose: PurposeId, tier: Tier | null, t: AssignmentTarget): Promise<UiError | null> {
-    const res = await api.setAssignment(purpose, tier, t);
-    if (res.ok) {
-      setState(res.state);
-      if (purpose === "text" && tier === "standard") {
-        setSummary((s) => ({ ...s, mainModel: `${t.providerAccount}/${t.model}` }));
-        setSub("menu");
-        next("slots");
-      } else {
-        setSummary((s) => ({ ...s, slots: [...new Set([...s.slots, `${purpose}${tier ? `·${tier}` : ""}`])] }));
-        setSub("menu");
+    try {
+      const res = await api.setAssignment(purpose, tier, t);
+      if (res.ok) {
+        setState(res.state);
+        if (purpose === "text" && tier === "standard") {
+          setSummary((s) => ({ ...s, mainModel: `${t.providerAccount}/${t.model}` }));
+          setSub("menu");
+          next("slots");
+        } else {
+          setSummary((s) => ({ ...s, slots: [...new Set([...s.slots, `${purpose}${tier ? `·${tier}` : ""}`])] }));
+          setSub("menu");
+        }
+        return null;
       }
-      return null;
+      setError(`${res.error.code}: ${res.error.message}`);
+      return res.error;
+    } catch (err: any) {
+      setError(err?.message ?? String(err));
+      return { code: "storage_error", message: err?.message ?? String(err) };
     }
-    setError(`${res.error.code}: ${res.error.message}`);
-    return res.error;
   }
 
   // ── Input ─────────────────────────────────────────────────────────────────
@@ -221,7 +226,13 @@ export function SetupWizard({ api, settings, onFinish, onExitSetup }: SetupWizar
         return;
       case "connect":
         if (isNum && num === 1) setSub("add");
-        else if (isNum && num === 2) next("main");
+        else if (isNum && num === 2) {
+          if (healthyAccounts.length === 0) {
+            setError("Connect at least one provider account to continue.");
+            return;
+          }
+          next("main");
+        }
         else if (isNum && num === 3) tryExit();
         return;
       case "main":
@@ -244,7 +255,14 @@ export function SetupWizard({ api, settings, onFinish, onExitSetup }: SetupWizar
         return;
       }
       case "summary":
-        if (key.return || (isNum && num === 1)) onFinish(summary);
+        if (key.return || (isNum && num === 1)) {
+          if (!summary.mainModel && !(state?.assignments as any)?.text?.standard) {
+            setError("A main model is required before finishing setup.");
+            next("main");
+            return;
+          }
+          onFinish(summary);
+        }
         else if (isNum && num === 2) next("extras");
         return;
     }

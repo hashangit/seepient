@@ -160,6 +160,7 @@ Current layout of the Obsidian vault (annotated):
 │   │   ├── research.md               # oh-my-pi provider-TUI study (/providers, /model, ModelBrowser) + decision ledger D1–D15
 │   │   ├── data-model.md             # Persisted shapes (ProviderEntry, CredentialRef, PurposeModelMap) + UI view models
 │   │   ├── quickstart.md             # QS-M1–QS-M5 manual validation scenarios + production budgets
+│   │   ├── manual-validation-results.md # Manual scenario results (QS-M1–M5, QS-O, QS-P)
 │   │   ├── checklists/requirements.md # Specification quality checklist (validated)
 │   │   └── contracts/                # provider-manager-api, model-manager-dock, setup-wizard
 ├── 010-provider-management-redesign/ # Provider mgmt redesign: contracts + runtime + purpose/tier routing

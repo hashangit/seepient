@@ -221,4 +221,88 @@ describe("SetupWizard — exit & escape navigation (C4, SC-004)", () => {
     // SC-004: settings.set was never called for unedited settings
     expect(settings.set).not.toHaveBeenCalled();
   });
+
+  it("preserves unedited keys in real setting.json on disk during wizard run (SC-004 real-file)", async () => {
+    const fs = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "seepient-sc004-"));
+    const settingFile = path.join(tmpDir, "setting.json");
+
+    // Pre-populate setting.json with existing custom settings
+    const initialConfig = {
+      "agent.systemPrompt": "Custom enterprise system prompt - DO NOT OVERWRITE",
+      "network.proxy": "http://10.0.0.1:8080",
+      "tui.theme": "dark-high-contrast",
+    };
+    fs.writeFileSync(settingFile, JSON.stringify(initialConfig, null, 2), "utf8");
+
+    const diskSettings: SettingsAdapter = {
+      get: (key: string) => {
+        try {
+          const raw = JSON.parse(fs.readFileSync(settingFile, "utf8"));
+          return raw[key];
+        } catch {
+          return undefined;
+        }
+      },
+      set: async (key: string, value: unknown) => {
+        let current: any = {};
+        try {
+          current = JSON.parse(fs.readFileSync(settingFile, "utf8"));
+        } catch {}
+        current[key] = value;
+        fs.writeFileSync(settingFile, JSON.stringify(current, null, 2), "utf8");
+      },
+    };
+
+    const state = freshState();
+    state.accounts = [{ id: "acme", upstreamProvider: "acme", credentialKind: "none", health: "ok", modelCount: 1 }];
+    (state.assignments as any).text = { standard: { providerAccount: "acme", model: "model-tool" } };
+
+    const onFinish = vi.fn();
+    const onExitSetup = vi.fn();
+    const inst = render(
+      <SetupWizard
+        api={makeApi(state).api}
+        settings={diskSettings}
+        onFinish={onFinish}
+        onExitSetup={onExitSetup}
+      />
+    );
+    await delay();
+
+    await type(inst, "1"); // welcome -> main
+    await type(inst, "1"); // main -> slots
+    await type(inst, "2"); // slots -> extras
+    await type(inst, "5"); // extras -> summary (skip entering keys)
+    await delay();
+    expect(inst.lastFrame() ?? "").toContain("Setup complete");
+    await type(inst, ENTER); // finish
+    await vi.waitFor(() => expect(onFinish).toHaveBeenCalled());
+
+    // Verify disk content: original keys remain untouched
+    const afterRun = JSON.parse(fs.readFileSync(settingFile, "utf8"));
+    expect(afterRun["agent.systemPrompt"]).toBe("Custom enterprise system prompt - DO NOT OVERWRITE");
+    expect(afterRun["network.proxy"]).toBe("http://10.0.0.1:8080");
+    expect(afterRun["tui.theme"]).toBe("dark-high-contrast");
+
+    // Clean up
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  it("blocks connect-step continue when 0 accounts are configured", async () => {
+    const { inst } = setup(freshState());
+    await delay();
+    await type(inst, "1"); // welcome -> connect (0 accounts)
+    expect(inst.lastFrame() ?? "").toContain("Add provider");
+    expect(inst.lastFrame() ?? "").toContain("Continue (disabled — add first)");
+
+    await type(inst, "2"); // Try to continue without account
+    await delay();
+    expect(inst.lastFrame() ?? "").toContain("Connect at least one provider account to continue");
+  });
 });

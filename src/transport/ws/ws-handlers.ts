@@ -727,35 +727,29 @@ export async function handleWsSetProvider(
   }
 
   const { type: providerType, apiKey, baseUrl, model } = msg.provider;
+  const allowPrivate = (msg.provider as any).allowPrivate ?? (msg.provider as any).ssrfAllowPrivate;
   if (!providerType) {
     safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "VALIDATION_ERROR", message: "Invalid provider type" } } as any);
     return;
   }
 
   try {
-    if (baseUrl) {
-      const { validateEndpointUrl } = await import("../http/ssrf-validator.js");
-      const allowPrivate = process.env.SEEPIENT_SSRF_ALLOW_PRIVATE === "1";
-      const val = await validateEndpointUrl(baseUrl, { ssrfAllowPrivate: allowPrivate });
-      if (!val.valid) {
-        safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "SSRF_BLOCKED", message: val.error } } as any);
-        return;
-      }
-    }
     const { getDefaultProviderRuntime } = await import("../../domain/providers/provider-runtime.js");
     const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
     const runtime = getDefaultProviderRuntime();
     const api = createProviderManagerApi(runtime);
 
+    const isAllowPrivate = Boolean(allowPrivate);
     const saveRes = await api.saveAccount({
       accountId: providerType,
       upstreamProvider: providerType,
       credential: apiKey ? { mode: "paste", keyValue: apiKey } : { mode: "none" },
       baseUrl,
+      allowPrivate: isAllowPrivate,
     });
 
     if (!saveRes.ok) {
-      safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: saveRes.error.code, message: saveRes.error.message } } as any);
+      safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: saveRes.error.code.toUpperCase(), message: saveRes.error.message } } as any);
       return;
     }
 

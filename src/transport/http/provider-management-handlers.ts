@@ -11,6 +11,7 @@ import { hasScope } from "../auth/auth.js";
 import { validateEndpointUrl } from "./ssrf-validator.js";
 import { InferenceError } from "../../foundations/errors.js";
 import { redactUrlCredentials, redactString } from "../../foundations/security/redact.js";
+import { createOAuthInteractionShim } from "../cli/provider-manager-api.js";
 
 function sendJSON(res: ServerResponse, status: number, body: unknown, revision?: number): void {
   res.statusCode = status;
@@ -135,7 +136,11 @@ export async function handleGetAssignments(
     return;
   }
 
-  const purposeEntry = (assignments as any)[purpose];
+  let purposeEntry = (assignments as any)[purpose];
+  if (!purposeEntry && purpose.includes(".")) {
+    const [pGroup, pSub] = purpose.split(".");
+    purposeEntry = (assignments as any)[pGroup]?.[pSub];
+  }
   if (!purposeEntry) {
     sendError(res, 404, "NOT_FOUND", `Purpose "${purpose}" not found`);
     return;
@@ -188,20 +193,18 @@ export async function handlePutAssignment(
     return;
   }
 
-  try {
-    const patch =
-      purpose.startsWith("media.")
-        ? { modelAssignments: { media: { [purpose.slice("media.".length)]: body } } }
-        : { modelAssignments: { [purpose]: { [tier]: body } } };
-    const result = await runtime.updateOverlay(patch as any, expectedRev);
-    sendJSON(res, 200, { revision: result.revision, assignment: body }, result.revision);
-  } catch (err: any) {
-    if (isConflictError(err)) {
-      sendError(res, 409, "CONFLICT", err.message);
-    } else {
-      sendError(res, 400, "BAD_REQUEST", err.message);
+  const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
+  const api = createProviderManagerApi(runtime);
+  const saveRes = await api.setAssignment(purpose as any, tier ? (tier as any) : null, body, expectedRev);
+  if (!saveRes.ok) {
+    if (saveRes.error.code === "conflict") {
+      sendError(res, 409, "CONFLICT", saveRes.error.message);
+      return;
     }
+    sendError(res, 400, saveRes.error.code.toUpperCase(), saveRes.error.message);
+    return;
   }
+  sendJSON(res, 200, { revision: saveRes.state.revision, assignment: body }, saveRes.state.revision);
 }
 
 export async function handleDeleteAssignment(
@@ -221,20 +224,18 @@ export async function handleDeleteAssignment(
   const expectedRev = await parseIfMatch(req, res, runtime);
   if (expectedRev === null) return;
 
-  try {
-    const patch =
-      purpose.startsWith("media.")
-        ? { modelAssignments: { media: { [purpose.slice("media.".length)]: null } } }
-        : { modelAssignments: { [purpose]: { [tier]: null } } };
-    const result = await runtime.updateOverlay(patch as any, expectedRev);
-    sendJSON(res, 200, { revision: result.revision, deleted: true }, result.revision);
-  } catch (err: any) {
-    if (isConflictError(err)) {
-      sendError(res, 409, "CONFLICT", err.message);
-    } else {
-      sendError(res, 400, "BAD_REQUEST", err.message);
+  const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
+  const api = createProviderManagerApi(runtime);
+  const clearRes = await api.clearAssignment(purpose as any, tier ? (tier as any) : null, expectedRev);
+  if (!clearRes.ok) {
+    if (clearRes.error.code === "conflict") {
+      sendError(res, 409, "CONFLICT", clearRes.error.message);
+      return;
     }
+    sendError(res, 400, clearRes.error.code.toUpperCase(), clearRes.error.message);
+    return;
   }
+  sendJSON(res, 200, { revision: clearRes.state.revision, deleted: true }, clearRes.state.revision);
 }
 
 export async function handleGetProviders(
@@ -292,7 +293,7 @@ export async function handlePutProvider(
   const expectedRev = await parseIfMatch(req, res, runtime);
   if (expectedRev === null) return;
 
-  let bodyText: string;
+  let bodyText = "";
   try {
     bodyText = await parseBody(req);
   } catch {
@@ -308,30 +309,57 @@ export async function handlePutProvider(
     return;
   }
 
-  if (body.baseUrl) {
-    const allowPrivate = process.env.SEEPIENT_SSRF_ALLOW_PRIVATE === "1";
-    const ssrfCheck = await validateEndpointUrl(body.baseUrl, { ssrfAllowPrivate: allowPrivate });
-    if (!ssrfCheck.valid) {
-      sendError(res, 400, "INVALID_ENDPOINT", ssrfCheck.error ?? "SSRF check failed");
-      return;
+  const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
+  const api = createProviderManagerApi(runtime);
+  let credInput: any = { mode: "preserve" };
+  if (body.credential) {
+    if (body.credential.kind === "env" || body.credential.mode === "env") {
+      credInput = { mode: "env", varName: body.credential.name ?? body.credential.varName ?? body.credential.envVar };
+    } else if (body.credential.kind === "none" || body.credential.mode === "none") {
+      credInput = { mode: "none" };
+    } else if (body.credential.kind === "api_key" || body.credential.mode === "paste" || body.credential.keyValue || body.credential.key) {
+      credInput = { mode: "paste", keyValue: body.credential.keyValue ?? body.credential.key ?? body.credential.value };
     }
   }
 
-  try {
-    const patch = {
-      providers: {
-        [providerId]: body,
-      } as any,
-    };
-    const result = await runtime.updateOverlay(patch, expectedRev);
-    sendJSON(res, 200, { revision: result.revision, provider: { ...body, credential: { kind: "redacted" } } }, result.revision);
-  } catch (err: any) {
-    if (isConflictError(err)) {
-      sendError(res, 409, "CONFLICT", err.message);
+  const saveRes = await api.saveAccount(
+    {
+      accountId: providerId,
+      upstreamProvider: body.upstreamProvider ?? providerId,
+      credential: credInput,
+      baseUrl: body.baseUrl,
+      compat: body.compat,
+      allowPrivate: body.ssrfAllowPrivate === true || body.allowPrivate === true,
+    },
+    expectedRev,
+  );
+
+  if (!saveRes.ok) {
+    if (saveRes.error.code === "conflict") {
+      sendError(res, 409, "CONFLICT", saveRes.error.message);
+    } else if (saveRes.error.code === "invalid_endpoint") {
+      sendError(res, 400, "INVALID_ENDPOINT", saveRes.error.message);
     } else {
-      sendError(res, 400, "BAD_REQUEST", err.message);
+      sendError(res, 400, "BAD_REQUEST", saveRes.error.message);
     }
+    return;
   }
+
+  const account = saveRes.state.accounts.find((a) => a.id === providerId);
+  sendJSON(
+    res,
+    200,
+    {
+      revision: saveRes.state.revision,
+      provider: {
+        id: providerId,
+        upstreamProvider: account?.upstreamProvider ?? body.upstreamProvider ?? providerId,
+        baseUrl: account?.baseUrl,
+        credential: { kind: account?.credentialKind ?? "none" },
+      },
+    },
+    saveRes.state.revision,
+  );
 }
 
 export async function handleDeleteProvider(
@@ -347,12 +375,15 @@ export async function handleDeleteProvider(
     return;
   }
 
+  const expectedRev = await parseIfMatch(req, res, runtime);
+  if (expectedRev === null) return;
+
   const url = new URL(req.url ?? "", "http://localhost");
   const force = url.searchParams.get("force") === "true";
 
   const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
   const api = createProviderManagerApi(runtime);
-  const result = await api.deleteAccount(providerId, { force });
+  const result = await api.deleteAccount(providerId, { force, expectedRevision: expectedRev });
 
   if (!result.ok) {
     if ("blocked" in result && result.blocked) {
@@ -459,32 +490,47 @@ export async function handleOAuthStart(
     },
   );
 
-  const interaction = {
-    signal: abortController.signal,
-    prompt: async () => "",
-    notify: (event: any) => {
-      if (event.type === "device_code") {
+  const interaction = createOAuthInteractionShim(
+    {
+      signal: abortController.signal,
+      onBrowserOpen: (url) => {
         notifyResolve({
-          userCode: event.userCode ?? event.user_code,
-          verificationUrl: event.verificationUri ?? event.verification_uri ?? event.url,
-          expiresInSeconds: event.expiresInSeconds ?? event.expires_in,
+          verificationUrl: url,
+          expiresInSeconds: 600,
         });
-      } else if (event.type === "auth_url") {
+      },
+      onDeviceCode: (info) => {
         notifyResolve({
-          verificationUrl: event.url,
-          expiresInSeconds: event.expiresInSeconds ?? event.expires_in,
+          userCode: info.userCode,
+          verificationUrl: info.verificationUrl,
+          expiresInSeconds: Math.round(info.expiresInMs / 1000),
         });
-      }
+      },
     },
-  };
+    abortController.signal,
+  );
 
   const loginPromise = flow.login(interaction as any);
-  // Attach a no-op handler so an abandoned/rejected background flow doesn't trigger unhandledRejection
+  const loginErrorPromise = new Promise<{ userCode?: string; verificationUrl?: string; expiresInSeconds?: number }>(
+    (_, reject) => {
+      loginPromise.catch((err) => reject(err));
+    },
+  );
+  // Attach a no-op handler so background rejection doesn't trigger unhandledRejection
   loginPromise.catch(() => {});
 
-  // Wait for notify event (up to 15s)
-  const timeoutPromise = new Promise<void>((resolve) => setTimeout(resolve, 15_000));
-  const notified = await Promise.race([notifyPromise, timeoutPromise]);
+  // Wait for notify event (up to 15s) or early login failure
+  const timeoutPromise = new Promise<{ userCode?: string; verificationUrl?: string; expiresInSeconds?: number }>(
+    (resolve) => setTimeout(() => resolve({}), 15_000),
+  );
+
+  let notified: { userCode?: string; verificationUrl?: string; expiresInSeconds?: number };
+  try {
+    notified = await Promise.race([notifyPromise, loginErrorPromise, timeoutPromise]);
+  } catch (err: any) {
+    sendError(res, 400, "OAUTH_FLOW_ERROR", redactString(err?.message || "OAuth login flow initiation failed"));
+    return;
+  }
 
   const expiresInMs = (notified?.expiresInSeconds ?? 600) * 1000;
   const userCode = notified?.userCode;
@@ -552,15 +598,31 @@ export async function handleOAuthComplete(
   }
 
   if (Date.now() > attempt.expiresAt) {
+    attempt.abortController?.abort();
     pendingOAuthAttempts.delete(attemptId);
     sendError(res, 400, "OAUTH_EXPIRED", "OAuth authorization expired");
     return;
   }
 
-  let preExistingCredential: any = null;
-  try {
-    preExistingCredential = await runtime.credentialStore.get(providerId);
-  } catch {}
+  const snapshot = await runtime.createTurnSnapshot();
+  const existingAccounts = Object.keys(snapshot.config.providers ?? {});
+  let targetAccountId = providerId;
+  if (existingAccounts.includes(targetAccountId)) {
+    let seq = 2;
+    while (existingAccounts.includes(`${providerId}-${seq}`)) {
+      seq++;
+    }
+    targetAccountId = `${providerId}-${seq}`;
+  }
+
+  let preExistingRecord: any = null;
+  let preExistingMeta: any = null;
+  if (typeof (runtime.credentialStore as any).getRecord === "function") {
+    try {
+      preExistingRecord = await (runtime.credentialStore as any).getRecord(targetAccountId);
+      preExistingMeta = (await runtime.credentialStore.get(targetAccountId))?.meta;
+    } catch {}
+  }
 
   let credentialPersisted = false;
   try {
@@ -578,20 +640,24 @@ export async function handleOAuthComplete(
       return;
     }
 
-    await runtime.credentialStore.put(providerId, {
-      kind: "oauth",
-      access: credResult.access,
-      refresh: credResult.refresh ?? "",
-      expires: credResult.expires ?? Date.now() + 3600_000,
-    });
+    await runtime.credentialStore.put(
+      targetAccountId,
+      {
+        kind: "oauth",
+        access: credResult.access,
+        refresh: credResult.refresh ?? "",
+        expires: credResult.expires ?? Date.now() + 3600_000,
+      },
+      { source: "disk", description: `OAuth login for ${attempt.upstream}` },
+    );
     credentialPersisted = true;
 
     const patch = {
       providers: {
-        [providerId]: {
+        [targetAccountId]: {
           adapter: "pi-ai",
           upstreamProvider: attempt.upstream,
-          credential: { kind: "seepient", id: providerId },
+          credential: { kind: "seepient", id: targetAccountId },
         },
       } as any,
     };
@@ -615,6 +681,7 @@ export async function handleOAuthComplete(
       {
         revision: result.revision,
         provider: {
+          id: targetAccountId,
           adapter: "pi-ai",
           upstreamProvider: attempt.upstream,
           credential: { kind: "redacted" },
@@ -624,10 +691,10 @@ export async function handleOAuthComplete(
     );
   } catch (err: any) {
     if (credentialPersisted) {
-      if (preExistingCredential) {
-        await runtime.credentialStore.put(providerId, preExistingCredential).catch(() => {});
+      if (preExistingRecord) {
+        await runtime.credentialStore.put(targetAccountId, preExistingRecord, preExistingMeta).catch(() => {});
       } else {
-        await runtime.credentialStore.delete(providerId).catch(() => {});
+        await runtime.credentialStore.delete(targetAccountId).catch(() => {});
       }
     }
     if (err.message === "OAUTH_PENDING") {
@@ -669,7 +736,7 @@ export async function handleResolveModel(
   try {
     const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
     const api = createProviderManagerApi(runtime);
-    const resPreview = await api.resolvePreview(body.purpose, body.tier);
+    const resPreview = await api.resolvePreview(body.purpose, body.tier, body.override);
     if ("ok" in resPreview && (resPreview as any).ok === false) {
       sendError(res, 400, "RESOLUTION_FAILED", (resPreview as any).message);
       return;

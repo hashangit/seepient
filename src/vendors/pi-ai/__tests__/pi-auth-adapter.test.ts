@@ -200,4 +200,47 @@ describe("pi-auth-adapter: CredentialStore bridge (T038)", () => {
     await piStore.delete("anthropic");
     expect(await piStore.read("anthropic")).toBeUndefined();
   });
+
+  it("caches PiCredentialStoreAdapter per SeepientCredentialStore instance", () => {
+    const seepientStore = createMockCredentialStore();
+    const adapter1 = createPiCredentialStore(seepientStore);
+    const adapter2 = createPiCredentialStore(seepientStore);
+    expect(adapter1).toBe(adapter2);
+  });
+
+  it("P0-1 regression: real Anthropic OAuth flow runs with controller interaction shim and waits for abort without premature settle", async () => {
+    const flow = await getOAuthFlow("anthropic");
+    expect(flow).toBeDefined();
+
+    const ac = new AbortController();
+    let urlEmitted = false;
+    let progressEmitted = false;
+
+    const { createOAuthInteractionShim } = await import("../../../transport/cli/provider-manager-api.js");
+    const interaction = createOAuthInteractionShim(
+      {
+        signal: ac.signal,
+        onBrowserOpen: (url) => {
+          urlEmitted = true;
+          expect(url).toContain("claude.ai");
+        },
+        onWaiting: () => {
+          progressEmitted = true;
+        },
+      },
+      ac.signal,
+    );
+
+    const loginPromise = flow!.login(interaction as any);
+
+    // The old buggy shim settled immediately with "" in <1ms causing "Missing authorization code"
+    // The fixed shim remains pending while the browser callback waits
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(urlEmitted).toBe(true);
+
+    // Abort cleanly stops the waiting flow
+    ac.abort();
+    await expect(loginPromise).rejects.toThrow();
+  });
 });

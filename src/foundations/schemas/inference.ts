@@ -52,6 +52,16 @@ export const UpstreamModelSchema = Type.Object({
 });
 export type UpstreamModel = Type.Static<typeof UpstreamModelSchema>;
 
+export const AvailableModelSchema = Type.Intersect([
+  UpstreamModelSchema,
+  Type.Object({
+    reachableVia: Type.Array(Type.String()),
+  }),
+]);
+export type AvailableModel = UpstreamModel & {
+  reachableVia: string[];
+};
+
 // ── Content Blocks ────────────────────────────────────────────────────────
 export const TextBlockSchema = Type.Object({
   type: Type.Literal("text"),

@@ -41,7 +41,7 @@ export const AVAILABLE_OAUTH_FLOWS: readonly string[] = [
 ] as const;
 
 /** Canonical mapping from common upstream provider names to OAuth flow ids. */
-const FLOW_MAP: Record<string, string> = {
+export const FLOW_MAP: Record<string, string> = {
   anthropic: "anthropic",
   openai: "openai-codex",
   "openai-codex": "openai-codex",
@@ -57,11 +57,16 @@ const FLOW_MAP: Record<string, string> = {
   radius: "radius",
 };
 
+/** Get the canonical OAuth flow ID for a provider name or alias. */
+export function getCanonicalOAuthFlowId(provider: string): string {
+  return FLOW_MAP[provider.toLowerCase()] ?? provider.toLowerCase();
+}
+
 /**
  * Get the OAuth flow instance for a provider if supported.
  */
 export async function getOAuthFlow(provider: string): Promise<OAuthAuth | undefined> {
-  const normalized = FLOW_MAP[provider.toLowerCase()] ?? provider.toLowerCase();
+  const normalized = getCanonicalOAuthFlowId(provider);
   switch (normalized) {
     case "anthropic":
       return anthropicProvider().auth.oauth;
@@ -84,7 +89,7 @@ export async function getOAuthFlow(provider: string): Promise<OAuthAuth | undefi
 
 /** Check if a provider supports OAuth sign-in. */
 export function isOAuthSupported(provider: string): boolean {
-  const normalized = FLOW_MAP[provider.toLowerCase()] ?? provider.toLowerCase();
+  const normalized = getCanonicalOAuthFlowId(provider);
   return AVAILABLE_OAUTH_FLOWS.includes(normalized);
 }
 
@@ -110,9 +115,22 @@ export class PiCredentialStoreAdapter implements PiCredentialStore {
   }
 
   async read(providerId: string, _options?: AuthOperationOptions): Promise<PiCredential | undefined> {
-    const record = this.seepientStore.getRecord
+    let record = this.seepientStore.getRecord
       ? await this.seepientStore.getRecord(providerId)
       : undefined;
+
+    if (!record && typeof this.seepientStore.list === "function") {
+      try {
+        const records = await this.seepientStore.list();
+        const hintMatches = records.filter((r) => r.meta?.providerAccountHint === providerId);
+        const match =
+          records.find((r) => r.id === providerId) ??
+          (hintMatches.length === 1 ? hintMatches[0] : undefined);
+        if (match && this.seepientStore.getRecord) {
+          record = await this.seepientStore.getRecord(match.id);
+        }
+      } catch {}
+    }
 
     if (!record) {
       const rec = typeof this.seepientStore.get === "function"
@@ -191,9 +209,17 @@ export class PiCredentialStoreAdapter implements PiCredentialStore {
   }
 }
 
+const adapterCache = new WeakMap<SeepientCredentialStore, PiCredentialStore>();
+
 /**
  * Factory creating a pi-ai CredentialStore backed by a Seepient CredentialStore.
+ * Adapters are cached per SeepientCredentialStore instance so mutex queues serialize concurrently.
  */
 export function createPiCredentialStore(seepientStore: SeepientCredentialStore): PiCredentialStore {
-  return new PiCredentialStoreAdapter(seepientStore);
+  let adapter = adapterCache.get(seepientStore);
+  if (!adapter) {
+    adapter = new PiCredentialStoreAdapter(seepientStore);
+    adapterCache.set(seepientStore, adapter);
+  }
+  return adapter;
 }

@@ -186,15 +186,20 @@ export function ModelPicker({
 
   async function doAssign(row: PickerRow, level: string): Promise<void> {
     setFeedback({ kind: "busy", message: `Saving ${title}…` });
-    const err = await onAssign({
-      providerAccount: row.reachableAccounts[0],
-      model: row.modelId,
-      thinkingLevel: level as any,
-    });
-    if (!err) {
-      setFeedback({ kind: "success", message: "✓ assigned", note: "applies next turn" });
-    } else {
-      setFeedback({ kind: "error", message: `${err.code}: ${err.message}` });
+    try {
+      const err = await onAssign({
+        providerAccount: row.reachableAccounts[0],
+        model: row.modelId,
+        thinkingLevel: level as any,
+      });
+      if (!err) {
+        setFeedback({ kind: "success", message: "✓ assigned", note: "applies next turn" });
+      } else {
+        setFeedback({ kind: "error", message: `${err.code}: ${err.message}` });
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setFeedback({ kind: "error", message: `failed: ${msg}` });
     }
   }
 
