@@ -258,8 +258,10 @@ describe("013 Golden Cross-Surface Parity (FR-039 / T056)", () => {
     // 5c. Deep Persisted Overlay Comparison Parity
     const overlay1 = await configStore1.getOverlay();
     const overlay3State = await configStore3.getOverlay();
-    expect(overlay1.patch.providers?.["openai-main"]).toEqual(overlay3State.patch.providers?.["openai-main"]);
-    expect(overlay1.patch.modelAssignments?.text?.standard).toEqual(overlay3State.patch.modelAssignments?.text?.standard);
+    const p1 = overlay1.patch as any;
+    const p3 = overlay3State.patch as any;
+    expect(p1.providers?.["openai-main"]).toEqual(p3.providers?.["openai-main"]);
+    expect(p1.modelAssignments?.text?.standard).toEqual(p3.modelAssignments?.text?.standard);
 
     // ── Operation 6: Delete Blocking & Deletion Parity ────────────────
     // Controller blocked delete
