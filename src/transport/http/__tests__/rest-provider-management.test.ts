@@ -444,4 +444,60 @@ describe("REST Provider Management v2 API (QS-P6.3 & QS-P6.4)", () => {
     expect(body.provider.id).toBe("test-acct");
     expect(body.provider.credential.kind).toBe("none");
   });
+
+  it("GET /v1/providers redacts sensitive query parameters from baseUrl", async () => {
+    await configStore.updateOverlay({
+      providers: {
+        "sensitive-url-acct": {
+          adapter: "pi-ai",
+          upstreamProvider: "openai",
+          baseUrl: "https://proxy.example.com/v1?api_key=supersecret123&token=abc",
+          credential: { kind: "none" },
+        } as any,
+      },
+    }, (await configStore.getOverlay()).revision);
+
+    const getReq = createMockReqRes(
+      "GET",
+      "/v1/providers/sensitive-url-acct",
+      { authorization: `Bearer ${readKey.rawKey}` },
+    );
+    await new Promise<void>((resolve) => {
+      getReq.res.on("finish", () => resolve());
+      handler(getReq.req, getReq.res);
+    });
+    expect(getReq.res.statusCode).toBe(200);
+    const body = JSON.parse(getReq.res.body);
+    expect(body.baseUrl).toContain("%5BREDACTED%5D");
+    expect(body.baseUrl).not.toContain("supersecret123");
+    expect(body.baseUrl).not.toContain("abc");
+  });
+
+  it("POST /v1/providers/:id/probe honors per-account ssrfAllowPrivate setting", async () => {
+    await configStore.updateOverlay({
+      providers: {
+        "local-ollama": {
+          adapter: "pi-ai",
+          upstreamProvider: "openai",
+          baseUrl: "http://127.0.0.1:11434/v1",
+          ssrfAllowPrivate: true,
+          credential: { kind: "none" },
+        } as any,
+      },
+    }, (await configStore.getOverlay()).revision);
+
+    const probeReq = createMockReqRes(
+      "POST",
+      "/v1/providers/local-ollama/probe",
+      { authorization: `Bearer ${adminKey.rawKey}` },
+    );
+    await new Promise<void>((resolve) => {
+      probeReq.res.on("finish", () => resolve());
+      handler(probeReq.req, probeReq.res);
+    });
+    expect(probeReq.res.statusCode).toBe(200);
+    const body = JSON.parse(probeReq.res.body);
+    expect(body.providerId).toBe("local-ollama");
+    expect(body.blocked).toBeUndefined();
+  });
 });

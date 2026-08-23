@@ -141,6 +141,11 @@ export interface ProviderManagerApi {
   refreshModels(accountId: string): Promise<RefreshResult>;
   switchSessionModel(accountId: string, modelId: string): void;
   signInWithProvider(upstream: string, callbacks: OAuthFlowCallbacks): Promise<SaveResult>;
+  completeOAuthSignIn(
+    upstream: string,
+    credentials: { access: string; refresh?: string; expires?: number },
+    opts?: { preferredAccountId?: string; description?: string },
+  ): Promise<SaveResult>;
   logoutAccount(accountId: string): Promise<SaveResult>;
   getAvailableOAuthFlows(): Promise<readonly string[]>;
 }
@@ -206,6 +211,12 @@ export function mapError(err: unknown, retried = false): UiError {
       hint: "Assign a model to this purpose slot first with setAssignment",
     };
   }
+  if (code === "oauth_expired") return { code: "oauth_expired", message, hint: "Sign in again to re-authenticate." };
+  if (code === "unsupported_capability" || code === "unsupported_thinking_level") {
+    return { code, message, hint: "Select a model that supports this capability or thinking level." };
+  }
+  if (code === "blocked") return { code: "blocked", message };
+  if (code === "account_not_found") return { code: "unconfigured_provider", message };
   if (code === "CONFIG_VIOLATION" || code === "invalid_request") {
     return { code: "validation_failed", message };
   }
@@ -217,7 +228,7 @@ export function mapError(err: unknown, retried = false): UiError {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function sanitizeBaseUrl(url: string): string {
+export function sanitizeBaseUrl(url: string): string {
   const redacted = redactUrlCredentials(url);
   try {
     const parsed = new URL(redacted);
@@ -346,19 +357,22 @@ export function createProviderManagerApi(
   const creds = () => runtime.credentialStore;
 
   type MutationBuilder = (state: ManagerState) => Promise<Record<string, unknown> | { error: UiError }>;
+  type MutationResult =
+    | { ok: true; state: ManagerState }
+    | { ok: false; error: UiError; attemptedWrite?: boolean; committed?: boolean };
 
   /** OCC mutate: read state → build & validate patch → write → retry once on conflict (B1 / R3). */
   async function occMutate(
     builder: MutationBuilder,
     expectedRevision?: number,
-  ): Promise<{ ok: true; state: ManagerState } | { ok: false; error: UiError; attemptedWrite?: boolean }> {
+  ): Promise<MutationResult> {
     let lastErr: unknown;
     for (let attempt = 0; attempt < 2; attempt++) {
       let state: ManagerState;
       try {
         state = await getState();
       } catch (err) {
-        return { ok: false, error: mapError(err) };
+        return { ok: false, error: mapError(err), attemptedWrite: false, committed: false };
       }
       if (expectedRevision !== undefined && state.revision !== expectedRevision) {
         return {
@@ -368,16 +382,17 @@ export function createProviderManagerApi(
             message: `Optimistic concurrency violation: expected revision ${expectedRevision}, but current revision is ${state.revision}.`,
           },
           attemptedWrite: false,
+          committed: false,
         };
       }
       let built: Record<string, unknown> | { error: UiError };
       try {
         built = await builder(state);
       } catch (err) {
-        return { ok: false, error: mapError(err) };
+        return { ok: false, error: mapError(err), attemptedWrite: false, committed: false };
       }
       if ("error" in built) {
-        return { ok: false, error: built.error as UiError };
+        return { ok: false, error: built.error as UiError, attemptedWrite: false, committed: false };
       }
       try {
         await store().updateOverlay(built as any, state.revision);
@@ -386,15 +401,15 @@ export function createProviderManagerApi(
         if (isConflictError(err) && attempt === 0 && expectedRevision === undefined) {
           continue;
         }
-        return { ok: false, error: mapError(err, attempt > 0) };
+        return { ok: false, error: mapError(err, attempt > 0), attemptedWrite: true, committed: false };
       }
       try {
         return { ok: true, state: await getState() };
       } catch (err) {
-        return { ok: false, error: mapError(err) };
+        return { ok: false, error: mapError(err), attemptedWrite: true, committed: true };
       }
     }
-    return { ok: false, error: mapError(lastErr, true) };
+    return { ok: false, error: mapError(lastErr, true), attemptedWrite: true, committed: false };
   }
 
   async function healthFor(
@@ -464,6 +479,12 @@ export function createProviderManagerApi(
 
   async function saveAccount(input: AccountInput, expectedRevision?: number): Promise<SaveResult> {
     if (input.baseUrl) {
+      if (input.baseUrl.includes("[REDACTED]")) {
+        return {
+          ok: false,
+          error: { code: "validation_failed", message: "Cannot save redacted baseUrl into configuration." },
+        };
+      }
       const check = await validateEndpointUrl(input.baseUrl, {
         ssrfAllowPrivate: input.allowPrivate === true,
       });
@@ -483,6 +504,13 @@ export function createProviderManagerApi(
       return {
         ok: false,
         error: { code: "validation_failed", message: "API key cannot be empty." },
+      };
+    }
+
+    if (input.credential.mode === "env" && (!input.credential.varName || input.credential.varName.trim() === "")) {
+      return {
+        ok: false,
+        error: { code: "validation_failed", message: "Environment variable name cannot be empty." },
       };
     }
 
@@ -538,9 +566,9 @@ export function createProviderManagerApi(
 
     if (!res.ok) {
       // Roll back a credential we just created (R4): never leave an orphan.
-      // Skip rollback when no write was attempted (e.g. stale expectedRevision before store mutation)
+      // Skip rollback when overlay write committed (res.committed === true) or when no write was attempted
       // so client retry with fresh revision succeeds without re-pasting.
-      if (input.credential.mode === "paste" && !preExisting && (res as any).attemptedWrite !== false) {
+      if (input.credential.mode === "paste" && !preExisting && !res.committed && (res as any).attemptedWrite !== false) {
         try {
           await creds().delete(input.accountId);
         } catch (rollbackErr: any) {
@@ -893,7 +921,35 @@ export function createProviderManagerApi(
       };
     }
 
-    // Determine accountId
+    return completeOAuthSignIn(
+      upstream,
+      {
+        access: credResult.access,
+        refresh: credResult.refresh,
+        expires: credResult.expires,
+      },
+      {
+        preferredAccountId: callbacks.preferredAccountId,
+        description: flow.name,
+      },
+    );
+  }
+
+  async function completeOAuthSignIn(
+    upstream: string,
+    credentials: { access: string; refresh?: string; expires?: number },
+    opts?: { preferredAccountId?: string; description?: string },
+  ): Promise<SaveResult> {
+    if (!credentials || !credentials.access) {
+      return {
+        ok: false,
+        error: {
+          code: "oauth_flow_failed",
+          message: "OAuth authorization did not return valid tokens.",
+        },
+      };
+    }
+
     const canonicalUpstream = getCanonicalOAuthFlowId(upstream);
     let existingAccounts: string[] = [];
     try {
@@ -902,15 +958,18 @@ export function createProviderManagerApi(
     } catch (err: any) {
       return { ok: false, error: mapError(err) };
     }
-    let accountId = callbacks.preferredAccountId?.trim() || upstream;
-    if (callbacks.preferredAccountId && existingAccounts.includes(accountId)) {
+
+    let accountId = opts?.preferredAccountId?.trim() || upstream;
+    if (opts?.preferredAccountId && existingAccounts.includes(accountId)) {
       console.warn(`[notice] Overwriting existing provider account "${accountId}" with new OAuth login.`);
-    } else if (!callbacks.preferredAccountId) {
+    } else if (!opts?.preferredAccountId) {
       let seq = 2;
       while (existingAccounts.includes(accountId)) {
         accountId = `${upstream}-${seq++}`;
       }
     }
+
+    const preExistingCred = await creds().get(accountId).catch(() => undefined);
 
     // Persist OAuth credential in credential store (keychain-first/primary store)
     try {
@@ -918,11 +977,15 @@ export function createProviderManagerApi(
         accountId,
         {
           kind: "oauth",
-          access: credResult.access,
-          refresh: credResult.refresh ?? "",
-          expires: credResult.expires ?? Date.now() + 3600_000,
+          access: credentials.access,
+          refresh: credentials.refresh ?? "",
+          expires: credentials.expires ?? Date.now() + 3600_000,
         },
-        { source: "keychain", description: flow.name, providerAccountHint: canonicalUpstream },
+        {
+          source: "keychain",
+          description: opts?.description ?? `OAuth login for ${upstream}`,
+          providerAccountHint: canonicalUpstream,
+        },
       );
     } catch (err: any) {
       return {
@@ -946,9 +1009,11 @@ export function createProviderManagerApi(
     }));
 
     if (!saveRes.ok) {
-      try {
-        await creds().delete(accountId);
-      } catch {}
+      if (!preExistingCred) {
+        try {
+          await creds().delete(accountId);
+        } catch {}
+      }
       if (!existingAccounts.includes(accountId)) {
         try {
           await occMutate(async () => ({
@@ -1012,6 +1077,7 @@ export function createProviderManagerApi(
     refreshModels,
     switchSessionModel,
     signInWithProvider,
+    completeOAuthSignIn,
     logoutAccount,
     getAvailableOAuthFlows,
   };

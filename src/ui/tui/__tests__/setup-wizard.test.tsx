@@ -53,6 +53,7 @@ function makeApi(state: ManagerState) {
     refreshModels: async () => ({ ok: true, discovered: [], state }),
     switchSessionModel: () => {},
     signInWithProvider: async () => ({ ok: true, state }),
+    completeOAuthSignIn: async () => ({ ok: true, state }),
     logoutAccount: async () => ({ ok: true, state }),
     getAvailableOAuthFlows: async () => ["anthropic"],
   };

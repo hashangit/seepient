@@ -164,12 +164,19 @@ async function resolveSecretApiKey(
           }
         }
       } catch (err: any) {
+        if (signal?.aborted || err?.name === "AbortError") {
+          throw err;
+        }
+        const isGrantExpired = /invalid_grant|expired|revoked/i.test(err?.message ?? "");
+        const isNetwork = /econnrefused|etimedout|enotfound|fetch failed|network/i.test(err?.message ?? "");
         throw new InferenceError({
-          code: "oauth_expired",
-          message: `OAuth session for "${target.providerAccount}" expired — sign in again (/login ${target.upstreamProvider}): ${err?.message ?? "refresh failed"}`,
+          code: isGrantExpired ? "oauth_expired" : isNetwork ? "network" : "auth",
+          message: isGrantExpired
+            ? `OAuth session for "${target.providerAccount}" expired — sign in again (/login ${target.upstreamProvider}): ${err?.message ?? "refresh failed"}`
+            : `OAuth token refresh for "${target.providerAccount}" failed: ${err?.message ?? "unknown error"}`,
           providerAccount: target.providerAccount,
           model: target.model,
-          retryable: false,
+          retryable: !isGrantExpired,
         });
       }
     }

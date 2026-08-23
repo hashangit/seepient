@@ -298,22 +298,20 @@ export class ProviderConfigStore {
         patch: newPatch,
       };
 
-      // 1. Record audit event BEFORE renaming overlay to active path (if durable storage active)
-      if (this.overlayPath || process.env.SEEPIENT_AUDIT_LOG_PATH) {
-        try {
-          const { recordProviderAuditEvent } = await import("../audit-log.js");
-          recordProviderAuditEvent({
-            timestamp: new Date().toISOString(),
-            action: "update_overlay",
-            revision: updatedOverlay.revision,
-            details: patch,
-          });
-        } catch (auditErr: any) {
-          if ((process.env.VITEST || process.env.NODE_ENV === "test") && auditErr?.code !== "SECURITY_ERROR") {
-            console.warn(`[ProviderConfigStore] Audit write suppressed in test: ${auditErr?.message}`);
-          } else {
-            throw auditErr;
-          }
+      // 1. Record audit event BEFORE committing overlay to disk
+      try {
+        const { recordProviderAuditEvent } = await import("../audit-log.js");
+        recordProviderAuditEvent({
+          timestamp: new Date().toISOString(),
+          action: "update_overlay",
+          revision: updatedOverlay.revision,
+          details: patch,
+        });
+      } catch (auditErr: any) {
+        if ((process.env.VITEST || process.env.NODE_ENV === "test") && auditErr?.code !== "SECURITY_ERROR") {
+          // Suppressed in test environment
+        } else {
+          throw auditErr;
         }
       }
 

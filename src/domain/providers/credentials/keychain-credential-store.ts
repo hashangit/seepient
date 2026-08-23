@@ -70,9 +70,9 @@ class DefaultPlatformKeychainProvider implements PlatformKeychainProvider {
     const platform = os.platform();
     if (platform === "darwin") {
       await new Promise<void>((resolve, reject) => {
-        const child = execFile(
+        execFile(
           "security",
-          ["add-generic-password", "-U", "-s", service, "-a", account, "-w"],
+          ["add-generic-password", "-U", "-s", service, "-a", account, "-w", password],
           (error) => {
             if (error) {
               if ((error as any)?.code === "ENOENT") {
@@ -83,11 +83,6 @@ class DefaultPlatformKeychainProvider implements PlatformKeychainProvider {
             resolve();
           },
         );
-        if (child.stdin) {
-          child.stdin.on("error", () => {});
-          child.stdin.write(password);
-          child.stdin.end();
-        }
       });
     } else if (platform === "linux") {
       await new Promise<void>((resolve, reject) => {
@@ -266,8 +261,33 @@ export class KeychainCredentialStore implements CredentialStore {
     return handle;
   }
 
-  async get(_id: string): Promise<CredentialRecord | undefined> {
-    return undefined;
+  async get(id: string): Promise<CredentialRecord | undefined> {
+    if (!this.provider) return undefined;
+    try {
+      const val = await this.provider.getPassword(this.defaultService, id);
+      if (!val) return undefined;
+      const now = new Date().toISOString();
+      try {
+        const parsed = JSON.parse(val);
+        if (parsed && typeof parsed === "object") {
+          return {
+            id,
+            materialKind: parsed.kind === "oauth" ? "oauth" : "api_key",
+            createdAt: parsed.createdAt ?? now,
+            updatedAt: parsed.updatedAt ?? now,
+            meta: parsed.meta,
+          };
+        }
+      } catch {}
+      return {
+        id,
+        materialKind: "api_key",
+        createdAt: now,
+        updatedAt: now,
+      };
+    } catch {
+      return undefined;
+    }
   }
 
   async getRecord(id: string): Promise<PersistedCredentialRecord | undefined> {
@@ -277,8 +297,11 @@ export class KeychainCredentialStore implements CredentialStore {
       if (!val) return undefined;
       try {
         const parsed = JSON.parse(val);
-        if (parsed && typeof parsed === "object" && parsed.kind === "oauth") {
-          return parsed as PersistedCredentialRecord;
+        if (parsed && typeof parsed === "object") {
+          const { meta: _m, ...rec } = parsed;
+          if (rec.kind === "oauth" || rec.kind === "api_key") {
+            return rec as PersistedCredentialRecord;
+          }
         }
       } catch {}
       return { kind: "api_key", keyValue: val };
@@ -287,7 +310,7 @@ export class KeychainCredentialStore implements CredentialStore {
     }
   }
 
-  async put(id: string, record: PersistedCredentialRecord, _meta?: CredentialMeta): Promise<void> {
+  async put(id: string, record: PersistedCredentialRecord, meta?: CredentialMeta): Promise<void> {
     if (!this.provider) {
       throw new SeepientError(
         "OS Keychain is not available on this platform",
@@ -296,8 +319,10 @@ export class KeychainCredentialStore implements CredentialStore {
       );
     }
     try {
-      const val = record.kind === "api_key" ? record.keyValue : JSON.stringify(record);
-      await this.provider.setPassword(this.defaultService, id, val);
+      const payload = record.kind === "api_key" && !meta
+        ? record.keyValue
+        : JSON.stringify({ ...record, ...(meta ? { meta } : {}) });
+      await this.provider.setPassword(this.defaultService, id, payload);
     } catch (err: any) {
       throw new SeepientError(
         `OS Keychain put failed: ${err?.message}`,

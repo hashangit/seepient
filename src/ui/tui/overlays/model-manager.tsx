@@ -19,6 +19,7 @@ import type {
   ProviderManagerApi, ManagerState, PurposeId, PurposeDef, Tier,
   AssignmentTarget, UiError,
 } from '../../../transport/cli/provider-manager-api.js';
+import { isOAuthSupported } from '../../../domain/providers/oauth-service.js';
 
 export interface ModelManagerProps {
   api: ProviderManagerApi;
@@ -387,7 +388,7 @@ export function ModelManager({
         upstreams={upstreams}
         existingIds={state.accounts.map((a) => a.id)}
         prefillUpstream={overlay.prefill}
-        canSignIn={(u) => oauthFlows.includes(u.toLowerCase())}
+        canSignIn={(u) => isOAuthSupported(u)}
         onSignIn={(u) => setOverlay({ kind: "sign-in", upstream: u })}
         onSaveAccount={async (input) => {
           const res = await api.saveAccount(input);
@@ -421,7 +422,7 @@ export function ModelManager({
         {overlay.slots.map((s) => <Text key={s} color={theme.fg}>  · {s}</Text>)}
         <Text> [1] Remove anyway   [2] Cancel</Text>
         <RemoveConfirm accountId={overlay.accountId} slots={overlay.slots} api={api}
-          onDone={(msg) => { setOverlay(null); setFeedback({ kind: "success", message: msg }); void load(); }}
+          onDone={(msg, isErr) => { setOverlay(null); setFeedback({ kind: isErr ? "error" : "success", message: msg }); void load(); }}
           onCancel={() => setOverlay(null)} />
       </Box>
     );
@@ -668,7 +669,7 @@ function RemoveConfirm({
   accountId: string;
   slots: string[];
   api: ProviderManagerApi;
-  onDone: (msg: string) => void;
+  onDone: (msg: string, isError?: boolean) => void;
   onCancel: () => void;
 }) {
   useInput((input, key) => {
@@ -676,9 +677,9 @@ function RemoveConfirm({
     if (input === "1") {
       void api.deleteAccount(accountId, { force: true }).then((r) => {
         if (r.ok) onDone(`✓ removed ${accountId}`);
-        else if ("error" in r) onDone(`Error: ${r.error.message}`);
+        else if ("error" in r) onDone(`Error: ${r.error.message}`, true);
         else onCancel();
-      }).catch((e) => onDone(`Error: ${String(e)}`));
+      }).catch((e) => onDone(`Error: ${String(e)}`, true));
     }
   });
   return null;

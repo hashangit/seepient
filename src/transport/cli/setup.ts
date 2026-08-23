@@ -37,7 +37,6 @@ export async function runSetup(options: { project?: boolean } = {}): Promise<voi
     console.log(chalk.dim('  (or configure custom env vars via `seepient providers add <id> --credential env:VAR_NAME`)'));
     console.log(chalk.dim('Or configure model assignments headlessly:'));
     console.log(chalk.dim('  seepient models set text.standard <account>/<model>'));
-    console.log(chalk.dim('Or mount a config file at ~/.seepient/setting.json'));
     process.exit(1);
   }
 

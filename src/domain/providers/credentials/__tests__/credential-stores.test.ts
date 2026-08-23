@@ -153,6 +153,36 @@ describe("CredentialStore implementations (QS-P4.1)", () => {
       expect(await lease.secret()).toEqual({ kind: "api_key", value: "sk-keychain-secret" });
       await lease.release();
     });
+
+    it("puts and gets persisted credential records round-trip via provider", async () => {
+      const memory = new Map<string, string>();
+      const mockProvider = {
+        getPassword: async (service: string, account: string) => memory.get(`${service}/${account}`) ?? null,
+        setPassword: async (service: string, account: string, password: string) => {
+          memory.set(`${service}/${account}`, password);
+        },
+        deletePassword: async (service: string, account: string) => memory.delete(`${service}/${account}`),
+      };
+
+      const store = new KeychainCredentialStore(mockProvider);
+      await store.put("kc-account", {
+        kind: "oauth",
+        access: "kc-access-123",
+        refresh: "kc-refresh-456",
+        expires: 1800000000,
+      }, { description: "test oauth", providerAccountHint: "openai" });
+
+      const rec = await store.getRecord("kc-account");
+      expect(rec).toEqual({
+        kind: "oauth",
+        access: "kc-access-123",
+        refresh: "kc-refresh-456",
+        expires: 1800000000,
+      });
+
+      const meta = await store.get("kc-account");
+      expect(meta?.meta?.providerAccountHint).toBe("openai");
+    });
   });
 
   describe("CompositeCredentialStore", () => {

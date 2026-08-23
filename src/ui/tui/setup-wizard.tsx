@@ -16,6 +16,7 @@ import { SignInFlow } from "./overlays/model-manager.js";
 import type {
   ProviderManagerApi, ManagerState, PurposeId, Tier, AssignmentTarget, UiError, AccountInput,
 } from "../../transport/cli/provider-manager-api.js";
+import { isOAuthSupported } from "../../domain/providers/oauth-service.js";
 
 export interface WizardExtrasField {
   dotKey: string;
@@ -285,7 +286,7 @@ export function SetupWizard({ api, settings, onFinish, onExitSetup }: SetupWizar
       <AddAccount
         upstreams={upstreams}
         existingIds={state?.accounts.map((a) => a.id) ?? []}
-        canSignIn={(u) => oauthFlows.includes(u.toLowerCase())}
+        canSignIn={(u) => isOAuthSupported(u)}
         onSignIn={(u) => {
           setSignInUpstream(u);
           setSub("sign-in");
@@ -399,7 +400,7 @@ export function SetupWizard({ api, settings, onFinish, onExitSetup }: SetupWizar
           {EXTRAS_GROUPS.map((g, i) => (
             <Text key={g.id} color={groupDone[g.id] ? "green" : undefined}>{` [${i + 1}] ${g.label}${groupDone[g.id] ? " ✓" : ""}`}</Text>
           ))}
-          <Text color={"gray"}> [${EXTRAS_GROUPS.length + 1}] Done   [${EXTRAS_GROUPS.length + 2}] Skip</Text>
+          <Text color={"gray"}>{` [${EXTRAS_GROUPS.length + 1}] Done   [${EXTRAS_GROUPS.length + 2}] Skip`}</Text>
         </Box>
       ) : null}
 

@@ -9,9 +9,8 @@ import type { ProviderRuntime } from "../../domain/providers/provider-runtime.js
 import type { ApiKeyEntry } from "../auth/auth.js";
 import { hasScope } from "../auth/auth.js";
 import { validateEndpointUrl } from "./ssrf-validator.js";
-import { InferenceError } from "../../foundations/errors.js";
 import { redactUrlCredentials, redactString } from "../../foundations/security/redact.js";
-import { createOAuthInteractionShim } from "../cli/provider-manager-api.js";
+import { createOAuthInteractionShim, createProviderManagerApi, sanitizeBaseUrl } from "../cli/provider-manager-api.js";
 
 function sendJSON(res: ServerResponse, status: number, body: unknown, revision?: number): void {
   res.statusCode = status;
@@ -256,11 +255,17 @@ export async function handleGetProviders(
   // Redact credentials and sensitive headers
   const sanitized: Record<string, any> = {};
   for (const [id, acc] of Object.entries(accounts)) {
-    const { headers: _h, ...rest } = acc as any;
     sanitized[id] = {
-      ...rest,
-      ...(rest.baseUrl ? { baseUrl: redactUrlCredentials(rest.baseUrl) } : {}),
-      credential: { kind: acc.credential?.kind ?? "redacted" },
+      adapter: acc.adapter,
+      upstreamProvider: acc.upstreamProvider,
+      ...(acc.baseUrl ? { baseUrl: sanitizeBaseUrl(acc.baseUrl) } : {}),
+      ...(acc.proxy ? { proxy: redactUrlCredentials(acc.proxy) } : {}),
+      ...(acc.compat ? { compat: acc.compat } : {}),
+      ...(acc.ssrfAllowPrivate !== undefined ? { ssrfAllowPrivate: acc.ssrfAllowPrivate } : {}),
+      credential: {
+        kind: acc.credential?.kind ?? "none",
+        ...(acc.credential?.kind === "env" ? { name: (acc.credential as any).name } : {}),
+      },
     };
   }
 
@@ -634,52 +639,31 @@ export async function handleOAuthComplete(
       if (timerId) clearTimeout(timerId);
     });
 
-    if (!credResult || credResult.type !== "oauth" || !credResult.access) {
-      pendingOAuthAttempts.delete(attemptId);
-      sendError(res, 400, "OAUTH_FAILED", "OAuth authorization did not return valid tokens");
+    const api = createProviderManagerApi(runtime);
+    const saveRes = await api.completeOAuthSignIn(
+      attempt.upstream,
+      {
+        access: credResult.access,
+        refresh: credResult.refresh,
+        expires: credResult.expires,
+      },
+      {
+        preferredAccountId: targetAccountId,
+        description: `OAuth login for ${attempt.upstream}`,
+      },
+    );
+
+    pendingOAuthAttempts.delete(attemptId);
+    if (!saveRes.ok) {
+      sendError(res, 400, saveRes.error.code.toUpperCase(), saveRes.error.message);
       return;
     }
 
-    await runtime.credentialStore.put(
-      targetAccountId,
-      {
-        kind: "oauth",
-        access: credResult.access,
-        refresh: credResult.refresh ?? "",
-        expires: credResult.expires ?? Date.now() + 3600_000,
-      },
-      { source: "disk", description: `OAuth login for ${attempt.upstream}` },
-    );
-    credentialPersisted = true;
-
-    const patch = {
-      providers: {
-        [targetAccountId]: {
-          adapter: "pi-ai",
-          upstreamProvider: attempt.upstream,
-          credential: { kind: "seepient", id: targetAccountId },
-        },
-      } as any,
-    };
-
-    let result: any;
-    for (let retry = 0; retry < 2; retry++) {
-      try {
-        const overlay = await runtime.configStore.getOverlay();
-        result = await runtime.updateOverlay(patch, overlay.revision);
-        break;
-      } catch (err: any) {
-        if (retry === 0) continue;
-        throw err;
-      }
-    }
-
-    pendingOAuthAttempts.delete(attemptId);
     sendJSON(
       res,
       200,
       {
-        revision: result.revision,
+        revision: saveRes.state.revision,
         provider: {
           id: targetAccountId,
           adapter: "pi-ai",
@@ -687,7 +671,7 @@ export async function handleOAuthComplete(
           credential: { kind: "redacted" },
         },
       },
-      result.revision,
+      saveRes.state.revision,
     );
   } catch (err: any) {
     if (credentialPersisted) {
@@ -793,7 +777,7 @@ export async function handleProbeProvider(
 
   if (acc.baseUrl) {
     const { safeSsrfFetch, validateEndpointUrl } = await import("./ssrf-validator.js");
-    const allowPrivate = process.env.SEEPIENT_SSRF_ALLOW_PRIVATE === "1";
+    const allowPrivate = acc.ssrfAllowPrivate === true || process.env.SEEPIENT_SSRF_ALLOW_PRIVATE === "1";
     if (full) {
       const start = Date.now();
       const controller = new AbortController();

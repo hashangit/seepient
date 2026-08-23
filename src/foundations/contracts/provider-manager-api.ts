@@ -118,6 +118,11 @@ export interface ProviderManagerApi {
   refreshModels(accountId: string): Promise<RefreshResult>;
   switchSessionModel(accountId: string, modelId: string): void;
   signInWithProvider(upstream: string, callbacks: OAuthFlowCallbacks): Promise<SaveResult>;
+  completeOAuthSignIn(
+    upstream: string,
+    credentials: { access: string; refresh?: string; expires?: number },
+    opts?: { preferredAccountId?: string; description?: string },
+  ): Promise<SaveResult>;
   logoutAccount(accountId: string): Promise<SaveResult>;
   getAvailableOAuthFlows(): Promise<readonly string[]>;
 }

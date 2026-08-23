@@ -654,4 +654,58 @@ describe("OAuth sign-in & logout (contract §6.8–6.10)", () => {
       spy.mockRestore();
     }
   });
+
+  it("saveAccount rejects baseUrl containing [REDACTED] markers", async () => {
+    const { api } = makeApi();
+    const res = await api.saveAccount({
+      accountId: "bad-url-acct",
+      upstreamProvider: "openai",
+      credential: { mode: "none" },
+      baseUrl: "https://proxy.example.com/v1?token=[REDACTED]",
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error.code).toBe("validation_failed");
+      expect(res.error.message).toContain("Cannot save redacted baseUrl");
+    }
+  });
+
+  it("completeOAuthSignIn creates valid overlay entry and keychain-backed credential", async () => {
+    const { api, credentialStore, configStore } = makeApi();
+    const res = await api.completeOAuthSignIn(
+      "openai",
+      {
+        access: "openai-access-123",
+        refresh: "openai-refresh-456",
+        expires: Date.now() + 3600_000,
+      },
+      { preferredAccountId: "my-openai-codex" },
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      const overlay = await configStore.getOverlay();
+      const entry = (overlay.patch.providers as any)?.["my-openai-codex"];
+      expect(entry).toBeDefined();
+      expect(entry.adapter).toBe("pi-ai");
+      expect(entry.upstreamProvider).toBe("openai-codex");
+      expect(entry.credential).toEqual({ kind: "seepient", id: "my-openai-codex" });
+
+      const cred = await credentialStore.getRecord("my-openai-codex");
+      expect(cred?.kind).toBe("oauth");
+      expect((cred as any)?.access).toBe("openai-access-123");
+    }
+  });
+
+  it("mapError properly categorizes oauth_expired, unsupported_capability, unsupported_thinking_level", () => {
+    const expired = mapError({ code: "oauth_expired", message: "Token expired" });
+    expect(expired.code).toBe("oauth_expired");
+    expect(expired.hint).toContain("Sign in again");
+
+    const cap = mapError({ code: "unsupported_capability", message: "Tool use not supported" });
+    expect(cap.code).toBe("unsupported_capability");
+    expect(cap.hint).toContain("capability");
+
+    const think = mapError({ code: "unsupported_thinking_level", message: "High not supported" });
+    expect(think.code).toBe("unsupported_thinking_level");
+  });
 });

@@ -149,7 +149,7 @@ export function registerProvidersCommands(program: Command): void {
 
       if (!existing) {
         if (opts.json) {
-          console.log(JSON.stringify({ ok: false, error: { code: "account_not_found", message: `Provider account "${id}" not found.` } }, null, 2));
+          console.log(JSON.stringify({ ok: false, error: { code: "unconfigured_provider", message: `Provider account "${id}" not found.` } }, null, 2));
           process.exitCode = 1;
           return;
         }

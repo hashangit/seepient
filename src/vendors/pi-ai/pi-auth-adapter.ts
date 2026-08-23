@@ -189,7 +189,23 @@ export class PiCredentialStoreAdapter implements PiCredentialStore {
           refresh: next.refresh,
           expires: next.expires,
         };
-        await this.seepientStore.put(providerId, persisted, { source: "keychain" });
+        const hint = getCanonicalOAuthFlowId(providerId);
+        let putErr: unknown;
+        for (let i = 0; i < 3; i++) {
+          try {
+            await this.seepientStore.put(providerId, persisted, {
+              source: "keychain",
+              providerAccountHint: hint,
+            });
+            putErr = undefined;
+            break;
+          } catch (err) {
+            putErr = err;
+          }
+        }
+        if (putErr) {
+          console.warn(`[warning] Failed to persist refreshed OAuth token for "${providerId}": ${String(putErr)}`);
+        }
       } else if (next.type === "api_key") {
         const persisted: PersistedCredentialRecord = {
           kind: "api_key",

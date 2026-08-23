@@ -395,7 +395,7 @@ export function TuiApp({
     { name: 'settings', description: 'View settings' },
     { name: 'sessions', description: 'Resume / delete a session' },
   ];
-  const onPaletteRun = (name: string): void => {
+  const onPaletteRun = (name: string, arg?: string): void => {
     setOverlay(null);
     if (name === 'shortcuts') {
       setOverlay('help');
@@ -411,7 +411,7 @@ export function TuiApp({
       setOverlay('model');
     } else if (name === 'login') {
       setModelPrefill(undefined);
-      setModelSignIn('anthropic');
+      setModelSignIn(arg?.trim() || 'anthropic');
       setModelTab('providers');
       setOverlay('model');
     } else if (name === 'logout') {
@@ -572,6 +572,7 @@ export function TuiApp({
             api={managerApi}
             activeAccount={providerType}
             activeModel={agent.getModel()}
+            activeThinking={(agent as any).getThinkingLevel?.() ?? (agent as any).getThinking?.() ?? (agent as any).thinkingLevel ?? undefined}
             sessionNotice={sessionNotice ?? undefined}
             prefill={modelPrefill}
             initialSignIn={modelSignIn}

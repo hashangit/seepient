@@ -5,7 +5,7 @@
  * controller. Pure presentational component (R9). The [4] sign-in entry
  * appears only when the parent provides the M5 OAuth hooks.
  */
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Box, Text, useInput } from "ink";
 import { useTheme } from "../hooks/use-theme.js";
 import type { AccountInput, UiError } from "../../../transport/cli/provider-manager-api.js";
@@ -98,11 +98,21 @@ export function AddAccount({
     }
   }
 
+  useEffect(() => {
+    return () => {
+      setSecret("");
+    };
+  }, []);
+
   useInput((input, key) => {
     if (busy) return;
     switch (phase) {
       case "choose": {
-        if (key.escape) { if (search) { setSearch(""); setSelected(0); } else onClose(); return; }
+        if (key.escape) {
+          if (search) { setSearch(""); setSelected(0); }
+          else { setSecret(""); onClose(); }
+          return;
+        }
         if (actionFocus) {
           if (key.escape || key.tab || key.upArrow) { setActionFocus(false); return; }
           if (input === "1" && sel) { choose(sel.kind === "custom" ? "custom" : sel.id); return; }
@@ -143,7 +153,7 @@ export function AddAccount({
       }
       case "paste":
       case "env": {
-        if (key.escape) { setPhase("credential"); return; }
+        if (key.escape) { setSecret(""); setPhase("credential"); return; }
         if (key.return) { void save(); return; }
         if (key.backspace || key.delete) { setSecret((s) => s.slice(0, -1)); return; }
         if (input && !key.ctrl && !key.meta && input >= " ") setSecret((s) => s + input);
@@ -167,7 +177,7 @@ export function AddAccount({
       }
       case "localConfirm": {
         if (key.escape) { setPhase("baseUrl"); return; }
-        if (input === "1") { setAllowPrivate(true); setPhase("compat"); return; }
+        if (input === "1" || key.return) { setAllowPrivate(true); setPhase("compat"); return; }
         if (input === "2") { setPhase("baseUrl"); return; }
         return;
       }
@@ -176,12 +186,12 @@ export function AddAccount({
         if (key.upArrow) { setCompatIdx((i) => Math.max(0, i - 1)); return; }
         if (key.downArrow) { setCompatIdx((i) => Math.min(COMPAT_OPTIONS.length - 1, i + 1)); return; }
         if (key.return) { setPhase("id"); return; }
-        const n = parseInt(input ?? "", 10);
+        const n = Number.parseInt(input, 10);
         if (!Number.isNaN(n) && n >= 1 && n <= COMPAT_OPTIONS.length) { setCompatIdx(n - 1); setPhase("id"); }
         return;
       }
       case "done": {
-        if (key.escape || key.return) onClose();
+        if (key.escape || key.return) { setSecret(""); onClose(); }
         return;
       }
     }

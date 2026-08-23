@@ -28,15 +28,21 @@ export function registerAuthCommands(program: Command): void {
       const existing = state.accounts.find((a) => a.id === providerId);
       const upstreamProvider = existing ? existing.upstreamProvider : providerId;
 
+      const snapshot = await runtime.createTurnSnapshot();
+      const rawExisting = snapshot.config.providers?.[providerId];
+
       if (opts.key) {
         const res = await api.saveAccount({
           accountId: providerId,
           upstreamProvider,
           credential: { mode: "paste", keyValue: opts.key },
-          baseUrl: existing?.baseUrl,
+          baseUrl: rawExisting?.baseUrl,
+          compat: rawExisting?.compat,
+          allowPrivate: rawExisting?.ssrfAllowPrivate,
         });
         if (!res.ok) {
-          console.error(chalk.red(`Error (${res.error.code}): ${res.error.message}`));
+          const hintText = res.error.hint ? ` (${res.error.hint})` : "";
+          console.error(chalk.red(`Error (${res.error.code}): ${res.error.message}${hintText}`));
           process.exit(1);
         }
         console.log(chalk.green(`✓ Successfully configured credential for provider account "${providerId}"`));
@@ -48,10 +54,13 @@ export function registerAuthCommands(program: Command): void {
           accountId: providerId,
           upstreamProvider,
           credential: { mode: "env", varName: opts.envVar },
-          baseUrl: existing?.baseUrl,
+          baseUrl: rawExisting?.baseUrl,
+          compat: rawExisting?.compat,
+          allowPrivate: rawExisting?.ssrfAllowPrivate,
         });
         if (!res.ok) {
-          console.error(chalk.red(`Error (${res.error.code}): ${res.error.message}`));
+          const hintText = res.error.hint ? ` (${res.error.hint})` : "";
+          console.error(chalk.red(`Error (${res.error.code}): ${res.error.message}${hintText}`));
           process.exit(1);
         }
         console.log(chalk.green(`✓ Successfully configured env credential (${opts.envVar}) for provider account "${providerId}"`));
@@ -89,7 +98,9 @@ export function registerAuthCommands(program: Command): void {
             accountId: providerId,
             upstreamProvider,
             credential: { mode: "paste", keyValue: key },
-            baseUrl: existing?.baseUrl,
+            baseUrl: rawExisting?.baseUrl,
+            compat: rawExisting?.compat,
+            allowPrivate: rawExisting?.ssrfAllowPrivate,
           });
           if (!res.ok) {
             const hintText = res.error.hint ? ` (${res.error.hint})` : "";
@@ -107,7 +118,9 @@ export function registerAuthCommands(program: Command): void {
             accountId: providerId,
             upstreamProvider,
             credential: { mode: "env", varName: envName },
-            baseUrl: existing?.baseUrl,
+            baseUrl: rawExisting?.baseUrl,
+            compat: rawExisting?.compat,
+            allowPrivate: rawExisting?.ssrfAllowPrivate,
           });
           if (!res.ok) {
             const hintText = res.error.hint ? ` (${res.error.hint})` : "";

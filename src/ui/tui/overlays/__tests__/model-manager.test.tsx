@@ -91,6 +91,7 @@ function fakeApi(overrides?: {
     refreshModels: async () => ({ ok: true, discovered: ["m1"], state }),
     switchSessionModel: vi.fn(),
     signInWithProvider: overrides?.signInWithProvider ?? (async () => ({ ok: true, state })),
+    completeOAuthSignIn: async () => ({ ok: true, state }),
     logoutAccount: overrides?.logoutAccount ?? (async () => ({ ok: true, state })),
     getAvailableOAuthFlows: overrides?.getAvailableOAuthFlows ?? (async () => ["anthropic", "openai-codex"]),
   };
