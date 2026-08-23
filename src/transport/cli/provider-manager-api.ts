@@ -20,7 +20,8 @@ import type { ThinkingLevel } from "../../foundations/schemas/inference.js";
 import { redactString, redactUrlCredentials, isSensitiveKey } from "../../foundations/security/redact.js";
 import { SeepientError } from "../../foundations/errors.js";
 import { validateEndpointUrl } from "../http/ssrf-validator.js";
-import { getCanonicalOAuthFlowId } from "../../domain/providers/oauth-service.js";
+import { getCanonicalOAuthFlowId, isOAuthSupported } from "../../domain/providers/oauth-service.js";
+export { isOAuthSupported, getCanonicalOAuthFlowId };
 
 // ── Vocabulary types (data-model.md §2.1) ───────────────────────────────────
 

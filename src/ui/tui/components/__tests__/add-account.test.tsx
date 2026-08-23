@@ -213,4 +213,22 @@ describe("AddAccount — navigation", () => {
     await type(inst, ENTER);
     expect(inst.lastFrame() ?? "").toContain("google");
   });
+
+  it("offers [4] Sign in with provider for supported OAuth upstreams", async () => {
+    const onSignIn = vi.fn();
+    const canSignIn = (u: string) => ["anthropic", "openai", "github", "kimi", "xai"].includes(u.toLowerCase());
+    const { inst } = setup({
+      prefillUpstream: "openai",
+      canSignIn,
+      onSignIn,
+    });
+    // From choose prefilled with openai → enter
+    await type(inst, ENTER); // id phase
+    await type(inst, ENTER); // credential phase
+    const frame = inst.lastFrame() ?? "";
+    expect(frame).toContain("[4] Sign in with provider");
+
+    await type(inst, "4");
+    expect(onSignIn).toHaveBeenCalledWith("openai");
+  });
 });

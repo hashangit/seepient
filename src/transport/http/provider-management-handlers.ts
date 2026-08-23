@@ -609,27 +609,6 @@ export async function handleOAuthComplete(
     return;
   }
 
-  const snapshot = await runtime.createTurnSnapshot();
-  const existingAccounts = Object.keys(snapshot.config.providers ?? {});
-  let targetAccountId = providerId;
-  if (existingAccounts.includes(targetAccountId)) {
-    let seq = 2;
-    while (existingAccounts.includes(`${providerId}-${seq}`)) {
-      seq++;
-    }
-    targetAccountId = `${providerId}-${seq}`;
-  }
-
-  let preExistingRecord: any = null;
-  let preExistingMeta: any = null;
-  if (typeof (runtime.credentialStore as any).getRecord === "function") {
-    try {
-      preExistingRecord = await (runtime.credentialStore as any).getRecord(targetAccountId);
-      preExistingMeta = (await runtime.credentialStore.get(targetAccountId))?.meta;
-    } catch {}
-  }
-
-  let credentialPersisted = false;
   try {
     let timerId: any;
     const timeoutPromise = new Promise((_, reject) => {
@@ -648,7 +627,7 @@ export async function handleOAuthComplete(
         expires: credResult.expires,
       },
       {
-        preferredAccountId: targetAccountId,
+        preferredAccountId: providerId,
         description: `OAuth login for ${attempt.upstream}`,
       },
     );
@@ -665,7 +644,7 @@ export async function handleOAuthComplete(
       {
         revision: saveRes.state.revision,
         provider: {
-          id: targetAccountId,
+          id: providerId,
           adapter: "pi-ai",
           upstreamProvider: attempt.upstream,
           credential: { kind: "redacted" },
@@ -674,13 +653,6 @@ export async function handleOAuthComplete(
       saveRes.state.revision,
     );
   } catch (err: any) {
-    if (credentialPersisted) {
-      if (preExistingRecord) {
-        await runtime.credentialStore.put(targetAccountId, preExistingRecord, preExistingMeta).catch(() => {});
-      } else {
-        await runtime.credentialStore.delete(targetAccountId).catch(() => {});
-      }
-    }
     if (err.message === "OAUTH_PENDING") {
       sendError(res, 202, "OAUTH_PENDING", "Authorization still pending in browser");
       return;

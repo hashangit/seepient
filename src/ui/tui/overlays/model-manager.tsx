@@ -19,7 +19,7 @@ import type {
   ProviderManagerApi, ManagerState, PurposeId, PurposeDef, Tier,
   AssignmentTarget, UiError,
 } from '../../../transport/cli/provider-manager-api.js';
-import { isOAuthSupported } from '../../../domain/providers/oauth-service.js';
+import { isOAuthSupported } from '../../../transport/cli/provider-manager-api.js';
 
 export interface ModelManagerProps {
   api: ProviderManagerApi;
@@ -77,7 +77,6 @@ export function ModelManager({
   const [provIdx, setProvIdx] = useState(0);
   const [fallbacks, setFallbacks] = useState<Record<string, string>>({});
   const [feedback, setFeedback] = useState<Feedback>({ kind: "idle", message: "" });
-  const [oauthFlows, setOauthFlows] = useState<readonly string[]>([]);
 
   const load = useCallback(async (): Promise<void> => {
     setLoadError(null);
@@ -111,8 +110,7 @@ export function ModelManager({
 
   useEffect(() => {
     void load();
-    void api.getAvailableOAuthFlows?.().then((f) => setOauthFlows(f)).catch(() => {});
-  }, [load, api]);
+  }, [load]);
 
   // ── Derived board rows ────────────────────────────────────────────────────
   const slotRows: SlotRow[] = useMemo(() => {

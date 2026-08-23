@@ -16,7 +16,7 @@ import { SignInFlow } from "./overlays/model-manager.js";
 import type {
   ProviderManagerApi, ManagerState, PurposeId, Tier, AssignmentTarget, UiError, AccountInput,
 } from "../../transport/cli/provider-manager-api.js";
-import { isOAuthSupported } from "../../domain/providers/oauth-service.js";
+import { isOAuthSupported } from "../../transport/cli/provider-manager-api.js";
 
 export interface WizardExtrasField {
   dotKey: string;
@@ -93,7 +93,6 @@ export function SetupWizard({ api, settings, onFinish, onExitSetup }: SetupWizar
   const [step, setStep] = useState<Step>("welcome");
   const [sub, setSub] = useState<"menu" | "picker" | "add" | "group" | "sign-in">("menu");
   const [signInUpstream, setSignInUpstream] = useState<string>("");
-  const [oauthFlows, setOauthFlows] = useState<readonly string[]>([]);
   const [activeSlot, setActiveSlot] = useState<{ purpose: PurposeId; tier: Tier | null; key: string } | null>(null);
   const [activeGroup, setActiveGroup] = useState<WizardExtrasGroup | null>(null);
   const [fieldIdx, setFieldIdx] = useState(0);
@@ -106,8 +105,7 @@ export function SetupWizard({ api, settings, onFinish, onExitSetup }: SetupWizar
   const load = useCallback(async () => setState(await api.getState()), [api]);
   useEffect(() => {
     void load().catch((e) => setError(String(e)));
-    void api.getAvailableOAuthFlows?.().then((f) => setOauthFlows(f)).catch(() => {});
-  }, [load, api]);
+  }, [load]);
 
   const mainAssigned = !!(state?.assignments as any)?.text?.standard;
   const emptySlots = useMemo(() => {

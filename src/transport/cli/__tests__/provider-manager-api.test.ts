@@ -3,7 +3,7 @@
  * Runs against an in-memory config store + memory credential store.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { createProviderManagerApi, mapError } from "../provider-manager-api.js";
+import { createProviderManagerApi, mapError, isOAuthSupported } from "../provider-manager-api.js";
 import { ProviderConfigStore } from "../../../domain/providers/config-store/provider-config-store.js";
 import { ProviderRuntime } from "../../../domain/providers/provider-runtime.js";
 import { MemoryCredentialStore } from "../../../domain/providers/credentials/memory-credential-store.js";
@@ -707,5 +707,34 @@ describe("OAuth sign-in & logout (contract §6.8–6.10)", () => {
 
     const think = mapError({ code: "unsupported_thinking_level", message: "High not supported" });
     expect(think.code).toBe("unsupported_thinking_level");
+  });
+
+  it("isOAuthSupported recognizes canonical IDs and aliases correctly", () => {
+    // Anthropic
+    expect(isOAuthSupported("anthropic")).toBe(true);
+    expect(isOAuthSupported("ANTHROPIC")).toBe(true);
+
+    // OpenAI aliases
+    expect(isOAuthSupported("openai")).toBe(true);
+    expect(isOAuthSupported("openai-codex")).toBe(true);
+
+    // GitHub / Copilot aliases
+    expect(isOAuthSupported("github")).toBe(true);
+    expect(isOAuthSupported("copilot")).toBe(true);
+    expect(isOAuthSupported("github-copilot")).toBe(true);
+
+    // Kimi / Moonshot aliases
+    expect(isOAuthSupported("kimi")).toBe(true);
+    expect(isOAuthSupported("moonshot")).toBe(true);
+    expect(isOAuthSupported("kimi-coding")).toBe(true);
+
+    // Grok / xAI aliases
+    expect(isOAuthSupported("grok")).toBe(true);
+    expect(isOAuthSupported("xai")).toBe(true);
+
+    // Unsupported / custom
+    expect(isOAuthSupported("ollama")).toBe(false);
+    expect(isOAuthSupported("custom")).toBe(false);
+    expect(isOAuthSupported("openai-compatible")).toBe(false);
   });
 });

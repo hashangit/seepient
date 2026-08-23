@@ -572,7 +572,6 @@ export function TuiApp({
             api={managerApi}
             activeAccount={providerType}
             activeModel={agent.getModel()}
-            activeThinking={(agent as any).getThinkingLevel?.() ?? (agent as any).getThinking?.() ?? (agent as any).thinkingLevel ?? undefined}
             sessionNotice={sessionNotice ?? undefined}
             prefill={modelPrefill}
             initialSignIn={modelSignIn}

@@ -101,6 +101,14 @@ export class FileCredentialStore implements CredentialStore {
               );
             }
             try {
+              const stat = fs.lstatSync(file);
+              if (stat.isSymbolicLink()) {
+                throw new SeepientError(
+                  `Security Violation: Symlinked credential file is rejected: "${file}"`,
+                  "SECURITY_ERROR",
+                  false,
+                );
+              }
               const raw = fs.readFileSync(file, "utf-8");
               const parsed = JSON.parse(raw) as StoredFilePayload;
               if (parsed.materialKind === "oauth") {

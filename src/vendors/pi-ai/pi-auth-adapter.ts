@@ -189,13 +189,22 @@ export class PiCredentialStoreAdapter implements PiCredentialStore {
           refresh: next.refresh,
           expires: next.expires,
         };
-        const hint = getCanonicalOAuthFlowId(providerId);
+        let existingMeta: any;
+        if (typeof this.seepientStore.get === "function") {
+          try {
+            existingMeta = (await this.seepientStore.get(providerId))?.meta;
+          } catch {}
+        }
+        const hint = existingMeta?.providerAccountHint ?? getCanonicalOAuthFlowId(providerId);
+        const description = existingMeta?.description ?? `OAuth login for ${providerId}`;
         let putErr: unknown;
         for (let i = 0; i < 3; i++) {
           try {
             await this.seepientStore.put(providerId, persisted, {
-              source: "keychain",
+              source: existingMeta?.source ?? "keychain",
               providerAccountHint: hint,
+              description,
+              ...(existingMeta?.tags ? { tags: existingMeta.tags } : {}),
             });
             putErr = undefined;
             break;
