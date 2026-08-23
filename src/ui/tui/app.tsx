@@ -298,7 +298,7 @@ export function TuiApp({
       return;
     }
     if (trimmed.startsWith('/login ') || trimmed === '/login') {
-      const provider = trimmed.startsWith('/login ') ? trimmed.slice('/login '.length).trim() : undefined;
+      const provider = trimmed.startsWith('/login ') ? trimmed.slice('/login '.length).trim() : 'anthropic';
       setModelPrefill(undefined);
       setModelSignIn(provider);
       setModelTab('providers');

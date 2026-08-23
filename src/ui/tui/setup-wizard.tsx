@@ -310,6 +310,8 @@ export function SetupWizard({ api, settings, onFinish, onExitSetup }: SetupWizar
         api={api}
         onDone={(msg) => {
           setSub("menu");
+          setSummary((s) => ({ ...s, accounts: [...new Set([...s.accounts, signInUpstream])] }));
+          setError(null);
           void load();
         }}
         onCancel={() => setSub("menu")}

@@ -197,7 +197,8 @@ export async function handlePutAssignment(
   const saveRes = await api.setAssignment(purpose as any, tier ? (tier as any) : null, body, expectedRev);
   if (!saveRes.ok) {
     if (saveRes.error.code === "conflict") {
-      sendError(res, 409, "CONFLICT", saveRes.error.message);
+      const snap = await runtime.createTurnSnapshot();
+      sendJSON(res, 409, { error: { code: "CONFLICT", message: saveRes.error.message }, revision: snap.revision }, snap.revision);
       return;
     }
     sendError(res, 400, saveRes.error.code.toUpperCase(), saveRes.error.message);
@@ -228,7 +229,8 @@ export async function handleDeleteAssignment(
   const clearRes = await api.clearAssignment(purpose as any, tier ? (tier as any) : null, expectedRev);
   if (!clearRes.ok) {
     if (clearRes.error.code === "conflict") {
-      sendError(res, 409, "CONFLICT", clearRes.error.message);
+      const snap = await runtime.createTurnSnapshot();
+      sendJSON(res, 409, { error: { code: "CONFLICT", message: clearRes.error.message }, revision: snap.revision }, snap.revision);
       return;
     }
     sendError(res, 400, clearRes.error.code.toUpperCase(), clearRes.error.message);
@@ -341,7 +343,8 @@ export async function handlePutProvider(
 
   if (!saveRes.ok) {
     if (saveRes.error.code === "conflict") {
-      sendError(res, 409, "CONFLICT", saveRes.error.message);
+      const snap = await runtime.createTurnSnapshot();
+      sendJSON(res, 409, { error: { code: "CONFLICT", message: saveRes.error.message }, revision: snap.revision }, snap.revision);
     } else if (saveRes.error.code === "invalid_endpoint") {
       sendError(res, 400, "INVALID_ENDPOINT", saveRes.error.message);
     } else {
@@ -403,7 +406,8 @@ export async function handleDeleteProvider(
     }
     const errObj = "error" in result ? result.error : undefined;
     if (errObj?.code === "conflict") {
-      sendError(res, 409, "CONFLICT", errObj.message);
+      const snap = await runtime.createTurnSnapshot();
+      sendJSON(res, 409, { error: { code: "CONFLICT", message: errObj.message }, revision: snap.revision }, snap.revision);
       return;
     }
     sendError(res, 400, (errObj?.code || "BAD_REQUEST").toUpperCase(), errObj?.message || "Delete failed");

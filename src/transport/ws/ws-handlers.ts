@@ -699,13 +699,16 @@ export async function handleWsListProviders(
 
   try {
     const { getDefaultProviderRuntime } = await import("../../domain/providers/provider-runtime.js");
-    const { redactUrlCredentials } = await import("../../foundations/security/redact.js");
+    const { sanitizeBaseUrl } = await import("../cli/provider-manager-api.js");
     const snapshot = await getDefaultProviderRuntime().createTurnSnapshot();
     const v2Providers = snapshot.config?.providers || {};
     for (const [id, entry] of Object.entries(v2Providers)) {
       providers[id] = {
         type: entry.upstreamProvider || entry.adapter || "custom",
-        baseUrl: entry.baseUrl ? redactUrlCredentials(entry.baseUrl) : undefined,
+        upstreamProvider: entry.upstreamProvider || entry.adapter || "custom",
+        adapter: entry.adapter,
+        baseUrl: entry.baseUrl ? sanitizeBaseUrl(entry.baseUrl) : undefined,
+        credentialKind: (entry.credential as any)?.kind ?? "none",
       };
     }
   } catch {}
@@ -759,7 +762,7 @@ export async function handleWsSetProvider(
         model,
       });
       if (!assignRes.ok) {
-        safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: assignRes.error.code, message: assignRes.error.message } } as any);
+        safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: assignRes.error.code.toUpperCase(), message: assignRes.error.message } } as any);
         return;
       }
     }
