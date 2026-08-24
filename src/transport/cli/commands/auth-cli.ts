@@ -21,12 +21,13 @@ export function registerAuthCommands(program: Command): void {
     .description("Configure credentials for a provider account")
     .option("--key <apiKey>", "API key for the provider")
     .option("--env-var <name>", "Environment variable name containing the API key")
+    .option("--upstream <upstream>", "Upstream provider name (e.g. openai, anthropic, google)")
     .action(async (providerId, opts) => {
       const runtime = getDefaultProviderRuntime();
       const api = createProviderManagerApi(runtime);
       const state = await api.getState();
       const existing = state.accounts.find((a) => a.id === providerId);
-      const upstreamProvider = existing ? existing.upstreamProvider : providerId;
+      const upstreamProvider = opts.upstream ?? (existing ? existing.upstreamProvider : providerId);
 
       const snapshot = await runtime.createTurnSnapshot();
       const rawExisting = snapshot.config.providers?.[providerId];

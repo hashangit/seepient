@@ -298,7 +298,9 @@ export function TuiApp({
       return;
     }
     if (trimmed.startsWith('/login ') || trimmed === '/login') {
-      const provider = trimmed.startsWith('/login ') ? trimmed.slice('/login '.length).trim() : 'anthropic';
+      const explicit = trimmed.startsWith('/login ') ? trimmed.slice('/login '.length).trim() : undefined;
+      const flows = await managerApi.getAvailableOAuthFlows?.().catch(() => []) ?? [];
+      const provider = explicit || flows[0];
       setModelPrefill(undefined);
       setModelSignIn(provider);
       setModelTab('providers');
@@ -410,10 +412,14 @@ export function TuiApp({
       setModelTab('providers');
       setOverlay('model');
     } else if (name === 'login') {
-      setModelPrefill(undefined);
-      setModelSignIn(arg?.trim() || 'anthropic');
-      setModelTab('providers');
-      setOverlay('model');
+      void (async () => {
+        const flows = await managerApi.getAvailableOAuthFlows?.().catch(() => []) ?? [];
+        const provider = arg?.trim() || flows[0];
+        setModelPrefill(undefined);
+        setModelSignIn(provider);
+        setModelTab('providers');
+        setOverlay('model');
+      })();
     } else if (name === 'logout') {
       setModelPrefill(undefined);
       setModelSignIn(undefined);

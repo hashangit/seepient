@@ -500,4 +500,45 @@ describe("REST Provider Management v2 API (QS-P6.3 & QS-P6.4)", () => {
     expect(body.providerId).toBe("local-ollama");
     expect(body.blocked).toBeUndefined();
   });
+
+  it("F2 regression: PUT /v1/providers/:id with credential only preserves existing baseUrl, compat, and ssrfAllowPrivate", async () => {
+    // 1. Create account with custom endpoint & ssrfAllowPrivate
+    await configStore.updateOverlay({
+      providers: {
+        "custom-ollama": {
+          adapter: "pi-ai",
+          upstreamProvider: "openai",
+          baseUrl: "http://127.0.0.1:11434/v1",
+          compat: "openai",
+          ssrfAllowPrivate: true,
+          credential: { kind: "none" },
+        } as any,
+      },
+    }, (await configStore.getOverlay()).revision);
+
+    const rev = (await configStore.getOverlay()).revision;
+    // 2. PUT with only credential (updating API key) without repeating baseUrl
+    const putReq = createMockReqRes(
+      "PUT",
+      "/v1/providers/custom-ollama",
+      { authorization: `Bearer ${adminKey.rawKey}`, "if-match": `"${rev}"` },
+      JSON.stringify({
+        credential: { kind: "api_key", keyValue: "sk-ollama-new" },
+      }),
+    );
+    await new Promise<void>((resolve) => {
+      putReq.res.on("finish", () => resolve());
+      handler(putReq.req, putReq.res);
+    });
+    expect(putReq.res.statusCode).toBe(200);
+
+    // 3. Assert overlay preserved baseUrl, compat, ssrfAllowPrivate, and upstreamProvider
+    const overlay = await configStore.getOverlay();
+    const entry = (overlay.patch.providers as any)?.["custom-ollama"];
+    expect(entry).toBeDefined();
+    expect(entry.upstreamProvider).toBe("openai");
+    expect(entry.baseUrl).toBe("http://127.0.0.1:11434/v1");
+    expect(entry.compat).toBe("openai");
+    expect(entry.ssrfAllowPrivate).toBe(true);
+  });
 });

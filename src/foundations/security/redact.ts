@@ -60,7 +60,7 @@ export function isSensitiveKey(key: string): boolean {
 export function redactString(str: string): string {
   let result = redactUrlCredentials(str);
   result = result.replace(
-    /((?:["']?(?:access_token|refresh_token|refresh|access|api_key|apiKey|password)["']?\s*[:=]\s*["']?))[a-zA-Z0-9._~+/-]+(["']?)/gi,
+    /((?:["']?(?:access_token|refresh_token|refresh|access|api_key|apiKey|keyValue|password|secret|token)["']?\s*[:=]\s*["']?))[a-zA-Z0-9._~+/-]+(["']?)/gi,
     "$1[REDACTED]$2",
   );
   for (const pattern of SECRET_VALUE_PATTERNS) {

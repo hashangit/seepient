@@ -408,7 +408,11 @@ export function SetupWizard({ api, settings, onFinish, onExitSetup }: SetupWizar
         <Box flexDirection="column">
           <Text bold color="green">Setup complete</Text>
           {summary.accounts.length > 0 ? <Text>Accounts connected: {summary.accounts.join(", ")}</Text> : null}
-          {summary.mainModel ? <Text>Main model: {summary.mainModel}</Text> : <Text color="yellow">Main model: not set — the default policy will apply</Text>}
+          {summary.mainModel || ((state?.assignments as any)?.text?.standard ? `${(state?.assignments as any).text.standard.providerAccount}/${(state?.assignments as any).text.standard.model}` : undefined) ? (
+            <Text>Main model: {summary.mainModel || `${(state?.assignments as any).text.standard.providerAccount}/${(state?.assignments as any).text.standard.model}`}</Text>
+          ) : (
+            <Text color="yellow">Main model: not set — the default policy will apply</Text>
+          )}
           {summary.slots.length > 0 ? <Text>Job slots staffed: {summary.slots.join(", ")}</Text> : null}
           {summary.extrasKeys.length > 0 ? <Text>Integrations saved: {summary.extrasKeys.join(", ")}</Text> : null}
           <Text color={"gray"}>Run `seepient` to start. Manage everything later with /models.</Text>

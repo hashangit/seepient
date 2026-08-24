@@ -119,7 +119,12 @@ function buildRows(
       displayName: m.displayName,
       priceLabel: priceLabel(m),
       contextLabel: contextLabel(m.contextWindow),
-      jobBadges: badges.get(`${m.reachableVia[0]}/${m.id}`) ?? badges.get(`*/${m.id}`) ?? [],
+      jobBadges: Array.from(
+        new Set([
+          ...m.reachableVia.flatMap((acc) => badges.get(`${acc}/${m.id}`) ?? []),
+          ...(badges.get(`*/${m.id}`) ?? []),
+        ]),
+      ),
       reachable: m.reachableVia.length > 0,
       reachableAccounts: m.reachableVia,
       capabilityOk,

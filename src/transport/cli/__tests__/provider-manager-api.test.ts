@@ -122,7 +122,8 @@ describe("saveAccount credential-first ordering (contract §6.2)", () => {
         throw new SeepientError("keychain denied", "CREDENTIAL_STORE_FAILURE", false);
       }
     }
-    const { api, configStore } = makeApi({ credentialStore: new FailingStore() as unknown as MemoryCredentialStore });
+    const { api, configStore, runtime } = makeApi({ credentialStore: new FailingStore() as unknown as MemoryCredentialStore });
+    withCatalogModels(runtime, MODELS);
     const res = await api.saveAccount({
       accountId: "acme-x", upstreamProvider: "acme",
       credential: { mode: "paste", keyValue: "k1" },
@@ -143,7 +144,8 @@ describe("saveAccount credential-first ordering (contract §6.2)", () => {
         throw new SeepientError(`Optimistic concurrency violation: expected revision ${rev}, but current revision is ${rev}.`, "PRECONDITION_FAILED", false);
       }
     }
-    const { api } = makeApi({ credentialStore: creds, configStore: new FlakyStore() });
+    const { api, runtime } = makeApi({ credentialStore: creds, configStore: new FlakyStore() });
+    withCatalogModels(runtime, MODELS);
     const res = await api.saveAccount({
       accountId: "acme-y", upstreamProvider: "acme",
       credential: { mode: "paste", keyValue: "k2" },
@@ -167,7 +169,8 @@ describe("OCC retry-once (contract §6.3)", () => {
       }
     }
     void base;
-    const { api } = makeApi({ configStore: new RetryOnceStore() });
+    const { api, runtime } = makeApi({ configStore: new RetryOnceStore() });
+    withCatalogModels(runtime, MODELS);
     const res = await api.saveAccount({
       accountId: "acme-ok", upstreamProvider: "acme", credential: { mode: "none" },
     });
@@ -552,8 +555,9 @@ describe("OAuth sign-in & logout (contract §6.8–6.10)", () => {
     }
   });
 
-  it("saveAccount preserves pasted credential when encountering an OCC revision conflict", async () => {
-    const { api, credentialStore, configStore } = makeApi();
+  it("saveAccount rolls back pasted credential when encountering an OCC revision conflict (F3)", async () => {
+    const { api, credentialStore, configStore, runtime } = makeApi();
+    withCatalogModels(runtime, MODELS);
 
     // Bump config revision to 1
     await configStore.updateOverlay({ modelAssignments: { text: { standard: { providerAccount: "a", model: "m" } } } }, 0);
@@ -563,7 +567,7 @@ describe("OAuth sign-in & logout (contract §6.8–6.10)", () => {
       {
         accountId: "conflict-key-acct",
         upstreamProvider: "acme",
-        credential: { mode: "paste", keyValue: "sk-should-survive-conflict" },
+        credential: { mode: "paste", keyValue: "sk-should-not-orphan" },
       },
       0, // Stale revision
     );
@@ -573,11 +577,9 @@ describe("OAuth sign-in & logout (contract §6.8–6.10)", () => {
       expect(saveRes.error.code).toBe("conflict");
     }
 
-    // Assert key is not deleted on conflict so client can retry with fresh revision
+    // Assert key is rolled back on conflict so no orphan secret remains
     const rec = await credentialStore.getRecord("conflict-key-acct");
-    expect(rec).toBeDefined();
-    expect(rec?.kind).toBe("api_key");
-    expect((rec as any)?.keyValue).toBe("sk-should-survive-conflict");
+    expect(rec).toBeUndefined();
   });
 
   it("P0 regression: signInWithProvider writes valid schema entry and produces valid effective config", async () => {
@@ -736,5 +738,51 @@ describe("OAuth sign-in & logout (contract §6.8–6.10)", () => {
     expect(isOAuthSupported("ollama")).toBe(false);
     expect(isOAuthSupported("custom")).toBe(false);
     expect(isOAuthSupported("openai-compatible")).toBe(false);
+  });
+
+  it("F3 regression: rolls back pasted credential on OCC revision mismatch so no orphan secret remains", async () => {
+    const { api, credentialStore } = makeApi();
+    const res = await api.saveAccount(
+      {
+        accountId: "occ-orphan-test",
+        upstreamProvider: "openai",
+        credential: { mode: "paste", keyValue: "sk-orphan-key-123" },
+      },
+      9999, // stale revision -> OCC conflict
+    );
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error.code).toBe("conflict");
+    }
+
+    // Secret must NOT be orphaned in credential store
+    const stored = await credentialStore.get("occ-orphan-test");
+    expect(stored).toBeUndefined();
+  });
+
+  it("F5 regression: rejects unknown upstreamProvider with validation_failed", async () => {
+    const { api, runtime } = makeApi();
+    withCatalogModels(runtime, MODELS);
+    const res = await api.saveAccount({
+      accountId: "my-custom-account",
+      upstreamProvider: "nonexistent-upstream-provider",
+      credential: { mode: "none" },
+    });
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error.code).toBe("validation_failed");
+      expect(res.error.message).toContain('Unknown upstream provider "nonexistent-upstream-provider"');
+    }
+  });
+
+  it("F6 regression: getAvailableOAuthFlows returns all bundled OAuth flow identifiers", async () => {
+    const { api } = makeApi();
+    const flows = await api.getAvailableOAuthFlows();
+    expect(flows).toContain("anthropic");
+    expect(flows).toContain("openai-codex");
+    expect(flows).toContain("github-copilot");
+    expect(flows.length).toBeGreaterThanOrEqual(7);
   });
 });

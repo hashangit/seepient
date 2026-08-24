@@ -14,6 +14,7 @@ import type {
   CredentialMeta,
 } from "../../../foundations/schemas/credential-store.js";
 import { SeepientError } from "../../../foundations/errors.js";
+import { redactString } from "../../../foundations/security/redact.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -78,7 +79,8 @@ class DefaultPlatformKeychainProvider implements PlatformKeychainProvider {
               if ((error as any)?.code === "ENOENT") {
                 return reject(new SeepientError("security command not found", "KEYCHAIN_UNAVAILABLE", false));
               }
-              return reject(error);
+              const cleanMsg = redactString(error.message || String(error));
+              return reject(new Error(cleanMsg));
             }
             resolve();
           },
@@ -325,7 +327,7 @@ export class KeychainCredentialStore implements CredentialStore {
       await this.provider.setPassword(this.defaultService, id, payload);
     } catch (err: any) {
       throw new SeepientError(
-        `OS Keychain put failed: ${err?.message}`,
+        `OS Keychain put failed: ${redactString(err?.message ?? "")}`,
         "KEYCHAIN_UNAVAILABLE",
         false,
       );

@@ -20,8 +20,8 @@ import type { ThinkingLevel } from "../../foundations/schemas/inference.js";
 import { redactString, redactUrlCredentials, isSensitiveKey } from "../../foundations/security/redact.js";
 import { SeepientError } from "../../foundations/errors.js";
 import { validateEndpointUrl } from "../http/ssrf-validator.js";
-import { getCanonicalOAuthFlowId, isOAuthSupported } from "../../domain/providers/oauth-service.js";
-export { isOAuthSupported, getCanonicalOAuthFlowId };
+import { getCanonicalOAuthFlowId, isOAuthSupported, FLOW_MAP } from "../../domain/providers/oauth-service.js";
+export { isOAuthSupported, getCanonicalOAuthFlowId, FLOW_MAP };
 
 // ── Vocabulary types (data-model.md §2.1) ───────────────────────────────────
 
@@ -501,6 +501,27 @@ export function createProviderManagerApi(
     const existingEntry = snapshot.config.providers?.[input.accountId];
     const preExisting = await creds().get(input.accountId).catch(() => undefined);
 
+    const catalogModels = await runtime.modelCatalog.listAvailableModels(snapshot.config);
+    const knownUpstreams = new Set<string>(["openai-compatible", "custom"]);
+    for (const key of Object.keys(FLOW_MAP)) {
+      knownUpstreams.add(key.toLowerCase());
+    }
+    for (const m of catalogModels) {
+      if (m.upstreamProvider) knownUpstreams.add(m.upstreamProvider.toLowerCase());
+    }
+    for (const p of Object.values(snapshot.config.providers ?? {})) {
+      if (p.upstreamProvider) knownUpstreams.add(p.upstreamProvider.toLowerCase());
+    }
+    if (catalogModels.length > 0 && !knownUpstreams.has(input.upstreamProvider.toLowerCase()) && !existingEntry) {
+      return {
+        ok: false,
+        error: {
+          code: "validation_failed",
+          message: `Unknown upstream provider "${input.upstreamProvider}". Valid providers include: ${Array.from(knownUpstreams).slice(0, 8).join(", ")}, etc.`,
+        },
+      };
+    }
+
     if (input.credential.mode === "paste" && (!input.credential.keyValue || input.credential.keyValue.trim() === "")) {
       return {
         ok: false,
@@ -516,6 +537,7 @@ export function createProviderManagerApi(
     }
 
     let ref: CredentialRef;
+    let credentialWritten = false;
     if (input.credential.mode === "paste") {
       ref = { kind: "seepient", id: input.accountId };
       try {
@@ -524,6 +546,7 @@ export function createProviderManagerApi(
           { kind: "api_key", keyValue: input.credential.keyValue! },
           { source: "disk", description: `Configured via seepient manager` },
         );
+        credentialWritten = true;
       } catch (err) {
         return { ok: false, error: mapError(err) };
       }
@@ -567,9 +590,8 @@ export function createProviderManagerApi(
 
     if (!res.ok) {
       // Roll back a credential we just created (R4): never leave an orphan.
-      // Skip rollback when overlay write committed (res.committed === true) or when no write was attempted
-      // so client retry with fresh revision succeeds without re-pasting.
-      if (input.credential.mode === "paste" && !preExisting && !res.committed && (res as any).attemptedWrite !== false) {
+      // Skip rollback only when overlay write committed (res.committed === true).
+      if (input.credential.mode === "paste" && !preExisting && !res.committed && credentialWritten) {
         try {
           await creds().delete(input.accountId);
         } catch (rollbackErr: any) {

@@ -3,7 +3,7 @@
  * Tests pi-ai CredentialStore over Seepient credential store, serialized modify,
  * refresh token rotation, and flow availability.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CredentialStore } from "../../../foundations/contracts/credential-store.js";
@@ -242,5 +242,41 @@ describe("pi-auth-adapter: CredentialStore bridge (T038)", () => {
     // Abort cleanly stops the waiting flow
     ac.abort();
     await expect(loginPromise).rejects.toThrow();
+  });
+
+  it("F1 regression: redacts secret tokens from warning log on failed keychain put", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const failingStore: CredentialStore = {
+      resolve: vi.fn(),
+      get: vi.fn(),
+      getRecord: vi.fn(),
+      list: vi.fn(),
+      put: vi.fn().mockRejectedValue(new Error('Command failed: security add-generic-password -w {"kind":"oauth","access":"sk-super-secret-token-12345678901234567890"}')),
+      delete: vi.fn(),
+    };
+
+    const piStore = createPiCredentialStore(failingStore);
+    await piStore.modify("test-oauth-provider", async () => {
+      return {
+        type: "oauth",
+        access: "sk-super-secret-token-12345678901234567890",
+        refresh: "refresh-token-val",
+        expires: Date.now() + 3600_000,
+      };
+    });
+
+    expect(warnSpy).toHaveBeenCalled();
+    const loggedMessage = warnSpy.mock.calls[0]?.[0] as string;
+    expect(loggedMessage).toContain("[REDACTED]");
+    expect(loggedMessage).not.toContain("sk-super-secret-token-12345678901234567890");
+    warnSpy.mockRestore();
+  });
+
+  it("P3-6 sync test: all bundled OAuth flows in AVAILABLE_OAUTH_FLOWS resolve valid flow definitions", async () => {
+    for (const flowId of AVAILABLE_OAUTH_FLOWS) {
+      const flow = await getOAuthFlow(flowId);
+      expect(flow).toBeDefined();
+      expect(typeof flow?.login).toBe("function");
+    }
   });
 });

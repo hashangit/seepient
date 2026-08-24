@@ -329,14 +329,20 @@ export async function handlePutProvider(
     }
   }
 
+  const snapshot = await runtime.createTurnSnapshot();
+  const existing = snapshot.config.providers?.[providerId];
+
   const saveRes = await api.saveAccount(
     {
       accountId: providerId,
-      upstreamProvider: body.upstreamProvider ?? providerId,
+      upstreamProvider: body.upstreamProvider ?? existing?.upstreamProvider ?? providerId,
       credential: credInput,
-      baseUrl: body.baseUrl,
-      compat: body.compat,
-      allowPrivate: body.ssrfAllowPrivate === true || body.allowPrivate === true,
+      baseUrl: body.baseUrl !== undefined ? body.baseUrl : existing?.baseUrl,
+      compat: body.compat !== undefined ? body.compat : existing?.compat,
+      allowPrivate:
+        body.ssrfAllowPrivate !== undefined || body.allowPrivate !== undefined
+          ? body.ssrfAllowPrivate === true || body.allowPrivate === true
+          : existing?.ssrfAllowPrivate === true,
     },
     expectedRev,
   );

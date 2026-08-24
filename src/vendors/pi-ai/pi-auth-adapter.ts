@@ -28,6 +28,7 @@ import { xaiProvider } from "@earendil-works/pi-ai/providers/xai";
 import { radiusProvider } from "@earendil-works/pi-ai/providers/radius";
 import type { CredentialStore as SeepientCredentialStore } from "../../foundations/contracts/credential-store.js";
 import type { PersistedCredentialRecord } from "../../foundations/schemas/credential-store.js";
+import { redactString } from "../../foundations/security/redact.js";
 
 /** The seven bundled OAuth flows supported in pi-ai. */
 export const AVAILABLE_OAUTH_FLOWS: readonly string[] = [
@@ -213,7 +214,7 @@ export class PiCredentialStoreAdapter implements PiCredentialStore {
           }
         }
         if (putErr) {
-          console.warn(`[warning] Failed to persist refreshed OAuth token for "${providerId}": ${String(putErr)}`);
+          console.warn(`[warning] Failed to persist refreshed OAuth token for "${providerId}": ${redactString(String(putErr))}`);
         }
       } else if (next.type === "api_key") {
         const persisted: PersistedCredentialRecord = {
