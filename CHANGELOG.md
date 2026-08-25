@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.5.1] - 2026-08-25
+
+**Seepient v0.5.1** delivers the complete **Automated Provider Catalog Freshness & Upstream Sync (Spec 014)**, automating catalog updates from `@earendil-works/pi-ai`, eliminating hardcoded model maps and regexes, introducing dynamic tier-scoring with natural generation extraction, and enabling zero-day model overrides.
+
+---
+
+### 🔧 What's New
+
+#### 1. Dynamic Purpose Tier Model Resolver (Spec 014 WS2)
+* **Zero Hardcoded Model Maps**: Replaced static resolver regexes with dynamic heuristic scoring across `standard`, `complex`, and `efficient` tiers.
+* **Natural Version Generation Scoring**: Extracts generation tuples (e.g. `gpt-5.6-terra` $\to$ `[5, 6]`, `claude-opus-4-8` $\to$ `[4, 8]`, `glm-5.3` $\to$ `[5, 3]`) so newer model generations are accurately preferred over older versions.
+* **Canonical Base ID Tie-Breaking**: Deterministic tie-breaking chain (Score $\to$ Generation $\to$ Context Window $\to$ ID Length $\to$ ID) systematically prefers clean canonical base IDs (`claude-haiku-4-5`, `gemini-3.1-pro-preview`) over dated snapshot suffixes.
+
+#### 2. Zero-Day Passthrough & Override Admission (Spec 014 WS5)
+* **Unindexed Model Override**: Admitting unindexed or newly released models via CLI/SDK overrides (`--model <id>`) without requiring catalog regeneration.
+* **Levenshtein Distance Typo Warnings**: Provides instant suggestions for mistyped model IDs based on candidate edit distance while admitting user-declared models.
+* **Warning Visibility**: Surfaces plan warnings via `warning` events and stderr notices across CLI and SDK transports.
+
+#### 3. Automated Upstream Sync & CI/CD Pipeline (Spec 014 WS1)
+* **Twice-Daily Automated Upstream Check**: Automated workflow (`.github/workflows/upstream-pi-sync.yml`) tracks upstream `@earendil-works/pi-ai` releases.
+* **Automatic Patch Auto-Merge & Publish**: Automatically bumps exact pins, validates test suites and latency benchmarks, merges non-breaking patch updates, tags releases, and triggers automated publication.
+* **Safety & Breaking Change Guard**: Automatically quarantines breaking-range updates or verification test failures into draft PRs labeled `upstream-breakage` with maintainer review requested.
+
+#### 4. Conformance Test Suite & Snapshots (Spec 014 WS4)
+* **Reproducible Snapshot Fixture**: Committed authentic snapshot generator (`scripts/snapshot-fixture.ts`) and full 1,309-model frozen fixture (`frozen-catalog.json`).
+* **Live Structural Smoke Tests**: Drift-tolerant tests asserting capability structures across providers without fragile hardcoded version strings.
+
+---
+
 ## [v0.5.0] - 2026-08-25
 
 **Seepient v0.5.0** is a major product and architectural milestone delivering the complete **Provider Management TUI & In-App Lifecycle Experience (Spec 013)**, unifying the runtime modernization from Spec 010 into an intuitive, keyboard-first terminal interface. 

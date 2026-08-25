@@ -220,4 +220,93 @@ describe("AssignmentResolver (QS-P4.5)", () => {
     expect(plan.selectedTarget.model).toBe("gpt-4o");
     expect(plan.failureTargets.length).toBe(0); // Incapable fallback was safely skipped
   });
+
+  describe("FR-002 (WS5 / QS-P4): Zero-Day Model Passthrough & Override Admission", () => {
+    it("admits unindexed model override with nearest-id warnings without mutating catalog snapshot", async () => {
+      const snap: TurnSnapshot = {
+        ...mockSnapshot,
+        catalog: [
+          {
+            id: "gpt-5.6-terra",
+            upstreamProvider: "openai",
+            displayName: "GPT-5.6 Terra",
+            contextWindow: 272000,
+            capabilities: { toolUse: true, streaming: true, vision: true },
+            provenance: "pi-catalog",
+          },
+          {
+            id: "gpt-5.6-sol",
+            upstreamProvider: "openai",
+            displayName: "GPT-5.6 Sol",
+            contextWindow: 272000,
+            capabilities: { toolUse: true, streaming: true, vision: true },
+            provenance: "pi-catalog",
+          },
+        ],
+      };
+
+      const catalogLengthBefore = snap.catalog.length;
+
+      // Override with an unindexed zero-day model id
+      const plan = await resolveInvocationPlan(snap, credentialStore, "text", "standard", {
+        model: "gpt-5.6-custom-zeroday",
+      });
+
+      // Target is admitted
+      expect(plan.selectedTarget.model).toBe("gpt-5.6-custom-zeroday");
+      expect(plan.selectedTarget.providerAccount).toBe("primary-openai");
+
+      // Warnings contain nearest candidate suggestions (capped at 3)
+      expect(plan.warnings).toBeDefined();
+      expect(plan.warnings?.length).toBe(1);
+      expect(plan.warnings?.[0]).toMatch(/Unknown model "gpt-5.6-custom-zeroday"/);
+      expect(plan.warnings?.[0]).toMatch(/gpt-5.6-terra/);
+
+      // Snapshot catalog remains immutable
+      expect(snap.catalog.length).toBe(catalogLengthBefore);
+      expect(snap.catalog.find((m) => m.id === "gpt-5.6-custom-zeroday")).toBeUndefined();
+    });
+
+    it("ranks candidates by similarity distance relative to modelId", async () => {
+      const snap: TurnSnapshot = {
+        ...mockSnapshot,
+        catalog: [
+          {
+            id: "completely-unrelated-model",
+            upstreamProvider: "openai",
+            displayName: "Unrelated",
+            contextWindow: 128000,
+            capabilities: { toolUse: true, streaming: true, vision: true },
+            provenance: "pi-catalog",
+          },
+          {
+            id: "gpt-5.6-terra-preview",
+            upstreamProvider: "openai",
+            displayName: "Terra Preview",
+            contextWindow: 272000,
+            capabilities: { toolUse: true, streaming: true, vision: true },
+            provenance: "pi-catalog",
+          },
+          {
+            id: "gpt-5.6-terra",
+            upstreamProvider: "openai",
+            displayName: "Terra",
+            contextWindow: 272000,
+            capabilities: { toolUse: true, streaming: true, vision: true },
+            provenance: "pi-catalog",
+          },
+        ],
+      };
+
+      // When overriding with "gpt-5.6-tera" (typo of terra), gpt-5.6-terra is ranked before completely-unrelated-model
+      const plan = await resolveInvocationPlan(snap, credentialStore, "text", "standard", {
+        model: "gpt-5.6-tera",
+      });
+
+      expect(plan.warnings).toBeDefined();
+      expect(plan.warnings?.[0]).toContain("gpt-5.6-terra, gpt-5.6-terra-preview");
+    });
+  });
 });
+
+
