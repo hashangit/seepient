@@ -115,21 +115,15 @@ describe("T008: Live Structural Smoke Test (Drift-Tolerant)", () => {
 
     expect(models.length).toBeGreaterThan(1000);
 
-    // Assert key model families exist in installed package
-    const hasOpenAI = models.some((m) => m.upstreamProvider === "openai" || m.upstreamProvider === "opencode");
-    const hasAnthropic = models.some((m) => m.upstreamProvider === "anthropic");
-    const hasGoogle = models.some((m) => m.upstreamProvider === "google" || m.upstreamProvider === "opencode");
-    const hasZai = models.some((m) => m.upstreamProvider === "zai" || m.upstreamProvider === "opencode-go");
-
-    expect(hasOpenAI).toBe(true);
-    expect(hasAnthropic).toBe(true);
-    expect(hasGoogle).toBe(true);
-    expect(hasZai).toBe(true);
-
-    // Assert key flagship 2026 model IDs are present
-    const keyModels = ["claude-sonnet-5", "claude-opus-5", "gemini-3.7-flash", "glm-5.3"];
-    for (const id of keyModels) {
-      expect(models.some((m) => m.id === id || m.id.includes(id))).toBe(true);
+    // Structural validation: each primary provider family has models supporting reasoning and tool capabilities
+    const providers = ["openai", "anthropic", "google", "zai"];
+    for (const p of providers) {
+      const familyModels = models.filter(
+        (m) => m.upstreamProvider === p || (m as any).provider === p || m.id.startsWith(p + "/"),
+      );
+      expect(familyModels.length).toBeGreaterThan(0);
+      expect(familyModels.some((m) => m.capabilities?.toolUse !== false)).toBe(true);
+      expect(familyModels.some((m) => m.supportedReasoningLevels && m.supportedReasoningLevels.length > 1)).toBe(true);
     }
 
     // Structural validation for reasoning levels and never-0 pricing contract

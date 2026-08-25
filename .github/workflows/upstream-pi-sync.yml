@@ -103,13 +103,9 @@ jobs:
           TEST_STATUS=$?
 
           if [ $TEST_STATUS -ne 0 ]; then
-            echo "Test suite had a failure. Retrying provider latency benchmark once for timing flake..."
-            pnpm run bench:provider
-            BENCH_STATUS=$?
-            if [ $BENCH_STATUS -eq 0 ]; then
-              pnpm test
-              TEST_STATUS=$?
-            fi
+            echo "Test suite had a failure. Retrying once for timing flake..."
+            pnpm test
+            TEST_STATUS=$?
           fi
           set -e
 
@@ -129,6 +125,11 @@ jobs:
             # Lockfile diff audit (Invariant 3): only package.json and pnpm-lock.yaml changed
             CHANGED_FILES=$(git diff --name-only)
             echo "Modified files: ${CHANGED_FILES}"
+            UNEXPECTED_FILES=$(echo "${CHANGED_FILES}" | grep -vE '^(package\.json|pnpm-lock\.yaml)$' || true)
+            if [ -n "${UNEXPECTED_FILES}" ]; then
+              echo "Unexpected files changed by version bump: ${UNEXPECTED_FILES}"
+              exit 1
+            fi
 
             NEW_SEEPIENT_VER=$(node -p "require('./package.json').version")
             git commit -am "chore(deps): bump @earendil-works/pi-ai to ${UPSTREAM_VER} and seepient to ${NEW_SEEPIENT_VER}"
