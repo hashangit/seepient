@@ -72,9 +72,14 @@ describe("AddAccount — account id", () => {
   it("suggests a suffix on collision with an existing id", async () => {
     const { inst } = setup();
     await type(inst, "openai"); // filter to the openai upstream
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("openai");
+      expect(inst.lastFrame() ?? "").not.toContain("anthropic");
+    }, { timeout: 3000 });
     await type(inst, ENTER);    // select it — collides with existingIds ["openai"]
-    const frame = inst.lastFrame() ?? "";
-    expect(frame).toContain("openai-2");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("openai-2");
+    }, { timeout: 3000 });
   });
 
   it("accepts a typed id (Enter advances to the credential menu)", async () => {

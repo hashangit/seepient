@@ -142,22 +142,32 @@ describe("Jobs board", () => {
 
   it("renders the numbered action bar on every tab (Tab cycles)", async () => {
     const { inst } = setup();
-    await delay();
-    expect(inst.lastFrame() ?? "").toContain("[1] Change model");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("[1] Change model");
+    }, { timeout: 3000 });
     await type(inst, TAB);
-    expect(inst.lastFrame() ?? "").toContain("[1] Add provider");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("[1] Add provider");
+    }, { timeout: 3000 });
     await type(inst, TAB);
-    expect(inst.lastFrame() ?? "").toContain("[1] Refresh");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("[1] Refresh");
+    }, { timeout: 3000 });
   });
 
   it("navigates tabs via Left/Right arrows", async () => {
     const { inst } = setup();
-    await delay();
-    expect(inst.lastFrame() ?? "").toContain("[1] Change model");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("[1] Change model");
+    }, { timeout: 3000 });
     await type(inst, "\u001B[C"); // Right arrow -> providers tab
-    expect(inst.lastFrame() ?? "").toContain("[1] Add provider");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("[1] Add provider");
+    }, { timeout: 3000 });
     await type(inst, "\u001B[D"); // Left arrow -> jobs tab
-    expect(inst.lastFrame() ?? "").toContain("[1] Change model");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("[1] Change model");
+    }, { timeout: 3000 });
   });
 
   it("Enter on a slot opens the shared picker for that purpose; assigning saves and confirms", async () => {
@@ -165,16 +175,22 @@ describe("Jobs board", () => {
       ok: true, state: { ...baseState(), assignments: { text: { standard: target } } as any },
     }));
     const { inst } = setup({ setAssignment });
-    await delay();
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Text (writing)");
+    }, { timeout: 3000 });
     await type(inst, ENTER); // slot text·standard selected → picker
-    let frame = inst.lastFrame() ?? "";
-    expect(frame).toContain("Assign text·standard");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Assign text·standard");
+    }, { timeout: 3000 });
     await type(inst, ENTER); // thinking step
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toMatch(/Thinking effort|Assign text·standard/);
+    }, { timeout: 3000 });
     await type(inst, ENTER); // accept default level → assign
     await vi.waitFor(() => {
       expect(setAssignment).toHaveBeenCalled();
     }, { timeout: 5000 });
-    frame = inst.lastFrame() ?? "";
+    const frame = inst.lastFrame() ?? "";
     expect(frame).toMatch(/applies next turn|assigned/);
   });
 
@@ -184,7 +200,9 @@ describe("Jobs board", () => {
       state: baseState(),
     }));
     const { inst } = setup({ clearAssignment } as any);
-    await delay();
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Text (writing)");
+    }, { timeout: 3000 });
     await type(inst, DOWN); // board action focus (single slot row selected)
     await type(inst, DOWN);
     await type(inst, "3"); // Clear slot
@@ -197,8 +215,13 @@ describe("Jobs board", () => {
 
 describe("Providers tab", () => {
   async function toProviders(inst: any) {
-    await delay();
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Jobs · Providers · Now");
+    }, { timeout: 3000 });
     await type(inst, TAB);
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("[1] Add provider");
+    }, { timeout: 3000 });
   }
 
   it("renders accounts with badges and not-connected teasers", async () => {
@@ -216,8 +239,9 @@ describe("Providers tab", () => {
     await type(inst, DOWN);
     await type(inst, DOWN); // focus actions
     await type(inst, "2"); // Test account
-    await delay();
-    expect(inst.lastFrame() ?? "").toMatch(/auth ok|✓/);
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toMatch(/auth ok|✓/);
+    }, { timeout: 3000 });
   });
 
   it("blocked remove lists referencing slots; force confirm removes", async () => {
@@ -232,8 +256,9 @@ describe("Providers tab", () => {
     await type(inst, DOWN);
     await type(inst, DOWN);
     await type(inst, "4"); // Remove account (blocked)
-    await delay();
-    expect(inst.lastFrame() ?? "").toContain("text·standard");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("text·standard");
+    }, { timeout: 3000 });
     await type(inst, "1"); // Remove anyway
     await vi.waitFor(() => {
       expect(forced).toBe(true);
@@ -246,9 +271,17 @@ describe("Providers tab", () => {
     await type(inst, DOWN);
     await type(inst, DOWN);
     await type(inst, "1"); // Add provider → AddAccount choose screen
-    expect(inst.lastFrame() ?? "").toContain("Custom / local endpoint");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Custom / local endpoint");
+    }, { timeout: 3000 });
     await type(inst, ENTER); // pick first upstream (acme? filtered list uses state upstreams)
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Account id");
+    }, { timeout: 3000 });
     await type(inst, ENTER); // id
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("[1] Paste API key");
+    }, { timeout: 3000 });
     await type(inst, "3"); // keyless
     await vi.waitFor(() => {
       expect(ctx.state.accounts.length).toBe(3);
