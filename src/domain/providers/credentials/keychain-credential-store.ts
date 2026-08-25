@@ -27,12 +27,17 @@ export interface PlatformKeychainProvider {
 /**
  * Default OS-native keychain provider using `security` on macOS or `secret-tool` on Linux.
  */
-class DefaultPlatformKeychainProvider implements PlatformKeychainProvider {
+export class DefaultPlatformKeychainProvider implements PlatformKeychainProvider {
+  constructor(
+    private readonly execFileFn: typeof execFile = execFile,
+    private readonly platformFn: () => NodeJS.Platform = os.platform,
+  ) {}
+
   async getPassword(service: string, account: string): Promise<string | null> {
-    const platform = os.platform();
+    const platform = this.platformFn();
     if (platform === "darwin") {
       try {
-        const { stdout } = await execFileAsync("security", [
+        const { stdout } = await promisify(this.execFileFn)("security", [
           "find-generic-password",
           "-s",
           service,
@@ -49,7 +54,7 @@ class DefaultPlatformKeychainProvider implements PlatformKeychainProvider {
       }
     } else if (platform === "linux") {
       try {
-        const { stdout } = await execFileAsync("secret-tool", [
+        const { stdout } = await promisify(this.execFileFn)("secret-tool", [
           "lookup",
           "service",
           service,
@@ -68,12 +73,12 @@ class DefaultPlatformKeychainProvider implements PlatformKeychainProvider {
   }
 
   async setPassword(service: string, account: string, password: string): Promise<void> {
-    const platform = os.platform();
+    const platform = this.platformFn();
     if (platform === "darwin") {
       await new Promise<void>((resolve, reject) => {
-        execFile(
+        const child = this.execFileFn(
           "security",
-          ["add-generic-password", "-U", "-s", service, "-a", account, "-w", password],
+          ["add-generic-password", "-U", "-s", service, "-a", account, "-w"],
           (error) => {
             if (error) {
               if ((error as any)?.code === "ENOENT") {
@@ -85,6 +90,9 @@ class DefaultPlatformKeychainProvider implements PlatformKeychainProvider {
             resolve();
           },
         );
+        child.stdin?.on?.("error", () => {});
+        child.stdin?.write(password);
+        child.stdin?.end();
       });
     } else if (platform === "linux") {
       await new Promise<void>((resolve, reject) => {

@@ -418,13 +418,16 @@ describe("OAuth sign-in & logout (contract §6.8–6.10)", () => {
     expect(recBefore?.materialKind).toBe("api_key");
 
     const logoutRes = await api.logoutAccount("anthropic-key");
-    expect(logoutRes.ok).toBe(true);
+    expect(logoutRes.ok).toBe(false);
+    if (!logoutRes.ok) {
+      expect(logoutRes.error.code).toBe("not_oauth_account");
+    }
 
     const recAfter = await credentialStore.get("anthropic-key");
     expect(recAfter).toBeDefined(); // Key MUST be preserved!
   });
 
-  it("saveAccount clears baseUrl and ssrfAllowPrivate when editing account with omitted fields", async () => {
+  it("saveAccount preserves baseUrl and ssrfAllowPrivate when editing account with omitted fields, and clears on null", async () => {
     const { api, configStore } = makeApi();
     const saveRes = await api.saveAccount({
       accountId: "custom-ep",
@@ -432,6 +435,7 @@ describe("OAuth sign-in & logout (contract §6.8–6.10)", () => {
       credential: { mode: "none" },
       baseUrl: "http://127.0.0.1:8080/v1",
       allowPrivate: true,
+      compat: "openai",
     });
     expect(saveRes.ok).toBe(true);
 
@@ -439,7 +443,7 @@ describe("OAuth sign-in & logout (contract §6.8–6.10)", () => {
     expect((ov.patch.providers as any)?.["custom-ep"]?.baseUrl).toBe("http://127.0.0.1:8080/v1");
     expect((ov.patch.providers as any)?.["custom-ep"]?.ssrfAllowPrivate).toBe(true);
 
-    // Edit account without baseUrl or allowPrivate
+    // Edit account without baseUrl or allowPrivate -> must preserve existing values
     const editRes = await api.saveAccount({
       accountId: "custom-ep",
       upstreamProvider: "openai",
@@ -447,13 +451,29 @@ describe("OAuth sign-in & logout (contract §6.8–6.10)", () => {
     });
     expect(editRes.ok).toBe(true);
 
+    const statePreserved = await api.getState();
+    const acctPreserved = statePreserved.accounts.find((a) => a.id === "custom-ep");
+    expect(acctPreserved?.baseUrl).toBe("http://127.0.0.1:8080/v1");
+
+    // Explicitly clear baseUrl and compat with null
+    const clearRes = await api.saveAccount({
+      accountId: "custom-ep",
+      upstreamProvider: "openai",
+      credential: { mode: "preserve" },
+      baseUrl: null,
+      compat: null,
+      allowPrivate: false,
+    });
+    expect(clearRes.ok).toBe(true);
+
     ov = await configStore.getOverlay();
     expect((ov.patch.providers as any)?.["custom-ep"]?.baseUrl).toBeNull();
+    expect((ov.patch.providers as any)?.["custom-ep"]?.compat).toBeNull();
     expect((ov.patch.providers as any)?.["custom-ep"]?.ssrfAllowPrivate).toBeNull();
 
-    const state = await api.getState();
-    const acct = state.accounts.find((a) => a.id === "custom-ep");
-    expect(acct?.baseUrl).toBeUndefined();
+    const stateCleared = await api.getState();
+    const acctCleared = stateCleared.accounts.find((a) => a.id === "custom-ep");
+    expect(acctCleared?.baseUrl).toBeUndefined();
   });
 
   it("sanitizeBaseUrl redacts query parameters containing secret keys", async () => {
@@ -740,6 +760,35 @@ describe("OAuth sign-in & logout (contract §6.8–6.10)", () => {
     expect(isOAuthSupported("openai-compatible")).toBe(false);
   });
 
+  it("P1-2 regression: logoutAccount rejects non-OAuth accounts with not_oauth_account", async () => {
+    const { api } = makeApi();
+    await api.saveAccount({
+      accountId: "api-key-acct",
+      upstreamProvider: "openai",
+      credential: { mode: "env", varName: "OPENAI_API_KEY" },
+    });
+
+    const logoutRes = await api.logoutAccount("api-key-acct");
+    expect(logoutRes.ok).toBe(false);
+    if (!logoutRes.ok) {
+      expect(logoutRes.error.code).toBe("not_oauth_account");
+      expect(logoutRes.error.message).toContain("not signed in via OAuth");
+    }
+  });
+
+  it("logoutAccount successfully deletes OAuth credentials for signed-in accounts", async () => {
+    const { api, credentialStore } = makeApi();
+    await api.completeOAuthSignIn("anthropic", {
+      access: "acc-token",
+      refresh: "ref-token",
+      expires: Date.now() + 3600_000,
+    });
+
+    const logoutRes = await api.logoutAccount("anthropic");
+    expect(logoutRes.ok).toBe(true);
+    expect(await credentialStore.get("anthropic")).toBeUndefined();
+  });
+
   it("F3 regression: rolls back pasted credential on OCC revision mismatch so no orphan secret remains", async () => {
     const { api, credentialStore } = makeApi();
     const res = await api.saveAccount(
@@ -784,5 +833,19 @@ describe("OAuth sign-in & logout (contract §6.8–6.10)", () => {
     expect(flows).toContain("openai-codex");
     expect(flows).toContain("github-copilot");
     expect(flows.length).toBeGreaterThanOrEqual(7);
+  });
+
+  it("SDK safety: rejects saving a new account when upstreamProvider is omitted", async () => {
+    const { api } = makeApi();
+    const res = await api.saveAccount({
+      accountId: "brand-new-account",
+      credential: { mode: "none" },
+    });
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error.code).toBe("validation_failed");
+      expect(res.error.message).toContain('Upstream provider is required when creating a new provider account');
+    }
   });
 });

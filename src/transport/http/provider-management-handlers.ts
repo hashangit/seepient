@@ -97,20 +97,28 @@ export async function handleGetProviderRuntime(
     return;
   }
 
-  const snapshot = await runtime.createTurnSnapshot();
+  const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
+  const api = createProviderManagerApi(runtime);
+  const state = await api.getState();
+
+  const healthMap: Record<string, string> = {};
+  for (const acc of state.accounts) {
+    healthMap[acc.id] = acc.health;
+  }
+
   sendJSON(
     res,
     200,
     {
-      revision: snapshot.revision,
+      revision: state.revision,
       updatedAt: new Date().toISOString(),
-      health: {},
+      health: healthMap,
       sources: {
         compiledDefault: true,
         overlay: true,
       },
     },
-    snapshot.revision,
+    state.revision,
   );
 }
 
@@ -329,20 +337,17 @@ export async function handlePutProvider(
     }
   }
 
-  const snapshot = await runtime.createTurnSnapshot();
-  const existing = snapshot.config.providers?.[providerId];
-
   const saveRes = await api.saveAccount(
     {
       accountId: providerId,
-      upstreamProvider: body.upstreamProvider ?? existing?.upstreamProvider ?? providerId,
+      upstreamProvider: body.upstreamProvider,
       credential: credInput,
-      baseUrl: body.baseUrl !== undefined ? body.baseUrl : existing?.baseUrl,
-      compat: body.compat !== undefined ? body.compat : existing?.compat,
+      baseUrl: body.baseUrl,
+      compat: body.compat,
       allowPrivate:
         body.ssrfAllowPrivate !== undefined || body.allowPrivate !== undefined
           ? body.ssrfAllowPrivate === true || body.allowPrivate === true
-          : existing?.ssrfAllowPrivate === true,
+          : undefined,
     },
     expectedRev,
   );
@@ -351,10 +356,8 @@ export async function handlePutProvider(
     if (saveRes.error.code === "conflict") {
       const snap = await runtime.createTurnSnapshot();
       sendJSON(res, 409, { error: { code: "CONFLICT", message: saveRes.error.message }, revision: snap.revision }, snap.revision);
-    } else if (saveRes.error.code === "invalid_endpoint") {
-      sendError(res, 400, "INVALID_ENDPOINT", saveRes.error.message);
     } else {
-      sendError(res, 400, "BAD_REQUEST", saveRes.error.message);
+      sendError(res, 400, (saveRes.error.code || "BAD_REQUEST").toUpperCase(), saveRes.error.message);
     }
     return;
   }
@@ -453,10 +456,15 @@ interface PendingOAuthAttempt {
 
 const pendingOAuthAttempts = new Map<string, PendingOAuthAttempt>();
 
+const MAX_PENDING_OAUTH_ATTEMPTS = 50;
+
 function cleanExpiredAttempts(): void {
   const now = Date.now();
   for (const [id, att] of pendingOAuthAttempts.entries()) {
     if (now > att.expiresAt) {
+      try {
+        att.abortController?.abort();
+      } catch {}
       pendingOAuthAttempts.delete(id);
     }
   }
@@ -476,6 +484,11 @@ export async function handleOAuthStart(
   }
 
   cleanExpiredAttempts();
+
+  if (pendingOAuthAttempts.size >= MAX_PENDING_OAUTH_ATTEMPTS) {
+    sendError(res, 429, "TOO_MANY_REQUESTS", "Too many concurrent pending OAuth attempts. Please wait or complete existing attempts.");
+    return;
+  }
 
   const { isOAuthSupported, getOAuthFlow } = await import(
     "../../domain/providers/oauth-service.js"
@@ -789,8 +802,11 @@ export async function handleProbeProvider(
     }
   }
 
+  const health = !authValid ? "missing" : !reachable ? "unverified" : "ok";
+
   sendJSON(res, 200, {
     providerId,
+    health,
     reachable,
     authValid,
     blocked: ssrfBlocked ? "ssrf" : undefined,

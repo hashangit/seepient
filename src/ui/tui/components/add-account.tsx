@@ -133,9 +133,23 @@ export function AddAccount({
       }
       case "id": {
         if (key.escape) { setPhase(upstream === "custom" ? "compat" : "choose"); return; }
-        if (key.return) { setPhase("credential"); return; }
-        if (key.backspace || key.delete) { setAccountId((s) => s.slice(0, -1)); return; }
+        if (key.return) {
+          const finalId = (accountId || defaultId).trim().toLowerCase();
+          if (existingIds.map((id) => id.toLowerCase()).includes(finalId)) {
+            setFeedback({ kind: "error", message: `Account "${finalId}" already exists — choose another id.` });
+            return;
+          }
+          setFeedback({ kind: "idle", message: "" });
+          setPhase("credential");
+          return;
+        }
+        if (key.backspace || key.delete) {
+          setFeedback({ kind: "idle", message: "" });
+          setAccountId((s) => s.slice(0, -1));
+          return;
+        }
         if (input && !key.ctrl && !key.meta && input >= " ") {
+          setFeedback({ kind: "idle", message: "" });
           setAccountId((s) => (s === "" ? input : s + input));
         }
         return;
@@ -231,13 +245,19 @@ export function AddAccount({
   }
 
   if (phase === "id") {
-    const collides = existingIds.includes(accountId || defaultId);
+    const finalId = (accountId || defaultId).trim().toLowerCase();
+    const collides = existingIds.map((id) => id.toLowerCase()).includes(finalId);
     return (
       <Box flexDirection="column" borderStyle="round" borderColor={theme.cyan} paddingLeft={1} paddingRight={1}>
         <Text color={theme.cyan} bold>Account id</Text>
-        <Text color={theme.fgDim}>A name for this connection (default: {defaultId}{collides ? " — suggested, your id already exists" : ""})</Text>
+        <Text color={theme.fgDim}>A name for this connection (default: {defaultId})</Text>
         <Text>{`> ${accountId || defaultId}▏`}</Text>
-        <Text color={theme.fgDim}>Enter accept · Esc back</Text>
+        {collides ? (
+          <Text color={theme.yellow}>⚠ Account "{finalId}" already exists — choose another id</Text>
+        ) : null}
+        <Text color={feedback.kind === "error" ? theme.red : theme.fgDim}>
+          {feedback.kind === "error" ? feedback.message : "Enter accept · Esc back"}
+        </Text>
       </Box>
     );
   }

@@ -30,6 +30,7 @@ export interface ModelManagerProps {
   prefill?: string;
   initialSignIn?: string;
   initialTab?: "jobs" | "providers" | "now";
+  onSessionSwitch?: (acct: string, mdl: string) => void;
   onClose: () => void;
 }
 
@@ -60,7 +61,7 @@ const BADGE: Record<string, string> = {
 };
 
 export function ModelManager({
-  api, activeAccount, activeModel, activeThinking, sessionNotice, prefill, initialSignIn, initialTab = "jobs", onClose,
+  api, activeAccount, activeModel, activeThinking, sessionNotice, prefill, initialSignIn, initialTab = "jobs", onSessionSwitch, onClose,
 }: ModelManagerProps) {
   const theme = useTheme();
   const [state, setState] = useState<ManagerState | null>(null);
@@ -92,13 +93,13 @@ export function ModelManager({
           const key = `${p.id}·${t}`;
           if (!assigned) {
             jobs.push([key, api.resolvePreview(p.id, t).then((r) => {
-              if (!("ok" in r) || r.ok === undefined) {
+              if (!("ok" in r && r.ok === false) && "selectedTarget" in r) {
                 const preview = r as any;
                 if (preview?.selectedTarget) {
                   setFallbacks((m) => ({ ...m, [key]: `${preview.selectedTarget.providerAccount}/${preview.selectedTarget.model}` }));
                 }
               }
-            }).catch(() => {})]);
+            })]);
           }
         }
       }
@@ -133,9 +134,16 @@ export function ModelManager({
     const a = state.assignments as any;
     const assigned = row.tier ? a?.[row.purpose.id]?.[row.tier] : a?.media?.[row.purpose.id.slice("media.".length)];
     if (!assigned) return { assigned: null, flag: "○", detail: "" };
-    const accountExists = state.accounts.some((acc) => acc.id === assigned.providerAccount);
-    if (!accountExists) {
+    const targetAccount = state.accounts.find((acc) => acc.id === assigned.providerAccount);
+    if (!targetAccount) {
       return { assigned, flag: "▲", detail: `account "${assigned.providerAccount}" not connected` };
+    }
+    if (targetAccount.health === "missing" || targetAccount.health === "expired") {
+      return {
+        assigned,
+        flag: "▲",
+        detail: targetAccount.health === "expired" ? "credential expired" : "credential missing",
+      };
     }
     const model = state.models.find((m) => m.id === assigned.model && m.reachableVia.includes(assigned.providerAccount));
     if (model) {
@@ -190,6 +198,18 @@ export function ModelManager({
     if (key.escape) { onClose(); return; }
     if (!state) return;
     if (key.tab) {
+      if (key.shift) {
+        setTab((t) => (t === "jobs" ? "now" : t === "providers" ? "jobs" : "providers"));
+      } else {
+        setTab((t) => (t === "jobs" ? "providers" : t === "providers" ? "now" : "jobs"));
+      }
+      return;
+    }
+    if (key.leftArrow) {
+      setTab((t) => (t === "jobs" ? "now" : t === "providers" ? "jobs" : "providers"));
+      return;
+    }
+    if (key.rightArrow) {
       setTab((t) => (t === "jobs" ? "providers" : t === "providers" ? "now" : "jobs"));
       return;
     }
@@ -269,8 +289,8 @@ export function ModelManager({
           setFeedback({
             kind: r.authValid ? "success" : "error",
             message: r.authValid
-              ? `✓ ${acct.id}: auth ok${r.reachable === false ? " · endpoint unreachable" : ""}`
-              : `⚠ ${acct.id}: could not authenticate`,
+              ? `✓ ${acct.id}: credential present${r.reachable === false ? " · endpoint unreachable" : ""}`
+              : `⚠ ${acct.id}: credential missing or unresolvable`,
           });
         }).catch((e) => setFeedback({ kind: "error", message: String(e) }));
         return;
@@ -279,11 +299,14 @@ export function ModelManager({
         void api.refreshModels(acct.id).then((r) => {
           if (r.ok && r.state) {
             setState(r.state);
+            const discoverySupported = ["openai", "openai-compatible", "google"].includes(acct.upstreamProvider?.toLowerCase());
             setFeedback({
               kind: "success",
               message: r.discovered && r.discovered.length > 0
                 ? `✓ discovered ${r.discovered.length} models for ${acct.id}`
-                : `Model discovery isn't available for ${acct.upstreamProvider} yet — declare models on the account if any are missing.`,
+                : discoverySupported
+                  ? `✓ 0 new models for ${acct.id} — already up to date`
+                  : `Model discovery isn't available for ${acct.upstreamProvider} yet — declare models on the account if any are missing.`,
             });
           } else if (r.error) {
             setFeedback({ kind: "error", message: `${r.error.code}: ${r.error.message}` });
@@ -337,6 +360,7 @@ export function ModelManager({
         onSessionSwitch={(acct, mdl) => {
           try {
             api.switchSessionModel(acct, mdl);
+            onSessionSwitch?.(acct, mdl);
             setFeedback({ kind: "success", message: `switched to ${acct}/${mdl}`, note: "session — not saved" });
             onClose();
           } catch (err: any) {
@@ -544,6 +568,7 @@ export function SignInFlow({ upstream, api, onDone, onCancel }: SignInFlowProps)
   const [status, setStatus] = useState<"initiating" | "device_code" | "waiting" | "error">("initiating");
   const [deviceInfo, setDeviceInfo] = useState<{ userCode: string; verificationUrl: string; expiresInMs: number } | null>(null);
   const [browserUrl, setBrowserUrl] = useState<string | null>(null);
+  const [browserInstructions, setBrowserInstructions] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const startedRef = useRef(false);
@@ -563,8 +588,9 @@ export function SignInFlow({ upstream, api, onDone, onCancel }: SignInFlowProps)
           setDeviceInfo(info);
           setStatus("device_code");
         },
-        onBrowserOpen: (url) => {
+        onBrowserOpen: (url, instructions) => {
           setBrowserUrl(url);
+          setBrowserInstructions(instructions ?? null);
           setStatus("waiting");
         },
         onWaiting: () => {
@@ -646,7 +672,10 @@ export function SignInFlow({ upstream, api, onDone, onCancel }: SignInFlowProps)
     return (
       <Box flexDirection="column" borderStyle="round" borderColor={theme.cyan} paddingLeft={1} paddingRight={1}>
         <Text color={theme.cyan} bold>Sign in with {upstream}</Text>
-        <Text>Complete authentication in your browser: <Text color={theme.blue} underline>{browserUrl}</Text></Text>
+        <Text>Complete authentication in your browser:</Text>
+        <Text color={theme.blue} underline>{browserUrl}</Text>
+        <Text color={theme.fgDim}>If you're not already signed in, the page will ask you to sign in or create an account first — then approve access.</Text>
+        {browserInstructions ? <Text color={theme.fgDim}>{browserInstructions}</Text> : null}
         <Text color={theme.fgDim}>Waiting for browser callback… (Esc to cancel)</Text>
       </Box>
     );

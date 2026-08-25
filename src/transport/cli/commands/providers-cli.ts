@@ -157,17 +157,14 @@ export function registerProvidersCommands(program: Command): void {
         process.exit(1);
       }
 
-      const snapshot = await runtime.createTurnSnapshot();
-      const existingEntry = snapshot.config.providers?.[id];
-
       const credential = opts.credential ? parseCredentialMode(opts.credential) : { mode: "preserve" as const };
       const res = await api.saveAccount({
         accountId: id,
-        upstreamProvider: opts.upstream ?? existing.upstreamProvider,
+        upstreamProvider: opts.upstream,
         credential,
-        baseUrl: opts.url !== undefined ? opts.url : existingEntry?.baseUrl,
-        allowPrivate: opts.allowPrivate !== undefined ? Boolean(opts.allowPrivate) : existingEntry?.ssrfAllowPrivate,
-        compat: opts.compat !== undefined ? opts.compat : existingEntry?.compat,
+        baseUrl: opts.url,
+        allowPrivate: opts.allowPrivate !== undefined ? Boolean(opts.allowPrivate) : undefined,
+        compat: opts.compat,
       });
 
       if (opts.json) {

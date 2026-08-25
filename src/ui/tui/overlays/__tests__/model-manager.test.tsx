@@ -150,6 +150,16 @@ describe("Jobs board", () => {
     expect(inst.lastFrame() ?? "").toContain("[1] Refresh");
   });
 
+  it("navigates tabs via Left/Right arrows", async () => {
+    const { inst } = setup();
+    await delay();
+    expect(inst.lastFrame() ?? "").toContain("[1] Change model");
+    await type(inst, "\u001B[C"); // Right arrow -> providers tab
+    expect(inst.lastFrame() ?? "").toContain("[1] Add provider");
+    await type(inst, "\u001B[D"); // Left arrow -> jobs tab
+    expect(inst.lastFrame() ?? "").toContain("[1] Change model");
+  });
+
   it("Enter on a slot opens the shared picker for that purpose; assigning saves and confirms", async () => {
     const setAssignment = vi.fn(async (_p: any, _t: any, target: any): Promise<SaveResult> => ({
       ok: true, state: { ...baseState(), assignments: { text: { standard: target } } as any },
@@ -331,5 +341,18 @@ describe("OAuth Sign-in & Badges (Phase 9 US7)", () => {
     expect(frame).toContain("Sign in with anthropic");
     expect(frame).toContain("ABCD-1234");
     expect(frame).toContain("https://auth.example.com");
+  });
+
+  it("FR-030: flags referencing slots with ▲ credential missing when assigned account credential is missing", async () => {
+    const state = baseState();
+    // acme-main has text.standard assigned in baseState; set its health to missing (e.g. after logout or deleted credential)
+    const acct = state.accounts.find((a) => a.id === "acme-main")!;
+    acct.health = "missing";
+
+    const { inst } = setup({ state }, { initialTab: "jobs" });
+    await delay();
+    const frame = inst.lastFrame() ?? "";
+    expect(frame).toContain("▲");
+    expect(frame).toContain("credential missing");
   });
 });

@@ -64,9 +64,10 @@ export function registerModelsCommands(program: Command, apiOverride?: ProviderM
           : chalk.yellow("○ unconfigured");
 
         const ctxStr = m.contextWindow ? `${Math.round(m.contextWindow / 1000)}k ctx` : "";
-        const priceStr = m.pricing
-          ? `$${((m.pricing.promptPerMillion ?? 0)).toFixed(2)}/M in · $${((m.pricing.completionPerMillion ?? 0)).toFixed(2)}/M out`
-          : "price unknown";
+        const priceStr =
+          m.pricing && (m.pricing.promptPerMillion != null || m.pricing.completionPerMillion != null)
+            ? `${m.pricing.promptPerMillion != null ? `$${m.pricing.promptPerMillion.toFixed(2)}/M in` : "unknown in"} · ${m.pricing.completionPerMillion != null ? `$${m.pricing.completionPerMillion.toFixed(2)}/M out` : "unknown out"}`
+            : "price unknown";
 
         const caps = [
           m.capabilities.toolUse !== false ? "tools" : "",

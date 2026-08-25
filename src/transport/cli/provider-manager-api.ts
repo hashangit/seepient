@@ -68,16 +68,16 @@ export interface UiError {
 
 export interface AccountInput {
   accountId: string;
-  upstreamProvider: string;
+  upstreamProvider?: string;
   credential:
     | { mode: "paste"; keyValue?: string; keyText?: string }
     | { mode: "env"; varName: string }
     | { mode: "none" }
     | { mode: "preserve" };
-  baseUrl?: string;
-  compat?: "openai" | "anthropic" | "google" | "openai-responses";
+  baseUrl?: string | null;
+  compat?: "openai" | "anthropic" | "google" | "openai-responses" | null;
   /** Explicit local-endpoint affordance (R5): only set when the UI confirmed. */
-  allowPrivate?: boolean;
+  allowPrivate?: boolean | null;
 }
 
 export interface AssignmentTarget {
@@ -117,7 +117,7 @@ export interface OAuthFlowCallbacks {
   preferredAccountId?: string;
   signal?: AbortSignal;
   onDeviceCode?(info: { userCode: string; verificationUrl: string; expiresInMs: number }): void;
-  onBrowserOpen?(url: string): void;
+  onBrowserOpen?(url: string, instructions?: string): void;
   onWaiting?(): void;
   onPrompt?(prompt: { type: string; message: string }): Promise<string>;
 }
@@ -303,8 +303,8 @@ function referencingSlots(assignments: PurposeModelMap, accountId: string): stri
 export function createOAuthInteractionShim(callbacks: OAuthFlowCallbacks, signal: AbortSignal) {
   return {
     signal,
-    openUrl: (url: string) => {
-      callbacks.onBrowserOpen?.(url);
+    openUrl: (url: string, instructions?: string) => {
+      callbacks.onBrowserOpen?.(url, instructions);
     },
     prompt: async (p: any) => {
       if (callbacks.onPrompt) {
@@ -342,7 +342,7 @@ export function createOAuthInteractionShim(callbacks: OAuthFlowCallbacks, signal
           expiresInMs: (event.expiresInSeconds ?? 600) * 1000,
         });
       } else if (event.type === "auth_url") {
-        callbacks.onBrowserOpen?.(event.url);
+        callbacks.onBrowserOpen?.(event.url, typeof event.instructions === "string" ? event.instructions : undefined);
       } else if (event.type === "progress") {
         callbacks.onWaiting?.();
       }
@@ -479,7 +479,11 @@ export function createProviderManagerApi(
   }
 
   async function saveAccount(input: AccountInput, expectedRevision?: number): Promise<SaveResult> {
-    if (input.baseUrl) {
+    const snapshot = await runtime.createTurnSnapshot();
+    const existingEntry = snapshot.config.providers?.[input.accountId];
+    const preExisting = await creds().get(input.accountId).catch(() => undefined);
+
+    if (input.baseUrl && typeof input.baseUrl === "string") {
       if (input.baseUrl.includes("[REDACTED]")) {
         return {
           ok: false,
@@ -487,7 +491,9 @@ export function createProviderManagerApi(
         };
       }
       const check = await validateEndpointUrl(input.baseUrl, {
-        ssrfAllowPrivate: input.allowPrivate === true,
+        ssrfAllowPrivate:
+          input.allowPrivate === true ||
+          (input.allowPrivate === undefined && existingEntry?.ssrfAllowPrivate === true),
       });
       if (!check.valid) {
         return {
@@ -497,9 +503,15 @@ export function createProviderManagerApi(
       }
     }
 
-    const snapshot = await runtime.createTurnSnapshot();
-    const existingEntry = snapshot.config.providers?.[input.accountId];
-    const preExisting = await creds().get(input.accountId).catch(() => undefined);
+    if (!existingEntry && (!input.upstreamProvider || input.upstreamProvider.trim() === "")) {
+      return {
+        ok: false,
+        error: {
+          code: "validation_failed",
+          message: `Upstream provider is required when creating a new provider account "${input.accountId}".`,
+        },
+      };
+    }
 
     const catalogModels = await runtime.modelCatalog.listAvailableModels(snapshot.config);
     const knownUpstreams = new Set<string>(["openai-compatible", "custom"]);
@@ -512,12 +524,13 @@ export function createProviderManagerApi(
     for (const p of Object.values(snapshot.config.providers ?? {})) {
       if (p.upstreamProvider) knownUpstreams.add(p.upstreamProvider.toLowerCase());
     }
-    if (catalogModels.length > 0 && !knownUpstreams.has(input.upstreamProvider.toLowerCase()) && !existingEntry) {
+    const upstreamToCheck = input.upstreamProvider || existingEntry?.upstreamProvider;
+    if (catalogModels.length > 0 && upstreamToCheck && !knownUpstreams.has(upstreamToCheck.toLowerCase()) && !existingEntry) {
       return {
         ok: false,
         error: {
           code: "validation_failed",
-          message: `Unknown upstream provider "${input.upstreamProvider}". Valid providers include: ${Array.from(knownUpstreams).slice(0, 8).join(", ")}, etc.`,
+          message: `Unknown upstream provider "${upstreamToCheck}". Valid providers include: ${Array.from(knownUpstreams).slice(0, 8).join(", ")}, etc.`,
         },
       };
     }
@@ -575,13 +588,20 @@ export function createProviderManagerApi(
       };
     }
 
+    const effectiveUpstream = input.upstreamProvider || existingEntry?.upstreamProvider || input.accountId;
+
     const entry: ProviderEntryPatch = {
       adapter: "pi-ai",
-      upstreamProvider: input.upstreamProvider,
+      upstreamProvider: effectiveUpstream,
       credential: ref,
-      baseUrl: input.baseUrl ? input.baseUrl : (existingEntry?.baseUrl ? null : undefined),
-      compat: input.compat ? input.compat : (existingEntry?.compat ? null : undefined),
-      ssrfAllowPrivate: input.allowPrivate ? true : (existingEntry?.ssrfAllowPrivate ? null : undefined),
+      baseUrl: input.baseUrl !== undefined ? (typeof input.baseUrl === "string" ? input.baseUrl.trim() || null : null) : undefined,
+      compat: input.compat !== undefined ? (input.compat || null) : undefined,
+      ssrfAllowPrivate:
+        input.allowPrivate !== undefined
+          ? input.allowPrivate === true
+            ? true
+            : null
+          : undefined,
     };
 
     const res = await occMutate(async () => {
@@ -881,7 +901,7 @@ export function createProviderManagerApi(
         ok: false,
         error: {
           code: "oauth_flow_failed",
-          message: `OAuth sign-in requires an interactive terminal. Configure ${upstream.toUpperCase()}_API_KEY or use --key.`,
+          message: `OAuth sign-in requires an interactive terminal. Use "seepient auth login --env-var" or configure credentials via "seepient providers add --credential env:NAME".`,
         },
       };
     }
@@ -1005,7 +1025,7 @@ export function createProviderManagerApi(
           expires: credentials.expires ?? Date.now() + 3600_000,
         },
         {
-          source: "keychain",
+          source: "disk",
           description: opts?.description ?? `OAuth login for ${upstream}`,
           providerAccountHint: canonicalUpstream,
         },
@@ -1037,7 +1057,7 @@ export function createProviderManagerApi(
           await creds().delete(accountId);
         } catch {}
       }
-      if (!existingAccounts.includes(accountId)) {
+      if (!existingAccounts.includes(accountId) && saveRes.committed) {
         try {
           await occMutate(async () => ({
             providers: { [accountId]: null },
@@ -1064,22 +1084,41 @@ export function createProviderManagerApi(
     }
     if (entry.credential?.kind === "seepient") {
       const seepId = (entry.credential as any).id;
-      const rec = typeof creds().get === "function" ? await creds().get(seepId) : undefined;
+      let rec: any;
+      try {
+        rec = typeof creds().get === "function" ? await creds().get(seepId) : undefined;
+      } catch (err: any) {
+        return { ok: false, error: mapError(err) };
+      }
       const otherShares = Object.entries(snapshot.config.providers ?? {}).some(
         ([id, p]) =>
           id !== accountId &&
           p.credential?.kind === "seepient" &&
           (p.credential as any).id === seepId,
       );
-      if (rec?.materialKind === "oauth" && !otherShares) {
-        try {
-          await creds().delete(seepId);
-        } catch (err: any) {
-          return { ok: false, error: mapError(err) };
+      if (rec?.materialKind === "oauth") {
+        if (!otherShares) {
+          try {
+            await creds().delete(seepId);
+          } catch (err: any) {
+            return { ok: false, error: mapError(err) };
+          }
         }
+        return { ok: true, state: await getState() };
+      }
+      if (!rec) {
+        // Credential was already removed (safe idempotent no-op)
+        return { ok: true, state: await getState() };
       }
     }
-    return { ok: true, state: await getState() };
+
+    return {
+      ok: false,
+      error: {
+        code: "not_oauth_account",
+        message: `Account "${accountId}" is not signed in via OAuth (credential kind: ${entry.credential?.kind ?? "none"}). Use "Remove account" to delete stored keys.`,
+      },
+    };
   }
 
   async function getAvailableOAuthFlows(): Promise<readonly string[]> {

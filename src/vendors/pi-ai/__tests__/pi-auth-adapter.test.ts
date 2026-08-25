@@ -244,6 +244,47 @@ describe("pi-auth-adapter: CredentialStore bridge (T038)", () => {
     await expect(loginPromise).rejects.toThrow();
   });
 
+  it("openrouter regression: emits documented authorize URL shape and forwards auth_url instructions through the shim", async () => {
+    const flow = await getOAuthFlow("openrouter");
+    expect(flow).toBeDefined();
+
+    const ac = new AbortController();
+    let capturedUrl: string | undefined;
+    let capturedInstructions: string | undefined;
+
+    const { createOAuthInteractionShim } = await import("../../../transport/cli/provider-manager-api.js");
+    const interaction = createOAuthInteractionShim(
+      {
+        signal: ac.signal,
+        onBrowserOpen: (url, instructions) => {
+          capturedUrl = url;
+          capturedInstructions = instructions;
+        },
+      },
+      ac.signal,
+    );
+
+    const loginPromise = flow!.login(interaction as any);
+    await new Promise((r) => setTimeout(r, 250));
+
+    // Documented OpenRouter PKCE shape (openrouter.ai/docs/oauth):
+    // /auth with callback_url, code_challenge, code_challenge_method=S256.
+    // A signed-out browser 307s to the general /sign-up page first — the flow
+    // only reads as "broken" when the sign-in-first step is unexplained.
+    expect(capturedUrl).toMatch(/^https:\/\/openrouter\.ai\/auth\?/);
+    const params = new URL(capturedUrl!).searchParams;
+    expect(params.get("callback_url")).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/oauth\/callback\//);
+    expect(params.get("code_challenge_method")).toBe("S256");
+    expect(params.get("code_challenge")).toBeTruthy();
+
+    // pi-ai's instructions string must survive the shim (dropping it hid the
+    // "complete sign-in in your browser" guidance).
+    expect(capturedInstructions).toBeTruthy();
+
+    ac.abort();
+    await expect(loginPromise).rejects.toThrow();
+  });
+
   it("F1 regression: redacts secret tokens from warning log on failed keychain put", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const failingStore: CredentialStore = {
@@ -278,5 +319,73 @@ describe("pi-auth-adapter: CredentialStore bridge (T038)", () => {
       expect(flow).toBeDefined();
       expect(typeof flow?.login).toBe("function");
     }
+  });
+
+  it("P1-1 regression: modify writes to matching record ID when accountId != canonical flowId", async () => {
+    const records = new Map<string, PersistedCredentialRecord>();
+    records.set("anthropic-work", {
+      kind: "oauth",
+      access: "access-token-1",
+      refresh: "refresh-token-1",
+      expires: Date.now() + 1000,
+    });
+
+    const metaMap = new Map<string, any>();
+    metaMap.set("anthropic-work", { providerAccountHint: "anthropic", description: "Work account" });
+
+    const now = new Date().toISOString();
+    const store: CredentialStore = {
+      resolve: vi.fn(),
+      get: vi.fn(async (id: string) => {
+        if (!records.has(id)) return undefined;
+        return {
+          id,
+          source: "keychain" as const,
+          materialKind: "oauth" as const,
+          createdAt: now,
+          updatedAt: now,
+          meta: metaMap.get(id),
+        };
+      }),
+      getRecord: vi.fn(async (id: string) => records.get(id)),
+      list: vi.fn(async () => [
+        {
+          id: "anthropic-work",
+          source: "keychain" as const,
+          materialKind: "oauth" as const,
+          createdAt: now,
+          updatedAt: now,
+          meta: metaMap.get("anthropic-work"),
+        },
+      ]),
+      put: vi.fn(async (id: string, record: any, meta: any) => {
+        records.set(id, record);
+        if (meta) metaMap.set(id, meta);
+      }),
+      delete: vi.fn(async (id: string) => { records.delete(id); }),
+    };
+
+    const piStore = createPiCredentialStore(store);
+
+    // Call modify using canonical name "anthropic", which should resolve and update "anthropic-work"
+    await piStore.modify("anthropic", async (curr) => {
+      expect(curr?.type).toBe("oauth");
+      expect((curr as any)?.access).toBe("access-token-1");
+      return {
+        type: "oauth",
+        access: "rotated-access-token-2",
+        refresh: "rotated-refresh-token-2",
+        expires: Date.now() + 3600_000,
+      };
+    });
+
+    // The write must have targeted "anthropic-work", NOT "anthropic"
+    expect(store.put).toHaveBeenCalledWith(
+      "anthropic-work",
+      expect.objectContaining({ access: "rotated-access-token-2" }),
+      expect.anything(),
+    );
+    expect(records.has("anthropic")).toBe(false);
+    expect((records.get("anthropic-work") as any)?.access).toBe("rotated-access-token-2");
   });
 });

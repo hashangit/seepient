@@ -56,7 +56,9 @@ interface PickerRow {
 function priceLabel(m: AvailableModel): string {
   const p = (m as any).pricing;
   if (!p || (p.promptPerMillion == null && p.completionPerMillion == null)) return "unknown";
-  return `$${(p.promptPerMillion ?? 0).toFixed(2)}/$${(p.completionPerMillion ?? 0).toFixed(2)}`;
+  const inStr = p.promptPerMillion != null ? `$${p.promptPerMillion.toFixed(2)}` : "unknown";
+  const outStr = p.completionPerMillion != null ? `$${p.completionPerMillion.toFixed(2)}` : "unknown";
+  return `${inStr}/${outStr}`;
 }
 
 function contextLabel(cw: number): string {
@@ -265,6 +267,8 @@ export function ModelPicker({
       return;
     }
     if (key.tab) { if (rows.length > 0) setActionFocus(true); return; }
+    if (key.pageUp) { setSelected((i) => Math.max(0, i - 10)); return; }
+    if (key.pageDown) { setSelected((i) => Math.min(rows.length - 1, i + 10)); return; }
     if (key.upArrow) { setSelected((i) => Math.max(0, i - 1)); return; }
     if (key.downArrow) {
       if (selected < rows.length - 1) setSelected((i) => i + 1);

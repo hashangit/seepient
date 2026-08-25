@@ -86,6 +86,18 @@ describe("AddAccount — account id", () => {
     expect(frame).toContain("[2] Use an environment variable");
     expect(frame).toContain("[3] No key");
   });
+
+  it("P0-1 regression: blocks advancing on colliding account id and shows error", async () => {
+    const { inst } = setup({ existingIds: ["anthropic"] });
+    await type(inst, ENTER); // select anthropic -> defaultId is "anthropic-2"
+    await type(inst, "anthropic"); // type colliding account id "anthropic"
+    await type(inst, ENTER); // try to submit colliding id
+
+    const frame = inst.lastFrame() ?? "";
+    expect(frame).toContain('Account "anthropic" already exists');
+    expect(frame).toContain("Account id"); // stays on account id phase
+    expect(frame).not.toContain("[1] Paste API key"); // does NOT advance to credential phase
+  });
 });
 
 describe("AddAccount — credential modes", () => {

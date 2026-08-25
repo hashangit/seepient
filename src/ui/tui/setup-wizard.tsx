@@ -180,12 +180,21 @@ export function SetupWizard({ api, settings, onFinish, onExitSetup }: SetupWizar
             catch (e) { setError(String(e)); return; }
           }
           setFieldVal("");
-          if (fieldIdx + 1 >= activeGroup.fields.length) {
+          const nextIdx = fieldIdx + 1;
+          if (nextIdx >= activeGroup.fields.length) {
             setGroupDone((g) => ({ ...g, [activeGroup.id]: true }));
             setActiveGroup(null);
             setSub("menu");
             setFieldIdx(0);
-          } else setFieldIdx(fieldIdx + 1);
+          } else {
+            setFieldIdx(nextIdx);
+            if (settings?.get && activeGroup.fields[nextIdx]) {
+              void settings.get(activeGroup.fields[nextIdx].dotKey).then((val) => {
+                if (val) setFieldVal(String(val));
+                else setFieldVal("");
+              });
+            }
+          }
         })();
         return;
       }
@@ -226,7 +235,7 @@ export function SetupWizard({ api, settings, onFinish, onExitSetup }: SetupWizar
       case "connect":
         if (isNum && num === 1) setSub("add");
         else if (isNum && num === 2) {
-          if (healthyAccounts.length === 0) {
+          if ((state?.accounts ?? []).length === 0) {
             setError("Connect at least one provider account to continue.");
             return;
           }
@@ -235,9 +244,14 @@ export function SetupWizard({ api, settings, onFinish, onExitSetup }: SetupWizar
         else if (isNum && num === 3) tryExit();
         return;
       case "main":
-        if (mainAssigned && (isNum && num === 1)) next("slots");
-        else if (isNum && num === 2 || (!mainAssigned && key.return)) setSub("picker");
-        else if (isNum && num === 3) tryExit();
+        if (mainAssigned) {
+          if (isNum && num === 1) next("slots");
+          else if (isNum && num === 2) setSub("picker");
+          else if (isNum && num === 3) tryExit();
+        } else {
+          if (key.return || (isNum && num === 1)) setSub("picker");
+          else if (isNum && (num === 2 || num === 3)) tryExit();
+        }
         return;
       case "slots":
         if ((isNum && num === 1) || key.return) {
@@ -246,11 +260,22 @@ export function SetupWizard({ api, settings, onFinish, onExitSetup }: SetupWizar
         else if (isNum && num === 3) tryExit();
         return;
       case "extras": {
-        const groupN = EXTRAS_GROUPS.findIndex((g) => g.id === EXTRAS_GROUPS[num - 1]?.id);
-        if (isNum && num >= 1 && num <= EXTRAS_GROUPS.length && groupN >= 0) {
-          setActiveGroup(EXTRAS_GROUPS[num - 1]); setSub("group"); setFieldIdx(0); setFieldVal("");
-        } else if ((isNum && num === EXTRAS_GROUPS.length + 1) || key.return) next("summary");
-        else if (isNum && num === EXTRAS_GROUPS.length + 2) next("summary");
+        if (isNum && num >= 1 && num <= EXTRAS_GROUPS.length) {
+          const grp = EXTRAS_GROUPS[num - 1];
+          setActiveGroup(grp);
+          setSub("group");
+          setFieldIdx(0);
+          if (settings?.get && grp.fields[0]) {
+            void settings.get(grp.fields[0].dotKey).then((val) => {
+              if (val) setFieldVal(String(val));
+              else setFieldVal("");
+            });
+          } else {
+            setFieldVal("");
+          }
+        } else if ((isNum && (num === EXTRAS_GROUPS.length + 1 || num === EXTRAS_GROUPS.length + 2)) || key.return) {
+          next("summary");
+        }
         return;
       }
       case "summary":
@@ -367,12 +392,16 @@ export function SetupWizard({ api, settings, onFinish, onExitSetup }: SetupWizar
 
       {step === "connect" ? (
         <Box flexDirection="column">
-          {healthyAccounts.length > 0 ? (
-            <Text color="green">✓ {healthyAccounts.length} account(s) already connected{state?.accounts.some((a) => a.health === "missing") ? " (one needs attention — test it from /models later)" : ""}</Text>
+          {(state?.accounts ?? []).length > 0 ? (
+            <Text color={healthyAccounts.length > 0 ? "green" : "yellow"}>
+              {healthyAccounts.length > 0
+                ? `✓ ${healthyAccounts.length} account(s) already connected${state?.accounts.some((a) => a.health === "missing") ? " (one needs attention — test it from /models later)" : ""}`
+                : `⚠ ${(state?.accounts ?? []).length} account(s) connected (needs attention — configure credentials from /models)`}
+            </Text>
           ) : (
             <Text>Connect at least one provider to continue.</Text>
           )}
-          <Text color={"gray"}> [1] Add provider   [2] Continue{healthyAccounts.length === 0 ? " (disabled — add first)" : ""}   [3] Exit setup</Text>
+          <Text color={"gray"}>{` [1] Add provider   [2] Continue${(state?.accounts ?? []).length === 0 ? " (disabled — add first)" : ""}   [3] Exit setup`}</Text>
         </Box>
       ) : null}
 
@@ -383,7 +412,7 @@ export function SetupWizard({ api, settings, onFinish, onExitSetup }: SetupWizar
           ) : (
             <Text>Pick your main model — the one new conversations use.</Text>
           )}
-          <Text color={"gray"}> {mainAssigned ? "[1] Continue   [2] Change model   [3] Exit setup" : "Enter pick model   [3] Exit setup"}</Text>
+          <Text color={"gray"}> {mainAssigned ? "[1] Continue   [2] Change model   [3] Exit setup" : "[1] Pick model   [2] Exit setup"}</Text>
         </Box>
       ) : null}
 

@@ -35,6 +35,7 @@ import type {
 } from "../../foundations/contracts/permission-policy.js";
 import type { SettingsHandlerContext } from "../http/settings-handlers.js";
 import { handleWsGetSettings, handleWsUpdateSettings, writeMutex } from "../http/settings-handlers.js";
+import { redactString } from "../../foundations/security/redact.js";
 
 // ── Active connections registry ──────────────────────────────────────
 
@@ -699,19 +700,25 @@ export async function handleWsListProviders(
 
   try {
     const { getDefaultProviderRuntime } = await import("../../domain/providers/provider-runtime.js");
-    const { sanitizeBaseUrl } = await import("../cli/provider-manager-api.js");
-    const snapshot = await getDefaultProviderRuntime().createTurnSnapshot();
-    const v2Providers = snapshot.config?.providers || {};
-    for (const [id, entry] of Object.entries(v2Providers)) {
-      providers[id] = {
-        type: entry.upstreamProvider || entry.adapter || "custom",
-        upstreamProvider: entry.upstreamProvider || entry.adapter || "custom",
-        adapter: entry.adapter,
-        baseUrl: entry.baseUrl ? sanitizeBaseUrl(entry.baseUrl) : undefined,
-        credentialKind: (entry.credential as any)?.kind ?? "none",
+    const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
+    const runtime = getDefaultProviderRuntime();
+    const api = createProviderManagerApi(runtime);
+    const apiState = await api.getState();
+    for (const acc of apiState.accounts) {
+      providers[acc.id] = {
+        type: acc.upstreamProvider,
+        upstreamProvider: acc.upstreamProvider,
+        baseUrl: acc.baseUrl,
+        credentialKind: acc.credentialKind,
+        credentialDetail: acc.credentialDetail,
+        health: acc.health,
+        modelCount: acc.modelCount,
       };
     }
-  } catch {}
+  } catch (err: any) {
+    safeSend(ws, { type: "providers_list", id: msg.id, providers: {}, error: { code: "STORAGE_ERROR", message: redactString(err?.message || "Failed to list providers") } } as any);
+    return;
+  }
 
   safeSend(ws, { type: "providers_list", id: msg.id, providers } as any);
 }
@@ -752,7 +759,7 @@ export async function handleWsSetProvider(
     });
 
     if (!saveRes.ok) {
-      safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: saveRes.error.code.toUpperCase(), message: saveRes.error.message } } as any);
+      safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: saveRes.error.code.toUpperCase(), message: redactString(saveRes.error.message) } } as any);
       return;
     }
 
@@ -762,12 +769,12 @@ export async function handleWsSetProvider(
         model,
       });
       if (!assignRes.ok) {
-        safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: assignRes.error.code.toUpperCase(), message: assignRes.error.message } } as any);
+        safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: assignRes.error.code.toUpperCase(), message: redactString(`Provider saved, but assignment failed: ${assignRes.error.message}`) } } as any);
         return;
       }
     }
   } catch (e: any) {
-    safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "SET_ERROR", message: e.message } } as any);
+    safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "STORAGE_ERROR", message: redactString(e.message) } } as any);
     return;
   }
 
@@ -803,15 +810,15 @@ export async function handleWsRemoveProvider(
         type: "settings_updated",
         id: msg.id,
         error: {
-          code: "blocked" in delRes ? "BLOCKED" : delRes.error.code,
-          message: "blocked" in delRes ? `Account referenced by slots: ${delRes.referencingSlots.join(", ")}` : delRes.error.message,
+          code: "blocked" in delRes ? "BLOCKED" : delRes.error.code.toUpperCase(),
+          message: "blocked" in delRes ? `Account referenced by slots: ${delRes.referencingSlots.join(", ")}` : redactString(delRes.error.message),
           referencingSlots: "blocked" in delRes ? delRes.referencingSlots : undefined,
         },
       } as any);
       return;
     }
   } catch (e: any) {
-    safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "RESET_ERROR", message: e.message } } as any);
+    safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "STORAGE_ERROR", message: redactString(e.message) } } as any);
     return;
   }
 

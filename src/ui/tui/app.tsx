@@ -299,10 +299,8 @@ export function TuiApp({
     }
     if (trimmed.startsWith('/login ') || trimmed === '/login') {
       const explicit = trimmed.startsWith('/login ') ? trimmed.slice('/login '.length).trim() : undefined;
-      const flows = await managerApi.getAvailableOAuthFlows?.().catch(() => []) ?? [];
-      const provider = explicit || flows[0];
       setModelPrefill(undefined);
-      setModelSignIn(provider);
+      setModelSignIn(explicit);
       setModelTab('providers');
       setOverlay('model');
       return;
@@ -315,7 +313,7 @@ export function TuiApp({
       }
       const res = await managerApi.logoutAccount(account);
       if (res.ok) {
-        feed.appendEntry({ kind: 'info', content: `✓ Logged out account "${account}". Associated credentials removed.` });
+        feed.appendEntry({ kind: 'info', content: `✓ Logged out account "${account}".` });
       } else {
         feed.appendEntry({ kind: 'error', message: `Logout failed: ${res.error.message}` });
       }
@@ -380,23 +378,33 @@ export function TuiApp({
     }
   };
 
-  // Palette includes synthetic entries that open overlays.
-  const paletteCommands: Suggestion[] = [
-    ...commands.map((c) => {
+  const liveModelDesc = `Switch model (currently ${providerType}/${agent.getModel()})`;
+
+  const composerCommands: Suggestion[] = useMemo(() => {
+    const list: Suggestion[] = commands.map((c) => {
       if (c.name === 'models' || c.name === 'model') {
-        return { ...c, description: `Switch model (currently ${providerType}/${agent.getModel()})` };
+        return { ...c, description: liveModelDesc };
       }
       return c;
-    }),
-    { name: 'shortcuts', description: 'Keyboard reference' },
-    { name: 'model', description: `Switch model (currently ${providerType}/${agent.getModel()})` },
-    { name: 'providers', description: 'Manage provider accounts' },
-    { name: 'login', description: 'Sign in with provider (OAuth / subscription)' },
-    { name: 'logout', description: 'Log out a provider account' },
-    { name: 'setup', description: 'Run setup wizard' },
-    { name: 'settings', description: 'View settings' },
-    { name: 'sessions', description: 'Resume / delete a session' },
-  ];
+    });
+    const names = new Set(list.map((c) => c.name));
+    if (!names.has('model')) list.push({ name: 'model', description: liveModelDesc });
+    if (!names.has('providers')) list.push({ name: 'providers', description: 'Manage provider accounts' });
+    if (!names.has('login')) list.push({ name: 'login', description: 'Sign in with provider (OAuth / subscription)' });
+    if (!names.has('logout')) list.push({ name: 'logout', description: 'Log out a provider account' });
+    if (!names.has('setup')) list.push({ name: 'setup', description: 'Run setup wizard' });
+    return list;
+  }, [commands, providerType, agent]);
+
+  // Palette includes synthetic entries that open overlays.
+  const paletteCommands: Suggestion[] = useMemo(() => {
+    const list = [...composerCommands];
+    const names = new Set(list.map((c) => c.name));
+    if (!names.has('shortcuts')) list.push({ name: 'shortcuts', description: 'Keyboard reference' });
+    if (!names.has('settings')) list.push({ name: 'settings', description: 'View settings' });
+    if (!names.has('sessions')) list.push({ name: 'sessions', description: 'Resume / delete a session' });
+    return list;
+  }, [composerCommands]);
   const onPaletteRun = (name: string, arg?: string): void => {
     setOverlay(null);
     if (name === 'shortcuts') {
@@ -412,14 +420,10 @@ export function TuiApp({
       setModelTab('providers');
       setOverlay('model');
     } else if (name === 'login') {
-      void (async () => {
-        const flows = await managerApi.getAvailableOAuthFlows?.().catch(() => []) ?? [];
-        const provider = arg?.trim() || flows[0];
-        setModelPrefill(undefined);
-        setModelSignIn(provider);
-        setModelTab('providers');
-        setOverlay('model');
-      })();
+      setModelPrefill(undefined);
+      setModelSignIn(arg?.trim() || undefined);
+      setModelTab('providers');
+      setOverlay('model');
     } else if (name === 'logout') {
       setModelPrefill(undefined);
       setModelSignIn(undefined);
@@ -539,7 +543,7 @@ export function TuiApp({
         onHistoryUp={onHistoryUp}
         onHistoryDown={onHistoryDown}
         onCycleFocus={onCycleWidgetFocus}
-        commands={commands}
+        commands={composerCommands}
         skills={skills}
       />
     </Box>
@@ -582,6 +586,13 @@ export function TuiApp({
             prefill={modelPrefill}
             initialSignIn={modelSignIn}
             initialTab={modelTab}
+            onSessionSwitch={(acct, mdl) => {
+              setSessionNotice(`switched to ${acct}/${mdl} (session, not saved)`);
+              feed.appendEntry({
+                kind: 'info',
+                content: `Switched model to ${acct}/${mdl} for this session (not saved).`,
+              });
+            }}
             onClose={() => {
               setModelPrefill(undefined);
               setModelSignIn(undefined);

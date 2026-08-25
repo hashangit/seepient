@@ -138,10 +138,12 @@ export function registerAuthCommands(program: Command): void {
               console.log(chalk.bold(`2. Enter code: ${chalk.yellow.bold(info.userCode)}`));
               console.log(chalk.dim(`\nWaiting for authorization (expires in ${Math.round(info.expiresInMs / 60000)}m)...`));
             },
-            onBrowserOpen: (url) => {
+            onBrowserOpen: (url, instructions) => {
               console.log(chalk.bold(`\nComplete authorization in your browser:`));
               console.log(chalk.underline.cyan(url));
-              console.log(chalk.dim("\nWaiting for callback..."));
+              console.log(chalk.dim(`\nIf you're not already signed in, the page will ask you to sign in or create an account first — then approve access.`));
+              if (instructions) console.log(chalk.dim(instructions));
+              console.log(chalk.dim(`\nWaiting for callback...`));
             },
             onWaiting: () => {
               process.stdout.write(chalk.dim("."));

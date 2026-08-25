@@ -100,6 +100,26 @@ describe("P8: No legacy provider imports or symbols regression guard", () => {
       label: "legacy glm-4-plus literal",
       regex: /['"]glm-4-plus['"]/,
     },
+    {
+      label: "legacy model-selector import or file reference",
+      regex: /model-selector(?:\.js|\.tsx)?/,
+    },
+    {
+      label: "legacy ModelOption symbol",
+      regex: /\bModelOption\b/,
+    },
+    {
+      label: "legacy handleModelsCommand symbol",
+      regex: /\bhandleModelsCommand\b/,
+    },
+    {
+      label: "legacy onSwitchModel symbol",
+      regex: /\bonSwitchModel\b/,
+    },
+    {
+      label: "legacy modelOptions symbol",
+      regex: /\bmodelOptions\b/,
+    },
   ];
 
   it("ensures no production source file contains banned legacy imports or symbols", () => {

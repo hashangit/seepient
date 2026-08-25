@@ -115,7 +115,8 @@ export class PiCredentialStoreAdapter implements PiCredentialStore {
     return next;
   }
 
-  async read(providerId: string, _options?: AuthOperationOptions): Promise<PiCredential | undefined> {
+  private async resolveRecordAndId(providerId: string): Promise<{ record: PersistedCredentialRecord | undefined; targetId: string }> {
+    let targetId = providerId;
     let record = this.seepientStore.getRecord
       ? await this.seepientStore.getRecord(providerId)
       : undefined;
@@ -129,16 +130,18 @@ export class PiCredentialStoreAdapter implements PiCredentialStore {
           (hintMatches.length === 1 ? hintMatches[0] : undefined);
         if (match && this.seepientStore.getRecord) {
           record = await this.seepientStore.getRecord(match.id);
+          targetId = match.id;
         }
       } catch {}
     }
+    return { record, targetId };
+  }
+
+  async read(providerId: string, _options?: AuthOperationOptions): Promise<PiCredential | undefined> {
+    const { record } = await this.resolveRecordAndId(providerId);
 
     if (!record) {
-      const rec = typeof this.seepientStore.get === "function"
-        ? await this.seepientStore.get(providerId)
-        : undefined;
-      if (!rec) return undefined;
-      return { type: rec.materialKind === "oauth" ? "oauth" : "api_key" } as PiCredential;
+      return undefined;
     }
 
     if (record.kind === "oauth") {
@@ -176,11 +179,24 @@ export class PiCredentialStoreAdapter implements PiCredentialStore {
       if (options?.signal?.aborted) {
         throw new Error("Auth operation aborted");
       }
-      const current = await this.read(providerId, options);
+      const { record, targetId } = await this.resolveRecordAndId(providerId);
+      const current = record
+        ? (record.kind === "oauth"
+            ? ({ type: "oauth", access: record.access, refresh: record.refresh, expires: record.expires } as OAuthCredential)
+            : ({ type: "api_key", key: record.keyValue } as PiCredential))
+        : await this.read(providerId, options);
+
       const next = await fn(current);
 
       if (next === undefined) {
         return current;
+      }
+
+      let existingMeta: any;
+      if (typeof this.seepientStore.get === "function") {
+        try {
+          existingMeta = (await this.seepientStore.get(targetId))?.meta;
+        } catch {}
       }
 
       if (next.type === "oauth") {
@@ -190,19 +206,13 @@ export class PiCredentialStoreAdapter implements PiCredentialStore {
           refresh: next.refresh,
           expires: next.expires,
         };
-        let existingMeta: any;
-        if (typeof this.seepientStore.get === "function") {
-          try {
-            existingMeta = (await this.seepientStore.get(providerId))?.meta;
-          } catch {}
-        }
         const hint = existingMeta?.providerAccountHint ?? getCanonicalOAuthFlowId(providerId);
-        const description = existingMeta?.description ?? `OAuth login for ${providerId}`;
+        const description = existingMeta?.description ?? `OAuth login for ${targetId}`;
         let putErr: unknown;
         for (let i = 0; i < 3; i++) {
           try {
-            await this.seepientStore.put(providerId, persisted, {
-              source: existingMeta?.source ?? "keychain",
+            await this.seepientStore.put(targetId, persisted, {
+              source: existingMeta?.source ?? "disk",
               providerAccountHint: hint,
               description,
               ...(existingMeta?.tags ? { tags: existingMeta.tags } : {}),
@@ -214,14 +224,14 @@ export class PiCredentialStoreAdapter implements PiCredentialStore {
           }
         }
         if (putErr) {
-          console.warn(`[warning] Failed to persist refreshed OAuth token for "${providerId}": ${redactString(String(putErr))}`);
+          console.warn(`[warning] Failed to persist refreshed OAuth token for "${targetId}": ${redactString(String(putErr))}`);
         }
       } else if (next.type === "api_key") {
         const persisted: PersistedCredentialRecord = {
           kind: "api_key",
           keyValue: next.key ?? "",
         };
-        await this.seepientStore.put(providerId, persisted, { source: "keychain" });
+        await this.seepientStore.put(targetId, persisted, { source: existingMeta?.source ?? "disk" });
       }
 
       return next;

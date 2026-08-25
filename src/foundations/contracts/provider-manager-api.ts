@@ -55,15 +55,15 @@ export type DeleteResult =
 
 export interface AccountInput {
   accountId: string;
-  upstreamProvider: string;
+  upstreamProvider?: string;
   credential:
     | { mode: "paste"; keyValue?: string; keyText?: string }
     | { mode: "env"; varName: string }
     | { mode: "none" }
     | { mode: "preserve" };
-  baseUrl?: string;
-  allowPrivate?: boolean;
-  compat?: "openai" | "anthropic" | "google" | "openai-responses";
+  baseUrl?: string | null;
+  allowPrivate?: boolean | null;
+  compat?: "openai" | "anthropic" | "google" | "openai-responses" | null;
 }
 
 export interface AssignmentTarget {
@@ -98,7 +98,7 @@ export interface OAuthFlowCallbacks {
   preferredAccountId?: string;
   signal?: AbortSignal;
   onDeviceCode?(info: { userCode: string; verificationUrl: string; expiresInMs: number }): void;
-  onBrowserOpen?(url: string): void;
+  onBrowserOpen?(url: string, instructions?: string): void;
   onWaiting?(): void;
   onPrompt?(prompt: { type: string; message: string }): Promise<string>;
 }

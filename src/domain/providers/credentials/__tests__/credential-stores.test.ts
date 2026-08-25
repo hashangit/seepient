@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -228,6 +228,35 @@ describe("CredentialStore implementations (QS-P4.1)", () => {
         refresh: "ref-456",
         expires: 1730000000,
       });
+    });
+
+    it("P0-2 regression: DefaultPlatformKeychainProvider on darwin passes secret via stdin and never in argv", async () => {
+      const { DefaultPlatformKeychainProvider } = await import("../keychain-credential-store.js");
+
+      let capturedArgs: readonly string[] = [];
+      let capturedStdin = "";
+
+      const fakeExecFile = (cmd: string, args: readonly string[], cb: any) => {
+        capturedArgs = args;
+        const fakeChild = {
+          stdin: {
+            on: () => fakeChild.stdin,
+            write: (chunk: string) => { capturedStdin += chunk; },
+            end: () => { cb(null); },
+          },
+        };
+        return fakeChild as any;
+      };
+
+      const provider = new DefaultPlatformKeychainProvider(fakeExecFile as any, () => "darwin");
+      await provider.setPassword("test-service", "test-account", "sk-secret-password-val");
+
+      expect(capturedArgs).toContain("-w");
+      // Password MUST NOT be present in argv
+      expect(capturedArgs).not.toContain("sk-secret-password-val");
+      expect(capturedArgs.join(" ")).not.toContain("sk-secret-password-val");
+      // Password MUST be written to stdin
+      expect(capturedStdin).toBe("sk-secret-password-val");
     });
   });
 });
