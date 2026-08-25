@@ -40,13 +40,13 @@ jobs:
         run: |
           set -e
           if grep -rlE "jsx-runtime" \
-              dist/adapters/cli/repl.js \
-              dist/adapters/cli/index.js \
-              dist/adapters/cli/bootstrap.js \
-              dist/adapters/cli/agent.js \
-              dist/adapters/server \
-              dist/adapters/sdk \
-              dist/core 2>/dev/null; then
+              dist/ui/cli/index.js \
+              dist/ui/repl/repl.js \
+              dist/transport/cli/bootstrap.js \
+              dist/transport/cli/agent.js \
+              dist/transport/http \
+              dist/transport/sdk \
+              dist/domain 2>/dev/null; then
             echo "::error::React/JSX leaked into a headless build output"
             exit 1
           fi

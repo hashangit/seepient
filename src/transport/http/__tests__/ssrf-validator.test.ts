@@ -52,7 +52,7 @@ describe("SSRF Validator Security Verification", () => {
   });
 
   it("fails closed on non-existent DNS hostnames", async () => {
-    const res = await validateEndpointUrl("https://non-existent-domain-for-testing-123456789.org");
+    const res = await validateEndpointUrl("https://non-existent-domain-for-testing-123456789.invalid");
     expect(res.valid).toBe(false);
     expect(res.error).toContain("DNS resolution failed");
   });
