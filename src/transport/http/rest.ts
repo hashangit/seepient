@@ -242,70 +242,70 @@ export function createRestHandler(ctx: RestHandlerContext) {
         case "provider_runtime": {
           const key = authMiddleware(req);
           if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
-          const { handleGetProviderRuntime } = await import("./provider-management-handlers.js");
+          const { handleGetProviderRuntime } = await import("./provider-management/accounts.js");
           await handleGetProviderRuntime(req, res, await getRuntime(), key);
           break;
         }
         case "catalog": {
           const key = authMiddleware(req);
           if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
-          const { handleGetCatalog } = await import("./provider-management-handlers.js");
+          const { handleGetCatalog } = await import("./provider-management/catalog.js");
           await handleGetCatalog(req, res, await getRuntime(), key);
           break;
         }
         case "models_resolve": {
           const key = authMiddleware(req);
           if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
-          const { handleResolveModel } = await import("./provider-management-handlers.js");
+          const { handleResolveModel } = await import("./provider-management/catalog.js");
           await handleResolveModel(req, res, await getRuntime(), key);
           break;
         }
         case "models_assignments": {
           const key = authMiddleware(req);
           if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
-          const { handleGetAssignments } = await import("./provider-management-handlers.js");
+          const { handleGetAssignments } = await import("./provider-management/assignments.js");
           await handleGetAssignments(req, res, await getRuntime(), key, route.params.purpose, route.params.tier);
           break;
         }
         case "models_assignment_put": {
           const key = authMiddleware(req);
           if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
-          const { handlePutAssignment } = await import("./provider-management-handlers.js");
+          const { handlePutAssignment } = await import("./provider-management/assignments.js");
           await handlePutAssignment(req, res, await getRuntime(), key, route.params.purpose, route.params.tier);
           break;
         }
         case "models_assignment_delete": {
           const key = authMiddleware(req);
           if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
-          const { handleDeleteAssignment } = await import("./provider-management-handlers.js");
+          const { handleDeleteAssignment } = await import("./provider-management/assignments.js");
           await handleDeleteAssignment(req, res, await getRuntime(), key, route.params.purpose, route.params.tier);
           break;
         }
         case "providers_v2_list": {
           const key = authMiddleware(req);
           if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
-          const { handleGetProviders } = await import("./provider-management-handlers.js");
+          const { handleGetProviders } = await import("./provider-management/accounts.js");
           await handleGetProviders(req, res, await getRuntime(), key);
           break;
         }
         case "provider_v2_get": {
           const key = authMiddleware(req);
           if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
-          const { handleGetProviders } = await import("./provider-management-handlers.js");
+          const { handleGetProviders } = await import("./provider-management/accounts.js");
           await handleGetProviders(req, res, await getRuntime(), key, route.params.providerId);
           break;
         }
         case "provider_v2_put": {
           const key = authMiddleware(req);
           if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
-          const { handlePutProvider } = await import("./provider-management-handlers.js");
+          const { handlePutProvider } = await import("./provider-management/accounts.js");
           await handlePutProvider(req, res, await getRuntime(), key, route.params.providerId);
           break;
         }
         case "provider_v2_delete": {
           const key = authMiddleware(req);
           if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
-          const { handleDeleteProvider } = await import("./provider-management-handlers.js");
+          const { handleDeleteProvider } = await import("./provider-management/accounts.js");
           await handleDeleteProvider(req, res, await getRuntime(), key, route.params.providerId);
           break;
         }
@@ -314,28 +314,28 @@ export function createRestHandler(ctx: RestHandlerContext) {
           if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
           const urlObj = new URL(req.url ?? "/", "http://localhost");
           const full = urlObj.searchParams.get("full") === "true";
-          const { handleProbeProvider } = await import("./provider-management-handlers.js");
+          const { handleProbeProvider } = await import("./provider-management/catalog.js");
           await handleProbeProvider(req, res, await getRuntime(), key, route.params.providerId, full);
           break;
         }
         case "provider_oauth_start": {
           const key = authMiddleware(req);
           if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
-          const { handleOAuthStart } = await import("./provider-management-handlers.js");
+          const { handleOAuthStart } = await import("./provider-management/oauth.js");
           await handleOAuthStart(req, res, await getRuntime(), key, route.params.providerId);
           break;
         }
         case "provider_oauth_complete": {
           const key = authMiddleware(req);
           if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
-          const { handleOAuthComplete } = await import("./provider-management-handlers.js");
+          const { handleOAuthComplete } = await import("./provider-management/oauth.js");
           await handleOAuthComplete(req, res, await getRuntime(), key, route.params.providerId);
           break;
         }
         case "provider_refresh_models": {
           const key = authMiddleware(req);
           if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
-          const { handleRefreshModels } = await import("./provider-management-handlers.js");
+          const { handleRefreshModels } = await import("./provider-management/catalog.js");
           await handleRefreshModels(req, res, await getRuntime(), key, route.params.providerId);
           break;
         }
