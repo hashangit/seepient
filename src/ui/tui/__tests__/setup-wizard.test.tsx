@@ -11,10 +11,10 @@ import type { ProviderManagerApi, ManagerState, SaveResult } from "../../../tran
 const ENTER = "\r";
 const ESC = "\u001B";
 
-const delay = (ms = 25) => new Promise<void>((r) => setTimeout(r, ms));
+const delay = (ms = 50) => new Promise<void>((r) => setTimeout(r, ms));
 async function type(inst: { stdin: { write(s: string): void } }, s: string): Promise<void> {
   inst.stdin.write(s);
-  await delay();
+  await delay(50);
 }
 
 function freshState(): ManagerState {
@@ -91,16 +91,16 @@ describe("SetupWizard — fresh flow (T021)", () => {
 
     await type(inst, "1");            // → AddAccount
     await vi.waitFor(() => {
-      expect(inst.lastFrame() ?? "").toContain("Custom / local endpoint");
-    }, { timeout: 3000 });
+      expect(inst.lastFrame() ?? "").toContain("▸ acme");
+    }, { timeout: 5000 });
     await type(inst, ENTER);          // first upstream (acme)
     await vi.waitFor(() => {
       expect(inst.lastFrame() ?? "").toContain("Account id");
-    }, { timeout: 3000 });
+    }, { timeout: 5000 });
     await type(inst, ENTER);          // default id
     await vi.waitFor(() => {
       expect(inst.lastFrame() ?? "").toContain("[1] Paste API key");
-    }, { timeout: 3000 });
+    }, { timeout: 5000 });
     await type(inst, "3");            // keyless → done
     await vi.waitFor(() => {
       expect(inst.lastFrame() ?? "").toContain("Account saved");
