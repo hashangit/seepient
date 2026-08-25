@@ -101,13 +101,44 @@ jobs:
       - name: Check for committed release notes
         id: notes
         run: |
-          NOTES_FILE="RELEASE_NOTES-v${{ steps.ver.outputs.version }}.md"
+          VER="${{ steps.ver.outputs.version }}"
+          NOTES_FILE="RELEASE_NOTES-v${VER}.md"
+
           if [[ -f "$NOTES_FILE" ]]; then
             echo "path=$NOTES_FILE" >> "$GITHUB_OUTPUT"
             echo "found=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+
+          if [[ -f "RELEASE_NOTES-${VER}.md" ]]; then
+            echo "path=RELEASE_NOTES-${VER}.md" >> "$GITHUB_OUTPUT"
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Extract from CHANGELOG.md
+          if [[ -f "CHANGELOG.md" ]]; then
+            node -e '
+              const fs = require("fs");
+              const ver = process.argv[1];
+              const content = fs.readFileSync("CHANGELOG.md", "utf8");
+              const regex = new RegExp("## \\[(?:v)?" + ver.replace(/\./g, "\\.") + "\\][^\\n]*\\n([\\s\\S]*?)(?=\\n## \\[|$)");
+              const match = content.match(regex);
+              if (match && match[1].trim()) {
+                fs.writeFileSync(".extracted_release_notes.md", match[1].trim() + "\n");
+                process.exit(0);
+              }
+              process.exit(1);
+            ' "$VER" || true
+
+            if [[ -f ".extracted_release_notes.md" ]]; then
+              echo "path=.extracted_release_notes.md" >> "$GITHUB_OUTPUT"
+              echo "found=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          echo "found=false" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
