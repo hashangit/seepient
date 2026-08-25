@@ -43,6 +43,7 @@ export interface InvocationPlan {
   readonly selectedTarget: InferenceTarget;
   readonly failureTargets: readonly InferenceTarget[];
   readonly snapshot?: TurnSnapshot;
+  readonly warnings?: readonly string[];
 }
 
 /**
@@ -116,6 +117,7 @@ export async function resolveInvocationPlan(
   const effectiveAccount = override?.providerAccount ?? assignment.providerAccount;
   const effectiveModel = override?.model ?? assignment.model;
   const effectiveThinking = (override?.thinkingLevel ?? assignment.thinkingLevel) as ThinkingLevel | undefined;
+  const isOverride = Boolean(override?.model);
 
   const mainAcc = accounts[effectiveAccount];
   if (!mainAcc) {
@@ -129,13 +131,14 @@ export async function resolveInvocationPlan(
   }
 
   // Capability gating & thinking level validation on selected target (QS-P5.1)
-  validateTargetCapabilities(
+  const warnings = validateTargetCapabilities(
     snapshot.catalog,
     purpose,
     effectiveAccount,
     mainAcc.upstreamProvider,
     effectiveModel,
     effectiveThinking,
+    isOverride,
   );
 
   const mainCredHandle = await credentialStore.resolve(mainAcc.credential);
@@ -165,6 +168,7 @@ export async function resolveInvocationPlan(
           fbAcc.upstreamProvider,
           fb.model,
           fb.thinkingLevel as ThinkingLevel,
+          false,
         );
 
         const fbCredHandle = await credentialStore.resolve(fbAcc.credential);
@@ -187,7 +191,32 @@ export async function resolveInvocationPlan(
     selectedTarget,
     failureTargets,
     snapshot,
+    ...(warnings && warnings.length > 0 ? { warnings } : {}),
   };
+}
+
+function computeDistance(a: string, b: string): number {
+  const s1 = a.toLowerCase();
+  const s2 = b.toLowerCase();
+  if (s1 === s2) return 0;
+  if (s1.includes(s2) || s2.includes(s1)) return 1;
+
+  const track = Array(s2.length + 1)
+    .fill(null)
+    .map(() => Array(s1.length + 1).fill(null));
+  for (let i = 0; i <= s1.length; i += 1) track[0][i] = i;
+  for (let j = 0; j <= s2.length; j += 1) track[j][0] = j;
+  for (let j = 1; j <= s2.length; j += 1) {
+    for (let i = 1; i <= s1.length; i += 1) {
+      const indicator = s1[i - 1] === s2[j - 1] ? 0 : 1;
+      track[j][i] = Math.min(
+        track[j][i - 1] + 1,
+        track[j - 1][i] + 1,
+        track[j - 1][i - 1] + indicator,
+      );
+    }
+  }
+  return track[s2.length][s1.length];
 }
 
 function validateTargetCapabilities(
@@ -197,7 +226,8 @@ function validateTargetCapabilities(
   upstreamProvider: string,
   modelId: string,
   thinkingLevel?: ThinkingLevel,
-): void {
+  isOverride = false,
+): string[] | undefined {
   const aliased = normalizeProviderName(upstreamProvider);
   const matchingProvider = (m: UpstreamModel) =>
     m.upstreamProvider === upstreamProvider ||
@@ -229,6 +259,26 @@ function validateTargetCapabilities(
           m.upstreamProvider === accountName,
       )
       .map((m) => m.id);
+
+    // Rank candidates by edit distance relative to modelId so closest suggestions are first
+    candidates.sort((a, b) => {
+      const distA = computeDistance(a, modelId);
+      const distB = computeDistance(b, modelId);
+      if (distA !== distB) return distA - distB;
+      return a.localeCompare(b);
+    });
+
+    if (isOverride) {
+      const warnings: string[] = [];
+      if (candidates.length > 0) {
+        const suggestions = candidates.slice(0, 3).join(", ");
+        warnings.push(
+          `Unknown model "${modelId}" for provider account "${accountName}". Did you mean: ${suggestions}? Admitting as unindexed user-declared model.`,
+        );
+      }
+      return warnings;
+    }
+
     if (candidates.length > 0) {
       const suggestions = candidates.slice(0, 3).join(", ");
       throw new InferenceError({
@@ -239,7 +289,7 @@ function validateTargetCapabilities(
         retryable: false,
       });
     }
-    return;
+    return undefined;
   }
 
   if (
