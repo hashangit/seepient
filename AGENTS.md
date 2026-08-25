@@ -449,8 +449,8 @@ shell commands, and other important information, read the current plan:
   and a governed self-evolution activation boundary. Six-item reviewer
   correction: see decisions D45–D47. Prior
   plan: `specs/007-tui-parity-upgrade/` (TUI parity — shipped).
-- **IMPLEMENTED (Pending Merge)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/015-god-file-decomposition/plan.md`
-  — God-file decomposition (implemented; branch `015-god-file-decomposition`; P1 in the
+- **SHIPPED**: `~/Documents/Obsidian/Seepient/Implementation-Specs/015-god-file-decomposition/plan.md`
+  — God-file decomposition (shipped; branch `015-god-file-decomposition`; P1 in the
   window after 014 merges and before 012 starts, P2 helper extraction):
   evidence-gated splits of four collision-prone files — `ws-handlers.ts` →
   message-family modules + `connection-registry.ts` (singletons move once),
