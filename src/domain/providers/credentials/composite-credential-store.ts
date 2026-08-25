@@ -122,6 +122,15 @@ export class CompositeCredentialStore implements CredentialStore {
     return this.fileStore.get(id);
   }
 
+  async getRecord(id: string): Promise<PersistedCredentialRecord | undefined> {
+    const ws = this.getWriteStore();
+    if (ws.getRecord) {
+      const rec = await ws.getRecord(id);
+      if (rec) return rec;
+    }
+    return this.fileStore.getRecord?.(id);
+  }
+
   async put(id: string, record: PersistedCredentialRecord, meta?: CredentialMeta): Promise<void> {
     return this.getWriteStore().put(id, record, meta);
   }

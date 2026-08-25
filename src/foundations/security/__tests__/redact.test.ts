@@ -65,4 +65,26 @@ describe("Security redaction & header denial (QS-P4.2)", () => {
     const redactedErr = redact(err);
     expect(redactedErr.message).toContain("[REDACTED]");
   });
+
+  it("redacts OAuth token fields (refresh, access, refresh_token, access_token) (T040)", () => {
+    const oauthPayload = {
+      kind: "oauth",
+      access: "gho_16C7e42F292c6912E7710c838347Ae178B4a",
+      refresh: "ghr_1B4a292c6912E7710c838347Ae178B4a16C7",
+      expires: 1720000000,
+    };
+    const redacted = redact(oauthPayload);
+    expect(redacted.access).toBe("[REDACTED]");
+    expect(redacted.refresh).toBe("[REDACTED]");
+    expect(redacted.expires).toBe(1720000000);
+    expect(redacted.kind).toBe("oauth");
+  });
+
+  it("redacts JSON-quoted token fields in stringified payloads", () => {
+    const rawJson = '{"access": "gho_16C7e42F292c6912E7710c838347Ae178B4a", "password": "supersecretpassword123"}';
+    const redacted = redactString(rawJson);
+    expect(redacted).not.toContain("gho_16C7e42F292c6912E7710c838347Ae178B4a");
+    expect(redacted).not.toContain("supersecretpassword123");
+    expect(redacted).toContain("[REDACTED]");
+  });
 });

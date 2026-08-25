@@ -19,7 +19,6 @@ import { bootstrapCliSession } from '../../transport/cli/bootstrap.js';
 import { buildCommandRegistry } from '../../transport/cli/commands/build-registry.js';
 import { warmInkReset, resetInkStatic, guardInkVersion } from './ink-reset.js';
 import { ThemeProvider } from './hooks/use-theme.js';
-import type { ModelOption } from './overlays/model-selector.js';
 import type { SettingItem } from './overlays/settings-overlay.js';
 import { SettingsManager } from '../../domain/settings/settings-manager.js';
 import { SETTINGS_MAP, SETTINGS_SCHEMA } from '../../foundations/settings-schema.js';
@@ -58,23 +57,6 @@ export async function startTui({ queryParts, options }: StartTuiArgs): Promise<v
     .map((e) => ({ name: e.name, description: e.description }));
   const skills: Suggestion[] = (agent.getSkillRegistry()?.getAll() ?? [])
     .map((s) => ({ name: s.name, description: s.description }));
-
-  // Model-selector options: catalog models from the active ProviderRuntime.
-  const modelOptions: ModelOption[] = [];
-  try {
-    const runtime = agent.getProviderRuntime();
-    const snapshot = await runtime.createTurnSnapshot();
-    for (const m of snapshot.catalog) {
-      modelOptions.push({
-        providerType: m.upstreamProvider || 'default',
-        modelId: m.id,
-        modelName: m.displayName || m.id,
-      });
-    }
-  } catch {}
-  const onSwitchModel = async (providerType: string, modelId: string): Promise<void> => {
-    agent.switchProvider(providerType, modelId);
-  };
 
   // Fresh settings list each time the overlay opens (so edits via /settings set
   // are reflected without a restart).
@@ -246,8 +228,6 @@ export async function startTui({ queryParts, options }: StartTuiArgs): Promise<v
       gatewayOn={!!gatewayInstance}
       skillCount={skills.length}
       mcpCount={gatewayInstance?.getTargets ? Object.keys(gatewayInstance.getTargets()).length : 0}
-      modelOptions={modelOptions}
-      onSwitchModel={onSwitchModel}
       getSettingsList={getSettingsList}
       onSetSetting={onSetSetting}
       listSessions={listSessions}

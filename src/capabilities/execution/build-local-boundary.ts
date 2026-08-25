@@ -22,7 +22,7 @@ import { ProcessExecutor } from "./process-executor.js";
 import { InMemoryArtifactStore } from "./in-memory-artifact-store.js";
 import { FileCommitBroker } from "./file-commit-broker.js";
 import { EffectBroker, NodeNetworkAdapter } from "./effect-broker.js";
-import { createNativeProcessSandbox } from "../../vendors/sandbox-runtime/index.js";
+import { createNativeProcessSandbox, UncontainedSandbox } from "../../vendors/sandbox-runtime/index.js";
 import { probeCommitHelper, PackagedCommitHelper } from "../../vendors/native-fs-commit/index.js";
 import type { ExecutionBoundary } from "../../foundations/contracts/execution-boundary.js";
 
@@ -53,8 +53,16 @@ export async function buildLocalBoundary(opts?: {
   const helper = new PackagedCommitHelper(probe);
   const commitBroker = new FileCommitBroker({ artifacts, helper });
 
+  // SEEPIENT_UNCONTAINED=1 is the environment form of the explicit opt-out;
+  // the SAME value must drive both the executor (which honors it) and the
+  // advertised environmentIsolation capability (which policy reads), so an
+  // operator who follows the setup message can actually run (review P1).
+  const unsafeUncontained = opts?.unsafeUncontained ?? process.env.SEEPIENT_UNCONTAINED === "1";
+
   // Process sandbox: probe and instantiate the best native sandbox backend (ASRT/Seatbelt/Bubblewrap).
-  const sandbox = await createNativeProcessSandbox();
+  const sandbox = unsafeUncontained
+    ? new UncontainedSandbox()
+    : await createNativeProcessSandbox();
 
   // Effect broker for network egress and external calls
   const effectBroker = new EffectBroker({
@@ -71,11 +79,6 @@ export async function buildLocalBoundary(opts?: {
   registry.register(new NoneExecutor());
   registry.register(new ReadFileExecutor({ artifacts }));
   registry.register(new CommitFilesExecutor({ broker: commitBroker, artifacts, useNative: probe.available, allowFallback: opts?.allowFallback ?? false }));
-  // SEEPIENT_UNCONTAINED=1 is the environment form of the explicit opt-out;
-  // the SAME value must drive both the executor (which honors it) and the
-  // advertised environmentIsolation capability (which policy reads), so an
-  // operator who follows the setup message can actually run (review P1).
-  const unsafeUncontained = opts?.unsafeUncontained ?? process.env.SEEPIENT_UNCONTAINED === "1";
   registry.register(new ProcessExecutor({ sandbox, unsafeUncontained }));
   registry.register(new BrokerExecutor({ broker: effectBroker }));
   registry.register(new TrustedHostExecutor(hostCallbacks));

@@ -47,6 +47,36 @@ export class MemoryCredentialStore implements CredentialStore {
       };
     }
 
+    if (ref.kind === "env") {
+      const varName = ref.name;
+      return {
+        id: `env:${varName}`,
+        ref,
+        activeLeaseCount: 0,
+        async isResolvable() {
+          return Boolean(process.env[varName]);
+        },
+        acquireLease(): CredentialLease {
+          return {
+            leaseId: `lease-env-${varName}`,
+            isReleased: false,
+            async secret(): Promise<CredentialSecret> {
+              const currentVal = process.env[varName];
+              if (!currentVal) {
+                throw new SeepientError(
+                  `Environment variable "${varName}" is not set`,
+                  "MISSING_ENV_VAR",
+                  false,
+                );
+              }
+              return { kind: "api_key", value: currentVal };
+            },
+            async release() {},
+          };
+        },
+      };
+    }
+
     if (ref.kind !== "seepient") {
       throw new SeepientError(
         `MemoryCredentialStore cannot resolve credential of kind "${ref.kind}"`,
@@ -94,6 +124,9 @@ export class MemoryCredentialStore implements CredentialStore {
                 false,
               );
             }
+            if (entry.record.kind === "oauth") {
+              return { kind: "pi_oauth", piAuthContext: entry.record };
+            }
             return { kind: "api_key", value: entry.record.keyValue };
           },
           release: async (): Promise<void> => {
@@ -116,11 +149,15 @@ export class MemoryCredentialStore implements CredentialStore {
     if (!entry) return undefined;
     return {
       id,
-      materialKind: "api_key",
+      materialKind: entry.record.kind,
       createdAt: entry.createdAt,
       updatedAt: entry.updatedAt,
       meta: entry.meta,
     };
+  }
+
+  async getRecord(id: string): Promise<PersistedCredentialRecord | undefined> {
+    return this.entries.get(id)?.record;
   }
 
   async put(id: string, record: PersistedCredentialRecord, meta?: CredentialMeta): Promise<void> {
@@ -139,7 +176,7 @@ export class MemoryCredentialStore implements CredentialStore {
     for (const [id, entry] of this.entries.entries()) {
       records.push({
         id,
-        materialKind: "api_key",
+        materialKind: entry.record.kind,
         createdAt: entry.createdAt,
         updatedAt: entry.updatedAt,
         meta: entry.meta,

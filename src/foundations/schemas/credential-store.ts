@@ -33,15 +33,23 @@ export type CredentialMeta = Type.Static<typeof CredentialMetaSchema>;
 // ── Persisted Record Shapes (no secrets returned in metadata/list) ────────
 export const CredentialRecordSchema = Type.Object({
   id: Type.String(),
-  materialKind: Type.Literal("api_key"),
+  materialKind: Type.Union([Type.Literal("api_key"), Type.Literal("oauth")]),
   createdAt: Type.String(),
   updatedAt: Type.String(),
   meta: Type.Optional(CredentialMetaSchema),
 });
 export type CredentialRecord = Type.Static<typeof CredentialRecordSchema>;
 
-export const PersistedCredentialRecordSchema = Type.Object({
-  kind: Type.Literal("api_key"),
-  keyValue: Type.String(),
-});
+export const PersistedCredentialRecordSchema = Type.Union([
+  Type.Object({
+    kind: Type.Literal("api_key"),
+    keyValue: Type.String(),
+  }),
+  Type.Object({
+    kind: Type.Literal("oauth"),
+    refresh: Type.String(),
+    access: Type.String(),
+    expires: Type.Number(),
+  }),
+]);
 export type PersistedCredentialRecord = Type.Static<typeof PersistedCredentialRecordSchema>;

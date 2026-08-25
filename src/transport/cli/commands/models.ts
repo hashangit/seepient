@@ -1,11 +1,10 @@
 import chalk from 'chalk';
 import { getDefaultProviderRuntime } from '../../../domain/providers/provider-runtime.js';
-import { handleModelsCommand } from '../setup.js';
 import { isNonInteractive } from '../../../foundations/environment.js';
 import { Agent } from '../agent.js';
 import type { CommandHandler } from './registry.js';
 
-export function modelsHandler(agent: Agent, config: any, activeProviderType: string): CommandHandler {
+export function modelsHandler(agent: Agent, _config: any, activeProviderType: string): CommandHandler {
   const handler: CommandHandler = async () => {
     const runtime = agent.getProviderRuntime() ?? getDefaultProviderRuntime();
     const effectiveConfig = await runtime.getConfigStore().getEffectiveConfig();
@@ -23,9 +22,15 @@ export function modelsHandler(agent: Agent, config: any, activeProviderType: str
       }
       return { output: lines.join('\n') };
     }
-    // Interactive wizard — owns stdout/stdin; the TUI defers this command.
-    await handleModelsCommand(agent, config, activeProviderType);
+    // Interactive dock — owns stdout/stdin; the TUI defers this command.
+    const { runModelManagerStandalone } = await import('../../../ui/tui/overlays/model-manager.js');
+    await runModelManagerStandalone({
+      activeAccount: agent.getProviderAccount() || activeProviderType,
+      activeModel: agent.getModel(),
+      onSwitchProvider: (account: string, model?: string) => agent.switchProvider(account, model),
+    });
     return {};
   };
   return handler;
 }
+

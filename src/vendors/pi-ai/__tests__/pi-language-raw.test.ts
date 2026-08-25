@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { PiLanguageRaw } from "../pi-language-raw.js";
 import type { AssistantMessageEvent } from "@earendil-works/pi-ai";
 import type { InferenceTarget } from "../../../foundations/contracts/backend-ports.js";
@@ -375,4 +375,245 @@ describe("PiLanguageRaw backend (QS-P3.3)", () => {
     expect(capturedModel.cost).toBeDefined();
     expect(Array.isArray(capturedModel.cost.tiers)).toBe(true); // Guarantees calculateCost doesn't crash!
   });
+
+  it("handles built-in pi-ai catalog providers like opencode without requiring an explicit baseUrl", async () => {
+    let capturedModel: any;
+    const credential = createMockCredential("sk-opencode");
+
+    // Real PiLanguageRaw with actual builtinModels
+    const backend = new PiLanguageRaw();
+    const target: InferenceTarget = {
+      providerAccount: "my-opencode-account",
+      upstreamProvider: "opencode",
+      model: "hy3-free",
+      credential,
+    };
+
+    // Spy on stream to verify prepared invocation
+    (backend as any).models.stream = (model: any) => {
+      capturedModel = model;
+      return (async function* () {
+        yield {
+          type: "done",
+          reason: "stop",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Hello from OpenCode" }],
+            usage: { input: 5, output: 5, totalTokens: 10 },
+          },
+        };
+      })();
+    };
+
+    const events = [];
+    for await (const ev of backend.chatStream(target, {
+      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+    })) {
+      events.push(ev);
+    }
+
+    expect(capturedModel).toBeDefined();
+    expect(capturedModel.id).toBe("hy3-free");
+    expect(capturedModel.provider).toBe("opencode");
+    expect(capturedModel.baseUrl).toBe("https://opencode.ai/zen/v1");
+  });
+
+  it("extracts access token from nested piAuthContext in pi_oauth secrets", async () => {
+    let capturedApiKey: string | undefined;
+    const mockCredential: CredentialHandle = {
+      id: "oauth-test",
+      ref: { kind: "seepient", id: "oauth-test" },
+      activeLeaseCount: 0,
+      async isResolvable() { return true; },
+      acquireLease() {
+        return {
+          leaseId: "lease-oauth",
+          isReleased: false,
+          async secret() {
+            return {
+              kind: "pi_oauth",
+              piAuthContext: {
+                access: "oauth-bearer-token-12345",
+                refresh: "refresh-token-xyz",
+                expires: Date.now() + 3600_000,
+              },
+            };
+          },
+          async release() {},
+        };
+      },
+    };
+
+    const mockModels = {
+      getModel: (_p: any, _m: any) => ({ id: "claude-3-5-sonnet", provider: "anthropic" }),
+      stream: (model: any, _ctx: any, opts: any) => {
+        capturedApiKey = opts?.apiKey;
+        return (async function* () {
+          yield {
+            type: "done",
+            reason: "stop",
+            message: { role: "assistant", content: [{ type: "text", text: "ok" }] },
+          };
+        })();
+      },
+    };
+
+    const backend = new PiLanguageRaw(mockModels as any);
+    const target: InferenceTarget = {
+      providerAccount: "oauth-account",
+      upstreamProvider: "anthropic",
+      model: "claude-3-5-sonnet",
+      credential: mockCredential,
+    };
+
+    for await (const _ of backend.chatStream(target, {
+      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+    })) {
+      // consume
+    }
+
+    expect(capturedApiKey).toBe("oauth-bearer-token-12345");
+  });
+
+  it("refreshes expired OAuth tokens and persists rotated credentials to credentialStore", async () => {
+    const authAdapter = await import("../pi-auth-adapter.js");
+    const mockFlow = {
+      name: "Anthropic OAuth",
+      refresh: vi.fn(async (cred: any) => {
+        expect(cred.type).toBe("oauth");
+        expect(cred.refresh).toBe("valid-refresh-token");
+        return {
+          type: "oauth",
+          access: "refreshed-oauth-token-999",
+          refresh: "new-refresh-token-000",
+          expires: Date.now() + 3600_000,
+        };
+      }),
+    };
+    vi.spyOn(authAdapter, "getOAuthFlow").mockResolvedValue(mockFlow as any);
+
+    let capturedApiKey: string | undefined;
+    const persistedRecords: any[] = [];
+    const mockStore = {
+      put: async (id: string, record: any) => {
+        persistedRecords.push({ id, ...record });
+      },
+    };
+
+    const mockCredential: CredentialHandle = {
+      id: "oauth-test-expired",
+      ref: { kind: "seepient", id: "oauth-test-expired" },
+      activeLeaseCount: 0,
+      async isResolvable() { return true; },
+      acquireLease() {
+        return {
+          leaseId: "lease-oauth-expired",
+          isReleased: false,
+          async secret() {
+            return {
+              kind: "pi_oauth",
+              piAuthContext: {
+                access: "expired-access-token",
+                refresh: "valid-refresh-token",
+                expires: Date.now() - 10_000, // expired
+              },
+            };
+          },
+          async release() {},
+        };
+      },
+    };
+
+    const mockModels = {
+      getProviders: () => [{ id: "anthropic" }],
+      getModel: (_p: any, _m: any) => ({ id: "claude-3-5-sonnet", provider: "anthropic" }),
+      stream: (_model: any, _ctx: any, opts: any) => {
+        capturedApiKey = opts?.apiKey;
+        return (async function* () {
+          yield {
+            type: "done",
+            reason: "stop",
+            message: { role: "assistant", content: [{ type: "text", text: "refreshed ok" }] },
+          };
+        })();
+      },
+    };
+
+    const backend = new PiLanguageRaw(mockModels as any, mockStore);
+    const target: InferenceTarget = {
+      providerAccount: "oauth-account-expired",
+      upstreamProvider: "anthropic",
+      model: "claude-3-5-sonnet",
+      credential: mockCredential,
+    };
+
+    for await (const _ of backend.chatStream(target, {
+      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+    })) {
+      // consume
+    }
+
+    // Verify token was refreshed and passed to stream
+    expect(capturedApiKey).toBe("refreshed-oauth-token-999");
+    expect(persistedRecords.length).toBe(1);
+    expect(persistedRecords[0].id).toBe("oauth-account-expired");
+    expect(persistedRecords[0].access).toBe("refreshed-oauth-token-999");
+    expect(persistedRecords[0].refresh).toBe("new-refresh-token-000");
+  });
+
+  it("throws oauth_expired InferenceError when token refresh fails", async () => {
+    const authAdapter = await import("../pi-auth-adapter.js");
+    const mockFlow = {
+      name: "Anthropic OAuth",
+      refresh: vi.fn(async () => {
+        throw new Error("invalid_grant: token revoked");
+      }),
+    };
+    vi.spyOn(authAdapter, "getOAuthFlow").mockResolvedValue(mockFlow as any);
+
+    const mockCredential: CredentialHandle = {
+      id: "oauth-test-revoked",
+      ref: { kind: "seepient", id: "oauth-test-revoked" },
+      activeLeaseCount: 0,
+      async isResolvable() { return true; },
+      acquireLease() {
+        return {
+          leaseId: "lease-oauth-revoked",
+          isReleased: false,
+          async secret() {
+            return {
+              kind: "pi_oauth",
+              piAuthContext: {
+                access: "expired-access-token",
+                refresh: "revoked-refresh-token",
+                expires: Date.now() - 10_000,
+              },
+            };
+          },
+          async release() {},
+        };
+      },
+    };
+
+    const mockModels = {
+      getProviders: () => [{ id: "anthropic" }],
+      getModel: (_p: any, _m: any) => ({ id: "claude-3-5-sonnet", provider: "anthropic" }),
+      stream: () => (async function* () {})(),
+    };
+
+    const backend = new PiLanguageRaw(mockModels as any);
+    const target: InferenceTarget = {
+      providerAccount: "oauth-account-revoked",
+      upstreamProvider: "anthropic",
+      model: "claude-3-5-sonnet",
+      credential: mockCredential,
+    };
+
+    await expect(async () => {
+      for await (const _ of backend.chatStream(target, {
+        messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      })) {}
+    }).rejects.toThrow(/OAuth session for "oauth-account-revoked" expired/);
+  });
 });
+

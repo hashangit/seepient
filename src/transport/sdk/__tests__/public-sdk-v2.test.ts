@@ -81,4 +81,39 @@ describe("Public SDK v2 Instance-First Contract (QS-P6.6)", () => {
     await agent.dispose();
     await seepient.dispose();
   });
+
+  it("exercises SDK management methods (FR-038 / T055)", async () => {
+    const seepient = await createSeepient({});
+
+    // 1. addProvider
+    const addRes = await seepient.addProvider({
+      accountId: "anthropic-acc",
+      upstreamProvider: "anthropic",
+      credential: { mode: "env", varName: "ANTHROPIC_API_KEY" },
+    });
+    expect(addRes.ok).toBe(true);
+
+    // 2. setAssignment
+    const setRes = await seepient.setAssignment("text", "standard", {
+      providerAccount: "anthropic-acc",
+      model: "claude-haiku-4-5",
+    });
+    expect(setRes.ok).toBe(true);
+    expect(seepient.getAssignments().text?.standard?.model).toBe("claude-haiku-4-5");
+
+    // 3. getCatalog
+    const catalog = await seepient.getCatalog();
+    expect(catalog.length).toBeGreaterThan(0);
+
+    // 4. clearAssignment
+    const clearRes = await seepient.clearAssignment("text", "standard");
+    expect(clearRes.ok).toBe(true);
+    expect(seepient.getAssignments().text?.standard).toBeUndefined();
+
+    // 5. removeProvider
+    const removeRes = await seepient.removeProvider("anthropic-acc");
+    expect(removeRes.ok).toBe(true);
+
+    await seepient.dispose();
+  });
 });

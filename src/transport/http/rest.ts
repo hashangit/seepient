@@ -128,7 +128,7 @@ function matchRoute(
   if (method === "GET" && path === "/v1/provider-runtime") {
     return { handler: "provider_runtime", params: {} };
   }
-  if (method === "GET" && path === "/v1/catalog") {
+  if (method === "GET" && (path === "/v1/catalog" || path === "/v1/models/catalog")) {
     return { handler: "catalog", params: {} };
   }
   if (method === "POST" && path === "/v1/models/resolve") {
@@ -137,18 +137,26 @@ function matchRoute(
   if (path === "/v1/models/assignments") {
     if (method === "GET") return { handler: "models_assignments", params: {} };
   }
-  const assignmentMatch = path.match(/^\/v1\/models\/assignments\/([a-z-]+)(?:\/([a-z]+))?$/);
+  const assignmentMatch = path.match(/^\/v1\/models\/assignments\/([a-z_.-]+)(?:\/([a-z]+))?$/);
   if (assignmentMatch) {
     const purpose = assignmentMatch[1];
     const tier = assignmentMatch[2];
     if (method === "GET") return { handler: "models_assignments", params: { purpose, ...(tier ? { tier } : {}) } };
-    if (method === "PUT" && tier) return { handler: "models_assignment_put", params: { purpose, tier } };
-    if (method === "DELETE" && tier) return { handler: "models_assignment_delete", params: { purpose, tier } };
+    if (method === "PUT") return { handler: "models_assignment_put", params: { purpose, ...(tier ? { tier } : {}) } };
+    if (method === "DELETE") return { handler: "models_assignment_delete", params: { purpose, ...(tier ? { tier } : {}) } };
   }
 
   // Provider v2 accounts routes
   if (method === "GET" && path === "/v1/providers") {
     return { handler: "providers_v2_list", params: {} };
+  }
+  const oauthStartMatch = path.match(/^\/v1\/providers\/([a-zA-Z0-9_-]+)\/oauth\/start$/);
+  if (method === "POST" && oauthStartMatch) {
+    return { handler: "provider_oauth_start", params: { providerId: oauthStartMatch[1] } };
+  }
+  const oauthCompleteMatch = path.match(/^\/v1\/providers\/([a-zA-Z0-9_-]+)\/oauth\/complete$/);
+  if (method === "POST" && oauthCompleteMatch) {
+    return { handler: "provider_oauth_complete", params: { providerId: oauthCompleteMatch[1] } };
   }
   const providerV2Match = path.match(/^\/v1\/providers\/([a-zA-Z0-9_-]+)$/);
   if (providerV2Match) {
@@ -308,6 +316,20 @@ export function createRestHandler(ctx: RestHandlerContext) {
           const full = urlObj.searchParams.get("full") === "true";
           const { handleProbeProvider } = await import("./provider-management-handlers.js");
           await handleProbeProvider(req, res, await getRuntime(), key, route.params.providerId, full);
+          break;
+        }
+        case "provider_oauth_start": {
+          const key = authMiddleware(req);
+          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
+          const { handleOAuthStart } = await import("./provider-management-handlers.js");
+          await handleOAuthStart(req, res, await getRuntime(), key, route.params.providerId);
+          break;
+        }
+        case "provider_oauth_complete": {
+          const key = authMiddleware(req);
+          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
+          const { handleOAuthComplete } = await import("./provider-management-handlers.js");
+          await handleOAuthComplete(req, res, await getRuntime(), key, route.params.providerId);
           break;
         }
         case "provider_refresh_models": {

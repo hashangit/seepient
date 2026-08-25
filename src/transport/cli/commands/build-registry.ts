@@ -88,6 +88,24 @@ export function buildCommandRegistry(
     description: 'List and revoke tool-approval grants',
     aliases: ['perms'],
   });
+  registry.register('providers', async () => ({
+    output: 'Provider account manager is available in the TUI: run /providers or use the Model Manager dock.',
+  }), {
+    description: 'Manage provider accounts',
+    interactive: true,
+  });
+  registry.register('login', async () => ({
+    output: 'Run /login <provider> to authenticate (e.g. /login anthropic).',
+  }), {
+    description: 'Sign in with provider (OAuth / subscription)',
+    interactive: true,
+  });
+  registry.register('logout', async () => ({
+    output: 'Run /logout <account-id> to log out (e.g. /logout anthropic).',
+  }), {
+    description: 'Log out a provider account',
+    interactive: true,
+  });
   registry.register('setup', async () => {
     await runSetup();
     return {};

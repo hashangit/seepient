@@ -1,4 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { generateImagesStructured, optimizePrompt } from "../../../capabilities/media/media.js";
 import { ProviderRuntime } from "../provider-runtime.js";
 import { MemoryCredentialStore } from "../credentials/memory-credential-store.js";
@@ -7,6 +10,16 @@ import { AggregateInferenceAdapter } from "../../../capabilities/inference/aggre
 import type { ImageBackend, LanguageBackend } from "../../../foundations/contracts/backend-ports.js";
 
 describe("Media Execution via ProviderRuntime (QS-P5.3a & QS-P5.3b)", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = realpathSync(mkdtempSync(join(tmpdir(), "seepient-media-test-")));
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
   it("executes generateImagesStructured through ProviderRuntime.executeImage", async () => {
     let capturedReq: any;
     const mockImageBackend: ImageBackend = {
@@ -57,6 +70,7 @@ describe("Media Execution via ProviderRuntime (QS-P5.3a & QS-P5.3b)", () => {
         n: 1,
         size: "1536x1024",
         quality: "hd",
+        outputDir: tempDir,
       },
       {
         runtime,
@@ -65,6 +79,7 @@ describe("Media Execution via ProviderRuntime (QS-P5.3a & QS-P5.3b)", () => {
 
     expect(res.success).toBe(true);
     expect(res.files.length).toBe(1);
+    expect(res.files[0].startsWith(tempDir)).toBe(true);
     expect(capturedReq.prompt).toBe("A beautiful mountain");
     expect(capturedReq.aspectRatio).toBe("16:9");
     expect(capturedReq.qualityPreset).toBe("high");

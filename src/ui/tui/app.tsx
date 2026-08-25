@@ -19,8 +19,9 @@ import { Footer } from './components/footer.js';
 import Spinner from 'ink-spinner';
 import { CommandPalette } from './components/command-palette.js';
 import { HelpDialog } from './overlays/help-dialog.js';
-import { ModelSelector, type ModelOption } from './overlays/model-selector.js';
 import { ModelManager } from './overlays/model-manager.js';
+import { SetupWizard } from './setup-wizard.js';
+import { createProviderManagerApi } from '../../transport/cli/provider-manager-api.js';
 import { SessionSelector, type SessionListItem } from './overlays/session-selector.js';
 import { SettingsEditor, type SettingItem } from './overlays/settings-overlay.js';
 import { messagesToFeedEntries } from './feed-serializer.js';
@@ -43,7 +44,7 @@ export interface TuiCommandOutcome {
   exit?: boolean;
 }
 
-type Overlay = 'palette' | 'help' | 'model' | 'settings' | 'sessions' | null;
+type Overlay = 'palette' | 'help' | 'model' | 'settings' | 'sessions' | 'setup' | null;
 
 /** Strip ANSI escapes — handler output is chalk-styled for the readline path. */
 function stripAnsi(text: string): string {
@@ -66,8 +67,6 @@ interface TuiAppProps {
   gatewayOn: boolean;
   skillCount: number;
   mcpCount: number;
-  modelOptions: ModelOption[];
-  onSwitchModel: (providerType: string, modelId: string) => Promise<void>;
   getSettingsList: () => SettingItem[];
   onSetSetting: (dotKey: string, value: string) => Promise<void>;
   listSessions: () => Promise<SessionListItem[]>;
@@ -89,7 +88,7 @@ interface TuiAppProps {
  */
 export function TuiApp({
   agent, permissionLevel, initialQuery, onExit, dispatchCommand, commands, skills, resetView,
-  providerType, gatewayOn, skillCount, mcpCount, modelOptions, onSwitchModel, getSettingsList, onSetSetting,
+  providerType, gatewayOn, skillCount, mcpCount, getSettingsList, onSetSetting,
   listSessions, onSwitchSession, onDeleteSession, onExportSession, onTranscriptSession, onRenameSession, getSessionId,
 }: TuiAppProps) {
   const theme = useTheme();
@@ -174,46 +173,22 @@ export function TuiApp({
     };
   }, [resetView]);
 
-  const [modelSnapshot, setModelSnapshot] = useState<{ assignments?: any; providers?: any; catalog?: any } | null>(null);
-
-  useEffect(() => {
-    if (overlay === 'model') {
-      const runtime = agent.getProviderRuntime?.();
-      if (runtime) {
-        runtime.createTurnSnapshot().then((snap: any) => {
-          setModelSnapshot({
-            assignments: snap.assignments,
-            providers: snap.config.providers,
-            catalog: snap.catalog,
-          });
-        }).catch(() => {});
-      }
-    }
-  }, [overlay, agent]);
-
-  const handleUpdateAssignment = (purpose: string, tier: string, target: { providerAccount: string; model: string; thinkingLevel?: any }) => {
-    const runtime = agent.getProviderRuntime?.();
-    if (runtime) {
-      runtime.configStore.getOverlay().then((overlayDoc: any) => {
-        const patch = {
-          modelAssignments: {
-            [purpose]: {
-              [tier]: target,
-            },
-          },
-        };
-        return runtime.configStore.updateOverlay(patch as any, overlayDoc.revision);
-      }).then(() => {
-        return runtime.createTurnSnapshot();
-      }).then((snap: any) => {
-        setModelSnapshot({
-          assignments: snap.assignments,
-          providers: snap.config.providers,
-          catalog: snap.catalog,
-        });
-      }).catch(() => {});
-    }
-  };
+  // 013: the model manager dock talks to the ProviderManagerApi controller —
+  // one semantic core shared with the wizard, CLI handlers, and SDK (R15).
+  const [sessionNotice, setSessionNotice] = useState<string | null>(null);
+  const managerApi = useMemo(
+    () =>
+      createProviderManagerApi(agent.getProviderRuntime(), {
+        switchProvider: (account, model) => {
+          agent.switchProvider(account, model);
+          setSessionNotice(`${account}/${model} — session, not saved`);
+        },
+      }),
+    [agent],
+  );
+  const [modelTab, setModelTab] = useState<'jobs' | 'providers' | 'now'>('jobs');
+  const [modelPrefill, setModelPrefill] = useState<string | undefined>(undefined);
+  const [modelSignIn, setModelSignIn] = useState<string | undefined>(undefined);
 
   const didInit = useRef(false);
   useEffect(() => {
@@ -309,8 +284,43 @@ export function TuiApp({
       setOverlay('help');
       return;
     }
-    if (trimmed === '/models' || trimmed === '/model') {
+    if (trimmed.startsWith('/model ') || trimmed === '/model' || trimmed === '/models') {
+      const search = trimmed.startsWith('/model ') ? trimmed.slice('/model '.length).trim() : undefined;
+      setModelPrefill(search);
+      setModelTab('jobs');
       setOverlay('model');
+      return;
+    }
+    if (trimmed === '/providers') {
+      setModelPrefill(undefined);
+      setModelTab('providers');
+      setOverlay('model');
+      return;
+    }
+    if (trimmed.startsWith('/login ') || trimmed === '/login') {
+      const explicit = trimmed.startsWith('/login ') ? trimmed.slice('/login '.length).trim() : undefined;
+      setModelPrefill(undefined);
+      setModelSignIn(explicit);
+      setModelTab('providers');
+      setOverlay('model');
+      return;
+    }
+    if (trimmed.startsWith('/logout ') || trimmed === '/logout') {
+      const account = trimmed.startsWith('/logout ') ? trimmed.slice('/logout '.length).trim() : undefined;
+      if (!account) {
+        feed.appendEntry({ kind: 'info', content: 'Usage: /logout <account-id>  (e.g. /logout anthropic)' });
+        return;
+      }
+      const res = await managerApi.logoutAccount(account);
+      if (res.ok) {
+        feed.appendEntry({ kind: 'info', content: `✓ Logged out account "${account}".` });
+      } else {
+        feed.appendEntry({ kind: 'error', message: `Logout failed: ${res.error.message}` });
+      }
+      return;
+    }
+    if (trimmed === '/setup') {
+      setOverlay('setup');
       return;
     }
     if (trimmed === '/sessions' || trimmed === '/session') {
@@ -368,20 +378,60 @@ export function TuiApp({
     }
   };
 
+  const activeModel = agent.getModel();
+  const liveModelDesc = `Switch model (currently ${providerType}/${activeModel})`;
+
+  const composerCommands: Suggestion[] = useMemo(() => {
+    const list: Suggestion[] = commands.map((c) => {
+      if (c.name === 'models' || c.name === 'model') {
+        return { ...c, description: liveModelDesc };
+      }
+      return c;
+    });
+    const names = new Set(list.map((c) => c.name));
+    if (!names.has('model')) list.push({ name: 'model', description: liveModelDesc });
+    if (!names.has('providers')) list.push({ name: 'providers', description: 'Manage provider accounts' });
+    if (!names.has('login')) list.push({ name: 'login', description: 'Sign in with provider (OAuth / subscription)' });
+    if (!names.has('logout')) list.push({ name: 'logout', description: 'Log out a provider account' });
+    if (!names.has('setup')) list.push({ name: 'setup', description: 'Run setup wizard' });
+    return list;
+  }, [commands, providerType, agent, activeModel, liveModelDesc]);
+
   // Palette includes synthetic entries that open overlays.
-  const paletteCommands: Suggestion[] = [
-    ...commands,
-    { name: 'shortcuts', description: 'Keyboard reference' },
-    { name: 'model', description: 'Switch model' },
-    { name: 'settings', description: 'View settings' },
-    { name: 'sessions', description: 'Resume / delete a session' },
-  ];
-  const onPaletteRun = (name: string): void => {
+  const paletteCommands: Suggestion[] = useMemo(() => {
+    const list = [...composerCommands];
+    const names = new Set(list.map((c) => c.name));
+    if (!names.has('shortcuts')) list.push({ name: 'shortcuts', description: 'Keyboard reference' });
+    if (!names.has('settings')) list.push({ name: 'settings', description: 'View settings' });
+    if (!names.has('sessions')) list.push({ name: 'sessions', description: 'Resume / delete a session' });
+    return list;
+  }, [composerCommands]);
+  const onPaletteRun = (name: string, arg?: string): void => {
     setOverlay(null);
     if (name === 'shortcuts') {
       setOverlay('help');
     } else if (name === 'model') {
+      setModelPrefill(undefined);
+      setModelSignIn(undefined);
+      setModelTab('jobs');
       setOverlay('model');
+    } else if (name === 'providers') {
+      setModelPrefill(undefined);
+      setModelSignIn(undefined);
+      setModelTab('providers');
+      setOverlay('model');
+    } else if (name === 'login') {
+      setModelPrefill(undefined);
+      setModelSignIn(arg?.trim() || undefined);
+      setModelTab('providers');
+      setOverlay('model');
+    } else if (name === 'logout') {
+      setModelPrefill(undefined);
+      setModelSignIn(undefined);
+      setModelTab('providers');
+      setOverlay('model');
+    } else if (name === 'setup') {
+      setOverlay('setup');
     } else if (name === 'settings') {
       setSettingsList(getSettingsList());
       setOverlay('settings');
@@ -494,7 +544,7 @@ export function TuiApp({
         onHistoryUp={onHistoryUp}
         onHistoryDown={onHistoryDown}
         onCycleFocus={onCycleWidgetFocus}
-        commands={commands}
+        commands={composerCommands}
         skills={skills}
       />
     </Box>
@@ -530,13 +580,40 @@ export function TuiApp({
           <HelpDialog onClose={() => setOverlay(null)} />
         ) : overlay === 'model' ? (
           <ModelManager
-            assignments={modelSnapshot?.assignments}
-            providers={modelSnapshot?.providers}
-            catalog={modelSnapshot?.catalog}
+            api={managerApi}
             activeAccount={providerType}
             activeModel={agent.getModel()}
-            onUpdateAssignment={handleUpdateAssignment}
-            onClose={() => setOverlay(null)}
+            sessionNotice={sessionNotice ?? undefined}
+            prefill={modelPrefill}
+            initialSignIn={modelSignIn}
+            initialTab={modelTab}
+            onSessionSwitch={(acct, mdl) => {
+              setSessionNotice(`switched to ${acct}/${mdl} (session, not saved)`);
+              feed.appendEntry({
+                kind: 'info',
+                content: `Switched model to ${acct}/${mdl} for this session (not saved).`,
+              });
+            }}
+            onClose={() => {
+              setModelPrefill(undefined);
+              setModelSignIn(undefined);
+              setOverlay(null);
+            }}
+          />
+        ) : overlay === 'setup' ? (
+          <SetupWizard
+            api={managerApi}
+            settings={{
+              get: async (k) => {
+                const item = settingsList.find((s) => s.dotKey === k);
+                return item?.value;
+              },
+              set: async (k, v) => {
+                await handleSetSetting(k, v);
+              },
+            }}
+            onFinish={() => setOverlay(null)}
+            onExitSetup={() => setOverlay(null)}
           />
         ) : overlay === 'settings' ? (
           <SettingsEditor settings={settingsList} onSet={handleSetSetting} onClose={() => setOverlay(null)} />

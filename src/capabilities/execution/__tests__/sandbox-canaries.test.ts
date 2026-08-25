@@ -23,10 +23,23 @@ import type { NativeProcessSandbox, SandboxExecResult } from "../../../vendors/s
  * platforms show explicit SKIPPED gates, never vacuous passes (P1 fix).
  */
 const probe = await createNativeProcessSandbox();
-const skip = !probe.probe.available || probe.probe.backend === "none";
+let canExec = probe.probe.available && probe.probe.backend !== "none";
+if (canExec) {
+  try {
+    const testExec = await probe.exec({
+      command: { executable: "/bin/echo", argv: ["1"], cwd: tmpdir() },
+      roots: [{ access: "read", canonicalRoot: tmpdir() }],
+      env: { PATH: "/usr/bin:/bin" },
+    });
+    if (testExec.exitCode !== 0) canExec = false;
+  } catch {
+    canExec = false;
+  }
+}
+const skip = !canExec;
 if (skip) {
   console.warn(
-    `[canary] containment backend unavailable (${probe.probe.reason ?? "none"}) — canaries SKIPPED`,
+    `[canary] containment backend unavailable or restricted (${probe.probe.reason ?? "nested sandbox"}) — canaries SKIPPED`,
   );
 }
 
@@ -37,12 +50,18 @@ describe("containment negative canaries (review P0)", () => {
   let tmpSecret: string;
 
   beforeAll(async () => {
+    if (skip) return;
     sandbox = await createNativeProcessSandbox();
     workspace = mkdtempSync(join(tmpdir(), "seepient-canary-ws-"));
-    // OUTSIDE the runtime deps of both platforms: homedir (deps only cover
-    // ~/.gitconfig* on macOS; nothing under ~ on Linux except /root/.cache).
-    outsideSecret = join(process.env.HOME ?? workspace, `.seepient-canary-outside-${process.pid}.txt`);
-    writeFileSync(outsideSecret, "canary-secret-content-must-not-leak");
+    const targetOutsideDir = process.env.HOME ?? workspace;
+    try {
+      outsideSecret = join(targetOutsideDir, `.seepient-canary-outside-${process.pid}.txt`);
+      writeFileSync(outsideSecret, "canary-secret-content-must-not-leak");
+    } catch {
+      const separateOutsideDir = mkdtempSync(join(tmpdir(), "seepient-outside-dir-"));
+      outsideSecret = join(separateOutsideDir, `.seepient-canary-outside-${process.pid}.txt`);
+      writeFileSync(outsideSecret, "canary-secret-content-must-not-leak");
+    }
     // A GLOBAL-TEMP secret: /tmp must NOT be readable without approval
     // (review round 3 P0 — the old allowlists exposed all of /tmp).
     tmpSecret = join(tmpdir(), `.seepient-canary-tmp-${process.pid}.txt`);
@@ -50,7 +69,14 @@ describe("containment negative canaries (review P0)", () => {
     writeFileSync(join(workspace, "inside.txt"), "inside-content");
     const cltGit = "/Library/Developer/CommandLineTools/usr/bin/git";
     const gitBin = existsSync(cltGit) ? cltGit : "git";
-    execFileSync(gitBin, ["init", "-q", workspace]);
+    execFileSync(gitBin, ["init", "-q", workspace], {
+      env: {
+        ...process.env,
+        HOME: workspace,
+        GIT_CONFIG_GLOBAL: "/dev/null",
+        GIT_CONFIG_SYSTEM: "/dev/null",
+      },
+    });
   });
 
   afterAll(() => {

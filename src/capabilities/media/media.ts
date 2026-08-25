@@ -522,6 +522,10 @@ RULES:
     }
   }
 
+  if (!config?.model) {
+    return "Error: Model is missing in prompt optimization configuration. Please configure a model in seepient settings.";
+  }
+
   if (!config?.apiKey) {
     return "Error: OpenAI API Key is missing in the configuration. Please run 'seepient setup' or check your .env file.";
   }
@@ -533,7 +537,7 @@ RULES:
 
   try {
     const completion = await client.chat.completions.create({
-      model: config.model || "gpt-4o",
+      model: config.model,
       messages: [
         {
           role: "system",

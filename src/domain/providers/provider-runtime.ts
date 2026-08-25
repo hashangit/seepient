@@ -228,7 +228,7 @@ export class ProviderRuntime extends EventEmitter {
     this.configStore = options?.configStore ?? new ProviderConfigStore();
     this.credentialStore = options?.credentialStore ?? new CompositeCredentialStore();
     this.modelCatalog = options?.modelCatalog ?? new ModelCatalog();
-    this.adapter = options?.adapter ?? new AggregateInferenceAdapter();
+    this.adapter = options?.adapter ?? new AggregateInferenceAdapter(undefined, undefined, this.credentialStore);
   }
 
   getConfigStore(): ProviderConfigStore {

@@ -153,13 +153,14 @@ Current layout of the Obsidian vault (annotated):
 │       ├── data-model.md             # Media schemas, ports, backend registry, capability classifier, dispatch inventory
 │       ├── quickstart.md             # Per-phase validation scenarios + production budgets
 │       └── contracts/                # media-inference, media-schemas, media-catalog, media-surfaces
-│   ├── 013-provider-management-tui/  # Shared provider mgmt TUI: /models dock upgrade + setup wizard rebuild (013)
-│   │   ├── spec.md                   # Product spec: 6 prioritized stories, FR-001–FR-024, success criteria
-│   │   ├── plan.md                   # M1–M5 build order; verified current-state findings; binding rules R1–R13
-│   │   ├── tasks.md                  # T001–T036 dependency-ordered work orders (test-first, per-phase gates)
+│   ├── 013-provider-management-tui/  # Shared provider mgmt TUI: dock + wizard + OAuth + CLI/server/SDK parity (013)
+│   │   ├── spec.md                   # Product spec: 8 prioritized stories, FR-001–FR-040, success criteria
+│   │   ├── plan.md                   # M1–M7 build order; verified current-state + surface audits; rules R1–R15
+│   │   ├── tasks.md                  # T001–T064 dependency-ordered work orders (test-first, per-phase gates)
 │   │   ├── research.md               # oh-my-pi provider-TUI study (/providers, /model, ModelBrowser) + decision ledger D1–D15
 │   │   ├── data-model.md             # Persisted shapes (ProviderEntry, CredentialRef, PurposeModelMap) + UI view models
 │   │   ├── quickstart.md             # QS-M1–QS-M5 manual validation scenarios + production budgets
+│   │   ├── manual-validation-results.md # Manual scenario results (QS-M1–M5, QS-O, QS-P)
 │   │   ├── checklists/requirements.md # Specification quality checklist (validated)
 │   │   └── contracts/                # provider-manager-api, model-manager-dock, setup-wizard
 ├── 010-provider-management-redesign/ # Provider mgmt redesign: contracts + runtime + purpose/tier routing
@@ -248,6 +249,12 @@ UI → Transport → Domain → Capabilities → Vendors
 | Sessions | `src/domain/sessions/session-store.ts` | `PersistenceBackend` factory + registry |
 | Settings manager | `src/domain/settings/settings-manager.ts` | get/set/reset/list, persistence, masking |
 | Provider runtime | `src/domain/providers/` | Runtime, config store, credential store, resolver, catalog |
+| Provider controller | `src/transport/cli/provider-manager-api.ts` | Single semantic core for provider/account/slot management |
+| Model manager dock | `src/ui/tui/overlays/model-manager.tsx` | Multi-tab TUI dock: purpose board, accounts, catalog browse, search |
+| Model picker | `src/ui/tui/components/model-picker.tsx` | Search & filter model selector with reachability & pricing badges |
+| Add account flow | `src/ui/tui/components/add-account.tsx` | Multi-credential account configuration (paste, env, none, oauth) |
+| Setup wizard | `src/ui/tui/setup-wizard.tsx` | First-run onboarding wizard with preset bundles & slot recommendations |
+| OAuth adapter | `src/vendors/pi-ai/pi-auth-adapter.ts` | Pi AI OAuth flow bridge over Seepient CredentialStore |
 | Context accounting | `src/domain/context/` | Context-breakdown, message-convert |
 | Inference adapters | `src/capabilities/inference/` | `AggregateInferenceAdapter` vendor routing |
 | Tools | `src/capabilities/tools/` | 15 built-in tool modules: shell, files, web, email, widgets, todos… |
@@ -297,7 +304,7 @@ Env vars per provider: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GLM_API_KEY`, `OP
 
 - **No bundler** — plain `tsc` to ES2022 NodeNext. Dev via `tsx`.
 - **Package exports** — `seepient` (SDK), `seepient/server`. Binaries: `seepient` (CLI), `seepient-server`.
-- **Vitest test suite** — 1231 tests across 152 files; CI gates publish on test pass
+- **Vitest test suite** — 1370+ tests across 160 files; CI gates publish on test pass
 - **Errors carry metadata** — `code` (machine-readable) + `retryable` flag on all `SeepientError` subclasses.
 - **Hook errors are non-fatal** — never crash the agent loop.
 - **Dynamic provider imports** — unused provider SDKs stay out of memory.
@@ -404,10 +411,17 @@ shell commands, and other important information, read the current plan:
   and the rebuilt setup wizard (searchable catalog provider list, credential
   modes paste/env/keyless, extras via SettingsManager — deletes the hardcoded
   four-provider menu, discarded model answers, cycling picker, dead-end
-  commands, silent save errors, and the extras settings-clobber bug). REPL
-  `/models` rerouted to the same manager. Binding rules R1–R13 in plan.md;
-  tasks T001–T036 in tasks.md (test-first, per-phase gates); UX contracts in
-  contracts/ (provider-manager-api, model-manager-dock, setup-wizard).
+  commands, silent save errors, and the extras settings-clobber bug). OAuth
+  "Sign in with provider" (pi-ai flows: Claude Pro/Max, OpenRouter, Copilot,
+  xAI, Kimi, Radius) folded in by owner amendment — `[4]` in the credential
+  menu, tokens confined to the credential store (R14). Cross-surface parity
+  (US8/M6): CLI (auth/providers/models browse/resolve, --json), server
+  (catalog reachableVia, OAuth code-relay), SDK (instance methods) — one
+  controller, four adapters, one vocabulary (R15). REPL
+  `/models` rerouted to the same manager. Binding rules R1–R15 in plan.md;
+  tasks T001–T064 in tasks.md (test-first, per-phase gates); UX contracts in
+  contracts/ (provider-manager-api, model-manager-dock, setup-wizard,
+  surface-parity).
 - **IN-FLIGHT PLAN (implementation underway)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/008-permission-system-redesign/plan.md`
   — Permission system redesign R9.1: analyzer-only tools, one Domain policy and
   execution boundary, native exact commits, typed effect/secret/model-egress

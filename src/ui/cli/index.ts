@@ -114,4 +114,18 @@ if (process.argv.includes('--docker')) {
   process.env.SEEPIENT_NO_INTERACTIVE = 'true';
 }
 
-program.parse(process.argv);
+// Global error containment for async CLI execution
+process.on("unhandledRejection", (reason: any) => {
+  const msg = reason?.message || String(reason);
+  console.error(chalk.red(`Error: ${msg}`));
+  process.exit(1);
+});
+
+try {
+  await program.parseAsync(process.argv);
+} catch (err: any) {
+  if (err?.code !== "commander.helpDisplayed" && err?.code !== "commander.version" && err?.exitCode !== 0) {
+    console.error(chalk.red(`Error: ${err?.message || String(err)}`));
+    process.exit(1);
+  }
+}
