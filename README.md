@@ -117,11 +117,11 @@ import { createServer } from 'seepient/server';
 
 ## Quick Start
 
-1.  **Setup**: Run the interactive setup wizard to configure your API keys and integrations.
+1.  **Setup**: Run the interactive setup wizard to configure your providers, credentials, and model assignments in under a minute.
     ```bash
     seepient setup
     ```
-    The wizard now supports configuring multiple providers (OpenAI, Anthropic, GLM) in a single session.
+    The wizard connects to the live community catalog (supporting dozens of upstream providers including OpenAI, Anthropic, Google, xAI, OpenRouter, Mistral, DeepSeek, and local endpoints), allows multi-mode credentials (API key paste, environment variable reference, keyless, or OAuth provider sign-in), and assigns your main models safely without touching unrelated settings.
 
 2.  **Run**: Start the agent in interactive mode.
     ```bash
@@ -199,7 +199,7 @@ Seepient Agent uses a hierarchical configuration system.
 
 ### Provider Management (v2 Architecture)
 
-Seepient Agent v0.4.4 features unified Provider Management with purpose × tier routing, dynamic upstream catalog discovery, multi-target automatic fallback, circuit-breaker cooldowns, and credential stores:
+Seepient Agent v0.5.0 features unified Provider Management with a shared interactive TUI dock (`/models`), first-run setup wizard (`seepient setup`), OAuth subscription sign-in (`/login`, `seepient auth login`), purpose × tier routing, dynamic upstream catalog discovery, multi-target automatic fallback, circuit-breaker cooldowns, and full cross-surface parity across CLI, Server, and SDK:
 
 **Configuration (`~/.seepient/setting.json` or `.seepient/setting.json`):**
 ```json
@@ -261,7 +261,7 @@ Seepient Agent v0.4.4 features unified Provider Management with purpose × tier 
 - `/logout [account]`: Log out of a provider account and remove cached credentials.
 - `/setup`: Launch the first-run onboarding setup wizard.
 
-> **⚠️ Security Note**: Never commit API keys or secrets in plaintext into git repositories. Use environment variables (e.g., `OPENAI_API_KEY`), `seepient auth login` with system keychain storage, or OAuth device sign-in.
+> **⚠️ Security Note**: Never commit API keys or secrets in plaintext into git repositories. Use environment variables (e.g., `OPENAI_API_KEY`), `seepient auth login` with system keychain storage, or OAuth provider sign-in.
 
 ## Integrations
 
