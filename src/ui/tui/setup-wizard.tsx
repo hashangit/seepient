@@ -265,13 +265,14 @@ export function SetupWizard({ api, settings, onFinish, onExitSetup }: SetupWizar
           setActiveGroup(grp);
           setSub("group");
           setFieldIdx(0);
+          setFieldVal("");
           if (settings?.get && grp.fields[0]) {
-            void settings.get(grp.fields[0].dotKey).then((val) => {
-              if (val) setFieldVal(String(val));
-              else setFieldVal("");
+            const targetKey = grp.fields[0].dotKey;
+            void settings.get(targetKey).then((val) => {
+              if (val !== undefined && val !== null) {
+                setFieldVal((curr) => (curr === "" ? String(val) : curr));
+              }
             });
-          } else {
-            setFieldVal("");
           }
         } else if ((isNum && (num === EXTRAS_GROUPS.length + 1 || num === EXTRAS_GROUPS.length + 2)) || key.return) {
           next("summary");
@@ -333,11 +334,20 @@ export function SetupWizard({ api, settings, onFinish, onExitSetup }: SetupWizar
       <SignInFlow
         upstream={signInUpstream}
         api={api}
-        onDone={(msg) => {
+        onDone={async (msg) => {
           setSub("menu");
-          setSummary((s) => ({ ...s, accounts: [...new Set([...s.accounts, signInUpstream])] }));
           setError(null);
-          void load();
+          try {
+            const st = await api.getState();
+            setState(st);
+            const latest = st.accounts.map((a) => a.id);
+            setSummary((s) => ({
+              ...s,
+              accounts: [...new Set([...s.accounts, ...latest.filter((id) => id.includes(signInUpstream) || id === signInUpstream)])],
+            }));
+          } catch {
+            void load();
+          }
         }}
         onCancel={() => setSub("menu")}
       />

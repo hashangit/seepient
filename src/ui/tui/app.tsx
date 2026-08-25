@@ -378,7 +378,8 @@ export function TuiApp({
     }
   };
 
-  const liveModelDesc = `Switch model (currently ${providerType}/${agent.getModel()})`;
+  const activeModel = agent.getModel();
+  const liveModelDesc = `Switch model (currently ${providerType}/${activeModel})`;
 
   const composerCommands: Suggestion[] = useMemo(() => {
     const list: Suggestion[] = commands.map((c) => {
@@ -394,7 +395,7 @@ export function TuiApp({
     if (!names.has('logout')) list.push({ name: 'logout', description: 'Log out a provider account' });
     if (!names.has('setup')) list.push({ name: 'setup', description: 'Run setup wizard' });
     return list;
-  }, [commands, providerType, agent]);
+  }, [commands, providerType, agent, activeModel, liveModelDesc]);
 
   // Palette includes synthetic entries that open overlays.
   const paletteCommands: Suggestion[] = useMemo(() => {

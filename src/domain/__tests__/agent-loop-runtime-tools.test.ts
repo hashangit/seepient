@@ -1,4 +1,7 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { runAgentLoop } from "../agent-loop.js";
 import { ProviderRuntime } from "../providers/provider-runtime.js";
 import { ProviderConfigStore } from "../providers/config-store/provider-config-store.js";
@@ -7,6 +10,16 @@ import { createHookExecutor } from "../hooks.js";
 import { ImageTool } from "../../capabilities/tools/image.js";
 
 describe("Agent Loop Runtime Tool Injection & Propagation", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = realpathSync(mkdtempSync(join(tmpdir(), "seepient-agent-media-test-")));
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
   it("ImageTool routes through runtime executeImage when runtime is provided", async () => {
     const configStore = new ProviderConfigStore(":memory:");
     await configStore.updateOverlay(
@@ -60,12 +73,13 @@ describe("Agent Loop Runtime Tool Injection & Propagation", () => {
     });
 
     const output = await ImageTool.handler(
-      { prompt: "A glowing galaxy" },
+      { prompt: "A glowing galaxy", output_dir: tempDir },
       { runtime },
     );
 
     expect(executeImageCalled).toBe(true);
     expect(output).toContain("Successfully generated 1 image");
+    expect(output).toContain(tempDir);
   });
 
   it("propagates runtime errors without silently falling back", async () => {

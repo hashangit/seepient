@@ -71,7 +71,7 @@ export function AddAccount({
   async function save(): Promise<void> {
     setFeedback({ kind: "busy", message: "Saving account…" });
     try {
-      const finalId = accountId || defaultId;
+      const finalId = (accountId || defaultId).trim().toLowerCase();
       const input: AccountInput = {
         accountId: finalId,
         upstreamProvider: upstream === "custom" ? "openai-compatible" : upstream,
