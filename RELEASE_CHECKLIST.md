@@ -131,8 +131,10 @@ Push the branch and tag to trigger the automated GitHub Actions release workflow
   - Verify formula updated in `https://github.com/hashangit/homebrew-seepient/blob/main/Formula/seepient.rb`.
 - [ ] **GitHub Releases**:
   - Verify release tag and notes on `https://github.com/hashangit/seepient/releases/tag/vX.Y.Z`.
-- [ ] **Global CLI Test (Optional)**:
+- [ ] **CLI Verification (Homebrew)**:
   ```bash
-  npm install -g seepient@X.Y.Z
+  brew update
+  brew upgrade seepient
   seepient --version
   ```
+  *(Note: For systems managing Seepient via Homebrew, do not install via `npm -g` to avoid binary collision.)*
