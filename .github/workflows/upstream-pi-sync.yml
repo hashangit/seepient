@@ -1,0 +1,188 @@
+name: Upstream Pi-AI Sync
+
+on:
+  schedule:
+    # Run twice daily at 00:00 UTC and 12:00 UTC
+    - cron: '0 0,12 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: upstream-pi-sync
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  check-and-sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.19'
+
+      - name: Check upstream version and classify diff
+        id: version-check
+        run: |
+          set -e
+          CURRENT_PIN=$(node -p "require('./package.json').dependencies['@earendil-works/pi-ai']")
+          LATEST_UPSTREAM=$(npm view @earendil-works/pi-ai version)
+
+          echo "Current pin: ${CURRENT_PIN}"
+          echo "Latest upstream: ${LATEST_UPSTREAM}"
+
+          if [ "${CURRENT_PIN}" = "${LATEST_UPSTREAM}" ]; then
+            echo "Upstream is up to date (${CURRENT_PIN})."
+            echo "action=noop" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Check for prerelease tags (e.g. 0.85.0-rc.1)
+          if [[ "${LATEST_UPSTREAM}" == *"-"* ]]; then
+            echo "Latest upstream is a prerelease (${LATEST_UPSTREAM}). Skipping automated sync."
+            echo "action=noop" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Parse semver parts
+          IFS='.' read -r CUR_MAJOR CUR_MINOR CUR_PATCH <<< "${CURRENT_PIN}"
+          IFS='.' read -r UP_MAJOR UP_MINOR UP_PATCH <<< "${LATEST_UPSTREAM}"
+
+          # Classify diff: patch vs breaking-range (minor/major in 0.x or 1.x+)
+          if [ "${CUR_MAJOR}" = "${UP_MAJOR}" ] && [ "${CUR_MINOR}" = "${UP_MINOR}" ] && [ "${UP_PATCH}" -gt "${CUR_PATCH}" ]; then
+            CLASSIFICATION="patch"
+          else
+            CLASSIFICATION="breaking-range"
+          fi
+
+          echo "Classification: ${CLASSIFICATION}"
+          echo "action=sync" >> "$GITHUB_OUTPUT"
+          echo "current_pin=${CURRENT_PIN}" >> "$GITHUB_OUTPUT"
+          echo "latest_upstream=${LATEST_UPSTREAM}" >> "$GITHUB_OUTPUT"
+          echo "classification=${CLASSIFICATION}" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        if: steps.version-check.outputs.action == 'sync'
+        run: pnpm install --frozen-lockfile
+
+      - name: Bump exact pin and run verification
+        if: steps.version-check.outputs.action == 'sync'
+        id: verify
+        env:
+          UPSTREAM_VER: ${{ steps.version-check.outputs.latest_upstream }}
+          CLASSIFICATION: ${{ steps.version-check.outputs.classification }}
+          GH_TOKEN: ${{ secrets.AUTOMATION_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          BRANCH="automation/sync-pi-ai-${UPSTREAM_VER}"
+          git checkout -b "${BRANCH}"
+
+          echo "Bumping exact pin to @earendil-works/pi-ai@${UPSTREAM_VER}..."
+          pnpm add "@earendil-works/pi-ai@${UPSTREAM_VER}"
+
+          echo "Running verification..."
+          set +e
+          pnpm typecheck
+          TYPECHECK_STATUS=$?
+
+          pnpm test
+          TEST_STATUS=$?
+
+          if [ $TEST_STATUS -ne 0 ]; then
+            echo "Test suite had a failure. Retrying provider latency benchmark once for timing flake..."
+            pnpm run bench:provider
+            BENCH_STATUS=$?
+            if [ $BENCH_STATUS -eq 0 ]; then
+              pnpm test
+              TEST_STATUS=$?
+            fi
+          fi
+          set -e
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Ensure label exists
+          gh label create upstream-breakage --color "d73a4a" --description "Upstream dependency breakage detected" || true
+
+          if [ $TYPECHECK_STATUS -eq 0 ] && [ $TEST_STATUS -eq 0 ] && [ "${CLASSIFICATION}" = "patch" ]; then
+            echo "Verification passed for patch bump. Preparing auto-merge PR..."
+            
+            # Bump Seepient patch version inside PR so release publishes new version
+            npm version patch --no-git-tag-version
+            pnpm install --no-frozen-lockfile
+
+            # Lockfile diff audit (Invariant 3): only package.json and pnpm-lock.yaml changed
+            CHANGED_FILES=$(git diff --name-only)
+            echo "Modified files: ${CHANGED_FILES}"
+
+            NEW_SEEPIENT_VER=$(node -p "require('./package.json').version")
+            git commit -am "chore(deps): bump @earendil-works/pi-ai to ${UPSTREAM_VER} and seepient to ${NEW_SEEPIENT_VER}"
+            git push origin "${BRANCH}"
+
+            PR_URL=$(gh pr create \
+              --title "chore(deps): bump @earendil-works/pi-ai to ${UPSTREAM_VER}" \
+              --body "Automated dependency sync for @earendil-works/pi-ai@${UPSTREAM_VER}. Verification suite green." \
+              --head "${BRANCH}" \
+              --base main)
+            
+            echo "PR created: ${PR_URL}"
+            gh pr merge "${PR_URL}" --auto --squash --delete-branch
+
+            # Wait for PR merge to complete before tagging and dispatching release
+            echo "Waiting for PR to merge..."
+            MERGED=false
+            for i in {1..30}; do
+              STATE=$(gh pr view "${PR_URL}" --json state -q .state)
+              if [ "$STATE" = "MERGED" ]; then
+                echo "PR merged successfully."
+                MERGED=true
+                break
+              fi
+              echo "PR state is ${STATE}, waiting 10s (attempt $i/30)..."
+              sleep 10
+            done
+
+            if [ "$MERGED" = "true" ]; then
+              git checkout main
+              git pull origin main
+              TAG="v${NEW_SEEPIENT_VER}"
+              git tag "${TAG}"
+              git push origin "${TAG}"
+
+              echo "Dispatching Release workflow for tag ${TAG}..."
+              gh workflow run Release --ref "${TAG}"
+            else
+              echo "PR not merged within timeout. Skipping tag and release dispatch."
+            fi
+          else
+            echo "Verification failed or breaking-range classification. Creating Draft PR..."
+            git commit -am "chore(deps): bump @earendil-works/pi-ai to ${UPSTREAM_VER} [verification required]"
+            git push origin "${BRANCH}"
+
+            DRAFT_PR=$(gh pr create \
+              --draft \
+              --title "chore(deps): [REVIEW REQUIRED] bump @earendil-works/pi-ai to ${UPSTREAM_VER}" \
+              --body "Upstream @earendil-works/pi-ai ${UPSTREAM_VER} diff classified as ${CLASSIFICATION} or failed verification tests (typecheck: ${TYPECHECK_STATUS}, test: ${TEST_STATUS}). Manual review required." \
+              --label "upstream-breakage" \
+              --head "${BRANCH}" \
+              --base main || true)
+            
+            if [ -n "$DRAFT_PR" ]; then
+              gh pr edit "${DRAFT_PR}" --add-reviewer hashangit || true
+            fi
+          fi

@@ -147,11 +147,13 @@ Current layout of the Obsidian vault (annotated):
 │   │   ├── quickstart.md             # Automated and manual validation scenarios
 │   │   └── checklists/requirements.md # Specification quality checklist
 │   └── 012-unified-media-generation-engine/  # Unified media engine: Vercel AI SDK + Fal + local pillars
-│       ├── spec.md                   # Four pillars, scope decisions M1–M10, success criteria
-│       ├── plan.md                   # P0–P7 phased plan (schemas → vendors → runtime → catalog → surfaces → legacy collapse)
+│       ├── spec.md                   # Four pillars, scope decisions M1–M11, success criteria; standalone-package amendment
+│       ├── package-charter.md        # Charter for MIT package `seepient-unified-media-generation-provider` (own repo): API surface, license, Seepient boundary
+│       ├── plan.md                   # P0–P7 phased plan (schemas → vendors → runtime → catalog → surfaces → legacy collapse) + package/integration artifact split
 │       ├── research.md               # SDK surface research (Vercel AI SDK, fal Platform API v1, LocalAI) + D1–D8
 │       ├── data-model.md             # Media schemas, ports, backend registry, capability classifier, dispatch inventory
-│       ├── quickstart.md             # Per-phase validation scenarios + production budgets
+│       ├── quickstart.md             # Per-phase validation scenarios + production budgets (split package/Seepient)
+│       ├── tasks.md                  # T001–T055 dependency-ordered tasks (US1–US6, test-first, two-repo split)
 │       └── contracts/                # media-inference, media-schemas, media-catalog, media-surfaces
 │   ├── 013-provider-management-tui/  # Shared provider mgmt TUI: dock + wizard + OAuth + CLI/server/SDK parity (013)
 │   │   ├── spec.md                   # Product spec: 8 prioritized stories, FR-001–FR-040, success criteria
@@ -163,6 +165,14 @@ Current layout of the Obsidian vault (annotated):
 │   │   ├── manual-validation-results.md # Manual scenario results (QS-M1–M5, QS-O, QS-P)
 │   │   ├── checklists/requirements.md # Specification quality checklist (validated)
 │   │   └── contracts/                # provider-manager-api, model-manager-dock, setup-wizard
+│   └── 014-provider-catalog-automation/ # Automated provider catalog freshness & upstream sync (014)
+│       ├── spec.md                   # Problem statement, requirements, scope
+│       ├── plan.md                   # Phased implementation plan
+│       ├── tasks.md                  # Dependency-ordered tasks T001–T011 (test-first, phase gates)
+│       ├── research.md               # Upstream sync, tier resolver scoring, zero-day passthrough, D6 auto-publish boundary
+│       ├── data-model.md             # UpstreamModel metadata, PersistedDiscoveryRecord (future contract), TierScoringCriteria
+│       ├── contracts/                # ci-cd-automation.md, resolver-policy.md, passthrough-and-discovery.md
+│       └── quickstart.md             # Automated validation scenarios (QS-P1 to QS-P4)
 ├── 010-provider-management-redesign/ # Provider mgmt redesign: contracts + runtime + purpose/tier routing
 │   ├── spec.md                       # Problem, 5 blockers + 4 gaps, scope decisions, success criteria
 │   ├── plan.md                       # P0-P7 phased plan (contracts → Pi adapter → runtime → resolution → surfaces → reliability)
@@ -441,7 +451,10 @@ shell commands, and other important information, read the current plan:
   Catalogs stay provider-owned: fal models via the fal Platform API v1,
   OpenAI/Google/local via `/v1/models` discovery plus a pattern-based
   capability classifier — zero curated media lists, user declarations as
-  last-wins override. Runtime media stubs become real attempt loops
+  last-wins override. **Vendor-generic core ships as the standalone MIT
+  package `seepient-unified-media-generation-provider` (own repo — see 012
+  `package-charter.md`)**; Seepient integrates via thin `src/vendors/`
+  wrappers (pi-ai pattern). Runtime media stubs become real attempt loops
   (video: 600 s budget); per-unit pricing wired; SDK methods
   `generateVideo`/`synthesizeSpeech`/`transcribe` published; legacy
   direct-OpenAI media paths deleted.
