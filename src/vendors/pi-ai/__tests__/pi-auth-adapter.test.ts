@@ -388,4 +388,52 @@ describe("pi-auth-adapter: CredentialStore bridge (T038)", () => {
     expect(records.has("anthropic")).toBe(false);
     expect((records.get("anthropic-work") as any)?.access).toBe("rotated-access-token-2");
   });
+
+  it("delete() deletes aliased record when called with canonical providerId", async () => {
+    const records = new Map<string, PersistedCredentialRecord>();
+    records.set("anthropic-work", {
+      kind: "oauth",
+      access: "access-token-1",
+      refresh: "refresh-token-1",
+      expires: Date.now() + 1000,
+    });
+
+    const metaMap = new Map<string, any>();
+    metaMap.set("anthropic-work", { providerAccountHint: "anthropic" });
+
+    const now = new Date().toISOString();
+    const store: CredentialStore = {
+      resolve: vi.fn(),
+      get: vi.fn(async (id: string) => {
+        if (!records.has(id)) return undefined;
+        return {
+          id,
+          source: "keychain" as const,
+          materialKind: "oauth" as const,
+          createdAt: now,
+          updatedAt: now,
+          meta: metaMap.get(id),
+        };
+      }),
+      getRecord: vi.fn(async (id: string) => records.get(id)),
+      list: vi.fn(async () => [
+        {
+          id: "anthropic-work",
+          source: "keychain" as const,
+          materialKind: "oauth" as const,
+          createdAt: now,
+          updatedAt: now,
+          meta: metaMap.get("anthropic-work"),
+        },
+      ]),
+      put: vi.fn(async (id: string, record: any) => { records.set(id, record); }),
+      delete: vi.fn(async (id: string) => { records.delete(id); }),
+    };
+
+    const piStore = createPiCredentialStore(store);
+    await piStore.delete("anthropic");
+
+    expect(store.delete).toHaveBeenCalledWith("anthropic-work");
+    expect(records.has("anthropic-work")).toBe(false);
+  });
 });

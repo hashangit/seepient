@@ -24,6 +24,7 @@ import type {
 } from "../../foundations/schemas/inference.js";
 import { InferenceError } from "../../foundations/errors.js";
 import { classifyInferenceError } from "../../foundations/errors/error-classifier.js";
+import { redactString } from "../../foundations/security/redact.js";
 import {
   canonicalToPiContext,
   canonicalToPiMessages,
@@ -167,13 +168,15 @@ async function resolveSecretApiKey(
         if (signal?.aborted || err?.name === "AbortError") {
           throw err;
         }
-        const isGrantExpired = /invalid_grant|expired|revoked/i.test(err?.message ?? "");
-        const isNetwork = /econnrefused|etimedout|enotfound|fetch failed|network/i.test(err?.message ?? "");
+        const rawMessage = err?.message ?? "";
+        const isGrantExpired = /invalid_grant|expired|revoked/i.test(rawMessage);
+        const isNetwork = /econnrefused|etimedout|enotfound|fetch failed|network/i.test(rawMessage);
+        const safeMessage = redactString(rawMessage);
         throw new InferenceError({
           code: isGrantExpired ? "oauth_expired" : isNetwork ? "network" : "auth",
           message: isGrantExpired
-            ? `OAuth session for "${target.providerAccount}" expired — sign in again (/login ${target.upstreamProvider}): ${err?.message ?? "refresh failed"}`
-            : `OAuth token refresh for "${target.providerAccount}" failed: ${err?.message ?? "unknown error"}`,
+            ? `OAuth session for "${target.providerAccount}" expired — sign in again (/login ${target.upstreamProvider}): ${safeMessage || "refresh failed"}`
+            : `OAuth token refresh for "${target.providerAccount}" failed: ${safeMessage || "unknown error"}`,
           providerAccount: target.providerAccount,
           model: target.model,
           retryable: !isGrantExpired,

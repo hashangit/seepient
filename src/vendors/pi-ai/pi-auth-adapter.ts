@@ -221,6 +221,7 @@ export class PiCredentialStoreAdapter implements PiCredentialStore {
             break;
           } catch (err) {
             putErr = err;
+            if (i < 2) await new Promise((r) => setTimeout(r, 50 * (i + 1)));
           }
         }
         if (putErr) {
@@ -240,7 +241,8 @@ export class PiCredentialStoreAdapter implements PiCredentialStore {
 
   async delete(providerId: string, _options?: AuthOperationOptions): Promise<void> {
     return this.enqueue(providerId, async () => {
-      await this.seepientStore.delete(providerId);
+      const { targetId } = await this.resolveRecordAndId(providerId);
+      await this.seepientStore.delete(targetId);
     });
   }
 }
