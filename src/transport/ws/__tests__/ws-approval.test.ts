@@ -7,7 +7,7 @@
  * so the durable record and the executed outcome never disagree.
  */
 import { describe, it, expect } from "vitest";
-import { wsApprovalDecision, wsLegacyApprovalRequest } from "../ws-handlers.js";
+import { wsApprovalDecision, wsLegacyApprovalRequest } from "../approvals.js";
 import type { PermissionRequest } from "../../../foundations/contracts/permission-policy.js";
 
 function requestWithOptions(): PermissionRequest {
