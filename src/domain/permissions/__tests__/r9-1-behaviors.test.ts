@@ -116,14 +116,18 @@ describe("isSecurityPath (T108a)", () => {
     expect(isSecurityPath(canonical + "/replay/ledger.ndjson")).toBe(true);
     // The override directory is protected even when the default exists.
     const realHome = process.env.HOME;
+    const prevSecDir = process.env.SEEPIENT_SECURITY_DIR;
     const override = "/tmp/override-security-" + process.pid;
     try {
       process.env.SEEPIENT_SECURITY_DIR = override;
       expect(isSecurityPath(override)).toBe(true);
       expect(isSecurityPath(override + "/policies/ws.json")).toBe(true);
     } finally {
-      process.env.SEEPIENT_SECURITY_DIR = undefined as never;
-      delete process.env.SEEPIENT_SECURITY_DIR;
+      if (prevSecDir !== undefined) {
+        process.env.SEEPIENT_SECURITY_DIR = prevSecDir;
+      } else {
+        delete process.env.SEEPIENT_SECURITY_DIR;
+      }
       process.env.HOME = realHome;
     }
   });

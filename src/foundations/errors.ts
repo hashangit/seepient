@@ -47,7 +47,8 @@ export type InferenceErrorCode =
   | "model_not_found"
   | "unknown_model"
   | "unconfigured_provider"
-  | "unconfigured_purpose";
+  | "unconfigured_purpose"
+  | "oauth_expired";
 
 export interface InferenceErrorOptions {
   code: InferenceErrorCode;

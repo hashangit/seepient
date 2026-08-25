@@ -16,6 +16,7 @@ import chalk from 'chalk';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as readline from 'readline/promises';
 
 import { Agent } from './agent.js';
 import { resolveLaunchMode, selectSystemPrompt } from '../../domain/prompts/system-prompts.js';
@@ -99,24 +100,25 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
     console.log(chalk.yellow("No provider configuration found."));
 
     if (isNonInteractive()) {
-      console.error(chalk.red("No provider configured. Set API key env vars (OPENAI_API_KEY / ANTHROPIC_API_KEY / GLM_API_KEY) or provide a config file."));
+      console.error(chalk.red("No provider configured. Set supported API key env vars (OPENAI_API_KEY / ANTHROPIC_API_KEY / GLM_API_KEY / OPENAI_COMPAT_API_KEY) or configure via `seepient providers add <id> --credential env:VAR_NAME`."));
       process.exit(1);
     } else {
-      const inquirer = await import('inquirer');
-      const { doSetup } = await inquirer.default.prompt([
-        {
-          type: 'confirm',
-          name: 'doSetup',
-          message: 'Would you like to run the setup wizard now?',
-          default: true
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      try {
+        const raw = await rl.question(chalk.cyan("No provider configured. Run setup wizard now? [Y/n] "));
+        const ans = raw.trim().toLowerCase();
+        if (ans === "n" || ans === "no") {
+          console.log(chalk.dim("Setup skipped. You can configure providers anytime using `seepient setup` or `seepient providers add`."));
+          process.exit(0);
         }
-      ]);
+      } finally {
+        rl.close();
+      }
+      await runSetup();
+      effectiveConfig = await runtime.getConfigStore().getEffectiveConfig();
+      hasProviders = Object.keys(effectiveConfig.providers || {}).length > 0;
 
-      if (doSetup) {
-        await runSetup();
-        effectiveConfig = await runtime.getConfigStore().getEffectiveConfig();
-        hasProviders = Object.keys(effectiveConfig.providers || {}).length > 0;
-      } else {
+      if (!hasProviders) {
         console.error(chalk.red("Provider configuration is required to proceed."));
         process.exit(1);
       }

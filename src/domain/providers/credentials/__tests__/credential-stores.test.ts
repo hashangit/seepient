@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -153,6 +153,36 @@ describe("CredentialStore implementations (QS-P4.1)", () => {
       expect(await lease.secret()).toEqual({ kind: "api_key", value: "sk-keychain-secret" });
       await lease.release();
     });
+
+    it("puts and gets persisted credential records round-trip via provider", async () => {
+      const memory = new Map<string, string>();
+      const mockProvider = {
+        getPassword: async (service: string, account: string) => memory.get(`${service}/${account}`) ?? null,
+        setPassword: async (service: string, account: string, password: string) => {
+          memory.set(`${service}/${account}`, password);
+        },
+        deletePassword: async (service: string, account: string) => memory.delete(`${service}/${account}`),
+      };
+
+      const store = new KeychainCredentialStore(mockProvider);
+      await store.put("kc-account", {
+        kind: "oauth",
+        access: "kc-access-123",
+        refresh: "kc-refresh-456",
+        expires: 1800000000,
+      }, { description: "test oauth", providerAccountHint: "openai" });
+
+      const rec = await store.getRecord("kc-account");
+      expect(rec).toEqual({
+        kind: "oauth",
+        access: "kc-access-123",
+        refresh: "kc-refresh-456",
+        expires: 1800000000,
+      });
+
+      const meta = await store.get("kc-account");
+      expect(meta?.meta?.providerAccountHint).toBe("openai");
+    });
   });
 
   describe("CompositeCredentialStore", () => {
@@ -171,6 +201,62 @@ describe("CredentialStore implementations (QS-P4.1)", () => {
       const noneLease = noneHandle.acquireLease();
       expect(await noneLease.secret()).toEqual({ kind: "none" });
       await noneLease.release();
+    });
+
+    it("stores and resolves oauth credentials across composite layers (T040)", async () => {
+      const memory = new MemoryCredentialStore();
+      const composite = new CompositeCredentialStore({
+        memory,
+        primaryWriteStore: "memory",
+      });
+
+      await composite.put("oauth-user", {
+        kind: "oauth",
+        access: "acc-123",
+        refresh: "ref-456",
+        expires: 1730000000,
+      });
+
+      const rec = await composite.get("oauth-user");
+      expect(rec).toBeDefined();
+      expect(rec?.materialKind).toBe("oauth");
+
+      const raw = await composite.getRecord("oauth-user");
+      expect(raw).toEqual({
+        kind: "oauth",
+        access: "acc-123",
+        refresh: "ref-456",
+        expires: 1730000000,
+      });
+    });
+
+    it("P0-2 regression: DefaultPlatformKeychainProvider on darwin passes secret via stdin and never in argv", async () => {
+      const { DefaultPlatformKeychainProvider } = await import("../keychain-credential-store.js");
+
+      let capturedArgs: readonly string[] = [];
+      let capturedStdin = "";
+
+      const fakeExecFile = (cmd: string, args: readonly string[], cb: any) => {
+        capturedArgs = args;
+        const fakeChild = {
+          stdin: {
+            on: () => fakeChild.stdin,
+            write: (chunk: string) => { capturedStdin += chunk; },
+            end: () => { cb(null); },
+          },
+        };
+        return fakeChild as any;
+      };
+
+      const provider = new DefaultPlatformKeychainProvider(fakeExecFile as any, () => "darwin");
+      await provider.setPassword("test-service", "test-account", "sk-secret-password-val");
+
+      expect(capturedArgs).toContain("-w");
+      // Password MUST NOT be present in argv
+      expect(capturedArgs).not.toContain("sk-secret-password-val");
+      expect(capturedArgs.join(" ")).not.toContain("sk-secret-password-val");
+      // Password MUST be written to stdin
+      expect(capturedStdin).toBe("sk-secret-password-val");
     });
   });
 });

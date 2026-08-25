@@ -1,5 +1,6 @@
 import type {
   UpstreamModel,
+  AvailableModel,
 } from "../../foundations/schemas/inference.js";
 import type { ProviderEffectiveConfig } from "../../foundations/schemas/provider-config.js";
 import type { CatalogSource } from "../../foundations/contracts/backend-ports.js";
@@ -9,10 +10,7 @@ import { DiscoveryCache } from "./discovery-cache.js";
 import { PiCatalogSource, getSyncBuiltinCatalog } from "../../vendors/pi-ai/pi-catalog-source.js";
 
 export { getSyncBuiltinCatalog };
-
-export interface AvailableModel extends UpstreamModel {
-  reachableVia: string[]; // configured account IDs that can reach this model
-}
+export type { AvailableModel };
 
 /**
  * ModelCatalog aggregating curated, dynamic, user-declared, and auto-discovered models.

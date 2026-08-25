@@ -21,6 +21,8 @@ import { GoogleImageRaw } from "../../vendors/google/google-image-raw.js";
 import { OpenAIImageRaw } from "../../vendors/openai/openai-image-raw.js";
 import { NATIVE_IMAGE_ANNOTATIONS } from "./catalog-merge.js";
 
+import type { CredentialStore } from "../../foundations/contracts/credential-store.js";
+
 export class AggregateInferenceAdapter {
   readonly id = "seepient-aggregate";
 
@@ -38,8 +40,9 @@ export class AggregateInferenceAdapter {
       openaiImage?: ImageBackend;
     },
     catalog?: readonly UpstreamModel[],
+    credentialStore?: CredentialStore,
   ) {
-    this.languageBackend = customBackends?.language ?? new PiLanguageRaw();
+    this.languageBackend = customBackends?.language ?? new PiLanguageRaw(undefined, credentialStore);
     this.piImageBackend = customBackends?.piImage ?? new PiImageRaw();
     this.googleImageBackend = customBackends?.googleImage ?? new GoogleImageRaw();
     this.openaiImageBackend = customBackends?.openaiImage ?? new OpenAIImageRaw();

@@ -117,11 +117,11 @@ import { createServer } from 'seepient/server';
 
 ## Quick Start
 
-1.  **Setup**: Run the interactive setup wizard to configure your API keys and integrations.
+1.  **Setup**: Run the interactive setup wizard to configure your providers, credentials, and model assignments in under a minute.
     ```bash
     seepient setup
     ```
-    The wizard now supports configuring multiple providers (OpenAI, Anthropic, GLM) in a single session.
+    The wizard connects to the live community catalog (supporting dozens of upstream providers including OpenAI, Anthropic, Google, xAI, OpenRouter, Mistral, DeepSeek, and local endpoints), allows multi-mode credentials (API key paste, environment variable reference, keyless, or OAuth provider sign-in), and assigns your main models safely without touching unrelated settings.
 
 2.  **Run**: Start the agent in interactive mode.
     ```bash
@@ -199,7 +199,7 @@ Seepient Agent uses a hierarchical configuration system.
 
 ### Provider Management (v2 Architecture)
 
-Seepient Agent v0.4.4 features unified Provider Management with purpose × tier routing, dynamic upstream catalog discovery, multi-target automatic fallback, circuit-breaker cooldowns, and credential stores:
+Seepient Agent v0.5.0 features unified Provider Management with a shared interactive TUI dock (`/models`), first-run setup wizard (`seepient setup`), OAuth subscription sign-in (`/login`, `seepient auth login`), purpose × tier routing, dynamic upstream catalog discovery, multi-target automatic fallback, circuit-breaker cooldowns, and full cross-surface parity across CLI, Server, and SDK:
 
 **Configuration (`~/.seepient/setting.json` or `.seepient/setting.json`):**
 ```json
@@ -245,14 +245,23 @@ Seepient Agent v0.4.4 features unified Provider Management with purpose × tier 
 
 ### CLI Commands for Models & Providers
 - `seepient models list`: List configured model assignments across purposes and tiers.
+- `seepient models browse [query] [--json] [--reachable-only]`: Search catalog models with reachability, context window, and pricing.
+- `seepient models resolve <purpose.tier> [--json]`: Dry-run resolution preview with active target, fallback chain, and unresolvables.
 - `seepient models set <purpose.tier> <account/model>`: Update an assignment (e.g. `seepient models set text.standard anthropic/claude-sonnet-5`).
 - `seepient models fallback <purpose.tier> <account/model>,...`: Configure ordered fallback candidates.
 - `seepient models status`: Display live status and thinking levels for active assignments.
+- `seepient models probe <provider>`: Test provider connectivity and credentials.
 - `seepient models discover <account>`: Discover available models from the account's `/models` endpoint.
-- `seepient providers add/edit/remove/list`: Manage configured provider accounts.
-- `seepient auth login/logout/issue-token`: Manage credentials and scoped management tokens.
+- `seepient providers add/edit/remove/list`: Manage configured provider accounts (supports `--credential env:NAME|none`).
+- `seepient auth login/logout/issue-token`: Manage credentials, OAuth device-code flows, and scoped management tokens.
 
-> **⚠️ Security Note**: Never commit API keys or secrets in plaintext into git repositories. Use environment variables (e.g., `OPENAI_API_KEY`) or `seepient auth login` with system keychain storage.
+### Interactive TUI & Slash Commands
+- `/models`: Open the Model Manager dock to manage purpose assignments, test accounts, and browse the model catalog.
+- `/login [provider]`: Start an OAuth sign-in flow directly from the conversation composer.
+- `/logout [account]`: Log out of a provider account and remove cached credentials.
+- `/setup`: Launch the first-run onboarding setup wizard.
+
+> **⚠️ Security Note**: Never commit API keys or secrets in plaintext into git repositories. Use environment variables (e.g., `OPENAI_API_KEY`), `seepient auth login` with system keychain storage, or OAuth provider sign-in.
 
 ## Integrations
 

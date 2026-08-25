@@ -8,8 +8,8 @@ import { ProviderRuntime, getDefaultProviderRuntime } from "../../domain/provide
 import { ProviderConfigStore } from "../../domain/providers/config-store/provider-config-store.js";
 import { MemoryCredentialStore } from "../../domain/providers/credentials/memory-credential-store.js";
 import { AggregateInferenceAdapter } from "../../capabilities/inference/aggregate-adapter.js";
-import { getSyncBuiltinCatalog } from "../../domain/providers/model-catalog.js";
-import { InferenceError, InferenceErrorCode } from "../../foundations/errors.js";
+import { InferenceError, InferenceErrorCode, SeepientError } from "../../foundations/errors.js";
+import type { ResolutionPreview } from "../cli/provider-manager-api.js";
 import type {
   Seepient,
   CreateSeepientOptions,
@@ -20,6 +20,14 @@ import type {
   ResolveOptions,
   TurnResult,
   ModelAssignmentOverride,
+  ProviderId,
+  AccountInput,
+  SaveResult,
+  DeleteResult,
+  PurposeId,
+  Tier,
+  AssignmentTarget,
+  AvailableModel,
 } from "../../foundations/contracts/sdk-fixture.js";
 import type {
   ContentBlock,
@@ -28,6 +36,7 @@ import type {
   InferenceResponse,
   ImageResult,
   UpstreamModel,
+  ThinkingLevel,
 } from "../../foundations/schemas/inference.js";
 import type { PurposeModelMap } from "../../foundations/schemas/provider-config.js";
 
@@ -46,7 +55,7 @@ export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<
   }
 
   const credentialStore = opts.credentials ?? new MemoryCredentialStore();
-  const adapter = opts.adapter ?? new AggregateInferenceAdapter();
+  const adapter = opts.adapter ?? new AggregateInferenceAdapter(undefined, undefined, credentialStore);
 
   const runtime = new ProviderRuntime({
     configStore,
@@ -66,8 +75,9 @@ export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<
     }
   };
 
-  const initialSnapshot = await runtime.createTurnSnapshot();
-  (runtime as any).currentAssignments = initialSnapshot.assignments;
+  const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
+  const managerApi = createProviderManagerApi(runtime);
+  let latestState = await managerApi.getState();
 
   return {
     async createAgent(agentOpts: AgentOptions): Promise<PublicAgent> {
@@ -267,7 +277,6 @@ export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<
             });
 
             snapshot = await runtime.createTurnSnapshot();
-            (runtime as any).currentAssignments = snapshot.assignments;
             plan = await runtime.resolvePlan(
               snapshot,
               agentOpts.purpose,
@@ -297,7 +306,6 @@ export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<
           conversationMessages.push(userMsg);
 
           const snapshot = await runtime.createTurnSnapshot();
-          (runtime as any).currentAssignments = snapshot.assignments;
           const plan = await runtime.resolvePlan(
             snapshot,
             agentOpts.purpose,
@@ -430,43 +438,90 @@ export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<
       };
     },
 
-    async resolve(opts: any): Promise<any> {
+    async resolve(opts: ResolveOptions): Promise<{
+      model: AvailableModel;
+      providerAccount: ProviderId;
+      thinkingLevel?: ThinkingLevel;
+      via: "requested" | "fallback-chain";
+      failureTargets: Array<{ providerAccount: string; model: string }>;
+    }> {
+      const res = await managerApi.resolvePreview(opts.purpose as PurposeId, opts.tier, opts.override);
+      if ("ok" in res && res.ok === false) {
+        throw new SeepientError(res.message || "Resolution failed", res.code, false);
+      }
+      const preview = res as ResolutionPreview;
       const snapshot = await runtime.createTurnSnapshot();
-      const plan = await runtime.resolvePlan(snapshot, opts.purpose, opts.tier, opts.override);
+      const availableModels = await runtime.modelCatalog.listAvailableModels(snapshot.config);
+      const targetModelId = preview.selectedTarget.model;
+      const targetAcct = preview.selectedTarget.providerAccount;
 
-      const model = snapshot.catalog.find((m: any) => m.id === plan.selectedTarget.model) ?? {
-        id: plan.selectedTarget.model,
-        displayName: plan.selectedTarget.model,
-        provider: plan.selectedTarget.providerAccount,
+      const foundModel =
+        availableModels.find((m) => m.id === targetModelId && m.reachableVia.includes(targetAcct)) ??
+        availableModels.find((m) => m.id === targetModelId);
+
+      const model: AvailableModel = foundModel ?? {
+        id: targetModelId,
+        displayName: targetModelId,
+        upstreamProvider: targetAcct,
+        contextWindow: 0,
         capabilities: {
-          reasoning: !!plan.selectedTarget.thinkingLevel,
-          images: opts.purpose === "image-generation",
-          streaming: true,
+          toolUse: false,
+          streaming: false,
           vision: false,
         },
-        provenance: "user-declared" as const,
+        provenance: "user-declared",
+        reachableVia: [targetAcct],
       };
 
       return {
         model,
-        providerAccount: plan.selectedTarget.providerAccount,
-        thinkingLevel: plan.selectedTarget.thinkingLevel,
+        providerAccount: preview.selectedTarget.providerAccount,
+        thinkingLevel: (preview.selectedTarget as any).thinkingLevel,
+        via: preview.via,
+        failureTargets: [...(preview.failureTargets ?? [])],
       };
     },
 
     getAssignments(): PurposeModelMap {
-      return (runtime as any).currentAssignments ?? {};
+      return latestState.assignments ?? {};
     },
 
-    async getCatalog(): Promise<readonly UpstreamModel[]> {
+    async getCatalog(): Promise<readonly AvailableModel[]> {
       const snapshot = await runtime.createTurnSnapshot();
-      return snapshot.catalog.length > 0 ? snapshot.catalog : getSyncBuiltinCatalog();
+      return runtime.modelCatalog.listAvailableModels(snapshot.config);
     },
 
     async reload(): Promise<{ revision: number }> {
-      const snapshot = await runtime.createTurnSnapshot();
-      (runtime as any).currentAssignments = snapshot.assignments;
-      return { revision: snapshot.revision };
+      latestState = await managerApi.getState();
+      return { revision: latestState.revision };
+    },
+
+    async addProvider(input: AccountInput): Promise<SaveResult> {
+      ensureNotDisposed();
+      const res = await managerApi.saveAccount(input);
+      if (res.ok) latestState = res.state;
+      return res;
+    },
+
+    async removeProvider(id: string, opts?: { force?: boolean }): Promise<DeleteResult> {
+      ensureNotDisposed();
+      const res = await managerApi.deleteAccount(id, opts);
+      if (res.ok) latestState = res.state;
+      return res;
+    },
+
+    async setAssignment(purpose: PurposeId, tier: Tier | null, target: AssignmentTarget): Promise<SaveResult> {
+      ensureNotDisposed();
+      const res = await managerApi.setAssignment(purpose, tier, target);
+      if (res.ok) latestState = res.state;
+      return res;
+    },
+
+    async clearAssignment(purpose: PurposeId, tier: Tier | null): Promise<SaveResult> {
+      ensureNotDisposed();
+      const res = await managerApi.clearAssignment(purpose, tier);
+      if (res.ok) latestState = res.state;
+      return res;
     },
 
     async dispose(): Promise<void> {

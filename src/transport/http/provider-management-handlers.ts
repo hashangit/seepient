@@ -9,7 +9,8 @@ import type { ProviderRuntime } from "../../domain/providers/provider-runtime.js
 import type { ApiKeyEntry } from "../auth/auth.js";
 import { hasScope } from "../auth/auth.js";
 import { validateEndpointUrl } from "./ssrf-validator.js";
-import { InferenceError } from "../../foundations/errors.js";
+import { redactUrlCredentials, redactString } from "../../foundations/security/redact.js";
+import { createOAuthInteractionShim, createProviderManagerApi, sanitizeBaseUrl } from "../cli/provider-manager-api.js";
 
 function sendJSON(res: ServerResponse, status: number, body: unknown, revision?: number): void {
   res.statusCode = status;
@@ -96,20 +97,28 @@ export async function handleGetProviderRuntime(
     return;
   }
 
-  const snapshot = await runtime.createTurnSnapshot();
+  const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
+  const api = createProviderManagerApi(runtime);
+  const state = await api.getState();
+
+  const healthMap: Record<string, string> = {};
+  for (const acc of state.accounts) {
+    healthMap[acc.id] = acc.health;
+  }
+
   sendJSON(
     res,
     200,
     {
-      revision: snapshot.revision,
+      revision: state.revision,
       updatedAt: new Date().toISOString(),
-      health: {},
+      health: healthMap,
       sources: {
         compiledDefault: true,
         overlay: true,
       },
     },
-    snapshot.revision,
+    state.revision,
   );
 }
 
@@ -134,7 +143,11 @@ export async function handleGetAssignments(
     return;
   }
 
-  const purposeEntry = (assignments as any)[purpose];
+  let purposeEntry = (assignments as any)[purpose];
+  if (!purposeEntry && purpose.includes(".")) {
+    const [pGroup, pSub] = purpose.split(".");
+    purposeEntry = (assignments as any)[pGroup]?.[pSub];
+  }
   if (!purposeEntry) {
     sendError(res, 404, "NOT_FOUND", `Purpose "${purpose}" not found`);
     return;
@@ -187,23 +200,19 @@ export async function handlePutAssignment(
     return;
   }
 
-  try {
-    const patch = {
-      modelAssignments: {
-        [purpose]: {
-          [tier]: body,
-        },
-      } as any,
-    };
-    const result = await runtime.updateOverlay(patch, expectedRev);
-    sendJSON(res, 200, { revision: result.revision, assignment: body }, result.revision);
-  } catch (err: any) {
-    if (isConflictError(err)) {
-      sendError(res, 409, "CONFLICT", err.message);
-    } else {
-      sendError(res, 400, "BAD_REQUEST", err.message);
+  const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
+  const api = createProviderManagerApi(runtime);
+  const saveRes = await api.setAssignment(purpose as any, tier ? (tier as any) : null, body, expectedRev);
+  if (!saveRes.ok) {
+    if (saveRes.error.code === "conflict") {
+      const snap = await runtime.createTurnSnapshot();
+      sendJSON(res, 409, { error: { code: "CONFLICT", message: saveRes.error.message }, revision: snap.revision }, snap.revision);
+      return;
     }
+    sendError(res, 400, saveRes.error.code.toUpperCase(), saveRes.error.message);
+    return;
   }
+  sendJSON(res, 200, { revision: saveRes.state.revision, assignment: body }, saveRes.state.revision);
 }
 
 export async function handleDeleteAssignment(
@@ -223,23 +232,19 @@ export async function handleDeleteAssignment(
   const expectedRev = await parseIfMatch(req, res, runtime);
   if (expectedRev === null) return;
 
-  try {
-    const patch = {
-      modelAssignments: {
-        [purpose]: {
-          [tier]: null,
-        },
-      } as any,
-    };
-    const result = await runtime.updateOverlay(patch, expectedRev);
-    sendJSON(res, 200, { revision: result.revision, deleted: true }, result.revision);
-  } catch (err: any) {
-    if (isConflictError(err)) {
-      sendError(res, 409, "CONFLICT", err.message);
-    } else {
-      sendError(res, 400, "BAD_REQUEST", err.message);
+  const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
+  const api = createProviderManagerApi(runtime);
+  const clearRes = await api.clearAssignment(purpose as any, tier ? (tier as any) : null, expectedRev);
+  if (!clearRes.ok) {
+    if (clearRes.error.code === "conflict") {
+      const snap = await runtime.createTurnSnapshot();
+      sendJSON(res, 409, { error: { code: "CONFLICT", message: clearRes.error.message }, revision: snap.revision }, snap.revision);
+      return;
     }
+    sendError(res, 400, clearRes.error.code.toUpperCase(), clearRes.error.message);
+    return;
   }
+  sendJSON(res, 200, { revision: clearRes.state.revision, deleted: true }, clearRes.state.revision);
 }
 
 export async function handleGetProviders(
@@ -257,12 +262,20 @@ export async function handleGetProviders(
   const snapshot = await runtime.createTurnSnapshot();
   const accounts = snapshot.config?.providers || {};
 
-  // Redact credentials
+  // Redact credentials and sensitive headers
   const sanitized: Record<string, any> = {};
   for (const [id, acc] of Object.entries(accounts)) {
     sanitized[id] = {
-      ...acc,
-      credential: { kind: acc.credential?.kind ?? "redacted" },
+      adapter: acc.adapter,
+      upstreamProvider: acc.upstreamProvider,
+      ...(acc.baseUrl ? { baseUrl: sanitizeBaseUrl(acc.baseUrl) } : {}),
+      ...(acc.proxy ? { proxy: redactUrlCredentials(acc.proxy) } : {}),
+      ...(acc.compat ? { compat: acc.compat } : {}),
+      ...(acc.ssrfAllowPrivate !== undefined ? { ssrfAllowPrivate: acc.ssrfAllowPrivate } : {}),
+      credential: {
+        kind: acc.credential?.kind ?? "none",
+        ...(acc.credential?.kind === "env" ? { name: (acc.credential as any).name } : {}),
+      },
     };
   }
 
@@ -295,7 +308,7 @@ export async function handlePutProvider(
   const expectedRev = await parseIfMatch(req, res, runtime);
   if (expectedRev === null) return;
 
-  let bodyText: string;
+  let bodyText = "";
   try {
     bodyText = await parseBody(req);
   } catch {
@@ -311,30 +324,59 @@ export async function handlePutProvider(
     return;
   }
 
-  if (body.baseUrl) {
-    const allowPrivate = process.env.SEEPIENT_SSRF_ALLOW_PRIVATE === "1";
-    const ssrfCheck = await validateEndpointUrl(body.baseUrl, { ssrfAllowPrivate: allowPrivate });
-    if (!ssrfCheck.valid) {
-      sendError(res, 400, "INVALID_ENDPOINT", ssrfCheck.error ?? "SSRF check failed");
-      return;
+  const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
+  const api = createProviderManagerApi(runtime);
+  let credInput: any = { mode: "preserve" };
+  if (body.credential) {
+    if (body.credential.kind === "env" || body.credential.mode === "env") {
+      credInput = { mode: "env", varName: body.credential.name ?? body.credential.varName ?? body.credential.envVar };
+    } else if (body.credential.kind === "none" || body.credential.mode === "none") {
+      credInput = { mode: "none" };
+    } else if (body.credential.kind === "api_key" || body.credential.mode === "paste" || body.credential.keyValue || body.credential.key) {
+      credInput = { mode: "paste", keyValue: body.credential.keyValue ?? body.credential.key ?? body.credential.value };
     }
   }
 
-  try {
-    const patch = {
-      providers: {
-        [providerId]: body,
-      } as any,
-    };
-    const result = await runtime.updateOverlay(patch, expectedRev);
-    sendJSON(res, 200, { revision: result.revision, provider: { ...body, credential: { kind: "redacted" } } }, result.revision);
-  } catch (err: any) {
-    if (isConflictError(err)) {
-      sendError(res, 409, "CONFLICT", err.message);
+  const saveRes = await api.saveAccount(
+    {
+      accountId: providerId,
+      upstreamProvider: body.upstreamProvider,
+      credential: credInput,
+      baseUrl: body.baseUrl,
+      compat: body.compat,
+      allowPrivate:
+        body.ssrfAllowPrivate !== undefined || body.allowPrivate !== undefined
+          ? body.ssrfAllowPrivate === true || body.allowPrivate === true
+          : undefined,
+    },
+    expectedRev,
+  );
+
+  if (!saveRes.ok) {
+    if (saveRes.error.code === "conflict") {
+      const snap = await runtime.createTurnSnapshot();
+      sendJSON(res, 409, { error: { code: "CONFLICT", message: saveRes.error.message }, revision: snap.revision }, snap.revision);
     } else {
-      sendError(res, 400, "BAD_REQUEST", err.message);
+      sendError(res, 400, (saveRes.error.code || "BAD_REQUEST").toUpperCase(), saveRes.error.message);
     }
+    return;
   }
+
+  const account = saveRes.state.accounts.find((a) => a.id === providerId);
+  sendJSON(
+    res,
+    200,
+    {
+      revision: saveRes.state.revision,
+      provider: {
+        id: providerId,
+        upstreamProvider: account?.upstreamProvider ?? body.upstreamProvider ?? providerId,
+        baseUrl: account?.baseUrl,
+        credential: { kind: account?.credentialKind ?? "none" },
+      },
+    },
+    saveRes.state.revision,
+  );
 }
 
 export async function handleDeleteProvider(
@@ -353,21 +395,35 @@ export async function handleDeleteProvider(
   const expectedRev = await parseIfMatch(req, res, runtime);
   if (expectedRev === null) return;
 
-  try {
-    const patch = {
-      providers: {
-        [providerId]: null,
-      } as any,
-    };
-    const result = await runtime.updateOverlay(patch, expectedRev);
-    sendJSON(res, 200, { revision: result.revision, deleted: true }, result.revision);
-  } catch (err: any) {
-    if (isConflictError(err)) {
-      sendError(res, 409, "CONFLICT", err.message);
-    } else {
-      sendError(res, 400, "BAD_REQUEST", err.message);
+  const url = new URL(req.url ?? "", "http://localhost");
+  const force = url.searchParams.get("force") === "true";
+
+  const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
+  const api = createProviderManagerApi(runtime);
+  const result = await api.deleteAccount(providerId, { force, expectedRevision: expectedRev });
+
+  if (!result.ok) {
+    if ("blocked" in result && result.blocked) {
+      sendJSON(res, 409, {
+        error: {
+          code: "BLOCKED",
+          message: `Cannot delete account "${providerId}" referenced by active slots. Pass ?force=true to delete anyway.`,
+          referencingSlots: result.referencingSlots,
+        },
+      });
+      return;
     }
+    const errObj = "error" in result ? result.error : undefined;
+    if (errObj?.code === "conflict") {
+      const snap = await runtime.createTurnSnapshot();
+      sendJSON(res, 409, { error: { code: "CONFLICT", message: errObj.message }, revision: snap.revision }, snap.revision);
+      return;
+    }
+    sendError(res, 400, (errObj?.code || "BAD_REQUEST").toUpperCase(), errObj?.message || "Delete failed");
+    return;
   }
+
+  sendJSON(res, 200, { revision: result.state.revision, deleted: true }, result.state.revision);
 }
 
 export async function handleGetCatalog(
@@ -382,7 +438,251 @@ export async function handleGetCatalog(
   }
 
   const snapshot = await runtime.createTurnSnapshot();
-  sendJSON(res, 200, snapshot.catalog, snapshot.revision);
+  const availableModels = await runtime.modelCatalog.listAvailableModels(snapshot.config);
+  sendJSON(res, 200, availableModels, snapshot.revision);
+}
+
+interface PendingOAuthAttempt {
+  attemptId: string;
+  providerId: string;
+  upstream: string;
+  createdAt: number;
+  expiresAt: number;
+  userCode?: string;
+  verificationUrl?: string;
+  loginPromise?: Promise<any>;
+  abortController?: AbortController;
+}
+
+const pendingOAuthAttempts = new Map<string, PendingOAuthAttempt>();
+
+const MAX_PENDING_OAUTH_ATTEMPTS = 50;
+
+function cleanExpiredAttempts(): void {
+  const now = Date.now();
+  for (const [id, att] of pendingOAuthAttempts.entries()) {
+    if (now > att.expiresAt) {
+      try {
+        att.abortController?.abort();
+      } catch {}
+      pendingOAuthAttempts.delete(id);
+    }
+  }
+}
+
+export async function handleOAuthStart(
+  req: IncomingMessage,
+  res: ServerResponse,
+  runtime: ProviderRuntime,
+  key: ApiKeyEntry,
+  providerId: string,
+): Promise<void> {
+  if (!checkDeploymentMode(res)) return;
+  if (!hasScope(key, "provider:admin")) {
+    sendError(res, 403, "FORBIDDEN", "API key lacks 'provider:admin' scope");
+    return;
+  }
+
+  cleanExpiredAttempts();
+
+  if (pendingOAuthAttempts.size >= MAX_PENDING_OAUTH_ATTEMPTS) {
+    sendError(res, 429, "TOO_MANY_REQUESTS", "Too many concurrent pending OAuth attempts. Please wait or complete existing attempts.");
+    return;
+  }
+
+  const { isOAuthSupported, getOAuthFlow } = await import(
+    "../../domain/providers/oauth-service.js"
+  );
+
+  const snapshot = await runtime.createTurnSnapshot();
+  const existing = snapshot.config.providers?.[providerId];
+  const upstream = existing?.upstreamProvider ?? providerId;
+
+  if (!isOAuthSupported(upstream)) {
+    sendError(res, 400, "OAUTH_UNSUPPORTED", `OAuth is not supported for provider "${upstream}"`);
+    return;
+  }
+
+  const flow = await getOAuthFlow(upstream);
+  if (!flow) {
+    sendError(res, 500, "OAUTH_FLOW_ERROR", `Could not initialize OAuth flow for "${upstream}"`);
+    return;
+  }
+
+  const attemptId = `oauth_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  const abortController = new AbortController();
+  let notifyResolve: (info: { userCode?: string; verificationUrl?: string; expiresInSeconds?: number }) => void;
+  const notifyPromise = new Promise<{ userCode?: string; verificationUrl?: string; expiresInSeconds?: number }>(
+    (resolve) => {
+      notifyResolve = resolve;
+    },
+  );
+
+  const interaction = createOAuthInteractionShim(
+    {
+      signal: abortController.signal,
+      onBrowserOpen: (url) => {
+        notifyResolve({
+          verificationUrl: url,
+          expiresInSeconds: 600,
+        });
+      },
+      onDeviceCode: (info) => {
+        notifyResolve({
+          userCode: info.userCode,
+          verificationUrl: info.verificationUrl,
+          expiresInSeconds: Math.round(info.expiresInMs / 1000),
+        });
+      },
+    },
+    abortController.signal,
+  );
+
+  const loginPromise = flow.login(interaction as any);
+  const loginErrorPromise = new Promise<{ userCode?: string; verificationUrl?: string; expiresInSeconds?: number }>(
+    (_, reject) => {
+      loginPromise.catch((err) => reject(err));
+    },
+  );
+  // Attach a no-op handler so background rejection doesn't trigger unhandledRejection
+  loginPromise.catch(() => {});
+
+  // Wait for notify event (up to 15s) or early login failure
+  const timeoutPromise = new Promise<{ userCode?: string; verificationUrl?: string; expiresInSeconds?: number }>(
+    (resolve) => setTimeout(() => resolve({}), 15_000),
+  );
+
+  let notified: { userCode?: string; verificationUrl?: string; expiresInSeconds?: number };
+  try {
+    notified = await Promise.race([notifyPromise, loginErrorPromise, timeoutPromise]);
+  } catch (err: any) {
+    sendError(res, 400, "OAUTH_FLOW_ERROR", redactString(err?.message || "OAuth login flow initiation failed"));
+    return;
+  }
+
+  const expiresInMs = (notified?.expiresInSeconds ?? 600) * 1000;
+  const userCode = notified?.userCode;
+  const verificationUrl = notified?.verificationUrl;
+
+  pendingOAuthAttempts.set(attemptId, {
+    attemptId,
+    providerId,
+    upstream,
+    createdAt: Date.now(),
+    expiresAt: Date.now() + expiresInMs,
+    userCode,
+    verificationUrl,
+    loginPromise,
+    abortController,
+  });
+
+  sendJSON(res, 200, {
+    attemptId,
+    userCode,
+    verificationUrl,
+    expiresInMs,
+  });
+}
+
+export async function handleOAuthComplete(
+  req: IncomingMessage,
+  res: ServerResponse,
+  runtime: ProviderRuntime,
+  key: ApiKeyEntry,
+  providerId: string,
+): Promise<void> {
+  if (!checkDeploymentMode(res)) return;
+  if (!hasScope(key, "provider:admin")) {
+    sendError(res, 403, "FORBIDDEN", "API key lacks 'provider:admin' scope");
+    return;
+  }
+
+  let bodyText: string;
+  try {
+    bodyText = await parseBody(req);
+  } catch {
+    sendError(res, 400, "BAD_REQUEST", "Failed to read request body");
+    return;
+  }
+
+  let body: any;
+  try {
+    body = JSON.parse(bodyText);
+  } catch {
+    sendError(res, 400, "BAD_REQUEST", "Invalid JSON in request body");
+    return;
+  }
+
+  const { attemptId } = body;
+  if (!attemptId || !pendingOAuthAttempts.has(attemptId)) {
+    sendError(res, 400, "OAUTH_ATTEMPT_NOT_FOUND", "OAuth attempt expired or not found");
+    return;
+  }
+
+  const attempt = pendingOAuthAttempts.get(attemptId)!;
+  if (attempt.providerId !== providerId) {
+    sendError(res, 400, "OAUTH_PROVIDER_MISMATCH", `Attempt was initiated for "${attempt.providerId}", not "${providerId}"`);
+    return;
+  }
+
+  if (Date.now() > attempt.expiresAt) {
+    attempt.abortController?.abort();
+    pendingOAuthAttempts.delete(attemptId);
+    sendError(res, 400, "OAUTH_EXPIRED", "OAuth authorization expired");
+    return;
+  }
+
+  try {
+    let timerId: any;
+    const timeoutPromise = new Promise((_, reject) => {
+      timerId = setTimeout(() => reject(new Error("OAUTH_PENDING")), 5000);
+    });
+    const credResult: any = await Promise.race([attempt.loginPromise, timeoutPromise]).finally(() => {
+      if (timerId) clearTimeout(timerId);
+    });
+
+    const api = createProviderManagerApi(runtime);
+    const saveRes = await api.completeOAuthSignIn(
+      attempt.upstream,
+      {
+        access: credResult.access,
+        refresh: credResult.refresh,
+        expires: credResult.expires,
+      },
+      {
+        preferredAccountId: providerId,
+        description: `OAuth login for ${attempt.upstream}`,
+      },
+    );
+
+    pendingOAuthAttempts.delete(attemptId);
+    if (!saveRes.ok) {
+      sendError(res, 400, saveRes.error.code.toUpperCase(), saveRes.error.message);
+      return;
+    }
+
+    sendJSON(
+      res,
+      200,
+      {
+        revision: saveRes.state.revision,
+        provider: {
+          id: providerId,
+          adapter: "pi-ai",
+          upstreamProvider: attempt.upstream,
+          credential: { kind: "redacted" },
+        },
+      },
+      saveRes.state.revision,
+    );
+  } catch (err: any) {
+    if (err.message === "OAUTH_PENDING") {
+      sendError(res, 202, "OAUTH_PENDING", "Authorization still pending in browser");
+      return;
+    }
+    pendingOAuthAttempts.delete(attemptId);
+    sendError(res, 400, "OAUTH_FAILED", redactString(err?.message || "OAuth login failed"));
+  }
 }
 
 export async function handleResolveModel(
@@ -413,12 +713,25 @@ export async function handleResolveModel(
   }
 
   try {
+    const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
+    const api = createProviderManagerApi(runtime);
+    const resPreview = await api.resolvePreview(body.purpose, body.tier, body.override);
+    if ("ok" in resPreview && (resPreview as any).ok === false) {
+      sendError(res, 400, "RESOLUTION_FAILED", (resPreview as any).message);
+      return;
+    }
+    const preview = resPreview as any;
     const snapshot = await runtime.createTurnSnapshot();
-    const plan = await runtime.resolvePlan(snapshot, body.purpose, body.tier, body.override);
-    sendJSON(res, 200, {
-      selectedTarget: plan.selectedTarget,
-      failureTargets: plan.failureTargets,
-    }, snapshot.revision);
+    sendJSON(
+      res,
+      200,
+      {
+        selectedTarget: preview.selectedTarget,
+        via: preview.via,
+        failureTargets: preview.failureTargets,
+      },
+      snapshot.revision,
+    );
   } catch (err: any) {
     sendError(res, 400, "RESOLUTION_FAILED", err.message);
   }
@@ -459,7 +772,7 @@ export async function handleProbeProvider(
 
   if (acc.baseUrl) {
     const { safeSsrfFetch, validateEndpointUrl } = await import("./ssrf-validator.js");
-    const allowPrivate = process.env.SEEPIENT_SSRF_ALLOW_PRIVATE === "1";
+    const allowPrivate = acc.ssrfAllowPrivate === true || process.env.SEEPIENT_SSRF_ALLOW_PRIVATE === "1";
     if (full) {
       const start = Date.now();
       const controller = new AbortController();
@@ -489,8 +802,11 @@ export async function handleProbeProvider(
     }
   }
 
+  const health = !authValid ? "missing" : !reachable ? "unverified" : "ok";
+
   sendJSON(res, 200, {
     providerId,
+    health,
     reachable,
     authValid,
     blocked: ssrfBlocked ? "ssrf" : undefined,

@@ -1,4 +1,5 @@
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
+import { createPiCredentialStore } from "./pi-auth-adapter.js";
 import type {
   Models,
   Model,
@@ -23,6 +24,7 @@ import type {
 } from "../../foundations/schemas/inference.js";
 import { InferenceError } from "../../foundations/errors.js";
 import { classifyInferenceError } from "../../foundations/errors/error-classifier.js";
+import { redactString } from "../../foundations/security/redact.js";
 import {
   canonicalToPiContext,
   canonicalToPiMessages,
@@ -96,14 +98,122 @@ function mapPiStopReasonToCanonical(reason?: string): StopReason {
   return "end_turn";
 }
 
+async function resolveSecretApiKey(
+  secret: any,
+  target: InferenceTarget,
+  credentialStore?: any,
+  signal?: AbortSignal,
+): Promise<string | undefined> {
+  if (!secret) return undefined;
+  if (secret.kind === "api_key") {
+    return secret.value;
+  }
+  if (secret.kind === "pi_oauth" || secret.kind === "oauth") {
+    const rawCtx = secret.piAuthContext ?? secret;
+    let access = rawCtx.access;
+    const refresh = rawCtx.refresh;
+    const expires = rawCtx.expires;
+
+    const isExpired =
+      typeof expires === "number"
+        ? expires === 0 || Date.now() >= expires - 60_000
+        : Boolean(refresh);
+
+    // Check if token is expired or close to expiry (within 60 seconds)
+    if (isExpired && refresh) {
+      try {
+        const { getOAuthFlow, createPiCredentialStore } = await import("./pi-auth-adapter.js");
+        const flow = await getOAuthFlow(target.upstreamProvider);
+        if (flow && typeof (flow as any).refresh === "function") {
+          const oauthCred = {
+            type: "oauth" as const,
+            access: access ?? "",
+            refresh,
+            expires: expires ?? 0,
+          };
+          const store = credentialStore ?? (target.credential as any)?.store;
+          if (store && (typeof store.modify === "function" || typeof store.put === "function")) {
+            const piStore = createPiCredentialStore(store);
+            const modified = await piStore.modify(target.providerAccount, async (curr) => {
+              if (
+                curr &&
+                curr.type === "oauth" &&
+                curr.access &&
+                typeof curr.expires === "number" &&
+                curr.expires > 0 &&
+                Date.now() < curr.expires - 60_000
+              ) {
+                return curr;
+              }
+              const base = curr && curr.type === "oauth" ? curr : oauthCred;
+              const refreshed = await (flow as any).refresh(base, signal);
+              if (!refreshed?.access) {
+                throw new Error("OAuth token refresh returned empty access token");
+              }
+              return refreshed;
+            });
+            if (modified && modified.type === "oauth") {
+              access = modified.access;
+            }
+          } else {
+            const refreshed = await (flow as any).refresh(oauthCred, signal);
+            if (refreshed?.access) {
+              access = refreshed.access;
+            } else {
+              throw new Error("OAuth token refresh returned empty access token");
+            }
+          }
+        }
+      } catch (err: any) {
+        if (signal?.aborted || err?.name === "AbortError") {
+          throw err;
+        }
+        const rawMessage = err?.message ?? "";
+        const isGrantExpired = /invalid_grant|expired|revoked/i.test(rawMessage);
+        const isNetwork = /econnrefused|etimedout|enotfound|fetch failed|network/i.test(rawMessage);
+        const safeMessage = redactString(rawMessage);
+        throw new InferenceError({
+          code: isGrantExpired ? "oauth_expired" : isNetwork ? "network" : "auth",
+          message: isGrantExpired
+            ? `OAuth session for "${target.providerAccount}" expired — sign in again (/login ${target.upstreamProvider}): ${safeMessage || "refresh failed"}`
+            : `OAuth token refresh for "${target.providerAccount}" failed: ${safeMessage || "unknown error"}`,
+          providerAccount: target.providerAccount,
+          model: target.model,
+          retryable: !isGrantExpired,
+        });
+      }
+    }
+
+    if (!access) {
+      throw new InferenceError({
+        code: "oauth_expired",
+        message: `OAuth session for "${target.providerAccount}" expired or has no access token — sign in again (/login ${target.upstreamProvider})`,
+        providerAccount: target.providerAccount,
+        model: target.model,
+        retryable: false,
+      });
+    }
+
+    return access;
+  }
+  return undefined;
+}
+
 /**
  * Pi AI raw language backend implementation.
  */
 export class PiLanguageRaw implements LanguageBackend {
   private models: Models;
+  private credentialStore?: any;
 
-  constructor(customModels?: Models) {
-    this.models = customModels ?? builtinModels();
+  constructor(customModels?: Models, credentialStore?: any) {
+    this.credentialStore = credentialStore;
+    if (customModels) {
+      this.models = customModels;
+    } else {
+      const piStore = credentialStore ? createPiCredentialStore(credentialStore) : undefined;
+      this.models = builtinModels(piStore ? { credentials: piStore } : undefined);
+    }
   }
 
   private prepareInvocation(
@@ -113,23 +223,14 @@ export class PiLanguageRaw implements LanguageBackend {
     signal?: AbortSignal,
     opts?: InferenceOptions,
   ) {
-    const knownPiProviders = new Set([
-      "openai",
-      "anthropic",
-      "google",
-      "openrouter",
-      "zai",
-      "groq",
-      "mistral",
-      "cerebras",
-      "together",
-      "deepseek",
-      "bedrock",
-    ]);
-
     const providerName = target.upstreamProvider === "glm" ? "zai" : target.upstreamProvider;
-    const isKnown = knownPiProviders.has(providerName);
-    const piProvider = isKnown ? providerName : "openai";
+    let model = this.models.getModel(providerName, target.model) as Model<Api> | undefined;
+
+    const isKnown =
+      Boolean(model) ||
+      (typeof this.models.getProviders === "function" &&
+        this.models.getProviders().some((p) => p.id === providerName));
+    const piProvider = model ? (model.provider || providerName) : (isKnown ? providerName : "openai");
 
     if (!isKnown && !target.baseUrl) {
       throw new InferenceError({
@@ -140,8 +241,6 @@ export class PiLanguageRaw implements LanguageBackend {
         retryable: false,
       });
     }
-
-    let model = this.models.getModel(piProvider, target.model) as Model<Api> | undefined;
 
     const effectiveThinking = req.thinkingLevel ?? target.thinkingLevel;
     const isThinking = Boolean(effectiveThinking && effectiveThinking !== "none");
@@ -222,7 +321,7 @@ export class PiLanguageRaw implements LanguageBackend {
       }
 
       const secret = await lease.secret();
-      const apiKey = secret.kind === "api_key" ? secret.value : undefined;
+      const apiKey = await resolveSecretApiKey(secret, target, this.credentialStore, signal);
 
       const { model, context, streamOptions } = this.prepareInvocation(
         target,
@@ -493,7 +592,7 @@ export class PiLanguageRaw implements LanguageBackend {
       }
 
       const secret = await lease.secret();
-      const apiKey = secret.kind === "api_key" ? secret.value : undefined;
+      const apiKey = await resolveSecretApiKey(secret, target, this.credentialStore, signal);
 
       const { model, context, streamOptions } = this.prepareInvocation(
         target,

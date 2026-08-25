@@ -72,6 +72,54 @@ describe("P8: No legacy provider imports or symbols regression guard", () => {
       label: "legacy configureProviders( call",
       regex: /\bconfigureProviders\s*\(/,
     },
+    {
+      label: "legacy ALL_PROVIDER_TYPES reference",
+      regex: /\bALL_PROVIDER_TYPES\b/,
+    },
+    {
+      label: "legacy OpenAI Official string",
+      regex: /['"]OpenAI Official['"]/,
+    },
+    {
+      label: "legacy Anthropic Official string",
+      regex: /['"]Anthropic Official['"]/,
+    },
+    {
+      label: "legacy GLM Code Plan string",
+      regex: /['"]GLM Code Plan['"]/,
+    },
+    {
+      label: "legacy defaultModelMap reference",
+      regex: /\bdefaultModelMap\b/,
+    },
+    {
+      label: "legacy claude-3-7-sonnet-latest literal",
+      regex: /['"]claude-3-7-sonnet-latest['"]/,
+    },
+    {
+      label: "legacy glm-4-plus literal",
+      regex: /['"]glm-4-plus['"]/,
+    },
+    {
+      label: "legacy model-selector import or file reference",
+      regex: /model-selector(?:\.js|\.tsx)?/,
+    },
+    {
+      label: "legacy ModelOption symbol",
+      regex: /\bModelOption\b/,
+    },
+    {
+      label: "legacy handleModelsCommand symbol",
+      regex: /\bhandleModelsCommand\b/,
+    },
+    {
+      label: "legacy onSwitchModel symbol",
+      regex: /\bonSwitchModel\b/,
+    },
+    {
+      label: "legacy modelOptions symbol",
+      regex: /\bmodelOptions\b/,
+    },
   ];
 
   it("ensures no production source file contains banned legacy imports or symbols", () => {
