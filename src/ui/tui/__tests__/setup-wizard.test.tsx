@@ -80,45 +80,71 @@ function setup(state: ManagerState) {
 describe("SetupWizard — fresh flow (T021)", () => {
   it("connect → pick main model → skip → done; picked model is exactly what's written", async () => {
     const { inst, ctx, onFinish } = setup(freshState());
-    await delay();
-    expect(inst.lastFrame() ?? "").toContain("Continue");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Continue");
+    }, { timeout: 3000 });
 
     await type(inst, "1");            // welcome → connect (no accounts)
-    expect(inst.lastFrame() ?? "").toContain("Add provider");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Add provider");
+    }, { timeout: 3000 });
 
     await type(inst, "1");            // → AddAccount
-    expect(inst.lastFrame() ?? "").toContain("Custom / local endpoint");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Custom / local endpoint");
+    }, { timeout: 3000 });
     await type(inst, ENTER);          // first upstream (acme)
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Account id");
+    }, { timeout: 3000 });
     await type(inst, ENTER);          // default id
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("[1] Paste API key");
+    }, { timeout: 3000 });
     await type(inst, "3");            // keyless → done
     await vi.waitFor(() => {
       expect(inst.lastFrame() ?? "").toContain("Account saved");
-    });
+    }, { timeout: 3000 });
     await type(inst, ESC);            // close AddAccount → back to connect menu
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("[2] Continue");
+    }, { timeout: 3000 });
     await type(inst, "2");            // Continue → main
 
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Pick your main model");
+    }, { timeout: 3000 });
     await type(inst, ENTER);          // open picker (fresh: no main model)
-    expect(inst.lastFrame() ?? "").toContain("Pick your main model");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Search models");
+    }, { timeout: 3000 });
     await type(inst, ENTER);          // model-tool → thinking step
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toMatch(/Thinking effort|Pick your main model/);
+    }, { timeout: 3000 });
     await type(inst, ENTER);          // accept default level → assign
     await vi.waitFor(() => {
       expect(ctx.setAssignment).toHaveBeenCalledWith(
         "text", "standard",
         { providerAccount: "acme", model: "model-tool", thinkingLevel: expect.any(String) },
       );
-    });
+    }, { timeout: 5000 });
     // exactly-what-was-picked: no hardcoded default id anywhere in the payload
     const call = ctx.setAssignment.mock.calls[0][2] as any;
     expect(call.model).toBe("model-tool");
 
     await type(inst, "2");            // slots → Skip
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Optional integrations");
+    }, { timeout: 3000 });
     await type(inst, "5");            // extras → Done
-    await delay();
-    expect(inst.lastFrame() ?? "").toContain("Setup complete");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Setup complete");
+    }, { timeout: 3000 });
     await type(inst, ENTER);          // [1] Finish
     await vi.waitFor(() => {
       expect(onFinish).toHaveBeenCalled();
-    });
+    }, { timeout: 5000 });
     expect(inst.lastFrame() ?? "").toContain("acme/model-tool");
   });
 });
@@ -129,18 +155,29 @@ describe("SetupWizard — skip rules on a configured state (T021/T026)", () => {
     state.accounts = [{ id: "acme", upstreamProvider: "acme", credentialKind: "none", health: "ok", modelCount: 1 }];
     (state.assignments as any).text = { standard: { providerAccount: "acme", model: "model-tool" } };
     const { inst, ctx, onFinish } = setup(state);
-    await delay();
-    await type(inst, "1"); // welcome → main (healthy account ⇒ connect skipped)
-    const frame = inst.lastFrame() ?? "";
-    expect(frame).toContain("already set");
-    expect(frame).toContain("acme/model-tool");
-    await type(inst, "1"); // Continue → slots
-    await type(inst, "2"); // Skip
-    await type(inst, "5"); // Done
-    await delay();
-    expect(inst.lastFrame() ?? "").toContain("Setup complete");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Continue");
+    }, { timeout: 3000 });
+    await type(inst, "1"); // welcome → main (skips connect because healthy accounts exist)
+    await vi.waitFor(() => {
+      const frame = inst.lastFrame() ?? "";
+      expect(frame).toContain("already set");
+      expect(frame).toContain("acme/model-tool");
+    }, { timeout: 3000 });
+    await type(inst, "1"); // main → slots (choose [1] Continue)
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("job slots are unstaffed");
+    }, { timeout: 3000 });
+    await type(inst, "2"); // slots → extras (choose [2] Skip)
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Optional integrations");
+    }, { timeout: 3000 });
+    await type(inst, "5"); // extras → summary (choose [5] Done)
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Setup complete");
+    }, { timeout: 3000 });
     await type(inst, ENTER); // Finish
-    await vi.waitFor(() => expect(onFinish).toHaveBeenCalled());
+    await vi.waitFor(() => expect(onFinish).toHaveBeenCalled(), { timeout: 5000 });
     expect(ctx.setAssignment).not.toHaveBeenCalled();
   });
 });
@@ -151,29 +188,45 @@ describe("SetupWizard — extras are per-key saves (T026, FR-006)", () => {
     state.accounts = [{ id: "acme", upstreamProvider: "acme", credentialKind: "none", health: "ok", modelCount: 1 }];
     (state.assignments as any).text = { standard: { providerAccount: "acme", model: "model-tool" } };
     const { inst, settings } = setup(state);
-    await delay();
-    await type(inst, "1"); // → main
-    await type(inst, "1"); // → slots
-    await type(inst, "2"); // → extras
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Continue");
+    }, { timeout: 3000 });
+    await type(inst, "1"); // welcome → main
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("already set");
+    }, { timeout: 3000 });
+    await type(inst, "1"); // main → slots
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("job slots are unstaffed");
+    }, { timeout: 3000 });
+    await type(inst, "2"); // slots → extras
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Optional integrations");
+    }, { timeout: 3000 });
     await type(inst, "3"); // Web search group
-    expect(inst.lastFrame() ?? "").toContain("tavily");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("tavily");
+    }, { timeout: 3000 });
     await type(inst, "tvly-secret-1");
     await type(inst, ENTER); // save the one field → group done
     await vi.waitFor(() => {
       expect(settings.set).toHaveBeenCalledWith("search.tavilyApiKey", "tvly-secret-1");
-    });
+    }, { timeout: 5000 });
     expect(settings.set).toHaveBeenCalledTimes(1);
     expect(inst.lastFrame() ?? "").toContain("✓"); // group marked done
     await type(inst, "5"); // Done → summary
-    await delay();
-    expect(inst.lastFrame() ?? "").toContain("search.tavilyApiKey");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("search.tavilyApiKey");
+    }, { timeout: 3000 });
   });
 });
 
 describe("SetupWizard — exit & escape navigation (C4, SC-004)", () => {
   it("clean exit before any change goes straight out (no confirm)", async () => {
     const { inst, onExitSetup } = setup(freshState());
-    await delay();
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Continue");
+    }, { timeout: 3000 });
     await type(inst, "2"); // Exit setup (nothing dirty)
     expect(onExitSetup).toHaveBeenCalled();
   });
@@ -183,24 +236,36 @@ describe("SetupWizard — exit & escape navigation (C4, SC-004)", () => {
     state.accounts = [{ id: "acme", upstreamProvider: "acme", credentialKind: "none", health: "ok", modelCount: 1 }];
     (state.assignments as any).text = { standard: { providerAccount: "acme", model: "model-tool" } };
     const { inst } = setup(state);
-    await delay();
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Continue");
+    }, { timeout: 3000 });
 
     await type(inst, "1"); // welcome -> main
-    expect(inst.lastFrame() ?? "").toContain("Main model already set");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Main model already set");
+    }, { timeout: 3000 });
 
     await type(inst, "1"); // main -> slots
-    expect(inst.lastFrame() ?? "").toContain("job slots are unstaffed");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("job slots are unstaffed");
+    }, { timeout: 3000 });
 
     await type(inst, "2"); // slots -> extras
-    expect(inst.lastFrame() ?? "").toContain("Optional integrations");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Optional integrations");
+    }, { timeout: 3000 });
 
     // Press Escape on extras -> should go back to slots
     await type(inst, ESC);
-    expect(inst.lastFrame() ?? "").toContain("job slots are unstaffed");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("job slots are unstaffed");
+    }, { timeout: 3000 });
 
     // Press Escape on slots -> should go back to main
     await type(inst, ESC);
-    expect(inst.lastFrame() ?? "").toContain("Main model already set");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Main model already set");
+    }, { timeout: 3000 });
   });
 
   it("preserves unedited settings during wizard run (SC-004)", async () => {
@@ -208,16 +273,28 @@ describe("SetupWizard — exit & escape navigation (C4, SC-004)", () => {
     state.accounts = [{ id: "acme", upstreamProvider: "acme", credentialKind: "none", health: "ok", modelCount: 1 }];
     (state.assignments as any).text = { standard: { providerAccount: "acme", model: "model-tool" } };
     const { inst, settings, onFinish } = setup(state);
-    await delay();
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Continue");
+    }, { timeout: 3000 });
 
     await type(inst, "1"); // welcome -> main
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("already set");
+    }, { timeout: 3000 });
     await type(inst, "1"); // main -> slots
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("job slots are unstaffed");
+    }, { timeout: 3000 });
     await type(inst, "2"); // slots -> extras
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Optional integrations");
+    }, { timeout: 3000 });
     await type(inst, "5"); // extras -> summary (no extra keys entered)
-    await delay();
-    expect(inst.lastFrame() ?? "").toContain("Setup complete");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Setup complete");
+    }, { timeout: 3000 });
     await type(inst, ENTER); // [1] Finish
-    await vi.waitFor(() => expect(onFinish).toHaveBeenCalled());
+    await vi.waitFor(() => expect(onFinish).toHaveBeenCalled(), { timeout: 5000 });
 
     // SC-004: settings.set was never called for unedited settings
     expect(settings.set).not.toHaveBeenCalled();
@@ -272,16 +349,28 @@ describe("SetupWizard — exit & escape navigation (C4, SC-004)", () => {
         onExitSetup={onExitSetup}
       />
     );
-    await delay();
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Continue");
+    }, { timeout: 3000 });
 
     await type(inst, "1"); // welcome -> main
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("already set");
+    }, { timeout: 3000 });
     await type(inst, "1"); // main -> slots
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("job slots are unstaffed");
+    }, { timeout: 3000 });
     await type(inst, "2"); // slots -> extras
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Optional integrations");
+    }, { timeout: 3000 });
     await type(inst, "5"); // extras -> summary (skip entering keys)
-    await delay();
-    expect(inst.lastFrame() ?? "").toContain("Setup complete");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Setup complete");
+    }, { timeout: 3000 });
     await type(inst, ENTER); // finish
-    await vi.waitFor(() => expect(onFinish).toHaveBeenCalled());
+    await vi.waitFor(() => expect(onFinish).toHaveBeenCalled(), { timeout: 5000 });
 
     // Verify disk content: original keys remain untouched
     const afterRun = JSON.parse(fs.readFileSync(settingFile, "utf8"));
@@ -297,13 +386,18 @@ describe("SetupWizard — exit & escape navigation (C4, SC-004)", () => {
 
   it("blocks connect-step continue when 0 accounts are configured", async () => {
     const { inst } = setup(freshState());
-    await delay();
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Continue");
+    }, { timeout: 3000 });
     await type(inst, "1"); // welcome -> connect (0 accounts)
-    expect(inst.lastFrame() ?? "").toContain("Add provider");
-    expect(inst.lastFrame() ?? "").toContain("Continue (disabled — add first)");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Add provider");
+      expect(inst.lastFrame() ?? "").toContain("Continue (disabled — add first)");
+    }, { timeout: 3000 });
 
     await type(inst, "2"); // Try to continue without account
-    await delay();
-    expect(inst.lastFrame() ?? "").toContain("Connect at least one provider account to continue");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("Connect at least one provider account to continue");
+    }, { timeout: 3000 });
   });
 });

@@ -158,6 +158,7 @@ export function SetupWizard({ api, settings, onFinish, onExitSetup }: SetupWizar
 
   // ── Input ─────────────────────────────────────────────────────────────────
   useInput((input, key) => {
+    if (!state) return;
     if (confirmExit) {
       if (input === "1") onExitSetup();
       else if (input === "2" || key.escape) setConfirmExit(false);
@@ -298,6 +299,15 @@ export function SetupWizard({ api, settings, onFinish, onExitSetup }: SetupWizar
       <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingLeft={1} paddingRight={1}>
         <Text color={"yellow"}>Exit setup? Some changes were already saved.</Text>
         <Text> [1] Exit anyway   [2] Keep going</Text>
+      </Box>
+    );
+  }
+
+  if (!state) {
+    return (
+      <Box flexDirection="column" borderStyle="round" borderColor="purple" paddingLeft={1} paddingRight={1}>
+        <Text bold color="purple">Seepient Setup Wizard</Text>
+        <Text color="gray">Loading...</Text>
       </Box>
     );
   }

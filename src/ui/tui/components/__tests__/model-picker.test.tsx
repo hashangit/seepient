@@ -242,13 +242,16 @@ describe("ModelPicker — Esc semantics + busy", () => {
   it("PageUp / PageDown jumps through rows", async () => {
     const models = Array.from({ length: 25 }, (_, i) => model(`model-${i + 1}`, "acme", { reachableVia: ["acme-main"] }));
     const { inst } = setup({ models });
-    await delay();
-    expect(inst.lastFrame() ?? "").toContain("model 1");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("model 1");
+    }, { timeout: 3000 });
     await type(inst, "\u001B[6~"); // PageDown
-    await delay();
-    expect(inst.lastFrame() ?? "").toContain("model 19");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("model 19");
+    }, { timeout: 3000 });
     await type(inst, "\u001B[5~"); // PageUp
-    await delay();
-    expect(inst.lastFrame() ?? "").toContain("model 1");
+    await vi.waitFor(() => {
+      expect(inst.lastFrame() ?? "").toContain("model 1");
+    }, { timeout: 3000 });
   });
 });

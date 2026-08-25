@@ -26,6 +26,7 @@
     "server": "node dist/transport/http/standalone.js",
     "dev": "tsx src/ui/cli/index.ts",
     "dev:server": "tsx src/transport/http/standalone.ts",
+    "check": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && vitest run && pnpm run build",
     "test": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && vitest run",
     "test:unit": "vitest run",
     "test:watch": "vitest",
