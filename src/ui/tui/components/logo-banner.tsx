@@ -1,4 +1,7 @@
 import React from 'react';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Box, Text } from 'ink';
 import figlet from 'figlet';
 import { useTheme } from '../hooks/use-theme.js';
@@ -12,7 +15,16 @@ const WORDMARK = 'Seepient Agent';
 // figlet font (e.g. 'Small Block' = 25 cols pixelated, 'Delta Corps Priest 1' =
 // ~102 cols wide). figlet has no scale option, so the font IS the size.
 const FONT = 'ANSI Compact';
-const VERSION = '0.5.0'; // keep in sync with package.json
+
+let VERSION = '0.5.2';
+try {
+  const dir = path.dirname(fileURLToPath(import.meta.url));
+  const pkgPath = path.join(dir, '..', '..', '..', '..', 'package.json');
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+  if (pkg.version) VERSION = pkg.version;
+} catch {
+  // fallback if package.json cannot be read
+}
 
 // Render once at module load; rstrip each line to drop invisible trailing spaces.
 const ART_LINES = figlet
