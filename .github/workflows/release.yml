@@ -46,11 +46,16 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm run build
-
-      - run: npm publish --access public
+      - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "seepient@${VERSION}" version >/dev/null 2>&1; then
+            echo "seepient@${VERSION} is already published on npm — skipping publish"
+          else
+            npm publish --access public
+          fi
 
   publish-homebrew:
     needs: publish-npm
