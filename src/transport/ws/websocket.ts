@@ -15,11 +15,12 @@ import type { IncomingMessage } from "http";
 import type { Duplex } from "stream";
 import { authMiddleware } from "../auth/auth.js";
 import type { WS, WSServer, WebSocket, WebSocketHandlerContext } from "./ws-types.js";
-import { handleConnection, closeAllConnections, getActiveConnectionCount } from "./ws-handlers.js";
+import { handleConnection } from "./ws-handlers.js";
+import { closeAllConnections, getActiveConnectionCount } from "./connection-registry.js";
 
 // Re-export types and helpers from sub-modules
 export type { WebSocketHandlerContext } from "./ws-types.js";
-export { getActiveConnectionCount } from "./ws-handlers.js";
+export { getActiveConnectionCount } from "./connection-registry.js";
 
 // ── Exported setup function ──────────────────────────────────────────
 
