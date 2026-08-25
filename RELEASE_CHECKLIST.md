@@ -60,10 +60,15 @@ Update all version strings and documentation artifacts in lockstep:
   - Create release notes file in repo root (picked up automatically by `.github/workflows/release.yml` for GitHub Releases).
 - [ ] **Logo & Version Fallbacks**:
   - `src/ui/tui/components/logo-banner.tsx`: Resolves dynamically from `package.json` with fallback.
-  - `src/ui/cli/index.ts`: Verify fallback `version` matches `X.Y.Z`.
 - [ ] **`README.md`**: Update feature highlights, version references, and command examples as needed.
-- [ ] **`AGENTS.md` & Vault Specs**:
-  - Mark completed specs as `SHIPPED` in `AGENTS.md` and in the corresponding Obsidian vault spec files.
+- [ ] **`ARCHITECTURE.md` & Source Layout Sync**:
+  - Update `ARCHITECTURE.md` in repository root and `Architecture/ARCHITECTURE.md` in the Obsidian vault.
+  - Keep the **Source Layout** directory tree, layer descriptions, and **Key Files** table in sync with any refactoring, newly created directories, or removed files.
+- [ ] **`AGENTS.md` & Obsidian Vault Specs**:
+  - Update Key Files table and layer guidelines in `AGENTS.md`.
+  - Mark completed specs as `SHIPPED` in `AGENTS.md` and in the corresponding Obsidian vault `spec.md`.
+  - Ensure `manual-validation-results.md` and any decision notes are recorded in `~/Documents/Obsidian/Seepient/Implementation-Specs/NNN-.../`.
+  - Update the vault directory tree index in `AGENTS.md` and vault `README.md`.
 
 ---
 
