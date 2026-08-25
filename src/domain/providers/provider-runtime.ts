@@ -320,6 +320,14 @@ export class ProviderRuntime extends EventEmitter {
     override?: ModelAssignmentOverride,
   ): Promise<InvocationPlan> {
     const plan = await resolveInvocationPlan(snapshot, this.credentialStore, purpose, tier, override);
+    if (plan.warnings && plan.warnings.length > 0) {
+      for (const w of plan.warnings) {
+        this.emit("warning", w);
+        if (typeof process !== "undefined" && process.stderr && !process.env.VITEST) {
+          process.stderr.write(`[warn] ${w}\n`);
+        }
+      }
+    }
     if (this.listenerCount("plan:resolved") > 0) {
       this.emit("plan:resolved", {
         purpose,
@@ -332,6 +340,7 @@ export class ProviderRuntime extends EventEmitter {
           providerAccount: t.providerAccount,
           model: t.model,
         })),
+        warnings: plan.warnings,
       });
     }
     return plan;
