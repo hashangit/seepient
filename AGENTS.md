@@ -173,6 +173,14 @@ Current layout of the Obsidian vault (annotated):
 │       ├── data-model.md             # UpstreamModel metadata, PersistedDiscoveryRecord (future contract), TierScoringCriteria
 │       ├── contracts/                # ci-cd-automation.md, resolver-policy.md, passthrough-and-discovery.md
 │       └── quickstart.md             # Automated validation scenarios (QS-P1 to QS-P4)
+│   └── 015-god-file-decomposition/   # God-file decomposition (015): evidence-gated splits
+│       ├── spec.md                   # FR-001–FR-008, non-goals (leave-alone list), success criteria
+│       ├── plan.md                   # P1 post-014 window (ws/http/TUI) + P2 post-008 (lifecycle helpers)
+│       ├── tasks.md                  # T001–T025 dependency-ordered, US1–US4 stories, per-story QS gates
+│       ├── research.md               # Churn/fan-in measurements + decision ledger D1–D11
+│       ├── data-model.md             # Symbol → target relocation maps, module-singleton inventory
+│       ├── contracts/                # safety-gates.md (five test gates + module-surface contract)
+│       └── quickstart.md             # QS-1–QS-4 + QS-P per-phase validation
 ├── 010-provider-management-redesign/ # Provider mgmt redesign: contracts + runtime + purpose/tier routing
 │   ├── spec.md                       # Problem, 5 blockers + 4 gaps, scope decisions, success criteria
 │   ├── plan.md                       # P0-P7 phased plan (contracts → Pi adapter → runtime → resolution → surfaces → reliability)
@@ -441,6 +449,22 @@ shell commands, and other important information, read the current plan:
   and a governed self-evolution activation boundary. Six-item reviewer
   correction: see decisions D45–D47. Prior
   plan: `specs/007-tui-parity-upgrade/` (TUI parity — shipped).
+- **UPCOMING (planned, not yet in implementation)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/015-god-file-decomposition/plan.md`
+  — God-file decomposition (planned; branch `015-god-file-decomposition`; P1 in the
+  window after 014 merges and before 012 starts, P2 when 008 stabilizes):
+  evidence-gated splits of four collision-prone files — `ws-handlers.ts` →
+  message-family modules + `connection-registry.ts` (singletons move once),
+  `provider-management-handlers.ts` → `provider-management/` route files (only
+  importer `rest.ts` re-pointed), `model-manager.tsx` → `use-manager-state.ts`
+  hook + tab components (parent path/exports preserved),
+  `action-lifecycle.ts` → private-helper extraction only (pipeline never
+  splits). Pure intra-layer moves, zero behavior change, no shims; safety =
+  five existing suites (`architecture-boundaries`, `golden-parity`,
+  `ws-approval`, `ws-provider-parity`, TUI + permission). Leave-alone list
+  (`analyzers.ts`, `agent-loop.ts`, `pi-language-raw.ts`, `agent.ts`,
+  `app.tsx`) and deferrals (`provider-runtime` → 012,
+  `provider-manager-api` internals → forcing feature) recorded in
+  research.md D1–D11.
 - **UPCOMING (planned, not yet in implementation)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/012-unified-media-generation-engine/plan.md`
   — Unified media generation engine (planned; starts after 010 lands on `main`,
   branch `012-media-engine`): extends the 010 provider architecture to image,

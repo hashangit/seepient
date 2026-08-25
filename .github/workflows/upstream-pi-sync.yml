@@ -86,6 +86,7 @@ jobs:
           UPSTREAM_VER: ${{ steps.version-check.outputs.latest_upstream }}
           CLASSIFICATION: ${{ steps.version-check.outputs.classification }}
           GH_TOKEN: ${{ secrets.AUTOMATION_TOKEN || secrets.GITHUB_TOKEN }}
+          AUTOMATION_TOKEN_SET: ${{ secrets.AUTOMATION_TOKEN }}
         run: |
           set -e
           BRANCH="automation/sync-pi-ai-${UPSTREAM_VER}"
@@ -114,6 +115,10 @@ jobs:
 
           # Ensure label exists
           gh label create upstream-breakage --color "d73a4a" --description "Upstream dependency breakage detected" || true
+
+          if [ -z "${AUTOMATION_TOKEN_SET}" ]; then
+            echo "::warning ::AUTOMATION_TOKEN secret is not set; falling back to default GITHUB_TOKEN. Note that downstream pull_request workflows may not trigger unless a PAT or App token is configured."
+          fi
 
           if [ $TYPECHECK_STATUS -eq 0 ] && [ $TEST_STATUS -eq 0 ] && [ "${CLASSIFICATION}" = "patch" ]; then
             echo "Verification passed for patch bump. Preparing auto-merge PR..."
@@ -144,18 +149,18 @@ jobs:
             echo "PR created: ${PR_URL}"
             gh pr merge "${PR_URL}" --auto --squash --delete-branch
 
-            # Wait for PR merge to complete before tagging and dispatching release
+            # Wait for PR merge to complete before tagging and dispatching release (up to 30 min)
             echo "Waiting for PR to merge..."
             MERGED=false
-            for i in {1..30}; do
+            for i in {1..60}; do
               STATE=$(gh pr view "${PR_URL}" --json state -q .state)
               if [ "$STATE" = "MERGED" ]; then
                 echo "PR merged successfully."
                 MERGED=true
                 break
               fi
-              echo "PR state is ${STATE}, waiting 10s (attempt $i/30)..."
-              sleep 10
+              echo "PR state is ${STATE}, waiting 30s (attempt $i/60)..."
+              sleep 30
             done
 
             if [ "$MERGED" = "true" ]; then
@@ -168,7 +173,7 @@ jobs:
               echo "Dispatching Release workflow for tag ${TAG}..."
               gh workflow run Release --ref "${TAG}"
             else
-              echo "PR not merged within timeout. Skipping tag and release dispatch."
+              echo "PR not merged within 30-minute timeout. Skipping tag and release dispatch."
             fi
           else
             echo "Verification failed or breaking-range classification. Creating Draft PR..."
