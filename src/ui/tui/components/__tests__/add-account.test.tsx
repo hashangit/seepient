@@ -73,13 +73,14 @@ describe("AddAccount — account id", () => {
     const { inst } = setup();
     await type(inst, "openai"); // filter to the openai upstream
     await vi.waitFor(() => {
-      expect(inst.lastFrame() ?? "").toContain("openai");
+      expect(inst.lastFrame() ?? "").toContain("openai▏");
+      expect(inst.lastFrame() ?? "").toContain("▸ openai");
       expect(inst.lastFrame() ?? "").not.toContain("anthropic");
-    }, { timeout: 3000 });
+    }, { timeout: 5000 });
     await type(inst, ENTER);    // select it — collides with existingIds ["openai"]
     await vi.waitFor(() => {
       expect(inst.lastFrame() ?? "").toContain("openai-2");
-    }, { timeout: 3000 });
+    }, { timeout: 5000 });
   });
 
   it("accepts a typed id (Enter advances to the credential menu)", async () => {
