@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { handleWsListProviders } from "../ws-handlers.js";
+import { handleWsListProviders } from "../provider-mutations.js";
 import type { ConnectionState, WebSocket } from "../ws-types.js";
 
 describe("WS Provider Parity (FR-040 / T057)", () => {
@@ -84,7 +84,7 @@ describe("WS Provider Parity (FR-040 / T057)", () => {
   });
 
   it("handleWsRemoveProvider enforces scope check", async () => {
-    const { handleWsRemoveProvider } = await import("../ws-handlers.js");
+    const { handleWsRemoveProvider } = await import("../provider-mutations.js");
     const messages: any[] = [];
     const mockWs: WebSocket = {
       readyState: 1,
