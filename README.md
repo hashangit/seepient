@@ -48,6 +48,7 @@ Unlike "screen-seeing" agents (such as OpenClaw) that rely on visual interpretat
 - 🔒 **Fail-Closed Isolation & SSRF Defense**: Process containment (macOS Seatbelt / Linux Bubblewrap) and exact-file write helpers fail closed; SSRF guards prevent metadata reflection.
 - 💾 **Durable Approvals & 0600 Audit**: File-locked atomic NDJSON stores and append-only `0600` audit logs (`~/.seepient/audit.log`) with fsync before mutation commits.
 - 🐳 **Server Worker Backend**: ephemeral Docker worker container scheduler with mTLS transport, Ed25519/HMAC signed dispatches, and secret-free worker execution environments.
+- 🏗️ **Clean Modular Architecture**: Strict responsibility-driven layers (`UI → Transport → Domain → Capabilities → Vendors → Foundations`) with decomposed route modules, isolated WebSocket message families, centralized connection registry, and decoupled TUI state hooks.
 - 🖥️ **Interactive TUI**: In a TTY, a full-screen Ink/React UI — bordered always-on input, streaming feed, session manager, message queue/`/steer`, and inline `write_file` diffs (atomic, crash-safe writes).
 ## Tech Stack
 - **Runtime**: Node.js
@@ -199,7 +200,7 @@ Seepient Agent uses a hierarchical configuration system.
 
 ### Provider Management (v2 Architecture)
 
-Seepient Agent v0.5.0 features unified Provider Management with a shared interactive TUI dock (`/models`), first-run setup wizard (`seepient setup`), OAuth subscription sign-in (`/login`, `seepient auth login`), purpose × tier routing, dynamic upstream catalog discovery, multi-target automatic fallback, circuit-breaker cooldowns, and full cross-surface parity across CLI, Server, and SDK:
+Seepient Agent features unified Provider Management with a shared interactive TUI dock (`/models`), first-run setup wizard (`seepient setup`), OAuth subscription sign-in (`/login`, `seepient auth login`), purpose × tier routing, dynamic upstream catalog discovery, multi-target automatic fallback, circuit-breaker cooldowns, and full cross-surface parity across CLI, Server, and SDK:
 
 **Configuration (`~/.seepient/setting.json` or `.seepient/setting.json`):**
 ```json
