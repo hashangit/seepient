@@ -153,10 +153,12 @@ describe("CLI Provider Subcommands Integration (QS-P6.1 & QS-P6.2)", () => {
     expect(resolveCmd).toBeDefined();
 
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const origExitCode = process.exitCode;
     try {
       await program.parseAsync(["node", "test", "models", "resolve", "media.image", "--json"]);
       expect(logSpy).toHaveBeenCalled();
     } finally {
+      process.exitCode = origExitCode;
       logSpy.mockRestore();
     }
   });

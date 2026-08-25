@@ -436,10 +436,16 @@ export function registerModelsCommands(program: Command, apiOverride?: ProviderM
       const health = acct?.health ?? (res.authValid ? "ok" : "missing");
 
       if (opts.json) {
-        console.log(JSON.stringify({ accountId: providerId, health, authValid: res.authValid, reachable: res.reachable !== false, latencyMs: res.latencyMs }, null, 2));
+        console.log(JSON.stringify({ accountId: providerId, health, authValid: res.authValid, reachable: res.reachable !== false, latencyMs: res.latencyMs, error: res.error }, null, 2));
         if (health !== "ok" && health !== "unverified") {
           process.exitCode = 1;
         }
+        return;
+      }
+
+      if (res.error) {
+        console.log(chalk.red(`✗ Provider "${providerId}" probe failed: ${res.error.message}`));
+        process.exitCode = 1;
         return;
       }
 

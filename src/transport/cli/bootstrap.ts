@@ -105,8 +105,9 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
     } else {
       const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
       try {
-        const ans = await rl.question(chalk.cyan("No provider configured. Run setup wizard now? [Y/n] "));
-        if (ans.trim().toLowerCase() === "n") {
+        const raw = await rl.question(chalk.cyan("No provider configured. Run setup wizard now? [Y/n] "));
+        const ans = raw.trim().toLowerCase();
+        if (ans === "n" || ans === "no") {
           console.log(chalk.dim("Setup skipped. You can configure providers anytime using `seepient setup` or `seepient providers add`."));
           process.exit(0);
         }

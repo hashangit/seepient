@@ -139,6 +139,7 @@ export function registerProvidersCommands(program: Command): void {
     .option("--credential <mode>", "Credential mode: env:VAR_NAME or none")
     .option("--url <baseUrl>", "Custom base URL endpoint")
     .option("--allow-private", "Allow connecting to private / localhost IP addresses")
+    .option("--no-allow-private", "Disallow connecting to private / localhost IP addresses")
     .option("--compat <compat>", "Wire protocol compatibility")
     .option("--json", "Output result as JSON")
     .action(async (id, opts) => {
