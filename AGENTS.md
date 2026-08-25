@@ -268,7 +268,7 @@ UI → Transport → Domain → Capabilities → Vendors
 | Settings manager | `src/domain/settings/settings-manager.ts` | get/set/reset/list, persistence, masking |
 | Provider runtime | `src/domain/providers/` | Runtime, config store, credential store, resolver, catalog |
 | Provider controller | `src/transport/cli/provider-manager-api.ts` | Single semantic core for provider/account/slot management |
-| Model manager dock | `src/ui/tui/overlays/model-manager.tsx` | Multi-tab TUI dock: purpose board, accounts, catalog browse, search |
+| Model manager dock | `src/ui/tui/overlays/model-manager.tsx` + `model-manager/` | Multi-tab TUI dock: purpose board, accounts, catalog browse, search (state hook, tabs, dialogs) |
 | Model picker | `src/ui/tui/components/model-picker.tsx` | Search & filter model selector with reachability & pricing badges |
 | Add account flow | `src/ui/tui/components/add-account.tsx` | Multi-credential account configuration (paste, env, none, oauth) |
 | Setup wizard | `src/ui/tui/setup-wizard.tsx` | First-run onboarding wizard with preset bundles & slot recommendations |
@@ -284,8 +284,8 @@ UI → Transport → Domain → Capabilities → Vendors
 | TUI | `src/ui/tui/` | Ink/React: components, widgets, diff, overlays, logo |
 | REPL | `src/ui/repl/repl.ts` | Readline fallback, non-interactive / piped |
 | CLI transport | `src/transport/cli/` | Bootstrap, setup, agent, config-loader, commands |
-| HTTP transport | `src/transport/http/` | REST handlers, server core, standalone |
-| WebSocket | `src/transport/ws/` | WS handlers, types |
+| HTTP transport | `src/transport/http/` | REST handlers, `provider-management/` routes (accounts, assignments, oauth, catalog), server core, standalone |
+| WebSocket | `src/transport/ws/` | Dispatcher (`ws-handlers.ts`), `connection-registry.ts`, message handlers (`chat`, `approvals`, `provider-mutations`, `session-control`) |
 | Auth | `src/transport/auth/` | API keys + scopes |
 | SDK transport | `src/transport/sdk/` | `generateText`, `streamText`, `createAgent`, option resolution |
 
@@ -449,9 +449,9 @@ shell commands, and other important information, read the current plan:
   and a governed self-evolution activation boundary. Six-item reviewer
   correction: see decisions D45–D47. Prior
   plan: `specs/007-tui-parity-upgrade/` (TUI parity — shipped).
-- **UPCOMING (planned, not yet in implementation)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/015-god-file-decomposition/plan.md`
-  — God-file decomposition (planned; branch `015-god-file-decomposition`; P1 in the
-  window after 014 merges and before 012 starts, P2 when 008 stabilizes):
+- **IMPLEMENTED (Pending Merge)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/015-god-file-decomposition/plan.md`
+  — God-file decomposition (implemented; branch `015-god-file-decomposition`; P1 in the
+  window after 014 merges and before 012 starts, P2 helper extraction):
   evidence-gated splits of four collision-prone files — `ws-handlers.ts` →
   message-family modules + `connection-registry.ts` (singletons move once),
   `provider-management-handlers.ts` → `provider-management/` route files (only

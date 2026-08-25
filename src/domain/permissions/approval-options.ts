@@ -38,6 +38,7 @@ import type {
   ApprovalOption,
   Capability,
   DenyRule,
+  PermissionDecision,
   PolicyContext,
 } from "../../foundations/contracts/permission-policy.js";
 import type { PreparedToolAction } from "../../foundations/contracts/prepared-action.js";
@@ -591,3 +592,38 @@ function choiceTitle(
       return "Allow always";
   }
 }
+
+/**
+ * Deep-freeze a plain-data value (permission requests are JSON-serializable).
+ * Used to give brokers a read-only view so a mutation attempt fails loudly
+ * instead of silently widening an approval.
+ */
+export function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const key of Object.keys(value as Record<string, unknown>)) {
+      deepFreeze((value as Record<string, unknown>)[key]);
+    }
+  }
+  return value;
+}
+
+/**
+ * Validate that an approval decision actually matches the request it claims to
+ * answer. Round 4 P1: approved decisions MUST carry the EXACT request ID and
+ * action digest — missing binding is rejected, never forgiven. (Legacy
+ * adapters normalize by filling these fields from the request they were
+ * given, before Domain sees the decision.)
+ */
+export function validFor(
+  answer: PermissionDecision,
+  expectedActionDigest: string,
+  expectedRequestId: string,
+): boolean {
+  if (!answer.approved) return true;
+  return (
+    answer.actionDigest === expectedActionDigest &&
+    answer.requestId === expectedRequestId
+  );
+}
+

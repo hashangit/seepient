@@ -52,6 +52,9 @@ import {
 } from "./policy-store.js";
 import { covers, setCovers } from "./capability-store.js";
 import type { PersistedCapabilityLedger } from "./persisted-capability-ledger.js";
+import { typedDenyReason } from "./deny-reasons.js";
+import { redactAuditCapability } from "./audit-redaction.js";
+import { deepFreeze, validFor } from "./approval-options.js";
 
 /**
  * Inputs to one action lifecycle. The lifecycle is constructed once per run
@@ -124,82 +127,6 @@ export interface LifecycleResult {
 /** Build a structured tool result string for a denial. */
 function denialOutput(reason: PermissionDenyReason, message: string): string {
   return `Tool execution denied (${reason}): ${message}`;
-}
-
-/**
- * Audit-copy of a capability: process argv is REDACTED (SC-011: the audit
- * never stores raw sensitive command arguments). The capability's kind,
- * executable, and shape remain for forensics; enforcement uses the exact
- * capabilities, never this copy.
- */
-function redactAuditCapability(cap: Capability): Capability {
-  if (cap.kind === "process") {
-    return { ...cap, argvPrefix: undefined };
-  }
-  return cap;
-}
-
-/** Keep in sync with `PermissionDenyReason` in permission-policy.ts. */
-const KNOWN_DENY_REASONS = new Set<string>([
-  "immutable-deny",
-  "outside-ceiling",
-  "outside-principal",
-  "outside-runtime-baseline",
-  "backend-unsupported",
-  "approval-unavailable",
-  "approval-denied",
-  "approval-expired",
-  "invalid-approval-response",
-  "user-denied",
-  "audit-unavailable",
-  "model-egress-denied",
-  "secret-denied",
-  "security-activation-required",
-  "policy-conflict",
-  "unknown-tool",
-  "capability-expired",
-  "capability-revoked",
-]);
-
-/** Map a broker-supplied reason to a typed deny reason (user-denied default). */
-function typedDenyReason(reason: string | undefined): PermissionDenyReason {
-  return reason !== undefined && KNOWN_DENY_REASONS.has(reason)
-    ? (reason as PermissionDenyReason)
-    : "user-denied";
-}
-
-/**
- * Deep-freeze a plain-data value (permission requests are JSON-serializable).
- * Used to give brokers a read-only view so a mutation attempt fails loudly
- * instead of silently widening an approval.
- */
-function deepFreeze<T>(value: T): T {
-  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
-    Object.freeze(value);
-    for (const key of Object.keys(value as Record<string, unknown>)) {
-      deepFreeze((value as Record<string, unknown>)[key]);
-    }
-  }
-  return value;
-}
-
-/**
- * Validate that an approval decision actually matches the request it claims to
- * answer. Round 4 P1: approved decisions MUST carry the EXACT request ID and
- * action digest — missing binding is rejected, never forgiven. (Legacy
- * adapters normalize by filling these fields from the request they were
- * given, before Domain sees the decision.)
- */
-function validFor(
-  answer: PermissionDecision,
-  expectedActionDigest: string,
-  expectedRequestId: string,
-): boolean {
-  if (!answer.approved) return true;
-  return (
-    answer.actionDigest === expectedActionDigest &&
-    answer.requestId === expectedRequestId
-  );
 }
 
 /**
