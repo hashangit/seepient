@@ -181,6 +181,24 @@ Current layout of the Obsidian vault (annotated):
 │       ├── data-model.md             # Symbol → target relocation maps, module-singleton inventory
 │       ├── contracts/                # safety-gates.md (five test gates + module-surface contract)
 │       └── quickstart.md             # QS-1–QS-4 + QS-P per-phase validation
+│   └── 016-location-model/           # Location model & storage contract (016)
+│       ├── spec.md                   # FR-001–FR-014, scope decisions M1–M11, success criteria
+│       ├── plan.md                   # P1 foundations → P2 workspace/standalone → P3 sessions → P4 outputs/barrel → P5 skills/docs
+│       ├── tasks.md                  # T001–T051, US1–US5 stories, test-first per-story gates
+│       ├── research.md               # Evidence sweep (file:line citations) + decision ledger D1–D26
+│       ├── data-model.md             # PathModel, WorkspaceContext, OutputTarget, BarrelFile, SessionIndexFile, GeneratedSkillFrontmatter
+│       ├── contracts/                # paths-module, atomic-write, output-placement, barrel-index, storage-contract
+│       └── quickstart.md             # QS-1–QS-8 validation scenarios + production budgets
+│   └── 017-permission-tool-baseline/ # Permission tool baseline & consent modes (017)
+│       ├── spec.md                   # Brokered-tool lockout + zero-effect gate bug; FR-001–FR-018; three consent modes
+│       ├── plan.md                   # P1 repair (0.5.3) → P2 modes (0.6.0) → P3 surfaces + legacy demolition
+│       ├── research.md               # Evidence ledger E1–E15 + decision ledger D1–D14 (repro-verified root cause)
+│       ├── data-model.md             # ConsentMode, ModeDecisionMatrix, ConfigDerivedGrant, wildcard network capability
+│       ├── contracts/                # capability-defaults, consent-modes, deny-messaging
+│       └── quickstart.md             # QS-1–QS-9 validation scenarios + production budgets
+│   └── 018-skill-injection-visibility/ # Skill injection & visibility (018)
+│       ├── spec.md                   # Ephemeral per-run skill injection, mandatory skills, cache-ordered assembly, cross-surface applied-skills attribution; FR-001–FR-019, M1–M12
+│       └── checklists/requirements.md # Specification quality checklist (validated)
 ├── 010-provider-management-redesign/ # Provider mgmt redesign: contracts + runtime + purpose/tier routing
 │   ├── spec.md                       # Problem, 5 blockers + 4 gaps, scope decisions, success criteria
 │   ├── plan.md                       # P0-P7 phased plan (contracts → Pi adapter → runtime → resolution → surfaces → reliability)
@@ -420,6 +438,50 @@ Keep `CONTEXT.md` under 20 lines total. Do NOT summarize the full conversation �
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
+- **ACTIVE PLAN (P0 — spec + plan complete, `/speckit-tasks` next)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/017-permission-tool-baseline/plan.md`
+  — Permission tool baseline & consent modes (017): repairs the R9.1 pipeline's
+  hardcoded local deployment ceiling, which omits every capability kind the
+  brokered tools need (web_search, read_website, generate_image,
+  optimize_prompt, send_email, send_notification hard-deny `outside-ceiling`
+  on all surfaces with no approval or remediation path) and leaves
+  zero-effect tools (datetime, todos, widgets) failing at the model-egress
+  gate (empty-envelope bug). Fix: wildcard HTTPS network capability +
+  startup grants derived from stored credentials into the runtime baseline
+  (never persisted), analyzer truth fixes (model-egress on none-op tools;
+  executor-derived destinations), setup-failure messages distinct from
+  permission denials, then the three consent modes (ask-everything `manual` /
+  edit-enabled `balanced` — currently phantom / autonomous) with risk-informed
+  prompting, `/mode` + Shift+Tab live toggling, per-workspace persistence, and
+  an always-allowed class for core tools in every mode; P3 deletes
+  `permissionLevel`, the legacy matrix/grants path, and the pipeline opt-out.
+  Enforcement (sandbox, SSRF broker, immutable denies, audit, secret
+  withholding) is mode-invariant. Ships 0.5.3 (repair) then 0.6.0 (modes).
+- **UPCOMING (spec complete — `/speckit-plan` next)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/018-skill-injection-visibility/spec.md`
+  — Skill injection & visibility (018): skill bodies never enter chat history
+  (today `use_skill` returns the body as a tool-result message, re-billed on
+  every later run; ~144k wasted prompt tokens for one 8k-token skill over a
+  20-run chat, duplicated on re-invocation); activations record bounded stubs
+  + structured metadata, bodies inject ephemerally per run at request
+  assembly (after the run's opening user message, alphabetical, repeat
+  activations collapse within a run); the catalog contract flips to per-run
+  semantics (default context = mandatory skills only; prior activations are
+  not in context; the model MUST re-activate at run start); mandatory skills
+  inject every run, trusted only from user-global scope or explicit opt-in
+  (project-sourced self-declarations ignored); prompt assembly is
+  volatility-ordered for prefix caching (frozen head of identity, tools,
+  catalog, mandatory bodies; separated env block; append-only history; tail
+  injection; no second-precision clock in the head — fixes the
+  `buildSystemInfoBlock()` `toLocaleString()` landmine; deterministic
+  ordering incl. append-only gateway tools; cache hit/miss split recorded
+  when providers report it); applied-skills attribution on all four surfaces
+  (TUI dedicated block + per-response attribution line + context panel, CLI
+  line + `--json`, SDK result field + step metadata, server payload + SSE),
+  all derived from one persisted per-run injection record; session resume
+  collapses legacy body messages to stubs. FR-001–FR-019, scope decisions
+  M1–M12 (in-flight indicator deferred, `allowedTools` scoping out of v1, no
+  size thresholds); SC-001–SC-006 incl. the behavioral re-activation gate
+  (≥90%) and the ≥90% cache-hit target. Validated in
+  checklists/requirements.md.
 - **ACTIVE PLAN**: `~/Documents/Obsidian/Seepient/Implementation-Specs/013-provider-management-tui/plan.md`
   — Provider management TUI (013): one shared, catalog-driven provider/model
   management experience over the existing v2 provider runtime (zero domain or
@@ -440,6 +502,27 @@ shell commands, and other important information, read the current plan:
   tasks T001–T064 in tasks.md (test-first, per-phase gates); UX contracts in
   contracts/ (provider-manager-api, model-manager-dock, setup-wizard,
   surface-parity).
+- **UPCOMING (plan + tasks complete — implementation next, branch `016-location-model`)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/016-location-model/plan.md`
+  — Location model & storage contract (016): one `foundations/paths.ts`
+  constructs every path and parses every `SEEPIENT_*` path env (architecture
+  rule enforces); one atomic-write helper gives the whole repo a single temp
+  shape (`.seepient-<8hex>.tmp`, fsync, unlink-on-failure, stale sweep,
+  0600/0700, symlink rejection); a Domain output resolver classifies every
+  generated file as explicit-path / artifact / byproduct (deterministic
+  `.seepient/output/<kind>/` floor, closed kind list shared with 012);
+  standalone mode works from `~/seepient_documents` as Seepient's own
+  workspace (signal-based detection, home access with denied zones, grants
+  workspace/global can never collide, global never a default); barrel index
+  (`.seepient/barrel.json`, directory-as-authority reconciliation, ≤30-topic
+  digest injected into standalone prompts — no LLM loop); sessions unify
+  under `~/.seepient/sessions` with `session-index.json` (node:sqlite at
+  BMI, DuckDB rejected); skills source-rank absolute (frontmatter priority
+  within-source only) + generated-skill writer (`kind: generated`
+  frontmatter, collision refusal, version+changelog, path-leak validator,
+  no approval); `docs/getting-started/storage.md` (≤20 rows) bound to code
+  by a docs-sync test. Phases P1 foundations → P2 workspace/standalone →
+  P3 sessions → P4 outputs/barrel → P5 skills/docs; tasks T001–T051 in
+  tasks.md (test-first, US1–US5 story gates).
 - **IN-FLIGHT PLAN (implementation underway)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/008-permission-system-redesign/plan.md`
   — Permission system redesign R9.1: analyzer-only tools, one Domain policy and
   execution boundary, native exact commits, typed effect/secret/model-egress
