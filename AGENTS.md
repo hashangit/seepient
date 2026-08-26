@@ -198,6 +198,11 @@ Current layout of the Obsidian vault (annotated):
 │       └── quickstart.md             # QS-1–QS-9 validation scenarios + production budgets
 │   └── 018-skill-injection-visibility/ # Skill injection & visibility (018)
 │       ├── spec.md                   # Ephemeral per-run skill injection, mandatory skills, cache-ordered assembly, cross-surface applied-skills attribution; FR-001–FR-019, M1–M12
+│       ├── plan.md                   # P0 groundwork → P1 injection engine → P2 mandatory → P3 cache-order → P4 surfaces → P5 SC harness
+│       ├── research.md               # E1–E9 codebase evidence + DeepSeek/OpenCode study + decision ledger D1–D12
+│       ├── data-model.md             # SkillActivation, InjectionRecord, ActivationState, MandatoryDeclaration, AppliedSkillsView, Usage cache split
+│       ├── contracts/                # activation-contract, context-assembly, mandatory-skills, visibility-parity
+│       ├── quickstart.md             # QS-1–QS-5 validation scenarios + QS-P production budgets
 │       └── checklists/requirements.md # Specification quality checklist (validated)
 ├── 010-provider-management-redesign/ # Provider mgmt redesign: contracts + runtime + purpose/tier routing
 │   ├── spec.md                       # Problem, 5 blockers + 4 gaps, scope decisions, success criteria
@@ -456,7 +461,7 @@ shell commands, and other important information, read the current plan:
   `permissionLevel`, the legacy matrix/grants path, and the pipeline opt-out.
   Enforcement (sandbox, SSRF broker, immutable denies, audit, secret
   withholding) is mode-invariant. Ships 0.5.3 (repair) then 0.6.0 (modes).
-- **UPCOMING (spec complete — `/speckit-plan` next)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/018-skill-injection-visibility/spec.md`
+- **UPCOMING (plan complete — `/speckit-tasks` next)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/018-skill-injection-visibility/plan.md`
   — Skill injection & visibility (018): skill bodies never enter chat history
   (today `use_skill` returns the body as a tool-result message, re-billed on
   every later run; ~144k wasted prompt tokens for one 8k-token skill over a
@@ -480,8 +485,11 @@ shell commands, and other important information, read the current plan:
   collapses legacy body messages to stubs. FR-001–FR-019, scope decisions
   M1–M12 (in-flight indicator deferred, `allowedTools` scoping out of v1, no
   size thresholds); SC-001–SC-006 incl. the behavioral re-activation gate
-  (≥90%) and the ≥90% cache-hit target. Validated in
-  checklists/requirements.md.
+  (≥90%) and the ≥90% cache-hit target. Phases P0 groundwork → P1 injection
+  engine → P2 mandatory → P3 cache-order → P4 surfaces → P5 SC harness in
+  plan.md; contracts in contracts/ (activation-contract, context-assembly,
+  mandatory-skills, visibility-parity); decision ledger D1–D12 in research.md.
+  Validated in checklists/requirements.md.
 - **ACTIVE PLAN**: `~/Documents/Obsidian/Seepient/Implementation-Specs/013-provider-management-tui/plan.md`
   — Provider management TUI (013): one shared, catalog-driven provider/model
   management experience over the existing v2 provider runtime (zero domain or
