@@ -137,4 +137,120 @@ describe("Markdown", () => {
     expect(singleGaps).toBe(1);
     expect(tripleGaps).toBe(1);
   });
+
+  it("handles loose lists with blank lines between items (T1)", () => {
+    const { lastFrame } = render(
+      <Markdown content={"1. first\n\n2. second\n\n3. third"} />,
+    );
+    const out = lastFrame() ?? "";
+    expect(out).toContain("1. first");
+    expect(out).toContain("2. second");
+    expect(out).toContain("3. third");
+  });
+
+  it("handles wrapped continuation lines indented under an item (T2)", () => {
+    const { lastFrame } = render(
+      <Markdown content={"1. first line\n   wrapped tail\n2. second"} />,
+    );
+    const out = lastFrame() ?? "";
+    expect(out).toContain("first line wrapped tail");
+    expect(out).toContain("2. second");
+  });
+
+  it("handles blank line with indented continuation (T3)", () => {
+    const { lastFrame } = render(
+      <Markdown content={"1. alpha\n\n   more of alpha\n2. beta"} />,
+    );
+    const out = lastFrame() ?? "";
+    expect(out).toContain("alpha more of alpha");
+    expect(out).toContain("2. beta");
+  });
+
+  it("preserves outer list numbering when nested bullet is present (T4)", () => {
+    const { lastFrame } = render(
+      <Markdown content={"1. alpha\n   - note\n2. beta"} />,
+    );
+    const out = lastFrame() ?? "";
+    expect(out).toContain("• note");
+    expect(out).toContain("2. beta");
+  });
+
+  it("preserves outer list numbering after nested ordered excursion (T5)", () => {
+    const { lastFrame } = render(
+      <Markdown content={"1. alpha\n   1. inner a\n   2. inner b\n2. beta"} />,
+    );
+    const out = lastFrame() ?? "";
+    expect(out).toContain("1. alpha");
+    expect(out).toContain("1. inner a");
+    expect(out).toContain("2. inner b");
+    expect(out).toContain("2. beta");
+  });
+
+  it("honors list starting at a literal number not equal to 1 (T6)", () => {
+    const { lastFrame } = render(
+      <Markdown content={"3. third\n4. fourth"} />,
+    );
+    const out = lastFrame() ?? "";
+    expect(out).toContain("3. third");
+    expect(out).toContain("4. fourth");
+  });
+
+  it("honors start number after text break (T7)", () => {
+    const { lastFrame } = render(
+      <Markdown content={"1. alpha\n2. beta\nsome text\n3. gamma"} />,
+    );
+    const out = lastFrame() ?? "";
+    expect(out).toContain("1. alpha");
+    expect(out).toContain("2. beta");
+    expect(out).toContain("some text");
+    expect(out).toContain("3. gamma");
+  });
+
+  it("supports paren-style ordered markers (T8)", () => {
+    const { lastFrame } = render(
+      <Markdown content={"1) alpha\n2) beta"} />,
+    );
+    const out = lastFrame() ?? "";
+    expect(out).toContain("1. alpha");
+    expect(out).toContain("2. beta");
+  });
+
+  it("resets and honors literal start number when bullet interrupts (T9)", () => {
+    const { lastFrame } = render(
+      <Markdown content={"1. a\n- bullet\n2. b"} />,
+    );
+    const out = lastFrame() ?? "";
+    expect(out).toContain("1. a");
+    expect(out).toContain("• bullet");
+    expect(out).toContain("2. b");
+  });
+
+  it("handles loose bullet lists with blank lines (T10)", () => {
+    const { lastFrame } = render(
+      <Markdown content={"- one\n\n- two"} />,
+    );
+    const out = lastFrame() ?? "";
+    expect(out).toContain("• one");
+    expect(out).toContain("• two");
+  });
+
+  it("numbers all-ones style ordered list sequentially (T11)", () => {
+    const { lastFrame } = render(
+      <Markdown content={"1. a\n1. b\n1. c"} />,
+    );
+    const out = lastFrame() ?? "";
+    expect(out).toContain("1. a");
+    expect(out).toContain("2. b");
+    expect(out).toContain("3. c");
+  });
+
+  it("handles CRLF line endings in ordered list (T12)", () => {
+    const { lastFrame } = render(
+      <Markdown content={"1. alpha\r\n2. beta\r\n3. gamma"} />,
+    );
+    const out = lastFrame() ?? "";
+    expect(out).toContain("1. alpha");
+    expect(out).toContain("2. beta");
+    expect(out).toContain("3. gamma");
+  });
 });
