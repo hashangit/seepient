@@ -52,7 +52,7 @@ function InlineText({ text }: { text: string }): React.ReactElement {
 type Block =
   | { type: 'code'; lines: string[] }
   | { type: 'heading'; level: number; text: string }
-  | { type: 'list'; ordered: boolean; depth: number; text: string }
+  | { type: 'list'; ordered: boolean; depth: number; text: string; marker: string }
   | { type: 'table'; headers: string[]; rows: string[][] }
   | { type: 'paragraph'; text: string }
   | { type: 'spacer' };
@@ -65,59 +65,126 @@ function indentDepth(lead: string): number {
 }
 
 function parseBlocks(content: string): Block[] {
-  const lines = content.split('\n');
+  const normalized = content.replace(/\r\n?/g, '\n');
+  const lines = normalized.split('\n');
   const blocks: Block[] = [];
+  const orderedMap = new Map<number, number>();
+  let lastListItem: { depth: number; blockIndex: number } | null = null;
+  let pendingBlank = false;
+
+  // Flush any pending spacer block between content sections.
+  const flushSpacer = () => {
+    if (pendingBlank) {
+      if (blocks.length > 0 && blocks[blocks.length - 1].type !== 'spacer') {
+        blocks.push({ type: 'spacer' });
+      }
+      pendingBlank = false;
+    }
+  };
+
+  // Simplifications:
+  // - Indented fenced code inside a list item renders as item text.
+  // - No lazy-continuation absorption for column-0 paragraph lines (they end
+  //   the list; correct numbering is preserved by honoring the literal start
+  //   number of the next list).
+
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
     if (line.startsWith('```')) {
+      flushSpacer();
+      orderedMap.clear();
+      lastListItem = null;
       const code: string[] = [];
       i++;
-      while (i < lines.length && !lines[i].startsWith('```')) { code.push(lines[i]); i++; }
+      while (i < lines.length && !lines[i].startsWith('```')) {
+        code.push(lines[i]);
+        i++;
+      }
       i++; // closing fence
       blocks.push({ type: 'code', lines: code });
     } else if (/^#{1,6}\s/.test(line)) {
+      flushSpacer();
+      orderedMap.clear();
+      lastListItem = null;
       const hashMatch = line.match(/^(#{1,6})\s+(.*)$/);
-      blocks.push({ type: 'heading', level: hashMatch ? hashMatch[1].length : 1, text: hashMatch ? hashMatch[2] : line.replace(/^#{1,6}\s/, '') });
+      blocks.push({
+        type: 'heading',
+        level: hashMatch ? hashMatch[1].length : 1,
+        text: hashMatch ? hashMatch[2] : line.replace(/^#{1,6}\s/, ''),
+      });
+      i++;
+    } else if (line.startsWith('|') && line.endsWith('|')) {
+      flushSpacer();
+      orderedMap.clear();
+      lastListItem = null;
+      // GFM table: collect header + separator + data rows
+      const rows: string[][] = [];
+      rows.push(parseTableRow(line));
+      i++;
+      if (i < lines.length && lines[i].match(/^\|[\s\-:]+\|$/)) {
+        i++; // skip separator
+        while (i < lines.length && lines[i].startsWith('|') && lines[i].endsWith('|')) {
+          rows.push(parseTableRow(lines[i]));
+          i++;
+        }
+      }
+      const headers = rows[0];
+      const dataRows = rows.slice(1);
+      blocks.push({ type: 'table', headers, rows: dataRows });
+    } else if (line.trim() === '') {
+      pendingBlank = true;
       i++;
     } else {
-      // Bullet (`-`/`*`/`+`) or ordered (`1.`) list item, with leading
-      // whitespace preserved as a nesting depth.
       const bullet = line.match(/^(\s*)([-*+])\s+(.*)$/);
-      const ordered = line.match(/^(\s*)(\d+)\.\s+(.*)$/);
+      const ordered = line.match(/^(\s*)(\d+)[.)]\s+(.*)$/);
+
       if (bullet) {
-        blocks.push({ type: 'list', ordered: false, depth: indentDepth(bullet[1]), text: bullet[3] });
+        flushSpacer();
+        const depth = indentDepth(bullet[1]);
+        // Marker-type change ends ordered run at this depth and deeper
+        for (const k of Array.from(orderedMap.keys())) {
+          if (k >= depth) orderedMap.delete(k);
+        }
+        blocks.push({ type: 'list', ordered: false, depth, text: bullet[3], marker: '• ' });
+        lastListItem = { depth, blockIndex: blocks.length - 1 };
         i++;
       } else if (ordered) {
-        blocks.push({ type: 'list', ordered: true, depth: indentDepth(ordered[1]), text: ordered[3] });
-        i++;
-      } else if (line.startsWith('|') && line.endsWith('|')) {
-        // GFM table: collect header + separator + data rows
-        const rows: string[][] = [];
-        rows.push(parseTableRow(line));
-        i++;
-        if (i < lines.length && lines[i].match(/^\|[\s\-:]+\|$/)) {
-          i++; // skip separator
-          while (i < lines.length && lines[i].startsWith('|') && lines[i].endsWith('|')) {
-            rows.push(parseTableRow(lines[i]));
-            i++;
-          }
+        flushSpacer();
+        const depth = indentDepth(ordered[1]);
+        let num: number;
+        if (orderedMap.has(depth)) {
+          num = orderedMap.get(depth)!;
+          orderedMap.set(depth, num + 1);
+        } else {
+          num = parseInt(ordered[2], 10);
+          orderedMap.set(depth, num + 1);
         }
-        const headers = rows[0];
-        const dataRows = rows.slice(1);
-        blocks.push({ type: 'table', headers, rows: dataRows });
-      } else if (line.trim() === '') {
-        // A blank line becomes a spacer only when it sits between two
-        // content blocks — leading, trailing, and doubled blanks collapse
-        // to nothing (or the single spacer already pushed). This is what
-        // gives the rendered output its paragraph/section separation.
-        if (blocks.length > 0 && blocks[blocks.length - 1].type !== 'spacer') {
-          blocks.push({ type: 'spacer' });
+        // Delete all map entries deeper than d
+        for (const k of Array.from(orderedMap.keys())) {
+          if (k > depth) orderedMap.delete(k);
         }
+        blocks.push({ type: 'list', ordered: true, depth, text: ordered[3], marker: `${num}. ` });
+        lastListItem = { depth, blockIndex: blocks.length - 1 };
         i++;
       } else {
-        blocks.push({ type: 'paragraph', text: line });
-        i++;
+        const lead = line.match(/^(\s*)/)?.[1] ?? '';
+        const depth = indentDepth(lead);
+        if (lastListItem !== null && depth > lastListItem.depth) {
+          // Indented continuation line under an open list item
+          const target = blocks[lastListItem.blockIndex];
+          if (target && target.type === 'list') {
+            target.text += ' ' + line.trim();
+          }
+          pendingBlank = false;
+          i++;
+        } else {
+          flushSpacer();
+          orderedMap.clear();
+          lastListItem = null;
+          blocks.push({ type: 'paragraph', text: line });
+          i++;
+        }
       }
     }
   }
@@ -139,27 +206,9 @@ export function Markdown({ content }: { content: string }): React.ReactElement {
   const theme = useTheme();
   const blocks = parseBlocks(content);
 
-  // Ordered-list numbering state: consecutive `1.` items at the same depth
-  // count up; any other block (or a depth change) resets to 1. The parser
-  // flattens each item into its own block, so the counter lives here.
-  let ordDepth = -1;
-  let ordNum = 0;
-
   return (
     <Box flexDirection="column">
       {blocks.map((b, i) => {
-        // Ordered-list numbering: count up across consecutive ordered items
-        // at the same depth; any other block ends the run so the next `1.`
-        // sequence restarts from 1 (per CommonMark). Computed up front so the
-        // reset runs for every block type, before any early return below.
-        let ordMarker = '';
-        if (b.type === 'list' && b.ordered) {
-          if (b.depth !== ordDepth) { ordDepth = b.depth; ordNum = 1; } else { ordNum++; }
-          ordMarker = `${ordNum}. `;
-        } else {
-          ordDepth = -1;
-        }
-
         if (b.type === 'code') {
           return (
             <Box key={i} flexDirection="column" borderStyle="round" borderColor={theme.fgGutter} paddingLeft={1} paddingRight={1}>
@@ -183,10 +232,9 @@ export function Markdown({ content }: { content: string }): React.ReactElement {
           );
         }
         if (b.type === 'list') {
-          const marker = b.ordered ? ordMarker : '• ';
           return (
             <Box key={i} paddingLeft={b.depth * 2}>
-              <Text color={b.ordered ? theme.yellow : theme.green}>{marker}</Text>
+              <Text color={b.ordered ? theme.yellow : theme.green}>{b.marker}</Text>
               <InlineText text={b.text} />
             </Box>
           );
