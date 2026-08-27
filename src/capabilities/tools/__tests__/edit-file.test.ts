@@ -34,7 +34,7 @@ describe('edit_file integration', () => {
     const filePath = await setupFile('fruits.txt', 'apple\nbanana\ncherry\ndate');
 
     // 1. read_file records a snapshot and returns content + tag
-    const readResult = await ReadFileTool.handler({ path: filePath }, { snapshotStore: store });
+    const readResult = await ReadFileTool.handler!({ path: filePath }, { snapshotStore: store });
     expect(typeof readResult).toBe('string');
     const tagMatch = (readResult as string).match(/\[content-tag:([0-9a-f]{4})\]/);
     expect(tagMatch).not.toBeNull();
@@ -44,7 +44,7 @@ describe('edit_file integration', () => {
     const patch = `[${filePath}#${tag}]
 SWAP 3.=3:
 +kumquat`;
-    const editResult = await EditFileTool.handler({ patch }, { snapshotStore: store });
+    const editResult = await EditFileTool.handler!({ patch }, { snapshotStore: store });
     expect(editResult).toMatchObject({ output: expect.stringContaining(filePath), success: true });
 
     // 3. File content is updated
@@ -64,7 +64,7 @@ SWAP 3.=3:
     const patch = '[/fake/path.txt#ffff]\nSWAP 1.=1:\n+hello';
     store = createSnapshotStore();
     await expect(
-      EditFileTool.handler({ patch }, { snapshotStore: store }),
+      EditFileTool.handler!({ patch }, { snapshotStore: store }),
     ).rejects.toThrow(/No snapshot for path|Unknown tag/);
   });
 
@@ -72,7 +72,7 @@ SWAP 3.=3:
     const filePath = await setupFile('stale.txt', 'alpha\nbeta\ngamma');
 
     // Read and record original content
-    const readResult = await ReadFileTool.handler({ path: filePath }, { snapshotStore: store });
+    const readResult = await ReadFileTool.handler!({ path: filePath }, { snapshotStore: store });
     const tag = (readResult as string).match(/\[content-tag:([0-9a-f]{4})\]/)![1];
 
     // External change between read and edit
@@ -82,7 +82,7 @@ SWAP 3.=3:
 SWAP 2.=2:
 +beta_new`;
     await expect(
-      EditFileTool.handler({ patch }, { snapshotStore: store }),
+      EditFileTool.handler!({ patch }, { snapshotStore: store }),
     ).rejects.toThrow(/Stale anchor/);
 
     // File content is preserved (no silent data loss)
@@ -97,8 +97,8 @@ SWAP 2.=2:
     await fs.writeFile(f2, 'foo\nbar\nbaz', 'utf8');
 
     // Read both to record snapshots
-    const r1 = (await ReadFileTool.handler({ path: f1 }, { snapshotStore: store })) as string;
-    const r2 = (await ReadFileTool.handler({ path: f2 }, { snapshotStore: store })) as string;
+    const r1 = (await ReadFileTool.handler!({ path: f1 }, { snapshotStore: store })) as string;
+    const r2 = (await ReadFileTool.handler!({ path: f2 }, { snapshotStore: store })) as string;
     const t1 = r1.match(/\[content-tag:([0-9a-f]{4})\]/)![1];
     const t2 = r2.match(/\[content-tag:([0-9a-f]{4})\]/)![1];
 
@@ -108,7 +108,7 @@ SWAP 2.=2:
 
 [${f2}#${t2}]
 DEL 2.=2`;
-    const result = (await EditFileTool.handler({ patch }, { snapshotStore: store })) as ToolResult;
+    const result = (await EditFileTool.handler!({ patch }, { snapshotStore: store })) as ToolResult;
     expect(result.success).toBe(true);
     expect(result.output).toContain('Edited 2 file(s)');
 
@@ -131,7 +131,7 @@ DEL 2.=2`;
     await fs.writeFile(f2, 'foo\nbar', 'utf8');
 
     // Read f1 only — f2 has no snapshot, so section 2 must fail.
-    const r1 = (await ReadFileTool.handler({ path: f1 }, { snapshotStore: store })) as string;
+    const r1 = (await ReadFileTool.handler!({ path: f1 }, { snapshotStore: store })) as string;
     const t1 = r1.match(/\[content-tag:([0-9a-f]{4})\]/)![1];
 
     const patch = `[${f1}#${t1}]
@@ -143,7 +143,7 @@ SWAP 1.=1:
 +FOO`;
 
     await expect(
-      EditFileTool.handler({ patch }, { snapshotStore: store }),
+      EditFileTool.handler!({ patch }, { snapshotStore: store }),
     ).rejects.toThrow(/No snapshot for path|Unknown tag/);
 
     // Critical: f1 (section 1) must be UNCHANGED — no partial multi-file edit.

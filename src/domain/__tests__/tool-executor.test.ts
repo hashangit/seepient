@@ -124,7 +124,7 @@ describe("tool() factory", () => {
       parameters: { type: "object", properties: {} },
       execute: async () => "pong",
     });
-    const result = await mod.handler({}, undefined);
+    const result = await mod.handler!({}, undefined);
     expect(typeof result).toBe("object");
     if (typeof result === "object" && result !== null && "error" in result) {
       expect((result as any).error.code).toBe("LEGACY_TOOL_DENIED");

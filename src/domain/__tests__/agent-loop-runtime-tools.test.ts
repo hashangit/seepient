@@ -72,7 +72,7 @@ describe("Agent Loop Runtime Tool Injection & Propagation", () => {
       },
     });
 
-    const output = await ImageTool.handler(
+    const output = await ImageTool.handler!(
       { prompt: "A glowing galaxy", output_dir: tempDir },
       { runtime },
     );
