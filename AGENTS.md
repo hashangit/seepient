@@ -189,7 +189,7 @@ Current layout of the Obsidian vault (annotated):
 │       ├── data-model.md             # PathModel, WorkspaceContext, OutputTarget, BarrelFile, SessionIndexFile, GeneratedSkillFrontmatter
 │       ├── contracts/                # paths-module, atomic-write, output-placement, barrel-index, storage-contract
 │       └── quickstart.md             # QS-1–QS-8 validation scenarios + production budgets
-│   └── 017-permission-tool-baseline/ # Permission tool baseline & consent modes (017)
+│   └── 017-permission-tool-baseline/ # Permission tool baseline & consent modes (017 — SHIPPED in v0.5.6)
 │       ├── spec.md                   # Brokered-tool lockout + zero-effect gate bug; FR-001–FR-019; three consent modes
 │       ├── plan.md                   # P1 repair (0.5.3) → P2 modes (0.6.0) → P3 surfaces + legacy demolition
 │       ├── tasks.md                  # T001–T051 dependency-ordered, US1–US5 story gates, test-first

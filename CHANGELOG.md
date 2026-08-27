@@ -7,12 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### 🛡️ Permissions & Autonomous Consent Mode Unification
-* **Demolished Legacy `permissions.autonomousMode`**: Removed legacy `permissions.autonomousMode` setting, `setConfirmedAutonomousMode()`, and parallel approval branches across all surfaces. Unified all prompt-free execution under the canonical `permissions.consentMode: "autonomous"` setting.
-  - *Migration Note*: Users who previously configured `permissions.autonomousMode: true` in their configuration file should update to `permissions.consentMode: "autonomous"` or use `/mode autonomous` in the TUI/REPL.
-* **Autonomous Warning Flag (`permissions.autonomousWarned`)**: Added `permissions.autonomousWarned` setting key to persist one-time warning acknowledgment across launches and sessions.
-* **Crash-Proof Overlay Confirmation**: Fixed TUI overlay confirm crash caused by boolean-to-string type mismatches in settings validation, ensured strict write persistence, and made overlay confirmation transactional with automatic rollback on error.
-* **Surface Warning Parity**: Shift+Tab, `/mode autonomous` (in both TUI and readline REPL), and startup in autonomous mode while unwarned now uniformly present the required high-risk confirmation before enabling unprompted execution.
+## [v0.5.6] - 2026-08-27
+
+### Network and DNS resolution
+* Pinned DNS resolution in `NodeNetworkAdapter` now handles Node 20+ `{ all: true }` lookups by returning an array of address objects instead of a single string. This prevents `ERR_INVALID_IP_ADDRESS` errors during outbound socket connections.
+
+### Brokered tool execution and output formatting
+* `BrokerExecutor` now connects to the shared artifact store, returning response text to the model instead of artifact IDs.
+* Corrected analyzer destination keys from `path` to `pathPrefix`, routing requests to endpoints like `/search` and `/v1/chat/completions` instead of the root path.
+* Fixed Tavily search argument name from `depth` to `search_depth` and formatted JSON search results into Markdown.
+* `read_website` converts HTML responses to plain text with scripts and styles removed, capped at 150k characters, and prefixes responses with HTTP status codes.
+* Added skill discovery for `~/.agents/skills` alongside `~/.seepient/skills` and workspace skills.
+
+### Consent mode and settings hardening
+* Removed legacy `permissions.autonomousMode` and unified prompt-free execution under `permissions.consentMode: "autonomous"`.
+* Added `permissions.autonomousWarned` to store one-time warning confirmation in workspace settings.
+* Hardened `SettingsManager` value validation for booleans and numbers, and added transactional rollback on failed mode switches.
+* Added `/mode autonomous --confirm` confirmation requirement to the interactive readline REPL.
+* Guarded slash-command skill launching in the TUI against unhandled exceptions.
+
+### Tool contracts and dead-code removal
+* Made `ToolModule.handler` optional in contracts to support broker-only tools without dummy handlers.
+* Removed direct HTTP fetch handler from `SearchTool`, routing all web searches through the permission pipeline.
+* Removed unused `legacyHandlerBoundary` from `legacy-adapter.ts`.
+* Updated `executeTool` to throw an error when called directly on tools without handlers.
+
+### Agent loop resilience and file editing
+* Added automatic retries with backoff (up to 2 retries) when providers return empty text completions without tool calls.
+* Added extraction of in-band XML and Markdown tool calls when providers output text instead of structured calls.
+* Added capture of reasoning tokens in canonical message history.
+* Routed `edit_file` to execute via `TrustedHostExecutor` to run hashline patches while preserving policy risk classification and audit logging.
+* Added integration tests for file editing through the permission pipeline.
 
 ## [v0.5.5] - 2026-08-27
 
