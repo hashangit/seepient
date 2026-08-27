@@ -84,7 +84,7 @@ export async function startTui({ queryParts, options }: StartTuiArgs): Promise<v
       projectConfig: loadJsonConfig(paths.local) as Record<string, any>,
       globalConfig: loadJsonConfig(paths.global) as Record<string, any>,
     });
-    await sm.set(dotKey, value as any);
+    await sm.set(dotKey, String(value));
   };
 
   // ── Sessions ────────────────────────────────────────────────────────────

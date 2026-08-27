@@ -2121,4 +2121,94 @@ describe("multi-mutation WAL history (round 7 P0)", () => {
     // history entry for mut-A: the intent stays provisional.
     expect(events.filter((e) => e.state === "policy-granted" && e.actionId === "action-A")).toHaveLength(0);
   });
+
+  it("fresh install with a tavily key configured does NOT persist derived network-destination into stored policy", async () => {
+    const originalKey = process.env.TAVILY_API_KEY;
+    process.env.TAVILY_API_KEY = "tvly-testkey-12345";
+    try {
+      const audit = new LocalAuditStore({ root: dir });
+      const store = new LocalPolicyStore({ root: join(dir, "policy") });
+      const workspaceId = computeWorkspaceId(dir);
+
+      const targetFile = join(dir, "a.txt");
+      const base = writeAction("d-tavily-test");
+      const action: PreparedToolAction = {
+        ...base,
+        principalId: "user-test",
+        effects: [
+          {
+            kind: "filesystem-write",
+            targets: [
+              {
+                target: {
+                  canonicalPath: targetFile,
+                  canonicalParent: dir,
+                  basename: "a.txt",
+                  exists: false,
+                  finalSymlink: false,
+                },
+                mode: "create",
+              },
+            ],
+          },
+        ],
+        display: {
+          ...base.display,
+          summary: targetFile,
+          canonicalTargets: [targetFile],
+        },
+        operation: {
+          kind: "commit-files",
+          commits: [
+            {
+              destination: {
+                canonicalPath: targetFile,
+                canonicalParent: dir,
+                basename: "a.txt",
+                exists: false,
+                finalSymlink: false,
+              },
+              content: {
+                artifactId: "art1",
+                sha256: "x",
+                byteLength: 4,
+                mediaType: "text/plain",
+              },
+            },
+          ],
+        },
+      };
+
+      const wired = await buildActionLifecycle({
+        principalId: "user-test",
+        runId: "r1",
+        sessionId: "s1",
+        workspaceRoot: dir,
+        approvalBroker: {
+          mode: "inline",
+          request: async (req) => approved(req, "user-test", "project"),
+        },
+        executionBoundary: fakeBoundary({ output: "ok", success: true }),
+        auditStore: audit,
+        policyStore: store,
+      });
+
+      const res = await wired.lifecycle.run(action);
+      expect(res.outcome.state).toBe("succeeded");
+
+      // Read the newly created snapshot from disk
+      const snap = await store.read(workspaceId);
+      expect(snap.version).toBeGreaterThan(0);
+      const tavilyCap = snap.policy.capabilities.find(
+        (c) => c.kind === "network-destination" && (c as any).host === "api.tavily.com",
+      );
+      expect(tavilyCap).toBeUndefined();
+    } finally {
+      if (originalKey !== undefined) {
+        process.env.TAVILY_API_KEY = originalKey;
+      } else {
+        delete process.env.TAVILY_API_KEY;
+      }
+    }
+  });
 });

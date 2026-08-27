@@ -311,18 +311,6 @@ export class Agent {
     return this._wiredPipeline?.lifecycle.getActiveCapabilities() ?? [];
   }
 
-  /** Enable/disable prompt-free execution without disabling policy safety. */
-  setAutonomousMode(enabled: boolean): void {
-    if (!this._wiredPipeline) {
-      throw new Error('Protected permission pipeline is not enabled');
-    }
-    this._wiredPipeline.lifecycle.setApprovalMode(enabled ? 'autonomous' : 'manual');
-  }
-
-  isAutonomousMode(): boolean {
-    return this._wiredPipeline?.lifecycle.getApprovalMode() === 'autonomous';
-  }
-
   /** Set consent mode live with single setApprovalMode call (spec 017, T026). */
   setConsentMode(mode: import('../../foundations/settings-schema.js').ConsentMode): void {
     if (!this._wiredPipeline) {

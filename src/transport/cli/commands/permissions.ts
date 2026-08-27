@@ -33,7 +33,6 @@ import type { PolicyStore, PolicySnapshot } from '../../../foundations/contracts
 import { GLOBAL_WORKSPACE_ID, GLOBAL_WORKSPACE_ROOT } from '../../../domain/permissions/policy-store.js';
 import type { ContainmentPreflightResult } from '../../../capabilities/execution/containment-preflight.js';
 import { capabilityKey } from '../../../domain/permissions/capability-store.js';
-import { createSettingsManager } from './settings.js';
 
 const SCOPES: GrantScope[] = ['session', 'project', 'global'];
 
@@ -44,8 +43,6 @@ function usage(): string {
     `  ${chalk.green('/permissions')}                     Show permissions by scope`,
     `  ${chalk.green('/permissions status')}              Same as /permissions (human-friendly view)`,
     `  ${chalk.green('/permissions revoke')} ${chalk.dim('<scope> <permission-number>')} Remove a listed permission (session|project|always)`,
-    `  ${chalk.green('/permissions autonomous on')}       Show the autonomous-mode warning`,
-    `  ${chalk.green('/permissions autonomous off')}      Disable autonomous mode`,
     `  ${chalk.green('/permissions diagnostics')}         Show technical enforcement details`,
     '',
     chalk.dim('Legacy grants (session rememberings):'),
@@ -167,7 +164,6 @@ export const permissionsHandler: CommandHandler = async (ctx) => {
         ctx.agent.getActiveCapabilities?.(),
         ctx.agent.getPolicyWorkspaceId?.(),
         ctx.agent.getWorkspaceRoot?.(),
-        ctx.agent.isAutonomousMode?.() ?? false,
         ctx.agent,
       ),
     };
@@ -187,56 +183,10 @@ export const permissionsHandler: CommandHandler = async (ctx) => {
   }
 
   if (sub === 'autonomous') {
-    const requested = parts[1]?.toLowerCase();
-    const confirmed = parts.includes('--confirm');
-    if (requested !== 'on' && requested !== 'off') {
-      return { output: chalk.yellow('Usage: /permissions autonomous on|off') };
-    }
-    if (requested === 'on' && !confirmed) {
-      return {
-        output: [
-          chalk.bold.red('WARNING — Autonomous mode'),
-          'Seepient will execute permitted tools without asking you first.',
-          'It may change or delete project files, run commands, or contact services allowed by policy.',
-          'OS containment, protected paths, immutable denials, and deployment limits remain enforced.',
-          '',
-          `To confirm: ${chalk.bold('/permissions autonomous on --confirm')}`,
-        ].join('\n'),
-      };
-    }
-    if (!ctx.agent.isPermissionPipelineEnabled?.()) {
-      return { output: chalk.red('Autonomous mode requires the protected permission pipeline.') };
-    }
-    // Review round 9: persisting the setting on a surface that cannot apply
-    // it would leave config and runtime diverged — fail before writing.
-    if (typeof ctx.agent.setAutonomousMode !== 'function') {
-      return { output: chalk.yellow('Autonomous mode is not supported on this surface.') };
-    }
-    const manager = createSettingsManager();
-    const setting = manager.get('permissions.autonomousMode');
-    if (setting.origin.startsWith('env:')) {
-      return {
-        output: chalk.yellow(
-          `Autonomous mode is controlled by ${setting.origin.slice(5)}. Unset that environment variable before changing it here.`,
-        ),
-      };
-    }
-    const enabled = requested === 'on';
-    const previous = ctx.agent.isAutonomousMode?.() ?? false;
-    try {
-      await manager.setConfirmedAutonomousMode(enabled);
-      ctx.agent.setAutonomousMode?.(enabled);
-    } catch (error) {
-      if (previous !== enabled) {
-        await manager.setConfirmedAutonomousMode(previous).catch(() => {});
-        ctx.agent.setAutonomousMode?.(previous);
-      }
-      return { output: chalk.red(`Could not change autonomous mode: ${(error as Error).message}`) };
-    }
     return {
-      output: enabled
-        ? chalk.bold.yellow('Autonomous mode is ON. Seepient will no longer ask for approval within configured safety boundaries.')
-        : chalk.green('Autonomous mode is OFF. Seepient will ask before actions that need permission.'),
+      output: chalk.yellow(
+        'Autonomous mode is now managed via consent modes. Use /mode autonomous (or Shift+Tab in TUI).',
+      ),
     };
   }
 
@@ -455,8 +405,8 @@ async function renderPermissions(
   active: Capability[] | undefined,
   agentWorkspaceId: string | null | undefined,
   workspaceRoot: string | null | undefined,
-  autonomous: boolean,
   agent?: {
+    getConsentMode?: () => import('../../../foundations/settings-schema.js').ConsentMode;
     recordRenderedPermissions?: (view: {
       session: string[];
       project: string[];
@@ -479,22 +429,10 @@ async function renderPermissions(
       })
     : [];
   const session = sessionPermissions(active ?? [], project, global, workspaceRoot ?? undefined);
-  const consentMode = (agent as any)?.getConsentMode?.() ?? (autonomous ? 'autonomous' : 'edit-enabled');
+  const consentMode = agent?.getConsentMode?.() ?? 'edit-enabled';
   const lines = [chalk.bold.cyan('Permissions'), ''];
   lines.push(`${chalk.bold('Consent mode:')} ${chalk.green(consentMode)} (change with ${chalk.bold('/mode')} or Shift+Tab in TUI)`);
-  lines.push(
-    autonomous
-      ? `${chalk.bold.yellow('Autonomous mode: ON')} — Seepient will not ask before permitted actions.`
-      : `${chalk.bold('Autonomous mode: OFF')} — Seepient asks before actions that need permission.`,
-  );
-  lines.push(
-    chalk.dim(
-      autonomous
-        ? 'Turn off: /permissions autonomous off'
-        : 'Turn on: /permissions autonomous on',
-    ),
-    '',
-  );
+  lines.push('');
   renderScope(lines, 'This session', 'session', session);
   if (projectError) lines.push(chalk.yellow(`  Could not read project policy: ${projectError}`));
   const visibleProject = visiblePermissions(project);

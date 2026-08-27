@@ -144,6 +144,7 @@ export const DEFAULT_LOCAL_DEPLOYMENT_CEILING_CAPABILITIES: Capability[] = [
   { kind: "network-destination", scheme: "https", host: "*" },
   { kind: "external-recipient", service: "*", recipient: "*" },
   { kind: "secret-ref", ref: "*" },
+  { kind: "trusted-host", registrationId: "use_skill" },
 ];
 
 /**
@@ -295,16 +296,17 @@ export async function buildActionLifecycle(
   // Active session capabilities:
   // - If caller provided explicit activeCapabilities, use them (no widening).
   // - If a principal policy exists (from policyStore or inputs.principalPolicy), start with those pre-approved capabilities.
-  // - Otherwise (fresh install), start with workspace read-root baseline so writes/exec require approval.
+  const baseFreshCaps: Capability[] = egressCoveredByCeiling
+    ? [{ kind: "read-root" as const, root }, defaultModelEgressCap]
+    : [{ kind: "read-root" as const, root }];
+  const persistentBaselineCapabilities =
+    isFreshInstall && !inputs.activeCapabilities ? [...baseFreshCaps] : [];
+
   const activeCaps: Capability[] = inputs.activeCapabilities
     ? [...inputs.activeCapabilities.capabilities]
     : hasStoredPolicy
-      ? [...principalPolicy.capabilities]
-      : egressCoveredByCeiling
-        ? [{ kind: "read-root" as const, root }, defaultModelEgressCap]
-        : [{ kind: "read-root" as const, root }];
-  const persistentBaselineCapabilities =
-    isFreshInstall && !inputs.activeCapabilities ? [...activeCaps] : [];
+      ? [...principalPolicy.capabilities, ...derivedGrants]
+      : [...baseFreshCaps, ...derivedGrants];
 
   // Global grants are additive active authority. Their mere existence must
   // not make a fresh workspace copy the entire deployment ceiling into its

@@ -50,11 +50,12 @@ const LOCAL_BOUNDARY: ExecutionBoundary = {
       "network-destination",
       "external-recipient",
       "secret-ref",
+      "trusted-host",
     ],
     exactCommit: true,
     hostFilteredEgress: true,
     environmentIsolation: true,
-    supportedOperationKinds: ["none", "read-file", "commit-files", "process", "broker"],
+    supportedOperationKinds: ["none", "read-file", "commit-files", "process", "broker", "trusted-host"],
   },
   execute: async (action) => ({
     state: "succeeded",
@@ -68,7 +69,7 @@ const LOCAL_BOUNDARY: ExecutionBoundary = {
   }),
 };
 
-describe("golden tool baseline (spec 017, T002 / T015 / T016 / QS-1)", () => {
+describe("golden tool baseline (spec 017, T008)", () => {
   let tempDir: string;
   let workspaceRoot: string;
   let artifacts: InMemoryArtifactStore;
@@ -98,14 +99,15 @@ describe("golden tool baseline (spec 017, T002 / T015 / T016 / QS-1)", () => {
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
-  async function getAnalysisContext(policyContext: PolicyContext): Promise<ToolAnalysisContext> {
+  async function getAnalysisContext(policyContext?: PolicyContext): Promise<ToolAnalysisContext> {
+    const root = policyContext?.workspaceRoot ?? workspaceRoot;
     return {
       principalId: "user-test",
       runId: "run-test",
       toolCallId: "call-test",
       workspace: {
-        workspaceId: policyContext.workspaceId ?? "ws-test",
-        canonicalRoot: workspaceRoot,
+        workspaceId: computeWorkspaceId(root),
+        canonicalRoot: root,
         policyVersion: 1,
         policyDigest: "digest-test",
       },
@@ -132,7 +134,7 @@ describe("golden tool baseline (spec 017, T002 / T015 / T016 / QS-1)", () => {
       { name: "write_file", args: { path: "new.txt", content: "data" }, expectedResult: "needs-approval" },
       { name: "edit_file", args: { path: "test.txt", edits: [{ oldText: "hello", newText: "hi" }] }, expectedResult: "needs-approval" },
       { name: "execute_shell_command", args: { command: "echo ok" }, expectedResult: "needs-approval" },
-      { name: "use_skill", args: { skill: "sample-skill.md" }, expectedResult: "allow" },
+      { name: "use_skill", args: { skill_name: "sample-skill" }, expectedResult: "allow" },
       { name: "get_current_datetime", args: {}, expectedResult: "allow" },
       { name: "manage_todos", args: { action: "list" }, expectedResult: "allow" },
       { name: "render_widget", args: { widget: "counter" }, expectedResult: "allow" },

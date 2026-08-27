@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 🛡️ Permissions & Autonomous Consent Mode Unification
+* **Demolished Legacy `permissions.autonomousMode`**: Removed legacy `permissions.autonomousMode` setting, `setConfirmedAutonomousMode()`, and parallel approval branches across all surfaces. Unified all prompt-free execution under the canonical `permissions.consentMode: "autonomous"` setting.
+  - *Migration Note*: Users who previously configured `permissions.autonomousMode: true` in their configuration file should update to `permissions.consentMode: "autonomous"` or use `/mode autonomous` in the TUI/REPL.
+* **Autonomous Warning Flag (`permissions.autonomousWarned`)**: Added `permissions.autonomousWarned` setting key to persist one-time warning acknowledgment across launches and sessions.
+* **Crash-Proof Overlay Confirmation**: Fixed TUI overlay confirm crash caused by boolean-to-string type mismatches in settings validation, ensured strict write persistence, and made overlay confirmation transactional with automatic rollback on error.
+* **Surface Warning Parity**: Shift+Tab, `/mode autonomous` (in both TUI and readline REPL), and startup in autonomous mode while unwarned now uniformly present the required high-risk confirmation before enabling unprompted execution.
+
 ## [v0.5.5] - 2026-08-27
 
 **Seepient v0.5.5** delivers the complete **Permission Tool Baseline & Consent Modes (Spec 017)** along with upstream **`@earendil-works/pi-ai` 0.84.3** synchronization. It fixes the brokered-tool lockout and zero-effect gate bug, establishes auto-granted baseline capabilities for all built-in brokered tools, classifies read-only/planning/in-memory tools as safe zero-prompt operations, replaces the legacy permission levels with three canonical consent modes (`ask-everything`, `edit-enabled`, `autonomous`), adds secret injection and cross-host redirect credential protection in `EffectBroker`, maps `--yes` / `-y` directly to autonomous mode, and completely demolishes the legacy parallel permission code paths across all surfaces.

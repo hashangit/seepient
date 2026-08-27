@@ -25,7 +25,9 @@ const MODE_DESCRIPTIONS: Record<ConsentMode, string> = {
 
 export const modeHandler: CommandHandler = async (ctx) => {
   const args = ctx.args || "";
-  const targetMode = args.trim().toLowerCase() as ConsentMode;
+  const parts = args.trim().split(/\s+/).filter(Boolean);
+  const targetMode = parts[0]?.toLowerCase() as ConsentMode;
+  const confirmed = parts.includes('--confirm');
 
   if (!targetMode) {
     const currentMode = ctx.agent?.getConsentMode?.() ?? "edit-enabled";
@@ -53,12 +55,33 @@ export const modeHandler: CommandHandler = async (ctx) => {
     };
   }
 
+  const previousMode = ctx.agent?.getConsentMode?.() ?? "edit-enabled";
+
   try {
+    const settings = createSettingsManager();
+
+    if (targetMode === 'autonomous') {
+      const isWarned = settings.get('permissions.autonomousWarned')?.value === true;
+      if (!isWarned && !confirmed) {
+        return {
+          output: [
+            chalk.bold.yellow('⚠ Autonomous Mode Warning'),
+            'In autonomous mode, Seepient executes in-ceiling actions without prompting for approval.',
+            'OS sandbox containment, network broker restrictions, and immutable denies remain active.',
+            '',
+            `To confirm and enable: ${chalk.bold('/mode autonomous --confirm')}`,
+          ].join('\n'),
+        };
+      }
+      if (!isWarned && confirmed) {
+        await settings.set('permissions.autonomousWarned', 'true');
+      }
+    }
+
     if (ctx.agent?.setConsentMode) {
       ctx.agent.setConsentMode(targetMode);
     }
     // Persist to workspace settings
-    const settings = createSettingsManager();
     await settings.set("permissions.consentMode", targetMode);
 
     return {
@@ -67,6 +90,9 @@ export const modeHandler: CommandHandler = async (ctx) => {
       ),
     };
   } catch (err) {
+    if (ctx.agent?.setConsentMode) {
+      ctx.agent.setConsentMode(previousMode);
+    }
     return {
       output: chalk.red(
         `Failed to switch consent mode: ${err instanceof Error ? err.message : String(err)}`,

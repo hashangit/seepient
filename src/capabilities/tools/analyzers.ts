@@ -282,12 +282,17 @@ export async function analyzeWriteFile(
 }
 
 export async function analyzeEditFile(
-  args: { path: string; edits: Array<{ oldText: string; newText: string }> },
+  args: { path?: string; patch?: string; edits?: Array<{ oldText: string; newText: string }> } | Record<string, any>,
   ctx: ToolAnalysisContext,
 ): Promise<PreparedToolAction> {
   const cwd = ctx.workspace.canonicalRoot;
-  const target = await canonicalizePath(args.path, cwd);
-  const jsonBytes = Buffer.from(JSON.stringify(args.edits ?? []), "utf8");
+  let rawPath = typeof args.path === "string" ? args.path : "";
+  if (!rawPath && typeof args.patch === "string") {
+    const match = args.patch.match(/^\[([^#\]]+)/);
+    if (match) rawPath = match[1];
+  }
+  const target = await canonicalizePath(rawPath || "edited-file", cwd);
+  const jsonBytes = Buffer.from(JSON.stringify(args.edits ?? (args.patch ? [{ oldText: "", newText: args.patch }] : [])), "utf8");
   const artifact = await ctx.artifacts.put(jsonBytes, "application/json");
   const expected = snapshotPath(target);
 
@@ -742,8 +747,9 @@ export async function analyzeOptimizePrompt(
     destination = { scheme: "https", host: "api.openai.com", pathPrefix: "/v1/chat/completions" };
   }
 
+  const promptText = (args && typeof args === "object" ? ((args as any).raw_prompt ?? (args as any).prompt ?? "") : "") as string;
   const secretRefs = ["OPENAI_API_KEY"];
-  const payloadBytes = Buffer.from(JSON.stringify({ prompt: args.prompt }), "utf8");
+  const payloadBytes = Buffer.from(JSON.stringify({ prompt: promptText }), "utf8");
   const payloadArtifact = await ctx.artifacts.put(payloadBytes, "application/json");
 
   const effects: EffectRequest[] = [
@@ -764,7 +770,7 @@ export async function analyzeOptimizePrompt(
   const operation: PreparedOperation = isLocal
     ? {
         kind: "none",
-        result: { output: args.prompt, success: true },
+        result: { output: promptText, success: true },
       }
     : {
         kind: "broker",
@@ -788,7 +794,7 @@ export async function analyzeOptimizePrompt(
     operation,
     display: {
       title: "Optimize prompt",
-      summary: args.prompt.slice(0, 60),
+      summary: promptText.slice(0, 60),
       canonicalTargets: isLocal ? [] : [`${destination.scheme}://${destination.host}${destination.pathPrefix ?? ""}`],
     },
     risk: "safe",
@@ -796,23 +802,26 @@ export async function analyzeOptimizePrompt(
 }
 
 export async function analyzeUseSkill(
-  args: { skill: string; args?: Record<string, unknown> },
+  args: { skill_name?: string; args?: Record<string, unknown> } | Record<string, any>,
   ctx: ToolAnalysisContext,
 ): Promise<PreparedToolAction> {
-  const cwd = ctx.workspace.canonicalRoot;
-  const target = await canonicalizePath(args.skill, cwd);
-  const expected = snapshotPath(target) ?? { exists: false };
+  const skillName = (args && typeof args === "object" && typeof args.skill_name === "string") ? args.skill_name : "";
+  const operation: PreparedOperation = {
+    kind: "trusted-host",
+    registrationId: "use_skill",
+    toolName: "use_skill",
+    args: (args && typeof args === "object" ? args : {}) as any,
+  };
 
   const effects: EffectRequest[] = [
-    { kind: "filesystem-read", targets: [target], sensitivity: "normal" },
+    { kind: "host-callback", toolName: "use_skill" },
+    {
+      kind: "model-egress",
+      providerClass: ctx.modelProviderClass,
+      dataClasses: ["normal"],
+      sources: ["skill-registry"],
+    },
   ];
-
-  const operation: PreparedOperation = {
-    kind: "read-file",
-    target,
-    expected,
-    sensitivity: "normal",
-  };
 
   return buildAction({
     toolName: "use_skill",
@@ -822,9 +831,9 @@ export async function analyzeUseSkill(
     effects,
     operation,
     display: {
-      title: `Use skill ${args.skill}`,
-      summary: target.canonicalPath,
-      canonicalTargets: [target.canonicalPath],
+      title: `Use skill ${skillName}`,
+      summary: skillName,
+      canonicalTargets: [],
     },
     risk: "safe",
   });

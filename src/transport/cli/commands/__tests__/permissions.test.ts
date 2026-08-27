@@ -14,7 +14,6 @@ import { Agent } from "../../agent.js";
 import { LocalPolicyStore, computeWorkspaceId, GLOBAL_WORKSPACE_ID } from "../../../../domain/permissions/policy-store.js";
 import { createSnapshotStore } from "../../../../foundations/hashline/snapshot-store.js";
 import { createMockRuntime } from "../../../../domain/__tests__/test-doubles.js";
-import { SettingsManager } from "../../../../domain/settings/settings-manager.js";
 
 let dir: string;
 beforeEach(() => {
@@ -80,23 +79,10 @@ describe("/permissions protected-policy (T307, QS-3.3)", () => {
     expect(res.output).not.toContain("Protected policy");
   });
 
-  it("autonomous mode requires an explicit warning confirmation before enabling", async () => {
+  it("autonomous subcommand directs operator to /mode autonomous", async () => {
     const agent = makeAgent();
-    const set = vi.spyOn(SettingsManager.prototype, "setConfirmedAutonomousMode").mockResolvedValue();
-    vi.spyOn(agent, "isPermissionPipelineEnabled").mockReturnValue(true);
-    const apply = vi.spyOn(agent, "setAutonomousMode").mockImplementation(() => {});
-
-    const warning = await run(agent, "autonomous on");
-    expect(warning.output).toContain("WARNING");
-    expect(warning.output).toContain("autonomous on --confirm");
-    expect(set).not.toHaveBeenCalled();
-    expect(apply).not.toHaveBeenCalled();
-
-    const enabled = await run(agent, "autonomous on --confirm");
-    expect(set).toHaveBeenCalledWith(true);
-    expect(apply).toHaveBeenCalledWith(true);
-    expect(enabled.output).toContain("Autonomous mode is ON");
-    set.mockRestore();
+    const res = await run(agent, "autonomous");
+    expect(res.output).toContain("Autonomous mode is now managed via consent modes. Use /mode autonomous");
   });
 
   it("status lists read-root and model-egress for revocation (review round 9)", async () => {

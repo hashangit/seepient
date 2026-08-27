@@ -29,7 +29,7 @@ import {
 } from './config-loader.js';
 import { runSetup } from './setup.js';
 import { isNonInteractive } from '../../foundations/environment.js';
-import type { ConsentMode } from '../../foundations/settings-schema.js';
+import { type ConsentMode, consentModeToApprovalMode } from '../../foundations/settings-schema.js';
 import type { PersistenceBackend } from '../../foundations/types.js';
 import { createPersistenceBackend } from '../../domain/sessions/session-store.js';
 import { SettingsManager } from '../../domain/settings/settings-manager.js';
@@ -189,15 +189,7 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
             ? (deadlineSettings.get('permissions.consentMode')?.value as ConsentMode)
             : consentMode);
 
-    const autonomousMode =
-      effectiveConsentMode === 'autonomous' ||
-      deadlineSettings.get('permissions.autonomousMode')?.value === true;
-
-    const approvalMode: 'manual' | 'balanced' | 'autonomous' = autonomousMode
-      ? 'autonomous'
-      : effectiveConsentMode === 'ask-everything'
-        ? 'manual'
-        : 'balanced';
+    const approvalMode = consentModeToApprovalMode(effectiveConsentMode);
 
     await agent.enablePermissionPipeline({
       workspaceRoot: process.cwd(),

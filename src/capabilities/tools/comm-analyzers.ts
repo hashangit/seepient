@@ -428,7 +428,7 @@ export async function analyzeGenerateImage(
     operation,
     display: {
       title: `Generate image`,
-      summary: args.prompt.slice(0, 60),
+      summary: (args.prompt ?? "").slice(0, 60),
       canonicalTargets: isLocal ? [] : [`${destination.scheme}://${destination.host}${destination.pathPrefix ?? ""}`],
     },
     risk: "communications",
