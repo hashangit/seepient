@@ -11,7 +11,6 @@ import type { Middleware } from "./contracts/middleware.js";
 // ── Permissions ────────────────────────────────────────────────────────
 
 export type ToolRiskCategory = "safe" | "edit" | "communications" | "destructive";
-export type PermissionLevel = "strict" | "moderate" | "permissive";
 
 // ── Tool Approval Grants ──────────────────────────────────────────────
 
@@ -190,17 +189,15 @@ export interface GenerateTextOptions {
   metadata?: Record<string, unknown>;
   middleware?: Middleware[];
   approveTool?: ApproveToolFn;
-  permissionLevel?: PermissionLevel;
   /** Pre-grant tools so matching calls skip the approval prompt. */
   grants?: GrantSpec[];
   /**
-   * Spec 008 opt-in: route tool calls through the new Domain policy pipeline
-   * (PolicyEngine → ApprovalBroker → ExecutionBoundary → audit) instead of
-   * the legacy matrix/grant/admit branches. When true, the composition root
-   * constructs an ActionLifecycle and the agent loop delegates each tool
-   * call to it. Default false — legacy behavior is preserved.
+   * Spec 008 / 017 domain policy pipeline options:
    */
   permissionPipeline?: boolean;
+  consentMode?: "ask-everything" | "edit-enabled" | "autonomous";
+  deploymentCeiling?: import("./contracts/permission-policy.js").CapabilitySet | import("./contracts/permission-policy.js").Capability[];
+  principalPolicy?: import("./contracts/permission-policy.js").CapabilitySet | import("./contracts/permission-policy.js").Capability[];
 }
 
 export interface GenerateTextResult {
@@ -249,7 +246,6 @@ export interface AgentCreateOptions {
   skills?: string[] | boolean;
   cwd?: string;
   maxSteps?: number;
-  permissionLevel?: PermissionLevel;
   persist?: string | PersistenceBackend | PersistenceConfig | SessionStore;
   hooks?: Hooks;
   config?: Record<string, unknown>;
@@ -258,8 +254,11 @@ export interface AgentCreateOptions {
   approveTool?: ApproveToolFn;
   /** Pre-grant tools so matching calls skip the approval prompt. */
   grants?: GrantSpec[];
-  /** Spec 008 opt-in policy pipeline (see GenerateTextOptions). */
+  /** Spec 008 / 017 domain policy pipeline options: */
   permissionPipeline?: boolean;
+  consentMode?: "ask-everything" | "edit-enabled" | "autonomous";
+  deploymentCeiling?: import("./contracts/permission-policy.js").CapabilitySet | import("./contracts/permission-policy.js").Capability[];
+  principalPolicy?: import("./contracts/permission-policy.js").CapabilitySet | import("./contracts/permission-policy.js").Capability[];
 }
 
 export interface SdkAgent {

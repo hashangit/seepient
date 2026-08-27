@@ -10,7 +10,6 @@ import type { Duplex } from "stream";
 import type {
   Message,
   Usage,
-  PermissionLevel,
 } from "../../foundations/types.js";
 
 // ── WS library type shims ────────────────────────────────────────────
@@ -60,7 +59,6 @@ export interface ChatMessage {
     tools?: string[];
     maxSteps?: number;
     skills?: string[];
-    permissionLevel?: PermissionLevel;
   };
   sessionId?: string;
 }
@@ -330,7 +328,6 @@ export interface WebSocketHandlerContext {
     maxSteps?: number;
     skills?: string[];
     sessionId?: string;
-    permissionLevel?: PermissionLevel;
     approveTool?: import("../../foundations/types.js").ApproveToolFn;
     onText: (delta: string) => void;
     onToolCall: (info: { name: string; args: Record<string, unknown>; callId: string }) => void;
@@ -342,7 +339,6 @@ export interface WebSocketHandlerContext {
   }) => void;
   listModels: () => Record<string, string[]>;
   listSkills: () => { name: string; description: string; tags: string[] }[];
-  maxPermissionLevel?: PermissionLevel;
   settingsHandlerContext?: import("../http/settings-handlers.js").SettingsHandlerContext;
 }
 
@@ -353,8 +349,6 @@ export interface ConnectionState {
   currentAbortController: AbortController | null;
   activeProvider: string | null;
   activeModel: string | null;
-  permissionLevel?: PermissionLevel;
-  maxPermissionLevel?: PermissionLevel;
   apiKeyHash: string;
   apiKey?: import("../auth/auth.js").ApiKeyEntry;
 }

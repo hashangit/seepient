@@ -115,7 +115,7 @@ notifications.dingtalk.webhook   → config.dingtalkWebhook
 notifications.dingtalk.keyword   → config.dingtalkKeyword
 notifications.wecom.webhook      → config.wecomWebhook
 notifications.wecom.keyword      → config.wecomKeyword
-agent.permissionLevel            → config.permissionLevel
+permissions.consentMode          → config.consentMode
 agent.autoConfirm                → config.autoConfirm
 ```
 
@@ -235,9 +235,9 @@ providers.openai.apiKey = sk-...4kQ8
 **REQ-4.3.2:** The `get` subcommand MUST show the default when it differs from the current value:
 
 ```
-agent.permissionLevel = strict
-  Default: moderate
-  Source: env: SEEPIENT_PERMISSION
+permissions.consentMode = edit-enabled
+  Default: edit-enabled
+  Source: default
 ```
 
 ### 4.4 Restart Indicators
@@ -282,7 +282,7 @@ agent.permissionLevel = strict
   Error: agent.autoConfirm must be true or false. Got: "yes"
 ```
 
-**REQ-5.1.4 — Enum fields:** `set` validates against the allowed set. For `agent.permissionLevel`, allowed values are `strict`, `moderate`, `permissive`.
+**REQ-5.1.4 — Enum fields:** `set` validates against the allowed set. For `permissions.consentMode`, allowed values are `ask-everything`, `edit-enabled`, `autonomous`.
 
 ### 5.2 Secret/Sensitive Field Handling
 
@@ -323,7 +323,7 @@ agent.permissionLevel = strict
 
 | Category | Settings | Effect |
 |---|---|---|
-| **Hot-apply** | `smtp.*`, `search.*`, `notifications.*`, `image.*`, `agent.autoConfirm`, `agent.permissionLevel` | Immediate — the in-memory `config` object is updated in place. |
+| **Hot-apply** | `smtp.*`, `search.*`, `notifications.*`, `image.*`, `agent.autoConfirm`, `permissions.consentMode` | Immediate — the in-memory `config` object is updated in place. |
 | **Restart-required** | `provider`, `providers.*.apiKey`, `providers.*.model`, `providers.*.baseUrl` | Requires REPL restart — the active provider instance and Agent are not re-created at runtime (except via `/models`). |
 
 **REQ-5.5.2:** After a successful `set`, update the in-memory config object (`ctx.config`) for hot-apply settings so subsequent tool calls use the new value within the same session.
@@ -547,7 +547,7 @@ type SettingsSchemaEntry = {
 | AT-06 | `/settings reset smtp.host` | Key removed from config file |
 | AT-07 | `/settings get unknown.key` | Error: "Unknown setting" |
 | AT-08 | `/settings set image.n abc` | Error: "must be a number" |
-| AT-09 | `/settings set agent.permissionLevel high` | Error: "must be one of: strict, moderate, permissive" |
+| AT-09 | `/settings set permissions.consentMode high` | Error: "must be one of: ask-everything, edit-enabled, autonomous" |
 | AT-10 | `/settings wizard` | Full setup wizard runs |
 | AT-11 | `/settings export` | Full config printed as JSON, secrets masked |
 | AT-12 | `/settings` in non-TTY mode | Falls back to list output |

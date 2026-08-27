@@ -12,13 +12,14 @@ import * as os from 'os';
 // ── Constants ──────────────────────────────────────────────────────────
 
 export function getGlobalConfigDir(): string {
-  return path.join(os.homedir(), '.seepient');
+  return process.env.SEEPIENT_CONFIG_GLOBAL_DIR || path.join(os.homedir(), '.seepient');
 }
 export function getGlobalConfigFile(): string {
-  return path.join(getGlobalConfigDir(), 'setting.json');
+  return process.env.SEEPIENT_GLOBAL_CONFIG_FILE || path.join(getGlobalConfigDir(), 'setting.json');
 }
-export function getLocalConfigFile(): string {
-  return path.join(process.cwd(), '.seepient', 'setting.json');
+export function getLocalConfigFile(customCwd?: string): string {
+  const cwd = customCwd || process.env.SEEPIENT_CWD || process.cwd();
+  return process.env.SEEPIENT_LOCAL_CONFIG_FILE || path.join(cwd, '.seepient', 'setting.json');
 }
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -41,7 +42,7 @@ export interface AppConfig {
   smtpFrom?: string;
   tavilyApiKey?: string;
   autoConfirm?: boolean;
-  permissionLevel?: "strict" | "moderate" | "permissive";
+  consentMode?: "ask-everything" | "edit-enabled" | "autonomous";
   feishuWebhook?: string;
   feishuKeyword?: string;
   dingtalkWebhook?: string;
@@ -69,10 +70,10 @@ export function getConfigDir(global?: boolean): string {
 /**
  * Returns both global and local config paths.
  */
-export function getConfigPaths(): { global: string; local: string; globalDir: string } {
+export function getConfigPaths(customCwd?: string): { global: string; local: string; globalDir: string } {
   return {
     global: getGlobalConfigFile(),
-    local: getLocalConfigFile(),
+    local: getLocalConfigFile(customCwd),
     globalDir: getGlobalConfigDir(),
   };
 }
@@ -108,12 +109,19 @@ export function loadMergedConfig(customCwd?: string): AppConfig {
   if (global.warning) {
     console.warn(`[Seepient] ${global.warning}`);
   }
-  const cwd = customCwd || process.env.SEEPIENT_CWD || process.cwd();
-  const local = loadJsonConfig(path.join(cwd, '.seepient', 'setting.json'));
+  const local = loadJsonConfig(getLocalConfigFile(customCwd));
   if (local.warning) {
     console.warn(`[Seepient] ${local.warning}`);
   }
-  return { ...global.config, ...local.config };
+  const merged: any = { ...global.config };
+  for (const [k, v] of Object.entries(local.config)) {
+    if (v !== null && typeof v === 'object' && !Array.isArray(v) && typeof merged[k] === 'object' && merged[k] !== null && !Array.isArray(merged[k])) {
+      merged[k] = { ...merged[k], ...v };
+    } else {
+      merged[k] = v;
+    }
+  }
+  return merged;
 }
 
 /**
@@ -135,11 +143,11 @@ export function applyEnvOverrides(config: AppConfig): AppConfig {
   if (process.env.WECOM_WEBHOOK) config.wecomWebhook = process.env.WECOM_WEBHOOK;
   if (process.env.WECOM_KEYWORD) config.wecomKeyword = process.env.WECOM_KEYWORD;
 
-  // Permission level
-  if (process.env.SEEPIENT_PERMISSION) {
-    const val = process.env.SEEPIENT_PERMISSION;
-    if (val === "strict" || val === "moderate" || val === "permissive") {
-      config.permissionLevel = val;
+  // Consent mode
+  if (process.env.SEEPIENT_CONSENT_MODE) {
+    const val = process.env.SEEPIENT_CONSENT_MODE;
+    if (val === "ask-everything" || val === "edit-enabled" || val === "autonomous") {
+      config.consentMode = val;
     }
   }
 

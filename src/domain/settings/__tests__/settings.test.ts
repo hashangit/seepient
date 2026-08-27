@@ -71,17 +71,17 @@ describe('settings-schema', () => {
     expect(isSecretField('smtp.pass')).toBe(true);
     expect(isSecretField('search.tavilyApiKey')).toBe(true);
     expect(isSecretField('smtp.host')).toBe(false);
-    expect(isSecretField('agent.permissionLevel')).toBe(false);
+    expect(isSecretField('permissions.consentMode')).toBe(false);
   });
 
   it('isRestartRequired identifies restart-required fields', () => {
     expect(isRestartRequired('smtp.host')).toBe(false);
-    expect(isRestartRequired('agent.permissionLevel')).toBe(false);
+    expect(isRestartRequired('permissions.consentMode')).toBe(false);
   });
 
   it('getSettingsByCategory returns correct keys', () => {
     const permKeys = getSettingsByCategory('permissions');
-    expect(permKeys).toContain('agent.permissionLevel');
+    expect(permKeys).toContain('permissions.consentMode');
     expect(permKeys).toContain('agent.autoConfirm');
     expect(permKeys).toContain('permissions.autonomousMode');
     expect(permKeys).toContain('permissions.approvalTimeoutMs');
@@ -108,7 +108,7 @@ describe('settings-schema', () => {
 
   it('ENV_VAR_MAP has entries for settings with env var overrides', () => {
     expect(ENV_VAR_MAP.get('smtp.host')).toBe('SMTP_HOST');
-    expect(ENV_VAR_MAP.get('agent.permissionLevel')).toBe('SEEPIENT_PERMISSION');
+    expect(ENV_VAR_MAP.get('permissions.consentMode')).toBe('SEEPIENT_CONSENT_MODE');
     expect(ENV_VAR_MAP.get('permissions.approvalTimeoutMs')).toBe('SEEPIENT_APPROVAL_TIMEOUT_MS');
   });
 });
@@ -178,8 +178,8 @@ describe('SettingsManager', () => {
 
   it('set() rejects invalid enum values', async () => {
     const mgr = createTestManager();
-    await expect(mgr.set('agent.permissionLevel', 'high')).rejects.toThrow(SettingsError);
-    await expect(mgr.set('agent.permissionLevel', 'high')).rejects.toThrow('must be one of');
+    await expect(mgr.set('permissions.consentMode', 'high')).rejects.toThrow(SettingsError);
+    await expect(mgr.set('permissions.consentMode', 'high')).rejects.toThrow('must be one of');
   });
 
   it('set() rejects invalid number values', async () => {

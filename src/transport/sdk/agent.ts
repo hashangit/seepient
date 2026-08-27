@@ -28,9 +28,16 @@ import { createHookExecutor } from "../../domain/hooks.js";
 import { StreamManager } from "../../domain/streaming/stream-manager.js";
 import { resolveTools, getAllToolDefinitions } from "./tools.js";
 import { createPersistenceBackend, persistSession } from "../../domain/sessions/session-store.js";
+
+function toCapabilitySet(cap: import("../../foundations/contracts/permission-policy.js").CapabilitySet | import("../../foundations/contracts/permission-policy.js").Capability[] | undefined): import("../../foundations/contracts/permission-policy.js").CapabilitySet | undefined {
+  if (!cap) return undefined;
+  if (Array.isArray(cap)) {
+    return { version: 1, capabilities: cap };
+  }
+  return cap;
+}
 import { runAgentLoop } from "../../domain/agent-loop.js";
 import type { AgentLoopOptions } from "../../domain/agent-loop.js";
-import { createSessionGrantStore } from "../../domain/grants.js";
 import { initializeSkillRegistry } from "../../capabilities/skills/index.js";
 import { buildSkillCatalog } from "../../domain/skills/skill-catalog.js";
 import {
@@ -116,9 +123,6 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
   // Hooks
   const hookExecutor = createHookExecutor(opts.hooks);
 
-  // Pre-grants (session-scoped GrantStore built once from opts.grants).
-  const grantStore = opts.grants?.length ? createSessionGrantStore(opts.grants) : undefined;
-
   // State
   const messages: Message[] = [];
   const sessionId = generateId();
@@ -142,6 +146,10 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
 
     const broker = legacyApproveToolToBroker(opts.approveTool);
     const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary();
+    const approvalMode = opts.consentMode
+      ? (opts.consentMode === 'autonomous' ? 'autonomous' : opts.consentMode === 'ask-everything' ? 'manual' : 'balanced')
+      : (opts.approveTool ? "manual" : "never");
+
     wiredPipeline = await buildActionLifecycle({
       principalId: "sdk-user",
       runId: sessionId,
@@ -149,7 +157,9 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
       modelProviderClass: (opts.provider ?? "openai") as string,
       approvalBroker: broker,
       executionBoundary: boundary,
-      approvalMode: opts.approveTool ? "manual" : "never",
+      approvalMode,
+      deploymentCeiling: toCapabilitySet(opts.deploymentCeiling),
+      principalPolicy: toCapabilitySet(opts.principalPolicy),
       artifacts: sharedArtifacts,
       terminalOutbox: auditOutbox,
     });
@@ -254,8 +264,6 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
       metadata: opts.metadata,
       middleware: opts.middleware,
       approveTool: opts.approveTool,
-      permissionLevel: opts.permissionLevel,
-      grantStore: grantStore,
       wiredPipeline,
     });
 
@@ -333,8 +341,6 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
           metadata: opts.metadata,
           middleware: opts.middleware,
           approveTool: opts.approveTool,
-          permissionLevel: opts.permissionLevel,
-          grantStore: grantStore,
           wiredPipeline,
           onStep: (step) => {
             if (streamOptions?.onStep) streamOptions.onStep(step);

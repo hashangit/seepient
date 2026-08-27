@@ -90,7 +90,7 @@ export function renderWizardHeader(manager: SettingsManager): string {
   const halfWidth = Math.floor((width - 4) / 2);
 
   const provider = manager.get('provider').value ?? 'not configured';
-  const permLevel = manager.get('agent.permissionLevel').value ?? 'moderate';
+  const consentMode = manager.get('permissions.consentMode')?.value ?? 'edit-enabled';
   const autoConfirm = manager.get('agent.autoConfirm').value ?? false;
 
   // Resolve current model from active provider
@@ -109,7 +109,7 @@ export function renderWizardHeader(manager: SettingsManager): string {
 
   const left1 = `Provider: ${provider}`;
   const right1 = `Model: ${model}`;
-  const left2 = `Permissions: ${permLevel}`;
+  const left2 = `Mode: ${consentMode}`;
   const right2 = `Auto-confirm: ${autoConfirm ? 'on' : 'off'}`;
 
   const lines: string[] = [];

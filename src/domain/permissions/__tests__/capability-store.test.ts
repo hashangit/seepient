@@ -90,6 +90,120 @@ describe("capability covers (T106)", () => {
       }),
     ).toBe(false);
   });
+
+  it("network-destination wildcard host coverage and scheme preservation", () => {
+    const outer: Capability = {
+      kind: "network-destination",
+      scheme: "https",
+      host: "*",
+    };
+    expect(
+      covers(outer, {
+        kind: "network-destination",
+        scheme: "https",
+        host: "api.tavily.com",
+      }),
+    ).toBe(true);
+    expect(
+      covers(outer, {
+        kind: "network-destination",
+        scheme: "https",
+        host: "openai.com",
+        port: 443,
+      }),
+    ).toBe(true);
+    expect(
+      covers(outer, {
+        kind: "network-destination",
+        scheme: "http",
+        host: "insecure.example.com",
+      }),
+    ).toBe(false);
+
+    const outerWithPort: Capability = {
+      kind: "network-destination",
+      scheme: "https",
+      host: "*",
+      port: 443,
+    };
+    expect(
+      covers(outerWithPort, {
+        kind: "network-destination",
+        scheme: "https",
+        host: "any.org",
+        port: 443,
+      }),
+    ).toBe(true);
+    expect(
+      covers(outerWithPort, {
+        kind: "network-destination",
+        scheme: "https",
+        host: "any.org",
+        port: 8443,
+      }),
+    ).toBe(false);
+  });
+
+  it("external-recipient wildcard coverage for service and recipient", () => {
+    const wildAll: Capability = {
+      kind: "external-recipient",
+      service: "*",
+      recipient: "*",
+    };
+    expect(
+      covers(wildAll, {
+        kind: "external-recipient",
+        service: "smtp",
+        recipient: "alice@example.com",
+      }),
+    ).toBe(true);
+    expect(
+      covers(wildAll, {
+        kind: "external-recipient",
+        service: "feishu",
+        recipient: "im-group",
+      }),
+    ).toBe(true);
+
+    const wildRecipient: Capability = {
+      kind: "external-recipient",
+      service: "smtp",
+      recipient: "*",
+    };
+    expect(
+      covers(wildRecipient, {
+        kind: "external-recipient",
+        service: "smtp",
+        recipient: "bob@example.com",
+      }),
+    ).toBe(true);
+    expect(
+      covers(wildRecipient, {
+        kind: "external-recipient",
+        service: "dingtalk",
+        recipient: "im-group",
+      }),
+    ).toBe(false);
+  });
+
+  it("secret-ref wildcard coverage", () => {
+    const wildRef: Capability = {
+      kind: "secret-ref",
+      ref: "*",
+    };
+    expect(
+      covers(wildRef, {
+        kind: "secret-ref",
+        ref: "tavilyApiKey",
+      }),
+    ).toBe(true);
+    expect(
+      covers(wildRef, {
+        kind: "secret-ref",
+        ref: "OPENAI_API_KEY",
+      }),
+    ).toBe(true);
+  });
 });
 
 describe("monotonic intersection (T106 property)", () => {
@@ -355,3 +469,37 @@ describe("exact vs prefix argv coverage (P0 review fix)", () => {
     expect(covers(bounded, { kind: "process", executable: "/usr/bin/git", argvPrefix: ["log"], argvExact: true })).toBe(false);
   });
 });
+
+describe("effectiveCapabilities wildcard intersection (spec 017, T003)", () => {
+  it("intersects wildcard deployment ceiling with concrete grant", () => {
+    const deployment = set(
+      { kind: "network-destination", scheme: "https", host: "*" },
+      { kind: "external-recipient", service: "*", recipient: "*" },
+      { kind: "secret-ref", ref: "*" },
+    );
+    const principal = set(
+      { kind: "network-destination", scheme: "https", host: "api.tavily.com" },
+      { kind: "external-recipient", service: "smtp", recipient: "alice@example.com" },
+      { kind: "secret-ref", ref: "tavilyApiKey" },
+    );
+    const runtime = deployment;
+    const active = principal;
+
+    const eff = effectiveCapabilities(deployment, principal, runtime, active);
+    expect(eff.capabilities).toContainEqual({
+      kind: "network-destination",
+      scheme: "https",
+      host: "api.tavily.com",
+    });
+    expect(eff.capabilities).toContainEqual({
+      kind: "external-recipient",
+      service: "smtp",
+      recipient: "alice@example.com",
+    });
+    expect(eff.capabilities).toContainEqual({
+      kind: "secret-ref",
+      ref: "tavilyApiKey",
+    });
+  });
+});
+

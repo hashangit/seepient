@@ -1,7 +1,7 @@
 /**
  * use-agent — agent run state for the TUI.
  *
- * Drives `Agent.chat(input, signal, approveTool, permissionLevel, onStep)`,
+ * Drives `Agent.chat(input, signal, approveTool, onStep)` ,
  * which (in TUI mode) opts into token streaming — the loop emits `text_delta`
  * steps as tokens arrive. Those accumulate into `streamingText` (rendered live
  * in the message area, since Ink `<Static>` freezes completed entries); on a
@@ -22,7 +22,7 @@ import type {
   PermissionRequest,
   TuiApprovalSelection,
 } from '../../../foundations/contracts/permission-policy.js';
-import type { ApproveToolFn, ApprovalContext, ApprovalDecision, PermissionLevel, StepResult, CumulativeUsage } from '../../../foundations/types.js';
+import type { ApproveToolFn, ApprovalContext, ApprovalDecision, StepResult, CumulativeUsage } from '../../../foundations/types.js';
 import type { Todo } from '../components/goal-status.js';
 import type { FeedApi } from './use-feed.js';
 import type { WidgetHost } from '../widget-host.js';
@@ -75,11 +75,11 @@ export interface AgentApi {
 export interface UseAgentArgs {
   agent: Agent;
   feed: FeedApi;
-  permissionLevel?: PermissionLevel;
+  consentMode?: import('../../../foundations/settings-schema.js').ConsentMode;
   widgetHost?: WidgetHost;
 }
 
-export function useAgent({ agent, feed, permissionLevel, widgetHost }: UseAgentArgs): AgentApi {
+export function useAgent({ agent, feed, consentMode, widgetHost }: UseAgentArgs): AgentApi {
   const [isRunning, setIsRunning] = useState(false);
   const [pendingPermission, setPendingPermission] = useState<PendingPermission | null>(null);
   const [streamingText, setStreamingText] = useState('');
@@ -97,8 +97,6 @@ export function useAgent({ agent, feed, permissionLevel, widgetHost }: UseAgentA
   // stale state (CLAUDE.md §6: long-lived callbacks read through refs).
   const feedRef = useRef(feed);
   feedRef.current = feed;
-  const permissionLevelRef = useRef(permissionLevel);
-  permissionLevelRef.current = permissionLevel;
   const resolverRef = useRef<((value: TuiApprovalSelection | ApprovalDecision) => void) | null>(null);
 
   // Spec 011: the native typed approval broker. Created once; its presenter
@@ -311,7 +309,6 @@ export function useAgent({ agent, feed, permissionLevel, widgetHost }: UseAgentA
         resolvedInput,
         signal,
         approveTool,
-        permissionLevelRef.current,
         onStep,
       );
       commitStreaming(); // commit the final assistant message if any

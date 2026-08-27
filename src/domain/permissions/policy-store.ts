@@ -101,6 +101,13 @@ function computeLegacyPolicyDigest(policy: CapabilitySet): string {
   return createHash("sha256").update(canonical, "utf8").digest("hex");
 }
 
+/**
+ * Current default deployment ceiling version (spec 017).
+ * Version 1 was the 4-entry ceiling without network/recipient/secret wildcards.
+ * Version 2 adds wildcard network-destination, external-recipient, and secret-ref.
+ */
+export const CURRENT_CEILING_VERSION = 2;
+
 /** Construct an empty snapshot (first-read default when no file exists). */
 function emptySnapshot(workspaceId: string): PolicySnapshot {
   const empty: CapabilitySet = { version: 1, capabilities: [] };
@@ -109,6 +116,7 @@ function emptySnapshot(workspaceId: string): PolicySnapshot {
     version: 0,
     policyDigest: computePolicyDigest(empty),
     policy: empty,
+    ceilingVersion: CURRENT_CEILING_VERSION,
   };
 }
 
@@ -117,6 +125,7 @@ interface StoredSnapshot {
   version: number;
   policyDigest: string;
   policy: CapabilitySet;
+  ceilingVersion?: number;
   /** Forensic record (P0 review fix): who performed the last mutation and
    *  when — persisted so the store itself carries provenance, not only the
    *  action audit trail. Optional for legacy snapshots. */
@@ -281,6 +290,10 @@ export class LocalPolicyStore implements PolicyStoreContract {
         version: current.version + 1,
         policyDigest: computePolicyDigest(next, { mutationId, mutationHistory }),
         policy: next,
+        ceilingVersion:
+          current.ceilingVersion !== undefined
+            ? Math.max(current.ceilingVersion, CURRENT_CEILING_VERSION)
+            : CURRENT_CEILING_VERSION,
         // P0 review fix: the compare-and-set actor was previously ignored.
         grantedBy: _actor,
         grantedAt: Date.now(),

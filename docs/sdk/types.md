@@ -19,19 +19,19 @@ import type { Message, GenerateTextResult, SdkAgent } from "seepient";
 type ProviderType = "openai" | "anthropic" | "glm" | "openai-compatible";
 ```
 
-### PermissionLevel
+### ConsentMode
 
-Controls which tools auto-execute vs. require human approval:
+Controls tool approval behavior across the unified policy pipeline:
 
 ```typescript
-type PermissionLevel = "strict" | "moderate" | "permissive";
+type ConsentMode = "ask-everything" | "edit-enabled" | "autonomous";
 ```
 
-| Level | Auto-executes |
-|-------|---------------|
-| `strict` | Nothing — all tools require approval |
-| `moderate` | Safe tools only |
-| `permissive` | Safe + edit + communications tools |
+| Mode | Behavior |
+|------|----------|
+| `edit-enabled` | Safe reads, workspace writes, and normal tools auto-execute; prompts for high-risk commands and external communications (default) |
+| `ask-everything` | Prompts for human approval on all side-effecting operations |
+| `autonomous` | Automatically approves all operations within the deployment ceiling |
 
 ### ToolRiskCategory
 
@@ -147,8 +147,8 @@ interface GenerateTextOptions {
   metadata?: Record<string, unknown>;
   /** Extra config passed to tool handlers. */
   config?: Record<string, unknown>;
-  /** Permission level controlling tool auto-execution. Default: "moderate". */
-  permissionLevel?: PermissionLevel;
+  /** Consent mode controlling tool auto-execution. Default: "edit-enabled". */
+  consentMode?: ConsentMode;
 }
 ```
 
@@ -245,8 +245,8 @@ interface AgentCreateOptions {
   skills?: string[];
   /** Maximum agent loop iterations. Default: 10. */
   maxSteps?: number;
-  /** Permission level controlling tool auto-execution. Default: "moderate". */
-  permissionLevel?: PermissionLevel;
+  /** Consent mode controlling tool auto-execution. Default: "edit-enabled". */
+  consentMode?: ConsentMode;
   /** Session persistence: path, backend instance, or config object. */
   persist?: string | PersistenceBackend | PersistenceConfig;
   /** Lifecycle callbacks. */

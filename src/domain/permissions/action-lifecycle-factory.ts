@@ -27,6 +27,8 @@ import {
 import { setCovers } from "./capability-store.js";
 import { DEFAULT_ANALYZERS } from "./default-analyzers.js";
 import { COMM_ANALYZERS } from "./comm-analyzers.js";
+import { deriveConfigGrants } from "./config-derived-grants.js";
+import { CURRENT_CEILING_VERSION } from "./policy-store.js";
 import type { ToolAnalyzer } from "./default-analyzers.js";
 import type {
   ApprovalBroker,
@@ -82,6 +84,7 @@ export interface ActionLifecycleInputs {
   /** Optional: active session capabilities baseline. */
   activeCapabilities?: CapabilitySet;
   approvalMode?: "manual" | "balanced" | "never" | "autonomous";
+  consentMode?: "ask-everything" | "edit-enabled" | "autonomous";
   /** Interaction contract — derived from the broker by default. */
   interaction?: PolicyContext["interaction"];
   /**
@@ -135,6 +138,14 @@ export interface WiredActionLifecycle {
   auditStore: AuditStore;
 }
 
+export const DEFAULT_LOCAL_DEPLOYMENT_CEILING_CAPABILITIES: Capability[] = [
+  { kind: "process" },
+  { kind: "model-egress", providerClass: "*", dataClasses: ["normal", "sensitive", "secret"] },
+  { kind: "network-destination", scheme: "https", host: "*" },
+  { kind: "external-recipient", service: "*", recipient: "*" },
+  { kind: "secret-ref", ref: "*" },
+];
+
 /**
  * Build a wired ActionLifecycle. The policy store is read ONCE at startup to
  * seed `principalPolicy`; subsequent /permissions approvals take effect on
@@ -166,8 +177,7 @@ export async function buildActionLifecycle(
     capabilities: [
       { kind: "read-root", root },
       { kind: "write-root", root },
-      { kind: "process" },
-      { kind: "model-egress", providerClass: "*", dataClasses: ["normal", "sensitive"] },
+      ...DEFAULT_LOCAL_DEPLOYMENT_CEILING_CAPABILITIES,
     ],
   };
 
@@ -185,6 +195,37 @@ export async function buildActionLifecycle(
     if (snap.version > 0 || snap.policy.capabilities.length > 0) {
       principalPolicy = snap.policy;
       hasStoredPolicy = true;
+      // Stored-policy reconciliation (FR-019 / spec 017):
+      // If the snapshot predates the ceiling widening (ceilingVersion < CURRENT_CEILING_VERSION or undefined),
+      // seed newly-defaulted capability kinds into stored principal policies.
+      if (snap.ceilingVersion === undefined || snap.ceilingVersion < CURRENT_CEILING_VERSION) {
+        const newlyDefaulted: Capability[] = [
+          { kind: "network-destination", scheme: "https", host: "*" },
+          { kind: "external-recipient", service: "*", recipient: "*" },
+          { kind: "secret-ref", ref: "*" },
+        ];
+        const reconciledCaps = [...principalPolicy.capabilities];
+        let changed = false;
+        for (const cap of newlyDefaulted) {
+          if (!reconciledCaps.some((c) => c.kind === cap.kind)) {
+            reconciledCaps.push(cap);
+            changed = true;
+          }
+        }
+        if (changed) {
+          principalPolicy = { version: 1 as const, capabilities: reconciledCaps };
+          if (snap.version > 0) {
+            await policyStore
+              .compareAndSet(
+                workspaceId,
+                snap.version,
+                principalPolicy,
+                { kind: "service", authorityId: "policy-reconciliation", authenticatedBy: "system" },
+              )
+              .catch(() => {});
+          }
+        }
+      }
     } else {
       principalPolicy = inputs.principalPolicy ?? deploymentCeiling;
       hasStoredPolicy = Boolean(inputs.principalPolicy);
@@ -243,8 +284,13 @@ export async function buildActionLifecycle(
     };
   }
 
-  // Runtime baseline: caller-supplied or pass-through from deploymentCeiling.
-  const runtimeBaseline = inputs.runtimeBaseline ?? deploymentCeiling;
+  // Runtime baseline: caller-supplied or pass-through from deploymentCeiling + config-derived grants.
+  const derivedGrants = deriveConfigGrants({ workspaceRoot: inputs.workspaceRoot });
+  const defaultRuntimeBaseline: CapabilitySet = {
+    version: 1 as const,
+    capabilities: [...deploymentCeiling.capabilities, ...derivedGrants],
+  };
+  const runtimeBaseline = inputs.runtimeBaseline ?? defaultRuntimeBaseline;
 
   // Active session capabilities:
   // - If caller provided explicit activeCapabilities, use them (no widening).
@@ -289,7 +335,15 @@ export async function buildActionLifecycle(
     runtimeBaseline,
     activeCapabilities: { version: 1, capabilities: activeCapabilities.capabilities },
     immutableDenies: inputs.immutableDenies ?? [],
-    approvalMode: inputs.approvalMode ?? "manual",
+    approvalMode:
+      inputs.approvalMode ??
+      (inputs.consentMode === "ask-everything"
+        ? "manual"
+        : inputs.consentMode === "autonomous"
+          ? "autonomous"
+          : inputs.consentMode === "edit-enabled"
+            ? "balanced"
+            : "manual"),
     interaction: inputs.interaction ?? {
       mode: inputs.approvalBroker.mode,
       // Spec 011 (T033 + settings): the local approval deadline. Default ten
