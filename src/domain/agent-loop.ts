@@ -6,7 +6,7 @@ import type { ToolDefinition } from "../foundations/contracts/tool.js";
 import { now, toSeepientError, messageToCanonicalMessage } from "./context/message-convert.js";
 import { generateId } from "../foundations/id.js";
 import { StreamingResponseAccumulator } from "./streaming/stream-accumulator.js";
-import { executeTool, normalizeToolResult } from "./tool-executor.js";
+import { normalizeToolResult } from "./tool-executor.js";
 import type { HookExecutor } from "./hooks.js";
 import type { Middleware, PipelineContext } from "../foundations/contracts/middleware.js";
 import { compose } from "../foundations/contracts/middleware.js";
@@ -68,6 +68,62 @@ export interface AgentLoopResult {
   contextTokens: number;
   finishReason: "stop" | "max_steps" | "error" | "aborted";
   error?: AgentLoopError;
+}
+
+/**
+ * Fallback extractor for reasoning models that emit tool calls inside text or markdown
+ * instead of structured API deltas.
+ */
+export function extractInBandToolCalls(content: string): {
+  toolCalls: Array<{ id: string; name: string; arguments: string }>;
+  remainingText: string;
+} {
+  if (!content || typeof content !== "string") {
+    return { toolCalls: [], remainingText: content };
+  }
+
+  const calls: Array<{ id: string; name: string; arguments: string }> = [];
+  let remaining = content;
+
+  // 1. XML-style: <tool_call>{"name": "...", "arguments": {...}}</tool_call>
+  const xmlPattern = /<tool_call>([\s\S]*?)<\/tool_call>/gi;
+  let xmlMatch: RegExpExecArray | null;
+  while ((xmlMatch = xmlPattern.exec(content)) !== null) {
+    try {
+      const parsed = JSON.parse(xmlMatch[1].trim());
+      if (parsed && typeof parsed.name === "string") {
+        calls.push({
+          id: `call_${generateId().slice(0, 8)}`,
+          name: parsed.name,
+          arguments: typeof parsed.arguments === "object" ? JSON.stringify(parsed.arguments) : String(parsed.arguments || "{}"),
+        });
+        remaining = remaining.replace(xmlMatch[0], "").trim();
+      }
+    } catch {}
+  }
+  remaining = remaining.replace(/<\/?tool_calls>/gi, "").trim();
+
+  // 2. Markdown fence: ```tool_call\n...\n``` or ```json\n{"name": "...", "arguments": ...}\n```
+  if (calls.length === 0) {
+    const fencePattern = /```(?:tool_call|json)\s*([\s\S]*?)```/gi;
+    let fenceMatch: RegExpExecArray | null;
+    while ((fenceMatch = fencePattern.exec(content)) !== null) {
+      try {
+        const parsed = JSON.parse(fenceMatch[1].trim());
+        if (parsed && typeof parsed.name === "string" && (parsed.arguments !== undefined || parsed.parameters !== undefined)) {
+          const args = parsed.arguments ?? parsed.parameters;
+          calls.push({
+            id: `call_${generateId().slice(0, 8)}`,
+            name: parsed.name,
+            arguments: typeof args === "object" ? JSON.stringify(args) : String(args || "{}"),
+          });
+          remaining = remaining.replace(fenceMatch[0], "").trim();
+        }
+      } catch {}
+    }
+  }
+
+  return { toolCalls: calls, remainingText: remaining };
 }
 
 function classifyOutputSensitivity(toolName: string, args: Record<string, unknown>, output: string): string {
@@ -212,7 +268,9 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     const hostCallbacks = new Map<string, (args: unknown) => Promise<unknown>>();
     const allModules = getAllToolModules();
     for (const mod of allModules) {
-      hostCallbacks.set(mod.definition.function.name, (args) => mod.handler(args as any, config));
+      if (mod.handler) {
+        hostCallbacks.set(mod.definition.function.name, (args) => mod.handler!(args as any, config));
+      }
     }
     const { boundary } = await buildLocalBoundary({ artifacts, hostCallbacks, allowFallback: options.allowFallback ?? true, workspaceRoot: options.cwd ?? process.cwd() });
     const broker = approveTool
@@ -327,46 +385,76 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
 
       const snapshot = options.turnSnapshot ?? (await runtime.createTurnSnapshot());
       let response: { content?: string; tool_calls?: any[]; usage?: Usage } = { content: "" };
-      const acc = new StreamingResponseAccumulator();
+      let acc = new StreamingResponseAccumulator();
+      let reasoningText = "";
       const canonicalMessages = messages.map(messageToCanonicalMessage);
 
-      try {
-        const plan = await runtime.resolvePlan(snapshot, "text", "standard", stepOverride);
-        currentModel = plan.selectedTarget.model;
+      const MAX_EMPTY_RETRIES = 2;
+      let emptyAttempt = 0;
 
-        for await (const event of runtime.executeLanguage(plan, { messages: canonicalMessages, tools: toolDefs as any }, { signal })) {
-          if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-            acc.appendText(event.delta.text);
-            const deltaStep: StepResult = { type: "text_delta", content: event.delta.text, timestamp: now() };
-            steps.push(deltaStep);
-            await hooks.onStep(deltaStep);
-            if (onStep) onStep(deltaStep);
-          } else if (event.type === "content_block_start" && event.block?.type === "tool_use") {
-            acc.beginToolCall(event.index, (event.block as any).id, (event.block as any).name);
-          } else if (event.type === "content_block_delta" && event.delta.type === "tool_input_delta") {
-            acc.appendToolCallArgs(event.index, event.delta.partialJson);
-          } else if (event.type === "finish" && event.usage) {
-            const inp = event.usage.inputTokens ?? event.usage.promptTokens ?? 0;
-            const out = event.usage.outputTokens ?? event.usage.completionTokens ?? 0;
-            acc.setUsage({ promptTokens: inp, completionTokens: out, totalTokens: inp + out, cost: 0 });
-          } else if (event.type === "abort") {
-            finishReason = "aborted";
-            loopError = { message: "Operation was aborted", code: "ABORTED", retryable: false };
-            break;
-          } else if (event.type === "error") {
-            throw new SeepientError(event.error.message, event.error.code, event.error.retryable);
+      while (true) {
+        acc = new StreamingResponseAccumulator();
+        reasoningText = "";
+        try {
+          const plan = await runtime.resolvePlan(snapshot, "text", "standard", stepOverride);
+          currentModel = plan.selectedTarget.model;
+
+          for await (const event of runtime.executeLanguage(plan, { messages: canonicalMessages, tools: toolDefs as any }, { signal })) {
+            if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+              acc.appendText(event.delta.text);
+              const deltaStep: StepResult = { type: "text_delta", content: event.delta.text, timestamp: now() };
+              steps.push(deltaStep);
+              await hooks.onStep(deltaStep);
+              if (onStep) onStep(deltaStep);
+            } else if (event.type === "content_block_delta" && (event.delta as any).type === "reasoning_delta") {
+              reasoningText += (event.delta as any).text || "";
+            } else if (event.type === "content_block_start" && event.block?.type === "tool_use") {
+              acc.beginToolCall(event.index, (event.block as any).id, (event.block as any).name);
+            } else if (event.type === "content_block_delta" && event.delta.type === "tool_input_delta") {
+              acc.appendToolCallArgs(event.index, event.delta.partialJson);
+            } else if (event.type === "finish" && event.usage) {
+              const inp = event.usage.inputTokens ?? event.usage.promptTokens ?? 0;
+              const out = event.usage.outputTokens ?? event.usage.completionTokens ?? 0;
+              acc.setUsage({ promptTokens: inp, completionTokens: out, totalTokens: inp + out, cost: 0 });
+            } else if (event.type === "abort") {
+              finishReason = "aborted";
+              loopError = { message: "Operation was aborted", code: "ABORTED", retryable: false };
+              break;
+            } else if (event.type === "error") {
+              throw new SeepientError(event.error.message, event.error.code, event.error.retryable);
+            }
+          }
+          response = acc.toResponse();
+        } catch (err) {
+          const seepientErr = toSeepientError(err, "PROVIDER_ERROR");
+          finishReason = "error";
+          loopError = { message: seepientErr.message, code: "PROVIDER_ERROR", retryable: seepientErr.retryable, provider: currentModel };
+          await hooks.onError(seepientErr);
+          break;
+        }
+
+        if (finishReason === "aborted" || (finishReason as string) === "error") break;
+
+        // In-band fallback tool call extraction (recovering tool calls emitted in markdown/XML)
+        if ((!response.tool_calls || response.tool_calls.length === 0) && response.content) {
+          const inBand = extractInBandToolCalls(response.content);
+          if (inBand.toolCalls.length > 0) {
+            response.tool_calls = inBand.toolCalls;
+            response.content = inBand.remainingText;
           }
         }
-        response = acc.toResponse();
-      } catch (err) {
-        const seepientErr = toSeepientError(err, "PROVIDER_ERROR");
-        finishReason = "error";
-        loopError = { message: seepientErr.message, code: "PROVIDER_ERROR", retryable: seepientErr.retryable, provider: currentModel };
-        await hooks.onError(seepientErr);
+
+        const isEmpty = (!response.content || !response.content.trim()) && (!response.tool_calls || response.tool_calls.length === 0);
+        if (isEmpty && emptyAttempt < MAX_EMPTY_RETRIES && !signal?.aborted) {
+          emptyAttempt++;
+          await new Promise((r) => setTimeout(r, 600 * emptyAttempt));
+          continue;
+        }
+
         break;
       }
 
-      if (finishReason === "aborted") break;
+      if (finishReason === "aborted" || (finishReason as string) === "error") break;
 
       const stepUsage = acc.getUsage();
       if (stepUsage && (stepUsage.promptTokens > 0 || stepUsage.completionTokens > 0)) {
@@ -390,6 +478,18 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
         lastContextTokens = estPrompt;
       }
 
+      // Empty completion check: fail loudly with informative, user-friendly message
+      if ((!response.content || !response.content.trim()) && (!response.tool_calls || response.tool_calls.length === 0)) {
+        if ((finishReason as string) !== "aborted" && (finishReason as string) !== "error") {
+          const errorMessage = `The model (${currentModel || "unknown"}) finished its turn without returning any text or tool calls. This typically happens when reasoning models consume their output budget in internal thinking without generating a final response.`;
+          const emptyErr = new SeepientError(errorMessage, "EMPTY_COMPLETION", true);
+          finishReason = "error";
+          loopError = { message: errorMessage, code: "EMPTY_COMPLETION", retryable: true, provider: currentModel };
+          await hooks.onError(emptyErr);
+          break;
+        }
+      }
+
       // Text content. Add assistant message if no tool calls.
       if (response.content) {
         if (!response.tool_calls || response.tool_calls.length === 0) {
@@ -397,6 +497,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
             id: generateId(),
             role: "assistant",
             content: response.content,
+            reasoning: reasoningText.trim() || undefined,
             timestamp: now(),
           });
         }
@@ -425,6 +526,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
         role: "assistant",
         content: response.content ?? "",
         toolCalls: assistantToolCalls,
+        reasoning: reasoningText.trim() || undefined,
         timestamp: now(),
       };
       messages.push(assistantMsg);
@@ -475,20 +577,6 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
         let output: string;
         let metadata: Record<string, unknown> | undefined;
 
-        // Runs the tool (injected module or registry), normalizing both branches
-        // into { output, metadata } and turning throws into an error output.
-        // Shared by all three permission paths below so the try/catch lives once.
-        const runToolSafely = async (): Promise<{ output: string; metadata?: Record<string, unknown> }> => {
-          try {
-            const result = injectedModule
-              ? normalizeToolResult(await injectedModule.handler(parsedArgs, config))
-              : await executeTool(tc.name, parsedArgs, config, execExtra);
-            return { output: result.output, metadata: result.metadata };
-          } catch (err) {
-            return { output: `Error: ${err instanceof Error ? err.message : String(err)}` };
-          }
-        };
-
         // ── Spec 008 / 017 pipeline path ─────────────────────────────────
         // When wiredPipeline is set, the legacy matrix/grant/autoConfirm
         // branches are BYPASSED. Every tool call is analyzed, evaluated by
@@ -500,60 +588,65 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
           // generic fallback. No tool falls through to the legacy matrix.
           const analyzer = resolveAnalyzerWithFallback(wiredPipeline.analyzers, tc.name);
           if (analyzer) {
-            // Build the prepared action via the registered analyzer.
-            const action = await analyzer(parsedArgs, {
-              ...wiredPipeline.analysisContext,
-              toolCallId: tc.id,
-            });
-            // Run the full lifecycle. The boundary dispatches by
-            // PreparedOperation.kind — commit-files → FileCommitBroker,
-            // process → ProcessExecutor, etc. The prepared operation IS
-            // the operation that executes (not the old tool handler).
-            const result = await wiredPipeline.lifecycle.run(action, { signal, onUpdate: execExtra.onUpdate });
-            output = result.toolResult.output;
-            metadata = result.toolResult.metadata;
-            // Spec 008 FR-010: Model-egress gate. Before tool output enters
-            // model-visible history, the Domain enforces the gate centrally so
-            // transport adapters cannot implement separate redaction policies.
-            // The classification is built ONLY from trusted sources: the
-            // action's declared `model-egress` effect classes (origin-derived,
-            // set by the analyzer) PLUS the call-site classifier's verdict on
-            // the actual output bytes — which can only ESCALATE (never
-            // downgrade). A caller cannot inject or soften these classes.
-            if (result.outcome.state !== "denied" && output.length > 0) {
-              // Trusted origin classes from the prepared action's effects.
-              const originDataClasses: string[] = [];
-              for (const eff of action.effects) {
-                if (eff.kind === "model-egress" && (eff as any).dataClasses) {
-                  originDataClasses.push(...(eff as any).dataClasses);
+            let result: any = undefined;
+            try {
+              // Build the prepared action via the registered analyzer.
+              const action = await analyzer(parsedArgs, {
+                ...wiredPipeline.analysisContext,
+                toolCallId: tc.id,
+              });
+              // Run the full lifecycle. The boundary dispatches by
+              // PreparedOperation.kind — commit-files → FileCommitBroker,
+              // process → ProcessExecutor, etc. The prepared operation IS
+              // the operation that executes (not the old tool handler).
+              result = await wiredPipeline.lifecycle.run(action, { signal, onUpdate: execExtra.onUpdate });
+              output = result.toolResult.output;
+              metadata = result.toolResult.metadata;
+              // Spec 008 FR-010: Model-egress gate. Before tool output enters
+              // model-visible history, the Domain enforces the gate centrally so
+              // transport adapters cannot implement separate redaction policies.
+              // The classification is built ONLY from trusted sources: the
+              // action's declared `model-egress` effect classes (origin-derived,
+              // set by the analyzer) PLUS the call-site classifier's verdict on
+              // the actual output bytes — which can only ESCALATE (never
+              // downgrade). A caller cannot inject or soften these classes.
+              if (result.outcome.state !== "denied" && output.length > 0) {
+                // Trusted origin classes from the prepared action's effects.
+                const originDataClasses: string[] = [];
+                for (const eff of action.effects) {
+                  if (eff.kind === "model-egress" && (eff as any).dataClasses) {
+                    originDataClasses.push(...(eff as any).dataClasses);
+                  }
+                }
+                // Classifier verdict on real bytes — escalate-only. If the
+                // output looks secret/sensitive (e.g. a key, .env contents) it is
+                // forced into the origin set regardless of what the analyzer
+                // declared, so a caller claiming "normal" cannot bypass the gate.
+                const sensitivity = classifyOutputSensitivity(tc.name, parsedArgs, output);
+                if (!originDataClasses.includes(sensitivity)) {
+                  originDataClasses.push(sensitivity);
+                }
+                const envelope = result.decision.decision === "allow" ? result.decision.envelope : undefined;
+                if (envelope) {
+                  const { ModelEgressGate } = await import("./permissions/model-egress-gate-proxy.js");
+                  const gate = new ModelEgressGate();
+                  // The gate derives its decision SOLELY from provenance + envelope.
+                  // No caller-supplied classification is passed.
+                  const decision = await gate.authorize(
+                    {
+                      actionDigest: action.actionDigest,
+                      providerClass: wiredPipeline.analysisContext.modelProviderClass,
+                      originDataClasses: [...new Set(originDataClasses)],
+                    },
+                    envelope,
+                  );
+                  if (decision.decision === "deny") {
+                    output = `[model-egress denied] ${("message" in decision ? decision.message : "sensitive data withheld from model")}`;
+                  }
                 }
               }
-              // Classifier verdict on real bytes — escalate-only. If the
-              // output looks secret/sensitive (e.g. a key, .env contents) it is
-              // forced into the origin set regardless of what the analyzer
-              // declared, so a caller claiming "normal" cannot bypass the gate.
-              const sensitivity = classifyOutputSensitivity(tc.name, parsedArgs, output);
-              if (!originDataClasses.includes(sensitivity)) {
-                originDataClasses.push(sensitivity);
-              }
-              const envelope = result.decision.decision === "allow" ? result.decision.envelope : undefined;
-              if (envelope) {
-                const { ModelEgressGate } = await import("./permissions/model-egress-gate-proxy.js");
-                const gate = new ModelEgressGate();
-                // The gate derives its decision SOLELY from provenance + envelope.
-                // No caller-supplied classification is passed.
-                const decision = await gate.authorize(
-                  {
-                    actionDigest: action.actionDigest,
-                    providerClass: wiredPipeline.analysisContext.modelProviderClass,
-                    originDataClasses: [...new Set(originDataClasses)],
-                  },
-                  envelope,
-                );
-                if (decision.decision === "deny") {
-                  output = `[model-egress denied] ${("message" in decision ? decision.message : "sensitive data withheld from model")}`;
-                }
-              }
+            } catch (err) {
+              output = `Error: ${err instanceof Error ? err.message : String(err)}`;
             }
             const duration = now() - start;
             messages.push({
@@ -573,7 +666,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
             await hooks.onStep(toolStep);
             // afterToolCall fires ONLY when an actual dispatch happened
             // (outcome.state === succeeded/failed/cancelled — not denied).
-            if (result.outcome.state !== "denied") {
+            if (result && result.outcome.state !== "denied") {
               await hooks.afterToolCall({ name: tc.name, output, duration });
             }
             if (onStep) onStep(toolStep);

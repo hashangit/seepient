@@ -307,6 +307,42 @@ function htmlToText(html: string): string {
     .trim();
 }
 
+/**
+ * Format Tavily search results into clean, token-efficient Markdown for the model.
+ * Returns the raw string unchanged if it is not valid JSON or lacks a `results` array.
+ */
+function formatSearchResults(text: string): string {
+  try {
+    const data = JSON.parse(text);
+    if (!data || typeof data !== "object" || !Array.isArray(data.results)) {
+      return text;
+    }
+
+    const lines: string[] = [];
+    if (data.query) {
+      lines.push(`Search results for "${data.query}":`);
+    }
+    if (data.answer) {
+      lines.push(`**Direct answer**: ${data.answer}`);
+    }
+
+    data.results.forEach((item: any, idx: number) => {
+      const title = item.title || "Untitled";
+      const url = item.url || "";
+      let content = typeof item.content === "string" ? item.content : "";
+      content = content.replace(/\s+/g, " ").trim();
+      if (content.length > 400) {
+        content = `${content.slice(0, 400)}…`;
+      }
+      lines.push(`${idx + 1}. **${title}**\n   ${url}\n   ${content}`);
+    });
+
+    return lines.join("\n\n").trim() || text;
+  } catch {
+    return text;
+  }
+}
+
 export class BrokerExecutor implements OperationExecutor {
   readonly kind = "broker" as const;
   private readonly broker: EffectBroker;
@@ -438,6 +474,7 @@ export class BrokerExecutor implements OperationExecutor {
         let text = new TextDecoder().decode(bytes);
         // The model reads page text, not markup — and context is not free.
         if (action.toolName === "read_website") text = htmlToText(text);
+        if (action.toolName === "web_search") text = formatSearchResults(text);
         outputText = capBrokerOutput(text);
       } catch {
         outputText = `<broker artifact ${result.output.artifactId}>`;
@@ -517,8 +554,9 @@ export class TrustedHostExecutor implements OperationExecutor {
     if (!cb) {
       const { getAllToolModules } = await import("../../domain/tool-executor.js");
       const mod = getAllToolModules().find((m) => m.definition.function.name === operation.registrationId || m.name === operation.registrationId);
-      if (mod) {
-        cb = async (args: unknown) => mod.handler(args as any);
+      if (mod && mod.handler) {
+        const handler = mod.handler;
+        cb = async (args: unknown) => handler(args as any);
       }
     }
     if (!cb) {

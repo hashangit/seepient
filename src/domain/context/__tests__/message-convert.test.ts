@@ -53,11 +53,13 @@ describe("messageToCanonicalMessage", () => {
       role: "assistant" as const,
       content: "hi",
       toolCalls: [{ id: "call_1", name: "read_file", arguments: { path: "a.txt" } }],
+      reasoning: "Let me check the file first.",
       timestamp: 1000,
     };
     const canonAssistant = messageToCanonicalMessage(assistantMsg);
     expect(canonAssistant.role).toBe("assistant");
-    expect(canonAssistant.content[0]).toEqual({ type: "text", text: "hi" });
-    expect(canonAssistant.content[1]).toEqual({ type: "tool_use", id: "call_1", name: "read_file", input: { path: "a.txt" } });
+    expect(canonAssistant.content[0]).toEqual({ type: "reasoning", text: "Let me check the file first." });
+    expect(canonAssistant.content[1]).toEqual({ type: "text", text: "hi" });
+    expect(canonAssistant.content[2]).toEqual({ type: "tool_use", id: "call_1", name: "read_file", input: { path: "a.txt" } });
   });
 });

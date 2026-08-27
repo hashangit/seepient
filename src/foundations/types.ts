@@ -48,6 +48,7 @@ export interface Message {
   toolCalls?: ToolCall[];
   toolCallId?: string;
   timestamp: number;
+  reasoning?: string;
 }
 
 export interface ToolCall {

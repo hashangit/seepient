@@ -212,9 +212,11 @@ export class Agent {
     const hostCallbacks = new Map<string, (args: unknown) => Promise<unknown>>();
     for (const tool of getAllToolModules()) {
       const fnName = tool.definition.function.name;
-      hostCallbacks.set(fnName, async (args: unknown) => {
-        return tool.handler(args as never);
-      });
+      if (tool.handler) {
+        hostCallbacks.set(fnName, async (args: unknown) => {
+          return tool.handler!(args as never, this.config);
+        });
+      }
     }
     const { boundary: realBoundary, artifacts: sharedArtifacts } = await buildLocalBoundary({
       allowFallback: opts.allowFallback,

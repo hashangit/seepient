@@ -282,36 +282,50 @@ export async function analyzeWriteFile(
 }
 
 export async function analyzeEditFile(
-  args: { path?: string; patch?: string; edits?: Array<{ oldText: string; newText: string }> } | Record<string, any>,
+  args: { patch: string; approval?: any } | Record<string, any>,
   ctx: ToolAnalysisContext,
 ): Promise<PreparedToolAction> {
   const cwd = ctx.workspace.canonicalRoot;
-  let rawPath = typeof args.path === "string" ? args.path : "";
-  if (!rawPath && typeof args.patch === "string") {
-    const match = args.patch.match(/^\[([^#\]]+)/);
-    if (match) rawPath = match[1];
+  const patchStr = typeof args?.patch === "string" ? args.patch : "";
+  const headerRegex = /^\[([^#\]]+)#[^\]]*\]/gm;
+  const matches = [...patchStr.matchAll(headerRegex)];
+  if (matches.length === 0) {
+    throw new Error("Invalid patch: no valid [PATH#TAG] section headers found");
   }
-  const target = await canonicalizePath(rawPath || "edited-file", cwd);
-  const jsonBytes = Buffer.from(JSON.stringify(args.edits ?? (args.patch ? [{ oldText: "", newText: args.patch }] : [])), "utf8");
-  const artifact = await ctx.artifacts.put(jsonBytes, "application/json");
-  const expected = snapshotPath(target);
+
+  const rawPaths = matches.map((m) => m[1].trim());
+  const targets = await Promise.all(rawPaths.map((p) => canonicalizePath(p, cwd)));
+  const uniqueTargets: typeof targets = [];
+  const seenPaths = new Set<string>();
+  for (const t of targets) {
+    if (!seenPaths.has(t.canonicalPath)) {
+      seenPaths.add(t.canonicalPath);
+      uniqueTargets.push(t);
+    }
+  }
 
   const effects: EffectRequest[] = [
     {
       kind: "filesystem-write",
-      targets: [{ target, mode: "replace", expected }],
+      targets: uniqueTargets.map((target) => ({
+        target,
+        mode: "replace",
+        expected: snapshotPath(target),
+      })),
     },
     {
       kind: "model-egress",
       providerClass: ctx.modelProviderClass,
       dataClasses: ["normal", "sensitive"],
-      sources: [target.canonicalPath],
+      sources: uniqueTargets.map((t) => t.canonicalPath),
     },
   ];
 
   const operation: PreparedOperation = {
-    kind: "commit-files",
-    commits: [{ destination: target, content: artifact, expected }],
+    kind: "trusted-host",
+    registrationId: "edit_file",
+    toolName: "edit_file",
+    args,
   };
 
   return buildAction({
@@ -322,9 +336,9 @@ export async function analyzeEditFile(
     effects,
     operation,
     display: {
-      title: `Edit ${target.basename}`,
-      summary: target.canonicalPath,
-      canonicalTargets: [target.canonicalPath],
+      title: uniqueTargets.length === 1 ? `Edit ${uniqueTargets[0].basename}` : `Edit ${uniqueTargets.length} files`,
+      summary: uniqueTargets.map((t) => t.canonicalPath).join(", "),
+      canonicalTargets: uniqueTargets.map((t) => t.canonicalPath),
     },
     risk: "edit",
   });
@@ -403,7 +417,13 @@ export async function analyzeWebSearch(
   const destination: NetworkDestination = { scheme: "https", host: "api.tavily.com", pathPrefix: "/search" };
   const secretRefs = ["tavilyApiKey"];
   const payloadBytes = Buffer.from(
-    JSON.stringify({ query: args.query, search_depth: args.depth ?? "basic" }),
+    JSON.stringify({
+      query: args.query,
+      search_depth: args.depth ?? "basic",
+      include_answer: true,
+      include_images: false,
+      max_results: 5,
+    }),
     "utf8",
   );
   const payloadArtifact = await ctx.artifacts.put(payloadBytes, "application/json");
@@ -716,7 +736,7 @@ export async function analyzeTakeScreenshot(
 }
 
 export async function analyzeOptimizePrompt(
-  args: { prompt: string },
+  args: { raw_prompt: string; context?: string } | Record<string, any>,
   ctx: ToolAnalysisContext,
 ): Promise<PreparedToolAction> {
   const { resolveCredentials } = await import("../../foundations/security/credential-resolver.js");
@@ -747,9 +767,9 @@ export async function analyzeOptimizePrompt(
     destination = { scheme: "https", host: "api.openai.com", pathPrefix: "/v1/chat/completions" };
   }
 
-  const promptText = (args && typeof args === "object" ? ((args as any).raw_prompt ?? (args as any).prompt ?? "") : "") as string;
+  const promptText = (args && typeof args === "object" ? ((args as any).raw_prompt ?? "") : "") as string;
   const secretRefs = ["OPENAI_API_KEY"];
-  const payloadBytes = Buffer.from(JSON.stringify({ prompt: promptText }), "utf8");
+  const payloadBytes = Buffer.from(JSON.stringify({ raw_prompt: promptText }), "utf8");
   const payloadArtifact = await ctx.artifacts.put(payloadBytes, "application/json");
 
   const effects: EffectRequest[] = [

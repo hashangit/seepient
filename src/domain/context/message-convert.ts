@@ -66,6 +66,9 @@ export function messageToCanonicalMessage(m: Message): any {
   }
   if (m.role === "assistant") {
     const contentBlocks: any[] = [];
+    if (m.reasoning) {
+      contentBlocks.push({ type: "reasoning", text: m.reasoning });
+    }
     if (m.content) {
       contentBlocks.push({ type: "text", text: m.content });
     }

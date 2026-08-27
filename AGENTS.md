@@ -206,6 +206,13 @@ Current layout of the Obsidian vault (annotated):
 │       ├── quickstart.md             # QS-1–QS-5 validation scenarios + QS-P production budgets
 │       ├── tasks.md                  # T001–T050 dependency-ordered, US1–US5 story phases, test-first gates
 │       └── checklists/requirements.md # Specification quality checklist (validated)
+│   └── 019-exact-commit-enforcement/ # Exact-commit enforcement & native helper completion (019)
+│       ├── spec.md                   # P0 bypass closure + helper build/packaging + collateral remedies; FR-001–FR-015, M1–M12
+│       ├── plan.md                   # P0 logic closure (no binary) → P1 Rust helper + packaging → P2 fallback demolition
+│       ├── research.md               # Ultra-deep review evidence (HEAD 3827eb3) + decision ledger D1–D15
+│       ├── data-model.md             # CommitHelperProbe+digest, manifest.json, jsFsFallbackOptIn, commit-files edit ops, allowlist setting
+│       ├── contracts/                # native-helper-protocol, exact-commit-gating, trusted-host-allowlist
+│       └── quickstart.md             # QS-0.1–QS-2.3 validation scenarios + production budgets
 ├── 010-provider-management-redesign/ # Provider mgmt redesign: contracts + runtime + purpose/tier routing
 │   ├── spec.md                       # Problem, 5 blockers + 4 gaps, scope decisions, success criteria
 │   ├── plan.md                       # P0-P7 phased plan (contracts → Pi adapter → runtime → resolution → surfaces → reliability)
@@ -464,6 +471,30 @@ shell commands, and other important information, read the current plan:
   `permissionLevel`, the legacy matrix/grants path, and the pipeline opt-out.
   Enforcement (sandbox, SSRF broker, immutable denies, audit, secret
   withholding) is mode-invariant. Ships 0.5.3 (repair) then 0.6.0 (modes).
+- **UPCOMING (plan complete — tasks next, branch `019-exact-commit-enforcement`)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/019-exact-commit-enforcement/plan.md`
+  — Exact-commit enforcement & native helper completion (019): the 008 exact-commit
+  architecture shipped as scaffolding — the Rust helper `seepient-fs-commit` was never
+  built or packaged, `edit_file` bypasses `FileCommitBroker` entirely (trusted-host op
+  with unchecked commit-file caps, analyzers.ts:324), `write_file` fails
+  EXACT_COMMIT_UNAVAILABLE *after* approval on CLI/TUI/REPL/SDK-pipeline while the
+  SDK lazy path silently uses unguarded JS writes (`allowFallback ?? true`), policy
+  never consumes `exactCommit`, and prompts promise "exact commit" unconditionally.
+  P0 (no binary): policy pre-prompt gate mirroring the process-containment gate with
+  `SEEPIENT_ALLOW_JS_FS_FALLBACK=1` as the single fail-closed opt-in; edit_file →
+  commit-files conversion (prep-time patch application via
+  `ToolAnalysisContext.snapshotStore`); hardened interim fallback (expected-snapshot
+  verify + finalSymlink reject); registry-only TrustedHostExecutor + operator
+  allowlist replacing the blanket ceiling exemption; `.env` planting filter; probe
+  digest verification prep; status line. P1: internal Rust crate `native/fs-commit`
+  (exact wrapper protocol, openat2 / openat+O_NOFOLLOW walk), CI matrix
+  (darwin-arm64/x64, linux-x64/arm64), checksummed binaries +
+  `dist/native-fs-commit/manifest.json` embedded in the npm tarball (crates.io
+  deferred to v1.0); generate_image destinations route through commit-files.
+  P2: delete the fallback + allowFallback surface entirely (no legacy baggage),
+  Windows documented chat+read-only, capability-matrix derives from probe.
+  Sequencing rule M10: no strictness change ships before the remedy that keeps its
+  users whole (gate before edit conversion; SDK wiring before ambient-fallback
+  deletion; helper before fallback deletion).
 - **UPCOMING (plan + tasks complete — implementation next, branch `018-skill-injection-visibility`)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/018-skill-injection-visibility/plan.md`
   — Skill injection & visibility (018): skill bodies never enter chat history
   (today `use_skill` returns the body as a tool-result message, re-billed on

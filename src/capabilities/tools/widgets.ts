@@ -161,7 +161,16 @@ export const RenderWidgetTool: ToolModule = {
     type: 'function',
     function: {
       name: 'render_widget',
-      description: 'Render a structured interactive widget instead of a plain text response. Prefer this over prose for structured/comparative content. Kinds: "table" (rows/columns of comparisons or listings), "keyvalue" (attribute→value pairs), "chart" (bar/line/sparkline trends), "status_grid" (items with ok/warn/fail/pending health), "tree" (nested hierarchy), "product_card" (a titled item with optional price/rating/actions), "form" (collect structured input via fields), "panel" (highlight a block of text with an accent color), "diff" (old vs new content).',
+      description: 'Render a structured interactive widget instead of a plain text response. Prefer this over prose for structured/comparative content. Kinds and props: ' +
+        '"chart" ({ variant: "bar"|"line"|"sparkline", data: number[], labels?: string[] }), ' +
+        '"table" ({ columns: string[], rows: string[][], columnWidths?: Record<string, number> }), ' +
+        '"keyvalue" ({ entries: Array<{ label: string, value: string }> }), ' +
+        '"status_grid" ({ items: Array<{ label: string, status: "ok"|"warn"|"fail"|"pending" }> }), ' +
+        '"tree" ({ root: { label: string, children?: Array<{ label: string, children?: any[] }> } }), ' +
+        '"panel" ({ body: string, accent?: "blue"|"green"|"yellow"|"red"|"purple"|"cyan"|"orange" }), ' +
+        '"diff" ({ newContent: string, oldContent?: string, path?: string }), ' +
+        '"form" ({ fields: Array<{ id: string, label: string, type: "text"|"number"|"boolean"|"select", placeholder?: string, required?: boolean, options?: Array<{ value: string, label: string }> }>, submitLabel?: string }), ' +
+        '"product_card" ({ title: string, subtitle?: string, price?: string, rating?: number, imageRef?: string } and requires top-level actions: Array<{ id: string, label: string }>).',
       parameters: {
         type: 'object',
         required: ['id', 'kind', 'props'],
