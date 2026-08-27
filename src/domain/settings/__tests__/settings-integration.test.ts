@@ -31,7 +31,7 @@ function mgr(config: Record<string, any> = {}): SettingsManager {
 describe('schema-manager round-trip', () => {
   const sampleKeys = [
     'smtp.host', 'smtp.port', 'smtp.user', 'smtp.pass',
-    'agent.permissionLevel', 'agent.autoConfirm',
+    'permissions.consentMode', 'agent.autoConfirm',
     'image.model', 'image.n',
   ];
 
@@ -96,7 +96,7 @@ describe('secret masking', () => {
 
 describe('validation', () => {
   it('rejects invalid enum', async () => {
-    await expect(mgr().set('agent.permissionLevel', 'invalid')).rejects.toThrow('must be one of');
+    await expect(mgr().set('permissions.consentMode', 'invalid')).rejects.toThrow('must be one of');
   });
 
   it('rejects non-number for number fields', async () => {

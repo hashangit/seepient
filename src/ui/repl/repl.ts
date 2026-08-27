@@ -12,7 +12,7 @@ import inquirer from 'inquirer';
 import { Agent } from '../../transport/cli/agent.js';
 import { bootstrapCliSession } from '../../transport/cli/bootstrap.js';
 import { buildCommandRegistry } from '../../transport/cli/commands/build-registry.js';
-import type { ApproveToolFn, PermissionLevel } from '../../foundations/types.js';
+import type { ApproveToolFn } from '../../foundations/types.js';
 
 // ── Interrupt handling ───────────────────────────────────────────────
 
@@ -96,11 +96,7 @@ function getShellApprovalMode(config: any, newPermissionSystemActive?: boolean):
 export function createCliApproveTool(
   config: any,
   handle: InterruptHandle,
-  permissionLevel?: PermissionLevel,
 ): ApproveToolFn {
-  // New permission system is active when an explicit permission level was resolved
-  const newPermissionSystemActive = permissionLevel !== undefined;
-
   return async (call) => {
     // Display what the tool wants to do
     if (call.name === 'execute_shell_command') {
@@ -112,7 +108,7 @@ export function createCliApproveTool(
       console.log(chalk.yellow(`\nAI wants to use tool: `) + chalk.bold(call.name));
     }
 
-    const mode = getShellApprovalMode(config, newPermissionSystemActive);
+    const mode = getShellApprovalMode(config, true);
 
     if (mode === 'deny') {
       console.log(chalk.red('Command denied (non-interactive mode).'));
@@ -151,17 +147,16 @@ export async function chatWithInterrupt(
   agent: Agent,
   input: string,
   config?: any,
-  permissionLevel?: PermissionLevel,
   providerFactory?: import('../../domain/agent-loop.js').ProviderFactory,
 ): Promise<void> {
   const handle = setupInterrupt(agent);
-  const approveTool = config ? createCliApproveTool(config, handle, permissionLevel) : undefined;
+  const approveTool = config ? createCliApproveTool(config, handle) : undefined;
   // Spec 008: when the pipeline is enabled, the broker consults this approveTool.
   if (agent.isPermissionPipelineEnabled()) {
     agent.setPipelineApproveTool(approveTool);
   }
   try {
-    await agent.chat(input, handle.signal, approveTool, permissionLevel, undefined, providerFactory);
+    await agent.chat(input, handle.signal, approveTool, undefined, providerFactory);
   } finally {
     handle.teardown();
   }
@@ -176,19 +171,11 @@ export async function runChat(queryParts: string[], options: any) {
 
   const initialQuery = queryParts.join(' ');
   const ctx = await bootstrapCliSession(options);
-  const { agent, fullConfig, activeProviderType, providerConfig, permissionLevel, gatewayInstance } = ctx;
-
-  // Spec 008: enable the new policy pipeline when --permission-pipeline is set.
-  // The REPL's approveTool (readline y/n) is wired per-chat below; the broker
-  // wrapper consults it at decision time.
-  if (options.permissionPipeline) {
-    await agent.enablePermissionPipeline({
-      modelProviderClass: activeProviderType,
-    });
-  }
+  const { agent, fullConfig, activeProviderType, providerConfig, consentMode, gatewayInstance } = ctx;
 
   if (options.interactive) {
     console.log(chalk.green(`Agent initialized with ${activeProviderType} (${providerConfig.model})`));
+    console.log(chalk.dim(`Consent mode: ${consentMode} (change with /mode or Shift+Tab in TUI)`));
     console.log(chalk.gray("Type /help for commands, /exit to leave."));
   }
 
@@ -205,7 +192,7 @@ export async function runChat(queryParts: string[], options: any) {
     if (initialQuery.includes('@')) {
       try { resolvedInitial = await resolveReferences(initialQuery); } catch { /* resolver not available */ }
     }
-    await chatWithInterrupt(agent, resolvedInitial, fullConfig, permissionLevel);
+    await chatWithInterrupt(agent, resolvedInitial, fullConfig);
 
     // Headless mode exit
     if (!options.interactive) {
@@ -265,7 +252,6 @@ export async function runChat(queryParts: string[], options: any) {
                 agent,
                 skillResult.prompt,
                 fullConfig,
-                permissionLevel,
                 switched ? switcher : undefined,
               );
             } finally {
@@ -295,7 +281,7 @@ export async function runChat(queryParts: string[], options: any) {
 
       rl.pause();
       try {
-        await chatWithInterrupt(agent, resolvedInput, fullConfig, permissionLevel);
+        await chatWithInterrupt(agent, resolvedInput, fullConfig);
       } finally {
         rl.resume();
       }

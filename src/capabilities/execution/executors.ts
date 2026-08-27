@@ -30,6 +30,7 @@ import type {
 } from "../../foundations/contracts/execution-brokers.js";
 import { UnsupportedBackendError } from "../../foundations/errors.js";
 import { isSecurityPath } from "./environment-policy.js";
+import { createSetupFailure } from "../../foundations/contracts/setup-failure.js";
 
 /** Read the prepared bytes for a commit operation from the artifact store. */
 async function readContent(
@@ -276,10 +277,12 @@ export class BrokerExecutor implements OperationExecutor {
   readonly kind = "broker" as const;
   private readonly broker: EffectBroker;
   private readonly artifacts?: PreparationArtifactStore;
+  private readonly workspaceRoot?: string;
 
-  constructor(opts: { broker: EffectBroker; artifacts?: PreparationArtifactStore }) {
+  constructor(opts: { broker: EffectBroker; artifacts?: PreparationArtifactStore; workspaceRoot?: string }) {
     this.broker = opts.broker;
     this.artifacts = opts.artifacts;
+    this.workspaceRoot = opts.workspaceRoot;
   }
   async execute(
     action: PreparedToolAction,
@@ -287,6 +290,87 @@ export class BrokerExecutor implements OperationExecutor {
     operation: Extract<PreparedToolAction["operation"], { kind: "broker" }>,
     _opts: { signal?: AbortSignal; onUpdate?: (u: ToolProgress) => void },
   ): Promise<ExecutionResult> {
+    // Preflight credential checks (spec 017, T014)
+    const { resolveCredentials } = await import("../../foundations/security/credential-resolver.js");
+    const creds = resolveCredentials(undefined, this.workspaceRoot);
+    if (action.toolName === "web_search" && !creds.tavilyApiKey) {
+      const failure = createSetupFailure("web_search", "Tavily API key", "TAVILY_API_KEY / search.tavilyApiKey");
+      return {
+        state: "failed",
+        error: {
+          code: "SETUP_REQUIRED",
+          message: failure.message,
+          retryable: false,
+        },
+        evidence: {
+          backend: "local-native",
+          actionDigest: action.actionDigest,
+          executorId: "broker-preflight",
+          operationKind: "broker",
+        },
+      };
+    }
+    if (action.toolName === "send_email" && (!creds.smtpHost || !creds.smtpUser || !creds.smtpPass)) {
+      const failure = createSetupFailure("send_email", "SMTP configuration", "SMTP_HOST / smtp.host");
+      return {
+        state: "failed",
+        error: {
+          code: "SETUP_REQUIRED",
+          message: failure.message,
+          retryable: false,
+        },
+        evidence: {
+          backend: "local-native",
+          actionDigest: action.actionDigest,
+          executorId: "broker-preflight",
+          operationKind: "broker",
+        },
+      };
+    }
+    if (action.toolName === "send_notification") {
+      const platform = (operation.request as any)?.service ?? "feishu";
+      const platformWebhook =
+        platform === "feishu" ? creds.feishuWebhook :
+        platform === "dingtalk" ? creds.dingtalkWebhook :
+        platform === "wecom" ? creds.wecomWebhook :
+        undefined;
+      if (!platformWebhook) {
+        const envKey = `${String(platform).toUpperCase()}_WEBHOOK`;
+        const failure = createSetupFailure("send_notification", `${platform} webhook URL`, `${envKey} / notifications.${platform}.webhook`);
+        return {
+          state: "failed",
+          error: {
+            code: "SETUP_REQUIRED",
+            message: failure.message,
+            retryable: false,
+          },
+          evidence: {
+            backend: "local-native",
+            actionDigest: action.actionDigest,
+            executorId: "broker-preflight",
+            operationKind: "broker",
+          },
+        };
+      }
+    }
+    if (action.toolName === "generate_image" && !creds.openaiApiKey && !creds.openaiBaseUrl) {
+      const failure = createSetupFailure("generate_image", "OpenAI API key (or image provider credentials)", "OPENAI_API_KEY / image.apiKey");
+      return {
+        state: "failed",
+        error: {
+          code: "SETUP_REQUIRED",
+          message: failure.message,
+          retryable: false,
+        },
+        evidence: {
+          backend: "local-native",
+          actionDigest: action.actionDigest,
+          executorId: "broker-preflight",
+          operationKind: "broker",
+        },
+      };
+    }
+
     const auth = {
       leaseId: envelope.envelopeId,
       actionDigest: action.actionDigest,

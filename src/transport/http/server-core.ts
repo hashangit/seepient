@@ -1,4 +1,4 @@
-import type { GenerateTextResult, Usage, Message, PermissionLevel, ApproveToolFn, StepResult } from "../../foundations/types.js";
+import type { GenerateTextResult, Usage, Message, ApproveToolFn, StepResult } from "../../foundations/types.js";
 import { runAgentLoop } from "../../domain/agent-loop.js";
 import { createHookExecutor } from "../../domain/hooks.js";
 import { resolveTools, getAllToolDefinitions } from "../../domain/tool-executor.js";
@@ -43,7 +43,6 @@ export async function serverGenerateText(
     /** Spec 008 wired pipeline (constructed by createServer). */
     wiredPipeline?: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle;
   },
-  permissionLevel: PermissionLevel,
   middleware?: Middleware[],
 ): Promise<GenerateTextResult> {
   const runtime: ProviderRuntime = (options as any).providerRuntime ?? getDefaultProviderRuntime();
@@ -85,7 +84,6 @@ export async function serverGenerateText(
     toolDefs,
     maxSteps: options.maxSteps ?? 5,
     hooks,
-    permissionLevel,
     middleware,
     config: { agentName: "server", runtime },
     wiredPipeline: options.wiredPipeline,
@@ -120,7 +118,6 @@ export async function handleAgentChatStream(
     tools?: string[];
     maxSteps?: number;
     skills?: string[];
-    permissionLevel?: PermissionLevel;
     approveTool?: ApproveToolFn;
     /** Spec 008 wired pipeline (constructed by createServer). */
     wiredPipeline?: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle;
@@ -132,7 +129,6 @@ export async function handleAgentChatStream(
     onDone: (result: { text: string; usage: Usage; finishReason: string }) => void;
     signal?: AbortSignal;
   },
-  serverPermissionLevel?: PermissionLevel,
   middleware?: Middleware[],
 ): Promise<void> {
   const runtime: ProviderRuntime = (opts as any).providerRuntime ?? getDefaultProviderRuntime();
@@ -171,7 +167,6 @@ export async function handleAgentChatStream(
       toolDefs,
       maxSteps: opts.maxSteps ?? 5,
       hooks,
-      permissionLevel: opts.permissionLevel ?? serverPermissionLevel,
       approveTool: opts.approveTool,
       signal: opts.signal,
       middleware: middleware ?? [],

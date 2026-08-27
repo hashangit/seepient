@@ -29,6 +29,7 @@ import type { NetworkDestination } from "../../foundations/contracts/tool-effect
 import type { PreparationArtifactStore } from "../../foundations/contracts/execution-brokers.js";
 import { createHash } from "node:crypto";
 import { PersistedReplayLedger } from "./persisted-replay-ledger.js";
+import { resolveSecretRef } from "../../foundations/security/credential-resolver.js";
 
 /** Loopback / private / link-local / reserved / cloud-metadata CIDRs (IPv4). */
 const DENIED_IPV4_PATTERNS: ReadonlyArray<RegExp> = [
@@ -117,6 +118,8 @@ export interface EffectBrokerOptions {
   externalSendHandler?: (req: Extract<BrokeredEffectRequest, { kind: "external-send" }>) => Promise<BrokeredEffectResult>;
   /** Optional handler for vendor-operation requests. */
   vendorOperationHandler?: (req: Extract<BrokeredEffectRequest, { kind: "vendor-operation" }>) => Promise<BrokeredEffectResult>;
+  /** Optional secret resolver for injecting credentials securely inside the broker. */
+  secretResolver?: (ref: string) => string | undefined;
 }
 
 /**
@@ -139,6 +142,7 @@ export class EffectBroker implements EffectBrokerContract {
   private readonly replayLedger: PersistedReplayLedger;
   private readonly externalSendHandler?: (req: Extract<BrokeredEffectRequest, { kind: "external-send" }>) => Promise<BrokeredEffectResult>;
   private readonly vendorOperationHandler?: (req: Extract<BrokeredEffectRequest, { kind: "vendor-operation" }>) => Promise<BrokeredEffectResult>;
+  private readonly secretResolver?: (ref: string) => string | undefined;
 
   constructor(opts: EffectBrokerOptions) {
     this.artifacts = opts.artifacts;
@@ -148,39 +152,58 @@ export class EffectBroker implements EffectBrokerContract {
     this.replayLedger = opts.replayLedger ?? new PersistedReplayLedger();
     this.externalSendHandler = opts.externalSendHandler;
     this.vendorOperationHandler = opts.vendorOperationHandler;
+    this.secretResolver = opts.secretResolver;
   }
 
+  private resolveSecret(ref: string): string | undefined {
+    if (this.secretResolver) {
+      const val = this.secretResolver(ref);
+      if (val !== undefined) return val;
+    }
+    return resolveSecretRef(ref);
+  }
+
+  /**
+   * Execute a prepared brokered effect. Enforces:
+   *  1. Non-empty requestId, unconsumed single-use replay ticket.
+   *  2. Exactly-once authorization context (actionDigest, lease unexpired).
+   *  3. Capability envelope covers the destination/recipient/secret.
+   *  4. DNS IP range / SSRF check.
+   *  5. Redirects re-checked against the capability envelope.
+   *  6. Response stored as artifact (not raw memory).
+   */
   async execute(
     request: BrokeredEffectRequest,
     envelope: CapabilityEnvelope,
     auth: BrokerAuthContext,
   ): Promise<BrokeredEffectResult> {
-    // 1. Authenticate caller + lease.
-    const now = Date.now();
-    if (auth.expiresAt <= now) {
-      return this.denied(request.requestId, "expired lease");
-    }
-    if (auth.actionDigest !== envelope.actionDigest) {
-      return this.denied(request.requestId, "lease/action digest mismatch");
-    }
-    // T210a: Atomic replay consumption BEFORE execution.
-    const consumed = await this.replayLedger.consume(auth.singleUseRequestId);
-    if (!consumed) {
-      return this.denied(request.requestId, "replay: request ID already consumed");
-    }
-
-    // 2. Reject unknown contract versions / operation kinds.
     const requestId = request.requestId;
-    const requestKind = request.kind;
-    if (requestKind !== "http" && requestKind !== "external-send" && requestKind !== "vendor-operation") {
-      return this.denied(requestId, `unsupported operation kind: ${requestKind}`);
+    if (!requestId || typeof requestId !== "string") {
+      return this.denied(requestId ?? "", "missing or invalid requestId");
     }
 
-    // 3. Per-kind validation + execution.
-    if (request.kind === "http") {
+    // 1a. Replay check (durable): each requestId can execute at most once.
+    const consumed = await this.replayLedger.consume(requestId);
+    if (!consumed) {
+      return this.denied(requestId, `replay detected: requestId "${requestId}" was already executed`);
+    }
+
+    // 1b. Auth context: lease unexpired, actionDigest matches.
+    if (Date.now() > auth.expiresAt) {
+      return this.denied(requestId, "broker authorization lease expired");
+    }
+    if (auth.singleUseRequestId !== requestId) {
+      return this.denied(requestId, "auth context singleUseRequestId mismatch");
+    }
+    if (envelope.actionDigest !== auth.actionDigest) {
+      return this.denied(requestId, "capability envelope actionDigest mismatch");
+    }
+
+    const requestKind = request.kind;
+    if (requestKind === "http") {
       return await this.executeHttp(request, envelope, auth);
     }
-    if (request.kind === "external-send") {
+    if (requestKind === "external-send") {
       return await this.executeExternalSend(request, envelope, auth);
     }
     if (request.kind === "vendor-operation") {
@@ -192,14 +215,14 @@ export class EffectBroker implements EffectBrokerContract {
   private async executeExternalSend(
     request: Extract<BrokeredEffectRequest, { kind: "external-send" }>,
     envelope: CapabilityEnvelope,
-    auth: BrokerAuthContext,
+    _auth: BrokerAuthContext,
   ): Promise<BrokeredEffectResult> {
     for (const recipient of request.recipients) {
       const cap = envelope.capabilities.find(
         (c) =>
           c.kind === "external-recipient" &&
-          c.service === recipient.service &&
-          c.recipient === recipient.recipient,
+          (c.service === recipient.service || c.service === "*") &&
+          (c.recipient === recipient.recipient || c.recipient === "*"),
       );
       if (!cap) {
         return this.denied(
@@ -211,9 +234,140 @@ export class EffectBroker implements EffectBrokerContract {
     if (this.externalSendHandler) {
       return await this.externalSendHandler(request);
     }
+    try {
+      return await this.defaultExternalSend(request);
+    } catch (err) {
+      return {
+        requestId: request.requestId,
+        status: "failed",
+        error: {
+          code: "EXTERNAL_SEND_FAILED",
+          message: (err as Error).message,
+          retryable: true,
+        },
+      };
+    }
+  }
+
+  private async defaultExternalSend(
+    request: Extract<BrokeredEffectRequest, { kind: "external-send" }>,
+  ): Promise<BrokeredEffectResult> {
+    let payloadText = "";
+    if (request.payload) {
+      const bytes = await this.artifacts.read(request.payload);
+      payloadText = new TextDecoder().decode(bytes);
+    }
+
+    if (request.service === "smtp") {
+      const host = this.resolveSecret("smtpHost");
+      const port = parseInt(this.resolveSecret("smtpPort") || "587", 10);
+      const user = this.resolveSecret("smtpUser");
+      const pass = this.resolveSecret("smtpPass");
+      const from = this.resolveSecret("smtpFrom") || user;
+
+      if (!host || !user || !pass) {
+        return this.denied(
+          request.requestId,
+          "SMTP configuration incomplete (missing smtpHost/smtpUser/smtpPass)",
+        );
+      }
+
+      let emailSubject = (request as any).subject ?? "Seepient Notification";
+      let emailBody = payloadText;
+      try {
+        const parsed = JSON.parse(payloadText);
+        if (parsed && typeof parsed === "object") {
+          if (parsed.subject) emailSubject = parsed.subject;
+          if (parsed.body !== undefined) emailBody = String(parsed.body);
+        }
+      } catch {
+        /* payloadText was raw plain text body */
+      }
+
+      const nodemailer = (await import("../../vendors/nodemailer.js")).default;
+      const transporter = nodemailer.createTransport({
+        host,
+        port,
+        secure: port === 465,
+        auth: { user, pass },
+      });
+
+      const recipient = request.recipients[0]?.recipient ?? "";
+      const info = await transporter.sendMail({
+        from,
+        to: recipient,
+        subject: emailSubject,
+        text: emailBody,
+      });
+
+      const outputBytes = new TextEncoder().encode(`Email sent successfully. Message ID: ${info.messageId}`);
+      const artifact = await this.artifacts.put(outputBytes, "text/plain");
+      return {
+        requestId: request.requestId,
+        status: "succeeded",
+        output: artifact,
+      };
+    }
+
+    if (request.service === "feishu" || request.service === "dingtalk" || request.service === "wecom") {
+      const webhookUrl = this.resolveSecret(`${request.service}Webhook`);
+      const keyword = this.resolveSecret(`${request.service}Keyword`);
+
+      if (!webhookUrl) {
+        return this.denied(
+          request.requestId,
+          `${request.service} webhook URL is not configured`,
+        );
+      }
+
+      let content = payloadText;
+      if (keyword && !content.includes(keyword)) {
+        content = `[${keyword}] ${content}`;
+      }
+
+      let payload: Record<string, unknown>;
+      if (request.service === "feishu") {
+        payload = { msg_type: "text", content: { text: content } };
+      } else {
+        payload = { msgtype: "text", text: { content } };
+      }
+
+      const response = await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const result: any = await response.json().catch(() => ({}));
+      const isSuccess =
+        response.ok &&
+        (request.service === "feishu" ? result.code === 0 : result.errcode === 0);
+
+      if (!isSuccess) {
+        return {
+          requestId: request.requestId,
+          status: "failed",
+          error: {
+            code: "EXTERNAL_SEND_FAILED",
+            message: `Notification to ${request.service} failed (HTTP ${response.status}): ${JSON.stringify(result)}`,
+            retryable: true,
+          },
+        };
+      }
+
+      const message = `Notification sent to ${request.service} successfully.`;
+      const outputBytes = new TextEncoder().encode(message);
+      const artifact = await this.artifacts.put(outputBytes, "text/plain");
+      return {
+        requestId: request.requestId,
+        status: "succeeded",
+        output: artifact,
+      };
+    }
+
     return this.denied(
       request.requestId,
-      "EFFECT_UNSUPPORTED: No external send transport configured (SMTP/SendGrid/Chat transport missing)",
+      `EFFECT_UNSUPPORTED: Unsupported external send service "${request.service}"`,
     );
   }
 
@@ -236,13 +390,13 @@ export class EffectBroker implements EffectBrokerContract {
     envelope: CapabilityEnvelope,
     auth: BrokerAuthContext,
   ): Promise<BrokeredEffectResult> {
-    // 2a. Capability check: envelope must carry a network-destination cap for
-    // this exact scheme+host.
+    // 2a. Envelope must authorize network-destination with matching scheme + host (exact or wildcard).
     const cap = envelope.capabilities.find(
       (c) =>
         c.kind === "network-destination" &&
         c.scheme === request.destination.scheme &&
-        c.host === request.destination.host,
+        (c.host === request.destination.host || c.host === "*") &&
+        (!c.port || c.port === request.destination.port),
     );
     if (!cap || cap.kind !== "network-destination") {
       return this.denied(request.requestId, "no network-destination capability for destination");
@@ -281,9 +435,48 @@ export class EffectBroker implements EffectBrokerContract {
     }
 
     // 2e. Read body artifact if present (digest-verified by artifact store).
+    // 2e. Read body artifact if present (digest-verified by artifact store).
     let body: Uint8Array | undefined;
     if (request.body) {
       body = await this.artifacts.read(request.body);
+    }
+
+    let hasInjectedSecret = false;
+
+    // 2e-ii. Inject authorized secret credentials for verified destinations & secretRefs.
+    if (dest.host === "api.tavily.com" || request.secretRefs?.includes("tavilyApiKey")) {
+      const tavilyKey = this.resolveSecret("tavilyApiKey");
+      if (tavilyKey) {
+        cleanHeaders["authorization"] = `Bearer ${tavilyKey}`;
+        cleanHeaders["api-key"] = tavilyKey;
+        hasInjectedSecret = true;
+        if (body) {
+          try {
+            const bodyStr = new TextDecoder().decode(body);
+            const json = JSON.parse(bodyStr);
+            if (typeof json === "object" && json !== null && !json.api_key) {
+              json.api_key = tavilyKey;
+              body = new TextEncoder().encode(JSON.stringify(json));
+            }
+          } catch {
+            /* not JSON body */
+          }
+        }
+      }
+    } else if (
+      request.secretRefs?.includes("OPENAI_API_KEY") ||
+      request.secretRefs?.includes("openaiApiKey") ||
+      request.secretRefs?.includes("imageApiKey") ||
+      dest.host === "api.openai.com"
+    ) {
+      const key =
+        this.resolveSecret("openaiApiKey") ||
+        this.resolveSecret("OPENAI_API_KEY") ||
+        this.resolveSecret("imageApiKey");
+      if (key) {
+        cleanHeaders["authorization"] = `Bearer ${key}`;
+        hasInjectedSecret = true;
+      }
     }
 
     // 2f. Connect with deadline and manual redirect validation.
@@ -295,6 +488,7 @@ export class EffectBroker implements EffectBrokerContract {
     let currentDest = dest;
     let currentMethod = request.method;
     let currentBody = body;
+    let currentHeaders = { ...cleanHeaders };
     let redirectCount = 0;
     const MAX_REDIRECTS = 5;
     const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
@@ -315,7 +509,7 @@ export class EffectBroker implements EffectBrokerContract {
           timeout = setTimeout(() => controller.abort(), Math.min(this.deadlineMs, remaining));
           const response = await this.network.fetch(
             currentDest,
-            { method: currentMethod, headers: cleanHeaders, body: currentBody, signal: controller.signal },
+            { method: currentMethod, headers: currentHeaders, body: currentBody, signal: controller.signal },
           );
           if (timeout) clearTimeout(timeout);
 
@@ -339,12 +533,26 @@ export class EffectBroker implements EffectBrokerContract {
               const nextHost = targetUrl.hostname;
               const nextPort = targetUrl.port ? parseInt(targetUrl.port, 10) : undefined;
 
+              // Cross-host redirect security:
+              const isCrossHost = nextHost.toLowerCase() !== dest.host.toLowerCase();
+              if (isCrossHost) {
+                // Never forward secret-bearing body across hosts on 307/308
+                if (hasInjectedSecret && (response.status === 307 || response.status === 308)) {
+                  return this.denied(request.requestId, `refusing to forward secret-bearing body to cross-host redirect target: ${nextHost}`);
+                }
+                // Strip credentials on cross-host redirects
+                delete currentHeaders["authorization"];
+                delete currentHeaders["api-key"];
+                delete currentHeaders["cookie"];
+              }
+
               // Re-validate against envelope, DENIED_HOSTS, and DNS IP ranges
               const redirectCap = envelope.capabilities.find(
                 (c) =>
                   c.kind === "network-destination" &&
                   c.scheme === nextScheme &&
-                  c.host === nextHost,
+                  (c.host === nextHost || c.host === "*") &&
+                  (!c.port || c.port === nextPort),
               );
               if (!redirectCap) {
                 return this.denied(request.requestId, `redirect to unauthorized destination ${nextScheme}://${nextHost} denied`);

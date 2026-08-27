@@ -12,7 +12,6 @@ import * as fs from "fs";
 import * as path from "path";
 import { homedir } from "os";
 
-import type { PermissionLevel } from "../../foundations/types.js";
 import { getSyncBuiltinCatalog } from "../../domain/providers/model-catalog.js";
 import { serverGenerateText, serverStreamText } from "./server-core.js";
 import { createRestHandler, type RestHandlerContext } from "./rest.js";
@@ -35,11 +34,7 @@ export interface ServerOptions {
   cors?: boolean;
   /** Session TTL in seconds (default: 86400 = 24 hours) */
   sessionTTL?: number;
-  /** Default permission level for REST endpoints (default: "moderate") */
-  permissionLevel?: PermissionLevel;
-  /** Maximum permission level clients can request (caps WebSocket messages) */
-  maxPermissionLevel?: PermissionLevel;
-  /** Spec 008: route every tool call through the Domain policy pipeline. */
+  /** Spec 008 / 017: route every tool call through the Domain policy pipeline. */
   permissionPipeline?: boolean;
 }
 
@@ -146,8 +141,6 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
   const version = resolveVersion();
   const startTime = Date.now();
 
-  const serverPermissionLevel = options?.permissionLevel ?? "moderate";
-
   // Spec 008: build a per-request pipeline factory when the operator opts in.
   // Product behavior: each API request gets its OWN permission identity
   // (principal, tenant, session, run). Sharing one pipeline across requests
@@ -166,7 +159,7 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
   }) => Promise<import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle>;
   let outboxFlushTimer: NodeJS.Timeout | undefined;
   let serverPipelineFactory: PipelineFactory | undefined;
-  const serverPermissionPipelineEnabled = options?.permissionPipeline !== false && process.env.SEEPIENT_PERMISSION_PIPELINE !== "0";
+  const serverPermissionPipelineEnabled = true;
   // FROZEN SCOPE (R9.1): the server control plane does NOT execute model-
   // authored effects. Per the release scope, multi-tenant server/container
   // execution is DISABLED until the external scheduler is complete; the
@@ -232,7 +225,7 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
           state: "failed" as const,
           error: {
             code: "BACKEND_UNSUPPORTED",
-            message: "Server-side effect execution is disabled in this release; use the local CLI/SDK.",
+            message: "Tool operations (including file reads) are not supported on the server surface until the Docker worker backend ships (spec 008). Chat and model inference are unaffected.",
             retryable: false,
           },
           evidence: {
@@ -346,7 +339,7 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
           modelProviderClass: (opts.provider ?? "openai") as string,
         });
       }
-      return serverGenerateText({ ...opts, wiredPipeline }, serverPermissionLevel, gatewayMiddleware);
+      return serverGenerateText({ ...opts, wiredPipeline }, gatewayMiddleware);
     },
     listModels,
     listSkills,
@@ -392,7 +385,7 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
           modelProviderClass: (opts.provider ?? "openai") as string,
         });
       }
-      serverStreamText({ ...opts, wiredPipeline }, serverPermissionLevel, gatewayMiddleware).catch((err: any) => {
+      serverStreamText({ ...opts, wiredPipeline }, gatewayMiddleware).catch((err: any) => {
         opts.onError({
           code: "STREAM_ERROR",
           message: err instanceof Error ? err.message : "Stream failed",
@@ -406,7 +399,6 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
     },
     listModels,
     listSkills,
-    maxPermissionLevel: options?.maxPermissionLevel,
     settingsHandlerContext,
   };
 

@@ -66,7 +66,6 @@ export type {
   // Skills
   SkillMetadata,
   // Permissions
-  PermissionLevel,
   ToolRiskCategory,
 } from '../foundations/types.js';
 
@@ -97,12 +96,7 @@ export {
   getAllToolDefinitions,
 } from './tool-executor.js';
 
-// Export permission system
-export {
-  checkToolPermission,
-  getToolRiskCategory,
-  resolvePermissionLevel,
-} from './permission.js';
+
 
 // Export middleware pipeline
 export {

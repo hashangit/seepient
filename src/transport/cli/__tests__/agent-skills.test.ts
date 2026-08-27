@@ -111,7 +111,7 @@ describe('CLI Agent skill catalog injection', () => {
     };
 
     // Chat turn with skill provider factory
-    await agent.chat('use skill', undefined as any, undefined, undefined, undefined, fakeSwitcher);
+    await agent.chat('use skill', undefined as any, undefined, undefined, fakeSwitcher);
 
     expect(runLoop).toHaveBeenCalledTimes(1);
     expect(runLoop.mock.calls[0][0].providerFactory).toBe(fakeSwitcher);

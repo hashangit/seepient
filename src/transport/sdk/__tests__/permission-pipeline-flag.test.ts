@@ -34,15 +34,15 @@ describe("permissionPipeline opt-in flag (T302/T303)", () => {
     expect(opts.permissionPipeline).toBeUndefined();
   });
 
-  it("legacy options (approveTool/permissionLevel/grants) still accepted alongside", () => {
+  it("typed options (consentMode/deploymentCeiling/principalPolicy) accepted alongside approveTool", () => {
     const opts: GenerateTextOptions = {
       permissionPipeline: true,
       approveTool: async () => true,
-      permissionLevel: "moderate",
+      consentMode: "edit-enabled",
       grants: [{ tool: "write_file", pattern: "/p/a.txt" }],
     };
     expect(opts.approveTool).toBeDefined();
-    expect(opts.permissionLevel).toBe("moderate");
+    expect(opts.consentMode).toBe("edit-enabled");
     expect(opts.grants).toHaveLength(1);
   });
 });

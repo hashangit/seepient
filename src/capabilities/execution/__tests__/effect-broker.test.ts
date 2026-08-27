@@ -39,7 +39,7 @@ function auth(overrides: Partial<{ expiresAt: number; actionDigest: string; sing
     leaseId: "l1",
     actionDigest: overrides.actionDigest ?? "d1",
     expiresAt: overrides.expiresAt ?? Date.now() + 60_000,
-    singleUseRequestId: overrides.singleUseRequestId ?? "req-1",
+    singleUseRequestId: overrides.singleUseRequestId ?? "br-1",
   };
 }
 
@@ -181,7 +181,7 @@ describe("EffectBroker (T209/T210, QS-2.6)", () => {
     await broker.execute(
       {
         kind: "http",
-        requestId: "br-1",
+        requestId: "req-headers-1",
         destination: { scheme: "https", host: "api.example.com" },
         method: "GET",
         headers: {
@@ -209,13 +209,13 @@ describe("EffectBroker (T209/T210, QS-2.6)", () => {
       network: fakeNetwork({}),
     });
     const a = await broker.execute(
-      httpReq({ scheme: "https", host: "api.example.com" }),
+      httpReq({ scheme: "https", host: "api.example.com" }, "nonce-1"),
       envelope("api.example.com"),
       auth({ singleUseRequestId: "nonce-1" }),
     );
     expect(a.status).toBe("succeeded");
     const b = await broker.execute(
-      httpReq({ scheme: "https", host: "api.example.com" }),
+      httpReq({ scheme: "https", host: "api.example.com" }, "nonce-1"),
       envelope("api.example.com"),
       auth({ singleUseRequestId: "nonce-1" }),
     );
@@ -322,7 +322,7 @@ describe("EffectBroker (T209/T210, QS-2.6)", () => {
       ],
     };
     const result = await broker.execute(
-      httpReq({ scheme: "https", host: "api.example.com" }),
+      httpReq({ scheme: "https", host: "api.example.com" }, "req-redirect-ok"),
       env,
       auth({ singleUseRequestId: "req-redirect-ok" }),
     );
@@ -349,7 +349,7 @@ describe("EffectBroker (T209/T210, QS-2.6)", () => {
     };
     const broker = new EffectBroker({ artifacts: new InMemoryArtifactStore(), network });
     const result = await broker.execute(
-      httpReq({ scheme: "https", host: "api.example.com" }),
+      httpReq({ scheme: "https", host: "api.example.com" }, "req-redirect-deny"),
       envelope("api.example.com"), // NO cap for evil.example.com
       auth({ singleUseRequestId: "req-redirect-deny" }),
     );
@@ -402,7 +402,7 @@ describe("EffectBroker (T209/T210, QS-2.6)", () => {
     await brokerWithBody.execute(
       {
         kind: "http",
-        requestId: "br-post",
+        requestId: "req-post-303",
         destination: { scheme: "https", host: "api.example.com" },
         method: "POST",
         headers: {},
@@ -461,7 +461,7 @@ describe("EffectBroker (T209/T210, QS-2.6)", () => {
     await broker.execute(
       {
         kind: "http",
-        requestId: "br-post-307",
+        requestId: "req-post-307",
         destination: { scheme: "https", host: "api.example.com" },
         method: "POST",
         headers: {},
@@ -505,7 +505,7 @@ describe("EffectBroker (T209/T210, QS-2.6)", () => {
       ],
     };
     const result = await broker.execute(
-      httpReq({ scheme: "https", host: "api.example.com" }),
+      httpReq({ scheme: "https", host: "api.example.com" }, "req-redirect-loop"),
       env,
       auth({ singleUseRequestId: "req-redirect-loop" }),
     );

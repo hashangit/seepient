@@ -43,9 +43,12 @@ function randomCap(r: () => number): Capability {
     "network-destination",
     "secret-ref",
     "model-egress",
+    "external-recipient",
+    "process",
   ];
   const kind = kinds[Math.floor(r() * kinds.length)];
   const n = Math.floor(r() * 1000);
+  const isWildcard = r() < 0.2;
   switch (kind) {
     case "commit-file":
     case "read-file":
@@ -54,13 +57,19 @@ function randomCap(r: () => number): Capability {
     case "write-root":
       return { kind, root: `/p${n}` };
     case "network-destination":
-      return { kind, scheme: "https", host: `h${n}.example.com` };
+      return isWildcard
+        ? { kind, scheme: "https", host: "*" }
+        : { kind, scheme: "https", host: `h${n}.example.com` };
     case "secret-ref":
-      return { kind, ref: `ref-${n}` };
+      return isWildcard ? { kind, ref: "*" } : { kind, ref: `ref-${n}` };
     case "model-egress":
-      return { kind, providerClass: "openai", dataClasses: ["normal"] };
+      return isWildcard
+        ? { kind, providerClass: "*", dataClasses: ["normal", "sensitive"] }
+        : { kind, providerClass: "openai", dataClasses: ["normal"] };
     case "external-recipient":
-      return { kind, service: "smtp", recipient: `r${n}` };
+      return isWildcard
+        ? { kind, service: "*", recipient: "*" }
+        : { kind, service: "smtp", recipient: `r${n}` };
     case "process":
       return { kind, executable: `/bin/x${n}` };
     case "activate-change-class":

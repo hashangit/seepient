@@ -117,7 +117,6 @@ function fakePipelineAgent(): FakeAgent {
       _input: string,
       signal?: AbortSignal,
       _approveTool?: unknown,
-      _permissionLevel?: unknown,
       onStep?: (step: { type: string; content?: string; toolCall?: unknown }) => void,
     ) => {
       // The agent loop consults the INSTALLED broker for needs-approval.

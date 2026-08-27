@@ -10,6 +10,8 @@ export interface KeybindingHandlers {
   onCycleFocus?: () => void;
   /** Escape at idle when a widget is focused returns focus to the prompt. */
   onEscapeWidget?: () => void;
+  /** Shift+Tab cycles consent modes (spec 017, T028). */
+  onCycleMode?: () => void;
 }
 
 export interface KeybindingOptions {
@@ -43,6 +45,12 @@ export function useKeybindings(
       }
       else if (input === 'c' || input === '\x03') (opts.isRunning ? handlers.onAbort() : handlers.onExit());
       return;
+    }
+    if ((key.shift && key.tab) || input === '\x1b[Z') {
+      if (!opts.isRunning && handlers.onCycleMode) {
+        handlers.onCycleMode();
+        return;
+      }
     }
     if (key.escape) {
       // The permission prompt's own useInput receives the same keypress and

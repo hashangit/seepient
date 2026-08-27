@@ -86,8 +86,14 @@ export async function analyzeSendEmail(
     (args.attachments ?? []).map((p) => canonicalizePath(p, cwd)),
   );
 
-  const payloadBytes = Buffer.from(args.body, "utf8");
-  const payloadArtifact = await ctx.artifacts.put(payloadBytes, "text/plain");
+  const emailPayload = {
+    subject: args.subject,
+    body: args.body,
+    to: args.to,
+    attachments: args.attachments,
+  };
+  const payloadBytes = Buffer.from(JSON.stringify(emailPayload), "utf8");
+  const payloadArtifact = await ctx.artifacts.put(payloadBytes, "application/json");
 
   const effects: EffectRequest[] = [
     {
@@ -334,12 +340,44 @@ export async function analyzeGenerateImage(
       .filter((p): p is string => Boolean(p))
       .map((p) => canonicalizePath(p, cwd)),
   );
+
+  const { resolveCredentials } = await import("../../foundations/security/credential-resolver.js");
+  const creds = resolveCredentials();
+
+  const isLocal =
+    process.env.SEEPIENT_LOCAL_MEDIA === "1" ||
+    process.env.SEEPIENT_MEDIA_RUNTIME === "local";
+
+  const rawBaseUrl =
+    creds.openaiBaseUrl ||
+    process.env.OPENAI_COMPAT_BASE_URL ||
+    process.env.OPENAI_BASE_URL ||
+    "https://api.openai.com/v1";
+
+  let destination: { scheme: "https" | "http"; host: string; port?: number; path?: string };
+  try {
+    const u = new URL(rawBaseUrl.startsWith("http") ? rawBaseUrl : `https://${rawBaseUrl}`);
+    destination = {
+      scheme: u.protocol === "http:" ? "http" : "https",
+      host: u.hostname,
+      port: u.port ? Number(u.port) : undefined,
+      path: u.pathname.endsWith("/v1")
+        ? `${u.pathname}/images/generations`
+        : `${u.pathname.replace(/\/$/, "")}/v1/images/generations`,
+    };
+  } catch {
+    destination = { scheme: "https", host: "api.openai.com", path: "/v1/images/generations" };
+  }
+
   const secretRefs = ["OPENAI_API_KEY"];
-  const destination = { scheme: "https" as const, host: "api.openai.com" };
 
   const effects: EffectRequest[] = [
-    { kind: "network-egress", destinations: [destination] },
-    { kind: "secret-use", secretRefs },
+    ...(isLocal
+      ? []
+      : [
+          { kind: "network-egress" as const, destinations: [destination] },
+          { kind: "secret-use" as const, secretRefs },
+        ]),
     {
       kind: "model-egress",
       providerClass: ctx.modelProviderClass,
@@ -361,18 +399,23 @@ export async function analyzeGenerateImage(
   );
   const payloadArtifact = await ctx.artifacts.put(payloadBytes, "application/json");
 
-  const operation = {
-    kind: "broker" as const,
-    request: {
-      kind: "http" as const,
-      requestId: generateId(),
-      destination,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: payloadArtifact,
-      secretRefs,
-    },
-  };
+  const operation = isLocal
+    ? ({
+        kind: "none" as const,
+        result: { output: "image generated locally", success: true },
+      })
+    : ({
+        kind: "broker" as const,
+        request: {
+          kind: "http" as const,
+          requestId: generateId(),
+          destination,
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: payloadArtifact,
+          secretRefs,
+        },
+      });
 
   return buildAction({
     toolName: "generate_image",
@@ -384,7 +427,7 @@ export async function analyzeGenerateImage(
     display: {
       title: `Generate image`,
       summary: args.prompt.slice(0, 60),
-      canonicalTargets: ["https://api.openai.com/v1/images/generations"],
+      canonicalTargets: isLocal ? [] : [`${destination.scheme}://${destination.host}${destination.path ?? ""}`],
     },
     risk: "communications",
   });
