@@ -16,7 +16,9 @@ import {
   NoneExecutor,
   UnsupportedExecutor,
   TrustedHostExecutor,
+  BrokerExecutor,
 } from "../executors.js";
+import { EffectBroker } from "../effect-broker.js";
 import { ProcessExecutor } from "../process-executor.js";
 import { FileCommitBroker } from "../file-commit-broker.js";
 import { InMemoryArtifactStore } from "../in-memory-artifact-store.js";
@@ -367,5 +369,100 @@ describe("CommitFilesExecutor fail-closed defaults (P0-1)", () => {
     expect(existsSync(dest)).toBe(false);
   });
 });
+describe("BrokerExecutor web_search formatting", () => {
+  it("formats Tavily search results into compact markdown snippet", async () => {
+    const prevKey = process.env.TAVILY_API_KEY;
+    process.env.TAVILY_API_KEY = "tvly-test-key";
+    try {
+      const artifacts = new InMemoryArtifactStore();
+    const fixtureTavilyJson = JSON.stringify({
+      query: "finland unemployment rate",
+      answer: "The unemployment rate in Finland is 8.2% as of July 2026.",
+      response_time: 0.45,
+      results: [
+        {
+          title: "Statistics Finland - Employment Bulletin",
+          url: "https://stat.fi/en/statistics/tyok",
+          content: "According to Statistics Finland's Labour Force Survey, the unemployment rate was 8.2 per cent in July 2026, compared to 7.9 per cent a year earlier. ".repeat(15),
+          score: 0.98,
+          raw_content: "<html>full raw dump</html>",
+        },
+      ],
+    });
+
+    const mockNetwork = {
+      resolve: async () => ["1.1.1.1"],
+      fetch: async () => ({
+        status: 200,
+        bytes: Buffer.from(fixtureTavilyJson, "utf8"),
+        effectiveHost: "api.tavily.com",
+        effectiveIp: "1.1.1.1",
+        headers: {},
+      }),
+    };
+
+    const broker = new EffectBroker({
+      artifacts,
+      network: mockNetwork,
+    });
+
+    const executor = new BrokerExecutor({ broker, artifacts });
+    const action: PreparedToolAction = {
+      version: 1,
+      actionId: "a-search",
+      runId: "r1",
+      toolCallId: "c1",
+      toolName: "web_search",
+      principalId: "u",
+      argsDigest: "dig",
+      actionDigest: "d1",
+      risk: "safe",
+      effects: [],
+      display: { title: "Web search", summary: "finland unemployment", canonicalTargets: [], effects: [] },
+      operation: {
+        kind: "broker",
+        request: {
+          kind: "http",
+          requestId: "req-1",
+          destination: { scheme: "https", host: "api.tavily.com", pathPrefix: "/search" },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          secretRefs: ["tavilyApiKey"],
+        },
+      },
+    };
+
+    const env: CapabilityEnvelope = {
+      version: 1,
+      envelopeId: "e1",
+      principalId: "u",
+      runId: "r1",
+      actionDigest: "d1",
+      capabilities: [{ kind: "network-destination", scheme: "https", host: "api.tavily.com" }],
+      lifetime: { kind: "action", actionDigest: "d1", consumeOnce: true },
+      issuedBy: { kind: "service", authorityId: "pe", authenticatedBy: "deployment" },
+      issuedAt: 0,
+      policyDigest: "dig",
+    };
+
+    const result = await executor.execute(action, env, asOp(action.operation, "broker"), {});
+    expect(result.state).toBe("succeeded");
+    if (result.state === "succeeded") {
+      const out = result.result.output;
+      expect(out).toContain("[HTTP 200 https://api.tavily.com/search]");
+      expect(out).toContain("**Direct answer**: The unemployment rate in Finland is 8.2% as of July 2026.");
+      expect(out).toContain("1. **Statistics Finland - Employment Bulletin**");
+      expect(out).toContain("https://stat.fi/en/statistics/tyok");
+      expect(out).toContain("…"); // truncated long snippet
+      expect(out).not.toContain('"score":');
+      expect(out).not.toContain('"response_time":');
+    }
+    } finally {
+      if (prevKey === undefined) delete process.env.TAVILY_API_KEY;
+      else process.env.TAVILY_API_KEY = prevKey;
+    }
+  });
+});
+
 // Re-export to satisfy type-only import in test file.
 export { sanitizeEnvironment };

@@ -24,7 +24,7 @@ export interface ToolModule {
   // Implementation. `extra` carries optional onUpdate (live progress) + signal.
   // May return a structured ToolResult to carry metadata (e.g. write_file's
   // old/new content for the diff viewer); plain strings still work everywhere.
-  handler: (args: any, config?: any, extra?: ToolExecExtra) => Promise<string | ToolResult>;
+  handler?: (args: any, config?: any, extra?: ToolExecExtra) => Promise<string | ToolResult>;
 }
 
 /**

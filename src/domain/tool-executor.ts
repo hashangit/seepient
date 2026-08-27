@@ -38,7 +38,10 @@ export const CORE_TOOLS = [
   "execute_shell_command",
   "read_file",
   "write_file",
+  "edit_file",
   "get_current_datetime",
+  "manage_todos",
+  "render_widget",
 ];
 
 export const COMM_TOOLS = [
@@ -210,6 +213,11 @@ export async function executeTool(
       `Unknown tool "${name}". Available: ${registry
         .map((t) => t.definition.function.name)
         .join(", ")}`,
+    );
+  }
+  if (!found.handler) {
+    throw new Error(
+      `Tool "${name}" has no direct handler (must execute via permission pipeline)`,
     );
   }
   const raw = await found.handler(args, config, extra);

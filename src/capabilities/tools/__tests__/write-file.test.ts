@@ -24,7 +24,7 @@ describe("WriteFileTool (safe atomic write)", () => {
   });
 
   const run = (file: string, content: string) =>
-    WriteFileTool.handler({ path: file, content });
+    WriteFileTool.handler!({ path: file, content });
 
   it("creates a new file atomically and reports isNewFile", async () => {
     const file = path.join(dir, "new.txt");
