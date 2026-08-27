@@ -504,18 +504,16 @@ export async function runSetupWizard(options: {
         set: (k, v) => sm.set(k, v),
       };
 
-  await new Promise<void>((resolve) => {
-    let instance: ReturnType<typeof render>;
-    instance = render(
-      <ThemeProvider>
-        <SetupWizard
-          api={api}
-          settings={settings}
-          onFinish={() => { instance.unmount(); resolve(); }}
-          onExitSetup={() => { instance.unmount(); resolve(); }}
-        />
-      </ThemeProvider>,
-      { exitOnCtrlC: true },
-    );
-  });
+  const instance = render(
+    <ThemeProvider>
+      <SetupWizard
+        api={api}
+        settings={settings}
+        onFinish={() => instance.unmount()}
+        onExitSetup={() => instance.unmount()}
+      />
+    </ThemeProvider>,
+    { exitOnCtrlC: true },
+  );
+  await instance.waitUntilExit();
 }

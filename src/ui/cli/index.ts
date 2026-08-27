@@ -29,7 +29,7 @@ dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkgPath = path.join(__dirname, '..', '..', '..', 'package.json');
-let version = '0.5.3';
+let version = '0.5.4';
 
 try {
   const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
