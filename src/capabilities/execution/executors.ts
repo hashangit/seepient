@@ -273,6 +273,40 @@ export class ReadFileExecutor implements OperationExecutor {
  * Broker executor. Routes typed HTTP / external-send operations through the
  * EffectBroker; the broker owns DNS, redirects, secret resolution.
  */
+
+/** Cap on broker responses materialized into model-visible tool output. */
+const MAX_BROKER_OUTPUT_CHARS = 150_000;
+
+function capBrokerOutput(text: string): string {
+  if (text.length <= MAX_BROKER_OUTPUT_CHARS) return text;
+  return `${text.slice(0, MAX_BROKER_OUTPUT_CHARS)}\n…[truncated: response exceeded ${MAX_BROKER_OUTPUT_CHARS} characters]`;
+}
+
+/**
+ * Minimal HTML→text conversion for read_website results. The model needs
+ * readable page text, not markup: strip script/style/head blocks, turn
+ * block-level closings into newlines, drop remaining tags, decode common
+ * entities. A full parser dependency is not warranted for this.
+ */
+function htmlToText(html: string): string {
+  return html
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<(script|style|noscript|svg|head|template)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<br\b[^>]*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|ul|ol|h[1-6]|tr|table|section|article|header|footer|blockquote|pre)\s*>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&(#[0-9]+|apos);/g, (m, d: string) => (d.startsWith("#") ? String.fromCodePoint(Number(d.slice(1))) : "'"))
+    .replace(/&#x([0-9a-f]+);/gi, (_, d: string) => String.fromCodePoint(parseInt(d, 16)))
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export class BrokerExecutor implements OperationExecutor {
   readonly kind = "broker" as const;
   private readonly broker: EffectBroker;
@@ -401,12 +435,23 @@ export class BrokerExecutor implements OperationExecutor {
     if (result.output && this.artifacts) {
       try {
         const bytes = await this.artifacts.read(result.output);
-        outputText = new TextDecoder().decode(bytes);
+        let text = new TextDecoder().decode(bytes);
+        // The model reads page text, not markup — and context is not free.
+        if (action.toolName === "read_website") text = htmlToText(text);
+        outputText = capBrokerOutput(text);
       } catch {
         outputText = `<broker artifact ${result.output.artifactId}>`;
       }
     } else if (result.output) {
       outputText = `<broker artifact ${result.output.artifactId}>`;
+    }
+    // Ground the model in what the server actually said: a 404/429/… page is
+    // a completed fetch whose content the model must not mistake for the
+    // requested document. Prefix HTTP results with the final status + URL.
+    if (result.httpStatus !== undefined) {
+      const dest = result.effectiveDestination;
+      const url = dest ? ` ${dest.scheme}://${dest.host}${dest.pathPrefix ?? ""}` : "";
+      outputText = `[HTTP ${result.httpStatus}${url}]\n\n${outputText}`;
     }
     return {
       state: "succeeded",

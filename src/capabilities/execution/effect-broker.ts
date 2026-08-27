@@ -444,24 +444,13 @@ export class EffectBroker implements EffectBrokerContract {
     let hasInjectedSecret = false;
 
     // 2e-ii. Inject authorized secret credentials for verified destinations & secretRefs.
+    // Tavily authenticates via the Authorization Bearer header only (per their
+    // API reference); the key is never duplicated into the request body.
     if (dest.host === "api.tavily.com" || request.secretRefs?.includes("tavilyApiKey")) {
       const tavilyKey = this.resolveSecret("tavilyApiKey");
       if (tavilyKey) {
         cleanHeaders["authorization"] = `Bearer ${tavilyKey}`;
-        cleanHeaders["api-key"] = tavilyKey;
         hasInjectedSecret = true;
-        if (body) {
-          try {
-            const bodyStr = new TextDecoder().decode(body);
-            const json = JSON.parse(bodyStr);
-            if (typeof json === "object" && json !== null && !json.api_key) {
-              json.api_key = tavilyKey;
-              body = new TextEncoder().encode(JSON.stringify(json));
-            }
-          } catch {
-            /* not JSON body */
-          }
-        }
       }
     } else if (
       request.secretRefs?.includes("OPENAI_API_KEY") ||
@@ -601,6 +590,7 @@ export class EffectBroker implements EffectBrokerContract {
             requestId: request.requestId,
             status: "succeeded",
             output: artifact,
+            httpStatus: response.status,
             effectiveDestination: { ...currentDest, host: response.effectiveHost },
           };
         } finally {

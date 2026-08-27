@@ -27,6 +27,11 @@ export function getSkillPaths(cwd: string): string[] {
   // 4. Global user skills (~/.seepient/skills)
   paths.push(join(homedir(), '.seepient', 'skills'));
 
+  // 4b. Cross-agent user skills (~/.agents/skills) — the shared standard
+  // location used by other agents; Seepient-native global skills win on
+  // name collision.
+  paths.push(join(homedir(), '.agents', 'skills'));
+
   // 5. Bundled skills (shipped with seepient)
   if (!process.env.SEEPIENT_NO_BUNDLED_SKILLS) {
     paths.push(join(__dirname, '..', '..', 'skills'));

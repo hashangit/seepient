@@ -21,7 +21,7 @@ import { CommitFilesExecutor, ReadFileExecutor, NoneExecutor, BrokerExecutor, Tr
 import { ProcessExecutor } from "./process-executor.js";
 import { InMemoryArtifactStore } from "./in-memory-artifact-store.js";
 import { FileCommitBroker } from "./file-commit-broker.js";
-import { EffectBroker, NodeNetworkAdapter } from "./effect-broker.js";
+import { EffectBroker, NodeNetworkAdapter, type BrokerNetworkAdapter } from "./effect-broker.js";
 import { createNativeProcessSandbox, UncontainedSandbox } from "../../vendors/sandbox-runtime/index.js";
 import { probeCommitHelper, PackagedCommitHelper } from "../../vendors/native-fs-commit/index.js";
 import type { ExecutionBoundary } from "../../foundations/contracts/execution-boundary.js";
@@ -45,6 +45,10 @@ export async function buildLocalBoundary(opts?: {
   hostCallbacks?: Map<string, (args: unknown) => Promise<unknown>>;
   unsafeUncontained?: boolean;
   allowFallback?: boolean;
+  /** Workspace root for credential preflight resolution (defaults to cwd). */
+  workspaceRoot?: string;
+  /** Network adapter override (tests inject a stub; default is the real Node adapter). */
+  network?: BrokerNetworkAdapter;
 }): Promise<BuildLocalBoundaryResult> {
   const artifacts = opts?.artifacts ?? new InMemoryArtifactStore();
 
@@ -67,7 +71,7 @@ export async function buildLocalBoundary(opts?: {
   // Effect broker for network egress and external calls
   const effectBroker = new EffectBroker({
     artifacts,
-    network: new NodeNetworkAdapter(),
+    network: opts?.network ?? new NodeNetworkAdapter(),
   });
 
   // Host callbacks map for built-in and custom tools (consulted by the
@@ -80,7 +84,7 @@ export async function buildLocalBoundary(opts?: {
   registry.register(new ReadFileExecutor({ artifacts }));
   registry.register(new CommitFilesExecutor({ broker: commitBroker, artifacts, useNative: probe.available, allowFallback: opts?.allowFallback ?? false }));
   registry.register(new ProcessExecutor({ sandbox, unsafeUncontained }));
-  registry.register(new BrokerExecutor({ broker: effectBroker }));
+  registry.register(new BrokerExecutor({ broker: effectBroker, artifacts, workspaceRoot: opts?.workspaceRoot }));
   registry.register(new TrustedHostExecutor(hostCallbacks));
 
   const boundary = new LocalExecutionBoundary({

@@ -214,7 +214,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     for (const mod of allModules) {
       hostCallbacks.set(mod.definition.function.name, (args) => mod.handler(args as any, config));
     }
-    const { boundary } = await buildLocalBoundary({ artifacts, hostCallbacks, allowFallback: options.allowFallback ?? true });
+    const { boundary } = await buildLocalBoundary({ artifacts, hostCallbacks, allowFallback: options.allowFallback ?? true, workspaceRoot: options.cwd ?? process.cwd() });
     const broker = approveTool
       ? legacyApproveToolToBroker(approveTool)
       : autoConfirm

@@ -17,6 +17,7 @@ import * as path from "node:path";
 import type { PreparedToolAction } from "../../foundations/contracts/prepared-action.js";
 import type {
   EffectRequest,
+  NetworkDestination,
   ToolEffectKind,
   ToolRiskCategory,
   ExternalRecipient,
@@ -155,10 +156,10 @@ export async function analyzeWebSearch(
   args: { query: string; depth?: string },
   ctx: ToolAnalysisContext,
 ): Promise<PreparedToolAction> {
-  const destination = { scheme: "https" as const, host: "api.tavily.com" };
+  const destination: NetworkDestination = { scheme: "https", host: "api.tavily.com", pathPrefix: "/search" };
   const secretRefs = ["tavilyApiKey"];
   const payloadBytes = Buffer.from(
-    JSON.stringify({ query: args.query, depth: args.depth ?? "basic" }),
+    JSON.stringify({ query: args.query, search_depth: args.depth ?? "basic" }),
     "utf8",
   );
   const payloadArtifact = await ctx.artifacts.put(payloadBytes, "application/json");
@@ -275,16 +276,17 @@ export async function analyzeReadWebsite(
   args: { url: string },
   ctx: ToolAnalysisContext,
 ): Promise<PreparedToolAction> {
-  let destination: { scheme: "https" | "http"; host: string; port?: number };
+  let destination: NetworkDestination;
   try {
     const u = new URL(args.url);
     destination = {
       scheme: u.protocol === "http:" ? "http" : "https",
       host: u.hostname,
       port: u.port ? Number(u.port) : undefined,
+      pathPrefix: u.pathname + u.search,
     };
   } catch {
-    destination = { scheme: "https", host: "invalid-url" };
+    destination = { scheme: "https", host: "invalid-url", pathPrefix: "/" };
   }
 
   const effects: EffectRequest[] = [
@@ -354,19 +356,19 @@ export async function analyzeGenerateImage(
     process.env.OPENAI_BASE_URL ||
     "https://api.openai.com/v1";
 
-  let destination: { scheme: "https" | "http"; host: string; port?: number; path?: string };
+  let destination: NetworkDestination;
   try {
     const u = new URL(rawBaseUrl.startsWith("http") ? rawBaseUrl : `https://${rawBaseUrl}`);
     destination = {
       scheme: u.protocol === "http:" ? "http" : "https",
       host: u.hostname,
       port: u.port ? Number(u.port) : undefined,
-      path: u.pathname.endsWith("/v1")
+      pathPrefix: u.pathname.endsWith("/v1")
         ? `${u.pathname}/images/generations`
         : `${u.pathname.replace(/\/$/, "")}/v1/images/generations`,
     };
   } catch {
-    destination = { scheme: "https", host: "api.openai.com", path: "/v1/images/generations" };
+    destination = { scheme: "https", host: "api.openai.com", pathPrefix: "/v1/images/generations" };
   }
 
   const secretRefs = ["OPENAI_API_KEY"];
@@ -427,7 +429,7 @@ export async function analyzeGenerateImage(
     display: {
       title: `Generate image`,
       summary: args.prompt.slice(0, 60),
-      canonicalTargets: isLocal ? [] : [`${destination.scheme}://${destination.host}${destination.path ?? ""}`],
+      canonicalTargets: isLocal ? [] : [`${destination.scheme}://${destination.host}${destination.pathPrefix ?? ""}`],
     },
     risk: "communications",
   });

@@ -207,7 +207,7 @@ export async function generateText(
     const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
     const { legacyApproveToolToBroker } = await import("../legacy-adapter.js");
     const { buildLocalBoundary } = await import("../../capabilities/execution/build-local-boundary.js");
-    const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary();
+    const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary({ workspaceRoot: opts.cwd ?? process.cwd() });
     const approvalMode = opts.consentMode
       ? (opts.consentMode === 'autonomous' ? 'autonomous' : opts.consentMode === 'ask-everything' ? 'manual' : 'balanced')
       : (opts.approveTool ? "manual" : "never");
@@ -324,7 +324,7 @@ export async function streamText(
     const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
     const { legacyApproveToolToBroker } = await import("../legacy-adapter.js");
     const { buildLocalBoundary } = await import("../../capabilities/execution/build-local-boundary.js");
-    const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary();
+    const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary({ workspaceRoot: opts.cwd ?? process.cwd() });
     const approvalMode = opts.consentMode
       ? (opts.consentMode === 'autonomous' ? 'autonomous' : opts.consentMode === 'ask-everything' ? 'manual' : 'balanced')
       : (opts.approveTool ? "manual" : "never");
