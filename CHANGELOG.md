@@ -7,9 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v0.6.0] - 2026-08-27
+## [v0.5.5] - 2026-08-27
 
-**Seepient v0.6.0** delivers the complete **Permission Tool Baseline & Consent Modes (Spec 017)**. It fixes the brokered-tool lockout and zero-effect gate bug, establishes auto-granted baseline capabilities for all built-in brokered tools, classifies read-only/planning/in-memory tools as safe zero-prompt operations, replaces the legacy permission levels with three canonical consent modes (`ask-everything`, `edit-enabled`, `autonomous`), and completely demolishes the legacy parallel permission code paths across all surfaces.
+**Seepient v0.5.5** delivers the complete **Permission Tool Baseline & Consent Modes (Spec 017)** along with upstream **`@earendil-works/pi-ai` 0.84.3** synchronization. It fixes the brokered-tool lockout and zero-effect gate bug, establishes auto-granted baseline capabilities for all built-in brokered tools, classifies read-only/planning/in-memory tools as safe zero-prompt operations, replaces the legacy permission levels with three canonical consent modes (`ask-everything`, `edit-enabled`, `autonomous`), adds secret injection and cross-host redirect credential protection in `EffectBroker`, maps `--yes` / `-y` directly to autonomous mode, and completely demolishes the legacy parallel permission code paths across all surfaces.
 
 ---
 
@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `edit-enabled` (default): Pre-approves workspace edits, reads, and normal operations; prompts only for high-risk shell commands and outbound communications.
   - `autonomous`: Executes all actions permitted by the ceiling policy without human prompts.
 * **Surface Parity**:
-  - CLI: Added `--mode <ask-everything|edit-enabled|autonomous>` startup flag.
+  - CLI: Added `--mode <ask-everything|edit-enabled|autonomous>` startup flag, and mapped `-y, --yes` directly to `autonomous` consent mode.
   - Slash Command: Added `/mode [ask-everything|edit-enabled|autonomous]` with cycle and direct selection.
   - TUI: `Shift+Tab` cycles modes live; real-time `mode: <mode>` indicator in footer; one-time interactive confirmation dialog when switching to autonomous mode.
   - REPL & SDK: Typed options for `consentMode`, `deploymentCeiling`, and `principalPolicy`.
@@ -40,7 +40,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **Fail-Closed Domain Action Lifecycle**: The Domain policy pipeline (`PolicyEngine` → `ApprovalBroker` → `ExecutionBoundary` → `AuditRecorder`) is now the sole execution path across CLI, TUI, REPL, SDK, and HTTP/WebSocket server.
 * **One-Way Legacy Grant Migration**: Automatically migrates legacy on-disk `grants.json` into canonical, typed capabilities in `LocalPolicyStore`.
 
+#### 5. Upstream AI Dependencies
+* **Bump `@earendil-works/pi-ai` to 0.84.3**: Upstream provider enhancements, bug fixes, and telemetry updates.
+
 ---
+
+## [v0.5.4] - 2026-08-26
 
 **Seepient v0.5.4** fixes a critical event-loop drain bug during first-run onboarding where `readline.close()` left `process.stdin` paused before handing off to Ink, causing Node 22/26 to exit prematurely with code 13 and an "unsettled top-level await" warning. It also integrates Ink's native `waitUntilExit()` promise in `runSetupWizard` to ensure clean exit settlement on all unmount paths (including Ctrl+C / SIGINT).
 

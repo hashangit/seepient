@@ -66,7 +66,12 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
   fullConfig.autoConfirm = options.yes || options.headless || options.docker || false;
 
   // 2b. Resolve consent mode from CLI flags, env var, and config
-  const rawConsentMode = options.mode || options.consentMode || process.env.SEEPIENT_CONSENT_MODE || fullConfig.consentMode;
+  const rawConsentMode =
+    (options.yes ? 'autonomous' : undefined) ||
+    options.mode ||
+    options.consentMode ||
+    process.env.SEEPIENT_CONSENT_MODE ||
+    fullConfig.consentMode;
   const validModes = ['ask-everything', 'edit-enabled', 'autonomous'];
   const consentMode: ConsentMode = validModes.includes(rawConsentMode)
     ? rawConsentMode

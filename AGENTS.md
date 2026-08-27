@@ -284,7 +284,7 @@ UI → Transport → Domain → Capabilities → Vendors
 | Config + models | `src/foundations/config.ts` + `models-catalog.ts` | Merge layers + catalog metadata accessors |
 | Hashline | `src/foundations/hashline/` | Hash-anchored patch language: grammar, parser, patcher, snapshots |
 | Tool executor | `src/domain/tool-executor.ts` | Registry, `tool()` factory, `resolveTools()`, groups |
-| Permission system | `src/domain/permission.ts` + `grants.ts` | Policy decisions: what runs, when to ask, what to remember |
+| Permission system | `src/domain/permissions/` | Single policy engine, action lifecycle, approval broker, consent modes, and audit logging |
 | Hooks | `src/domain/hooks.ts` | Safe executor — errors never crash the loop |
 | Middleware pipeline | `src/domain/middleware/` | `compose()` chain: logging, rate-limit, auth, semantic-tools |
 | Skill orchestration | `src/domain/skills/skill-invoker.ts` + `skill-catalog.ts` | Fill args, build prompt, switch provider |

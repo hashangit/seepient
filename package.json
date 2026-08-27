@@ -1,6 +1,6 @@
 {
   "name": "seepient",
-  "version": "0.6.0",
+  "version": "0.5.5",
   "type": "module",
   "main": "dist/ui/cli/index.js",
   "exports": {
@@ -85,7 +85,7 @@
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.67",
     "@anthropic-ai/sdk": "^0.52.0",
-    "@earendil-works/pi-ai": "0.84.2",
+    "@earendil-works/pi-ai": "0.84.3",
     "@google/genai": "2.15.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@mozilla/readability": "^0.6.0",

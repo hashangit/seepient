@@ -277,62 +277,46 @@ Environment variables for customizing skill discovery and behavior:
 Skills are discovered in priority order (last wins): built-in bundled skills, `~/.seepient/skills/`, `.seepient/skills/`, then `SEEPIENT_SKILLS_PATH` directories. See the [Skills documentation](/sdk/skills) for the full SKILL.md format and features.
 :::
 
-## Permission Levels
+## Consent Modes & Permissions
 
-Control which tools auto-execute vs. require human approval using a risk-based permission matrix.
+Control which tools auto-execute vs. require human approval using Seepient's fail-closed Domain policy pipeline (`PolicyEngine` → `ApprovalBroker` → `ExecutionBoundary` → `AuditRecorder`).
 
-### Levels
+### Consent Modes
 
-| Level | Behavior |
-|-------|----------|
-| `strict` | All tools require approval |
-| `moderate` | Safe tools auto-execute; edit, communications, and destructive tools require approval |
-| `permissive` | Safe, edit, and communications tools auto-execute; destructive tools require approval |
+| Mode | Behavior |
+|------|----------|
+| `edit-enabled` *(default)* | Workspace edits, reads, and normal operations are pre-approved; prompts for high-risk shell commands and outbound external communications |
+| `ask-everything` | Prompts for human approval on every tool execution with side effects or model egress |
+| `autonomous` | Automatically approves all actions permitted by the deployment ceiling without interactive prompts |
 
-### Tool Risk Categories
-
-| Category | Examples | Auto in `moderate` |
-|----------|----------|---------------------|
-| `safe` | `read_file`, `get_current_datetime`, `web_search`, `read_website` | Yes |
-| `edit` | `write_file`, `optimize_prompt`, `use_skill` | No |
-| `communications` | `send_email`, `send_notification` | No |
-| `destructive` | `execute_shell_command`, `take_screenshot`, `generate_image` | No |
-
-Custom tools default to `destructive` (deny-by-default). Custom tools can specify a `risk` field when registered via `tool()`.
-
-### CLI Flags
+### CLI Flags & Commands
 
 ```bash
-seepient --strict       # All tools require approval
-seepient --moderate     # Safe tools auto-execute (default)
-seepient --yolo         # Only destructive tools require approval
-seepient --headless     # No approval prompts; denied tools fail silently
+seepient --mode ask-everything   # Prompt for all side-effecting tools
+seepient --mode edit-enabled     # Auto-approve edits/reads; prompt on high risk (default)
+seepient --mode autonomous       # Zero interactive prompts (same as -y / --yes)
+seepient -n                      # Headless mode (fails closed if unapproved)
 ```
 
-### Environment Variable
+In interactive TUI mode, you can type `/mode [mode]` or press `Shift+Tab` to cycle modes live.
 
-| Variable | Values | Default |
-|----------|--------|---------|
-| `SEEPIENT_PERMISSION` | `strict`, `moderate`, `permissive` | `moderate` |
+### Environment Variable & Settings
+
+| Setting | Values | Default |
+|---------|--------|---------|
+| `permissions.consentMode` / `SEEPIENT_CONSENT_MODE` | `ask-everything`, `edit-enabled`, `autonomous` | `edit-enabled` |
 
 ### SDK Usage
 
 ```typescript
-import { generateText } from 'seepient'
+import { generateText, createAgent } from 'seepient'
 
-await generateText('List my files', {
-  permissionLevel: 'strict' // All tools require approval callback
+await generateText('Refactor codebase', {
+  consentMode: 'autonomous' // Or 'edit-enabled' | 'ask-everything'
 })
-```
 
-### Server Configuration
-
-The server supports a `maxPermissionLevel` ceiling per connection. Clients can request a per-message level, but it is capped at the server-configured maximum:
-
-```typescript
-// Server startup
-const server = createServer({
-  maxPermissionLevel: 'moderate' // Clients cannot exceed moderate
+const agent = createAgent({
+  consentMode: 'edit-enabled'
 })
 ```
 
