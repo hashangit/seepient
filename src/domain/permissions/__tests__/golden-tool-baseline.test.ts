@@ -69,7 +69,7 @@ const LOCAL_BOUNDARY: ExecutionBoundary = {
   }),
 };
 
-describe("golden tool baseline (spec 017, T008)", () => {
+describe("golden tool baseline (spec 017, T002 / T015 / T016 / QS-1)", () => {
   let tempDir: string;
   let workspaceRoot: string;
   let artifacts: InMemoryArtifactStore;
@@ -132,7 +132,7 @@ describe("golden tool baseline (spec 017, T008)", () => {
     const toolInvocations: Array<{ name: string; args: unknown; expectedResult: "allow" | "needs-approval" | "backend-unsupported" }> = [
       { name: "read_file", args: { path: "test.txt" }, expectedResult: "allow" },
       { name: "write_file", args: { path: "new.txt", content: "data" }, expectedResult: "needs-approval" },
-      { name: "edit_file", args: { path: "test.txt", edits: [{ oldText: "hello", newText: "hi" }] }, expectedResult: "needs-approval" },
+      { name: "edit_file", args: { patch: "[test.txt#0000]\n+hi\n" }, expectedResult: "needs-approval" },
       { name: "execute_shell_command", args: { command: "echo ok" }, expectedResult: "needs-approval" },
       { name: "use_skill", args: { skill_name: "sample-skill" }, expectedResult: "allow" },
       { name: "get_current_datetime", args: {}, expectedResult: "allow" },
@@ -143,7 +143,7 @@ describe("golden tool baseline (spec 017, T008)", () => {
       { name: "send_email", args: { to: "alice@example.com", subject: "hi", body: "test" }, expectedResult: "needs-approval" },
       { name: "send_notification", args: { platform: "feishu", content: "alert" }, expectedResult: "needs-approval" },
       { name: "generate_image", args: { prompt: "sunset" }, expectedResult: "needs-approval" },
-      { name: "optimize_prompt", args: { prompt: "write poetry" }, expectedResult: "needs-approval" },
+      { name: "optimize_prompt", args: { raw_prompt: "write poetry" }, expectedResult: "needs-approval" },
       { name: "take_screenshot", args: {}, expectedResult: "allow" },
     ];
 
@@ -226,7 +226,7 @@ describe("golden tool baseline (spec 017, T008)", () => {
       { name: "send_email", args: { to: "user@example.com", subject: "hi", body: "body" } },
       { name: "send_notification", args: { platform: "feishu", content: "msg" } },
       { name: "generate_image", args: { prompt: "cat" } },
-      { name: "optimize_prompt", args: { prompt: "prompt" } },
+      { name: "optimize_prompt", args: { raw_prompt: "prompt" } },
     ];
 
     for (const tool of brokeredTools) {

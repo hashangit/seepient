@@ -32,7 +32,7 @@ describe('runAgentLoop streaming', () => {
         usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3, cost: 0 },
       },
       {
-        text: '',
+        text: 'Done',
         usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0 },
       },
     ]);
@@ -49,7 +49,7 @@ describe('runAgentLoop streaming', () => {
 
     // Text streamed as deltas
     const deltas = steps.filter((s) => s.type === 'text_delta');
-    expect(deltas.map((s) => s.content ?? '').join('')).toBe('Hello world');
+    expect(deltas.map((s) => s.content ?? '').join('')).toBe('Hello worldDone');
 
     // Tool call reassembled and parsed.
     const toolStep = steps.find((s) => s.type === 'tool_call');

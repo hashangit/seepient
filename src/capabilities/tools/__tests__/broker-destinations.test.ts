@@ -115,6 +115,9 @@ describe.each([
     expect(body.query).toBe("finland unemployment");
     expect(body.search_depth).toBe("advanced");
     expect(body.depth).toBeUndefined();
+    expect(body.include_answer).toBe(true);
+    expect(body.max_results).toBe(5);
+    expect(body.include_images).toBe(false);
   });
 
   it("read_website keeps the URL path and query", async () => {
@@ -138,7 +141,7 @@ describe.each([
 describe("optimize_prompt destination (analyzers.ts)", () => {
   it("targets /v1/chat/completions of the default base", async () => {
     const ctx = makeCtx();
-    const action = await analyzeOptimizePrompt({ prompt: "improve me" }, ctx);
+    const action = await analyzeOptimizePrompt({ raw_prompt: "improve me" }, ctx);
     expect(httpRequestOf(action).destination).toMatchObject({
       host: "api.openai.com",
       pathPrefix: "/v1/chat/completions",

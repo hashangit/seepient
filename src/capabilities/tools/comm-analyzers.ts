@@ -159,7 +159,13 @@ export async function analyzeWebSearch(
   const destination: NetworkDestination = { scheme: "https", host: "api.tavily.com", pathPrefix: "/search" };
   const secretRefs = ["tavilyApiKey"];
   const payloadBytes = Buffer.from(
-    JSON.stringify({ query: args.query, search_depth: args.depth ?? "basic" }),
+    JSON.stringify({
+      query: args.query,
+      search_depth: args.depth ?? "basic",
+      include_answer: true,
+      include_images: false,
+      max_results: 5,
+    }),
     "utf8",
   );
   const payloadArtifact = await ctx.artifacts.put(payloadBytes, "application/json");

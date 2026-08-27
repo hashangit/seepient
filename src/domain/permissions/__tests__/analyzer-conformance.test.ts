@@ -35,7 +35,7 @@ describe("analyzer conformance (spec 017, T018 / QS-3)", () => {
     const toolsToTest: Array<{ name: string; args: unknown }> = [
       { name: "read_file", args: { path: "test.txt" } },
       { name: "write_file", args: { path: "test.txt", content: "hi" } },
-      { name: "edit_file", args: { path: "test.txt", edits: [] } },
+      { name: "edit_file", args: { patch: "[test.txt#0000]\n+hi\n" } },
       { name: "execute_shell_command", args: { command: "ls" } },
       { name: "get_current_datetime", args: {} },
       { name: "manage_todos", args: {} },
@@ -45,7 +45,7 @@ describe("analyzer conformance (spec 017, T018 / QS-3)", () => {
       { name: "send_email", args: { to: "a@b.com", subject: "s", body: "b" } },
       { name: "send_notification", args: { platform: "feishu", content: "c" } },
       { name: "generate_image", args: { prompt: "draw" } },
-      { name: "optimize_prompt", args: { prompt: "prompt" } },
+      { name: "optimize_prompt", args: { raw_prompt: "prompt" } },
     ];
 
     for (const tool of toolsToTest) {

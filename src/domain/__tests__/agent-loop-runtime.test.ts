@@ -228,4 +228,84 @@ describe("Agent Loop Execution via ProviderRuntime (QS-P5.3c)", () => {
     const step2Req = receivedRequests[1];
     expect(step2Req.messages.some((m: any) => m.role === "tool")).toBe(true);
   });
+
+  it("fails loudly with EMPTY_COMPLETION when provider yields 0 tokens and no tool calls", async () => {
+    const mockLanguageBackend: LanguageBackend = {
+      chatStream: async function* () {
+        yield {
+          type: "start",
+          resolvedModel: { providerAccount: "main-account", modelId: "gpt-4o" },
+        };
+        // No text delta or tool calls — finishes immediately
+        yield {
+          type: "finish",
+          stopReason: "end_turn",
+          usage: { inputTokens: 10, outputTokens: 0, totalTokens: 10 },
+        };
+      },
+      chat: async () => ({
+        message: { role: "assistant", content: [] },
+        stopReason: "end_turn",
+      }),
+    };
+
+    const adapter = new AggregateInferenceAdapter({ language: mockLanguageBackend });
+    const credStore = new MemoryCredentialStore();
+    const configStore = new ProviderConfigStore(":memory:");
+    await configStore.updateOverlay({
+      providers: {
+        "main-account": {
+          adapter: "pi-ai",
+          upstreamProvider: "openai",
+          credential: { kind: "none" },
+        },
+      },
+      modelAssignments: {
+        text: {
+          standard: { providerAccount: "main-account", model: "gpt-4o" },
+        },
+      },
+    }, 0);
+
+    const runtime = new ProviderRuntime({
+      configStore,
+      credentialStore: credStore,
+      adapter,
+    });
+
+    const initialMessages = [{ id: "1", role: "user" as const, content: "Hi", timestamp: Date.now() }];
+    const result = await runAgentLoop({
+      runtime,
+      model: "gpt-4o",
+      messages: initialMessages,
+      toolDefs: [],
+      maxSteps: 3,
+      hooks: createHookExecutor(),
+    });
+
+    expect(result.finishReason).toBe("error");
+    expect(result.error?.code).toBe("EMPTY_COMPLETION");
+    expect(result.error?.retryable).toBe(true);
+    // Must NOT push an empty assistant message
+    expect(result.messages.length).toBe(1);
+  });
+
+  it("extracts in-band XML tool calls (<tool_call>) from content", async () => {
+    const { extractInBandToolCalls } = await import("../agent-loop.js");
+    const raw = `Let me check the weather.\n<tool_call>\n{"name": "web_search", "arguments": {"query": "weather in Tokyo"}}\n</tool_call>\nDone.`;
+    const extracted = extractInBandToolCalls(raw);
+    expect(extracted.toolCalls).toHaveLength(1);
+    expect(extracted.toolCalls[0].name).toBe("web_search");
+    expect(JSON.parse(extracted.toolCalls[0].arguments)).toEqual({ query: "weather in Tokyo" });
+    expect(extracted.remainingText).toContain("Let me check the weather.");
+  });
+
+  it("extracts in-band Markdown tool calls (```tool_call) from content", async () => {
+    const { extractInBandToolCalls } = await import("../agent-loop.js");
+    const raw = `I will run the command:\n\`\`\`tool_call\n{\n  "name": "execute_shell_command",\n  "arguments": {"command": "ls -la"}\n}\n\`\`\``;
+    const extracted = extractInBandToolCalls(raw);
+    expect(extracted.toolCalls).toHaveLength(1);
+    expect(extracted.toolCalls[0].name).toBe("execute_shell_command");
+    expect(JSON.parse(extracted.toolCalls[0].arguments)).toEqual({ command: "ls -la" });
+  });
 });

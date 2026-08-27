@@ -105,11 +105,12 @@ describe("consent mode matrix (spec 017, T024 / T032 / T033 / QS-4)", () => {
           "network-destination",
           "external-recipient",
           "secret-ref",
+          "trusted-host",
         ],
         exactCommit: true,
         hostFilteredEgress: true,
         environmentIsolation: opts?.environmentIsolation ?? true,
-        supportedOperationKinds: ["none", "read-file", "commit-files", "process", "broker"],
+        supportedOperationKinds: ["none", "read-file", "commit-files", "process", "broker", "trusted-host"],
       },
       workspaceRoot,
     };
@@ -176,7 +177,7 @@ describe("consent mode matrix (spec 017, T024 / T032 / T033 / QS-4)", () => {
       expect(engine.evaluate(write, p).decision).toBe("allow");
 
       const edit = await ALL_ANALYZERS.edit_file(
-        { path: "normal.txt", edits: [{ oldText: "normal", newText: "updated" }] },
+        { patch: "[normal.txt#0000]\n+updated" },
         ctx,
       );
       expect(engine.evaluate(edit, p).decision).toBe("allow");
@@ -203,7 +204,7 @@ describe("consent mode matrix (spec 017, T024 / T032 / T033 / QS-4)", () => {
       const img = await ALL_ANALYZERS.generate_image({ prompt: "art" }, ctx);
       expect(engine.evaluate(img, p).decision).toBe("allow");
 
-      const opt = await ALL_ANALYZERS.optimize_prompt({ prompt: "prompt" }, ctx);
+      const opt = await ALL_ANALYZERS.optimize_prompt({ raw_prompt: "prompt" }, ctx);
       expect(engine.evaluate(opt, p).decision).toBe("allow");
 
       // Sends route to prompt
@@ -228,7 +229,7 @@ describe("consent mode matrix (spec 017, T024 / T032 / T033 / QS-4)", () => {
         await ALL_ANALYZERS.web_search({ query: "q" }, ctx),
         await ALL_ANALYZERS.read_website({ url: "https://example.com" }, ctx),
         await ALL_ANALYZERS.generate_image({ prompt: "art" }, ctx),
-        await ALL_ANALYZERS.optimize_prompt({ prompt: "prompt" }, ctx),
+        await ALL_ANALYZERS.optimize_prompt({ raw_prompt: "prompt" }, ctx),
         await ALL_ANALYZERS.send_email({ to: "a@b.com", subject: "s", body: "b" }, ctx),
         await ALL_ANALYZERS.send_notification({ platform: "feishu", content: "hi" }, ctx),
       ];
