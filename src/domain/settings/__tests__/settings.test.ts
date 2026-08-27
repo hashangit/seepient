@@ -83,8 +83,9 @@ describe('settings-schema', () => {
     const permKeys = getSettingsByCategory('permissions');
     expect(permKeys).toContain('permissions.consentMode');
     expect(permKeys).toContain('agent.autoConfirm');
-    expect(permKeys).toContain('permissions.autonomousMode');
+    expect(permKeys).toContain('permissions.autonomousWarned');
     expect(permKeys).toContain('permissions.approvalTimeoutMs');
+    expect(permKeys).not.toContain('permissions.autonomousMode');
   });
 
   it('permissions.approvalTimeoutMs defaults to ten minutes and validates bounds', () => {
@@ -97,13 +98,14 @@ describe('settings-schema', () => {
     expect(getSettingEntry('permissions.approvalTimeoutMs')!.category).toBe('permissions');
   });
 
-  it('permissions.autonomousMode is an explicit boolean startup setting', () => {
-    const schema = getSettingSchema('permissions.autonomousMode');
+  it('permissions.autonomousWarned is an explicit boolean setting', () => {
+    const schema = getSettingSchema('permissions.autonomousWarned');
     expect(schema).toMatchObject({
       type: 'boolean',
       default: false,
       restartRequired: false,
     });
+    expect(getSettingEntry('permissions.autonomousWarned')!.category).toBe('permissions');
   });
 
   it('ENV_VAR_MAP has entries for settings with env var overrides', () => {
@@ -199,13 +201,38 @@ describe('SettingsManager', () => {
     expect(mgr.get('agent.autoConfirm').value).toBe(true);
   });
 
-  it('autonomous mode cannot bypass its warning through generic settings', async () => {
+  it('permissions.autonomousWarned round-trips correctly', async () => {
+    const mgr = createTestManager();
+    expect(mgr.get('permissions.autonomousWarned').value).toBe(false);
+    await mgr.set('permissions.autonomousWarned', 'true');
+    expect(mgr.get('permissions.autonomousWarned').value).toBe(true);
+    await mgr.reset('permissions.autonomousWarned');
+    expect(mgr.get('permissions.autonomousWarned').value).toBe(false);
+  });
+
+  it('set() accepts boolean literals directly (defense in depth)', async () => {
+    const mgr = createTestManager();
+    await mgr.set('permissions.autonomousWarned', true as any);
+    expect(mgr.get('permissions.autonomousWarned').value).toBe(true);
+    await mgr.set('permissions.autonomousWarned', false as any);
+    expect(mgr.get('permissions.autonomousWarned').value).toBe(false);
+  });
+
+  it('set() rejects when persistence fails rather than silently resolving', async () => {
+    // Config path pointing to an invalid/unwritable location (e.g. /dev/null/config.json)
+    const mgr = new SettingsManager({
+      config: {},
+      projectConfigPath: '/dev/null/invalid/config.json',
+      globalConfigPath: '/dev/null/invalid/config.json',
+    });
+    await expect(mgr.set('permissions.autonomousWarned', 'true')).rejects.toThrow();
+  });
+
+  it('setting permissions.autonomousMode throws SETTINGS_INVALID_KEY', async () => {
     const mgr = createTestManager();
     await expect(mgr.set('permissions.autonomousMode', 'true')).rejects.toThrow(
-      '/permissions autonomous on',
+      /Unknown setting: permissions\.autonomousMode/,
     );
-    await mgr.setConfirmedAutonomousMode(true);
-    expect(mgr.get('permissions.autonomousMode').value).toBe(true);
   });
 
   it('set() rejects unknown keys', async () => {

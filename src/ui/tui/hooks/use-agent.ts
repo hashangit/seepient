@@ -63,7 +63,7 @@ export interface AgentApi {
   contextTokens: number;
   /** Persistent todo list (updated by manage_todos tool; null when none). */
   latestTodos: Todo[] | null;
-  submit: (input: string) => Promise<void>;
+  submit: (input: string, providerFactory?: import('../../../domain/agent-loop.js').ProviderFactory) => Promise<void>;
   /** Native selections or legacy decisions both flow through this resolver. */
   resolvePermission: (selection: TuiApprovalSelection | ApprovalDecision) => void;
   abort: () => void;
@@ -194,7 +194,10 @@ export function useAgent({ agent, feed, consentMode, widgetHost }: UseAgentArgs)
     }
   }, []);
 
-  const submit = useCallback(async (input: string): Promise<void> => {
+  const submit = useCallback(async (
+    input: string,
+    providerFactory?: import('../../../domain/agent-loop.js').ProviderFactory,
+  ): Promise<void> => {
     const trimmed = input.trim();
     if (!trimmed) return;
 
@@ -310,6 +313,7 @@ export function useAgent({ agent, feed, consentMode, widgetHost }: UseAgentArgs)
         signal,
         approveTool,
         onStep,
+        providerFactory,
       );
       commitStreaming(); // commit the final assistant message if any
       if (result.finishReason === 'error' && result.error) {

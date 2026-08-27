@@ -15,7 +15,7 @@ export const skillsHandler: CommandHandler = async (ctx) => {
   const registry = agent.getSkillRegistry();
   if (!registry || registry.getAll().length === 0) {
     return {
-      output: `${chalk.yellow('No skills loaded.')}\n${chalk.dim('Add skills to .seepient/skills/ or set SEEPIENT_SKILLS_PATH env var.')}`,
+      output: `${chalk.yellow('No skills loaded.')}\n${chalk.dim('Add skills to ~/.agents/skills/, ~/.seepient/skills/, .seepient/skills/, or set SEEPIENT_SKILLS_PATH env var.')}`,
     };
   }
 

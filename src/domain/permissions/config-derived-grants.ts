@@ -112,6 +112,9 @@ export function deriveConfigGrants(options: ConfigDerivedGrantsOptions = {}): Ca
     );
   }
 
+  // 5. Built-in trusted-host capabilities (use_skill)
+  capabilities.push({ kind: "trusted-host", registrationId: "use_skill" });
+
   // Deduplicate capabilities by stable key
   const seen = new Set<string>();
   const deduped: Capability[] = [];

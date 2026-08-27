@@ -130,19 +130,11 @@ export class SettingsManager {
 
   // ── Write ──────────────────────────────────────────────────────────────
 
-  async set(dotKey: string, rawValue: string): Promise<void> {
-    return this.setValue(dotKey, rawValue, false);
+  async set(dotKey: string, rawValue: unknown): Promise<void> {
+    return this.setValue(dotKey, rawValue);
   }
 
-  /**
-   * Trusted write used only after `/permissions autonomous on --confirm` has
-   * displayed and received the dedicated high-risk confirmation.
-   */
-  async setConfirmedAutonomousMode(enabled: boolean): Promise<void> {
-    return this.setValue('permissions.autonomousMode', String(enabled), true);
-  }
-
-  private async setValue(dotKey: string, rawValue: string, confirmed: boolean): Promise<void> {
+  private async setValue(dotKey: string, rawValue: unknown): Promise<void> {
     const mapEntry = SETTINGS_MAP.get(dotKey);
     if (!mapEntry) {
       throw new SettingsError(`Unknown setting: ${dotKey}. Use /settings list to see available keys.`, 'SETTINGS_INVALID_KEY');
@@ -150,12 +142,6 @@ export class SettingsManager {
 
     const schema = SETTINGS_SCHEMA.get(dotKey);
     const value = this.validateValue(dotKey, rawValue, schema);
-    if (dotKey === 'permissions.autonomousMode' && value === true && !confirmed) {
-      throw new SettingsError(
-        'Autonomous mode can only be enabled through /permissions autonomous on, which displays the required warning.',
-        'SETTINGS_VALIDATION_FAILED',
-      );
-    }
 
     // Determine write target
     const writePath = this.resolveWriteTarget(dotKey);
@@ -169,13 +155,10 @@ export class SettingsManager {
       console.warn(`Note: This key is overridden by env var ${envVar}. Saving to config. The env var takes precedence until unset.`);
     }
 
-    // Read current file, apply change, write. Autonomous mode must not
-    // silently change in-memory only: the CLI command rolls back the live
-    // lifecycle when persistence fails (review round 9), so its writes are
-    // strict.
+    // Read current file, apply change, write
     const fileConfig = await this.readConfigFile(writePath);
     this.applyValueToConfig(fileConfig, mapEntry.configPath, value);
-    await this.persist(writePath, fileConfig, dotKey === 'permissions.autonomousMode');
+    await this.persist(writePath, fileConfig);
 
     // Update in-memory
     this.applyValueToConfig(this.config, mapEntry.configPath, value);
@@ -248,12 +231,12 @@ export class SettingsManager {
     }
   }
 
-  private validateValue(dotKey: string, raw: string, schema?: SettingsSchemaEntry): unknown {
+  private validateValue(dotKey: string, raw: unknown, schema?: SettingsSchemaEntry): unknown {
     if (!schema) return raw;
 
     switch (schema.type) {
       case 'number': {
-        const num = Number(raw);
+        const num = typeof raw === 'number' ? raw : Number(raw);
         if (isNaN(num)) {
           throw new SettingsError(`${dotKey} must be a number. Got: "${raw}"`, 'SETTINGS_VALIDATION_FAILED');
         }
@@ -266,22 +249,24 @@ export class SettingsManager {
         return num;
       }
       case 'boolean': {
-        const lower = raw.toLowerCase();
+        if (typeof raw === 'boolean') return raw;
+        const lower = String(raw).toLowerCase();
         if (lower === 'true' || lower === '1') return true;
         if (lower === 'false' || lower === '0') return false;
         throw new SettingsError(`${dotKey} must be true or false. Got: "${raw}"`, 'SETTINGS_VALIDATION_FAILED');
       }
       case 'enum': {
-        if (!schema.enumValues?.includes(raw)) {
+        if (!schema.enumValues?.includes(String(raw))) {
           throw new SettingsError(`${dotKey} must be one of: ${schema.enumValues?.join(', ')}. Got: "${raw}"`, 'SETTINGS_VALIDATION_FAILED');
         }
-        return raw;
+        return String(raw);
       }
       case 'string': {
+        const str = String(raw ?? '');
         // URL validation for baseUrl/webhook fields
         if (dotKey.includes('baseUrl') || dotKey.includes('.webhook')) {
           try {
-            const parsed = new URL(raw);
+            const parsed = new URL(str);
             if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
               throw new SettingsError(`${dotKey} must be a valid URL starting with http:// or https://.`, 'SETTINGS_VALIDATION_FAILED');
             }
@@ -295,11 +280,11 @@ export class SettingsManager {
         }
         // Hostname validation
         if (dotKey === 'smtp.host') {
-          if (!/^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$/.test(raw)) {
+          if (!/^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$/.test(str)) {
             throw new SettingsError(`${dotKey} must be a valid hostname.`, 'SETTINGS_VALIDATION_FAILED');
           }
         }
-        return raw;
+        return str;
       }
       default:
         return raw;
@@ -354,24 +339,19 @@ export class SettingsManager {
     }
   }
 
-  private async persist(configPath: string, data: Record<string, any>, strict = false): Promise<void> {
+  private async persist(configPath: string, data: Record<string, any>): Promise<void> {
+    const dir = path.dirname(configPath);
+    await fs.mkdir(dir, { recursive: true });
+
+    // Backup existing file
     try {
-      const dir = path.dirname(configPath);
-      await fs.mkdir(dir, { recursive: true });
+      await fs.rename(configPath, configPath + '.bak');
+    } catch { /* no existing file to back up */ }
 
-      // Backup existing file
-      try {
-        await fs.rename(configPath, configPath + '.bak');
-      } catch { /* no existing file to back up */ }
-
-      // Atomic write via temp file
-      const tmpPath = configPath + `.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
-      await fs.writeFile(tmpPath, JSON.stringify(data, null, 2), { mode: 0o600 });
-      await fs.rename(tmpPath, configPath);
-    } catch (e: any) {
-      if (strict) throw e;
-      console.warn(`Warning: could not save to ${configPath}: ${e.message}. Change applied in-memory only.`);
-    }
+    // Atomic write via temp file
+    const tmpPath = configPath + `.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
+    await fs.writeFile(tmpPath, JSON.stringify(data, null, 2), { mode: 0o600 });
+    await fs.rename(tmpPath, configPath);
   }
 
   private getValueByPath(obj: Record<string, any>, pathParts: string[]): unknown {

@@ -6,21 +6,30 @@
  *   - Explains what enforcement remains (sandbox, broker network checks, immutable denies, audit)
  *   - Once confirmed, persisted to settings (permissions.autonomousWarned)
  */
-import React from 'react';
+import React, { useRef } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { useTheme } from '../hooks/use-theme.js';
 
 interface AutonomousWarningProps {
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
   onCancel: () => void;
 }
 
 export function AutonomousWarning({ onConfirm, onCancel }: AutonomousWarningProps): React.ReactElement {
   const theme = useTheme();
+  const isConfirmingRef = useRef(false);
 
-  useInput((input, key) => {
+  useInput(async (input, key) => {
+    if (isConfirmingRef.current) return;
     if (key.return || input === 'y' || input === 'Y') {
-      onConfirm();
+      isConfirmingRef.current = true;
+      try {
+        await onConfirm();
+      } catch {
+        // Handled upstream by onConfirm
+      } finally {
+        isConfirmingRef.current = false;
+      }
     } else if (key.escape || input === 'n' || input === 'N') {
       onCancel();
     }

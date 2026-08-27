@@ -25,6 +25,7 @@ import { createProviderManagerApi } from '../../transport/cli/provider-manager-a
 import { SessionSelector, type SessionListItem } from './overlays/session-selector.js';
 import { SettingsEditor, type SettingItem } from './overlays/settings-overlay.js';
 import { AutonomousWarning } from './overlays/autonomous-warning.js';
+import { isAutonomousWarned, shouldShowAutonomousWarning } from './autonomous-decision.js';
 import { messagesToFeedEntries } from './feed-serializer.js';
 import type { Suggestion } from './components/autocomplete.js';
 import type { Agent } from '../../transport/cli/agent.js';
@@ -106,8 +107,13 @@ export function TuiApp({
     widgetHost.setSubmit((synthetic: string) => { void submit(synthetic); });
   }, [widgetHost, submit]);
   const [input, setInput] = useState('');
-  const [overlay, setOverlay] = useState<Overlay>(null);
-  const [settingsList, setSettingsList] = useState<SettingItem[]>([]);
+  const initialSettings = useMemo(() => (getSettingsList ? getSettingsList() : []), [getSettingsList]);
+  const [settingsList, setSettingsList] = useState<SettingItem[]>(initialSettings);
+  const initialConsent = agent.getConsentMode?.() ?? consentMode ?? 'edit-enabled';
+  const [currentConsentMode, setCurrentConsentMode] = useState<ConsentMode>(initialConsent);
+
+  const startNeedsWarning = shouldShowAutonomousWarning(initialConsent, isAutonomousWarned(initialSettings));
+  const [overlay, setOverlay] = useState<Overlay>(startNeedsWarning ? 'autonomous-warning' : null);
   const [sessionsList, setSessionsList] = useState<SessionListItem[]>([]);
 
   // Widget focus — only active when agent is idle. When set, widgets render
@@ -233,7 +239,36 @@ export function TuiApp({
     } else if (result.output) {
       feed.appendEntry({ kind: 'assistant', content: stripAnsi(result.output) });
     } else if (result.status === 'fallthrough') {
-      feed.appendEntry({ kind: 'assistant', content: `${name} skill launch from the TUI arrives in US2 — ask in chat, or run it in the readline REPL.` });
+      try {
+        const registry = agent.getSkillRegistry();
+        if (registry) {
+          const { invokeSkill, createRuntimeSkillProviderSwitcher } = await import('../../domain/skills/skill-invoker.js');
+          const skillResult = await invokeSkill({ input: raw, registry });
+          if (skillResult) {
+            feed.appendEntry({ kind: 'info', content: `Loading skill: ${skillResult.skill.name}` });
+            const switcher = createRuntimeSkillProviderSwitcher(agent.getProviderRuntime());
+            const switched = await switcher.switchIfNeeded(skillResult);
+            try {
+              await submit(skillResult.prompt, switched ? switcher : undefined);
+            } finally {
+              if (switched) {
+                switcher.restore();
+              }
+            }
+            return;
+          }
+        }
+        feed.appendEntry({ kind: 'info', content: `Unknown command: ${name}. Type /? for help.` });
+      } catch (err) {
+        feed.appendEntry({
+          kind: 'error',
+          message: `Failed to launch skill ${name}: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    }
+    if (agent.getConsentMode) {
+      const liveConsent = agent.getConsentMode();
+      setCurrentConsentMode((prev) => (prev !== liveConsent ? liveConsent : prev));
     }
   };
 
@@ -323,6 +358,19 @@ export function TuiApp({
       setSessionsList(await listSessions());
       setOverlay('sessions');
       return;
+    }
+    // `/mode autonomous` — route through warning check if unwarned
+    {
+      const parts = trimmed.split(/\s+/);
+      const cmd = parts[0]?.toLowerCase();
+      const sub = parts[1]?.toLowerCase();
+      if (cmd === '/mode' && sub === 'autonomous') {
+        const isWarned = isAutonomousWarned(settingsList);
+        if (shouldShowAutonomousWarning('autonomous', isWarned)) {
+          setOverlay('autonomous-warning');
+          return;
+        }
+      }
     }
     // `/clear` starts a fresh session + TUI (logo, empty feed) — handled here,
     // not via the registry (which only clears the agent, not the visible feed).
@@ -486,44 +534,71 @@ export function TuiApp({
     return ok;
   };
 
-  const [currentConsentMode, setCurrentConsentMode] = useState<ConsentMode>(
-    agent.getConsentMode?.() ?? 'edit-enabled',
-  );
-
   const cycleConsentMode = async (): Promise<void> => {
     const cycleMap: Record<ConsentMode, ConsentMode> = {
       'ask-everything': 'edit-enabled',
       'edit-enabled': 'autonomous',
       autonomous: 'ask-everything',
     };
-    const nextMode = cycleMap[currentConsentMode] ?? 'edit-enabled';
-    if (nextMode === 'autonomous') {
-      const warnedSetting = settingsList.find((s) => s.dotKey === 'permissions.autonomousWarned')?.value;
-      const warned = warnedSetting === 'true' || (warnedSetting as unknown) === true;
-      if (!warned) {
-        setOverlay('autonomous-warning');
-        return;
-      }
+    const prevMode = currentConsentMode;
+    const nextMode = cycleMap[prevMode] ?? 'edit-enabled';
+    const isWarned = isAutonomousWarned(settingsList);
+    if (shouldShowAutonomousWarning(nextMode, isWarned)) {
+      setOverlay('autonomous-warning');
+      return;
     }
-    agent.setConsentMode?.(nextMode);
-    setCurrentConsentMode(nextMode);
-    await handleSetSetting('permissions.consentMode', nextMode);
-    feed.appendEntry({
-      kind: 'info',
-      content: `Switched consent mode to ${nextMode}.`,
-    });
+    try {
+      agent.setConsentMode?.(nextMode);
+      setCurrentConsentMode(nextMode);
+      await handleSetSetting('permissions.consentMode', nextMode);
+      feed.appendEntry({
+        kind: 'info',
+        content: `Switched consent mode to ${nextMode}.`,
+      });
+    } catch (err) {
+      agent.setConsentMode?.(prevMode);
+      setCurrentConsentMode(prevMode);
+      feed.appendEntry({
+        kind: 'error',
+        message: `Failed to change consent mode: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
   };
 
   const confirmAutonomousMode = async (): Promise<void> => {
-    agent.setConsentMode?.('autonomous');
-    setCurrentConsentMode('autonomous');
-    await handleSetSetting('permissions.consentMode', 'autonomous');
-    await handleSetSetting('permissions.autonomousWarned', true);
+    const prevMode = currentConsentMode === 'autonomous' ? 'edit-enabled' : currentConsentMode;
+    try {
+      // 1. Write the warned flag first so failure cannot leave autonomous persisted without warning
+      await handleSetSetting('permissions.autonomousWarned', true);
+      // 2. Set live agent runtime + React state
+      agent.setConsentMode?.('autonomous');
+      setCurrentConsentMode('autonomous');
+      // 3. Persist consentMode
+      await handleSetSetting('permissions.consentMode', 'autonomous');
+      setOverlay(null);
+      feed.appendEntry({
+        kind: 'info',
+        content: 'Autonomous mode enabled. All in-ceiling actions run unprompted.',
+      });
+    } catch (err) {
+      // On failure, revert runtime mode + React state and do not leave autonomous persisted
+      agent.setConsentMode?.(prevMode);
+      setCurrentConsentMode(prevMode);
+      setOverlay(null);
+      feed.appendEntry({
+        kind: 'error',
+        message: `Failed to enable autonomous mode: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  };
+
+  const cancelAutonomousWarning = (): void => {
+    if (currentConsentMode === 'autonomous') {
+      // Drop session to edit-enabled for this run without rewriting settings
+      agent.setConsentMode?.('edit-enabled');
+      setCurrentConsentMode('edit-enabled');
+    }
     setOverlay(null);
-    feed.appendEntry({
-      kind: 'info',
-      content: 'Autonomous mode enabled. All in-ceiling actions run unprompted.',
-    });
   };
 
   useKeybindings(
@@ -666,7 +741,7 @@ export function TuiApp({
             onClose={() => setOverlay(null)}
           />
         ) : overlay === 'autonomous-warning' ? (
-          <AutonomousWarning onConfirm={confirmAutonomousMode} onCancel={() => setOverlay(null)} />
+          <AutonomousWarning onConfirm={confirmAutonomousMode} onCancel={cancelAutonomousWarning} />
         ) : (
           inputAreaSlot
         )}
