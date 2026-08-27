@@ -40,6 +40,10 @@ export async function runSetup(options: { project?: boolean } = {}): Promise<voi
     process.exit(1);
   }
 
+  // readline's close() paused stdin; Ink 6 never resumes it — a paused TTY handle
+  // does not keep the event loop alive, so the wizard would drain the loop and die.
+  process.stdin.resume();
+
   const { runSetupWizard } = await import('../../ui/tui/setup-wizard.js');
   await runSetupWizard({ project: options.project });
   ensureDocumentsWorkspace();
