@@ -37,16 +37,7 @@ export interface StartTuiArgs {
 export async function startTui({ queryParts, options }: StartTuiArgs): Promise<void> {
   const initialQuery = queryParts.join(' ').trim();
   const ctx = await bootstrapCliSession(options);
-  const { agent, fullConfig, activeProviderType, gatewayInstance, permissionLevel, persistence } = ctx;
-
-  // Spec 008: enable the new policy pipeline when --permission-pipeline is set.
-  // The TUI's approveTool (the permission prompt overlay) is wired via useAgent;
-  // the broker wrapper consults it at decision time.
-  if (options.permissionPipeline) {
-    await agent.enablePermissionPipeline({
-      modelProviderClass: activeProviderType,
-    });
-  }
+  const { agent, fullConfig, activeProviderType, gatewayInstance, consentMode, persistence } = ctx;
 
   // Same registry the readline REPL uses — one owner of the command set.
   const registry = buildCommandRegistry(agent, fullConfig, activeProviderType, gatewayInstance);
@@ -84,7 +75,7 @@ export async function startTui({ queryParts, options }: StartTuiArgs): Promise<v
       };
     });
   };
-  const onSetSetting = async (dotKey: string, value: string): Promise<void> => {
+  const onSetSetting = async (dotKey: string, value: unknown): Promise<void> => {
     const paths = getConfigPaths();
     const sm = new SettingsManager({
       config: applyEnvOverrides(loadMergedConfig()),
@@ -93,7 +84,7 @@ export async function startTui({ queryParts, options }: StartTuiArgs): Promise<v
       projectConfig: loadJsonConfig(paths.local) as Record<string, any>,
       globalConfig: loadJsonConfig(paths.global) as Record<string, any>,
     });
-    await sm.set(dotKey, value);
+    await sm.set(dotKey, value as any);
   };
 
   // ── Sessions ────────────────────────────────────────────────────────────
@@ -217,7 +208,7 @@ export async function startTui({ queryParts, options }: StartTuiArgs): Promise<v
     <ThemeProvider>
     <TuiApp
       agent={agent}
-      permissionLevel={permissionLevel}
+      consentMode={consentMode}
       initialQuery={initialQuery}
       onExit={onExit}
       dispatchCommand={dispatchCommand}

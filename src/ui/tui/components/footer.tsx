@@ -1,12 +1,12 @@
 import { Box, Text } from 'ink';
 import { useTheme } from '../hooks/use-theme.js';
-import type { CumulativeUsage, PermissionLevel } from '../../../foundations/types.js';
+import type { CumulativeUsage } from '../../../foundations/types.js';
 
 interface FooterProps {
   providerType: string;
   model: string;
   usage: CumulativeUsage;
-  permissionLevel?: PermissionLevel;
+  consentMode?: string;
   skillCount: number;
   gatewayOn: boolean;
   mcpCount: number;
@@ -24,14 +24,15 @@ function fmtContext(used: number, limit?: number): string {
 }
 
 /**
- * Fixed bottom status bar: provider | model | context-window | cost | permission
+ * Fixed bottom status bar: provider | model | context-window | cost | consent mode
  * | skills | gw. Context-window + cost update live from the agent's usage.
  */
 export function Footer({
-  providerType, model, usage, permissionLevel, skillCount, gatewayOn, mcpCount, contextTokens, contextWindow,
+  providerType, model, usage, consentMode, skillCount, gatewayOn, mcpCount, contextTokens, contextWindow,
 }: FooterProps) {
   const theme = useTheme();
   const sep = <Text color={theme.fgGutter}> │ </Text>;
+  const activeMode = consentMode ?? 'edit-enabled';
   return (
     <Box>
       <Text color={theme.purple}>{providerType}</Text>
@@ -42,7 +43,7 @@ export function Footer({
       {sep}
       <Text color={theme.fgDim}>${usage.totalCost.toFixed(2)}</Text>
       {sep}
-      <Text color={theme.fgDim}>{permissionLevel ?? 'moderate'}</Text>
+      <Text color={activeMode === 'autonomous' ? theme.yellow : theme.fgDim}>mode: {activeMode}</Text>
       {sep}
       <Text color={theme.fgDim}>{skillCount} skills</Text>
       {sep}

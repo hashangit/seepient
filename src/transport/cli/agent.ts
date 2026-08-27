@@ -10,9 +10,8 @@ import { now } from '../../domain/context/message-convert.js';
 import { generateId } from '../../foundations/id.js';
 import { createHookExecutor } from '../../domain/hooks.js';
 import { buildSkillCatalog } from '../../domain/skills/skill-catalog.js';
-import type { Message, StepResult, Usage, ToolCall, ApproveToolFn, PermissionLevel, PersistenceBackend } from '../../foundations/types.js';
+import type { Message, StepResult, Usage, ToolCall, ApproveToolFn, PersistenceBackend } from '../../foundations/types.js';
 import { persistSession } from '../../domain/sessions/session-store.js';
-import type { GrantStore } from '../../domain/grants.js';
 import type { Middleware } from '../../foundations/contracts/middleware.js';
 import type { ApprovalBroker, Capability, CapabilitySet, PermissionRequest } from '../../foundations/contracts/permission-policy.js';
 import type { PolicyStore } from '../../foundations/contracts/execution-brokers.js';
@@ -48,7 +47,6 @@ export class Agent {
   private readonly systemPrompt: string;
   private readonly providerType: string | undefined;
   private readonly persistence: PersistenceBackend | null;
-  private _grantStore: GrantStore | null = null;
   // Spec 008 protected policy store + pending proposals (T307).
   private _policyStore: PolicyStore | null = null;
   private _workspaceId: string | null = null;
@@ -146,15 +144,6 @@ export class Agent {
   /** Set middleware pipeline (e.g., gateway semantic injection). */
   setMiddleware(middleware: Middleware[]): void {
     this._middleware = middleware;
-  }
-
-  /** Attach the persisted-grant store (used by the loop + /permissions). */
-  setGrantStore(store: GrantStore): void {
-    this._grantStore = store;
-  }
-
-  getGrantStore(): GrantStore | null {
-    return this._grantStore;
   }
 
   // The spec-008 wired pipeline (built lazily by enablePermissionPipeline()).
@@ -331,6 +320,22 @@ export class Agent {
 
   isAutonomousMode(): boolean {
     return this._wiredPipeline?.lifecycle.getApprovalMode() === 'autonomous';
+  }
+
+  /** Set consent mode live with single setApprovalMode call (spec 017, T026). */
+  setConsentMode(mode: import('../../foundations/settings-schema.js').ConsentMode): void {
+    if (!this._wiredPipeline) {
+      throw new Error('Protected permission pipeline is not enabled');
+    }
+    const approvalMode = mode === 'autonomous' ? 'autonomous' : mode === 'ask-everything' ? 'manual' : 'balanced';
+    this._wiredPipeline.lifecycle.setApprovalMode(approvalMode);
+  }
+
+  getConsentMode(): import('../../foundations/settings-schema.js').ConsentMode {
+    const approvalMode = this._wiredPipeline?.lifecycle.getApprovalMode();
+    if (approvalMode === 'autonomous') return 'autonomous';
+    if (approvalMode === 'manual') return 'ask-everything';
+    return 'edit-enabled';
   }
 
   /** Remove one in-memory permission from the current session immediately. */
@@ -528,7 +533,6 @@ export class Agent {
     userInput: string,
     signal?: AbortSignal,
     approveTool?: ApproveToolFn,
-    permissionLevel?: PermissionLevel,
     onStep?: (step: StepResult) => void,
     providerFactory?: ProviderFactory,
   ): Promise<ChatResult> {
@@ -571,7 +575,6 @@ export class Agent {
     try {
       const runtime = this.providerRuntime;
       const snapshot = await runtime.createTurnSnapshot();
-
       const result = await runAgentLoop({
         runtime,
         turnSnapshot: snapshot,
@@ -586,9 +589,7 @@ export class Agent {
         config: { ...this.config, agentName: 'cli', runtime },
         signal,
         approveTool: wrappedApproveTool,
-        permissionLevel,
         autoConfirm: this.autoConfirm,
-        grantStore: this._grantStore ?? undefined,
         middleware: this._middleware.length > 0 ? this._middleware : undefined,
         onStep: onStep ?? defaultOnStep,
         wiredPipeline: this._wiredPipeline ?? undefined,

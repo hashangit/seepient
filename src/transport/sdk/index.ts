@@ -21,7 +21,6 @@ import { createHookExecutor } from "../../domain/hooks.js";
 import { StreamManager } from "../../domain/streaming/stream-manager.js";
 import { resolveTools, getAllToolDefinitions } from "./tools.js";
 import { runAgentLoop } from "../../domain/agent-loop.js";
-import { createSessionGrantStore } from "../../domain/grants.js";
 import { initializeSkillRegistry } from "../../capabilities/skills/index.js";
 import { buildSkillCatalog } from "../../domain/skills/skill-catalog.js";
 import {
@@ -110,9 +109,16 @@ export type {
   PersistenceConfig,
   SkillMetadata,
   SeepientError,
-  PermissionLevel,
   ToolRiskCategory,
 } from "../../foundations/types.js";
+
+function toCapabilitySet(cap: import("../../foundations/contracts/permission-policy.js").CapabilitySet | import("../../foundations/contracts/permission-policy.js").Capability[] | undefined): import("../../foundations/contracts/permission-policy.js").CapabilitySet | undefined {
+  if (!cap) return undefined;
+  if (Array.isArray(cap)) {
+    return { version: 1, capabilities: cap };
+  }
+  return cap;
+}
 
 export {
   createPersistenceBackend,
@@ -202,6 +208,10 @@ export async function generateText(
     const { legacyApproveToolToBroker } = await import("../legacy-adapter.js");
     const { buildLocalBoundary } = await import("../../capabilities/execution/build-local-boundary.js");
     const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary();
+    const approvalMode = opts.consentMode
+      ? (opts.consentMode === 'autonomous' ? 'autonomous' : opts.consentMode === 'ask-everything' ? 'manual' : 'balanced')
+      : (opts.approveTool ? "manual" : "never");
+
     wiredPipeline = await buildActionLifecycle({
       principalId: "sdk-user",
       runId: generateId(),
@@ -209,6 +219,9 @@ export async function generateText(
       modelProviderClass: (opts.provider ?? "openai") as string,
       approvalBroker: legacyApproveToolToBroker(opts.approveTool),
       executionBoundary: boundary,
+      approvalMode,
+      deploymentCeiling: toCapabilitySet(opts.deploymentCeiling),
+      principalPolicy: toCapabilitySet(opts.principalPolicy),
       artifacts: sharedArtifacts,
     });
   }
@@ -230,8 +243,6 @@ export async function generateText(
     metadata: opts.metadata,
     middleware: opts.middleware,
     approveTool: opts.approveTool,
-    permissionLevel: opts.permissionLevel,
-    grantStore: opts.grants?.length ? createSessionGrantStore(opts.grants) : undefined,
     wiredPipeline,
   });
 
@@ -314,6 +325,10 @@ export async function streamText(
     const { legacyApproveToolToBroker } = await import("../legacy-adapter.js");
     const { buildLocalBoundary } = await import("../../capabilities/execution/build-local-boundary.js");
     const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary();
+    const approvalMode = opts.consentMode
+      ? (opts.consentMode === 'autonomous' ? 'autonomous' : opts.consentMode === 'ask-everything' ? 'manual' : 'balanced')
+      : (opts.approveTool ? "manual" : "never");
+
     wiredPipeline = await buildActionLifecycle({
       principalId: "sdk-user",
       runId: generateId(),
@@ -321,6 +336,9 @@ export async function streamText(
       modelProviderClass: (opts.provider ?? "openai") as string,
       approvalBroker: legacyApproveToolToBroker(opts.approveTool),
       executionBoundary: boundary,
+      approvalMode,
+      deploymentCeiling: toCapabilitySet(opts.deploymentCeiling),
+      principalPolicy: toCapabilitySet(opts.principalPolicy),
       artifacts: sharedArtifacts,
     });
   }
@@ -345,8 +363,6 @@ export async function streamText(
         metadata: opts.metadata,
         middleware: opts.middleware,
         approveTool: opts.approveTool,
-        permissionLevel: opts.permissionLevel,
-        grantStore: opts.grants?.length ? createSessionGrantStore(opts.grants) : undefined,
         wiredPipeline,
         onStep: (step) => {
           if (opts.onStep) opts.onStep(step);

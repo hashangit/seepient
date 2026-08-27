@@ -199,6 +199,8 @@ export interface PolicySnapshot {
    */
   mutationId?: string;
   mutationHistory?: Array<{ mutationId: string; version: number }>;
+  /** Default ceiling version stamp at the time this snapshot was written/reconciled. */
+  ceilingVersion?: number;
 }
 
 /**

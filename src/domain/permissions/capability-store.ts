@@ -117,16 +117,17 @@ export function covers(outer: Capability, inner: Capability): boolean {
       return inner.kind === "commit-file" && inner.path === outer.path;
     case "network-destination": {
       if (inner.kind !== "network-destination") return false;
-      if (inner.host !== outer.host || inner.scheme !== outer.scheme) return false;
+      if (inner.scheme !== outer.scheme) return false;
+      if (outer.host !== "*" && inner.host !== outer.host) return false;
       if (outer.port !== undefined && inner.port !== undefined && outer.port !== inner.port) return false;
       return true;
     }
-    case "external-recipient":
-      return (
-        inner.kind === "external-recipient" &&
-        inner.service === outer.service &&
-        inner.recipient === outer.recipient
-      );
+    case "external-recipient": {
+      if (inner.kind !== "external-recipient") return false;
+      if (outer.service !== "*" && inner.service !== outer.service) return false;
+      if (outer.recipient !== "*" && inner.recipient !== outer.recipient) return false;
+      return true;
+    }
     case "process": {
       if (inner.kind !== "process") return false;
       if (outer.executable !== undefined && outer.executable !== inner.executable) return false;
@@ -147,7 +148,7 @@ export function covers(outer: Capability, inner: Capability): boolean {
       return true;
     }
     case "secret-ref":
-      return inner.kind === "secret-ref" && inner.ref === outer.ref;
+      return inner.kind === "secret-ref" && (outer.ref === "*" || inner.ref === outer.ref);
     case "model-egress": {
       if (inner.kind !== "model-egress") return false;
       if (outer.providerClass !== "*" && outer.providerClass !== inner.providerClass) return false;
@@ -255,7 +256,14 @@ function intersectCapabilityFields(a: Capability, b: Capability): Capability | u
     }
     case "network-destination": {
       if (b.kind !== "network-destination") return undefined;
-      if (a.host !== b.host || a.scheme !== b.scheme) return undefined;
+      if (a.scheme !== b.scheme) return undefined;
+      const host =
+        a.host === "*"
+          ? b.host
+          : b.host === "*" || b.host === a.host
+            ? a.host
+            : undefined;
+      if (host === undefined) return undefined;
       if (a.port !== undefined && b.port !== undefined && a.port !== b.port) {
         return undefined;
       }
@@ -263,8 +271,44 @@ function intersectCapabilityFields(a: Capability, b: Capability): Capability | u
       return {
         kind: "network-destination",
         scheme: a.scheme,
-        host: a.host,
+        host,
         ...(port !== undefined ? { port } : {}),
+      };
+    }
+    case "external-recipient": {
+      if (b.kind !== "external-recipient") return undefined;
+      const service =
+        a.service === "*"
+          ? b.service
+          : b.service === "*" || b.service === a.service
+            ? a.service
+            : undefined;
+      if (service === undefined) return undefined;
+      const recipient =
+        a.recipient === "*"
+          ? b.recipient
+          : b.recipient === "*" || b.recipient === a.recipient
+            ? a.recipient
+            : undefined;
+      if (recipient === undefined) return undefined;
+      return {
+        kind: "external-recipient",
+        service,
+        recipient,
+      };
+    }
+    case "secret-ref": {
+      if (b.kind !== "secret-ref") return undefined;
+      const ref =
+        a.ref === "*"
+          ? b.ref
+          : b.ref === "*" || b.ref === a.ref
+            ? a.ref
+            : undefined;
+      if (ref === undefined) return undefined;
+      return {
+        kind: "secret-ref",
+        ref,
       };
     }
     default:
@@ -312,7 +356,13 @@ export function effectiveCapabilities(
   // field-wise intersection; being the narrowest valid candidate, it replaces
   // the wider layer-sourced candidates below.
   const overflowKinds = new Set<Capability["kind"]>();
-  for (const kind of ["process", "model-egress", "network-destination"] as const) {
+  for (const kind of [
+    "process",
+    "model-egress",
+    "network-destination",
+    "external-recipient",
+    "secret-ref",
+  ] as const) {
     // The enumeration below is the product of the per-layer counts; dedupe
     // identical capabilities (the same ceiling is commonly repeated across
     // layers) and fail CLOSED for the kind beyond the bound: the layer-

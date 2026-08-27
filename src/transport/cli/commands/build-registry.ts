@@ -21,6 +21,7 @@ import { contextHandler } from './context.js';
 import { modelsHandler } from './models.js';
 import { settingsHandler } from './settings.js';
 import { permissionsHandler } from './permissions.js';
+import { modeHandler } from './mode.js';
 import { runSetup } from '../setup.js';
 
 export function buildCommandRegistry(
@@ -87,6 +88,10 @@ export function buildCommandRegistry(
   registry.register('permissions', permissionsHandler, {
     description: 'List and revoke tool-approval grants',
     aliases: ['perms'],
+  });
+  registry.register('mode', modeHandler, {
+    description: 'Switch consent mode (ask-everything | edit-enabled | autonomous)',
+    aliases: ['consent'],
   });
   registry.register('providers', async () => ({
     output: 'Provider account manager is available in the TUI: run /providers or use the Model Manager dock.',

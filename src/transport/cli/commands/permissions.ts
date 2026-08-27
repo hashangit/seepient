@@ -66,8 +66,11 @@ function usage(): string {
   ].join('\n');
 }
 
-/** Parse a capability spec like "commit-file:/proj/a.txt" or "read-root:/proj". */
+/** Parse a capability spec like "commit-file:/proj/a.txt", "network-destination:https://api.github.com", or "process". */
 function parseCapabilitySpec(spec: string): Capability | { error: string } {
+  if (spec.trim() === "process") {
+    return { kind: "process" };
+  }
   const idx = spec.indexOf(":");
   if (idx === -1) return { error: `Expected "<kind>:<target>", got "${spec}"` };
   const kind = spec.slice(0, idx);
@@ -81,6 +84,39 @@ function parseCapabilitySpec(spec: string): Capability | { error: string } {
       return { kind, root: target };
     case "secret-ref":
       return { kind, ref: target };
+    case "model-egress":
+      return { kind: "model-egress", providerClass: target, dataClasses: ["normal"] };
+    case "external-recipient": {
+      const subIdx = target.indexOf(":");
+      if (subIdx === -1) {
+        return { kind: "external-recipient", service: "*", recipient: target };
+      }
+      return {
+        kind: "external-recipient",
+        service: target.slice(0, subIdx),
+        recipient: target.slice(subIdx + 1),
+      };
+    }
+    case "network-destination": {
+      let scheme: "http" | "https" = "https";
+      let host = target;
+      let port: number | undefined;
+      if (target.startsWith("https://")) {
+        scheme = "https";
+        host = target.slice(8);
+      } else if (target.startsWith("http://")) {
+        scheme = "http";
+        host = target.slice(7);
+      }
+      const slashIdx = host.indexOf("/");
+      if (slashIdx !== -1) host = host.slice(0, slashIdx);
+      const portIdx = host.indexOf(":");
+      if (portIdx !== -1) {
+        port = parseInt(host.slice(portIdx + 1), 10);
+        host = host.slice(0, portIdx);
+      }
+      return { kind: "network-destination", scheme, host, port };
+    }
     default:
       return { error: `Unsupported capability kind for proposal: ${kind}` };
   }
@@ -117,7 +153,6 @@ function describeCapability(cap: Capability): string {
 }
 
 export const permissionsHandler: CommandHandler = async (ctx) => {
-  const store = ctx.agent.getGrantStore?.();
   const policyStore = ctx.agent.getPolicyStore?.();
   const parts = ctx.args.trim().split(/\s+/).filter(Boolean);
   const sub = parts[0]?.toLowerCase();
@@ -141,7 +176,7 @@ export const permissionsHandler: CommandHandler = async (ctx) => {
   if (sub === 'diagnostics') {
     return {
       output: await renderDiagnostics(
-        store,
+        undefined,
         policyStore,
         ctx.agent.getContainmentStatus?.(),
         ctx.agent.getActiveCapabilities?.(),
@@ -306,46 +341,8 @@ ${chalk.dim('Effective on the next evaluation. Stored outside executor roots.')}
     }
   }
 
-  if (!store) {
-    return { output: chalk.yellow('No grant store available (grants are CLI-only).') };
-  }
-
-  // /permissions list — legacy GrantStore entries only. Bare /permissions is
-  // the consolidated native status above so project/session authority is not
-  // hidden behind a second command.
-  if (sub === 'list') {
-    return { output: renderGrants(store.list()) };
-  }
-
   if (sub === 'help') {
     return { output: usage() };
-  }
-
-  if (sub === 'clear') {
-    const scope = parts[1]?.toLowerCase() as GrantScope;
-    if (!SCOPES.includes(scope)) {
-      return { output: `${chalk.red('Invalid scope.')} Use: ${chalk.cyan('session | project | global')}` };
-    }
-    await store.clear(scope);
-    return { output: chalk.green(`Cleared all ${scope} grants.`) };
-  }
-
-  if (sub === 'revoke') {
-    const idPrefix = parts[1];
-    if (!idPrefix) {
-      return { output: chalk.red('Usage: /permissions revoke <id-prefix>') };
-    }
-    // Find by id prefix (full ids are long UUIDs)
-    const all = store.list();
-    const match = all.filter((g) => g.id.startsWith(idPrefix));
-    if (match.length === 0) {
-      return { output: chalk.yellow(`No grant matching "${idPrefix}".`) };
-    }
-    if (match.length > 1) {
-      return { output: chalk.yellow(`Ambiguous prefix "${idPrefix}" — matches ${match.length} grants. Use more characters.`) };
-    }
-    await store.remove(match[0].id);
-    return { output: chalk.green(`Revoked grant: ${describeGrant(match[0])}`) };
   }
 
   return { output: `${chalk.red(`Unknown subcommand: ${sub}`)}\n\n${usage()}` };
@@ -482,7 +479,9 @@ async function renderPermissions(
       })
     : [];
   const session = sessionPermissions(active ?? [], project, global, workspaceRoot ?? undefined);
+  const consentMode = (agent as any)?.getConsentMode?.() ?? (autonomous ? 'autonomous' : 'edit-enabled');
   const lines = [chalk.bold.cyan('Permissions'), ''];
+  lines.push(`${chalk.bold('Consent mode:')} ${chalk.green(consentMode)} (change with ${chalk.bold('/mode')} or Shift+Tab in TUI)`);
   lines.push(
     autonomous
       ? `${chalk.bold.yellow('Autonomous mode: ON')} — Seepient will not ask before permitted actions.`

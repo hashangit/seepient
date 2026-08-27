@@ -1,7 +1,7 @@
 /** Seepient Core — THE Agent Loop (single implementation) */
 
 import { SeepientError } from "../foundations/errors.js";
-import type { Message, StepResult, ToolCall, Usage, ApproveToolFn, ApprovalDecision, ApprovalScope, ApprovalContext, PermissionLevel, ToolRiskCategory } from "../foundations/types.js";
+import type { Message, StepResult, ToolCall, Usage, ApproveToolFn, ApprovalDecision, ApprovalScope, ApprovalContext, ToolRiskCategory } from "../foundations/types.js";
 import type { ToolDefinition } from "../foundations/contracts/tool.js";
 import { now, toSeepientError, messageToCanonicalMessage } from "./context/message-convert.js";
 import { generateId } from "../foundations/id.js";
@@ -10,8 +10,6 @@ import { executeTool, normalizeToolResult } from "./tool-executor.js";
 import type { HookExecutor } from "./hooks.js";
 import type { Middleware, PipelineContext } from "../foundations/contracts/middleware.js";
 import { compose } from "../foundations/contracts/middleware.js";
-import { checkToolPermission, getToolRiskCategory } from "./permission.js";
-import { GrantStore } from "./grants.js";
 import { extractPattern } from "../foundations/grant-pattern.js";
 import { getAllToolModules } from "./tool-executor.js";
 import { getModelMeta } from "../foundations/models-catalog.js";
@@ -44,10 +42,7 @@ export interface AgentLoopOptions {
   modelOverride?: string | { model?: string; providerAccount?: string };
   middleware?: Middleware[];
   approveTool?: ApproveToolFn;
-  permissionLevel?: PermissionLevel;
   autoConfirm?: boolean;
-  /** Persisted approval grants. When set, matching calls skip the prompt. */
-  grantStore?: GrantStore;
   /**
    * Spec 008 wired action-lifecycle pipeline.
    */
@@ -203,9 +198,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
   } = options;
 
   const approveTool = options.approveTool;
-  const permissionLevel = options.permissionLevel;
   const autoConfirm = options.autoConfirm;
-  const grantStore = options.grantStore;
   let currentModel = model ?? "";
 
   // Spec 008: Every tool call routes through the Domain policy pipeline.
@@ -496,10 +489,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
           }
         };
 
-        // Permission pre-filter + adapter-level tool approval
-        const effectiveLevel: PermissionLevel = permissionLevel ?? "moderate";
-
-        // ── Spec 008 pipeline path ───────────────────────────────────────
+        // ── Spec 008 / 017 pipeline path ─────────────────────────────────
         // When wiredPipeline is set, the legacy matrix/grant/autoConfirm
         // branches are BYPASSED. Every tool call is analyzed, evaluated by
         // PolicyEngine, optionally brokered through ApprovalBroker, executed

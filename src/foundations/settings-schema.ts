@@ -103,8 +103,8 @@ const entries: [string, SettingsMapEntry][] = [
   ['notifications.wecom.keyword', { dotKey: 'notifications.wecom.keyword', configPath: ['wecomKeyword'], category: 'notifications', label: 'WeCom Keyword' }],
 
   // Permissions
-  ['agent.permissionLevel', { dotKey: 'agent.permissionLevel', configPath: ['permissionLevel'], category: 'permissions', label: 'Permission Level' }],
   ['agent.autoConfirm', { dotKey: 'agent.autoConfirm', configPath: ['autoConfirm'], category: 'permissions', label: 'Auto-Confirm All Tools' }],
+  ['permissions.consentMode', { dotKey: 'permissions.consentMode', configPath: ['permissions', 'consentMode'], category: 'permissions', label: 'Consent Mode (ask-everything | edit-enabled | autonomous)' }],
   ['permissions.autonomousMode', { dotKey: 'permissions.autonomousMode', configPath: ['permissions', 'autonomousMode'], category: 'permissions', label: 'Autonomous Mode (skip approval prompts)' }],
   ['permissions.approvalTimeoutMs', { dotKey: 'permissions.approvalTimeoutMs', configPath: ['approvalTimeoutMs'], category: 'permissions', label: 'Approval Timeout (ms)' }],
 
@@ -125,6 +125,23 @@ export const SETTINGS_MAP: Map<string, SettingsMapEntry> = new Map(entries);
 export const CONFIG_PATH_TO_DOTKEY: Map<string, string> = new Map(
   entries.map(([, entry]) => [entry.configPath.join('.'), entry.dotKey]),
 );
+
+// ── Consent Mode ───────────────────────────────────────────────────────
+
+export type ConsentMode = "ask-everything" | "edit-enabled" | "autonomous";
+
+export function consentModeToApprovalMode(mode: ConsentMode): "manual" | "balanced" | "autonomous" {
+  switch (mode) {
+    case "ask-everything":
+      return "manual";
+    case "edit-enabled":
+      return "balanced";
+    case "autonomous":
+      return "autonomous";
+    default:
+      return "balanced";
+  }
+}
 
 // ── Settings Schema ────────────────────────────────────────────────────
 
@@ -156,9 +173,9 @@ const schemaEntries: [string, SettingsSchemaEntry][] = [
   ['notifications.wecom.webhook', { type: 'string', secret: true, restartRequired: false, envVar: 'WECOM_WEBHOOK' }],
   ['notifications.wecom.keyword', { type: 'string', secret: false, restartRequired: false, envVar: 'WECOM_KEYWORD' }],
 
-  // Agent
-  ['agent.permissionLevel', { type: 'enum', secret: false, enumValues: ['strict', 'moderate', 'permissive'], default: 'moderate', restartRequired: false, envVar: 'SEEPIENT_PERMISSION' }],
+  // Agent / Permissions
   ['agent.autoConfirm', { type: 'boolean', secret: false, default: false, restartRequired: false }],
+  ['permissions.consentMode', { type: 'enum', secret: false, enumValues: ['ask-everything', 'edit-enabled', 'autonomous'], default: 'edit-enabled', restartRequired: false, envVar: 'SEEPIENT_CONSENT_MODE' }],
   ['permissions.autonomousMode', { type: 'boolean', secret: false, default: false, restartRequired: false }],
   ['permissions.approvalTimeoutMs', { type: 'number', secret: false, default: 600000, min: 10000, max: 3600000, restartRequired: true, envVar: 'SEEPIENT_APPROVAL_TIMEOUT_MS' }],
 

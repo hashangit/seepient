@@ -29,10 +29,9 @@ import {
 } from './config-loader.js';
 import { runSetup } from './setup.js';
 import { isNonInteractive } from '../../foundations/environment.js';
-import type { PermissionLevel, PersistenceBackend, GrantScope } from '../../foundations/types.js';
+import type { ConsentMode } from '../../foundations/settings-schema.js';
+import type { PersistenceBackend } from '../../foundations/types.js';
 import { createPersistenceBackend } from '../../domain/sessions/session-store.js';
-import { resolvePermissionLevel } from '../../domain/permission.js';
-import { GrantStore } from '../../domain/grants.js';
 import { SettingsManager } from '../../domain/settings/settings-manager.js';
 import { loadMergedConfig } from './config-loader.js';
 
@@ -41,7 +40,7 @@ export interface CliSessionContext {
   fullConfig: any;
   activeProviderType: string;
   providerConfig: any;
-  permissionLevel: PermissionLevel | undefined;
+  consentMode: ConsentMode;
   gatewayInstance: any;
   persistence: PersistenceBackend;
 }
@@ -66,27 +65,12 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
   // 2. Inject runtime flags
   fullConfig.autoConfirm = options.yes || options.headless || options.docker || false;
 
-  // 2b. Resolve permission level from CLI flags, env var, and config
-  let permissionLevel: PermissionLevel | undefined;
-  const headless = options.headless || options.yes || options.docker;
-
-  if (!headless) {
-    const flagLevel = options.yolo ? "permissive"
-      : options.strict ? "strict"
-      : options.moderate ? "moderate"
-      : undefined;
-    permissionLevel = resolvePermissionLevel(
-      flagLevel,
-      process.env.SEEPIENT_PERMISSION,
-      fullConfig.permissionLevel,
-    );
-  }
-
-  // Warn about conflicting flags
-  if (headless && (options.strict || options.moderate || options.yolo)) {
-    const flag = options.strict ? '--strict' : options.moderate ? '--moderate' : '--yolo';
-    console.warn(`Warning: --headless overrides ${flag}. All tools will be auto-approved.`);
-  }
+  // 2b. Resolve consent mode from CLI flags, env var, and config
+  const rawConsentMode = options.mode || options.consentMode || process.env.SEEPIENT_CONSENT_MODE || fullConfig.consentMode;
+  const validModes = ['ask-everything', 'edit-enabled', 'autonomous'];
+  const consentMode: ConsentMode = validModes.includes(rawConsentMode)
+    ? rawConsentMode
+    : 'edit-enabled';
 
   // 3. Apply env var overrides for tool settings
   fullConfig = applyEnvOverrides(fullConfig);
@@ -164,75 +148,68 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
     agent.switchProvider(cliProvider, options.model ?? resolvedModel);
   }
 
-  // Tool-approval grant store: project grants at <cwd>/.seepient/grants.json,
-  // global at ~/.seepient/grants.json. Consulted by the agent loop so matching
-  // tool calls skip the approval prompt; managed via /permissions.
-  const grantStore = new GrantStore({
-    projectDir: getConfigDir(false),
-    globalDir: getConfigDir(true),
-  });
-  agent.setGrantStore(grantStore);
-
-  // Spec 008 (T307): attach the protected PolicyStore. Active policy lives
+  // Spec 008 / 017: attach the protected PolicyStore. Active policy lives
   // at ~/.seepient/security/policies/<workspace-id>.json — outside executor-
   // writable roots. /permissions propose|review|approve|revoke-cap route
   // through compare-and-set; proposals are inert until approved.
-  if (options.permissionPipeline !== false && process.env.SEEPIENT_PERMISSION_PIPELINE !== '0') {
-    try {
-      const { LocalPolicyStore, computeWorkspaceId } = await import(
-        '../../domain/permissions/policy-store.js'
-      );
-      const policyStore = new LocalPolicyStore();
-      const workspaceId = computeWorkspaceId(process.cwd());
-      agent.setPolicyStore(policyStore, workspaceId);
-      // Spec 011 (T033 + settings): the approval deadline comes from
-      // `permissions.approvalTimeoutMs` (default ten minutes). Read it here
-      // so the request expiry and the inline broker cutoff both honor it.
-      const deadlineSettings = new SettingsManager({
-        config: applyEnvOverrides(loadMergedConfig()),
-        projectConfigPath: LOCAL_CONFIG_FILE,
-        globalConfigPath: GLOBAL_CONFIG_FILE,
-      });
-      // The value is captured when the pipeline is constructed (restart to
-      // change, per the settings metadata), so clamp any out-of-range input
-      // here — env overrides bypass the SettingsManager set() validation
-      // (P1 review fix).
-      const rawDeadline = deadlineSettings.get(
-        'permissions.approvalTimeoutMs',
-      ).value as number;
-      const approvalDeadlineMs = Number.isFinite(rawDeadline)
-        ? Math.min(Math.max(rawDeadline, 10_000), 3_600_000)
-        : 600_000;
-      const autonomousMode = deadlineSettings.get(
-        'permissions.autonomousMode',
-      ).value === true;
-      await agent.enablePermissionPipeline({
-        workspaceRoot: process.cwd(),
-        modelProviderClass: activeProviderType ?? 'openai',
-        approvalDeadlineMs,
-        approvalMode: autonomousMode ? 'autonomous' : 'manual',
-      });
-    } catch (err) {
-      // P0 review fix (fail closed): when the protected pipeline was
-      // REQUESTED (default), an initialization failure must NOT fall back to
-      // the legacy execution path — a warning does not close the bypass.
-      // Terminate startup unless the operator explicitly selected legacy
-      // mode (--no-permission-pipeline / SEEPIENT_PERMISSION_PIPELINE=0).
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(
-        chalk.red(`[permissions] Permission pipeline failed to initialize: ${message}`),
-      );
-      agent.setPipelineInitError?.(message);
-      if (options.permissionPipeline !== false && process.env.SEEPIENT_PERMISSION_PIPELINE !== '0') {
-        console.error(
-          chalk.red('[permissions] Refusing to start: the protected permission pipeline was requested but could not be initialized.'),
-        );
-        console.error(
-          chalk.red('[permissions] Fix the error above, or restart with --no-permission-pipeline (or SEEPIENT_PERMISSION_PIPELINE=0) to explicitly use the legacy approval path.'),
-        );
-        process.exit(1);
-      }
-    }
+  try {
+    const { LocalPolicyStore, computeWorkspaceId } = await import(
+      '../../domain/permissions/policy-store.js'
+    );
+    const policyStore = new LocalPolicyStore();
+    const workspaceId = computeWorkspaceId(process.cwd());
+    agent.setPolicyStore(policyStore, workspaceId);
+    // Spec 011 (T033 + settings): the approval deadline comes from
+    // `permissions.approvalTimeoutMs` (default ten minutes). Read it here
+    // so the request expiry and the inline broker cutoff both honor it.
+    const deadlineSettings = new SettingsManager({
+      config: applyEnvOverrides(loadMergedConfig()),
+      projectConfigPath: LOCAL_CONFIG_FILE,
+      globalConfigPath: GLOBAL_CONFIG_FILE,
+    });
+    // The value is captured when the pipeline is constructed (restart to
+    // change, per the settings metadata), so clamp any out-of-range input
+    // here — env overrides bypass the SettingsManager set() validation
+    // (P1 review fix).
+    const rawDeadline = deadlineSettings.get(
+      'permissions.approvalTimeoutMs',
+    ).value as number;
+    const approvalDeadlineMs = Number.isFinite(rawDeadline)
+      ? Math.min(Math.max(rawDeadline, 10_000), 3_600_000)
+      : 600_000;
+    const effectiveConsentMode: ConsentMode =
+      (options.mode || options.consentMode)
+        ? consentMode
+        : (validModes.includes(String(deadlineSettings.get('permissions.consentMode')?.value))
+            ? (deadlineSettings.get('permissions.consentMode')?.value as ConsentMode)
+            : consentMode);
+
+    const autonomousMode =
+      effectiveConsentMode === 'autonomous' ||
+      deadlineSettings.get('permissions.autonomousMode')?.value === true;
+
+    const approvalMode: 'manual' | 'balanced' | 'autonomous' = autonomousMode
+      ? 'autonomous'
+      : effectiveConsentMode === 'ask-everything'
+        ? 'manual'
+        : 'balanced';
+
+    await agent.enablePermissionPipeline({
+      workspaceRoot: process.cwd(),
+      modelProviderClass: activeProviderType ?? 'openai',
+      approvalDeadlineMs,
+      approvalMode,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(
+      chalk.red(`[permissions] Permission pipeline failed to initialize: ${message}`),
+    );
+    agent.setPipelineInitError?.(message);
+    console.error(
+      chalk.red('[permissions] Refusing to start: the protected permission pipeline could not be initialized.'),
+    );
+    process.exit(1);
   }
 
   // T109c: Audit recovery — reload durable outbox + scan for dispatched
@@ -255,31 +232,6 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
       console.warn(`[audit] Recovered ${recovered.length} indeterminate action(s): ${recovered.join(', ')}`);
     }
   } catch { /* best-effort — never block startup on audit recovery */ }
-
-  // Pre-seed grants from --allow-* flags (repeatable, scope-specific):
-  //   --allow-once / --allow-session → session scope (process lifetime;
-  //     equivalent in non-interactive mode — one run = one session)
-  //   --allow-project                 → project scope (<cwd>/.seepient/grants.json)
-  //   --allow-global                  → global scope  (~/.seepient/grants.json)
-  // Spec format per flag: "tool" or "tool:pattern". Lets a headless/CI run
-  // pre-authorize specific tools (optionally scoped by arg prefix) without
-  // the blanket --yes / --headless auto-approval.
-  const allowFlags: Array<{ specs: string[]; scope: GrantScope }> = [
-    { specs: options.allowOnce ?? [], scope: 'session' },
-    { specs: options.allowSession ?? [], scope: 'session' },
-    { specs: options.allowProject ?? [], scope: 'project' },
-    { specs: options.allowGlobal ?? [], scope: 'global' },
-  ];
-  for (const { specs, scope } of allowFlags) {
-    for (const spec of specs) {
-      const sep = spec.indexOf(':');
-      const tool = (sep === -1 ? spec : spec.slice(0, sep)).trim();
-      const pattern = sep === -1 ? undefined : spec.slice(sep + 1).trim();
-      if (tool.length > 0) {
-        await grantStore.add(tool, scope, pattern || undefined);
-      }
-    }
-  }
 
   // Initialize skills system
   await agent.initializeSkills();
@@ -377,5 +329,5 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
     if (options.interactive !== false) console.log(chalk.dim(`Resumed session ${resumeId.slice(0, 8)}.`));
   }
 
-  return { agent, fullConfig, activeProviderType, providerConfig, permissionLevel, gatewayInstance, persistence };
+  return { agent, fullConfig, activeProviderType, providerConfig, consentMode, gatewayInstance, persistence };
 }

@@ -28,7 +28,6 @@ describe("server model-override handling (QS-P0.1)", () => {
         model: "gpt-5.4-mini",
         providerRuntime: runtime,
       } as any,
-      "moderate",
     );
 
     expect(receivedPlan?.selectedTarget?.model).toBe("gpt-5.4-mini");
@@ -68,7 +67,6 @@ describe("server model-override handling (QS-P0.1)", () => {
           doneResult = res;
         },
       } as any,
-      "moderate",
     );
 
     expect(receivedPlan?.selectedTarget?.model).toBe("gpt-5.4-mini");
