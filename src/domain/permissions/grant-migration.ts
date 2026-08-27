@@ -18,7 +18,15 @@ import type {
   Capability,
   CapabilitySet,
 } from "../../foundations/contracts/permission-policy.js";
-import type { Grant } from "../grants.js";
+
+/** Legacy grant shape on disk. */
+export interface Grant {
+  id: string;
+  tool: string;
+  pattern?: string;
+  scope: "session" | "project" | "global";
+  createdAt: number;
+}
 
 /** Outcome categories for each legacy grant on read. */
 export type MigrationOutcome =

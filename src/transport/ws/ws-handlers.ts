@@ -65,7 +65,6 @@ export function handleConnection(
     currentAbortController: null,
     activeProvider: null,
     activeModel: null,
-    maxPermissionLevel: ctx.maxPermissionLevel,
     apiKeyHash: key.keyHash ?? (key.key ? hashKey(key.key) : ""),
     apiKey: key,
   };

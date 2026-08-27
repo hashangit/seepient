@@ -10,7 +10,7 @@ import type {
   WebSocketHandlerContext,
   ConnectionState,
 } from "./ws-types.js";
-import type { PermissionLevel, Message } from "../../foundations/types.js";
+import type { Message } from "../../foundations/types.js";
 import { safeSend } from "./connection-registry.js";
 import { createServerApproveTool } from "./approvals.js";
 
@@ -43,18 +43,6 @@ export function handleChat(
   const provider = msg.options?.provider ?? state.activeProvider ?? undefined;
   const model = msg.options?.model ?? state.activeModel ?? undefined;
 
-  // Resolve permission level with server ceiling
-  let effectivePermissionLevel: PermissionLevel | undefined = msg.options?.permissionLevel ?? state.permissionLevel;
-  if (effectivePermissionLevel && state.maxPermissionLevel) {
-    const levels: PermissionLevel[] = ["strict", "moderate", "permissive"];
-    const maxIdx = levels.indexOf(state.maxPermissionLevel);
-    const reqIdx = levels.indexOf(effectivePermissionLevel);
-    // QA-009: Unknown levels (-1) are capped to the server ceiling
-    if (reqIdx === -1 || reqIdx > maxIdx) {
-      effectivePermissionLevel = state.maxPermissionLevel;
-    }
-  }
-
   // Stream text
   try {
     ctx.streamText({
@@ -65,7 +53,6 @@ export function handleChat(
       maxSteps: msg.options?.maxSteps ?? 10,
       skills: msg.options?.skills,
       sessionId: state.sessionId ?? undefined,
-      permissionLevel: effectivePermissionLevel,
       // Spec 008: pass the authenticated API-key hash as principal identity.
       ...(state.apiKeyHash ? { apiKeyHash: state.apiKeyHash } : {}),
       approveTool: createServerApproveTool(ws),

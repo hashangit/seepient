@@ -85,6 +85,31 @@ function pushLayer(
   trace.evaluatedLayers.push({ layer, result, ruleIds });
 }
 
+export function formatCapabilitySpec(cap: Capability): string {
+  switch (cap.kind) {
+    case "read-root":
+      return `read-root:${cap.root}`;
+    case "read-file":
+      return `read-file:${cap.path}`;
+    case "write-root":
+      return `write-root:${cap.root}`;
+    case "commit-file":
+      return `commit-file:${cap.path}`;
+    case "process":
+      return "process";
+    case "model-egress":
+      return `model-egress:${cap.providerClass}`;
+    case "network-destination":
+      return `network-destination:${cap.scheme}://${cap.host}`;
+    case "external-recipient":
+      return `external-recipient:${cap.service}:${cap.recipient}`;
+    case "secret-ref":
+      return `secret-ref:${cap.ref}`;
+    default:
+      return (cap as any).kind ?? "capability";
+  }
+}
+
 /**
  * Effect kinds produced by a prepared operation (independent of the analyzer-
  * declared effects). Used so the engine can reason about what the operation
@@ -261,9 +286,15 @@ export class PolicyEngine implements PolicyEngineContract {
       !context.backendCapabilities.supportedOperationKinds.includes(opKind)
     ) {
       pushLayer(trace, "backend", "deny");
+      let message = `Backend "${context.backendCapabilities.backend}" does not support operation "${opKind}"`;
+      if (context.backendCapabilities.supportedOperationKinds.length === 0) {
+        message = "Tool operations (including file reads) are not supported on the server surface until the Docker worker backend ships (spec 008). Chat and model inference are unaffected.";
+      } else if (action.toolName === "take_screenshot") {
+        message = "take_screenshot requires an isolated browser worker (not yet available). It is intentionally unsupported rather than silently unsafe.";
+      }
       return deny(
         "backend-unsupported",
-        `Backend "${context.backendCapabilities.backend}" does not support operation "${opKind}"`,
+        message,
         trace,
       );
     }
@@ -341,6 +372,21 @@ export class PolicyEngine implements PolicyEngineContract {
       );
     }
 
+    // FR-012: none-operation normal-class actions (e.g. get_current_datetime, manage_todos, render_widget)
+    // are implicitly pre-authorized across all consent modes once verified within the deployment ceiling.
+    const isNoneOperationNormalEgress =
+      action.operation.kind === "none" &&
+      action.effects.every(
+        (e) =>
+          e.kind === "model-egress" &&
+          (!e.dataClasses || e.dataClasses.every((d) => d === "normal")),
+      );
+
+    if (isNoneOperationNormalEgress) {
+      const envelope = buildEnvelope(action, required, this.policyDigest);
+      return { decision: "allow", envelope, trace };
+    }
+
     pushLayer(trace, "backend", "allow");
     // Spec 011 (FR-019): containment preflight — a process action can only be
     // presented for approval when the backend can actually isolate it OR the
@@ -372,13 +418,38 @@ export class PolicyEngine implements PolicyEngineContract {
       };
     }
 
+    // Balanced mode (edit-enabled, spec 017 / T025): auto-approves non-destructive,
+    // non-send in-ceiling capabilities. Destructive-risk process actions,
+    // external-send effects, and secret-sensitivity reads route to prompt.
+    if (context.approvalMode === "balanced") {
+      const isDestructiveProcess =
+        action.operation.kind === "process" && action.risk === "destructive";
+      const hasExternalSend = action.effects.some(
+        (e) => e.kind === "external-send",
+      );
+      const readsSecret = action.effects.some(
+        (e) => e.kind === "filesystem-read" && e.sensitivity === "secret",
+      );
+
+      const requiresPrompt = isDestructiveProcess || hasExternalSend || readsSecret;
+      if (!requiresPrompt) {
+        return {
+          decision: "allow",
+          envelope: buildEnvelope(action, required, this.policyDigest),
+          trace,
+        };
+      }
+    }
+
     // 5. needs-approval — only if the interaction mode can represent it.
     if (context.interaction.mode === "none") {
-      // Headless surfaces: typed denial immediately, never prompt.
+      // Headless surfaces: typed denial immediately with exact remediation.
       pushLayer(trace, "backend", "deny");
+      const firstMissing = missing[0];
+      const spec = firstMissing ? formatCapabilitySpec(firstMissing) : "required capability";
       return deny(
         "approval-unavailable",
-        "Headless surface: missing capability and approval is unavailable",
+        `Headless run: ${spec} is not predeclared. Allow it with: /permissions propose ${spec} (interactive), or pass --mode autonomous, or supply SDK policy options.`,
         trace,
       );
     }

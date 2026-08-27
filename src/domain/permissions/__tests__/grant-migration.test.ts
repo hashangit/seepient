@@ -9,8 +9,8 @@ import { describe, it, expect } from "vitest";
 import {
   classifyLegacyGrant,
   migrateLegacyGrants,
+  type Grant,
 } from "../grant-migration.js";
-import type { Grant } from "../../grants.js";
 
 function grant(tool: string, pattern: string | undefined, scope: "project" | "global" | "session" = "project"): Grant {
   return { id: "g1", tool, pattern, scope, createdAt: 0 };

@@ -359,6 +359,19 @@ export async function analyzeExecuteShellCommand(
     ],
   };
 
+  function classifyShellCommandRisk(command: string): ToolRiskCategory {
+    const trimmed = command.trim();
+    const destructivePatterns = [
+      /\b(rm\s+-|rm\s+|rmdir|git\s+reset|git\s+clean|git\s+restore|git\s+branch\s+-[dD]|kill|pkill|killall|reboot|shutdown|dd\s+|mkfs|fdisk)\b/i,
+      />\s*\/dev\//,
+      /\bchmod\s+(-[a-zA-Z]*R[a-zA-Z]*\s+)?([0-7]{3,4}|[+-][rwx]+)\s+\//,
+    ];
+    if (destructivePatterns.some((p) => p.test(trimmed))) {
+      return "destructive";
+    }
+    return "safe";
+  }
+
   return buildAction({
     toolName: "execute_shell_command",
     ctx,
@@ -371,7 +384,7 @@ export async function analyzeExecuteShellCommand(
       summary: commandStr,
       canonicalTargets: [cwd],
     },
-    risk: "destructive",
+    risk: classifyShellCommandRisk(commandStr),
   });
 }
 
@@ -593,28 +606,70 @@ export async function analyzeGenerateImage(
   args: { prompt: string; image_path?: string },
   ctx: ToolAnalysisContext,
 ): Promise<PreparedToolAction> {
-  const destination = { scheme: "https" as const, host: "api.openai.com", path: "/v1/images/generations" };
+  const { resolveCredentials } = await import("../../foundations/security/credential-resolver.js");
+  const creds = resolveCredentials();
+
+  const isLocal =
+    process.env.SEEPIENT_LOCAL_MEDIA === "1" ||
+    process.env.SEEPIENT_MEDIA_RUNTIME === "local";
+
+  const rawBaseUrl =
+    creds.openaiBaseUrl ||
+    process.env.OPENAI_COMPAT_BASE_URL ||
+    process.env.OPENAI_BASE_URL ||
+    "https://api.openai.com/v1";
+
+  let destination: { scheme: "https" | "http"; host: string; port?: number; path?: string };
+  try {
+    const u = new URL(rawBaseUrl.startsWith("http") ? rawBaseUrl : `https://${rawBaseUrl}`);
+    destination = {
+      scheme: u.protocol === "http:" ? "http" : "https",
+      host: u.hostname,
+      port: u.port ? Number(u.port) : undefined,
+      path: u.pathname.endsWith("/v1")
+        ? `${u.pathname}/images/generations`
+        : `${u.pathname.replace(/\/$/, "")}/v1/images/generations`,
+    };
+  } catch {
+    destination = { scheme: "https", host: "api.openai.com", path: "/v1/images/generations" };
+  }
+
   const secretRefs = ["OPENAI_API_KEY"];
   const payloadBytes = Buffer.from(JSON.stringify({ prompt: args.prompt, n: 1, size: "1024x1024" }), "utf8");
   const payloadArtifact = await ctx.artifacts.put(payloadBytes, "application/json");
 
   const effects: EffectRequest[] = [
-    { kind: "network-egress", destinations: [destination] },
-    { kind: "secret-use", secretRefs },
+    ...(isLocal
+      ? []
+      : [
+          { kind: "network-egress" as const, destinations: [destination] },
+          { kind: "secret-use" as const, secretRefs },
+        ]),
+    {
+      kind: "model-egress",
+      providerClass: ctx.modelProviderClass,
+      dataClasses: ["normal"],
+      sources: ["image-response"],
+    },
   ];
 
-  const operation: PreparedOperation = {
-    kind: "broker",
-    request: {
-      kind: "http",
-      requestId: generateId(),
-      destination,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: payloadArtifact,
-      secretRefs,
-    },
-  };
+  const operation: PreparedOperation = isLocal
+    ? {
+        kind: "none",
+        result: { output: "image generated locally", success: true },
+      }
+    : {
+        kind: "broker",
+        request: {
+          kind: "http",
+          requestId: generateId(),
+          destination,
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: payloadArtifact,
+          secretRefs,
+        },
+      };
 
   return buildAction({
     toolName: "generate_image",
@@ -626,7 +681,7 @@ export async function analyzeGenerateImage(
     display: {
       title: `Generate image`,
       summary: args.prompt.slice(0, 60),
-      canonicalTargets: ["https://api.openai.com/v1/images/generations"],
+      canonicalTargets: isLocal ? [] : [`${destination.scheme}://${destination.host}${destination.path ?? ""}`],
     },
     risk: "safe",
   });
@@ -658,28 +713,70 @@ export async function analyzeOptimizePrompt(
   args: { prompt: string },
   ctx: ToolAnalysisContext,
 ): Promise<PreparedToolAction> {
-  const destination = { scheme: "https" as const, host: "api.openai.com", path: "/v1/chat/completions" };
+  const { resolveCredentials } = await import("../../foundations/security/credential-resolver.js");
+  const creds = resolveCredentials();
+
+  const isLocal =
+    process.env.SEEPIENT_LOCAL_PROMPT === "1" ||
+    process.env.SEEPIENT_MEDIA_RUNTIME === "local";
+
+  const rawBaseUrl =
+    creds.openaiBaseUrl ||
+    process.env.OPENAI_COMPAT_BASE_URL ||
+    process.env.OPENAI_BASE_URL ||
+    "https://api.openai.com/v1";
+
+  let destination: { scheme: "https" | "http"; host: string; port?: number; path?: string };
+  try {
+    const u = new URL(rawBaseUrl.startsWith("http") ? rawBaseUrl : `https://${rawBaseUrl}`);
+    destination = {
+      scheme: u.protocol === "http:" ? "http" : "https",
+      host: u.hostname,
+      port: u.port ? Number(u.port) : undefined,
+      path: u.pathname.endsWith("/v1")
+        ? `${u.pathname}/chat/completions`
+        : `${u.pathname.replace(/\/$/, "")}/v1/chat/completions`,
+    };
+  } catch {
+    destination = { scheme: "https", host: "api.openai.com", path: "/v1/chat/completions" };
+  }
+
   const secretRefs = ["OPENAI_API_KEY"];
   const payloadBytes = Buffer.from(JSON.stringify({ prompt: args.prompt }), "utf8");
   const payloadArtifact = await ctx.artifacts.put(payloadBytes, "application/json");
 
   const effects: EffectRequest[] = [
-    { kind: "network-egress", destinations: [destination] },
-    { kind: "secret-use", secretRefs },
+    ...(isLocal
+      ? []
+      : [
+          { kind: "network-egress" as const, destinations: [destination] },
+          { kind: "secret-use" as const, secretRefs },
+        ]),
+    {
+      kind: "model-egress",
+      providerClass: ctx.modelProviderClass,
+      dataClasses: ["normal"],
+      sources: ["prompt-optimizer-response"],
+    },
   ];
 
-  const operation: PreparedOperation = {
-    kind: "broker",
-    request: {
-      kind: "http",
-      requestId: generateId(),
-      destination,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: payloadArtifact,
-      secretRefs,
-    },
-  };
+  const operation: PreparedOperation = isLocal
+    ? {
+        kind: "none",
+        result: { output: args.prompt, success: true },
+      }
+    : {
+        kind: "broker",
+        request: {
+          kind: "http",
+          requestId: generateId(),
+          destination,
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: payloadArtifact,
+          secretRefs,
+        },
+      };
 
   return buildAction({
     toolName: "optimize_prompt",
@@ -691,7 +788,7 @@ export async function analyzeOptimizePrompt(
     display: {
       title: "Optimize prompt",
       summary: args.prompt.slice(0, 60),
-      canonicalTargets: ["https://api.openai.com/v1/chat/completions"],
+      canonicalTargets: isLocal ? [] : [`${destination.scheme}://${destination.host}${destination.path ?? ""}`],
     },
     risk: "safe",
   });
@@ -741,12 +838,20 @@ export async function analyzeGetCurrentDatetime(
     kind: "none",
     result: { output: nowStr, success: true },
   };
+  const effects: EffectRequest[] = [
+    {
+      kind: "model-egress",
+      providerClass: ctx.modelProviderClass,
+      dataClasses: ["normal"],
+      sources: ["direct-output"],
+    },
+  ];
   return buildAction({
     toolName: "get_current_datetime",
     ctx,
     args: _args,
     argsDigest: digestArgs(_args),
-    effects: [],
+    effects,
     operation,
     display: { title: "Get current date/time", summary: nowStr, canonicalTargets: [] },
     risk: "safe",
@@ -761,12 +866,20 @@ export async function analyzeManageTodos(
     kind: "none",
     result: { output: JSON.stringify(args ?? {}), success: true },
   };
+  const effects: EffectRequest[] = [
+    {
+      kind: "model-egress",
+      providerClass: ctx.modelProviderClass,
+      dataClasses: ["normal"],
+      sources: ["direct-output"],
+    },
+  ];
   return buildAction({
     toolName: "manage_todos",
     ctx,
     args,
     argsDigest: digestArgs(args),
-    effects: [],
+    effects,
     operation,
     display: { title: "Manage todos", summary: "todo update", canonicalTargets: [] },
     risk: "safe",
@@ -781,12 +894,20 @@ export async function analyzeRenderWidget(
     kind: "none",
     result: { output: JSON.stringify(args ?? {}), success: true },
   };
+  const effects: EffectRequest[] = [
+    {
+      kind: "model-egress",
+      providerClass: ctx.modelProviderClass,
+      dataClasses: ["normal"],
+      sources: ["direct-output"],
+    },
+  ];
   return buildAction({
     toolName: "render_widget",
     ctx,
     args,
     argsDigest: digestArgs(args),
-    effects: [],
+    effects,
     operation,
     display: { title: "Render widget", summary: "widget spec", canonicalTargets: [] },
     risk: "safe",

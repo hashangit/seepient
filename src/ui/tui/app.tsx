@@ -24,10 +24,11 @@ import { SetupWizard } from './setup-wizard.js';
 import { createProviderManagerApi } from '../../transport/cli/provider-manager-api.js';
 import { SessionSelector, type SessionListItem } from './overlays/session-selector.js';
 import { SettingsEditor, type SettingItem } from './overlays/settings-overlay.js';
+import { AutonomousWarning } from './overlays/autonomous-warning.js';
 import { messagesToFeedEntries } from './feed-serializer.js';
 import type { Suggestion } from './components/autocomplete.js';
 import type { Agent } from '../../transport/cli/agent.js';
-import type { PermissionLevel } from '../../foundations/types.js';
+import type { ConsentMode } from '../../foundations/settings-schema.js';
 import { getModelMeta } from '../../foundations/models-catalog.js';
 import { HORIZONTAL_PADDING } from './layout.js';
 
@@ -44,7 +45,7 @@ export interface TuiCommandOutcome {
   exit?: boolean;
 }
 
-type Overlay = 'palette' | 'help' | 'model' | 'settings' | 'sessions' | 'setup' | null;
+type Overlay = 'palette' | 'help' | 'model' | 'settings' | 'sessions' | 'setup' | 'autonomous-warning' | null;
 
 /** Strip ANSI escapes — handler output is chalk-styled for the readline path. */
 function stripAnsi(text: string): string {
@@ -53,7 +54,7 @@ function stripAnsi(text: string): string {
 
 interface TuiAppProps {
   agent: Agent;
-  permissionLevel?: PermissionLevel;
+  consentMode?: ConsentMode;
   initialQuery?: string;
   onExit: () => void;
   dispatchCommand: (input: string) => Promise<TuiCommandOutcome>;
@@ -68,26 +69,21 @@ interface TuiAppProps {
   skillCount: number;
   mcpCount: number;
   getSettingsList: () => SettingItem[];
-  onSetSetting: (dotKey: string, value: string) => Promise<void>;
+  onSetSetting: (key: string, value: unknown) => Promise<void>;
   listSessions: () => Promise<SessionListItem[]>;
-  onSwitchSession: (sessionId: string) => Promise<{ preview: string; userMessageCount: number; toolCallCount: number } | null>;
-  onDeleteSession: (sessionId: string) => Promise<void>;
-  onExportSession: (sessionId: string) => Promise<string | null>;
-  onTranscriptSession: (sessionId: string) => Promise<string | null>;
-  onRenameSession: (sessionId: string, title: string) => Promise<boolean>;
+  onSwitchSession: (id: string) => Promise<{ preview: string; userMessageCount: number; toolCallCount: number } | null>;
+  onDeleteSession: (id: string) => Promise<void>;
+  onExportSession: (id: string) => Promise<string | null>;
+  onTranscriptSession: (id: string) => Promise<string | null>;
+  onRenameSession: (id: string, title: string) => Promise<boolean>;
   getSessionId: () => string;
 }
 
 /**
- * TuiApp — Ink `<Static>` + native terminal scroll (like Command Code: the wheel
- * scrolls the terminal's own scrollback, so no mouse capture / no gibberish).
- * `<MessageArea>` grows the scrollback; the live region swaps between modal
- * overlays, the inline permission prompt, a "working" indicator, and the input
- * prompt. A status footer is always at the bottom of the written content.
- * `ink-reset.ts` (`resetView`) keeps resize/expand repaints artifact-free.
+ * Top-level full-screen TUI component.
  */
 export function TuiApp({
-  agent, permissionLevel, initialQuery, onExit, dispatchCommand, commands, skills, resetView,
+  agent, consentMode, initialQuery, onExit, dispatchCommand, commands, skills, resetView,
   providerType, gatewayOn, skillCount, mcpCount, getSettingsList, onSetSetting,
   listSessions, onSwitchSession, onDeleteSession, onExportSession, onTranscriptSession, onRenameSession, getSessionId,
 }: TuiAppProps) {
@@ -100,7 +96,7 @@ export function TuiApp({
   const agentApi = useAgent({
     agent,
     feed,
-    permissionLevel,
+    consentMode,
     widgetHost,
   });
   const { isRunning, pendingPermission, streamingText, streamingTool, usage, contextTokens, latestTodos, submit, resolvePermission, abort, resetTodos, restoreTodos } = agentApi;
@@ -445,7 +441,7 @@ export function TuiApp({
     }
   };
 
-  const handleSetSetting = async (dotKey: string, value: string): Promise<void> => {
+  const handleSetSetting = async (dotKey: string, value: unknown): Promise<void> => {
     await onSetSetting(dotKey, value);
     setSettingsList(getSettingsList());
   };
@@ -490,6 +486,46 @@ export function TuiApp({
     return ok;
   };
 
+  const [currentConsentMode, setCurrentConsentMode] = useState<ConsentMode>(
+    agent.getConsentMode?.() ?? 'edit-enabled',
+  );
+
+  const cycleConsentMode = async (): Promise<void> => {
+    const cycleMap: Record<ConsentMode, ConsentMode> = {
+      'ask-everything': 'edit-enabled',
+      'edit-enabled': 'autonomous',
+      autonomous: 'ask-everything',
+    };
+    const nextMode = cycleMap[currentConsentMode] ?? 'edit-enabled';
+    if (nextMode === 'autonomous') {
+      const warnedSetting = settingsList.find((s) => s.dotKey === 'permissions.autonomousWarned')?.value;
+      const warned = warnedSetting === 'true' || (warnedSetting as unknown) === true;
+      if (!warned) {
+        setOverlay('autonomous-warning');
+        return;
+      }
+    }
+    agent.setConsentMode?.(nextMode);
+    setCurrentConsentMode(nextMode);
+    await handleSetSetting('permissions.consentMode', nextMode);
+    feed.appendEntry({
+      kind: 'info',
+      content: `Switched consent mode to ${nextMode}.`,
+    });
+  };
+
+  const confirmAutonomousMode = async (): Promise<void> => {
+    agent.setConsentMode?.('autonomous');
+    setCurrentConsentMode('autonomous');
+    await handleSetSetting('permissions.consentMode', 'autonomous');
+    await handleSetSetting('permissions.autonomousWarned', true);
+    setOverlay(null);
+    feed.appendEntry({
+      kind: 'info',
+      content: 'Autonomous mode enabled. All in-ceiling actions run unprompted.',
+    });
+  };
+
   useKeybindings(
     {
       onAbort: abort,
@@ -499,6 +535,7 @@ export function TuiApp({
       onClear: clearAll,
       onCycleFocus: onCycleWidgetFocus,
       onEscapeWidget: () => { if (focusedWidgetId) setFocusedWidgetId(null); },
+      onCycleMode: () => { void cycleConsentMode(); },
     },
     { enabled: overlay === null, isRunning, promptPending: !!pendingPermission },
   );
@@ -628,6 +665,8 @@ export function TuiApp({
             onRename={(id, title) => handleRenameSession(id, title)}
             onClose={() => setOverlay(null)}
           />
+        ) : overlay === 'autonomous-warning' ? (
+          <AutonomousWarning onConfirm={confirmAutonomousMode} onCancel={() => setOverlay(null)} />
         ) : (
           inputAreaSlot
         )}
@@ -639,7 +678,7 @@ export function TuiApp({
         providerType={providerType}
         model={agent.getModel()}
         usage={usage}
-        permissionLevel={permissionLevel}
+        consentMode={currentConsentMode}
         skillCount={skillCount}
         gatewayOn={gatewayOn}
         mcpCount={mcpCount}
