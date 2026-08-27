@@ -219,6 +219,7 @@ export class Agent {
     const { boundary: realBoundary, artifacts: sharedArtifacts } = await buildLocalBoundary({
       allowFallback: opts.allowFallback,
       hostCallbacks,
+      workspaceRoot: opts.workspaceRoot ?? process.cwd(),
     });
     // Spec 011 (T032/FR-019): containment preflight at startup. The status is
     // surfaced (TUI/status surfaces) so approval choices are disabled before

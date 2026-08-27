@@ -333,7 +333,7 @@ Custom tools: `tool({ description, parameters, execute })` → `ToolModule` regi
 
 ## Skills
 
-File-based plugin system (`src/capabilities/skills/`). YAML frontmatter + body. Skills can specify allowed tools, preferred provider/model, and template args. Discovery from multiple sources with priority (last wins): built-in → `~/.seepient/skills/` → `.seepient/skills/` → `SEEPIENT_SKILLS_PATH`.
+File-based plugin system (`src/capabilities/skills/`). YAML frontmatter + body. Skills can specify allowed tools, preferred provider/model, and template args. Discovery from multiple sources with priority (last wins): bundled → `~/.agents/skills/` → `~/.seepient/skills/` → `/mnt/skills` → `.seepient/skills/` → `SEEPIENT_SKILLS_PATH`.
 
 Domain orchestrates skill loading via `src/domain/skills/skill-invoker.ts` and `src/domain/skills/skill-catalog.ts`.
 

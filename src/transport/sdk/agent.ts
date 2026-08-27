@@ -145,7 +145,7 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
     await recoverIndeterminateActions(auditStore, auditOutbox).catch(() => {});
 
     const broker = legacyApproveToolToBroker(opts.approveTool);
-    const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary();
+    const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary({ workspaceRoot: opts.cwd ?? process.cwd() });
     const approvalMode = opts.consentMode
       ? (opts.consentMode === 'autonomous' ? 'autonomous' : opts.consentMode === 'ask-everything' ? 'manual' : 'balanced')
       : (opts.approveTool ? "manual" : "never");

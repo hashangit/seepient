@@ -12,7 +12,7 @@ describe("EffectBroker credential resolution & auth headers (P0-1)", () => {
     artifacts = new InMemoryArtifactStore();
   });
 
-  it("injects Authorization Bearer and api-key headers for Tavily requests", async () => {
+  it("injects Authorization Bearer for Tavily requests and keeps the key out of the body", async () => {
     let capturedHeaders: Record<string, string> = {};
     let capturedBody: Uint8Array | undefined;
     const broker = new EffectBroker({
@@ -85,13 +85,15 @@ describe("EffectBroker credential resolution & auth headers (P0-1)", () => {
     // Verify forbidden headers were stripped and replaced with the resolved authorized secret
     expect(capturedHeaders.cookie).toBeUndefined();
     expect(capturedHeaders.authorization).toBe("Bearer tvly-secret-12345");
-    expect(capturedHeaders["api-key"]).toBe("tvly-secret-12345");
 
-    // Verify the body was injected with api_key
+    // Tavily auth is Bearer-only per their API reference: the key must not be
+    // duplicated into other headers or the request body (secret-surface reduction).
+    expect(capturedHeaders["api-key"]).toBeUndefined();
     expect(capturedBody).toBeDefined();
     const bodyJson = JSON.parse(new TextDecoder().decode(capturedBody!));
     expect(bodyJson.query).toBe("vitest test");
-    expect(bodyJson.api_key).toBe("tvly-secret-12345");
+    expect(bodyJson.api_key).toBeUndefined();
+    expect(JSON.stringify(bodyJson)).not.toContain("tvly-secret-12345");
   });
 
   it("injects OpenAI API key into Authorization header for image/prompt endpoints", async () => {
@@ -279,9 +281,8 @@ describe("EffectBroker credential resolution & auth headers (P0-1)", () => {
     const result = await broker.execute(request, envelope, auth);
     expect(result.status).toBe("succeeded");
     expect(hopHeaders).toHaveLength(2);
-    // First hop (api.tavily.com) carries credentials
+    // First hop (api.tavily.com) carries the Bearer credential
     expect(hopHeaders[0].authorization).toBe("Bearer tvly-secret-12345");
-    expect(hopHeaders[0]["api-key"]).toBe("tvly-secret-12345");
     // Second hop (other.example.com) MUST NOT carry credentials
     expect(hopHeaders[1].authorization).toBeUndefined();
     expect(hopHeaders[1]["api-key"]).toBeUndefined();
