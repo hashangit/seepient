@@ -48,7 +48,7 @@ program
   .option('-p, --provider <provider>', 'Provider to use (openai-compatible|openai|anthropic|glm)')
   .option('-n, --no-interactive', 'Exit after processing the initial query (Headless mode)')
   .option('--docker', 'Docker mode: implies --no-interactive, disables all prompts, uses env vars and config only')
-  .option('-y, --yes', 'Auto-confirm all tool executions (e.g., shell commands)')
+  .option('-y, --yes', 'Autonomous mode: auto-approve actions within deployment ceiling (alias for --mode autonomous)')
   .option('--mode <mode>', 'Consent mode: ask-everything | edit-enabled (default) | autonomous')
   .option('-r, --resume <id>', 'Resume a previous session by id (or "last")');
 

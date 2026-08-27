@@ -172,13 +172,22 @@ seepient
 - `-m, --model <model>`: Specify the LLM model (default: `gpt-4o`).
 - `-p, --provider <provider>`: Specify the LLM provider (`openai-compatible`, `openai`, `anthropic`, `glm`).
 - `-n, --no-interactive`: Exit after processing the initial query (Headless mode).
-- `-y, --yes`: Auto-confirm all tool executions (e.g., shell commands).
+- `-y, --yes`: Autonomous mode: auto-approve actions within deployment ceiling (alias for `--mode autonomous`).
+- `--mode <mode>`: Consent mode: `ask-everything` | `edit-enabled` (default) | `autonomous`.
 - `--docker`: Run in Docker-optimized non-interactive mode (auto-detected in containers).
 - `--generate-api-key`: Generate an API key for server mode (use with `seepient-server`).
 
 ### Interactive Commands
 - `/models`: Switch between configured providers during a conversation.
+- `/mode [mode]`: View or switch consent mode (`ask-everything`, `edit-enabled`, `autonomous`). You can also press `Shift+Tab` in the TUI to cycle modes.
+- `/permissions [status|propose]`: Inspect active capabilities, grants, and deployment ceiling policies.
 - `/exit` or `/quit`: End the session.
+
+### Consent Modes & Security
+Seepient uses a single, fail-closed Domain policy pipeline (`PolicyEngine` → `ApprovalBroker` → `ExecutionBoundary` → `AuditRecorder`) with three canonical consent modes:
+- **`edit-enabled` (Default)**: Workspace edits, reads, and normal operations are pre-approved. Prompts for human confirmation on high-risk shell commands and outbound communications.
+- **`ask-everything`**: Prompts for confirmation before executing any tool with external side effects or model egress.
+- **`autonomous`**: Executes all actions permitted by the deployment ceiling without interactive prompts (ideal for sandboxed automation or CI/CD with `-y`).
 
 ## Configuration
 

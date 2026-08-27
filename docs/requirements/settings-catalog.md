@@ -760,34 +760,30 @@ Three notification channels: Feishu (Lark), DingTalk, and WeCom. Each follows th
 
 ## 8. Category 6: Agent Behavior
 
-### 8.1 `permissionLevel`
+### 8.1 `consentMode`
 
 | Property | Value |
 |----------|-------|
-| **Key** | `permissionLevel` |
-| **Display Name** | Permission Level |
-| **Description** | Controls which tool executions are auto-approved vs. require explicit user confirmation. Applies a risk-based matrix across four tool categories. |
+| **Key** | `permissions.consentMode` / `consentMode` |
+| **Display Name** | Consent Mode |
+| **Description** | Controls which tool executions are auto-approved vs. require explicit user confirmation via the unified Domain policy pipeline. |
 | **Type** | enum |
-| **Default Value** | `"moderate"` |
+| **Default Value** | `"edit-enabled"` |
 | **Required** | No |
 | **Sensitive** | No |
-| **Valid Values** | `"strict"` \| `"moderate"` \| `"permissive"` |
-| **Env Var Override** | `SEEPIENT_PERMISSION` |
+| **Valid Values** | `"ask-everything"` \| `"edit-enabled"` \| `"autonomous"` |
+| **Env Var Override** | `SEEPIENT_CONSENT_MODE` |
 | **Scope** | both |
 | **Runtime Editable** | Yes (hot-apply) |
 | **Category** | Agent Behavior |
 | **Depends On** | — |
 
-**Permission Matrix:**
+**Consent Modes:**
+- `edit-enabled`: Pre-approves workspace edits, reads, and normal operations; prompts for high-risk shell commands and outbound external communications.
+- `ask-everything`: Prompts for confirmation on every side-effecting operation.
+- `autonomous`: Auto-approves all operations within the deployment ceiling.
 
-| Risk Category | strict | moderate | permissive |
-|---------------|--------|----------|------------|
-| `safe` | auto | auto | auto |
-| `edit` | ask | auto | auto |
-| `communications` | ask | auto | auto |
-| `destructive` | ask | ask | auto |
-
-**Resolution priority:** CLI flag > `SEEPIENT_PERMISSION` env var > config file > `"moderate"` default. Invalid values silently fall through to the next source.
+**Resolution priority:** CLI flag (`--mode` / `-y`) > `SEEPIENT_CONSENT_MODE` env var > config file > `"edit-enabled"` default. Invalid values silently fall through to the next source.
 
 ---
 
@@ -1344,12 +1340,12 @@ These settings do not yet exist in `AppConfig` or env vars but are identified as
 | All SMTP settings (`smtpHost`, `smtpPort`, `smtpUser`, `smtpPass`) must be set for `send_email` to work. | Error | Tool returns error message. |
 
 ### 14.4 Permissions
-
+ 
 | Rule | Severity | Behavior |
 |------|----------|----------|
-| `permissionLevel` must be one of: `"strict"`, `"moderate"`, `"permissive"`. | Warning | Invalid values silently fall through to next source. Default: `"moderate"`. |
-| `SEEPIENT_PERMISSION` env var value must be one of the three valid values. | Warning | Invalid values are ignored silently. |
-| `autoConfirm` bypasses `permissionLevel` entirely when `true`. | Override | All tools auto-approved. |
+| `consentMode` must be one of: `"ask-everything"`, `"edit-enabled"`, `"autonomous"`. | Warning | Invalid values silently fall through to next source. Default: `"edit-enabled"`. |
+| `SEEPIENT_CONSENT_MODE` env var value must be one of the three valid modes. | Warning | Invalid values are ignored silently. |
+| `autoConfirm` / `-y` maps to `"autonomous"` consent mode. | Override | All in-ceiling operations auto-approved. |
 
 ### 14.5 Skills
 
@@ -1414,7 +1410,7 @@ These settings do not yet exist in `AppConfig` or env vars but are identified as
 | 29 | `dingtalkKeyword` | Notifications | string | _(none)_ | No | `DINGTALK_KEYWORD` | both | hot-apply |
 | 30 | `wecomWebhook` | Notifications | string | _(none)_ | Yes | `WECOM_WEBHOOK` | both | hot-apply |
 | 31 | `wecomKeyword` | Notifications | string | _(none)_ | No | `WECOM_KEYWORD` | both | hot-apply |
-| 32 | `permissionLevel` | Agent Behavior | enum | `moderate` | No | `SEEPIENT_PERMISSION` | both | hot-apply |
+| 32 | `permissions.consentMode` | Agent Behavior | enum | `edit-enabled` | No | `SEEPIENT_CONSENT_MODE` | both | hot-apply |
 | 33 | `autoConfirm` | Agent Behavior | boolean | `false` | No | _(none)_ | both | hot-apply |
 | 34 | `maxSteps` | Agent Behavior | number | 5-20 | No | _(none)_ | runtime | per-request |
 | 35 | `systemPrompt` | Agent Behavior | string | _(none)_ | No | _(none)_ | runtime | per-request |
