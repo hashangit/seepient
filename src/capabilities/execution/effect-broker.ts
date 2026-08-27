@@ -670,6 +670,10 @@ export class NodeNetworkAdapter implements BrokerNetworkAdapter {
     return new Promise((resolvePromise, rejectPromise) => {
       const isV6 = pinnedIp.includes(":");
       const family = isV6 ? 6 : 4;
+      const allAddresses = resolvedIps.map((ip) => ({
+        address: ip,
+        family: ip.includes(":") ? 6 : 4,
+      }));
 
       const reqOpts = {
         method: init.method,
@@ -681,9 +685,22 @@ export class NodeNetworkAdapter implements BrokerNetworkAdapter {
           host: destination.host,
         },
         servername: isHttps ? destination.host : undefined,
-        // Force net/tls connect to pinnedIp (true DNS rebinding protection)
-        lookup: (_h: string, _opts: unknown, cb: (err: Error | null, address: string, family: number) => void) => {
-          cb(null, pinnedIp, family);
+        // Force net/tls connect to the pre-resolved IPs (true DNS rebinding
+        // protection). Node >= 20 with autoSelectFamily requests the `all`
+        // form and expects [{address, family}]; answering that request with
+        // the legacy single-address form makes net throw
+        // ERR_INVALID_IP_ADDRESS ("Invalid IP address: undefined").
+        lookup: (
+          _h: string,
+          opts: { all?: boolean },
+          cb: (
+            err: Error | null,
+            result: string | Array<{ address: string; family: number }>,
+            family?: number,
+          ) => void,
+        ) => {
+          if (opts?.all) cb(null, allAddresses);
+          else cb(null, pinnedIp, family);
         },
       };
 
