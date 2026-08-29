@@ -21,6 +21,7 @@ describe("native-fs-commit probe (T203, QS-2.9)", () => {
       available: false,
       reason: "binary-missing",
       platform: process.platform,
+      digestVerified: false,
     });
     expect(helper.available).toBe(false);
     const result = await helper.commit({

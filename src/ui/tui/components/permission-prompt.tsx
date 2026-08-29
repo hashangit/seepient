@@ -189,6 +189,9 @@ interface LegacyPermissionPromptProps {
   args: Record<string, unknown>;
   /** LLM-authored gate context (title/description + per-scope implications). */
   approvalContext?: ApprovalContext;
+  /** True only when the backend verified the native helper; exactness may
+   *  then be claimed on write labels (spec 019). Default: not claimed. */
+  exactCommit?: boolean;
   /** Called once with the user's decision. */
   onResolve: (decision: ApprovalDecision) => void;
 }
@@ -247,7 +250,7 @@ function formatActual(toolName: string, args: Record<string, unknown>): string {
  * fallback. Kept byte-for-byte behavior; it is not part of 011's acceptance
  * evidence (spec 011 scope & boundary).
  */
-export function LegacyPermissionPrompt({ toolName, args, approvalContext, onResolve }: LegacyPermissionPromptProps) {
+export function LegacyPermissionPrompt({ toolName, args, approvalContext, exactCommit, onResolve }: LegacyPermissionPromptProps) {
   const theme = useTheme();
   const [selected, setSelected] = useState(0);
 
@@ -293,7 +296,7 @@ export function LegacyPermissionPrompt({ toolName, args, approvalContext, onReso
         ) : null}
         <Box>
           <Text color={theme.cyan}>  Effect  </Text>
-          <Text color={theme.fg}>{effectLabel(toolName, args)}</Text>
+          <Text color={theme.fg}>{effectLabel(toolName, args, exactCommit)}</Text>
         </Box>
         <Box>
           <Text color={theme.cyan}>  Expires </Text>
@@ -383,10 +386,14 @@ function riskLabel(toolName: string, args: Record<string, unknown>): string {
 }
 
 /** Deterministic effect label (spec 008 T306) — derived from tool+args, not
- *  from LLM-authored text. Mirrors the effect vocabulary in tool-effects.ts. */
-function effectLabel(toolName: string, args: Record<string, unknown>): string {
+ *  from LLM-authored text. Mirrors the effect vocabulary in tool-effects.ts.
+ *  The "(exact commit)" suffix appears only when the backend can enforce it
+ *  (spec 019 FR-002): no surface claims exactness it cannot deliver. */
+function effectLabel(toolName: string, args: Record<string, unknown>, exactCommit?: boolean): string {
   if (toolName === 'execute_shell_command') return 'process-exec (root-shaped caps)';
-  if (toolName === 'write_file' || toolName === 'edit_file') return 'filesystem-write (exact commit)';
+  if (toolName === 'write_file' || toolName === 'edit_file') {
+    return exactCommit ? 'filesystem-write (exact commit)' : 'filesystem-write';
+  }
   if (toolName === 'read_file') return 'filesystem-read + model-egress';
   if (toolName === 'send_email') return 'external-send (smtp) + secret-use';
   if (toolName === 'web_search' || toolName === 'read_website') return 'network-egress + model-egress';
