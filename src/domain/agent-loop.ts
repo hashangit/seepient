@@ -337,6 +337,10 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
       executionBoundary: boundary,
       artifacts,
       snapshotStore,
+      // The wired host callbacks ARE the composition root's operator intent
+      // (spec 019 D8): they join the trusted-host allowlist alongside the
+      // settings default.
+      trustedHostAllowlist: [...(options as { trustedHostAllowlist?: string[] }).trustedHostAllowlist ?? ["use_skill"], ...hostCallbacks.keys()],
     });
   }
   if (!wiredPipeline) {

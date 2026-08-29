@@ -51,13 +51,24 @@ Instructions on how to operate the hello system.
     const registry = await initializeSkillRegistry(dir);
     expect(registry.get("hello-ops")).toBeDefined();
 
+    // spec 019: the composition root wires host callbacks — the executor
+    // runs registered callbacks ONLY after the ambient fallback deletion.
+    const { getAllToolModules } = await import("../../../domain/tool-executor.js");
+    const hostCallbacks = new Map<string, (args: unknown) => Promise<unknown>>();
+    for (const mod of getAllToolModules()) {
+      if (mod.handler) {
+        hostCallbacks.set(mod.definition.function.name, (args) => mod.handler!(args as never, {}));
+      }
+    }
     const { boundary, artifacts } = await buildLocalBoundary({
       workspaceRoot: dir,
+      hostCallbacks,
     });
 
     const wiredPipeline = await buildActionLifecycle({
       principalId: "user-test",
       runId: "run-e2e-skill",
+      trustedHostAllowlist: ["use_skill"],
       workspaceRoot: dir,
       approvalBroker: NOOP_BROKER,
       executionBoundary: boundary,
@@ -106,8 +117,18 @@ Instructions on how to operate the hello system.
     const registry = await initializeSkillRegistry(dir);
     expect(registry.get("hello-ops")).toBeDefined();
 
+    // spec 019: the composition root wires host callbacks — the executor
+    // runs registered callbacks ONLY after the ambient fallback deletion.
+    const { getAllToolModules } = await import("../../../domain/tool-executor.js");
+    const hostCallbacks = new Map<string, (args: unknown) => Promise<unknown>>();
+    for (const mod of getAllToolModules()) {
+      if (mod.handler) {
+        hostCallbacks.set(mod.definition.function.name, (args) => mod.handler!(args as never, {}));
+      }
+    }
     const { boundary, artifacts } = await buildLocalBoundary({
       workspaceRoot: dir,
+      hostCallbacks,
     });
 
     const wiredPipeline = await buildActionLifecycle({

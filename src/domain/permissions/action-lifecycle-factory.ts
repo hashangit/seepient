@@ -99,6 +99,13 @@ export interface ActionLifecycleInputs {
    * instance must back the boundary's ReadFileExecutor.
    */
   snapshotStore?: import("../../foundations/hashline/snapshot-store.js").SnapshotStore;
+  /**
+   * Operator allowlist for trusted-host execution (spec 019 FR-006,
+   * `permissions.trustedHostAllowlist`). Defaults to `["use_skill"]`.
+   * SDK roots append explicitly registered trustedHostTool ids — the
+   * composition wiring IS operator intent there.
+   */
+  trustedHostAllowlist?: string[];
   /** Optional: persisted capability ledger for authority consumption & revocation (T107a). */
   capabilityLedger?: PersistedCapabilityLedger;
   /**
@@ -367,6 +374,8 @@ export async function buildActionLifecycle(
     // Spec 011 (persistent choices): the protected-policy workspace identity
     // so the engine can offer `project`/`global` approval choices.
     workspaceId,
+    // Spec 019 (FR-006): operator allowlist for trusted-host execution.
+    trustedHostAllowlist: inputs.trustedHostAllowlist ?? ["use_skill"],
   };
 
   const capabilityLedger = inputs.capabilityLedger ?? new PersistedCapabilityLedger(inputs.auditRoot ? { root: path.join(inputs.auditRoot, "caps") } : undefined);

@@ -243,7 +243,7 @@ export interface AgentCreateOptions {
   model?: string;
   provider?: string;
   systemPrompt?: string;
-  tools?: string[] | UserToolDefinition[];
+  tools?: string[] | UserToolDefinition[] | import("./contracts/custom-tools.js").AnyToolRegistration[];
   skills?: string[] | boolean;
   cwd?: string;
   maxSteps?: number;

@@ -594,8 +594,10 @@ export class UnsupportedExecutor implements OperationExecutor {
 /**
  * Trusted-host executor. Host tools are application authority and run the
  * registered callback directly — they are always audit-labelled and excluded
- * from agent-grant persistence. Enabled only by an operator allowlist in
- * server deployments.
+ * from agent-grant persistence. Registry-ONLY (spec 019 FR-006): the lookup
+ * consults the composition root's callback map and nothing else — the former
+ * ambient `getAllToolModules()` fallback is deleted. Misses fail closed with
+ * `HOST_TOOL_NOT_REGISTERED`.
  */
 export class TrustedHostExecutor implements OperationExecutor {
   readonly kind = "trusted-host" as const;
@@ -611,15 +613,7 @@ export class TrustedHostExecutor implements OperationExecutor {
     operation: Extract<PreparedToolAction["operation"], { kind: "trusted-host" }>,
     _opts: { signal?: AbortSignal; onUpdate?: (u: ToolProgress) => void },
   ): Promise<ExecutionResult> {
-    let cb = this.callbacks.get(operation.registrationId) ?? (operation.toolName ? this.callbacks.get(operation.toolName) : undefined);
-    if (!cb) {
-      const { getAllToolModules } = await import("../../domain/tool-executor.js");
-      const mod = getAllToolModules().find((m) => m.definition.function.name === operation.registrationId || m.name === operation.registrationId);
-      if (mod && mod.handler) {
-        const handler = mod.handler;
-        cb = async (args: unknown) => handler(args as any);
-      }
-    }
+    const cb = this.callbacks.get(operation.registrationId) ?? (operation.toolName ? this.callbacks.get(operation.toolName) : undefined);
     if (!cb) {
       return {
         state: "failed",

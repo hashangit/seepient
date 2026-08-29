@@ -104,6 +104,13 @@ export type UserToolRegistration =
   | PreparedToolRegistration
   | BrokerConnectorRegistration;
 
+/** Union of all recognized registrations (including legacy/host authority). */
+export type AnyToolRegistration =
+  | PreparedToolRegistration
+  | BrokerConnectorRegistration
+  | TrustedHostToolRegistration
+  | LegacyHostToolRegistration;
+
 /**
  * Legacy `tool({ execute })` registration shape, recognized for one
  * deprecation window. Emits a warning on registration and fails closed at
