@@ -79,10 +79,15 @@ export async function buildLocalBoundary(opts?: {
   // Capabilities does not import Domain (AGENTS.md).
   const hostCallbacks = opts?.hostCallbacks ?? new Map<string, (args: unknown) => Promise<unknown>>();
 
+  // Single source of truth for the interim JS fallback opt-in: the SAME
+  // effective value drives the executor's behavior and the boundary's
+  // `jsFsFallbackOptIn` advertisement (spec 019, FR-002/FR-003).
+  const allowFallback = opts?.allowFallback ?? false;
+
   const registry = new OperationExecutorRegistry();
   registry.register(new NoneExecutor());
   registry.register(new ReadFileExecutor({ artifacts }));
-  registry.register(new CommitFilesExecutor({ broker: commitBroker, artifacts, useNative: probe.available, allowFallback: opts?.allowFallback ?? false }));
+  registry.register(new CommitFilesExecutor({ broker: commitBroker, artifacts, useNative: probe.available, allowFallback }));
   registry.register(new ProcessExecutor({ sandbox, unsafeUncontained }));
   registry.register(new BrokerExecutor({ broker: effectBroker, artifacts, workspaceRoot: opts?.workspaceRoot }));
   registry.register(new TrustedHostExecutor(hostCallbacks));
@@ -90,6 +95,7 @@ export async function buildLocalBoundary(opts?: {
   const boundary = new LocalExecutionBoundary({
     registry,
     exactCommit: probe.available,
+    jsFsFallbackOptIn: allowFallback,
     hostFilteredEgress: true,
     // environmentIsolation is TRUE ONLY when a real backend exists — the
     // uncontained opt-in is advertised separately so policy can permit the

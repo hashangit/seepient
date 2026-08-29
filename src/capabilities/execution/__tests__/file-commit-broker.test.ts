@@ -10,48 +10,8 @@ import { FileCommitBroker } from "../file-commit-broker.js";
 import { OperationExecutorRegistry, registryCapabilities } from "../operation-executor-registry.js";
 import { LocalExecutionBoundary } from "../local-execution-boundary.js";
 import { InMemoryArtifactStore } from "../in-memory-artifact-store.js";
-import type { NativeCommitHelper, NativeCommitResult } from "../../../vendors/native-fs-commit/index.js";
 import { UnsupportedBackendError } from "../../../foundations/errors.js";
-import type { CapabilityEnvelope } from "../../../foundations/contracts/permission-policy.js";
-
-function envelope(path: string): CapabilityEnvelope {
-  return {
-    version: 1,
-    envelopeId: "e1",
-    principalId: "u",
-    runId: "r1",
-    actionDigest: "d1",
-    capabilities: [{ kind: "commit-file", path }],
-    lifetime: { kind: "action", actionDigest: "d1", consumeOnce: true },
-    issuedBy: { kind: "service", authorityId: "pe", authenticatedBy: "deployment" },
-    issuedAt: 0,
-    policyDigest: "dig",
-  };
-}
-
-/** Fake helper that reports success and echoes the input digest. */
-function fakeHelper(opts: { available: boolean; failWith?: NativeCommitResult["errorCode"] }): NativeCommitHelper {
-  return {
-    available: opts.available,
-    probe: {
-      available: opts.available,
-      platform: process.platform,
-      binaryPath: opts.available ? "/fake/bin" : undefined,
-      reason: opts.available ? undefined : "binary-missing",
-    },
-    async commit(req) {
-      if (!opts.available) {
-        return { ok: false, writtenSha256: "", errorCode: "primitive-unsupported" };
-      }
-      if (opts.failWith) {
-        return { ok: false, writtenSha256: "", errorCode: opts.failWith };
-      }
-      const { createHash } = await import("node:crypto");
-      const sha = createHash("sha256").update(req.content).digest("hex");
-      return { ok: true, writtenSha256: sha };
-    },
-  };
-}
+import { fakeCommitEnvelope as envelope, fakeHelper } from "./helpers/commit-helper-fakes.js";
 
 describe("FileCommitBroker (T204, QS-2.9)", () => {
   it("commits when envelope has exact commit-file capability", async () => {
