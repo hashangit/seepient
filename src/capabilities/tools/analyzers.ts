@@ -697,6 +697,22 @@ export async function analyzeGenerateImage(
   const payloadBytes = Buffer.from(JSON.stringify({ prompt: args.prompt, n: 1, size: "1024x1024" }), "utf8");
   const payloadArtifact = await ctx.artifacts.put(payloadBytes, "application/json");
 
+  // Spec 019 (FR-011): a file destination adds a filesystem-write effect at
+  // analysis time (policy demands the commit-file cap, prompts honestly)
+  // and rides the broker operation as outputCommit. No network I/O happens
+  // here — the fetched bytes only exist after dispatch, where
+  // BrokerExecutor hands them to FileCommitBroker (executor chaining).
+  let outputCommit: { destination: CanonicalPathTarget } | undefined;
+  if (typeof args.image_path === "string" && args.image_path.length > 0) {
+    const target = await canonicalizePath(args.image_path, ctx.workspace.canonicalRoot);
+    if (target.finalSymlink) {
+      throw new Error(
+        `Refusing image save: ${target.canonicalPath} is a symbolic link; exact commit would reject it (target-symlink)`,
+      );
+    }
+    outputCommit = { destination: target };
+  }
+
   const effects: EffectRequest[] = [
     ...(isLocal
       ? []
@@ -704,6 +720,16 @@ export async function analyzeGenerateImage(
           { kind: "network-egress" as const, destinations: [destination] },
           { kind: "secret-use" as const, secretRefs },
         ]),
+    ...(outputCommit
+      ? [
+          {
+            kind: "filesystem-write" as const,
+            targets: [
+              { target: outputCommit.destination, mode: "create" as const, expected: snapshotPath(outputCommit.destination) },
+            ],
+          },
+        ]
+      : []),
     {
       kind: "model-egress",
       providerClass: ctx.modelProviderClass,
@@ -727,6 +753,7 @@ export async function analyzeGenerateImage(
           headers: { "Content-Type": "application/json" },
           body: payloadArtifact,
           secretRefs,
+          ...(outputCommit ? { outputCommit } : {}),
         },
       };
 
@@ -738,9 +765,13 @@ export async function analyzeGenerateImage(
     effects,
     operation,
     display: {
-      title: `Generate image`,
+      title: `Generate image${outputCommit ? " → " + outputCommit.destination.basename : ""}`,
       summary: args.prompt.slice(0, 60),
-      canonicalTargets: isLocal ? [] : [`${destination.scheme}://${destination.host}${destination.pathPrefix ?? ""}`],
+      canonicalTargets: outputCommit
+        ? [outputCommit.destination.canonicalPath]
+        : isLocal
+          ? []
+          : [`${destination.scheme}://${destination.host}${destination.pathPrefix ?? ""}`],
     },
     risk: "safe",
   });

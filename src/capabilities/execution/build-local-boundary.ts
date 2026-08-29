@@ -105,7 +105,7 @@ export async function buildLocalBoundary(opts?: {
   registry.register(new ReadFileExecutor({ artifacts, snapshotStore: opts?.snapshotStore }));
   registry.register(new CommitFilesExecutor({ broker: commitBroker, artifacts, useNative: probe.available, allowFallback }));
   registry.register(new ProcessExecutor({ sandbox, unsafeUncontained }));
-  registry.register(new BrokerExecutor({ broker: effectBroker, artifacts, workspaceRoot: opts?.workspaceRoot }));
+  registry.register(new BrokerExecutor({ broker: effectBroker, artifacts, workspaceRoot: opts?.workspaceRoot, commitBroker }));
   registry.register(new TrustedHostExecutor(hostCallbacks));
 
   const boundary = new LocalExecutionBoundary({
