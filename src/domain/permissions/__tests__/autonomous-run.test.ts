@@ -74,7 +74,6 @@ describe("autonomous run end-to-end (spec 017, T034 / T035 / T036 / QS-5)", () =
           "secret-ref",
         ],
         exactCommit: true,
-        jsFsFallbackOptIn: false,
         hostFilteredEgress: true,
         environmentIsolation: true,
         supportedOperationKinds: ["none", "read-file", "commit-files", "process", "broker"],
@@ -218,8 +217,7 @@ describe("autonomous run end-to-end (spec 017, T034 / T035 / T036 / QS-5)", () =
     const commitExecutor = new CommitFilesExecutor({
       broker: { commit: async () => {} } as any,
       artifacts,
-      useNative: false,
-      allowFallback: true,
+      useNative: true,
     });
 
     const writeSecurityAction = {

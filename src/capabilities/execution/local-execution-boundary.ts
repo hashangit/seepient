@@ -27,8 +27,6 @@ export interface LocalExecutionBoundaryOptions {
   registry: OperationExecutorRegistry;
   /** Native helper probe result — gates `exactCommit`. */
   exactCommit?: boolean;
-  /** Interim JS filesystem fallback opt-in advertised to policy (spec 019). */
-  jsFsFallbackOptIn?: boolean;
   /** Whether the effect broker enforces host-filtered egress. */
   hostFilteredEgress?: boolean;
   /** Honest advertisement of process containment availability. */
@@ -50,7 +48,6 @@ export class LocalExecutionBoundary implements ExecutionBoundary {
     this.registry = opts.registry;
     this.capabilities = registryCapabilities(opts.registry, "local-native", {
       exactCommit: opts.exactCommit ?? false,
-      jsFsFallbackOptIn: opts.jsFsFallbackOptIn ?? false,
       hostFilteredEgress: opts.hostFilteredEgress ?? false,
       environmentIsolation: opts.environmentIsolation,
       uncontainedOptIn: opts.uncontainedOptIn,

@@ -105,7 +105,6 @@ describe("analyzer conformance (spec 017, T018 / QS-3)", () => {
         backend: "local-native",
         capabilityKinds: ["model-egress"],
         exactCommit: true,
-        jsFsFallbackOptIn: false,
         hostFilteredEgress: true,
         environmentIsolation: true,
         supportedOperationKinds: ["none"],

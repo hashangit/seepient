@@ -98,7 +98,8 @@ describe("native TUI bridge (T015)", () => {
   it("carries the full request to the presenter and enriches the selection (SC-001)", async () => {
     const artifacts = new InMemoryArtifactStore();
     const contentRef = await artifacts.put(Buffer.from("hi\n"), "text/plain", "r1");
-    const { boundary } = await buildLocalBoundary({ artifacts, allowFallback: true });
+    const { diskBackedFakeHelper } = await import("../../capabilities/execution/__tests__/helpers/commit-helper-fakes.js");
+    const { boundary } = await buildLocalBoundary({ artifacts, commitHelper: diskBackedFakeHelper() });
 
     const received: PermissionRequest[] = [];
     const presenter: InlineApprovalPresenter = {
@@ -161,7 +162,8 @@ describe("native TUI bridge (T015)", () => {
   it("flag-off path keeps legacy behavior but binds approval to a request option", async () => {
     const artifacts = new InMemoryArtifactStore();
     const contentRef = await artifacts.put(Buffer.from("hi\n"), "text/plain", "r1");
-    const { boundary } = await buildLocalBoundary({ artifacts, allowFallback: true });
+    const { diskBackedFakeHelper } = await import("../../capabilities/execution/__tests__/helpers/commit-helper-fakes.js");
+    const { boundary } = await buildLocalBoundary({ artifacts, commitHelper: diskBackedFakeHelper() });
 
     // Legacy surface: boolean/scope UX, no typed selection.
     const broker = legacyApproveToolToBroker(async () => ({
@@ -220,11 +222,12 @@ describe("native TUI bridge (T015)", () => {
       null,
       "openai",
     );
+    const { diskBackedFakeHelper } = await import("../../capabilities/execution/__tests__/helpers/commit-helper-fakes.js");
     await agent.enablePermissionPipeline({
       workspaceRoot: dir,
       modelProviderClass: "openai",
       auditRoot: dir,
-      allowFallback: true,
+      commitHelper: diskBackedFakeHelper(),
     });
     // Neither the native broker nor the legacy approveTool is installed.
     await agent.chat(`write to ${join(dir, "x.txt")}`);

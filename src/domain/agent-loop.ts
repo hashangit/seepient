@@ -48,7 +48,8 @@ export interface AgentLoopOptions {
    */
   wiredPipeline?: WiredActionLifecycle;
   /** Allow JS filesystem fallback for file commits when native helper is absent. */
-  allowFallback?: boolean;
+  /** Commit-helper injection for tests/e2e (spec 019): pins the probe. */
+  commitHelper?: import("../vendors/native-fs-commit/index.js").NativeCommitHelper;
 }
 
 export interface AgentLoopError {
@@ -272,14 +273,11 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
         hostCallbacks.set(mod.definition.function.name, (args) => mod.handler!(args as any, config));
       }
     }
-    // No `?? true` default (spec 019, FR-003): the lazy pipeline no longer
-    // silently opts into unguarded JS writes. buildLocalBoundary owns the
-    // fail-closed default and the single SEEPIENT_ALLOW_JS_FS_FALLBACK read.
     // spec 019 FR-001: the session snapshot store rides in config (the same
     // store the legacy handlers use); one instance backs read-side tagging
     // AND analysis-time patch application.
     const snapshotStore = (config as { snapshotStore?: import("../foundations/hashline/snapshot-store.js").SnapshotStore } | undefined)?.snapshotStore;
-    const { boundary } = await buildLocalBoundary({ artifacts, hostCallbacks, allowFallback: options.allowFallback, workspaceRoot: options.cwd ?? process.cwd(), snapshotStore });
+    const { boundary } = await buildLocalBoundary({ artifacts, hostCallbacks, workspaceRoot: options.cwd ?? process.cwd(), snapshotStore, commitHelper: options.commitHelper });
     const broker = approveTool
       ? legacyApproveToolToBroker(approveTool)
       : autoConfirm

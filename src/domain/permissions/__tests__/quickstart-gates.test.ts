@@ -36,7 +36,6 @@ const LOCAL: ExecutionBackendCapabilities = {
   backend: "local-native",
   capabilityKinds: ["commit-file", "read-file", "process", "model-egress"],
   exactCommit: true,
-  jsFsFallbackOptIn: false,
   hostFilteredEgress: true,
   environmentIsolation: true,
   supportedOperationKinds: ["none", "read-file", "commit-files", "process"],

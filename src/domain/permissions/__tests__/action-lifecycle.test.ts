@@ -50,7 +50,6 @@ const LOCAL_BACKEND: ExecutionBackendCapabilities = {
   backend: "local-native",
   capabilityKinds: ["commit-file", "read-file", "process", "model-egress"],
   exactCommit: true,
-  jsFsFallbackOptIn: false,
   hostFilteredEgress: true,
   environmentIsolation: true,
   supportedOperationKinds: ["none", "read-file", "commit-files", "process"],
@@ -669,7 +668,8 @@ describe("ActionLifecycle (T110)", () => {
 
   it("inline approval writes no grants or protected-policy files", async () => {
     const artifacts = new InMemoryArtifactStore();
-    const { boundary } = await buildLocalBoundary({ artifacts, allowFallback: true });
+    const { diskBackedFakeHelper } = await import("../../../capabilities/execution/__tests__/helpers/commit-helper-fakes.js");
+    const { boundary } = await buildLocalBoundary({ artifacts, commitHelper: diskBackedFakeHelper() });
 
     // The commit-files operation reads its content from the shared artifact
     // store (the analyzer would have stored it; this test bypasses analysis).

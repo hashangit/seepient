@@ -17,7 +17,6 @@ import dotenv from "dotenv";
 export const DOTENV_REFUSED_VARS: readonly string[] = [
   "SEEPIENT_UNCONTAINED",
   "SEEPIENT_FS_COMMIT_BIN",
-  "SEEPIENT_ALLOW_JS_FS_FALLBACK",
 ];
 
 /**

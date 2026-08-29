@@ -112,7 +112,6 @@ describe("consent mode matrix (spec 017, T024 / T032 / T033 / QS-4)", () => {
           "trusted-host",
         ],
         exactCommit: true,
-        jsFsFallbackOptIn: false,
         hostFilteredEgress: true,
         environmentIsolation: opts?.environmentIsolation ?? true,
         supportedOperationKinds: ["none", "read-file", "commit-files", "process", "broker", "trusted-host"],

@@ -8,6 +8,8 @@
 
 **The Engineering-First Headless Agent Framework: CLI, SDK, and Server. Stable, Scalable Automation for the Post-Vision Era.**
 
+**Platform support** — chat, planning, and file reads work everywhere. Model-authored file writes are enforced through exact atomic commits via the bundled native helper (`native/fs-commit`): fully supported on **macOS (arm64/x64)** and **Linux (x64/arm64)**; on **Windows** writes are refused before approval (read-only) until a win32 helper exists. There is no unguarded write fallback.
+
 ---
 
 🔗 **GitHub Repository**: [https://github.com/hashangit/seepient](https://github.com/hashangit/seepient)
