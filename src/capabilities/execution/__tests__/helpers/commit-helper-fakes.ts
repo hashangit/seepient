@@ -27,12 +27,13 @@ export function fakeCommitEnvelope(path: string): CapabilityEnvelope {
 }
 
 /** Probe builder matching the shapes `probeCommitHelper` can return. */
-export function fakeProbe(opts: { available: boolean; reason?: CommitHelperProbe["reason"]; binaryPath?: string }): CommitHelperProbe {
+export function fakeProbe(opts: { available: boolean; reason?: CommitHelperProbe["reason"]; binaryPath?: string; digestVerified?: boolean }): CommitHelperProbe {
   return {
     available: opts.available,
     platform: process.platform,
     binaryPath: opts.available ? (opts.binaryPath ?? "/fake/bin") : opts.binaryPath,
     reason: opts.available ? undefined : (opts.reason ?? "binary-missing"),
+    digestVerified: opts.digestVerified ?? false,
   };
 }
 

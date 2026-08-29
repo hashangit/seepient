@@ -19,7 +19,14 @@ describe("containment preflight (spec 011 T032)", () => {
       probe: { available: true, platform: "darwin", backend: "seatbelt" },
     });
     const result = await preflightContainment({ workspaceRoot: "/work" });
-    expect(result).toEqual({ ok: true, backend: "seatbelt", workspaceRoot: "/work" });
+    // commitHelper rides every result (spec 019 FR-010); the helper is absent
+    // in this environment so exactCommit is honestly false.
+    expect(result).toEqual({
+      ok: true,
+      backend: "seatbelt",
+      workspaceRoot: "/work",
+      commitHelper: { exactCommit: false, reason: "binary-missing", digestVerified: false },
+    });
   });
 
   it("fails closed with a macOS setup hint when sandbox-exec is missing", async () => {

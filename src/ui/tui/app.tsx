@@ -759,6 +759,8 @@ export function TuiApp({
         mcpCount={mcpCount}
         contextTokens={contextTokens}
         contextWindow={getModelMeta(agent.getModel())?.contextWindow}
+        exactCommit={agent.getContainmentStatus?.()?.commitHelper?.exactCommit}
+        exactCommitReason={agent.getContainmentStatus?.()?.commitHelper?.reason}
       />
     </Box>
   );

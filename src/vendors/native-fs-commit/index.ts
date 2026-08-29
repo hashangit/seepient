@@ -27,11 +27,15 @@ const currentDir = path.dirname(fileURLToPath(import.meta.url));
 export interface CommitHelperProbe {
   available: boolean;
   /** Why the helper is unavailable, when `available` is false. */
-  reason?: "binary-missing" | "primitive-unsupported" | "self-test-failed";
+  reason?: "binary-missing" | "primitive-unsupported" | "self-test-failed" | "digest-mismatch";
   /** Path to the resolved helper binary, when available. */
   binaryPath?: string;
   /** Platform the probe ran on. */
   platform: NodeJS.Platform;
+  /** True only when the packaged binary matched the shipped manifest digest
+   *  (spec 019, FR-009). The SEEPIENT_FS_COMMIT_BIN override bypasses the
+   *  manifest check by design, so it reports false. */
+  digestVerified: boolean;
 }
 
 /** A validated commit request handed to the native helper. */
@@ -98,15 +102,18 @@ export async function probeCommitHelper(): Promise<CommitHelperProbe> {
       available: false,
       reason: "primitive-unsupported",
       platform,
+      digestVerified: false,
     };
   }
   const binaryPath = resolveBinaryPath();
   try {
     await access(binaryPath, constants.X_OK);
-    return { available: true, binaryPath, platform };
+    // Digest verification against the shipped manifest lands with packaging
+    // (spec 019 T030); until then an execute-bit pass reports unverified.
+    return { available: true, binaryPath, platform, digestVerified: false };
   } catch {
     // Helper binary missing: fail closed
-    return { available: false, binaryPath: undefined, platform, reason: "binary-missing" };
+    return { available: false, binaryPath: undefined, platform, reason: "binary-missing", digestVerified: false };
   }
 }
 
@@ -119,7 +126,7 @@ export class PackagedCommitHelper implements NativeCommitHelper {
   readonly probe: CommitHelperProbe;
 
   constructor(probe?: CommitHelperProbe) {
-    this.probe = probe ?? { available: false, reason: "binary-missing", platform: process.platform };
+    this.probe = probe ?? { available: false, reason: "binary-missing", platform: process.platform, digestVerified: false };
   }
 
   get available(): boolean {
