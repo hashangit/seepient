@@ -92,6 +92,8 @@ export function registryCapabilities(
   backend: ExecutionBackendCapabilities["backend"],
   opts: {
     exactCommit?: boolean;
+    /** Interim JS filesystem fallback opt-in advertised to policy (spec 019). */
+    jsFsFallbackOptIn?: boolean;
     hostFilteredEgress?: boolean;
     /**
      * True ONLY when a real containment backend is operational. When
@@ -107,6 +109,7 @@ export function registryCapabilities(
     backend,
     capabilityKinds: deriveCapabilityKinds(registry.supportedKinds()),
     exactCommit: opts.exactCommit ?? false,
+    jsFsFallbackOptIn: opts.jsFsFallbackOptIn ?? false,
     hostFilteredEgress: opts.hostFilteredEgress ?? false,
     environmentIsolation: opts.environmentIsolation ?? (backend !== "uncontained"),
     uncontainedOptIn: opts.uncontainedOptIn,

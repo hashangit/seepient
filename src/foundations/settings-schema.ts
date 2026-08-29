@@ -23,12 +23,14 @@ export interface SettingsMapEntry {
 }
 
 export interface SettingsSchemaEntry {
-  type: 'string' | 'number' | 'boolean' | 'enum';
+  type: 'string' | 'number' | 'boolean' | 'enum' | 'array';
+  /** Element type for `array` settings. */
+  itemType?: 'string';
   secret: boolean;
   enumValues?: string[];
   min?: number;
   max?: number;
-  default?: string | number | boolean;
+  default?: string | number | boolean | string[];
   restartRequired: boolean;
   envVar?: string;
 }
@@ -107,6 +109,7 @@ const entries: [string, SettingsMapEntry][] = [
   ['permissions.consentMode', { dotKey: 'permissions.consentMode', configPath: ['permissions', 'consentMode'], category: 'permissions', label: 'Consent Mode (ask-everything | edit-enabled | autonomous)' }],
   ['permissions.autonomousWarned', { dotKey: 'permissions.autonomousWarned', configPath: ['permissions', 'autonomousWarned'], category: 'permissions', label: 'Autonomous warning acknowledged' }],
   ['permissions.approvalTimeoutMs', { dotKey: 'permissions.approvalTimeoutMs', configPath: ['approvalTimeoutMs'], category: 'permissions', label: 'Approval Timeout (ms)' }],
+  ['permissions.trustedHostAllowlist', { dotKey: 'permissions.trustedHostAllowlist', configPath: ['permissions', 'trustedHostAllowlist'], category: 'permissions', label: 'Trusted-Host Tool Allowlist' }],
 
   // Gateway
   ['gateway.enabled', { dotKey: 'gateway.enabled', configPath: ['gatewayEnabled'], category: 'gateway', label: 'Gateway Enabled' }],
@@ -178,6 +181,7 @@ const schemaEntries: [string, SettingsSchemaEntry][] = [
   ['permissions.consentMode', { type: 'enum', secret: false, enumValues: ['ask-everything', 'edit-enabled', 'autonomous'], default: 'edit-enabled', restartRequired: false, envVar: 'SEEPIENT_CONSENT_MODE' }],
   ['permissions.autonomousWarned', { type: 'boolean', secret: false, default: false, restartRequired: false }],
   ['permissions.approvalTimeoutMs', { type: 'number', secret: false, default: 600000, min: 10000, max: 3600000, restartRequired: true, envVar: 'SEEPIENT_APPROVAL_TIMEOUT_MS' }],
+  ['permissions.trustedHostAllowlist', { type: 'array', itemType: 'string', secret: false, default: ['use_skill'], restartRequired: true }],
 
   // Gateway
   ['gateway.enabled', { type: 'boolean', secret: false, default: true, restartRequired: true, envVar: 'SEEPIENT_GATEWAY_ENABLED' }],
