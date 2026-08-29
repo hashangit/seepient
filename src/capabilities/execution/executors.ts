@@ -63,7 +63,10 @@ export class CommitFilesExecutor implements OperationExecutor {
     this.broker = opts.broker;
     this.artifacts = opts.artifacts;
     this.useNative = opts.useNative ?? true;
-    this.allowFallback = opts.allowFallback ?? (process.env.SEEPIENT_ALLOW_JS_FS_FALLBACK === "1");
+    // No env default here — the composition root (buildLocalBoundary) owns
+    // the single env-honoring opt-in (spec 019, FR-003). Tests construct
+    // with explicit booleans.
+    this.allowFallback = opts.allowFallback ?? false;
   }
 
   async execute(

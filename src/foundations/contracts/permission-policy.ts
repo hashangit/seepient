@@ -178,7 +178,10 @@ export type PermissionDenyReason =
   /** T107d: capability was consumed (action-scoped) or has expired (run/session). */
   | "capability-expired"
   /** T107d: capability was revoked before use (run/session revocation). */
-  | "capability-revoked";
+  | "capability-revoked"
+  /** Spec 019 FR-002: the backend cannot enforce exact commits and the
+   *  interim JS fallback was not opted into — denied before any prompt. */
+  | "exact-commit-unavailable";
 
 /**
  * Closed decision union. `needs-approval` carries the immutable request and

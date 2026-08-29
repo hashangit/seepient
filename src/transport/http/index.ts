@@ -216,6 +216,7 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
         backend: "uncontained",
         capabilityKinds: [],
         exactCommit: false,
+        jsFsFallbackOptIn: false,
         hostFilteredEgress: false,
         environmentIsolation: false,
         supportedOperationKinds: [],

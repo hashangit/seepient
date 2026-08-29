@@ -24,6 +24,7 @@ const LOCAL_BACKEND: ExecutionBackendCapabilities = {
   backend: "local-native",
   capabilityKinds: ["commit-file", "read-file", "process", "model-egress"],
   exactCommit: true,
+  jsFsFallbackOptIn: false,
   hostFilteredEgress: true,
   environmentIsolation: true,
   supportedOperationKinds: ["none", "read-file", "commit-files", "process"],
@@ -439,7 +440,7 @@ describe("policy digest deep-canonicalization (reviewer fix #7)", () => {
       immutableDenies: [],
       approvalMode: "manual" as const,
       interaction: { mode: "inline" as const },
-      backendCapabilities: { backend: "local-native" as const, capabilityKinds: [], exactCommit: false, hostFilteredEgress: false, environmentIsolation: false, supportedOperationKinds: [] },
+      backendCapabilities: { backend: "local-native" as const, capabilityKinds: [], exactCommit: false, jsFsFallbackOptIn: false, hostFilteredEgress: false, environmentIsolation: false, supportedOperationKinds: [] },
     };
     const ctx2 = { ...ctx1, deploymentCeiling: { version: 1 as const, capabilities: [{ kind: "commit-file" as const, path: "/b" }] } };
     expect(computePolicyDigest(ctx1)).not.toBe(computePolicyDigest(ctx2));
@@ -454,7 +455,7 @@ describe("policy digest deep-canonicalization (reviewer fix #7)", () => {
       immutableDenies: [],
       approvalMode: "manual" as const,
       interaction: { mode: "inline" as const },
-      backendCapabilities: { backend: "local-native" as const, capabilityKinds: [], exactCommit: false, hostFilteredEgress: false, environmentIsolation: false, supportedOperationKinds: [] },
+      backendCapabilities: { backend: "local-native" as const, capabilityKinds: [], exactCommit: false, jsFsFallbackOptIn: false, hostFilteredEgress: false, environmentIsolation: false, supportedOperationKinds: [] },
     };
     // Same content, manually reversed key order at the top level. deepSort
     // canonicalizes both to the same output.

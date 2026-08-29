@@ -299,6 +299,24 @@ export class PolicyEngine implements PolicyEngineContract {
       );
     }
 
+    // Spec 019 (FR-002): exact-commit gate. A write the backend cannot
+    // enforce is refused BEFORE the prompt — keyed on operation kind so it
+    // runs for every commit-files action regardless of capability coverage;
+    // pre-granted caps (017 always-allowed class, config-derived grants)
+    // must not reach the early-allow and dispatch into a guaranteed failure.
+    if (
+      opKind === "commit-files" &&
+      !context.backendCapabilities.exactCommit &&
+      !context.backendCapabilities.jsFsFallbackOptIn
+    ) {
+      pushLayer(trace, "backend", "deny");
+      return deny(
+        "exact-commit-unavailable",
+        "Exact file commits are unavailable because the native helper is missing or failed verification. Update Seepient to get the packaged helper, or set SEEPIENT_ALLOW_JS_FS_FALLBACK=1 to accept atomic writes without symlink/TOCTOU protection.",
+        trace,
+      );
+    }
+
     // 3. Effective capabilities — monotonic intersection.
     const effective = effectiveCapabilities(
       context.deploymentCeiling,
