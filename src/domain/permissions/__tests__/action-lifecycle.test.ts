@@ -9,7 +9,7 @@
  *  - audit is idempotent on `<actionId>:<state>`
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ActionLifecycle } from "../action-lifecycle.js";
@@ -40,7 +40,7 @@ import type { ToolResult } from "../../../foundations/types.js";
 
 let dir: string;
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "seepient-audit-"));
+  dir = realpathSync(mkdtempSync(join(tmpdir(), "seepient-audit-")));
 });
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });

@@ -53,3 +53,7 @@ docs/.vitepress/cache/
 # Test media artifacts
 generated-*.png
 edited-*.png
+
+# spec 019: dev-built native helper binaries (pnpm native:build)
+src/native-fs-commit/
+native/fs-commit/target/
