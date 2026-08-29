@@ -387,7 +387,10 @@ describe("CommitFilesExecutor fail-closed defaults (P0-1)", () => {
   it("production buildLocalBoundary() defaults to fail-closed exactCommit:false when native is missing", async () => {
     const { buildLocalBoundary } = await import("../build-local-boundary.js");
     const artifacts = new InMemoryArtifactStore();
-    const { boundary } = await buildLocalBoundary({ artifacts });
+    // Pin the helper to unavailable: the dev tree may or may not carry a
+    // binary built via `pnpm native:build` (spec 019 QS-1.5).
+    const { fakeHelper } = await import("./helpers/commit-helper-fakes.js");
+    const { boundary } = await buildLocalBoundary({ artifacts, commitHelper: fakeHelper({ available: false }) });
     expect(boundary.capabilities.exactCommit).toBe(false);
     const dest = join(dir, "should-not-be-written.txt");
     const contentRef = await artifacts.put(Buffer.from("do not write"), "text/plain");

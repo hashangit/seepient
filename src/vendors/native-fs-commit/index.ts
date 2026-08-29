@@ -90,10 +90,57 @@ function resolveBinaryPath(): string {
   );
 }
 
+/** The manifest directory for a resolved binary (sibling of the platform dir). */
+function resolveManifestPath(binaryPath: string): string {
+  return path.join(path.dirname(path.dirname(binaryPath)), "manifest.json");
+}
+
 /**
- * Startup self-test. Probes for the binary's existence and runs a single
- * exact-commit self-check (create temp, commit, verify). Failures are
- * reported as `available:false` — exact writes then fail closed.
+ * sha256 the binary and compare against its manifest entry. Exported for
+ * unit tests with fixture manifests.
+ */
+export async function verifyPackagedBinary(
+  binaryPath: string,
+  manifestPath: string,
+  platform: NodeJS.Platform,
+  arch: string = process.arch,
+): Promise<{ ok: boolean; reason?: "digest-mismatch" }> {
+  const { readFile } = await import("node:fs/promises");
+  let manifest: { version?: number; binaries?: Record<string, { sha256?: string }> };
+  try {
+    manifest = JSON.parse(await readFile(manifestPath, "utf-8"));
+  } catch {
+    // Missing or unreadable manifest: fail closed — an install whose
+    // integrity cannot be verified is indistinguishable from a tampered one.
+    return { ok: false, reason: "digest-mismatch" };
+  }
+  if (manifest.version !== 1) {
+    // Unknown manifest version: fail closed (spec 019 data-model).
+    return { ok: false, reason: "digest-mismatch" };
+  }
+  const entry = manifest.binaries?.[`${platform}-${arch}`];
+  if (!entry || typeof entry.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(entry.sha256)) {
+    return { ok: false, reason: "digest-mismatch" };
+  }
+  const bytes = await readFile(binaryPath);
+  const actual = createHash("sha256").update(bytes).digest("hex");
+  if (actual !== entry.sha256) {
+    return { ok: false, reason: "digest-mismatch" };
+  }
+  return { ok: true };
+}
+
+/**
+ * Startup self-test. Resolution order:
+ *  1. platform gate (darwin/linux only; win32 → primitive-unsupported),
+ *  2. `SEEPIENT_FS_COMMIT_BIN` override — exec-bit check only, EXEMPT from
+ *     the manifest check BY DESIGN (developer-built binary; documented as an
+ *     explicit trust decision, spec 019 D11),
+ *  3. packaged layout — digest verified against the shipped manifest
+ *     (fail closed on mismatch: `digest-mismatch`),
+ *  4. source layout (tsx dev runs) — no manifest exists by design; the
+ *     binary is available but `digestVerified:false` (from-source story,
+ *     spec 019 QS-1.5).
  */
 export async function probeCommitHelper(): Promise<CommitHelperProbe> {
   const platform = process.platform;
@@ -106,15 +153,32 @@ export async function probeCommitHelper(): Promise<CommitHelperProbe> {
     };
   }
   const binaryPath = resolveBinaryPath();
+  const envOverride = Boolean(process.env.SEEPIENT_FS_COMMIT_BIN);
   try {
     await access(binaryPath, constants.X_OK);
-    // Digest verification against the shipped manifest lands with packaging
-    // (spec 019 T030); until then an execute-bit pass reports unverified.
-    return { available: true, binaryPath, platform, digestVerified: false };
   } catch {
     // Helper binary missing: fail closed
     return { available: false, binaryPath: undefined, platform, reason: "binary-missing", digestVerified: false };
   }
+  if (envOverride) {
+    return { available: true, binaryPath, platform, digestVerified: false };
+  }
+  // Manifest verification applies ONLY to the packaged (dist) layout; the
+  // source layout never carries a manifest (CI is the only manifest
+  // generator — contract: commits must never include a hand-written one).
+  const isPackagedLayout = currentDir.split(path.sep).includes("dist");
+  if (isPackagedLayout) {
+    const verification = await verifyPackagedBinary(
+      binaryPath,
+      resolveManifestPath(binaryPath),
+      platform,
+    );
+    if (!verification.ok) {
+      return { available: false, binaryPath: undefined, platform, reason: "digest-mismatch", digestVerified: false };
+    }
+    return { available: true, binaryPath, platform, digestVerified: true };
+  }
+  return { available: true, binaryPath, platform, digestVerified: false };
 }
 
 /**

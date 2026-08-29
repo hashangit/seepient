@@ -32,6 +32,9 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "bench:provider": "vitest run src/domain/providers/__tests__/provider-benchmark.test.ts",
+    "native:build": "cargo build --manifest-path native/fs-commit/Cargo.toml --release && node scripts/place-native-helper.cjs",
+    "native:test": "cargo test --manifest-path native/fs-commit/Cargo.toml",
+    "native:test": "cargo test --manifest-path native/fs-commit/Cargo.toml",
     "prepublishOnly": "pnpm run build"
   },
   "files": [
@@ -41,6 +44,7 @@
     "dist/transport",
     "dist/ui",
     "dist/vendors",
+    "dist/native-fs-commit",
     "skills",
     "README.md",
     "CHANGELOG.md",

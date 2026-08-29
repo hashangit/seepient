@@ -1,0 +1,27 @@
+[package]
+name = "seepient-fs-commit"
+version = "0.1.0"
+edition = "2021"
+description = "Native exact-commit helper: symlink/TOCTOU-hardened atomic file writes for Seepient"
+license = "MIT"
+
+[[bin]]
+name = "seepient-fs-commit"
+path = "src/main.rs"
+
+[dependencies]
+# `libc` is unavoidable: the commit sequence's guarantees (openat2 with
+# RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS|RESOLVE_NO_XDEV on Linux, component-wise
+# openat + O_NOFOLLOW on macOS, raw dirfd fsync) have no std equivalent. No
+# other dependencies; hashing is a self-contained std-only SHA-256.
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+serde_json = "1"
+tempfile = "3"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
