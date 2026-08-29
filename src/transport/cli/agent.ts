@@ -162,7 +162,27 @@ export class Agent {
     workspaceRoot?: string;
     modelProviderClass?: string;
     auditRoot?: string;
-    allowFallback?: boolean;
+    /**
+     * Commit-helper injection for tests/e2e (spec 019): pins the probe.
+     * Structural shape of the vendor's NativeCommitHelper — Transport must
+     * not import from src/vendors (S-12).
+     */
+    commitHelper?: {
+      available: boolean;
+      probe: {
+        available: boolean;
+        reason?: "binary-missing" | "primitive-unsupported" | "self-test-failed" | "digest-mismatch";
+        binaryPath?: string;
+        platform: NodeJS.Platform;
+        digestVerified: boolean;
+      };
+      commit(req: { destination: string; content: Uint8Array; expected?: { exists: boolean; sha256?: string } }): Promise<{
+        ok: boolean;
+        writtenSha256: string;
+        errorCode?: "target-symlink" | "parent-symlink" | "parent-replaced" | "snapshot-changed" | "cross-device-rename" | "io-error" | "timeout" | "primitive-unsupported";
+        message?: string;
+      }>;
+    };
     /**
      * Local approval deadline in ms (spec 011 T033). Defaults to ten
      * minutes; the CLI bootstrap passes `permissions.approvalTimeoutMs`.
@@ -225,10 +245,10 @@ export class Agent {
     // (bootstrap) owns the session store; tests may inject their own.
     const snapshotStore = opts.snapshotStore ?? (await import("../../foundations/hashline/snapshot-store.js")).createSnapshotStore();
     const { boundary: realBoundary, artifacts: sharedArtifacts } = await buildLocalBoundary({
-      allowFallback: opts.allowFallback,
       hostCallbacks,
       workspaceRoot: opts.workspaceRoot ?? process.cwd(),
       snapshotStore,
+      commitHelper: opts.commitHelper,
     });
     // Spec 011 (T032/FR-019): containment preflight at startup. The status is
     // surfaced (TUI/status surfaces) so approval choices are disabled before

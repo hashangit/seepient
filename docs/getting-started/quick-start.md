@@ -32,6 +32,14 @@ $env:OPENAI_API_KEY="your-api-key-here"
 You can use provider-specific keys like `ANTHROPIC_API_KEY` or `GLM_API_KEY` instead. See [Configuration](/getting-started/configuration) for all options.
 :::
 
+::: warning Windows platform support (writes are read-only)
+On Windows, Seepient supports chat, planning, and file **reads**. Model-authored
+file **writes** are refused before approval because they cannot be enforced
+exactly: the native `seepient-fs-commit` helper ships for macOS and Linux only,
+and there is no unguarded fallback. Windows support for writes returns when a
+win32 helper exists.
+:::
+
 ## Step 2: Your First Generation
 
 Create a file called `hello.js`:

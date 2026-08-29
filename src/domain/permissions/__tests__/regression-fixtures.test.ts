@@ -62,7 +62,7 @@ describe("P0 regression fixtures — fixed behavior (spec-008 pipeline)", () => 
       backendCapabilities: {
         backend: "local-native" as const,
         capabilityKinds: ["commit-file"],
-        exactCommit: true, jsFsFallbackOptIn: false, hostFilteredEgress: true, environmentIsolation: true,
+        exactCommit: true, hostFilteredEgress: true, environmentIsolation: true,
         supportedOperationKinds: ["commit-files"],
       },
     };
@@ -98,7 +98,7 @@ describe("P0 regression fixtures — fixed behavior (spec-008 pipeline)", () => 
       backendCapabilities: {
         backend: "local-native" as const,
         capabilityKinds: ["commit-file"],
-        exactCommit: true, jsFsFallbackOptIn: false, hostFilteredEgress: true, environmentIsolation: true,
+        exactCommit: true, hostFilteredEgress: true, environmentIsolation: true,
         supportedOperationKinds: ["commit-files"],
       },
     };

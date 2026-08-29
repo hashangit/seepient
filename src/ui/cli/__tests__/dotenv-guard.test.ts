@@ -51,7 +51,6 @@ describe("dotenv security guard (spec 019 FR-007, QS-0.7)", () => {
       [
         "SEEPIENT_UNCONTAINED=1",
         "SEEPIENT_FS_COMMIT_BIN=/attacker/bin",
-        "SEEPIENT_ALLOW_JS_FS_FALLBACK=1",
         "SEEPIENT_DOTENV_BENIGN=hello",
       ].join("\n"),
       "utf8",
@@ -61,7 +60,6 @@ describe("dotenv security guard (spec 019 FR-007, QS-0.7)", () => {
 
     expect(process.env.SEEPIENT_UNCONTAINED).toBeUndefined();
     expect(process.env.SEEPIENT_FS_COMMIT_BIN).toBeUndefined();
-    expect(process.env.SEEPIENT_ALLOW_JS_FS_FALLBACK).toBeUndefined();
     // Exactly one warning line per refused variable, each naming the var.
     for (const key of DOTENV_REFUSED_VARS) {
       const lines = stderr.split("\n").filter((l) => l.includes(key));

@@ -1,12 +1,12 @@
 /**
- * Exact-commit pre-prompt gate tests (spec 019, T006, QS-0.1/0.2).
+ * Exact-commit pre-prompt gate tests (spec 019 FR-002, QS-0.1).
  *
  * The gate lives in the backend-support section of `PolicyEngine.evaluate`,
  * keyed on operation kind, so it runs for every `commit-files` action
  * regardless of capability coverage — pre-granted write caps (017
  * always-allowed class, config-derived grants) cannot short-circuit it via
- * the early-allow. QS-0.1: deny pre-prompt, no executor round trip; QS-0.2:
- * the env opt-in admits the action and the label drops the exactness claim.
+ * the early-allow. Post-P2 there is NO fallback: exactCommit is the only
+ * path to a write.
  */
 import { describe, it, expect } from "vitest";
 import { PolicyEngine } from "../policy-engine.js";
@@ -21,27 +21,14 @@ import type {
   ExecutionBackendCapabilities,
 } from "../../../foundations/contracts/execution-boundary.js";
 
-/** Narrow to the deny variant so `reason`/`message` are type-visible. */
-function expectDeny(d: PolicyDecision): { reason: string; message: string } {
-  if (d.decision !== "deny") throw new Error(`expected deny, got ${d.decision}`);
-  return { reason: d.reason, message: d.message };
-}
-
-/** Backend WITHOUT the helper and WITHOUT the fallback opt-in (QS-0.1). */
+/** Backend WITHOUT the helper (the state on any install it isn't shipped/built for). */
 const NO_HELPER_BACKEND: ExecutionBackendCapabilities = {
   backend: "local-native",
   capabilityKinds: ["commit-file", "read-file", "process", "model-egress"],
   exactCommit: false,
-  jsFsFallbackOptIn: false,
   hostFilteredEgress: true,
   environmentIsolation: true,
   supportedOperationKinds: ["none", "read-file", "commit-files", "process", "broker", "trusted-host"],
-};
-
-/** Backend with the interim fallback opt-in advertised (QS-0.2). */
-const FALLBACK_OPT_IN_BACKEND: ExecutionBackendCapabilities = {
-  ...NO_HELPER_BACKEND,
-  jsFsFallbackOptIn: true,
 };
 
 function set(...caps: Capability[]): CapabilitySet {
@@ -169,8 +156,14 @@ function readAction(): PreparedToolAction {
   };
 }
 
+/** Narrow to the deny variant so `reason`/`message` are type-visible. */
+function expectDeny(d: PolicyDecision): { reason: string; message: string } {
+  if (d.decision !== "deny") throw new Error(`expected deny, got ${d.decision}`);
+  return { reason: d.reason, message: d.message };
+}
+
 describe("exact-commit pre-prompt gate (spec 019 FR-002, QS-0.1)", () => {
-  it("denies exact-commit-unavailable pre-prompt when the helper is absent and no opt-in", () => {
+  it("denies exact-commit-unavailable pre-prompt when the helper is absent", () => {
     const engine = new PolicyEngine("digest");
     const d = engine.evaluate(writeAction(), context());
     expect(d.decision).toBe("deny");
@@ -188,11 +181,13 @@ describe("exact-commit pre-prompt gate (spec 019 FR-002, QS-0.1)", () => {
     });
   });
 
-  it("names the fallback env opt-in verbatim in the denial message", () => {
+  it("denial message names the remedies (update / build from source)", () => {
     const engine = new PolicyEngine("digest");
     const d = engine.evaluate(writeAction(), context());
     expect(d.decision).toBe("deny");
-    expect(expectDeny(d).message).toContain("SEEPIENT_ALLOW_JS_FS_FALLBACK=1");
+    const { message } = expectDeny(d);
+    expect(message).toContain("native helper");
+    expect(message).toContain("pnpm native:build");
   });
 
   it("denies even when commit-file capabilities are pre-granted (coverage proof)", () => {
@@ -223,18 +218,6 @@ describe("exact-commit pre-prompt gate (spec 019 FR-002, QS-0.1)", () => {
     const d = engine.evaluate(writeAction(), context({ approvalMode: "balanced" }));
     expect(d.decision).toBe("deny");
     expect(expectDeny(d).reason).toBe("exact-commit-unavailable");
-  });
-
-  it("allows the action when the fallback opt-in is advertised (QS-0.2)", () => {
-    const engine = new PolicyEngine("digest");
-    const granted = context({
-      backendCapabilities: FALLBACK_OPT_IN_BACKEND,
-      principalPolicy: set({ kind: "commit-file", path: "/proj/a.txt" }),
-      runtimeBaseline: set({ kind: "commit-file", path: "/proj/a.txt" }),
-      activeCapabilities: set({ kind: "commit-file", path: "/proj/a.txt" }),
-    });
-    const d = engine.evaluate(writeAction(), granted);
-    expect(d.decision).toBe("allow");
   });
 
   it("allows when exactCommit is available", () => {

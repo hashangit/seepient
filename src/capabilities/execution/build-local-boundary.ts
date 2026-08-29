@@ -44,7 +44,6 @@ export async function buildLocalBoundary(opts?: {
    */
   hostCallbacks?: Map<string, (args: unknown) => Promise<unknown>>;
   unsafeUncontained?: boolean;
-  allowFallback?: boolean;
   /** Workspace root for credential preflight resolution (defaults to cwd). */
   workspaceRoot?: string;
   /** Network adapter override (tests inject a stub; default is the real Node adapter). */
@@ -93,17 +92,10 @@ export async function buildLocalBoundary(opts?: {
   // Capabilities does not import Domain (AGENTS.md).
   const hostCallbacks = opts?.hostCallbacks ?? new Map<string, (args: unknown) => Promise<unknown>>();
 
-  // Single source of truth for the interim JS fallback opt-in: the SAME
-  // effective value drives the executor's behavior and the boundary's
-  // `jsFsFallbackOptIn` advertisement (spec 019, FR-002/FR-003). Default is
-  // fail-closed; SEEPIENT_ALLOW_JS_FS_FALLBACK=1 is the one documented
-  // opt-in, honored here and nowhere else.
-  const allowFallback = opts?.allowFallback ?? process.env.SEEPIENT_ALLOW_JS_FS_FALLBACK === "1";
-
   const registry = new OperationExecutorRegistry();
   registry.register(new NoneExecutor());
   registry.register(new ReadFileExecutor({ artifacts, snapshotStore: opts?.snapshotStore }));
-  registry.register(new CommitFilesExecutor({ broker: commitBroker, artifacts, useNative: probe.available, allowFallback }));
+  registry.register(new CommitFilesExecutor({ broker: commitBroker, artifacts, useNative: probe.available }));
   registry.register(new ProcessExecutor({ sandbox, unsafeUncontained }));
   registry.register(new BrokerExecutor({ broker: effectBroker, artifacts, workspaceRoot: opts?.workspaceRoot, commitBroker }));
   registry.register(new TrustedHostExecutor(hostCallbacks));
@@ -111,7 +103,6 @@ export async function buildLocalBoundary(opts?: {
   const boundary = new LocalExecutionBoundary({
     registry,
     exactCommit: probe.available,
-    jsFsFallbackOptIn: allowFallback,
     hostFilteredEgress: true,
     // environmentIsolation is TRUE ONLY when a real backend exists — the
     // uncontained opt-in is advertised separately so policy can permit the

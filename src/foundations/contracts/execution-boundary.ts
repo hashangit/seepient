@@ -40,13 +40,6 @@ export interface ExecutionBackendCapabilities {
     | "uncontained";
   capabilityKinds: Capability["kind"][];
   exactCommit: boolean;
-  /**
-   * True when the operator opted into the interim JS filesystem fallback
-   * (SEEPIENT_ALLOW_JS_FS_FALLBACK=1 or the explicit boundary option).
-   * Policy admits `commit-files` actions without the native helper only when
-   * this is advertised (spec 019, FR-002).
-   */
-  jsFsFallbackOptIn: boolean;
   hostFilteredEgress: boolean;
   /**
    * True ONLY when a real containment backend (Seatbelt/Bubblewrap) is

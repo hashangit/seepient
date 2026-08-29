@@ -66,7 +66,8 @@ describe("E2E: CLI Agent.enablePermissionPipeline", () => {
   it("enablePermissionPipeline wires the new path; the boundary executes the real tool", async () => {
     const runtime = fakeRuntime();
     const agent = new Agent(runtime, "test", { snapshotStore: createSnapshotStore() }, "sys", null, "openai");
-    await agent.enablePermissionPipeline({ workspaceRoot: dir, modelProviderClass: "openai", auditRoot: dir, allowFallback: true });
+    const { diskBackedFakeHelper } = await import("../../../capabilities/execution/__tests__/helpers/commit-helper-fakes.js");
+    await agent.enablePermissionPipeline({ workspaceRoot: dir, modelProviderClass: "openai", auditRoot: dir, commitHelper: diskBackedFakeHelper() });
     agent.setPipelineApproveTool(async () => true);
     expect(agent.isPermissionPipelineEnabled()).toBe(true);
 
