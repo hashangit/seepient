@@ -369,6 +369,89 @@ describe("CommitFilesExecutor fail-closed defaults (P0-1)", () => {
     expect(existsSync(dest)).toBe(false);
   });
 });
+
+describe("CommitFilesExecutor fallback honesty (spec 019 FR-005, QS-0.4)", () => {
+  /** Fallback-path executor: no native helper, opt-in JS fallback. */
+  function fallbackExecutor(artifacts: InMemoryArtifactStore) {
+    const broker = new FileCommitBroker({ artifacts, helper: fakeHelper() as never });
+    return new CommitFilesExecutor({ broker, artifacts, useNative: false, allowFallback: true });
+  }
+
+  function commitAction(dest: string, contentRef: Awaited<ReturnType<InMemoryArtifactStore["put"]>>, expected?: { exists: boolean; sha256?: string; size?: number }): PreparedToolAction {
+    const action = actionWith("commit-files", {});
+    action.operation = {
+      kind: "commit-files",
+      commits: [
+        {
+          destination: { canonicalPath: dest, canonicalParent: dir, basename: dest.split("/").pop() ?? "f", exists: expected?.exists ?? false, finalSymlink: false },
+          content: contentRef,
+          ...(expected ? { expected } : {}),
+        },
+      ],
+    };
+    return action;
+  }
+
+  it("mismatching expected.sha256 → COMMIT_FAILED naming the mismatch, disk untouched", async () => {
+    const artifacts = new InMemoryArtifactStore();
+    const executor = fallbackExecutor(artifacts);
+    const dest = join(dir, "watched.txt");
+    writeFileSync(dest, "current content", "utf-8");
+    const { createHash } = await import("node:crypto");
+    const staleSha = createHash("sha256").update("snapshot-time content").digest("hex");
+    const ref = await artifacts.put(Buffer.from("new content"), "text/plain");
+    const action = commitAction(dest, ref, { exists: true, sha256: staleSha, size: "snapshot-time content".length });
+
+    const result = await executor.execute(action, envelope(dest), asOp(action.operation, "commit-files"), {});
+    expect(result.state).toBe("failed");
+    if (result.state === "failed") {
+      expect(result.error.code).toBe("COMMIT_FAILED");
+      expect(result.error.message).toMatch(/snapshot/i);
+    }
+    await expect(import("node:fs/promises").then((fs) => fs.readFile(dest, "utf-8"))).resolves.toBe("current content");
+  });
+
+  it("symlinked destination → refusal with disk untouched", async () => {
+    const artifacts = new InMemoryArtifactStore();
+    const executor = fallbackExecutor(artifacts);
+    const victim = join(dir, "victim.txt");
+    writeFileSync(victim, "do not touch", "utf-8");
+    const link = join(dir, "link.txt");
+    const { symlinkSync } = await import("node:fs");
+    symlinkSync(victim, link);
+    const ref = await artifacts.put(Buffer.from("new content"), "text/plain");
+    const action = commitAction(link, ref, { exists: false });
+    // Mark the destination as a symlinked final component (as the analyzer's
+    // canonicalizePath would have detected).
+    (action.operation as { commits: Array<{ destination: { finalSymlink: boolean } }> }).commits[0].destination.finalSymlink = true;
+
+    const result = await executor.execute(action, envelope(victim), asOp(action.operation, "commit-files"), {});
+    expect(result.state).toBe("failed");
+    if (result.state === "failed") {
+      expect(result.error.message).toMatch(/symlink/i);
+    }
+    await expect(import("node:fs/promises").then((fs) => fs.readFile(victim, "utf-8"))).resolves.toBe("do not touch");
+    await expect(import("node:fs/promises").then((fs) => fs.readlink(link))).resolves.toBe(victim);
+  });
+
+  it("matching expected + clean target → write succeeds", async () => {
+    const artifacts = new InMemoryArtifactStore();
+    const executor = fallbackExecutor(artifacts);
+    const dest = join(dir, "clean.txt");
+    writeFileSync(dest, "current content", "utf-8");
+    const { createHash } = await import("node:crypto");
+    const ref = await artifacts.put(Buffer.from("new content"), "text/plain");
+    const action = commitAction(dest, ref, {
+      exists: true,
+      sha256: createHash("sha256").update("current content").digest("hex"),
+      size: "current content".length,
+    });
+
+    const result = await executor.execute(action, envelope(dest), asOp(action.operation, "commit-files"), {});
+    expect(result.state).toBe("succeeded");
+    await expect(import("node:fs/promises").then((fs) => fs.readFile(dest, "utf-8"))).resolves.toBe("new content");
+  });
+});
 describe("BrokerExecutor web_search formatting", () => {
   it("formats Tavily search results into compact markdown snippet", async () => {
     const prevKey = process.env.TAVILY_API_KEY;

@@ -134,16 +134,15 @@ export class PackagedCommitHelper implements NativeCommitHelper {
   }
 
   async commit(req: NativeCommitRequest): Promise<NativeCommitResult> {
-    if (!this.probe.available) {
+    if (!this.probe.available || !this.probe.binaryPath) {
+      // No JS fallback exists (spec 019 FR-004): an unavailable probe always
+      // answers primitive-unsupported and the broker fails closed.
       return {
         ok: false,
         writtenSha256: "",
         errorCode: "primitive-unsupported",
         message: "Native exact-commit helper unavailable; no JS fallback",
       };
-    }
-    if (!this.probe.binaryPath) {
-      return this.nodeExactCommit(req);
     }
 
     // The real invocation passes destination + content over stdin and reads
@@ -210,21 +209,5 @@ export class PackagedCommitHelper implements NativeCommitHelper {
       });
       child.stdin.end(Buffer.from(req.content));
     });
-  }
-
-  private async nodeExactCommit(req: NativeCommitRequest): Promise<NativeCommitResult> {
-    try {
-      const dir = path.dirname(req.destination);
-      const { mkdir, writeFile, rename } = await import("node:fs/promises");
-      const { randomBytes } = await import("node:crypto");
-      await mkdir(dir, { recursive: true, mode: 0o755 });
-      const tmp = path.join(dir, `.commit.tmp.${process.pid}.${randomBytes(4).toString("hex")}`);
-      await writeFile(tmp, Buffer.from(req.content));
-      await rename(tmp, req.destination);
-      const sha = createHash("sha256").update(req.content).digest("hex");
-      return { ok: true, writtenSha256: sha };
-    } catch (err) {
-      return { ok: false, writtenSha256: "", errorCode: "io-error", message: (err as Error).message };
-    }
   }
 }

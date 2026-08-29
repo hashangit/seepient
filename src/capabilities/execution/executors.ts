@@ -17,6 +17,7 @@
  * and never import each other or `capabilities/tools/`.
  */
 import type { PreparedToolAction } from "../../foundations/contracts/prepared-action.js";
+import type { CanonicalPathTarget, FileSnapshot } from "../../foundations/contracts/tool-effects.js";
 import type {
   ExecutionResult,
   ToolProgress,
@@ -106,7 +107,7 @@ export class CommitFilesExecutor implements OperationExecutor {
             expected: commit.expected,
           });
         } else if (this.allowFallback) {
-          await this.fallbackWrite(commit.destination.canonicalPath, bytes);
+          await this.fallbackWrite(commit.destination, bytes, commit.expected);
         } else {
           return {
             state: "failed",
@@ -180,23 +181,59 @@ export class CommitFilesExecutor implements OperationExecutor {
   }
 
   /**
-   * Atomic temp+rename write. Writes to a temp file in the same directory,
-   * then renames. On failure the temp is cleaned up and the destination is
-   * never partially written. This is the same mechanism the legacy write_file
-   * tool uses — not as safe as the native helper (no symlink/TOCTOU defense)
-   * but strictly better than the old handler path because the prepared bytes
-   * and destination are used, not the raw model args.
+   * Hardened interim fallback (spec 019 FR-005). Before the temp+rename the
+   * destination is checked against the caller's expected snapshot: a symlinked
+   * final component is refused (target-symlink-equivalent) and current disk
+   * content must hash-match `expected.sha256` (snapshot-changed-equivalent).
+   * This is the honest version of the weaker path — the native helper's
+   * TOCTOU window closure is still absent, which is exactly why the fallback
+   * is opt-in and scheduled for deletion (FR-013).
    */
-  private async fallbackWrite(destination: string, bytes: Uint8Array): Promise<void> {
+  private async fallbackWrite(
+    destination: CanonicalPathTarget,
+    bytes: Uint8Array,
+    expected?: FileSnapshot,
+  ): Promise<void> {
     const fs = await import("node:fs/promises");
     const path = await import("node:path");
     const crypto = await import("node:crypto");
-    const dir = path.dirname(destination);
+    const dest = destination.canonicalPath;
+    if (destination.finalSymlink) {
+      throw new Error(
+        `Refusing fallback write: destination is a symbolic link (${dest}); exact-commit would reject this as target-symlink`,
+      );
+    }
+    if (expected) {
+      const st = await fs.lstat(dest).then(
+        (s) => s,
+        () => undefined,
+      );
+      if (expected.exists && !st) {
+        throw new Error(
+          `Fallback write refused: expected the file to exist but it is missing (snapshot changed): ${dest}`,
+        );
+      }
+      if (!expected.exists && st) {
+        throw new Error(
+          `Fallback write refused: expected a new file but one exists (snapshot changed): ${dest}`,
+        );
+      }
+      if (expected.exists && expected.sha256 && st) {
+        const current = await fs.readFile(dest);
+        const currentSha = crypto.createHash("sha256").update(current).digest("hex");
+        if (currentSha !== expected.sha256) {
+          throw new Error(
+            `Fallback write refused: file changed since it was read (expected snapshot ${expected.sha256.slice(0, 12)}…, current ${currentSha.slice(0, 12)}…): ${dest}`,
+          );
+        }
+      }
+    }
+    const dir = path.dirname(dest);
     const tmp = path.join(dir, `.seepient-tmp-${crypto.randomUUID().slice(0, 8)}`);
     try {
       await fs.mkdir(dir, { recursive: true });
       await fs.writeFile(tmp, bytes);
-      await fs.rename(tmp, destination);
+      await fs.rename(tmp, dest);
     } catch (err) {
       try { await fs.unlink(tmp); } catch { /* temp may not exist */ }
       throw err;
