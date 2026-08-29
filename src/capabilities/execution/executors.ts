@@ -409,11 +409,19 @@ export class BrokerExecutor implements OperationExecutor {
   private readonly broker: EffectBroker;
   private readonly artifacts?: PreparationArtifactStore;
   private readonly workspaceRoot?: string;
+  private readonly commitBroker?: FileCommitBroker;
 
-  constructor(opts: { broker: EffectBroker; artifacts?: PreparationArtifactStore; workspaceRoot?: string }) {
+  constructor(opts: {
+    broker: EffectBroker;
+    artifacts?: PreparationArtifactStore;
+    workspaceRoot?: string;
+    /** spec 019 FR-011: for outputCommit handoff after a successful fetch. */
+    commitBroker?: FileCommitBroker;
+  }) {
     this.broker = opts.broker;
     this.artifacts = opts.artifacts;
     this.workspaceRoot = opts.workspaceRoot;
+    this.commitBroker = opts.commitBroker;
   }
   async execute(
     action: PreparedToolAction,
@@ -528,6 +536,77 @@ export class BrokerExecutor implements OperationExecutor {
         },
       };
     }
+    // spec 019 (FR-011) executor chaining: a declared outputCommit hands the
+    // fetched output artifact to the FileCommitBroker under the SAME action
+    // envelope (which carries the commit-file cap because the analyzer added
+    // the filesystem-write effect). A refusal here discards the fetched
+    // result — the write either happens exactly, or not at all.
+    const outputCommit =
+      operation.request.kind === "http" ? operation.request.outputCommit : undefined;
+    let committedPath: string | undefined;
+    if (outputCommit) {
+      if (!this.commitBroker || !this.artifacts) {
+        return {
+          state: "failed",
+          error: {
+            code: "COMMIT_UNAVAILABLE",
+            message: "Output destination declared but the commit broker is unavailable; write refused.",
+            retryable: false,
+          },
+          evidence: {
+            backend: "local-native",
+            actionDigest: action.actionDigest,
+            executorId: "broker",
+            operationKind: "broker",
+            effectiveDestinations: result.effectiveDestination ? [result.effectiveDestination] : [],
+          },
+        };
+      }
+      const imageBytes = await this.extractImageBytes(result.output);
+      if (!imageBytes) {
+        return {
+          state: "failed",
+          error: {
+            code: "OUTPUT_NOT_COMMITTABLE",
+            message: "Provider response carried no decodable image bytes (expected b64_json or a binary body); nothing was written.",
+            retryable: false,
+          },
+          evidence: {
+            backend: "local-native",
+            actionDigest: action.actionDigest,
+            executorId: "broker",
+            operationKind: "broker",
+            effectiveDestinations: result.effectiveDestination ? [result.effectiveDestination] : [],
+          },
+        };
+      }
+      try {
+        const meta = await this.commitBroker.commit({
+          envelope,
+          destination: outputCommit.destination.canonicalPath,
+          content: imageBytes,
+          expected: undefined,
+        });
+        committedPath = meta.path;
+      } catch (err) {
+        return {
+          state: "failed",
+          error: {
+            code: "COMMIT_FAILED",
+            message: `Fetch succeeded but the exact commit was refused: ${err instanceof Error ? err.message : String(err)}`,
+            retryable: false,
+          },
+          evidence: {
+            backend: "local-native",
+            actionDigest: action.actionDigest,
+            executorId: "broker",
+            operationKind: "broker",
+            effectiveDestinations: result.effectiveDestination ? [result.effectiveDestination] : [],
+          },
+        };
+      }
+    }
+
     let outputText = "ok";
     if (result.output && this.artifacts) {
       try {
@@ -542,6 +621,11 @@ export class BrokerExecutor implements OperationExecutor {
       }
     } else if (result.output) {
       outputText = `<broker artifact ${result.output.artifactId}>`;
+    }
+    if (committedPath) {
+      // Do NOT inline image bytes into history — the model learns where the
+      // file landed.
+      outputText = `Image saved to ${committedPath}`;
     }
     // Ground the model in what the server actually said: a 404/429/… page is
     // a completed fetch whose content the model must not mistake for the
@@ -567,6 +651,40 @@ export class BrokerExecutor implements OperationExecutor {
           : [],
       },
     };
+  }
+
+  /**
+   * Decode the commit-able bytes from the fetched artifact: an OpenAI-style
+   * JSON envelope with data[0].b64_json, or a raw binary body. Returns
+   * undefined when the response carries neither.
+   */
+  private async extractImageBytes(
+    artifact: import("../../foundations/contracts/prepared-action.js").PreparedArtifactRef | undefined,
+  ): Promise<Uint8Array | undefined> {
+    if (!artifact || !this.artifacts) return undefined;
+    let bytes: Uint8Array;
+    try {
+      bytes = await this.artifacts.read(artifact);
+    } catch {
+      return undefined;
+    }
+    const text = new TextDecoder().decode(bytes);
+    try {
+      const parsed = JSON.parse(text) as { data?: Array<{ b64_json?: string; url?: string }> };
+      const b64 = parsed.data?.[0]?.b64_json;
+      if (b64) {
+        return new Uint8Array(Buffer.from(b64, "base64"));
+      }
+    } catch {
+      // Not JSON: a raw binary body IS the image.
+    }
+    // Heuristic: a JSON body that is not an image envelope is not committable;
+    // a non-JSON body is treated as raw bytes.
+    const trimmed = text.trimStart();
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      return undefined;
+    }
+    return bytes;
   }
 }
 

@@ -58,6 +58,14 @@ export type BrokeredEffectRequest =
       headers: Record<string, string>;
       body?: PreparedArtifactRef;
       secretRefs: string[];
+      /**
+       * Spec 019 (FR-011): when the action saves its output to a file, the
+       * analyzer declares the destination here and adds a filesystem-write
+       * effect (so policy demands the `commit-file` cap). After a
+       * successful fetch the BrokerExecutor hands the output artifact to
+       * the FileCommitBroker. Analysis performs NO network I/O.
+       */
+      outputCommit?: { destination: CanonicalPathTarget };
     }
   | {
       kind: "external-send";
