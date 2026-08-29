@@ -272,7 +272,10 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
         hostCallbacks.set(mod.definition.function.name, (args) => mod.handler!(args as any, config));
       }
     }
-    const { boundary } = await buildLocalBoundary({ artifacts, hostCallbacks, allowFallback: options.allowFallback ?? true, workspaceRoot: options.cwd ?? process.cwd() });
+    // No `?? true` default (spec 019, FR-003): the lazy pipeline no longer
+    // silently opts into unguarded JS writes. buildLocalBoundary owns the
+    // fail-closed default and the single SEEPIENT_ALLOW_JS_FS_FALLBACK read.
+    const { boundary } = await buildLocalBoundary({ artifacts, hostCallbacks, allowFallback: options.allowFallback, workspaceRoot: options.cwd ?? process.cwd() });
     const broker = approveTool
       ? legacyApproveToolToBroker(approveTool)
       : autoConfirm

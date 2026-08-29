@@ -53,6 +53,7 @@ const LOCAL_BOUNDARY: ExecutionBoundary = {
       "trusted-host",
     ],
     exactCommit: true,
+    jsFsFallbackOptIn: false,
     hostFilteredEgress: true,
     environmentIsolation: true,
     supportedOperationKinds: ["none", "read-file", "commit-files", "process", "broker", "trusted-host"],

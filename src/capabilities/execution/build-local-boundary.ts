@@ -81,8 +81,10 @@ export async function buildLocalBoundary(opts?: {
 
   // Single source of truth for the interim JS fallback opt-in: the SAME
   // effective value drives the executor's behavior and the boundary's
-  // `jsFsFallbackOptIn` advertisement (spec 019, FR-002/FR-003).
-  const allowFallback = opts?.allowFallback ?? false;
+  // `jsFsFallbackOptIn` advertisement (spec 019, FR-002/FR-003). Default is
+  // fail-closed; SEEPIENT_ALLOW_JS_FS_FALLBACK=1 is the one documented
+  // opt-in, honored here and nowhere else.
+  const allowFallback = opts?.allowFallback ?? process.env.SEEPIENT_ALLOW_JS_FS_FALLBACK === "1";
 
   const registry = new OperationExecutorRegistry();
   registry.register(new NoneExecutor());
