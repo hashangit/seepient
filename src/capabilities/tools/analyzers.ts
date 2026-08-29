@@ -292,16 +292,51 @@ export async function analyzeEditFile(
   if (matches.length === 0) {
     throw new Error("Invalid patch: no valid [PATH#TAG] section headers found");
   }
+  if (!ctx.snapshotStore) {
+    const { HashlineError } = await import("../../foundations/errors.js");
+    throw new HashlineError("edit_file requires a snapshot store", "HASHLINE_NO_STORE", false);
+  }
 
-  const rawPaths = matches.map((m) => m[1].trim());
-  const targets = await Promise.all(rawPaths.map((p) => canonicalizePath(p, cwd)));
-  const uniqueTargets: typeof targets = [];
-  const seenPaths = new Set<string>();
-  for (const t of targets) {
-    if (!seenPaths.has(t.canonicalPath)) {
-      seenPaths.add(t.canonicalPath);
-      uniqueTargets.push(t);
+  // Spec 019 FR-001: the patch is validated and applied ENTIRELY IN MEMORY
+  // at analysis time against the session snapshot store (stale-anchor
+  // merge-or-reject included). No disk writes happen here; the resulting
+  // bytes are prepared as artifacts and land through FileCommitBroker at
+  // dispatch with `expected` snapshots — the capability envelope is finally
+  // checked on the write that actually happens.
+  const { applySectionsToSnapshot } = await import("../../foundations/hashline/patcher.js");
+  const { readFile: fsReadFile } = await import("node:fs/promises");
+  const sections = await applySectionsToSnapshot(
+    patchStr,
+    (p) => fsReadFile(path.isAbsolute(p) ? p : path.resolve(cwd, p), "utf-8"),
+    ctx.snapshotStore,
+  );
+
+  const commits: Extract<PreparedOperation, { kind: "commit-files" }>["commits"] = [];
+  const uniqueTargets: CanonicalPathTarget[] = [];
+  const expectedByPath = new Map<string, FileSnapshot>();
+
+  for (const section of sections) {
+    const target = await canonicalizePath(section.filePath, cwd);
+    if (target.finalSymlink) {
+      throw new Error(
+        `Refusing edit: ${target.canonicalPath} is a symbolic link; exact commit would reject it (target-symlink)`,
+      );
     }
+    const bytes = Buffer.from(section.applied, "utf8");
+    const artifact = await ctx.artifacts.put(bytes, "text/plain");
+    if (!expectedByPath.has(target.canonicalPath)) {
+      expectedByPath.set(target.canonicalPath, {
+        exists: true,
+        size: Buffer.byteLength(section.current, "utf8"),
+        sha256: createHash("sha256").update(section.current, "utf8").digest("hex"),
+      });
+      uniqueTargets.push(target);
+    }
+    commits.push({
+      destination: target,
+      content: artifact,
+      expected: expectedByPath.get(target.canonicalPath)!,
+    });
   }
 
   const effects: EffectRequest[] = [
@@ -309,8 +344,8 @@ export async function analyzeEditFile(
       kind: "filesystem-write",
       targets: uniqueTargets.map((target) => ({
         target,
-        mode: "replace",
-        expected: snapshotPath(target),
+        mode: "replace" as const,
+        expected: expectedByPath.get(target.canonicalPath),
       })),
     },
     {
@@ -322,10 +357,8 @@ export async function analyzeEditFile(
   ];
 
   const operation: PreparedOperation = {
-    kind: "trusted-host",
-    registrationId: "edit_file",
-    toolName: "edit_file",
-    args,
+    kind: "commit-files",
+    commits,
   };
 
   return buildAction({

@@ -275,7 +275,11 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     // No `?? true` default (spec 019, FR-003): the lazy pipeline no longer
     // silently opts into unguarded JS writes. buildLocalBoundary owns the
     // fail-closed default and the single SEEPIENT_ALLOW_JS_FS_FALLBACK read.
-    const { boundary } = await buildLocalBoundary({ artifacts, hostCallbacks, allowFallback: options.allowFallback, workspaceRoot: options.cwd ?? process.cwd() });
+    // spec 019 FR-001: the session snapshot store rides in config (the same
+    // store the legacy handlers use); one instance backs read-side tagging
+    // AND analysis-time patch application.
+    const snapshotStore = (config as { snapshotStore?: import("../foundations/hashline/snapshot-store.js").SnapshotStore } | undefined)?.snapshotStore;
+    const { boundary } = await buildLocalBoundary({ artifacts, hostCallbacks, allowFallback: options.allowFallback, workspaceRoot: options.cwd ?? process.cwd(), snapshotStore });
     const broker = approveTool
       ? legacyApproveToolToBroker(approveTool)
       : autoConfirm
@@ -332,6 +336,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
       approvalBroker: broker,
       executionBoundary: boundary,
       artifacts,
+      snapshotStore,
     });
   }
   if (!wiredPipeline) {

@@ -160,6 +160,48 @@ describe("ReadFileExecutor (T205)", () => {
   });
 });
 
+describe("ReadFileExecutor snapshot parity (spec 019 FR-001, T015)", () => {
+  it("records the content and appends [content-tag:N] when a store is wired", async () => {
+    const { createSnapshotStore, tagFor } = await import("../../../foundations/hashline/snapshot-store.js");
+    const store = createSnapshotStore();
+    const file = join(dir, "tagged.txt");
+    const content = "line 1\nline 2\n";
+    writeFileSync(file, content);
+    const executor = new ReadFileExecutor({ snapshotStore: store });
+    const action = actionWith("read-file", { destinationPath: file });
+    const result = await executor.execute(action, envelope(file), asOp(action.operation, "read-file"), {});
+    expect(result.state).toBe("succeeded");
+    if (result.state === "succeeded") {
+      // Legacy contract byte-for-byte (core.ts:77-79): content + blank line
+      // + tag, so a following edit_file patch header is valid.
+      const expectedTag = tagFor(file, content);
+      expect(result.result.output).toBe(`${content}\n\n[content-tag:${expectedTag}]`);
+    }
+    // The store gained the entry — the pipeline read→edit loop can resolve it.
+    expect(store.resolvePath(file)).not.toBeNull();
+  });
+
+  it("returns raw content when no store is wired (unchanged behavior)", async () => {
+    const file = join(dir, "raw.txt");
+    writeFileSync(file, "raw content");
+    const executor = new ReadFileExecutor();
+    const action = actionWith("read-file", { destinationPath: file });
+    const result = await executor.execute(action, envelope(file), asOp(action.operation, "read-file"), {});
+    expect(result.state).toBe("succeeded");
+    if (result.state === "succeeded") expect(result.result.output).toBe("raw content");
+  });
+
+  it("keeps the security-path denial unchanged", async () => {
+    const { createSnapshotStore } = await import("../../../foundations/hashline/snapshot-store.js");
+    const executor = new ReadFileExecutor({ snapshotStore: createSnapshotStore() });
+    const secPath = `${process.env.HOME ?? "~"}/.seepient/security/keys.json`;
+    const action = actionWith("read-file", { destinationPath: secPath });
+    const result = await executor.execute(action, envelope(secPath), asOp(action.operation, "read-file"), {});
+    expect(result.state).toBe("failed");
+    if (result.state === "failed") expect(result.error.code).toBe("SECURITY_PATH_DENIED");
+  });
+});
+
 describe("NoneExecutor", () => {
   it("returns the precomputed result", async () => {
     const executor = new NoneExecutor();
