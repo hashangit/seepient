@@ -49,6 +49,9 @@ skips checksum verification).
 * The native helper is built by CI on darwin-arm64/darwin-x64/linux-x64/
   linux-arm64; release publishes checksummed binaries plus
   `dist/native-fs-commit/manifest.json` in the tarball.
+* Production budgets (measured, spec 019 quickstart): helper overhead
+  ≈2.1 ms per commit (budget <50 ms); tarball growth ≈1.4 MB across the
+  four platform binaries (budget ≤15 MB).
 
 ## [v0.5.6] - 2026-08-27
 

@@ -472,7 +472,7 @@ shell commands, and other important information, read the current plan:
   `permissionLevel`, the legacy matrix/grants path, and the pipeline opt-out.
   Enforcement (sandbox, SSRF broker, immutable denies, audit, secret
   withholding) is mode-invariant. Ships 0.5.3 (repair) then 0.6.0 (modes).
-- **UPCOMING (plan + tasks complete — implementation next, branch `019-exact-commit-enforcement`)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/019-exact-commit-enforcement/plan.md`
+- **SHIPPED (spec 019 complete, branch `019-exact-commit-enforcement`)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/019-exact-commit-enforcement/plan.md`
   — Exact-commit enforcement & native helper completion (019): the 008 exact-commit
   architecture shipped as scaffolding — the Rust helper `seepient-fs-commit` was never
   built or packaged, `edit_file` bypasses `FileCommitBroker` entirely (trusted-host op
