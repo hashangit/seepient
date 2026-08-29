@@ -13,6 +13,17 @@ import { PolicyEngine } from "../policy-engine.js";
 import { InMemoryArtifactStore } from "../../../capabilities/execution/in-memory-artifact-store.js";
 import type { ToolAnalysisContext } from "../../../foundations/contracts/custom-tools.js";
 import type { PolicyContext } from "../../../foundations/contracts/permission-policy.js";
+import { createSnapshotStore, tagFor } from "../../../foundations/hashline/snapshot-store.js";
+
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+// A REAL temp workspace: edit_file's analyzer reads current file content at
+// analysis time, so the patched path must exist on disk.
+const MOCK_WORKSPACE = mkdtempSync(join(tmpdir(), "seepient-conformance-"));
+mkdirSync(MOCK_WORKSPACE, { recursive: true });
+writeFileSync(join(MOCK_WORKSPACE, "test.txt"), "hello\n", "utf8");
 
 const artifacts = new InMemoryArtifactStore();
 
@@ -22,20 +33,24 @@ const ctx: ToolAnalysisContext = {
   toolCallId: "call-test",
   workspace: {
     workspaceId: "ws-test",
-    canonicalRoot: "/mock/workspace",
+    canonicalRoot: MOCK_WORKSPACE,
     policyVersion: 1,
     policyDigest: "digest-test",
   },
   artifacts,
   modelProviderClass: "*",
+  // spec 019: edit_file's analyzer applies patches against the store.
+  snapshotStore: createSnapshotStore(),
 };
+// The edit_file invocation below patches test.txt — the store must know it.
+ctx.snapshotStore!.record("test.txt", "hello\n");
 
 describe("analyzer conformance (spec 017, T018 / QS-3)", () => {
   it("declares model-egress effect for all output-producing built-in tools", async () => {
     const toolsToTest: Array<{ name: string; args: unknown }> = [
       { name: "read_file", args: { path: "test.txt" } },
       { name: "write_file", args: { path: "test.txt", content: "hi" } },
-      { name: "edit_file", args: { patch: "[test.txt#0000]\n+hi\n" } },
+      { name: "edit_file", args: { patch: `[test.txt#${tagFor("test.txt", "hello\n")}]\n+hi\n` } },
       { name: "execute_shell_command", args: { command: "ls" } },
       { name: "get_current_datetime", args: {} },
       { name: "manage_todos", args: {} },

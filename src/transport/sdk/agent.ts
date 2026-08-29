@@ -145,7 +145,9 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
     await recoverIndeterminateActions(auditStore, auditOutbox).catch(() => {});
 
     const broker = legacyApproveToolToBroker(opts.approveTool);
-    const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary({ workspaceRoot: opts.cwd ?? process.cwd() });
+    const { createSnapshotStore } = await import("../../foundations/hashline/snapshot-store.js");
+    const snapshotStore = createSnapshotStore();
+    const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary({ workspaceRoot: opts.cwd ?? process.cwd(), snapshotStore });
     const approvalMode = opts.consentMode
       ? (opts.consentMode === 'autonomous' ? 'autonomous' : opts.consentMode === 'ask-everything' ? 'manual' : 'balanced')
       : (opts.approveTool ? "manual" : "never");
@@ -161,6 +163,7 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
       deploymentCeiling: toCapabilitySet(opts.deploymentCeiling),
       principalPolicy: toCapabilitySet(opts.principalPolicy),
       artifacts: sharedArtifacts,
+      snapshotStore,
       terminalOutbox: auditOutbox,
     });
   }

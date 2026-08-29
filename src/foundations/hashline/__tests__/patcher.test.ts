@@ -184,3 +184,79 @@ describe('tryReapplyOrReject', () => {
   });
 });
 
+
+// ── applySectionsToSnapshot (spec 019 T018) ──────────────────────────────
+
+describe('applySectionsToSnapshot (spec 019 FR-001)', () => {
+  const makeStore = async (files: Record<string, string>) => {
+    const { createSnapshotStore } = await import('../snapshot-store.js');
+    const store = createSnapshotStore();
+    for (const [p, content] of Object.entries(files)) store.record(p, content);
+    return store;
+  };
+
+  it('validates all sections in memory and returns applied content per section (no disk writes)', async () => {
+    const { applySectionsToSnapshot } = await import('../patcher.js');
+    const a = '/proj/a.txt';
+    const b = '/proj/b.txt';
+    const store = await makeStore({ [a]: 'file a\n', [b]: 'file b\n' });
+    const disk: Record<string, string> = { [a]: 'file a\n', [b]: 'file b\n' };
+    const readCurrent = async (p: string) => disk[p];
+
+    const patch = `[${a}#${store.resolvePath(a)!.tag}]\nINS.TAIL:\n+extra a\n[${b}#${store.resolvePath(b)!.tag}]\nINS.TAIL:\n+extra b`;
+    const sections = await applySectionsToSnapshot(patch, readCurrent, store);
+
+    expect(sections).toHaveLength(2);
+    expect(sections[0].filePath).toBe(a);
+    expect(sections[0].applied).toBe('file a\n\nextra a');
+    expect(sections[0].current).toBe('file a\n');
+    expect(sections[1].applied).toBe('file b\n\nextra b');
+    // Nothing was written anywhere — the caller owns the commit.
+    expect(disk[a]).toBe('file a\n');
+    expect(disk[b]).toBe('file b\n');
+  });
+
+  it('throws HASHLINE_UNKNOWN_TAG when the store has no entry', async () => {
+    const { applySectionsToSnapshot } = await import('../patcher.js');
+    const store = await makeStore({});
+    await expect(
+      applySectionsToSnapshot('[ghost.txt#abcd]\nINS.TAIL:\n+x', async () => '', store),
+    ).rejects.toThrow(/No snapshot for path/);
+  });
+
+  it('stale tag with converging reapply → merged content (merge-or-reject, hashline semantics)', async () => {
+    const { applySectionsToSnapshot } = await import('../patcher.js');
+    const p = '/proj/c.txt';
+    const store = await makeStore({ [p]: 'line 1\nline 2\n' });
+    const tag = store.resolvePath(p)!.tag;
+    // Disk moved on: line 1 replaced — the same op reapplied to the snapshot
+    // yields exactly the current content, so the merge converges.
+    const current = 'line 1\nline 2 changed\n';
+    const patch = `[${p}#${tag}]\nSWAP 2.=2:\n+line 2 changed`;
+    const sections = await applySectionsToSnapshot(patch, async () => current, store);
+    expect(sections[0].applied).toBe('line 1\nline 2 changed\n');
+  });
+
+  it('stale tag with diverging content → HASHLINE_STALE_ANCHOR (fail closed)', async () => {
+    const { applySectionsToSnapshot } = await import('../patcher.js');
+    const p = '/proj/d.txt';
+    const store = await makeStore({ [p]: 'line 1\nline 2\n' });
+    const tag = store.resolvePath(p)!.tag;
+    const current = 'totally different\n';
+    const patch = `[${p}#${tag}]\nSWAP 1.=1:\n+nope`;
+    await expect(
+      applySectionsToSnapshot(patch, async () => current, store),
+    ).rejects.toThrow(/Stale anchor/);
+  });
+
+  it('out-of-range op → HASHLINE_OUT_OF_RANGE before any caller commit', async () => {
+    const { applySectionsToSnapshot } = await import('../patcher.js');
+    const p = '/proj/e.txt';
+    const store = await makeStore({ [p]: 'one line\n' });
+    const tag = store.resolvePath(p)!.tag;
+    const patch = `[${p}#${tag}]\nSWAP 5.=5:\n+nope`;
+    await expect(
+      applySectionsToSnapshot(patch, async () => 'one line\n', store),
+    ).rejects.toThrow(/out of range/i);
+  });
+});

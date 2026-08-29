@@ -60,3 +60,39 @@ export function fakeHelper(opts: FakeHelperOptions): NativeCommitHelper {
     },
   };
 }
+
+/**
+ * Disk-backed fake helper: performs the helper's commit sequence for real
+ * (expected verify → temp sibling → rename) so pipeline e2e tests can assert
+ * actual disk state, without needing the compiled native binary.
+ */
+export function diskBackedFakeHelper(): NativeCommitHelper {
+  return {
+    available: true,
+    probe: fakeProbe({ available: true }),
+    async commit(req) {
+      const fs = await import("node:fs/promises");
+      const path = await import("node:path");
+      const crypto = await import("node:crypto");
+      if (req.expected?.exists && req.expected.sha256) {
+        const current = await fs.readFile(req.destination).catch(() => undefined);
+        const sha = current
+          ? crypto.createHash("sha256").update(current).digest("hex")
+          : undefined;
+        if (sha !== req.expected.sha256) {
+          return { ok: false, writtenSha256: "", errorCode: "snapshot-changed", message: "file changed since snapshot" };
+        }
+      }
+      const dir = path.dirname(req.destination);
+      const tmp = path.join(dir, `.fake-helper-${crypto.randomUUID().slice(0, 8)}`);
+      try {
+        await fs.writeFile(tmp, req.content);
+        await fs.rename(tmp, req.destination);
+      } catch (err) {
+        return { ok: false, writtenSha256: "", errorCode: "io-error", message: (err as Error).message };
+      }
+      const sha = crypto.createHash("sha256").update(req.content).digest("hex");
+      return { ok: true, writtenSha256: sha };
+    },
+  };
+}

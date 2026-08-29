@@ -27,6 +27,12 @@ export interface ToolAnalysisContext {
   workspace: WorkspaceSnapshot;
   artifacts: import("./execution-brokers.js").PreparationArtifactStore;
   modelProviderClass: string;
+  /**
+   * Session snapshot store (spec 019, FR-001). Analyzers that prepare
+   * edits (edit_file) apply patches in memory against it at analysis time;
+   * the SAME store instance backs the read-side tagging in the boundary.
+   */
+  snapshotStore?: import("../hashline/snapshot-store.js").SnapshotStore;
 }
 
 export interface WorkspaceSnapshot {

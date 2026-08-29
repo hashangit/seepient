@@ -131,20 +131,40 @@ export function tryReapplyOrReject(snapshot: string, current: string, ops: Hashl
   }
 }
 
-/** Apply an edit_file patch to one or more files.
+/**
+ * One validated patch section, prepared entirely in memory (spec 019 T018).
+ * `current` is the disk-observed content at analysis time — the basis for
+ * the commit's `expected` snapshot; `applied` is the post-patch content the
+ * caller commits.
+ */
+export interface PreparedSection {
+  filePath: string;
+  current: string;
+  applied: string;
+}
+
+/**
+ * Pure in-memory section applier (spec 019 FR-001). Validates EVERY section
+ * against the snapshot store — unknown tag, stale anchor (merge-or-reject),
+ * out-of-range ops — and returns the post-patch content per section WITHOUT
+ * touching disk. `applyPatch` is the write-backed consumer; the edit_file
+ * analyzer is the commit-broker consumer. Fail-closed semantics are
+ * identical to applyPatch pass 1 by construction.
  *
- *  Atomicity: every section is validated and its result computed in memory
- *  (pass 1) BEFORE any file is written (pass 2). A failure in any section
- *  therefore leaves all files unchanged — no partial multi-file edits. */
-export async function applyPatch(
+ * `readCurrent` supplies the file's current content (the analyzer reads disk
+ * itself); `store` is the session snapshot store backing `[PATH#TAG]` tags.
+ */
+export async function applySectionsToSnapshot(
   patchSource: string,
+  readCurrent: (filePath: string) => Promise<string>,
   store: SnapshotStore,
-): Promise<EditFileResult> {
+): Promise<PreparedSection[]> {
   const patch = parsePatch(patchSource);
 
-  // Pass 1 — resolve + apply every section in memory. Any validation failure
-  // (unknown tag, stale anchor, out-of-range op) throws here, before any write.
-  const pending: Array<{ filePath: string; current: string; applied: string }> = [];
+  // Validate + apply every section in memory. Any validation failure
+  // (unknown tag, stale anchor, out-of-range op) throws here, before the
+  // caller prepares or commits anything.
+  const sections: PreparedSection[] = [];
   for (const section of patch.sections) {
     const { path: filePath, tag } = section;
     const resolved = store.resolvePath(filePath);
@@ -155,11 +175,10 @@ export async function applyPatch(
       throw new HashlineError(`Stale tag for ${filePath} — file changed since snapshot`, 'HASHLINE_STALE_ANCHOR', true);
     }
 
-    const current = await fs.readFile(filePath, 'utf8');
+    const current = await readCurrent(filePath);
     const currentTag = tagFor(filePath, current);
-    const currentLines = current.split('\n');
-    let applied: string;
 
+    let applied: string;
     if (currentTag !== resolved.tag) {
       // Stale anchor: reapply ops to snapshot, accept only if result matches current
       const snapshotContent = store.snapshot(filePath);
@@ -172,20 +191,34 @@ export async function applyPatch(
       }
       applied = merged.content;
     } else {
-      let targetLines = currentLines;
+      let targetLines = current.split('\n');
       for (const op of sortOpsBottomToTop(section.operations)) {
         targetLines = applyOp(targetLines, op);
       }
       applied = targetLines.join('\n');
     }
 
-    pending.push({ filePath, current, applied });
+    sections.push({ filePath, current, applied });
   }
+  return sections;
+}
+
+/** Apply an edit_file patch to one or more files.
+ *
+ *  Atomicity: every section is validated and its result computed in memory
+ *  (pass 1) BEFORE any file is written (pass 2). A failure in any section
+ *  therefore leaves all files unchanged — no partial multi-file edits. */
+export async function applyPatch(
+  patchSource: string,
+  store: SnapshotStore,
+): Promise<EditFileResult> {
+  // Pass 1 — shared pure validation/application.
+  const sections = await applySectionsToSnapshot(patchSource, (p) => fs.readFile(p, 'utf8'), store);
 
   // Pass 2 — all sections validated; now write. (Single-file edits write once,
   // as before. Multi-file edits write all-or-nothing relative to this call.)
   const results: FileWriteMetadata[] = [];
-  for (const { filePath, current, applied } of pending) {
+  for (const { filePath, current, applied } of sections) {
     await atomicWrite(filePath, applied);
     store.record(filePath, applied);
     results.push({

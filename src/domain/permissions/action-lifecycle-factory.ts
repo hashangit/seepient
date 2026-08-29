@@ -93,6 +93,12 @@ export interface ActionLifecycleInputs {
    * `interaction` is not supplied.
    */
   approvalDeadlineMs?: number;
+  /**
+   * Session snapshot store (spec 019 FR-001). Threaded into the analysis
+   * context so edit_file applies patches at analysis time; the SAME store
+   * instance must back the boundary's ReadFileExecutor.
+   */
+  snapshotStore?: import("../../foundations/hashline/snapshot-store.js").SnapshotStore;
   /** Optional: persisted capability ledger for authority consumption & revocation (T107a). */
   capabilityLedger?: PersistedCapabilityLedger;
   /**
@@ -448,6 +454,7 @@ export async function buildActionLifecycle(
       },
       artifacts,
       modelProviderClass: inputs.modelProviderClass ?? "*",
+      snapshotStore: inputs.snapshotStore,
     },
     workspaceId,
   };

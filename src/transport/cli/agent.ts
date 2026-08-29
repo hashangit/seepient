@@ -169,6 +169,8 @@ export class Agent {
      */
     approvalDeadlineMs?: number;
     approvalMode?: import("../../foundations/contracts/permission-policy.js").PolicyContext["approvalMode"];
+    /** Session snapshot store (spec 019 FR-001); defaults to a fresh store. */
+    snapshotStore?: import("../../foundations/hashline/snapshot-store.js").SnapshotStore;
   }): Promise<void> {
     const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
     const { legacyApproveToolToBroker } = await import("../legacy-adapter.js");
@@ -218,10 +220,15 @@ export class Agent {
         });
       }
     }
+    // spec 019 FR-001: one store instance backs the boundary's read-side
+    // tagging and the lifecycle's analysis context. The composition root
+    // (bootstrap) owns the session store; tests may inject their own.
+    const snapshotStore = opts.snapshotStore ?? (await import("../../foundations/hashline/snapshot-store.js")).createSnapshotStore();
     const { boundary: realBoundary, artifacts: sharedArtifacts } = await buildLocalBoundary({
       allowFallback: opts.allowFallback,
       hostCallbacks,
       workspaceRoot: opts.workspaceRoot ?? process.cwd(),
+      snapshotStore,
     });
     // Spec 011 (T032/FR-019): containment preflight at startup. The status is
     // surfaced (TUI/status surfaces) so approval choices are disabled before
@@ -245,6 +252,7 @@ export class Agent {
       policyStore: this._policyStore ?? undefined,
       auditRoot: opts.auditRoot,
       artifacts: sharedArtifacts,
+      snapshotStore,
     });
     // Spec 008 FR-014: run crash-recovery on startup. Marks any `dispatched`
     // actions without a terminal record as `indeterminate` (never re-executed).

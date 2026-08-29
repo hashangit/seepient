@@ -18,6 +18,7 @@
  */
 import type { PreparedToolAction } from "../../foundations/contracts/prepared-action.js";
 import type { CanonicalPathTarget, FileSnapshot } from "../../foundations/contracts/tool-effects.js";
+import type { SnapshotStore } from "../../foundations/hashline/snapshot-store.js";
 import type {
   ExecutionResult,
   ToolProgress,
@@ -96,6 +97,14 @@ export class CommitFilesExecutor implements OperationExecutor {
       }
     }
     const committed: string[] = [];
+    // Diff-viewer parity (spec 019 FR-001): capture the first destination's
+    // pre-commit content so metadata can carry oldContent/newContent exactly
+    // like the legacy hashline handler did.
+    let oldContent: string | null = null;
+    try {
+      const { readFile: fsReadOld } = await import("node:fs/promises");
+      oldContent = await fsReadOld(operation.commits[0].destination.canonicalPath, "utf-8");
+    } catch { /* new file or unreadable: metadata degrades, commit proceeds */ }
     try {
       for (const commit of operation.commits) {
         const bytes = await readContent(this.artifacts, commit.content);
@@ -131,10 +140,13 @@ export class CommitFilesExecutor implements OperationExecutor {
       if (firstCommit) {
         try {
           const bytes = await readContent(this.artifacts, firstCommit.content);
+          const newContent = new TextDecoder().decode(bytes);
           metadata = {
             path: action.display.canonicalTargets[0] ?? firstCommit.destination.canonicalPath,
             isNewFile: !firstCommit.expected?.exists,
-            newContent: new TextDecoder().decode(bytes),
+            oldContent,
+            newContent,
+            byteDelta: bytes.byteLength - (firstCommit.expected?.size ?? 0),
           };
         } catch (e) {
           process.stderr.write(`METADATA ERROR: ${e instanceof Error ? e.stack : String(e)}\n`);
@@ -244,13 +256,20 @@ export class CommitFilesExecutor implements OperationExecutor {
 /**
  * Read-file executor. Reads via the canonicalized target; the model-egress
  * gate (consulted by the caller before adding to history) decides release.
+ *
+ * Spec 019 FR-001 read-side parity: when a snapshot store is wired, a
+ * successful read records the content and appends the `[content-tag:N]`
+ * line — byte-for-byte the legacy handler contract (core.ts:77-79) — so a
+ * following edit_file patch header resolves without manual pre-recording.
  */
 export class ReadFileExecutor implements OperationExecutor {
   readonly kind = "read-file" as const;
   private readonly artifacts?: PreparationArtifactStore;
+  private readonly snapshotStore?: SnapshotStore;
 
-  constructor(opts?: { artifacts?: PreparationArtifactStore }) {
+  constructor(opts?: { artifacts?: PreparationArtifactStore; snapshotStore?: SnapshotStore }) {
     this.artifacts = opts?.artifacts;
+    this.snapshotStore = opts?.snapshotStore;
   }
 
   async execute(
@@ -279,9 +298,11 @@ export class ReadFileExecutor implements OperationExecutor {
     try {
       const { readFile } = await import("node:fs/promises");
       const content = await readFile(operation.target.canonicalPath, "utf-8");
+      const tag = this.snapshotStore?.record(operation.target.canonicalPath, content);
+      const output = tag ? `${content}\n\n[content-tag:${tag}]` : content;
       return {
         state: "succeeded",
-        result: { output: content, success: true },
+        result: { output, success: true },
         evidence: {
           backend: "local-native",
           actionDigest: action.actionDigest,

@@ -7,6 +7,7 @@ import { COMM_ANALYZERS } from "../../../capabilities/tools/comm-analyzers.js";
 import { getAllToolModules } from "../../../domain/tool-executor.js";
 import { InMemoryArtifactStore } from "../../../capabilities/execution/in-memory-artifact-store.js";
 import type { ToolAnalysisContext } from "../../../foundations/contracts/custom-tools.js";
+import { createSnapshotStore, tagFor } from "../../../foundations/hashline/snapshot-store.js";
 import { computeWorkspaceId } from "../policy-store.js";
 
 function buildMinimalArgs(schema: any): Record<string, any> {
@@ -74,7 +75,10 @@ describe("analyzer schema conformance smoke test", () => {
       },
       artifacts,
       modelProviderClass: "*",
+      // spec 019: edit_file applies patches against the session store.
+      snapshotStore: createSnapshotStore(),
     };
+    ctx.snapshotStore!.record("sample.txt", "sample file\n");
   });
 
   afterEach(async () => {
@@ -91,6 +95,11 @@ describe("analyzer schema conformance smoke test", () => {
 
       const schema = module!.definition.function.parameters;
       const minimalArgs = buildMinimalArgs(schema);
+      // spec 019: edit_file's patch tag must match the recorded snapshot.
+      if (toolName === "edit_file") {
+        const tag = tagFor("sample.txt", "sample file\n");
+        minimalArgs.patch = `[sample.txt#${tag}]\n+added line`;
+      }
 
       const action = await analyzer(minimalArgs, ctx);
       expect(action, `Action for ${toolName} must be returned`).toBeDefined();
@@ -113,6 +122,11 @@ describe("analyzer schema conformance smoke test", () => {
 
       const schema = module!.definition.function.parameters;
       const minimalArgs = buildMinimalArgs(schema);
+      // spec 019: edit_file's patch tag must match the recorded snapshot.
+      if (toolName === "edit_file") {
+        const tag = tagFor("sample.txt", "sample file\n");
+        minimalArgs.patch = `[sample.txt#${tag}]\n+added line`;
+      }
 
       const action = await analyzer(minimalArgs, ctx);
       expect(action, `Action for ${toolName} must be returned`).toBeDefined();
