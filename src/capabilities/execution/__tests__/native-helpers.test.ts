@@ -32,6 +32,27 @@ describe("native-fs-commit probe (T203, QS-2.9)", () => {
     expect(result.errorCode).toBe("primitive-unsupported");
   });
 
+  // spec 019 FR-004: an unavailable probe answers primitive-unsupported
+  // ALWAYS — there is no binaryPath-less JS commit escape branch.
+  it("unavailable probes always return primitive-unsupported (no JS escape path)", async () => {
+    for (const probe of [
+      { available: false, reason: "binary-missing" as const, platform: process.platform, digestVerified: false },
+      // Hand-built probe claiming availability without a binaryPath: the
+      // wrapper must still refuse — a JS commit path would contradict the
+      // wrapper's no-JS-fallback contract.
+      { available: true, platform: process.platform, digestVerified: false },
+      { available: false, reason: "digest-mismatch" as const, platform: process.platform, digestVerified: false },
+    ]) {
+      const helper = new PackagedCommitHelper(probe);
+      const result = await helper.commit({
+        destination: "/tmp/x",
+        content: new Uint8Array([1, 2, 3]),
+      });
+      expect(result.ok).toBe(false);
+      expect(result.errorCode).toBe("primitive-unsupported");
+    }
+  });
+
   it("probeCommitHelper returns a structured result", async () => {
     const probe = await probeCommitHelper();
     expect(typeof probe.available).toBe("boolean");
