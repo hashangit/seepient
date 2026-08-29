@@ -135,6 +135,13 @@ export interface PolicyContext {
    *  the `session` lifetime for TUI approval (spec 011). */
   sessionId?: string;
   /**
+   * Operator allowlist for trusted-host execution (spec 019 FR-006,
+   * `permissions.trustedHostAllowlist`). A `trusted-host` capability is
+   * within the deployment ceiling only when its registrationId/toolName is
+   * a member. Defaults to `["use_skill"]` when absent.
+   */
+  trustedHostAllowlist?: string[];
+  /**
    * Protected-policy workspace identity (project scope). When set, the
    * engine may offer persistent `project`/`global` approval choices — they
    * are recorded through `PolicyStore.compareAndSet`, never grants files.

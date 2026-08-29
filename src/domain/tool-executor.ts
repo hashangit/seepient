@@ -273,7 +273,20 @@ export function getToolGroup(
 
 // ── resolveTools ─────────────────────────────────────────────────────
 
-type ToolInput = string | UserToolDefinition;
+type ToolInput =
+  | string
+  | UserToolDefinition
+  | import("../foundations/contracts/custom-tools.js").AnyToolRegistration;
+
+/** Is this input an explicit-trust registration (definition-carrying)? */
+function isToolRegistration(input: unknown): input is import("../foundations/contracts/custom-tools.js").AnyToolRegistration {
+  return (
+    typeof input === "object" &&
+    input !== null &&
+    "definition" in input &&
+    typeof (input as { definition?: unknown }).definition === "object"
+  );
+}
 
 /**
  * Resolve a mixed array of tool references into concrete OpenAI function
@@ -326,6 +339,18 @@ export function resolveTools(tools?: ToolInput[]): ToolDefinition[] {
       if (!seen.has(name)) {
         seen.add(name);
         result.push(found.definition);
+      }
+      continue;
+    }
+
+    // Explicit-trust registration (preparedTool / brokerConnector /
+    // trustedHostTool) — contribute its definition directly. The executor
+    // wiring for trusted-host callbacks happens in the composition root.
+    if (isToolRegistration(input)) {
+      const name = input.definition.function.name;
+      if (!seen.has(name)) {
+        seen.add(name);
+        result.push(input.definition);
       }
       continue;
     }

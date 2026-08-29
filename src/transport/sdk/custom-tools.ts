@@ -27,11 +27,7 @@ import type {
 import type { UserToolDefinition } from "../../foundations/types.js";
 
 /** Union of all recognized registrations (including legacy). */
-export type AnyToolRegistration =
-  | PreparedToolRegistration
-  | BrokerConnectorRegistration
-  | TrustedHostToolRegistration
-  | LegacyHostToolRegistration;
+export type { AnyToolRegistration } from "../../foundations/contracts/custom-tools.js";
 
 /**
  * `preparedTool` — register an application-trusted analyzer. The analyzer's

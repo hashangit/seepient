@@ -19,7 +19,7 @@ import type {
 import { getDefaultProviderRuntime, type ProviderRuntime } from "../../domain/providers/provider-runtime.js";
 import { createHookExecutor } from "../../domain/hooks.js";
 import { StreamManager } from "../../domain/streaming/stream-manager.js";
-import { resolveTools, getAllToolDefinitions } from "./tools.js";
+import { resolveTools, getAllToolDefinitions, extractHostCallbacks, DEFAULT_TRUSTED_HOST_ALLOWLIST } from "./tools.js";
 import { runAgentLoop } from "../../domain/agent-loop.js";
 import { initializeSkillRegistry } from "../../capabilities/skills/index.js";
 import { buildSkillCatalog } from "../../domain/skills/skill-catalog.js";
@@ -183,6 +183,9 @@ export async function generateText(
 
   // Resolve tools
   const toolDefs = opts.tools ? resolveTools(opts.tools) : getAllToolDefinitions();
+  // spec 019 FR-006: explicit trustedHostTool registrations wire into the
+  // boundary's host-callback map and join the operator allowlist.
+  const { callbacks: hostCallbacks, registrationIds } = extractHostCallbacks(opts.tools);
 
   // Hooks
   const hooks = createHookExecutor(opts.hooks);
@@ -209,7 +212,7 @@ export async function generateText(
     const { buildLocalBoundary } = await import("../../capabilities/execution/build-local-boundary.js");
     const { createSnapshotStore } = await import("../../foundations/hashline/snapshot-store.js");
     const snapshotStore = createSnapshotStore();
-    const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary({ workspaceRoot: opts.cwd ?? process.cwd(), snapshotStore });
+    const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary({ workspaceRoot: opts.cwd ?? process.cwd(), snapshotStore, hostCallbacks });
     const approvalMode = opts.consentMode
       ? (opts.consentMode === 'autonomous' ? 'autonomous' : opts.consentMode === 'ask-everything' ? 'manual' : 'balanced')
       : (opts.approveTool ? "manual" : "never");
@@ -226,6 +229,7 @@ export async function generateText(
       principalPolicy: toCapabilitySet(opts.principalPolicy),
       artifacts: sharedArtifacts,
       snapshotStore,
+      trustedHostAllowlist: [...DEFAULT_TRUSTED_HOST_ALLOWLIST, ...registrationIds],
     });
   }
 
@@ -298,6 +302,9 @@ export async function streamText(
 
   // Resolve tools
   const toolDefs = opts.tools ? resolveTools(opts.tools) : getAllToolDefinitions();
+  // spec 019 FR-006: explicit trustedHostTool registrations wire into the
+  // boundary's host-callback map and join the operator allowlist.
+  const { callbacks: hostCallbacks, registrationIds } = extractHostCallbacks(opts.tools);
 
   // Hooks — merge stream-level callbacks with any base hooks
   const mergedHooks = { ...opts.hooks };
@@ -329,7 +336,7 @@ export async function streamText(
     const { buildLocalBoundary } = await import("../../capabilities/execution/build-local-boundary.js");
     const { createSnapshotStore } = await import("../../foundations/hashline/snapshot-store.js");
     const snapshotStore = createSnapshotStore();
-    const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary({ workspaceRoot: opts.cwd ?? process.cwd(), snapshotStore });
+    const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary({ workspaceRoot: opts.cwd ?? process.cwd(), snapshotStore, hostCallbacks });
     const approvalMode = opts.consentMode
       ? (opts.consentMode === 'autonomous' ? 'autonomous' : opts.consentMode === 'ask-everything' ? 'manual' : 'balanced')
       : (opts.approveTool ? "manual" : "never");
@@ -346,6 +353,7 @@ export async function streamText(
       principalPolicy: toCapabilitySet(opts.principalPolicy),
       artifacts: sharedArtifacts,
       snapshotStore,
+      trustedHostAllowlist: [...DEFAULT_TRUSTED_HOST_ALLOWLIST, ...registrationIds],
     });
   }
 

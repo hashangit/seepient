@@ -26,7 +26,8 @@ import type {
 import { getDefaultProviderRuntime, type ProviderRuntime } from "../../domain/providers/provider-runtime.js";
 import { createHookExecutor } from "../../domain/hooks.js";
 import { StreamManager } from "../../domain/streaming/stream-manager.js";
-import { resolveTools, getAllToolDefinitions } from "./tools.js";
+import { resolveTools, getAllToolDefinitions, extractHostCallbacks } from "./tools.js";
+import { DEFAULT_TRUSTED_HOST_ALLOWLIST } from "./tools.js";
 import { createPersistenceBackend, persistSession } from "../../domain/sessions/session-store.js";
 
 function toCapabilitySet(cap: import("../../foundations/contracts/permission-policy.js").CapabilitySet | import("../../foundations/contracts/permission-policy.js").Capability[] | undefined): import("../../foundations/contracts/permission-policy.js").CapabilitySet | undefined {
@@ -119,6 +120,10 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
 
   // Tools
   let toolDefs = opts.tools ? resolveTools(opts.tools) : getAllToolDefinitions();
+  // spec 019 FR-006: explicit trustedHostTool registrations wire into the
+  // boundary's host-callback map (registered callbacks ONLY after the
+  // ambient fallback deletion) and join the operator allowlist.
+  const { callbacks: hostCallbacks, registrationIds } = extractHostCallbacks(opts.tools);
 
   // Hooks
   const hookExecutor = createHookExecutor(opts.hooks);
@@ -147,7 +152,7 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
     const broker = legacyApproveToolToBroker(opts.approveTool);
     const { createSnapshotStore } = await import("../../foundations/hashline/snapshot-store.js");
     const snapshotStore = createSnapshotStore();
-    const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary({ workspaceRoot: opts.cwd ?? process.cwd(), snapshotStore });
+    const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary({ workspaceRoot: opts.cwd ?? process.cwd(), snapshotStore, hostCallbacks });
     const approvalMode = opts.consentMode
       ? (opts.consentMode === 'autonomous' ? 'autonomous' : opts.consentMode === 'ask-everything' ? 'manual' : 'balanced')
       : (opts.approveTool ? "manual" : "never");
@@ -164,6 +169,7 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
       principalPolicy: toCapabilitySet(opts.principalPolicy),
       artifacts: sharedArtifacts,
       snapshotStore,
+      trustedHostAllowlist: [...DEFAULT_TRUSTED_HOST_ALLOWLIST, ...registrationIds],
       terminalOutbox: auditOutbox,
     });
   }

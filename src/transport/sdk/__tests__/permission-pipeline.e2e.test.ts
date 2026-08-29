@@ -97,3 +97,46 @@ describe("E2E: generateText with permissionPipeline", () => {
     }
   });
 });
+
+// ── spec 019 T021 (QS-0.6): custom SDK tools survive the tightening ──────
+
+describe("QS-0.6: trustedHostTool through createAgent({ permissionPipeline: true })", () => {
+  it("executes a registered trustedHostTool via the composition wiring", async () => {
+    const { trustedHostTool } = await import("../custom-tools.js");
+    const calls: string[] = [];
+    const registration = trustedHostTool({
+      definition: {
+        type: "function",
+        function: {
+          name: "sdk_custom_probe",
+          description: "probe custom tool wiring",
+          parameters: { type: "object", properties: {}, required: [] },
+        },
+      },
+      execute: async () => {
+        calls.push("executed");
+        return { output: "custom-ran-ok", success: true };
+      },
+    });
+
+    const runtime = createMockRuntime([
+      { toolCalls: [{ id: "tc_probe", name: "sdk_custom_probe", args: {} }] },
+      { content: "probe done" },
+    ]);
+
+    // `runtime` is an intentionally-untyped injection seam on createAgent.
+    const agent = await createAgent({
+      permissionPipeline: true,
+      runtime: runtime as never,
+      tools: [registration] as never,
+      cwd: dir,
+      approveTool: async () => true,
+    } as never);
+
+    const response = await agent.chat("run sdk_custom_probe");
+    // The registered callback executed through the pipeline boundary —
+    // not through any ambient registry fallback.
+    expect(calls).toEqual(["executed"]);
+    expect(response.text).toBe("probe done");
+  });
+});

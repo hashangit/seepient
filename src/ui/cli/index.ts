@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import chalk from 'chalk';
-import dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
 import { isNonInteractive } from '../../foundations/environment.js';
+import { loadProjectEnv } from './dotenv-guard.js';
 import { runSetup } from '../../transport/cli/setup.js';
 import { runChat } from '../repl/repl.js';
 import { resolveLaunchMode } from '../../domain/prompts/system-prompts.js';
@@ -24,8 +24,11 @@ function handleExit() {
 process.on('SIGINT', handleExit);
 process.on('SIGTERM', handleExit);
 
-// Load local env vars (lowest priority of env vars, but env vars override JSON)
-dotenv.config();
+// Load local env vars (lowest priority of env vars, but env vars override JSON).
+// spec 019 FR-007: security-relevant SEEPIENT_* switches are refused from
+// project-local .env files with a loud warning — a committed .env must not
+// control containment or the commit-helper binary path.
+loadProjectEnv();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkgPath = path.join(__dirname, '..', '..', '..', 'package.json');

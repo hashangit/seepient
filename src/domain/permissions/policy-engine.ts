@@ -352,11 +352,29 @@ export class PolicyEngine implements PolicyEngineContract {
     // not contain write-root for the workspace (it's empty by default). In
     // that case, we check whether the requested capability's PATH is within
     // the workspace root — if so, the interactive user may approve it.
+    //
+    // Spec 019 (FR-006): trusted-host capabilities are within ceiling only
+    // via the operator allowlist (`permissions.trustedHostAllowlist`,
+    // default `["use_skill"]`) — the former blanket exemption let one
+    // approval cover unlimited subsequent MCP writes.
+    let hostDenyMessage: string | undefined;
+    const hostAllowlist = context.trustedHostAllowlist ?? ["use_skill"];
+    const hostRegistrationId = (cap: Capability): string | undefined => {
+      if (cap.kind !== "trusted-host") return undefined;
+      if (typeof cap.registrationId === "string") return cap.registrationId;
+      const op = action.operation;
+      return op.kind === "trusted-host" ? op.toolName ?? op.registrationId : undefined;
+    };
     const inCeiling = missing.every((c) => {
       // Check the deployment ceiling first.
       if (setCovers(context.deploymentCeiling, c)) return true;
-      // Host callbacks registered in the tool registry are within operator ceiling
-      if (c.kind === "trusted-host") return true;
+      // Host authority: allowlist membership only.
+      if (c.kind === "trusted-host") {
+        const id = hostRegistrationId(c);
+        if (id && hostAllowlist.includes(id)) return true;
+        hostDenyMessage = `Tool "${id ?? "unknown"}" runs with host authority and is not on the trusted-host allowlist. Add it under permissions.trustedHostAllowlist in your settings if you trust it.`;
+        return false;
+      }
       if (context.approvalMode !== "never" && context.workspaceRoot) {
         const root = canonicalPath(context.workspaceRoot);
         const withinRoot = (target: string): boolean => {
@@ -372,7 +390,7 @@ export class PolicyEngine implements PolicyEngineContract {
       pushLayer(trace, "deployment", "deny");
       return deny(
         "outside-ceiling",
-        "Requested capability exceeds deployment ceiling",
+        hostDenyMessage ?? "Requested capability exceeds deployment ceiling",
         trace,
       );
     }
