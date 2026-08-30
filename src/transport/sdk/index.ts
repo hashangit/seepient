@@ -19,7 +19,7 @@ import type {
 import { getDefaultProviderRuntime, type ProviderRuntime } from "../../domain/providers/provider-runtime.js";
 import { createHookExecutor } from "../../domain/hooks.js";
 import { StreamManager } from "../../domain/streaming/stream-manager.js";
-import { resolveTools, getAllToolDefinitions } from "./tools.js";
+import { resolveTools, getAllToolDefinitions, extractHostCallbacks, DEFAULT_TRUSTED_HOST_ALLOWLIST } from "./tools.js";
 import { runAgentLoop } from "../../domain/agent-loop.js";
 import { initializeSkillRegistry } from "../../capabilities/skills/index.js";
 import { buildSkillCatalog } from "../../domain/skills/skill-catalog.js";
@@ -54,6 +54,15 @@ export type {
 export type { UiError, ManagerState, ProviderManagerApi, ResolutionPreview, ProbeResult } from "../../foundations/contracts/provider-manager-api.js";
 export { createProviderManagerApi, isOAuthSupported, getCanonicalOAuthFlowId } from "../cli/provider-manager-api.js";
 export { tool, CORE_TOOLS, COMM_TOOLS, ADVANCED_TOOLS, ALL_TOOLS } from "./tools.js";
+export {
+  trustedHostTool,
+  type AnyToolRegistration,
+  type TrustedHostToolRegistration,
+  type PreparedToolRegistration,
+  type BrokerConnectorRegistration,
+  type LegacyHostToolRegistration,
+  type HostToolContext,
+} from "./custom-tools.js";
 export { settings, SettingsError } from "./settings.js";
 export { createRuntimeSkillProviderSwitcher } from "../../domain/skills/skill-invoker.js";
 export type { SSEOptions } from "./http.js";
@@ -183,6 +192,9 @@ export async function generateText(
 
   // Resolve tools
   const toolDefs = opts.tools ? resolveTools(opts.tools) : getAllToolDefinitions();
+  // spec 019 FR-006: explicit trustedHostTool registrations wire into the
+  // boundary's host-callback map and join the operator allowlist.
+  const { callbacks: hostCallbacks, registrationIds } = extractHostCallbacks(opts.tools);
 
   // Hooks
   const hooks = createHookExecutor(opts.hooks);
@@ -207,7 +219,23 @@ export async function generateText(
     const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
     const { legacyApproveToolToBroker } = await import("../legacy-adapter.js");
     const { buildLocalBoundary } = await import("../../capabilities/execution/build-local-boundary.js");
-    const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary({ workspaceRoot: opts.cwd ?? process.cwd() });
+    const { createSnapshotStore } = await import("../../foundations/hashline/snapshot-store.js");
+    const { InMemoryArtifactStore } = await import("../../capabilities/execution/in-memory-artifact-store.js");
+    const { createMediaVendorOperationHandler } = await import("../../domain/media/vendor-operation-handler.js");
+    const snapshotStore = createSnapshotStore();
+    const sharedArtifacts = new InMemoryArtifactStore();
+    const vendorOperationHandler = createMediaVendorOperationHandler({
+      runtime,
+      artifacts: sharedArtifacts,
+      signal: (opts as any).signal,
+    });
+    const { boundary } = await buildLocalBoundary({
+      artifacts: sharedArtifacts,
+      workspaceRoot: opts.cwd ?? process.cwd(),
+      snapshotStore,
+      hostCallbacks,
+      vendorOperationHandler,
+    });
     const approvalMode = opts.consentMode
       ? (opts.consentMode === 'autonomous' ? 'autonomous' : opts.consentMode === 'ask-everything' ? 'manual' : 'balanced')
       : (opts.approveTool ? "manual" : "never");
@@ -223,6 +251,8 @@ export async function generateText(
       deploymentCeiling: toCapabilitySet(opts.deploymentCeiling),
       principalPolicy: toCapabilitySet(opts.principalPolicy),
       artifacts: sharedArtifacts,
+      snapshotStore,
+      trustedHostAllowlist: [...DEFAULT_TRUSTED_HOST_ALLOWLIST, ...registrationIds],
     });
   }
 
@@ -291,10 +321,13 @@ export async function streamText(
 ): Promise<StreamTextResult> {
   const opts = options ?? {};
   const maxSteps = opts.maxSteps ?? 10;
-  const runtime: ProviderRuntime = (opts as any).providerRuntime ?? getDefaultProviderRuntime();
+  const runtime: ProviderRuntime = (opts as any).runtime ?? (opts as any).providerRuntime ?? getDefaultProviderRuntime();
 
   // Resolve tools
   const toolDefs = opts.tools ? resolveTools(opts.tools) : getAllToolDefinitions();
+  // spec 019 FR-006: explicit trustedHostTool registrations wire into the
+  // boundary's host-callback map and join the operator allowlist.
+  const { callbacks: hostCallbacks, registrationIds } = extractHostCallbacks(opts.tools);
 
   // Hooks — merge stream-level callbacks with any base hooks
   const mergedHooks = { ...opts.hooks };
@@ -324,7 +357,23 @@ export async function streamText(
     const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
     const { legacyApproveToolToBroker } = await import("../legacy-adapter.js");
     const { buildLocalBoundary } = await import("../../capabilities/execution/build-local-boundary.js");
-    const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary({ workspaceRoot: opts.cwd ?? process.cwd() });
+    const { createSnapshotStore } = await import("../../foundations/hashline/snapshot-store.js");
+    const { InMemoryArtifactStore } = await import("../../capabilities/execution/in-memory-artifact-store.js");
+    const { createMediaVendorOperationHandler } = await import("../../domain/media/vendor-operation-handler.js");
+    const snapshotStore = createSnapshotStore();
+    const sharedArtifacts = new InMemoryArtifactStore();
+    const vendorOperationHandler = createMediaVendorOperationHandler({
+      runtime,
+      artifacts: sharedArtifacts,
+      signal: abortController.signal,
+    });
+    const { boundary } = await buildLocalBoundary({
+      artifacts: sharedArtifacts,
+      workspaceRoot: opts.cwd ?? process.cwd(),
+      snapshotStore,
+      hostCallbacks,
+      vendorOperationHandler,
+    });
     const approvalMode = opts.consentMode
       ? (opts.consentMode === 'autonomous' ? 'autonomous' : opts.consentMode === 'ask-everything' ? 'manual' : 'balanced')
       : (opts.approveTool ? "manual" : "never");
@@ -340,6 +389,8 @@ export async function streamText(
       deploymentCeiling: toCapabilitySet(opts.deploymentCeiling),
       principalPolicy: toCapabilitySet(opts.principalPolicy),
       artifacts: sharedArtifacts,
+      snapshotStore,
+      trustedHostAllowlist: [...DEFAULT_TRUSTED_HOST_ALLOWLIST, ...registrationIds],
     });
   }
 

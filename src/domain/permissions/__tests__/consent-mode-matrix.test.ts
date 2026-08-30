@@ -14,6 +14,7 @@ import * as fs from "node:fs/promises";
 import { PolicyEngine } from "../policy-engine.js";
 import { ALL_ANALYZERS } from "../action-lifecycle-factory.js";
 import { InMemoryArtifactStore } from "../../../capabilities/execution/in-memory-artifact-store.js";
+import { createSnapshotStore, tagFor } from "../../../foundations/hashline/snapshot-store.js";
 import type { PolicyContext } from "../../../foundations/contracts/permission-policy.js";
 import type { ToolAnalysisContext } from "../../../foundations/contracts/custom-tools.js";
 
@@ -44,7 +45,10 @@ describe("consent mode matrix (spec 017, T024 / T032 / T033 / QS-4)", () => {
       },
       artifacts,
       modelProviderClass: "*",
+      // spec 019: edit_file applies patches against the session store.
+      snapshotStore: createSnapshotStore(),
     };
+    ctx.snapshotStore!.record("normal.txt", "normal content\n");
   });
 
   function makeContext(
@@ -176,8 +180,9 @@ describe("consent mode matrix (spec 017, T024 / T032 / T033 / QS-4)", () => {
       const write = await ALL_ANALYZERS.write_file({ path: "out.txt", content: "data" }, ctx);
       expect(engine.evaluate(write, p).decision).toBe("allow");
 
+      const editTag = tagFor("normal.txt", "normal content\n");
       const edit = await ALL_ANALYZERS.edit_file(
-        { patch: "[normal.txt#0000]\n+updated" },
+        { patch: `[normal.txt#${editTag}]\n+updated` },
         ctx,
       );
       expect(engine.evaluate(edit, p).decision).toBe("allow");

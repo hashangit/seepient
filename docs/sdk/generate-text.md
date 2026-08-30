@@ -53,7 +53,7 @@ console.log(result.usage);
 | `model`         | `string`                                 | Provider default | Model identifier, e.g. `"gpt-5.4"`, `"claude-sonnet-4-6-20260320"` |
 | `provider`      | `ProviderType`                           | Config default   | `"openai"` \| `"anthropic"` \| `"glm"` \| `"openai-compatible"` |
 | `systemPrompt`  | `string`                                 | *(none)*         | Prepended as a system message before the user prompt |
-| `tools`         | `string[] \| UserToolDefinition[]`       | All built-in     | Built-in tool names, group names (`"core"`, `"all"`), or custom tool definitions |
+| `tools`         | `(string \| UserToolDefinition \| AnyToolRegistration)[]` | All built-in     | Built-in tool names, group names (`"core"`, `"all"`), or custom tool registrations (`trustedHostTool`) |
 | `skills`        | `string[]`                               | *(none)*         | Skill names to activate for this invocation |
 | `maxSteps`      | `number`                                 | `10`             | Maximum agent loop iterations (tool call rounds) |
 | `temperature`   | `number`                                 | Provider default | Sampling temperature (0.0 -- 2.0) |
@@ -151,22 +151,32 @@ const result2 = await generateText("Read ./config.json and summarize it", {
 ### Custom tools
 
 ```typescript
-import { generateText, tool } from "seepient";
-import { z } from "zod";
+import { generateText, trustedHostTool } from "seepient";
 
-const dbQuery = tool({
-  name: "db_query",
-  description: "Query the database with a SQL statement",
-  parameters: z.object({
-    sql: z.string().describe("SQL query to execute"),
-  }),
-  execute: async ({ sql }) => {
+const dbQuery = trustedHostTool({
+  definition: {
+    type: "function",
+    function: {
+      name: "db_query",
+      description: "Query the database with a SQL statement",
+      parameters: {
+        type: "object",
+        properties: {
+          sql: { type: "string", description: "SQL query to execute" },
+        },
+        required: ["sql"],
+      },
+    },
+  },
+  execute: async (args) => {
+    const { sql } = (args ?? {}) as { sql: string };
     const rows = await database.query(sql);
     return JSON.stringify(rows);
   },
 });
 
 const result = await generateText("How many users signed up last week?", {
+  permissionPipeline: true,
   tools: [dbQuery],
 });
 ```

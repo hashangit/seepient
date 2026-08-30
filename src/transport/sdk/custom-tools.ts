@@ -23,15 +23,18 @@ import type {
   BrokerConnectorRegistration,
   TrustedHostToolRegistration,
   LegacyHostToolRegistration,
+  HostToolContext,
+  AnyToolRegistration,
 } from "../../foundations/contracts/custom-tools.js";
-import type { UserToolDefinition } from "../../foundations/types.js";
 
-/** Union of all recognized registrations (including legacy). */
-export type AnyToolRegistration =
-  | PreparedToolRegistration
-  | BrokerConnectorRegistration
-  | TrustedHostToolRegistration
-  | LegacyHostToolRegistration;
+export type {
+  PreparedToolRegistration,
+  BrokerConnectorRegistration,
+  TrustedHostToolRegistration,
+  LegacyHostToolRegistration,
+  HostToolContext,
+  AnyToolRegistration,
+};
 
 /**
  * `preparedTool` — register an application-trusted analyzer. The analyzer's

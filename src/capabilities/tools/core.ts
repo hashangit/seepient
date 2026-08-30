@@ -12,7 +12,7 @@ export const ShellTool: ToolModule = {
     type: "function",
     function: {
       name: "execute_shell_command",
-      description: "Execute a shell command on the host machine. Use this to run scripts, list files, or interact with the system.",
+      description: "Execute a shell command on the host machine. Use this to run scripts, list files, or interact with the system. Single-quote arguments containing spaces or special characters; do not mix quote types inside one argument.",
       parameters: {
         type: "object",
         properties: {

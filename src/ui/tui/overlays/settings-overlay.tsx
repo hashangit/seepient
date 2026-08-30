@@ -7,7 +7,7 @@ export interface SettingItem {
   value: string;
   category: string;
   label: string;
-  type: 'string' | 'number' | 'boolean' | 'enum';
+  type: 'string' | 'number' | 'boolean' | 'enum' | 'array';
   secret: boolean;
   enumValues?: string[];
   restartRequired: boolean;

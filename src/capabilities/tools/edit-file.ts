@@ -27,7 +27,16 @@ export const EditFileTool: ToolModule = {
         properties: {
           patch: {
             type: 'string',
-            description: 'One or more [PATH#TAG] sections. TAG is the 4-hex content hash returned by read_file. Operations: SWAP A.=B:, SWAP.BLK A:, DEL A.=B, DEL.BLK A, INS.PRE A:, INS.POST A:, INS.HEAD:, INS.TAIL:. Body rows prefixed with +. Order multiple operations from bottom-to-top (highest line first) so line numbers stay correct.',
+            description: [
+              'Hashline patch. First read_file the target; its output ends with [content-tag:XXXX], and that tag anchors the patch.',
+              'Format: one [PATH#TAG] section header per file, then operations. Replacement/inserted content goes on the lines AFTER the op line, each prefixed with "+". A.=B is a line range; a single line is written 2.=2.',
+              'Example — replace line 2 of /src/app.ts (tag a1f2):',
+              '[/src/app.ts#a1f2]',
+              'SWAP 2.=2:',
+              '+const x = 2;',
+              'Ops: SWAP A.=B: (replace lines A–B with body) · SWAP.BLK A: (replace indentation block at A) · DEL A.=B (delete lines A–B; no colon, no body) · DEL.BLK A (delete block) · INS.PRE A: / INS.POST A: (insert body before/after line A) · INS.HEAD: / INS.TAIL: (insert at top/end).',
+              'When stacking multiple ops in one section, order bottom-to-top (highest line first) so line numbers stay valid.',
+            ].join('\n'),
           },
           approval: APPROVAL_SCHEMA,
         },

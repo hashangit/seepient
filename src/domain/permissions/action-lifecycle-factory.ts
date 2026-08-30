@@ -93,6 +93,21 @@ export interface ActionLifecycleInputs {
    * `interaction` is not supplied.
    */
   approvalDeadlineMs?: number;
+  /**
+   * Session snapshot store (spec 019 FR-001). Threaded into the analysis
+   * context so edit_file applies patches at analysis time; the SAME store
+   * instance must back the boundary's ReadFileExecutor.
+   */
+  snapshotStore?: import("../../foundations/hashline/snapshot-store.js").SnapshotStore;
+  /**
+   * Operator allowlist for trusted-host execution (spec 019 FR-006,
+   * `permissions.trustedHostAllowlist`). Defaults to `["use_skill"]`.
+   * SDK roots append explicitly registered trustedHostTool ids — the
+   * composition wiring IS operator intent there.
+   */
+  trustedHostAllowlist?: string[];
+  /** Optional probe to test image capability reachability before prompting user. */
+  imageCapabilityProbe?: () => Promise<{ reachable: boolean; reason?: string }>;
   /** Optional: persisted capability ledger for authority consumption & revocation (T107a). */
   capabilityLedger?: PersistedCapabilityLedger;
   /**
@@ -361,6 +376,8 @@ export async function buildActionLifecycle(
     // Spec 011 (persistent choices): the protected-policy workspace identity
     // so the engine can offer `project`/`global` approval choices.
     workspaceId,
+    // Spec 019 (FR-006): operator allowlist for trusted-host execution.
+    trustedHostAllowlist: inputs.trustedHostAllowlist ?? ["use_skill"],
   };
 
   const capabilityLedger = inputs.capabilityLedger ?? new PersistedCapabilityLedger(inputs.auditRoot ? { root: path.join(inputs.auditRoot, "caps") } : undefined);
@@ -448,6 +465,8 @@ export async function buildActionLifecycle(
       },
       artifacts,
       modelProviderClass: inputs.modelProviderClass ?? "*",
+      snapshotStore: inputs.snapshotStore,
+      imageCapabilityProbe: inputs.imageCapabilityProbe,
     },
     workspaceId,
   };

@@ -17,6 +17,7 @@
  * and never import each other or `capabilities/tools/`.
  */
 import type { PreparedToolAction } from "../../foundations/contracts/prepared-action.js";
+import type { SnapshotStore } from "../../foundations/hashline/snapshot-store.js";
 import type {
   ExecutionResult,
   ToolProgress,
@@ -57,13 +58,11 @@ export class CommitFilesExecutor implements OperationExecutor {
   private readonly broker: FileCommitBroker;
   private readonly artifacts: PreparationArtifactStore;
   private readonly useNative: boolean;
-  private readonly allowFallback: boolean;
 
-  constructor(opts: { broker: FileCommitBroker; artifacts: PreparationArtifactStore; useNative?: boolean; allowFallback?: boolean }) {
+  constructor(opts: { broker: FileCommitBroker; artifacts: PreparationArtifactStore; useNative?: boolean }) {
     this.broker = opts.broker;
     this.artifacts = opts.artifacts;
     this.useNative = opts.useNative ?? true;
-    this.allowFallback = opts.allowFallback ?? (process.env.SEEPIENT_ALLOW_JS_FS_FALLBACK === "1");
   }
 
   async execute(
@@ -92,6 +91,14 @@ export class CommitFilesExecutor implements OperationExecutor {
       }
     }
     const committed: string[] = [];
+    // Diff-viewer parity (spec 019 FR-001): capture the first destination's
+    // pre-commit content so metadata can carry oldContent/newContent exactly
+    // like the legacy hashline handler did.
+    let oldContent: string | null = null;
+    try {
+      const { readFile: fsReadOld } = await import("node:fs/promises");
+      oldContent = await fsReadOld(operation.commits[0].destination.canonicalPath, "utf-8");
+    } catch { /* new file or unreadable: metadata degrades, commit proceeds */ }
     try {
       for (const commit of operation.commits) {
         const bytes = await readContent(this.artifacts, commit.content);
@@ -102,8 +109,6 @@ export class CommitFilesExecutor implements OperationExecutor {
             content: bytes,
             expected: commit.expected,
           });
-        } else if (this.allowFallback) {
-          await this.fallbackWrite(commit.destination.canonicalPath, bytes);
         } else {
           return {
             state: "failed",
@@ -127,10 +132,13 @@ export class CommitFilesExecutor implements OperationExecutor {
       if (firstCommit) {
         try {
           const bytes = await readContent(this.artifacts, firstCommit.content);
+          const newContent = new TextDecoder().decode(bytes);
           metadata = {
             path: action.display.canonicalTargets[0] ?? firstCommit.destination.canonicalPath,
             isNewFile: !firstCommit.expected?.exists,
-            newContent: new TextDecoder().decode(bytes),
+            oldContent,
+            newContent,
+            byteDelta: bytes.byteLength - (firstCommit.expected?.size ?? 0),
           };
         } catch (e) {
           process.stderr.write(`METADATA ERROR: ${e instanceof Error ? e.stack : String(e)}\n`);
@@ -146,7 +154,7 @@ export class CommitFilesExecutor implements OperationExecutor {
         evidence: {
           backend: "local-native",
           actionDigest: action.actionDigest,
-          executorId: this.useNative ? "commit-files-native" : "commit-files-fallback",
+          executorId: "commit-files-native",
           operationKind: "commit-files",
           committedTargets: committed,
         },
@@ -168,35 +176,11 @@ export class CommitFilesExecutor implements OperationExecutor {
         evidence: {
           backend: "local-native",
           actionDigest: action.actionDigest,
-          executorId: this.useNative ? "commit-files-native" : "commit-files-fallback",
+          executorId: "commit-files-native",
           operationKind: "commit-files",
           committedTargets: committed,
         },
       };
-    }
-  }
-
-  /**
-   * Atomic temp+rename write. Writes to a temp file in the same directory,
-   * then renames. On failure the temp is cleaned up and the destination is
-   * never partially written. This is the same mechanism the legacy write_file
-   * tool uses — not as safe as the native helper (no symlink/TOCTOU defense)
-   * but strictly better than the old handler path because the prepared bytes
-   * and destination are used, not the raw model args.
-   */
-  private async fallbackWrite(destination: string, bytes: Uint8Array): Promise<void> {
-    const fs = await import("node:fs/promises");
-    const path = await import("node:path");
-    const crypto = await import("node:crypto");
-    const dir = path.dirname(destination);
-    const tmp = path.join(dir, `.seepient-tmp-${crypto.randomUUID().slice(0, 8)}`);
-    try {
-      await fs.mkdir(dir, { recursive: true });
-      await fs.writeFile(tmp, bytes);
-      await fs.rename(tmp, destination);
-    } catch (err) {
-      try { await fs.unlink(tmp); } catch { /* temp may not exist */ }
-      throw err;
     }
   }
 }
@@ -204,13 +188,20 @@ export class CommitFilesExecutor implements OperationExecutor {
 /**
  * Read-file executor. Reads via the canonicalized target; the model-egress
  * gate (consulted by the caller before adding to history) decides release.
+ *
+ * Spec 019 FR-001 read-side parity: when a snapshot store is wired, a
+ * successful read records the content and appends the `[content-tag:N]`
+ * line — byte-for-byte the legacy handler contract (core.ts:77-79) — so a
+ * following edit_file patch header resolves without manual pre-recording.
  */
 export class ReadFileExecutor implements OperationExecutor {
   readonly kind = "read-file" as const;
   private readonly artifacts?: PreparationArtifactStore;
+  private readonly snapshotStore?: SnapshotStore;
 
-  constructor(opts?: { artifacts?: PreparationArtifactStore }) {
+  constructor(opts?: { artifacts?: PreparationArtifactStore; snapshotStore?: SnapshotStore }) {
     this.artifacts = opts?.artifacts;
+    this.snapshotStore = opts?.snapshotStore;
   }
 
   async execute(
@@ -239,9 +230,11 @@ export class ReadFileExecutor implements OperationExecutor {
     try {
       const { readFile } = await import("node:fs/promises");
       const content = await readFile(operation.target.canonicalPath, "utf-8");
+      const tag = this.snapshotStore?.record(operation.target.canonicalPath, content);
+      const output = tag ? `${content}\n\n[content-tag:${tag}]` : content;
       return {
         state: "succeeded",
-        result: { output: content, success: true },
+        result: { output, success: true },
         evidence: {
           backend: "local-native",
           actionDigest: action.actionDigest,
@@ -348,11 +341,19 @@ export class BrokerExecutor implements OperationExecutor {
   private readonly broker: EffectBroker;
   private readonly artifacts?: PreparationArtifactStore;
   private readonly workspaceRoot?: string;
+  private readonly commitBroker?: FileCommitBroker;
 
-  constructor(opts: { broker: EffectBroker; artifacts?: PreparationArtifactStore; workspaceRoot?: string }) {
+  constructor(opts: {
+    broker: EffectBroker;
+    artifacts?: PreparationArtifactStore;
+    workspaceRoot?: string;
+    /** spec 019 FR-011: for outputCommit handoff after a successful fetch. */
+    commitBroker?: FileCommitBroker;
+  }) {
     this.broker = opts.broker;
     this.artifacts = opts.artifacts;
     this.workspaceRoot = opts.workspaceRoot;
+    this.commitBroker = opts.commitBroker;
   }
   async execute(
     action: PreparedToolAction,
@@ -423,23 +424,6 @@ export class BrokerExecutor implements OperationExecutor {
         };
       }
     }
-    if (action.toolName === "generate_image" && !creds.openaiApiKey && !creds.openaiBaseUrl) {
-      const failure = createSetupFailure("generate_image", "OpenAI API key (or image provider credentials)", "OPENAI_API_KEY / image.apiKey");
-      return {
-        state: "failed",
-        error: {
-          code: "SETUP_REQUIRED",
-          message: failure.message,
-          retryable: false,
-        },
-        evidence: {
-          backend: "local-native",
-          actionDigest: action.actionDigest,
-          executorId: "broker-preflight",
-          operationKind: "broker",
-        },
-      };
-    }
 
     const auth = {
       leaseId: envelope.envelopeId,
@@ -467,8 +451,94 @@ export class BrokerExecutor implements OperationExecutor {
         },
       };
     }
+    // spec 019 (FR-011) executor chaining: a declared outputCommit hands the
+    // fetched output artifact to the FileCommitBroker under the SAME action
+    // envelope (which carries the commit-file cap because the analyzer added
+    // the filesystem-write effect). A refusal here discards the fetched
+    // result — the write either happens exactly, or not at all.
+    const outputCommit =
+      operation.request.kind === "http" || operation.request.kind === "vendor-operation"
+        ? (operation.request as any).outputCommit
+        : undefined;
+    let committedPath: string | undefined;
+    if (outputCommit) {
+      if (!this.commitBroker || !this.artifacts) {
+        return {
+          state: "failed",
+          error: {
+            code: "COMMIT_UNAVAILABLE",
+            message: "Output destination declared but the commit broker is unavailable; write refused.",
+            retryable: false,
+          },
+          evidence: {
+            backend: "local-native",
+            actionDigest: action.actionDigest,
+            executorId: "broker",
+            operationKind: "broker",
+            effectiveDestinations: result.effectiveDestination ? [result.effectiveDestination] : [],
+          },
+        };
+      }
+      const artifactsList = result.outputs && result.outputs.length > 0 ? result.outputs : result.output ? [result.output] : [];
+      const destTargets = outputCommit.destinations && outputCommit.destinations.length > 0 ? outputCommit.destinations : [outputCommit.destination];
+      const committedPaths: string[] = [];
+
+      for (let i = 0; i < artifactsList.length; i++) {
+        const art = artifactsList[i];
+        const destTarget = destTargets[i] ?? destTargets[0];
+        const imageBytes = await this.extractImageBytes(art);
+        if (!imageBytes) {
+          return {
+            state: "failed",
+            error: {
+              code: "OUTPUT_NOT_COMMITTABLE",
+              message: "Provider response carried no decodable image bytes (expected b64_json or a binary body); nothing was written.",
+              retryable: false,
+            },
+            evidence: {
+              backend: "local-native",
+              actionDigest: action.actionDigest,
+              executorId: "broker",
+              operationKind: "broker",
+              effectiveDestinations: result.effectiveDestination ? [result.effectiveDestination] : [],
+            },
+          };
+        }
+        try {
+          const meta = await this.commitBroker.commit({
+            envelope,
+            destination: destTarget.canonicalPath,
+            content: imageBytes,
+            expected: undefined,
+          });
+          committedPaths.push(meta.path);
+        } catch (err) {
+          return {
+            state: "failed",
+            error: {
+              code: "COMMIT_FAILED",
+              message: `Fetch succeeded but the exact commit was refused: ${err instanceof Error ? err.message : String(err)}`,
+              retryable: false,
+            },
+            evidence: {
+              backend: "local-native",
+              actionDigest: action.actionDigest,
+              executorId: "broker",
+              operationKind: "broker",
+              effectiveDestinations: result.effectiveDestination ? [result.effectiveDestination] : [],
+            },
+          };
+        }
+      }
+      committedPath = committedPaths.join(", ");
+    }
+
     let outputText = "ok";
-    if (result.output && this.artifacts) {
+    if (action.toolName === "generate_image" && !committedPath) {
+      outputText = result.output
+        ? `Image generated successfully (artifact: ${result.output.artifactId}, ${result.output.byteLength} bytes)`
+        : "Image generated successfully";
+    } else if (result.output && this.artifacts) {
       try {
         const bytes = await this.artifacts.read(result.output);
         let text = new TextDecoder().decode(bytes);
@@ -481,6 +551,11 @@ export class BrokerExecutor implements OperationExecutor {
       }
     } else if (result.output) {
       outputText = `<broker artifact ${result.output.artifactId}>`;
+    }
+    if (committedPath) {
+      // Do NOT inline image bytes into history — the model learns where the
+      // file landed.
+      outputText = `Image saved to ${committedPath}`;
     }
     // Ground the model in what the server actually said: a 404/429/… page is
     // a completed fetch whose content the model must not mistake for the
@@ -506,6 +581,40 @@ export class BrokerExecutor implements OperationExecutor {
           : [],
       },
     };
+  }
+
+  /**
+   * Decode the commit-able bytes from the fetched artifact: an OpenAI-style
+   * JSON envelope with data[0].b64_json, or a raw binary body. Returns
+   * undefined when the response carries neither.
+   */
+  private async extractImageBytes(
+    artifact: import("../../foundations/contracts/prepared-action.js").PreparedArtifactRef | undefined,
+  ): Promise<Uint8Array | undefined> {
+    if (!artifact || !this.artifacts) return undefined;
+    let bytes: Uint8Array;
+    try {
+      bytes = await this.artifacts.read(artifact);
+    } catch {
+      return undefined;
+    }
+    const text = new TextDecoder().decode(bytes);
+    try {
+      const parsed = JSON.parse(text) as { data?: Array<{ b64_json?: string; url?: string }> };
+      const b64 = parsed.data?.[0]?.b64_json;
+      if (b64) {
+        return new Uint8Array(Buffer.from(b64, "base64"));
+      }
+    } catch {
+      // Not JSON: a raw binary body IS the image.
+    }
+    // Heuristic: a JSON body that is not an image envelope is not committable;
+    // a non-JSON body is treated as raw bytes.
+    const trimmed = text.trimStart();
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      return undefined;
+    }
+    return bytes;
   }
 }
 
@@ -533,8 +642,10 @@ export class UnsupportedExecutor implements OperationExecutor {
 /**
  * Trusted-host executor. Host tools are application authority and run the
  * registered callback directly — they are always audit-labelled and excluded
- * from agent-grant persistence. Enabled only by an operator allowlist in
- * server deployments.
+ * from agent-grant persistence. Registry-ONLY (spec 019 FR-006): the lookup
+ * consults the composition root's callback map and nothing else — the former
+ * ambient `getAllToolModules()` fallback is deleted. Misses fail closed with
+ * `HOST_TOOL_NOT_REGISTERED`.
  */
 export class TrustedHostExecutor implements OperationExecutor {
   readonly kind = "trusted-host" as const;
@@ -550,15 +661,7 @@ export class TrustedHostExecutor implements OperationExecutor {
     operation: Extract<PreparedToolAction["operation"], { kind: "trusted-host" }>,
     _opts: { signal?: AbortSignal; onUpdate?: (u: ToolProgress) => void },
   ): Promise<ExecutionResult> {
-    let cb = this.callbacks.get(operation.registrationId) ?? (operation.toolName ? this.callbacks.get(operation.toolName) : undefined);
-    if (!cb) {
-      const { getAllToolModules } = await import("../../domain/tool-executor.js");
-      const mod = getAllToolModules().find((m) => m.definition.function.name === operation.registrationId || m.name === operation.registrationId);
-      if (mod && mod.handler) {
-        const handler = mod.handler;
-        cb = async (args: unknown) => handler(args as any);
-      }
-    }
+    const cb = this.callbacks.get(operation.registrationId) ?? (operation.toolName ? this.callbacks.get(operation.toolName) : undefined);
     if (!cb) {
       return {
         state: "failed",

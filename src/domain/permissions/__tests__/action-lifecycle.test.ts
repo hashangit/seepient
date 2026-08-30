@@ -9,7 +9,7 @@
  *  - audit is idempotent on `<actionId>:<state>`
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ActionLifecycle } from "../action-lifecycle.js";
@@ -40,7 +40,7 @@ import type { ToolResult } from "../../../foundations/types.js";
 
 let dir: string;
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "seepient-audit-"));
+  dir = realpathSync(mkdtempSync(join(tmpdir(), "seepient-audit-")));
 });
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
@@ -668,7 +668,8 @@ describe("ActionLifecycle (T110)", () => {
 
   it("inline approval writes no grants or protected-policy files", async () => {
     const artifacts = new InMemoryArtifactStore();
-    const { boundary } = await buildLocalBoundary({ artifacts, allowFallback: true });
+    const { diskBackedFakeHelper } = await import("../../../capabilities/execution/__tests__/helpers/commit-helper-fakes.js");
+    const { boundary } = await buildLocalBoundary({ artifacts, commitHelper: diskBackedFakeHelper() });
 
     // The commit-files operation reads its content from the shared artifact
     // store (the analyzer would have stored it; this test bypasses analysis).

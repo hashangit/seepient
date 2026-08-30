@@ -203,7 +203,7 @@ describe("ModelPicker — thinking step (§4.1)", () => {
         model: "solo",
         thinkingLevel: expect.any(String),
       });
-    });
+    }, { timeout: 3000 });
   });
 });
 

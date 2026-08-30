@@ -300,11 +300,12 @@ describe("permission prompt vs global keybindings (FR-015)", () => {
         {
           onAbort: () => events.push("abort"),
           onExit: () => events.push("exit"),
+          onClearDraft: () => events.push("clear-draft"),
           onExpandToggle: () => {},
           onPalette: () => {},
           onClear: () => {},
         },
-        { enabled: true, isRunning: true, promptPending: true },
+        { enabled: true, isRunning: true, promptPending: true, hasDraft: false },
       );
       return <PermissionPrompt request={request()} onResolve={(s) => { captured = s; }} />;
     }
@@ -322,11 +323,12 @@ describe("permission prompt vs global keybindings (FR-015)", () => {
         {
           onAbort: () => events.push("abort"),
           onExit: () => events.push("exit"),
+          onClearDraft: () => events.push("clear-draft"),
           onExpandToggle: () => {},
           onPalette: () => {},
           onClear: () => {},
         },
-        { enabled: true, isRunning: true, promptPending: true },
+        { enabled: true, isRunning: true, promptPending: true, hasDraft: false },
       );
       return <PermissionPrompt request={request()} onResolve={() => {}} />;
     }
@@ -343,11 +345,12 @@ describe("permission prompt vs global keybindings (FR-015)", () => {
         {
           onAbort: () => events.push("abort"),
           onExit: () => events.push("exit"),
+          onClearDraft: () => events.push("clear-draft"),
           onExpandToggle: () => {},
           onPalette: () => {},
           onClear: () => {},
         },
-        { enabled: true, isRunning: true },
+        { enabled: true, isRunning: true, hasDraft: false },
       );
       return null;
     }

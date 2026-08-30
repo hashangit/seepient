@@ -135,6 +135,13 @@ export interface PolicyContext {
    *  the `session` lifetime for TUI approval (spec 011). */
   sessionId?: string;
   /**
+   * Operator allowlist for trusted-host execution (spec 019 FR-006,
+   * `permissions.trustedHostAllowlist`). A `trusted-host` capability is
+   * within the deployment ceiling only when its registrationId/toolName is
+   * a member. Defaults to `["use_skill"]` when absent.
+   */
+  trustedHostAllowlist?: string[];
+  /**
    * Protected-policy workspace identity (project scope). When set, the
    * engine may offer persistent `project`/`global` approval choices — they
    * are recorded through `PolicyStore.compareAndSet`, never grants files.
@@ -178,7 +185,10 @@ export type PermissionDenyReason =
   /** T107d: capability was consumed (action-scoped) or has expired (run/session). */
   | "capability-expired"
   /** T107d: capability was revoked before use (run/session revocation). */
-  | "capability-revoked";
+  | "capability-revoked"
+  /** Spec 019 FR-002: the backend cannot enforce exact commits and the
+   *  interim JS fallback was not opted into — denied before any prompt. */
+  | "exact-commit-unavailable";
 
 /**
  * Closed decision union. `needs-approval` carries the immutable request and

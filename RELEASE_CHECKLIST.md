@@ -72,17 +72,49 @@ Update all version strings and documentation artifacts in lockstep:
 
 ---
 
-## 🔀 Phase 3: Committing, Merging & Tagging
+## 🔀 Phase 3: Pull Request & Automated Ito Code Review
 
-- [ ] **Commit Release Prep**:
+Before merging into `main`, run automated code review via **Ito** and deliberate on all findings:
+
+- [ ] **Open Pull Request**:
+  - Commit all release prep changes to your feature/release branch and push to origin:
+    ```bash
+    git add package.json CHANGELOG.md RELEASE_NOTES-vX.Y.Z.md README.md AGENTS.md src/
+    git commit -m "chore(release): bump version to vX.Y.Z and add release notes"
+    git push -u origin <release-branch>
+    ```
+  - Open a PR targeting `main`:
+    ```bash
+    gh pr create --title "Release vX.Y.Z" --body "Release vX.Y.Z preparation and quality gates."
+    ```
+- [ ] **Ito Code Review Run**:
+  - Wait for the connected **Ito** code review integration to finish reviewing the PR diff and submit its findings.
+- [ ] **Deliberate & Validate Findings**:
+  - Inspect all comments, flags, and suggested fixes from Ito.
+  - Deliberate and validate each point: confirm whether the feedback identifies actual bugs, edge cases, type issues, or architectural drift.
+  - Discard/clarify false positives with reasoned deliberation; never blindly apply unverified bot suggestions.
+- [ ] **Apply Fixes & Re-test**:
+  - Apply validated fixes directly to the branch.
+  - Re-run local verification to ensure zero regressions:
+    ```bash
+    pnpm exec tsc --noEmit && pnpm test && pnpm run build
+    ```
+  - Push the updates and ensure all Ito review discussions are resolved cleanly.
+- [ ] **Merge Gate Clearance**:
+  - **Only proceed to merge once Ito code review is complete, all valid issues are addressed, and all PR checks are green.**
+
+---
+
+## 🔀 Phase 4: Merging & Tagging
+
+- [ ] **Merge Pull Request to `main`**:
   ```bash
-  git add package.json CHANGELOG.md RELEASE_NOTES-vX.Y.Z.md README.md AGENTS.md src/ui/
-  git commit -m "chore(release): bump version to vX.Y.Z and add release notes"
+  gh pr merge --merge --delete-branch
   ```
-- [ ] **Merge Feature Branch to `main`** (if releasing from a branch):
+  *(Or fast-forward / merge locally if required)*:
   ```bash
   git checkout main
-  git merge --no-ff <feature-branch> -m "feat: <feature description> and release vX.Y.Z"
+  git pull origin main
   ```
 - [ ] **Create Annotated Tag**:
   ```bash
@@ -95,7 +127,7 @@ Update all version strings and documentation artifacts in lockstep:
 
 ---
 
-## 🚀 Phase 4: Publishing & CI/CD Verification
+## 🚀 Phase 5: Publishing & CI/CD Verification
 
 Push the branch and tag to trigger the automated GitHub Actions release workflow:
 
@@ -121,7 +153,7 @@ Push the branch and tag to trigger the automated GitHub Actions release workflow
 
 ---
 
-## ✅ Phase 5: Post-Release Verification
+## ✅ Phase 6: Post-Release Verification
 
 - [ ] **npm Registry**:
   ```bash

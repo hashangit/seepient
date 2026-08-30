@@ -337,13 +337,12 @@ Generate or edit images using AI models (DALL-E 3, DALL-E 2, or compatible model
 | `size` | `string` | No | Resolution. DALL-E 3: `1024x1024`, `1792x1024`, `1024x1792`. High-res models: `2048x2048`, `2560x1440`, `1440x2560` |
 | `quality` | `"standard"` \| `"hd"` | No | Image quality, DALL-E 3 only (default: `standard`) |
 | `style` | `"vivid"` \| `"natural"` | No | Image style, DALL-E 3 only (default: `vivid`) |
-| `output_dir` | `string` | No | Directory to save images (default: current directory) |
+| `output_path` | `string` | No | Exact destination file path (e.g. `images/logo.png`) committed via exact-file commit |
+| `output_dir` | `string` | No | Directory to save images (default: current workspace directory) |
 
 **Configuration required:**
 
-```bash
-OPENAI_API_KEY=sk-...    # or configure imageApiKey in .seepient/setting.json
-```
+Configure an image model in `/models` under the `image-generation` purpose slot or via `seepient models image`.
 
 **Example:**
 
@@ -356,9 +355,7 @@ const result = await generateText(
 
 **Notes:**
 - Mode is auto-inferred: `image_path` + `mask_path` = edit, `image_path` alone = variation, otherwise text-to-image.
-- DALL-E 3 generates one image at a time (looped for `n > 1`). DALL-E 2 can generate multiple in one call.
-- Variation and edit modes only support DALL-E 2 (DALL-E 3 automatically falls back).
-- Custom models like Doubao require `imageBaseUrl` configuration.
+- Image generation executes through the configured `ProviderRuntime` image model and commits results safely via `FileCommitBroker`.
 
 ---
 

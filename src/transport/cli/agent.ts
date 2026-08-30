@@ -162,13 +162,35 @@ export class Agent {
     workspaceRoot?: string;
     modelProviderClass?: string;
     auditRoot?: string;
-    allowFallback?: boolean;
+    /**
+     * Commit-helper injection for tests/e2e (spec 019): pins the probe.
+     * Structural shape of the vendor's NativeCommitHelper — Transport must
+     * not import from src/vendors (S-12).
+     */
+    commitHelper?: {
+      available: boolean;
+      probe: {
+        available: boolean;
+        reason?: "binary-missing" | "primitive-unsupported" | "self-test-failed" | "digest-mismatch";
+        binaryPath?: string;
+        platform: NodeJS.Platform;
+        digestVerified: boolean;
+      };
+      commit(req: { destination: string; content: Uint8Array; expected?: { exists: boolean; sha256?: string } }): Promise<{
+        ok: boolean;
+        writtenSha256: string;
+        errorCode?: "target-symlink" | "parent-symlink" | "parent-replaced" | "snapshot-changed" | "cross-device-rename" | "io-error" | "timeout" | "primitive-unsupported";
+        message?: string;
+      }>;
+    };
     /**
      * Local approval deadline in ms (spec 011 T033). Defaults to ten
      * minutes; the CLI bootstrap passes `permissions.approvalTimeoutMs`.
      */
     approvalDeadlineMs?: number;
     approvalMode?: import("../../foundations/contracts/permission-policy.js").PolicyContext["approvalMode"];
+    /** Session snapshot store (spec 019 FR-001); defaults to a fresh store. */
+    snapshotStore?: import("../../foundations/hashline/snapshot-store.js").SnapshotStore;
   }): Promise<void> {
     const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
     const { legacyApproveToolToBroker } = await import("../legacy-adapter.js");
@@ -218,10 +240,24 @@ export class Agent {
         });
       }
     }
-    const { boundary: realBoundary, artifacts: sharedArtifacts } = await buildLocalBoundary({
-      allowFallback: opts.allowFallback,
+    // spec 019 FR-001: one store instance backs the boundary's read-side
+    // tagging and the lifecycle's analysis context. The composition root
+    // (bootstrap) owns the session store; tests may inject their own.
+    const snapshotStore = opts.snapshotStore ?? (await import("../../foundations/hashline/snapshot-store.js")).createSnapshotStore();
+    const { InMemoryArtifactStore } = await import("../../capabilities/execution/in-memory-artifact-store.js");
+    const sharedArtifacts = new InMemoryArtifactStore();
+    const { createMediaVendorOperationHandler } = await import("../../domain/media/vendor-operation-handler.js");
+    const vendorOperationHandler = createMediaVendorOperationHandler({
+      runtime: () => this.providerRuntime,
+      artifacts: sharedArtifacts,
+    });
+    const { boundary: realBoundary } = await buildLocalBoundary({
+      artifacts: sharedArtifacts,
       hostCallbacks,
       workspaceRoot: opts.workspaceRoot ?? process.cwd(),
+      snapshotStore,
+      commitHelper: opts.commitHelper,
+      vendorOperationHandler,
     });
     // Spec 011 (T032/FR-019): containment preflight at startup. The status is
     // surfaced (TUI/status surfaces) so approval choices are disabled before
@@ -245,6 +281,7 @@ export class Agent {
       policyStore: this._policyStore ?? undefined,
       auditRoot: opts.auditRoot,
       artifacts: sharedArtifacts,
+      snapshotStore,
     });
     // Spec 008 FR-014: run crash-recovery on startup. Marks any `dispatched`
     // actions without a terminal record as `indeterminate` (never re-executed).

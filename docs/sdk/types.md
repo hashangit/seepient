@@ -121,12 +121,14 @@ interface Usage {
 interface GenerateTextOptions {
   /** Model identifier, e.g. "gpt-5.4", "claude-sonnet-4-6-20260320". */
   model?: string;
-  /** LLM provider to use. */
-  provider?: ProviderType;
+  /** Feeds the permission pipeline's modelProviderClass audit label. */
+  provider?: string;
   /** System message prepended to the conversation. */
   systemPrompt?: string;
-  /** Tools available to the agent. String names, group names, or custom definitions. */
-  tools?: string[] | UserToolDefinition[];
+  /** Tools available: string names, group constants, or custom tool registrations. */
+  tools?: (string | UserToolDefinition | AnyToolRegistration)[];
+  /** Enable the unified domain permission pipeline and execution boundary. */
+  permissionPipeline?: boolean;
   /** Skill names to activate. */
   skills?: string[];
   /** Maximum agent loop iterations (tool call rounds). Default: 10. */
@@ -235,12 +237,14 @@ interface StreamTextResult {
 interface AgentCreateOptions {
   /** Model identifier. */
   model?: string;
-  /** LLM provider to use. */
-  provider?: ProviderType;
+  /** Feeds the permission pipeline's modelProviderClass audit label. */
+  provider?: string;
   /** System prompt prepended to every conversation. */
   systemPrompt?: string;
-  /** Tools available to the agent. */
-  tools?: string[] | UserToolDefinition[];
+  /** Tools available: string names, group constants, or custom registrations. */
+  tools?: (string | UserToolDefinition | AnyToolRegistration)[];
+  /** Enable the unified domain permission pipeline and execution boundary. */
+  permissionPipeline?: boolean;
   /** Skill names to activate. */
   skills?: string[];
   /** Maximum agent loop iterations. Default: 10. */
@@ -268,8 +272,8 @@ interface SdkAgent {
   chat(message: string): Promise<AgentResponse>;
   /** Send a message with streaming output. */
   chatStream(message: string, options?: StreamTextOptions): Promise<StreamTextResult>;
-  /** Switch the LLM provider (and optionally model) mid-conversation. */
-  switchProvider(provider: ProviderType, model?: string): Promise<void>;
+  /** Switch the provider account (and optionally model) used for subsequent calls; one argument switches the model only. */
+  switchProvider(accountOrModel: string, model?: string): Promise<void>;
   /** Update the system prompt. */
   setSystemPrompt(prompt: string): void;
   /** Update the available tool set. */

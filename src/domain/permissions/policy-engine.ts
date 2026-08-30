@@ -128,6 +128,7 @@ function operationEffects(op: PreparedOperation): ToolEffectKind[] {
     case "broker":
       if (op.request.kind === "http") return ["network-egress"];
       if (op.request.kind === "external-send") return ["external-send"];
+      if (op.request.kind === "vendor-operation") return ["network-egress"];
       return ["secret-use"];
     case "trusted-host":
       // Host tools are application authority; the effect vocabulary is what
@@ -299,6 +300,22 @@ export class PolicyEngine implements PolicyEngineContract {
       );
     }
 
+    // Spec 019 (FR-002, post-P2): exact-commit gate. A write the backend
+    // cannot enforce is refused BEFORE the prompt — keyed on operation kind
+    // so it runs for every commit-files action regardless of capability
+    // coverage; pre-granted caps (017 always-allowed class, config-derived
+    // grants) must not reach the early-allow and dispatch into a guaranteed
+    // failure. The interim JS fallback was deleted with the helper shipped,
+    // so exactCommit is the only path to a write.
+    if (opKind === "commit-files" && !context.backendCapabilities.exactCommit) {
+      pushLayer(trace, "backend", "deny");
+      return deny(
+        "exact-commit-unavailable",
+        "Exact file commits are unavailable because the native helper is missing or failed verification. Update Seepient to get the packaged helper, or build it from source with `pnpm native:build` (see docs).",
+        trace,
+      );
+    }
+
     // 3. Effective capabilities — monotonic intersection.
     const effective = effectiveCapabilities(
       context.deploymentCeiling,
@@ -334,11 +351,29 @@ export class PolicyEngine implements PolicyEngineContract {
     // not contain write-root for the workspace (it's empty by default). In
     // that case, we check whether the requested capability's PATH is within
     // the workspace root — if so, the interactive user may approve it.
+    //
+    // Spec 019 (FR-006): trusted-host capabilities are within ceiling only
+    // via the operator allowlist (`permissions.trustedHostAllowlist`,
+    // default `["use_skill"]`) — the former blanket exemption let one
+    // approval cover unlimited subsequent MCP writes.
+    let hostDenyMessage: string | undefined;
+    const hostAllowlist = context.trustedHostAllowlist ?? ["use_skill"];
+    const hostRegistrationId = (cap: Capability): string | undefined => {
+      if (cap.kind !== "trusted-host") return undefined;
+      if (typeof cap.registrationId === "string") return cap.registrationId;
+      const op = action.operation;
+      return op.kind === "trusted-host" ? op.toolName ?? op.registrationId : undefined;
+    };
     const inCeiling = missing.every((c) => {
-      // Check the deployment ceiling first.
+      // Host authority: allowlist membership only (Spec 019 FR-006).
+      if (c.kind === "trusted-host") {
+        const id = hostRegistrationId(c);
+        if (id && hostAllowlist.includes(id)) return true;
+        hostDenyMessage = `Tool "${id ?? "unknown"}" runs with host authority and is not on the trusted-host allowlist. Add it under permissions.trustedHostAllowlist in your settings if you trust it.`;
+        return false;
+      }
+      // Check the deployment ceiling for other capabilities.
       if (setCovers(context.deploymentCeiling, c)) return true;
-      // Host callbacks registered in the tool registry are within operator ceiling
-      if (c.kind === "trusted-host") return true;
       if (context.approvalMode !== "never" && context.workspaceRoot) {
         const root = canonicalPath(context.workspaceRoot);
         const withinRoot = (target: string): boolean => {
@@ -354,7 +389,7 @@ export class PolicyEngine implements PolicyEngineContract {
       pushLayer(trace, "deployment", "deny");
       return deny(
         "outside-ceiling",
-        "Requested capability exceeds deployment ceiling",
+        hostDenyMessage ?? "Requested capability exceeds deployment ceiling",
         trace,
       );
     }

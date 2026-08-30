@@ -48,7 +48,8 @@ describe("REAL tool execution through the new pipeline (reviewer fix #2)", () =>
         };
       },
     };
-    const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary({ allowFallback: true });
+    const { diskBackedFakeHelper } = await import("../../capabilities/execution/__tests__/helpers/commit-helper-fakes.js");
+    const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary({ commitHelper: diskBackedFakeHelper() });
     const wired = await buildActionLifecycle({
       principalId: "u",
       runId: "r1",

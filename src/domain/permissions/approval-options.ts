@@ -332,13 +332,17 @@ function familyOf(caps: Capability[]): "process" | "file" | "other" {
   return "other";
 }
 
-/** Exact-option copy: one headline + explanation per capability family. */
-function exactLabel(caps: Capability[]): string {
+/** Exact-option copy: one headline + explanation per capability family.
+ *  File writes promise exactness only when the backend can enforce it
+ *  (spec 019); otherwise the caveat names the weaker guarantee. */
+function exactLabel(caps: Capability[], exactCommit: boolean): string {
   switch (familyOf(caps)) {
     case "process":
       return "Only this command — runs exactly the command shown. Any change will ask again.";
     case "file":
-      return "Only this file — changes exactly what's shown. Any change will ask again.";
+      return exactCommit
+        ? "Only this file — changes exactly what's shown. Any change will ask again."
+        : "Only this file — changes exactly what's shown, but the write is atomic and not symlink-protected. Any change will ask again.";
     default:
       return "Only this action — any change will ask again.";
   }
@@ -385,7 +389,7 @@ export function buildApprovalOptions(
       optionId: optionIdFor(action.actionDigest, "exact", exact),
       actionDigest: action.actionDigest,
       kind: "exact",
-      label: exactLabel(exact),
+      label: exactLabel(exact, context.backendCapabilities.exactCommit === true),
       capabilities: exact,
       supportedLifetimes: [...offeredLifetimes],
     },

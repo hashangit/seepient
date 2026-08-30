@@ -81,6 +81,17 @@ describe('SDK opts.model override', () => {
     const agent = await createAgent({ tools: [], model: 'override-agent' });
     await agent.chat('hi');
 
-    expect(runAgentLoopMock.mock.calls[0][0].modelOverride).toBe('override-agent');
+    expect(runAgentLoopMock.mock.calls[0][0].modelOverride).toEqual({ model: 'override-agent', providerAccount: undefined });
+  });
+
+  it('createAgent switchProvider routes subsequent chats through the account + model', async () => {
+    const { runAgentLoopMock } = mockEntryPoints('resolved-default-model');
+    const { createAgent } = await import('../agent.js');
+
+    const agent = await createAgent({ tools: [] });
+    await agent.switchProvider('main', 'switched-model');
+    await agent.chat('hi');
+
+    expect(runAgentLoopMock.mock.calls[0][0].modelOverride).toEqual({ model: 'switched-model', providerAccount: 'main' });
   });
 });

@@ -212,7 +212,16 @@ Current layout of the Obsidian vault (annotated):
 │       ├── research.md               # Ultra-deep review evidence (HEAD 3827eb3) + decision ledger D1–D15
 │       ├── data-model.md             # CommitHelperProbe+digest, manifest.json, jsFsFallbackOptIn, commit-files edit ops, allowlist setting
 │       ├── contracts/                # native-helper-protocol, exact-commit-gating, trusted-host-allowlist
-│       └── quickstart.md             # QS-0.1–QS-2.3 validation scenarios + production budgets
+│       ├── quickstart.md             # QS-0.1–QS-2.3 validation scenarios + production budgets
+│       └── tasks.md                  # T001–T041 dependency-ordered, US1–US7 story phases, test-first gates
+│   └── 020-custom-tool-execution-parity/ # Custom-tool execution parity (020 — plan+tasks complete, 0.6.0)
+│       ├── spec.md                   # Make preparedTool/brokerConnector execute; FR-001–FR-009, M1–M14, SC-001–SC-006
+│       ├── plan.md                   # P0 draft contract+constructor → P1 preparedTool dispatch (SDK roots + factory seam) → P2 connector registry → P3 export restoration + decision table
+│       ├── research.md               # 0.5.7 review evidence E1–E10 + decisions D1–D16 (incl. review amendments F1–F7, R1–R4)
+│       ├── data-model.md             # ToolRegistrationMap, PreparedActionDraft + constructor table, connector registry, error codes
+│       ├── contracts/                # prepared-tool-execution, broker-connector-registry, trust-model-selection (decision table)
+│       ├── quickstart.md             # QS-0.1–QS-3.3 validation scenarios + QS-P production budgets
+│       └── tasks.md                  # T001–T023 dependency-ordered, US1–US4 story phases, test-first gates
 ├── 010-provider-management-redesign/ # Provider mgmt redesign: contracts + runtime + purpose/tier routing
 │   ├── spec.md                       # Problem, 5 blockers + 4 gaps, scope decisions, success criteria
 │   ├── plan.md                       # P0-P7 phased plan (contracts → Pi adapter → runtime → resolution → surfaces → reliability)
@@ -362,7 +371,6 @@ Env vars per provider: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GLM_API_KEY`, `OP
 
 ## Known Gaps
 
-- Image and prompt-optimizer tools (`src/capabilities/tools/image.ts`, `prompt-optimizer.ts`) import the OpenAI SDK directly — should route through a `capabilities/media/` vendor-neutral interface
 - Gateway registration (`src/capabilities/gateway/index.ts`) imports from Domain's `tool-executor` — should be wired at the composition root
 - `use_skill` tool imports Skills internals directly — activation should be owned by Domain's skill invoker
 - No automated layer-boundary lint enforcement yet — vendor quarantine and import-direction rules are aspirational
@@ -452,6 +460,38 @@ Keep `CONTEXT.md` under 20 lines total. Do NOT summarize the full conversation �
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
+- **UPCOMING (plan + tasks complete — implementation next, branch `020-custom-tool-execution-parity`, target 0.6.0)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/020-custom-tool-execution-parity/plan.md`
+  — Custom-tool execution parity (020): 008's two policy-governed custom-tool
+  rungs are contract-only (T005 types + T304 registration shipped; analyzer
+  dispatch never consults SDK registrations — `resolveAnalyzerWithFallback`
+  sends every custom name to trusted-host, and a `preparedTool` today is denied
+  `outside-ceiling` with a misleading allowlist remediation, then would fail
+  `HOST_TOOL_NOT_REGISTERED`). 0.5.7 trimmed their entry exports after review
+  (P0) and shipped `trustedHostTool` alone. 020 builds the missing road:
+  P0 `PreparedActionDraft` contract amendment (M13 — authors return
+  `{operation, effects, risk, display}`; the platform stamps identity and
+  digests, eliminating forgeable fields instead of checking them; analyzer JS
+  stays application TCB per 008 D41) + fail-closed constructor with teaching
+  error codes. P1 dispatch: a Domain wrapper (`makeRegistrationAnalyzer`) is
+  consulted at the `agent-loop.ts` call site before the trusted-host
+  fallback — the Capabilities resolver stays untouched (no upward import,
+  D16); registrations ride the `WiredActionLifecycle`, wired from the three
+  SDK roots, with the lifecycle-factory seam carrying parity for other roots
+  (server pipeline is a deny-all stub today — `unsupportedBoundary` — and the
+  CLI class has no registration input; lazy path stays string-only, M12/D15),
+  deny-messaging fix (FR-009), full
+  policy/approval/boundary/audit parity with built-in analyzers. P2
+  `brokerConnector`: closed v1 connector registry (web-search first — wraps
+  the existing `kind:"broker"` operation), data-only mapping evaluator (JSON
+  Pointers, constants), secretRefs resolved at execution only, placement by
+  construction (resolved values never reach outputs/audit, D14). P3 restores
+  the trimmed exports in the same release as their execution paths (M9 — no
+  surface-before-road repeat), fixes `tools` typing to an element union
+  `(string | UserToolDefinition | AnyToolRegistration)[]`, and ships the
+  decision table + per-rung authoring guides (embedder compliance burden is a
+  deliverable). Acceptance reference: Personal-Finances-style five-tool
+  mixed-rung agent (SC-006/M10). Tasks T001–T023 (US1 constructor → US2
+  dispatch → US3 connectors → US4 restoration; MVP = T001–T005).
 - **SHIPPED (Spec 017 complete, v0.6.0, branch `017-permission-tool-baseline`)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/017-permission-tool-baseline/plan.md`
   — Permission tool baseline & consent modes (017): repairs the R9.1 pipeline's
   hardcoded local deployment ceiling, which omits every capability kind the
@@ -471,7 +511,7 @@ shell commands, and other important information, read the current plan:
   `permissionLevel`, the legacy matrix/grants path, and the pipeline opt-out.
   Enforcement (sandbox, SSRF broker, immutable denies, audit, secret
   withholding) is mode-invariant. Ships 0.5.3 (repair) then 0.6.0 (modes).
-- **UPCOMING (plan complete — tasks next, branch `019-exact-commit-enforcement`)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/019-exact-commit-enforcement/plan.md`
+- **SHIPPED (spec 019 complete, branch `019-exact-commit-enforcement`)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/019-exact-commit-enforcement/plan.md`
   — Exact-commit enforcement & native helper completion (019): the 008 exact-commit
   architecture shipped as scaffolding — the Rust helper `seepient-fs-commit` was never
   built or packaged, `edit_file` bypasses `FileCommitBroker` entirely (trusted-host op
@@ -479,17 +519,20 @@ shell commands, and other important information, read the current plan:
   EXACT_COMMIT_UNAVAILABLE *after* approval on CLI/TUI/REPL/SDK-pipeline while the
   SDK lazy path silently uses unguarded JS writes (`allowFallback ?? true`), policy
   never consumes `exactCommit`, and prompts promise "exact commit" unconditionally.
-  P0 (no binary): policy pre-prompt gate mirroring the process-containment gate with
-  `SEEPIENT_ALLOW_JS_FS_FALLBACK=1` as the single fail-closed opt-in; edit_file →
-  commit-files conversion (prep-time patch application via
-  `ToolAnalysisContext.snapshotStore`); hardened interim fallback (expected-snapshot
+  P0 (no binary): policy pre-prompt gate in the backend-support section
+  (coverage-proof against pre-granted caps) with
+  `SEEPIENT_ALLOW_JS_FS_FALLBACK=1` as the single fail-closed opt-in; read-side
+  snapshot/tag parity in ReadFileExecutor + edit_file → commit-files conversion
+  (prep-time patch application via `ToolAnalysisContext.snapshotStore`); hardened
+  interim fallback (expected-snapshot
   verify + finalSymlink reject); registry-only TrustedHostExecutor + operator
   allowlist replacing the blanket ceiling exemption; `.env` planting filter; probe
   digest verification prep; status line. P1: internal Rust crate `native/fs-commit`
   (exact wrapper protocol, openat2 / openat+O_NOFOLLOW walk), CI matrix
   (darwin-arm64/x64, linux-x64/arm64), checksummed binaries +
   `dist/native-fs-commit/manifest.json` embedded in the npm tarball (crates.io
-  deferred to v1.0); generate_image destinations route through commit-files.
+  deferred to v1.0); generate_image destinations saved via broker→commit executor
+  chaining (outputCommit on the broker op; no network at analysis).
   P2: delete the fallback + allowFallback surface entirely (no legacy baggage),
   Windows documented chat+read-only, capability-matrix derives from probe.
   Sequencing rule M10: no strictness change ships before the remedy that keeps its
