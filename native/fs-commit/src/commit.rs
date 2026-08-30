@@ -285,7 +285,12 @@ pub fn commit_file(
 fn final_component_is_symlink(dir_fd: libc::c_int, name: &CString) -> bool {
     let fd = unsafe { libc::openat(dir_fd, name.as_ptr(), O_PATH_FLAGS) };
     if fd >= 0 {
+        let mut st: libc::stat = unsafe { std::mem::zeroed() };
+        let res = unsafe { libc::fstat(fd, &mut st) };
         unsafe { libc::close(fd) };
+        if res == 0 && (st.st_mode & libc::S_IFMT) == libc::S_IFLNK {
+            return true;
+        }
         false
     } else {
         let errno = errno_of(std::io::Error::last_os_error());
