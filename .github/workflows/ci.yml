@@ -61,7 +61,7 @@ jobs:
       matrix:
         include:
           - { os: macos-14, target: aarch64-apple-darwin, cross: '' }
-          - { os: macos-13, target: x86_64-apple-darwin, cross: '' }
+          - { os: macos-14, target: x86_64-apple-darwin, cross: '' }
           - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, cross: '' }
           - { os: ubuntu-24.04, target: aarch64-unknown-linux-gnu, cross: 'aarch64-linux-gnu-gcc' }
 
@@ -84,7 +84,7 @@ jobs:
 
       - name: Crate unit + integration tests (native targets)
         if: matrix.cross == ''
-        run: cargo test --manifest-path native/fs-commit/Cargo.toml --release
+        run: cargo test --manifest-path native/fs-commit/Cargo.toml --release --target ${{ matrix.target }}
 
       - name: Build release binary (${{ matrix.target }})
         run: cargo build --manifest-path native/fs-commit/Cargo.toml --release --target ${{ matrix.target }}
