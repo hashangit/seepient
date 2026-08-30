@@ -59,9 +59,9 @@ const PASTE_OPEN = /(?:\x1b)?\[200~/;
 const PASTE_CLOSE = /(?:\x1b)?\[201~/;
 
 // A chunk following another within this window is machine-paced (a paste
-// split across stdin chunks); the fastest human typists bottom out ≈35ms
-// between keystrokes, so 10ms can never swallow a real Enter.
-const RAPID_CHUNK_MS = 10;
+// split across stdin chunks); human typists bottom out ≈35ms between
+// keystrokes, so 20ms separates machine bursts from human Enter.
+const RAPID_CHUNK_MS = 20;
 
 /** Terminals send pasted newlines as CRLF or CR — the value stores '\n'. */
 function normalizeNewlines(s: string): string {
