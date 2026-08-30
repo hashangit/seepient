@@ -65,7 +65,7 @@ export type BrokeredEffectRequest =
        * successful fetch the BrokerExecutor hands the output artifact to
        * the FileCommitBroker. Analysis performs NO network I/O.
        */
-      outputCommit?: { destination: CanonicalPathTarget };
+      outputCommit?: { destination: CanonicalPathTarget; destinations?: CanonicalPathTarget[] };
     }
   | {
       kind: "external-send";
@@ -82,6 +82,7 @@ export type BrokeredEffectRequest =
       operation: string;
       input: JsonValue;
       secretRefs: string[];
+      outputCommit?: { destination: CanonicalPathTarget; destinations?: CanonicalPathTarget[] };
     };
 
 /** Deterministic, tool-owned display data. `agentRationale` is untrusted. */

@@ -9,6 +9,7 @@
 import { createHash } from "node:crypto";
 import * as path from "node:path";
 import { realpathSync as fs_realpathSync, lstatSync as fs_lstatSync } from "node:fs";
+import { spawn } from "node:child_process";
 import type { PreparedToolAction, PreparedOperation } from "../../foundations/contracts/prepared-action.js";
 import type {
   CanonicalPathTarget,
@@ -290,7 +291,7 @@ export async function analyzeEditFile(
   const headerRegex = /^\[([^#\]]+)#[^\]]*\]/gm;
   const matches = [...patchStr.matchAll(headerRegex)];
   if (matches.length === 0) {
-    throw new Error("Invalid patch: no valid [PATH#TAG] section headers found");
+    throw new Error("Invalid patch: no valid [PATH#TAG] section headers found. Expected e.g. [/abs/path.ts#a1f2] where a1f2 is the content-tag from read_file");
   }
   if (!ctx.snapshotStore) {
     const { HashlineError } = await import("../../foundations/errors.js");
@@ -319,7 +320,7 @@ export async function analyzeEditFile(
     const target = await canonicalizePath(section.filePath, cwd);
     if (target.finalSymlink) {
       throw new Error(
-        `Refusing edit: ${target.canonicalPath} is a symbolic link; exact commit would reject it (target-symlink)`,
+        `Refusing edit: ${target.canonicalPath} is a symbolic link; exact commit would reject it (target-symlink). Edit the resolved real path instead.`,
       );
     }
     const bytes = Buffer.from(section.applied, "utf8");
@@ -377,12 +378,102 @@ export async function analyzeEditFile(
   });
 }
 
+export async function checkShellSyntax(
+  commandStr: string,
+  timeoutMs = 1500,
+): Promise<{ valid: boolean; error?: string }> {
+  if (process.platform === "win32") {
+    return { valid: true };
+  }
+  if (typeof commandStr !== "string") {
+    return { valid: true };
+  }
+  return new Promise<{ valid: boolean; error?: string }>((resolve) => {
+    try {
+      const child = spawn("/bin/sh", ["-n", "-c", commandStr], {
+        stdio: ["ignore", "ignore", "pipe"],
+      });
+      let stderr = "";
+      let settled = false;
+
+      const finish = (result: { valid: boolean; error?: string }) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(result);
+        }
+      };
+
+      const timer = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // ignore
+        }
+        finish({ valid: true }); // fail-open on timeout
+      }, timeoutMs);
+
+      child.stderr?.on("data", (chunk: Buffer) => {
+        if (stderr.length < 4096) {
+          stderr += chunk.toString("utf8");
+        }
+      });
+
+      child.on("error", () => {
+        finish({ valid: true }); // fail-open on spawn failure
+      });
+
+      child.on("close", (code) => {
+        if (code === 0 || code === null) {
+          finish({ valid: true });
+        } else {
+          finish({
+            valid: false,
+            error: stderr.trim() || `Shell syntax check failed with exit code ${code}`,
+          });
+        }
+      });
+    } catch {
+      resolve({ valid: true }); // fail-open
+    }
+  });
+}
+
 export async function analyzeExecuteShellCommand(
   args: { command: string; cwd?: string },
   ctx: ToolAnalysisContext,
 ): Promise<PreparedToolAction> {
   const cwd = ctx.workspace.canonicalRoot;
-  const commandStr = args.command;
+  const commandStr = typeof args?.command === "string" ? args.command : String(args?.command ?? "");
+
+  const syntaxCheck = await checkShellSyntax(commandStr);
+  if (!syntaxCheck.valid) {
+    const diagnostic = syntaxCheck.error ? `${syntaxCheck.error}\n\n` : "";
+    const errorMessage = `Shell syntax error:\n${diagnostic}Fix the quoting and retry: prefer single quotes around arguments containing spaces or special characters; ensure every opening quote is closed.`;
+    const operation: PreparedOperation = {
+      kind: "none",
+      result: {
+        output: errorMessage,
+        success: false,
+        metadata: { code: "SHELL_SYNTAX_INVALID" },
+      },
+    };
+    return buildAction({
+      toolName: "execute_shell_command",
+      ctx,
+      args,
+      argsDigest: digestArgs(args),
+      effects: [],
+      operation,
+      display: {
+        title: `Execute shell command`,
+        summary: commandStr,
+        canonicalTargets: [cwd],
+      },
+      risk: "safe",
+    });
+  }
+
   const executable = process.platform === "win32" ? "cmd.exe" : "/bin/sh";
   const argv = process.platform === "win32" ? ["/c", commandStr] : ["-c", commandStr];
 
@@ -662,74 +753,137 @@ export async function analyzeSendNotification(
 }
 
 export async function analyzeGenerateImage(
-  args: { prompt: string; image_path?: string },
+  args: {
+    prompt?: string;
+    output_path?: string;
+    output_dir?: string;
+    image_path?: string;
+    mask_path?: string;
+    mode?: string;
+    model?: string;
+    n?: number;
+    size?: string;
+    quality?: string;
+    style?: string;
+  } & Record<string, any>,
   ctx: ToolAnalysisContext,
 ): Promise<PreparedToolAction> {
-  const { resolveCredentials } = await import("../../foundations/security/credential-resolver.js");
-  const creds = resolveCredentials();
+  const prompt = typeof args?.prompt === "string" ? args.prompt : "";
 
-  const isLocal =
-    process.env.SEEPIENT_LOCAL_MEDIA === "1" ||
-    process.env.SEEPIENT_MEDIA_RUNTIME === "local";
-
-  const rawBaseUrl =
-    creds.openaiBaseUrl ||
-    process.env.OPENAI_COMPAT_BASE_URL ||
-    process.env.OPENAI_BASE_URL ||
-    "https://api.openai.com/v1";
-
-  let destination: NetworkDestination;
-  try {
-    const u = new URL(rawBaseUrl.startsWith("http") ? rawBaseUrl : `https://${rawBaseUrl}`);
-    destination = {
-      scheme: u.protocol === "http:" ? "http" : "https",
-      host: u.hostname,
-      port: u.port ? Number(u.port) : undefined,
-      pathPrefix: u.pathname.endsWith("/v1")
-        ? `${u.pathname}/images/generations`
-        : `${u.pathname.replace(/\/$/, "")}/v1/images/generations`,
-    };
-  } catch {
-    destination = { scheme: "https", host: "api.openai.com", pathPrefix: "/v1/images/generations" };
+  // Analysis-time reachability check via probe
+  if (ctx.imageCapabilityProbe) {
+    try {
+      const probeResult = await ctx.imageCapabilityProbe();
+      if (!probeResult.reachable) {
+        const effects: EffectRequest[] = [];
+        const operation: PreparedOperation = {
+          kind: "none",
+          result: {
+            output: `[setup required] generate_image needs an image provider configured. Run /models or configure a provider with the media.image purpose.\n${probeResult.reason ?? ""}`.trim(),
+            success: false,
+            metadata: { code: "SETUP_REQUIRED" },
+          },
+        };
+        return buildAction({
+          toolName: "generate_image",
+          ctx,
+          args,
+          argsDigest: digestArgs(args),
+          effects,
+          operation,
+          display: { title: "Generate image", summary: "setup required", canonicalTargets: [] },
+          risk: "safe",
+        });
+      }
+    } catch (err: any) {
+      const effects: EffectRequest[] = [];
+      const operation: PreparedOperation = {
+        kind: "none",
+        result: {
+          output: `[setup required] generate_image needs an image provider configured. Run /models.\n${err?.message ?? ""}`.trim(),
+          success: false,
+          metadata: { code: "SETUP_REQUIRED" },
+        },
+      };
+      return buildAction({
+        toolName: "generate_image",
+        ctx,
+        args,
+        argsDigest: digestArgs(args),
+        effects,
+        operation,
+        display: { title: "Generate image", summary: "setup required", canonicalTargets: [] },
+        risk: "safe",
+      });
+    }
   }
 
-  const secretRefs = ["OPENAI_API_KEY"];
-  const payloadBytes = Buffer.from(JSON.stringify({ prompt: args.prompt, n: 1, size: "1024x1024" }), "utf8");
-  const payloadArtifact = await ctx.artifacts.put(payloadBytes, "application/json");
+  const cwd = ctx.workspace.canonicalRoot;
 
-  // Spec 019 (FR-011): a file destination adds a filesystem-write effect at
-  // analysis time (policy demands the commit-file cap, prompts honestly)
-  // and rides the broker operation as outputCommit. No network I/O happens
-  // here — the fetched bytes only exist after dispatch, where
-  // BrokerExecutor hands them to FileCommitBroker (executor chaining).
-  let outputCommit: { destination: CanonicalPathTarget } | undefined;
-  if (typeof args.image_path === "string" && args.image_path.length > 0) {
-    const target = await canonicalizePath(args.image_path, ctx.workspace.canonicalRoot);
-    if (target.finalSymlink) {
-      throw new Error(
-        `Refusing image save: ${target.canonicalPath} is a symbolic link; exact commit would reject it (target-symlink)`,
+  // Resolve input targets (read side-effect if image_path or mask_path is provided)
+  const inputTargets = await Promise.all(
+    [args.image_path, args.mask_path]
+      .filter((p): p is string => typeof p === "string" && p.length > 0)
+      .map((p) => canonicalizePath(p, cwd)),
+  );
+
+  // Resolve save destination: output_path takes precedence over output_dir, defaulting to workspace root
+  const count = typeof args.n === "number" && args.n > 0 ? Math.floor(args.n) : 1;
+  const promptDigest = createHash("sha256").update(prompt || generateId()).digest("hex").slice(0, 12);
+  const destinationPaths: string[] = [];
+
+  if (typeof args.output_path === "string" && args.output_path.trim().length > 0) {
+    const rawPath = args.output_path.trim();
+    if (count === 1) {
+      destinationPaths.push(rawPath);
+    } else {
+      for (let i = 0; i < count; i++) {
+        destinationPaths.push(
+          rawPath.replace(/(\.[a-zA-Z0-9]+)?$/, (match) => `-${i + 1}${match || ".png"}`),
+        );
+      }
+    }
+  } else if (typeof args.output_dir === "string" && args.output_dir.trim().length > 0) {
+    const rawDir = args.output_dir.trim();
+    for (let i = 0; i < count; i++) {
+      destinationPaths.push(
+        path.join(rawDir, count === 1 ? `image-${promptDigest}.png` : `image-${promptDigest}-${i + 1}.png`),
       );
     }
-    outputCommit = { destination: target };
+  } else {
+    for (let i = 0; i < count; i++) {
+      destinationPaths.push(
+        path.join(cwd, count === 1 ? `image-${promptDigest}.png` : `image-${promptDigest}-${i + 1}.png`),
+      );
+    }
   }
 
+  const targets: CanonicalPathTarget[] = [];
+  for (const p of destinationPaths) {
+    const target = await canonicalizePath(p, cwd);
+    if (target.finalSymlink) {
+      throw new Error(
+        `Refusing image save: ${target.canonicalPath} is a symbolic link; exact commit would reject it (target-symlink). Use the resolved real path instead.`,
+      );
+    }
+    targets.push(target);
+  }
+
+  const outputCommit: { destination: CanonicalPathTarget; destinations: CanonicalPathTarget[] } = {
+    destination: targets[0],
+    destinations: targets,
+  };
+
   const effects: EffectRequest[] = [
-    ...(isLocal
-      ? []
-      : [
-          { kind: "network-egress" as const, destinations: [destination] },
-          { kind: "secret-use" as const, secretRefs },
-        ]),
-    ...(outputCommit
-      ? [
-          {
-            kind: "filesystem-write" as const,
-            targets: [
-              { target: outputCommit.destination, mode: "create" as const, expected: snapshotPath(outputCommit.destination) },
-            ],
-          },
-        ]
-      : []),
+    { kind: "network-egress", destinations: [{ scheme: "https", host: "*" }] },
+    {
+      kind: "filesystem-write" as const,
+      targets: targets.map((t) => ({
+        target: t,
+        mode: "create" as const,
+        expected: snapshotPath(t),
+      })),
+    },
     {
       kind: "model-egress",
       providerClass: ctx.modelProviderClass,
@@ -738,24 +892,39 @@ export async function analyzeGenerateImage(
     },
   ];
 
-  const operation: PreparedOperation = isLocal
-    ? {
-        kind: "none",
-        result: { output: "image generated locally", success: true },
-      }
-    : {
-        kind: "broker",
-        request: {
-          kind: "http",
-          requestId: generateId(),
-          destination,
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: payloadArtifact,
-          secretRefs,
-          ...(outputCommit ? { outputCommit } : {}),
-        },
-      };
+  if (inputTargets.length > 0) {
+    effects.unshift({
+      kind: "filesystem-read",
+      targets: inputTargets,
+      sensitivity: "normal",
+    });
+  }
+
+  const inputObj: Record<string, import("../../foundations/contracts/tool-effects.js").JsonValue> = {};
+  if (args.prompt !== undefined) inputObj.prompt = args.prompt;
+  if (outputCommit) inputObj.outputPath = outputCommit.destination.canonicalPath;
+  if (args.image_path !== undefined) inputObj.imagePath = args.image_path;
+  if (args.mask_path !== undefined) inputObj.maskPath = args.mask_path;
+  if (args.mode !== undefined) inputObj.mode = args.mode;
+  if (args.model !== undefined) inputObj.model = args.model;
+  if (args.n !== undefined) inputObj.n = args.n;
+  if (args.size !== undefined) inputObj.size = args.size;
+  if (args.quality !== undefined) inputObj.quality = args.quality;
+  if (args.style !== undefined) inputObj.style = args.style;
+  if (args.output_dir !== undefined) inputObj.outputDir = args.output_dir;
+
+  const operation: PreparedOperation = {
+    kind: "broker",
+    request: {
+      kind: "vendor-operation",
+      requestId: generateId(),
+      connector: "media",
+      operation: "generate_image",
+      input: inputObj,
+      secretRefs: [],
+      ...(outputCommit ? { outputCommit } : {}),
+    },
+  };
 
   return buildAction({
     toolName: "generate_image",
@@ -766,12 +935,10 @@ export async function analyzeGenerateImage(
     operation,
     display: {
       title: `Generate image${outputCommit ? " → " + outputCommit.destination.basename : ""}`,
-      summary: args.prompt.slice(0, 60),
+      summary: prompt.slice(0, 60),
       canonicalTargets: outputCommit
         ? [outputCommit.destination.canonicalPath]
-        : isLocal
-          ? []
-          : [`${destination.scheme}://${destination.host}${destination.pathPrefix ?? ""}`],
+        : [],
     },
     risk: "safe",
   });
@@ -800,49 +967,14 @@ export async function analyzeTakeScreenshot(
 }
 
 export async function analyzeOptimizePrompt(
-  args: { raw_prompt: string; context?: string } | Record<string, any>,
+  args: { raw_prompt?: string; context?: string } | Record<string, any>,
   ctx: ToolAnalysisContext,
 ): Promise<PreparedToolAction> {
-  const { resolveCredentials } = await import("../../foundations/security/credential-resolver.js");
-  const creds = resolveCredentials();
-
-  const isLocal =
-    process.env.SEEPIENT_LOCAL_PROMPT === "1" ||
-    process.env.SEEPIENT_MEDIA_RUNTIME === "local";
-
-  const rawBaseUrl =
-    creds.openaiBaseUrl ||
-    process.env.OPENAI_COMPAT_BASE_URL ||
-    process.env.OPENAI_BASE_URL ||
-    "https://api.openai.com/v1";
-
-  let destination: NetworkDestination;
-  try {
-    const u = new URL(rawBaseUrl.startsWith("http") ? rawBaseUrl : `https://${rawBaseUrl}`);
-    destination = {
-      scheme: u.protocol === "http:" ? "http" : "https",
-      host: u.hostname,
-      port: u.port ? Number(u.port) : undefined,
-      pathPrefix: u.pathname.endsWith("/v1")
-        ? `${u.pathname}/chat/completions`
-        : `${u.pathname.replace(/\/$/, "")}/v1/chat/completions`,
-    };
-  } catch {
-    destination = { scheme: "https", host: "api.openai.com", pathPrefix: "/v1/chat/completions" };
-  }
-
   const promptText = (args && typeof args === "object" ? ((args as any).raw_prompt ?? "") : "") as string;
-  const secretRefs = ["OPENAI_API_KEY"];
-  const payloadBytes = Buffer.from(JSON.stringify({ raw_prompt: promptText }), "utf8");
-  const payloadArtifact = await ctx.artifacts.put(payloadBytes, "application/json");
+  const contextText = (args && typeof args === "object" ? ((args as any).context ?? undefined) : undefined) as string | undefined;
 
   const effects: EffectRequest[] = [
-    ...(isLocal
-      ? []
-      : [
-          { kind: "network-egress" as const, destinations: [destination] },
-          { kind: "secret-use" as const, secretRefs },
-        ]),
+    { kind: "network-egress", destinations: [{ scheme: "https", host: "*" }] },
     {
       kind: "model-egress",
       providerClass: ctx.modelProviderClass,
@@ -851,23 +983,24 @@ export async function analyzeOptimizePrompt(
     },
   ];
 
-  const operation: PreparedOperation = isLocal
-    ? {
-        kind: "none",
-        result: { output: promptText, success: true },
-      }
-    : {
-        kind: "broker",
-        request: {
-          kind: "http",
-          requestId: generateId(),
-          destination,
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: payloadArtifact,
-          secretRefs,
-        },
-      };
+  const optInput: Record<string, import("../../foundations/contracts/tool-effects.js").JsonValue> = {
+    raw_prompt: promptText,
+  };
+  if (contextText !== undefined) {
+    optInput.context = contextText;
+  }
+
+  const operation: PreparedOperation = {
+    kind: "broker",
+    request: {
+      kind: "vendor-operation",
+      requestId: generateId(),
+      connector: "media",
+      operation: "optimize_prompt",
+      input: optInput,
+      secretRefs: [],
+    },
+  };
 
   return buildAction({
     toolName: "optimize_prompt",
@@ -879,7 +1012,7 @@ export async function analyzeOptimizePrompt(
     display: {
       title: "Optimize prompt",
       summary: promptText.slice(0, 60),
-      canonicalTargets: isLocal ? [] : [`${destination.scheme}://${destination.host}${destination.pathPrefix ?? ""}`],
+      canonicalTargets: [],
     },
     risk: "safe",
   });

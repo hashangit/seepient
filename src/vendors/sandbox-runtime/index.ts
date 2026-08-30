@@ -201,8 +201,10 @@ export class UncontainedSandbox implements NativeProcessSandbox {
  * SHELL MODEL (review P1 fix): the SDK's only argv path is
  * `wrapWithSandboxArgv`, which emits `[shell, -c, wrapped]` — argument-array
  * exec is not offered by the SDK. The adapter therefore enforces a strict
- * shell-quoting model: every argv token is single-quoted with `'\''`
- * escaping, and environment KEYS are validated against a POSIX name regex
+ * shell-quoting model: every argv token is double-quoted with backslash
+ * escaping for `"`, `$`, `\`, and backticks (because the SDK's own layer
+ * re-quotes the full command line in single quotes, double-quoting survives
+ * untouched), and environment KEYS are validated against a POSIX name regex
  * (invalid keys are dropped, never interpolated). Environment values are
  * always shell-quoted. This is documented in the 008 sandbox contract.
  */

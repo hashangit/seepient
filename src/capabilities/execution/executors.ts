@@ -424,23 +424,6 @@ export class BrokerExecutor implements OperationExecutor {
         };
       }
     }
-    if (action.toolName === "generate_image" && !creds.openaiApiKey && !creds.openaiBaseUrl) {
-      const failure = createSetupFailure("generate_image", "OpenAI API key (or image provider credentials)", "OPENAI_API_KEY / image.apiKey");
-      return {
-        state: "failed",
-        error: {
-          code: "SETUP_REQUIRED",
-          message: failure.message,
-          retryable: false,
-        },
-        evidence: {
-          backend: "local-native",
-          actionDigest: action.actionDigest,
-          executorId: "broker-preflight",
-          operationKind: "broker",
-        },
-      };
-    }
 
     const auth = {
       leaseId: envelope.envelopeId,
@@ -474,7 +457,9 @@ export class BrokerExecutor implements OperationExecutor {
     // the filesystem-write effect). A refusal here discards the fetched
     // result — the write either happens exactly, or not at all.
     const outputCommit =
-      operation.request.kind === "http" ? operation.request.outputCommit : undefined;
+      operation.request.kind === "http" || operation.request.kind === "vendor-operation"
+        ? (operation.request as any).outputCommit
+        : undefined;
     let committedPath: string | undefined;
     if (outputCommit) {
       if (!this.commitBroker || !this.artifacts) {
@@ -494,53 +479,66 @@ export class BrokerExecutor implements OperationExecutor {
           },
         };
       }
-      const imageBytes = await this.extractImageBytes(result.output);
-      if (!imageBytes) {
-        return {
-          state: "failed",
-          error: {
-            code: "OUTPUT_NOT_COMMITTABLE",
-            message: "Provider response carried no decodable image bytes (expected b64_json or a binary body); nothing was written.",
-            retryable: false,
-          },
-          evidence: {
-            backend: "local-native",
-            actionDigest: action.actionDigest,
-            executorId: "broker",
-            operationKind: "broker",
-            effectiveDestinations: result.effectiveDestination ? [result.effectiveDestination] : [],
-          },
-        };
+      const artifactsList = result.outputs && result.outputs.length > 0 ? result.outputs : result.output ? [result.output] : [];
+      const destTargets = outputCommit.destinations && outputCommit.destinations.length > 0 ? outputCommit.destinations : [outputCommit.destination];
+      const committedPaths: string[] = [];
+
+      for (let i = 0; i < artifactsList.length; i++) {
+        const art = artifactsList[i];
+        const destTarget = destTargets[i] ?? destTargets[0];
+        const imageBytes = await this.extractImageBytes(art);
+        if (!imageBytes) {
+          return {
+            state: "failed",
+            error: {
+              code: "OUTPUT_NOT_COMMITTABLE",
+              message: "Provider response carried no decodable image bytes (expected b64_json or a binary body); nothing was written.",
+              retryable: false,
+            },
+            evidence: {
+              backend: "local-native",
+              actionDigest: action.actionDigest,
+              executorId: "broker",
+              operationKind: "broker",
+              effectiveDestinations: result.effectiveDestination ? [result.effectiveDestination] : [],
+            },
+          };
+        }
+        try {
+          const meta = await this.commitBroker.commit({
+            envelope,
+            destination: destTarget.canonicalPath,
+            content: imageBytes,
+            expected: undefined,
+          });
+          committedPaths.push(meta.path);
+        } catch (err) {
+          return {
+            state: "failed",
+            error: {
+              code: "COMMIT_FAILED",
+              message: `Fetch succeeded but the exact commit was refused: ${err instanceof Error ? err.message : String(err)}`,
+              retryable: false,
+            },
+            evidence: {
+              backend: "local-native",
+              actionDigest: action.actionDigest,
+              executorId: "broker",
+              operationKind: "broker",
+              effectiveDestinations: result.effectiveDestination ? [result.effectiveDestination] : [],
+            },
+          };
+        }
       }
-      try {
-        const meta = await this.commitBroker.commit({
-          envelope,
-          destination: outputCommit.destination.canonicalPath,
-          content: imageBytes,
-          expected: undefined,
-        });
-        committedPath = meta.path;
-      } catch (err) {
-        return {
-          state: "failed",
-          error: {
-            code: "COMMIT_FAILED",
-            message: `Fetch succeeded but the exact commit was refused: ${err instanceof Error ? err.message : String(err)}`,
-            retryable: false,
-          },
-          evidence: {
-            backend: "local-native",
-            actionDigest: action.actionDigest,
-            executorId: "broker",
-            operationKind: "broker",
-            effectiveDestinations: result.effectiveDestination ? [result.effectiveDestination] : [],
-          },
-        };
-      }
+      committedPath = committedPaths.join(", ");
     }
 
     let outputText = "ok";
-    if (result.output && this.artifacts) {
+    if (action.toolName === "generate_image" && !committedPath) {
+      outputText = result.output
+        ? `Image generated successfully (artifact: ${result.output.artifactId}, ${result.output.byteLength} bytes)`
+        : "Image generated successfully";
+    } else if (result.output && this.artifacts) {
       try {
         const bytes = await this.artifacts.read(result.output);
         let text = new TextDecoder().decode(bytes);

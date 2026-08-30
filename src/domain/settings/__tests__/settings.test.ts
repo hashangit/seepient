@@ -67,7 +67,6 @@ describe('settings-schema', () => {
   });
 
   it('isSecretField identifies secret fields', () => {
-    expect(isSecretField('image.apiKey')).toBe(true);
     expect(isSecretField('smtp.pass')).toBe(true);
     expect(isSecretField('search.tavilyApiKey')).toBe(true);
     expect(isSecretField('smtp.host')).toBe(false);
@@ -147,11 +146,11 @@ describe('SettingsManager', () => {
 
   it('get() masks secret fields', () => {
     const mgr = createTestManager({
-      imageApiKey: 'sk-abcdef1234567890',
+      tavilyApiKey: 'tvly-abcdef1234567890',
     });
-    const result = mgr.get('image.apiKey');
+    const result = mgr.get('search.tavilyApiKey');
     expect(result.masked).toBe(true);
-    expect(result.value).toBe('sk-...7890');
+    expect(result.value).toBe('tvl...7890');
   });
 
   it('get() throws SettingsError for unknown key', () => {
@@ -186,8 +185,8 @@ describe('SettingsManager', () => {
 
   it('set() rejects invalid number values', async () => {
     const mgr = createTestManager();
-    await expect(mgr.set('image.n', 'abc')).rejects.toThrow(SettingsError);
-    await expect(mgr.set('image.n', 'abc')).rejects.toThrow('must be a number');
+    await expect(mgr.set('permissions.approvalTimeoutMs', 'abc')).rejects.toThrow(SettingsError);
+    await expect(mgr.set('permissions.approvalTimeoutMs', 'abc')).rejects.toThrow('must be a number');
   });
 
   it('set() rejects invalid boolean values', async () => {

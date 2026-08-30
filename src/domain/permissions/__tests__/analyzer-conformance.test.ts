@@ -15,14 +15,13 @@ import type { ToolAnalysisContext } from "../../../foundations/contracts/custom-
 import type { PolicyContext } from "../../../foundations/contracts/permission-policy.js";
 import { createSnapshotStore, tagFor } from "../../../foundations/hashline/snapshot-store.js";
 
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // A REAL temp workspace: edit_file's analyzer reads current file content at
 // analysis time, so the patched path must exist on disk.
-const MOCK_WORKSPACE = mkdtempSync(join(tmpdir(), "seepient-conformance-"));
-mkdirSync(MOCK_WORKSPACE, { recursive: true });
+const MOCK_WORKSPACE = realpathSync(mkdtempSync(join(tmpdir(), "seepient-conformance-")));
 writeFileSync(join(MOCK_WORKSPACE, "test.txt"), "hello\n", "utf8");
 
 const artifacts = new InMemoryArtifactStore();

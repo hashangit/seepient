@@ -134,11 +134,11 @@ Point your SDK client or HTTP calls at the deployed server:
 ### SDK Configuration
 
 ```typescript
-import { configureProviders } from "seepient";
+import { generateText } from "seepient";
 
-configureProviders({
-  openai: { apiKey: process.env.OPENAI_API_KEY },
-  default: "openai",
+// In-process SDK calls automatically read provider configuration from environment
+const result = await generateText("Hello", {
+  model: "gpt-5.4",
 });
 ```
 

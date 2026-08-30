@@ -277,7 +277,20 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     // store the legacy handlers use); one instance backs read-side tagging
     // AND analysis-time patch application.
     const snapshotStore = (config as { snapshotStore?: import("../foundations/hashline/snapshot-store.js").SnapshotStore } | undefined)?.snapshotStore;
-    const { boundary } = await buildLocalBoundary({ artifacts, hostCallbacks, workspaceRoot: options.cwd ?? process.cwd(), snapshotStore, commitHelper: options.commitHelper });
+
+    const { createMediaVendorOperationHandler } = await import("./media/vendor-operation-handler.js");
+    const vendorOperationHandler = runtime
+      ? createMediaVendorOperationHandler({ runtime, artifacts, signal })
+      : undefined;
+
+    const { boundary } = await buildLocalBoundary({
+      artifacts,
+      hostCallbacks,
+      workspaceRoot: options.cwd ?? process.cwd(),
+      snapshotStore,
+      commitHelper: options.commitHelper,
+      vendorOperationHandler,
+    });
     const broker = approveTool
       ? legacyApproveToolToBroker(approveTool)
       : autoConfirm
@@ -325,6 +338,18 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
       modelProviderClass = initialPlan.selectedTarget?.providerAccount || "normal";
     } catch {}
 
+    const imageCapabilityProbe = runtime
+      ? async () => {
+          try {
+            const snapshot = await runtime.createTurnSnapshot();
+            await runtime.resolvePlan(snapshot, "image-generation");
+            return { reachable: true };
+          } catch (e) {
+            return { reachable: false, reason: e instanceof Error ? e.message : String(e) };
+          }
+        }
+      : undefined;
+
     wiredPipeline = await buildActionLifecycle({
       principalId: "agent-user",
       runId: generateId(),
@@ -335,6 +360,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
       executionBoundary: boundary,
       artifacts,
       snapshotStore,
+      imageCapabilityProbe,
       // The wired host callbacks ARE the composition root's operator intent
       // (spec 019 D8): they join the trusted-host allowlist alongside the
       // settings default.

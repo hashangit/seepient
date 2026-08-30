@@ -11,37 +11,28 @@
  * Plus the take_screenshot denial-message parity check (plan P1 step 3).
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, realpathSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, realpathSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { analyzeGenerateImage } from "../../../capabilities/tools/analyzers.js";
+import { ALL_ANALYZERS } from "../action-lifecycle-factory.js";
 import { BrokerExecutor } from "../../../capabilities/execution/executors.js";
 import { FileCommitBroker } from "../../../capabilities/execution/file-commit-broker.js";
 import { EffectBroker } from "../../../capabilities/execution/effect-broker.js";
 import { InMemoryArtifactStore } from "../../../capabilities/execution/in-memory-artifact-store.js";
 import { createSnapshotStore } from "../../../foundations/hashline/snapshot-store.js";
-import { fakeCommitEnvelope, diskBackedFakeHelper, fakeHelper } from "../../../capabilities/execution/__tests__/helpers/commit-helper-fakes.js";
+import { fakeCommitEnvelope, diskBackedFakeHelper } from "../../../capabilities/execution/__tests__/helpers/commit-helper-fakes.js";
 import type { ToolAnalysisContext } from "../../../foundations/contracts/custom-tools.js";
 import type { CapabilityEnvelope, Capability } from "../../../foundations/contracts/permission-policy.js";
+import type { PreparedToolAction } from "../../../foundations/contracts/prepared-action.js";
 
 /** A minimal PNG header so "raw binary body" extraction has a real payload. */
 const PNG_BYTES = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
 ]);
 
-/** Stub the OpenAI images API: JSON envelope with b64_json (the default). */
-function b64JsonResponse(bytes: Buffer): { status: number; body: string; contentType: string } {
-  return {
-    status: 200,
-    body: JSON.stringify({ data: [{ b64_json: bytes.toString("base64") }] }),
-    contentType: "application/json",
-  };
-}
-
 function envelopeFor(action: { actionDigest: string }, paths: string[]): CapabilityEnvelope {
   const caps: Capability[] = [
-    { kind: "network-destination", scheme: "https", host: "api.openai.com" },
-    { kind: "secret-ref", ref: "OPENAI_API_KEY" },
+    { kind: "network-destination", scheme: "https", host: "*" },
     ...paths.map((p) => ({ kind: "commit-file" as const, path: p })),
   ];
   // The envelope must carry THIS action's digest (lease authority binds the
@@ -57,8 +48,7 @@ describe("image destination via broker chaining (spec 019)", () => {
   let dir: string;
   let artifacts: InMemoryArtifactStore;
   let ctx: ToolAnalysisContext;
-  let effectBroker: EffectBroker;
-  let fetchCalls: number;
+  let vendorCalls: number;
 
   beforeEach(() => {
     dir = realpathSync(mkdtempSync(join(tmpdir(), "seepient-img-e2e-")));
@@ -72,40 +62,48 @@ describe("image destination via broker chaining (spec 019)", () => {
       modelProviderClass: "openai",
       snapshotStore: createSnapshotStore(),
     };
-    fetchCalls = 0;
+    vendorCalls = 0;
   });
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
-    delete process.env.OPENAI_API_KEY;
   });
 
-  /** Build the effect broker with a stubbed network adapter that serves the
-   *  given response (the broker is unit-tested through this seam). */
-  function brokerWithResponse(response: { status: number; body: string }): EffectBroker {
+  function brokerWithVendorPayload(imageBytes: Uint8Array): EffectBroker {
     return new EffectBroker({
       artifacts,
       network: {
         async resolve() {
           return ["93.184.216.34"];
         },
-        async fetch(destination, init) {
-          void init;
-          fetchCalls++;
+        async fetch() {
           return {
-            status: response.status,
-            bytes: new Uint8Array(Buffer.from(response.body, "latin1")),
-            effectiveHost: destination.host,
+            status: 200,
+            bytes: new Uint8Array(),
+            effectiveHost: "api.example.com",
             effectiveIp: "93.184.216.34",
             headers: {},
           };
         },
       },
+      vendorOperationHandler: async (req) => {
+        vendorCalls++;
+        const artifact = await artifacts.put(imageBytes, "image/png");
+        return {
+          requestId: req.requestId,
+          status: "succeeded",
+          output: artifact,
+        };
+      },
     });
   }
 
-  async function runBroker(action: Awaited<ReturnType<typeof analyzeGenerateImage>>, envelope: CapabilityEnvelope, response: { status: number; body: string; contentType: string }) {
+  async function runBroker(
+    action: PreparedToolAction,
+    envelope: CapabilityEnvelope,
+    imageBytes: Uint8Array = PNG_BYTES,
+  ) {
     const executor = new BrokerExecutor({
-      broker: brokerWithResponse(response),
+      broker: brokerWithVendorPayload(imageBytes),
       artifacts,
       workspaceRoot: dir,
       commitBroker: new FileCommitBroker({ artifacts, helper: diskBackedFakeHelper() }),
@@ -119,28 +117,26 @@ describe("image destination via broker chaining (spec 019)", () => {
   }
 
   it("(a)+(b) destination declared → file lands via FileCommitBroker with the cap in the envelope", async () => {
-    process.env.OPENAI_API_KEY = "test-key";
     const dest = join(dir, "sunset.png");
-    const action = await analyzeGenerateImage({ prompt: "a sunset", image_path: dest }, ctx);
+    const action = await ALL_ANALYZERS.generate_image({ prompt: "a sunset", output_path: dest }, ctx);
     expect(action.operation.kind).toBe("broker");
 
-    const result = await runBroker(action, envelopeFor(action, [dest]), b64JsonResponse(PNG_BYTES));
+    const result = await runBroker(action, envelopeFor(action, [dest]), PNG_BYTES);
     expect(result.state).toBe("succeeded");
     if (result.state === "succeeded") {
       expect(String(result.result.output)).toContain("sunset.png");
     }
     expect(existsSync(dest)).toBe(true);
     expect(readFileSync(dest)).toEqual(PNG_BYTES);
-    expect(fetchCalls).toBe(1);
+    expect(vendorCalls).toBe(1);
   });
 
   it("(c) envelope without the commit-file cap → fetch happens but the write is refused", async () => {
-    process.env.OPENAI_API_KEY = "test-key";
     const dest = join(dir, "refused.png");
-    const action = await analyzeGenerateImage({ prompt: "no cap", image_path: dest }, ctx);
+    const action = await ALL_ANALYZERS.generate_image({ prompt: "no cap", output_path: dest }, ctx);
     // An envelope that forgot the commit-file cap the effect demands.
     const envelope = envelopeFor(action, []);
-    const result = await runBroker(action, envelope, b64JsonResponse(PNG_BYTES));
+    const result = await runBroker(action, envelope, PNG_BYTES);
     expect(result.state).toBe("failed");
     if (result.state === "failed") {
       expect(result.error.message).toMatch(/refused|commit/i);
@@ -148,40 +144,48 @@ describe("image destination via broker chaining (spec 019)", () => {
     expect(existsSync(dest)).toBe(false);
   });
 
-  it("(d) no destination → URL/base64 result, no write", async () => {
-    process.env.OPENAI_API_KEY = "test-key";
-    const action = await analyzeGenerateImage({ prompt: "no destination" }, ctx);
+  it("(d) no destination → defaults to deterministic path in workspace root and commits file", async () => {
+    const action = await ALL_ANALYZERS.generate_image({ prompt: "no destination" }, ctx);
     expect(action.operation.kind).toBe("broker");
     if (action.operation.kind !== "broker") return;
-    expect((action.operation.request as { outputCommit?: unknown }).outputCommit).toBeUndefined();
+    const req = action.operation.request as { outputCommit?: { destination: { canonicalPath: string } } };
+    expect(req.outputCommit).toBeDefined();
+    const defaultPath = req.outputCommit!.destination.canonicalPath;
+    expect(defaultPath).toContain(dir);
 
-    const result = await runBroker(action, envelopeFor(action, []), b64JsonResponse(PNG_BYTES));
+    const result = await runBroker(action, envelopeFor(action, [defaultPath]), PNG_BYTES);
     expect(result.state).toBe("succeeded");
     if (result.state === "succeeded") {
-      // The model sees the provider payload, not a saved file.
-      expect(String(result.result.output)).not.toContain("saved to");
+      expect(String(result.result.output)).toContain(defaultPath);
     }
-    expect(fetchCalls).toBe(1);
+    expect(existsSync(defaultPath)).toBe(true);
+    expect(vendorCalls).toBe(1);
   });
 
-  it("(b2) raw binary body is committed when b64_json is absent", async () => {
-    process.env.OPENAI_API_KEY = "test-key";
+  it("(e) n > 1 creates distinct indexed file targets and commits each image", async () => {
+    const dest = join(dir, "multi.png");
+    const action = await ALL_ANALYZERS.generate_image({ prompt: "multi cat", output_path: dest, n: 2 }, ctx);
+    expect(action.operation.kind).toBe("broker");
+    if (action.operation.kind !== "broker") return;
+    const req = action.operation.request as { outputCommit?: { destination: { canonicalPath: string }; destinations?: Array<{ canonicalPath: string }> } };
+    expect(req.outputCommit?.destinations).toHaveLength(2);
+    const dest1 = req.outputCommit!.destinations![0].canonicalPath;
+    const dest2 = req.outputCommit!.destinations![1].canonicalPath;
+    expect(dest1).toContain("multi-1.png");
+    expect(dest2).toContain("multi-2.png");
+  });
+
+  it("(b2) raw binary body is committed when bytes are returned", async () => {
     const dest = join(dir, "raw.png");
-    const action = await analyzeGenerateImage({ prompt: "raw body", image_path: dest }, ctx);
-    const result = await runBroker(action, envelopeFor(action, [dest]), {
-      status: 200,
-      body: PNG_BYTES.toString("latin1"),
-      contentType: "image/png",
-    });
+    const action = await ALL_ANALYZERS.generate_image({ prompt: "raw body", output_path: dest }, ctx);
+    const result = await runBroker(action, envelopeFor(action, [dest]), PNG_BYTES);
     expect(result.state).toBe("succeeded");
     expect(existsSync(dest)).toBe(true);
+    expect(readFileSync(dest)).toEqual(PNG_BYTES);
   });
 
   it("take_screenshot keeps its honest denial message (parity check)", async () => {
-    // The screenshot analyzer answers with a none-op carrying the honest
-    // unsupported message — unchanged by 019 (plan P1 step 3).
-    const { analyzeTakeScreenshot } = await import("../../../capabilities/tools/analyzers.js");
-    const action = await analyzeTakeScreenshot({}, ctx);
+    const action = await ALL_ANALYZERS.take_screenshot({}, ctx);
     expect(action.operation.kind).toBe("none");
     if (action.operation.kind !== "none") return;
     const output = String(action.operation.result.output ?? "");

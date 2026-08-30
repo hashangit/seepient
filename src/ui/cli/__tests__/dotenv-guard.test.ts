@@ -13,21 +13,26 @@ import { join } from "node:path";
 import { loadProjectEnv, DOTENV_REFUSED_VARS } from "../dotenv-guard.js";
 
 let dir: string;
-const savedKeys: string[] = [];
+const savedEnv = new Map<string, string | undefined>();
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "seepient-env-"));
   // Keep the test hermetic: snapshot then clear the refused vars.
   for (const key of DOTENV_REFUSED_VARS) {
-    savedKeys.push(key);
-    if (key in process.env) delete process.env[key];
+    savedEnv.set(key, process.env[key]);
+    delete process.env[key];
   }
-  if ("SEEPIENT_DOTENV_BENIGN" in process.env) delete process.env.SEEPIENT_DOTENV_BENIGN;
+  savedEnv.set("SEEPIENT_DOTENV_BENIGN", process.env.SEEPIENT_DOTENV_BENIGN);
+  delete process.env.SEEPIENT_DOTENV_BENIGN;
 });
 
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
-  delete process.env.SEEPIENT_DOTENV_BENIGN;
+  for (const [key, val] of savedEnv) {
+    if (val === undefined) delete process.env[key];
+    else process.env[key] = val;
+  }
+  savedEnv.clear();
 });
 
 function withCapturedStderr<T>(fn: () => T): { result: T; stderr: string } {

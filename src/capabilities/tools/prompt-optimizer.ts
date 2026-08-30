@@ -1,5 +1,4 @@
 import { ToolModule } from '../../foundations/contracts/tool.js';
-import { optimizePrompt } from '../media/media.js';
 
 export const PromptOptimizerTool: ToolModule = {
   name: "Prompt Optimizer",
@@ -24,8 +23,5 @@ export const PromptOptimizerTool: ToolModule = {
         required: ["raw_prompt"]
       }
     }
-  },
-  handler: async (args: any, config: any) => {
-    return optimizePrompt(args.raw_prompt, args.context, config ?? {});
   }
 };

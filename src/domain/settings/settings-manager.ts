@@ -262,7 +262,12 @@ export class SettingsManager {
         return String(raw);
       }
       case 'array': {
-        const list = Array.isArray(raw) ? raw : String(raw ?? '').split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+        if (typeof raw === 'string' && raw.trim() === '') return [];
+        const list = Array.isArray(raw)
+          ? raw
+          : typeof raw === 'string'
+            ? raw.split(',').map((s) => s.trim())
+            : [];
         if (list.some((item) => typeof item !== 'string')) {
           throw new SettingsError(`${dotKey} must be an array of strings.`, 'SETTINGS_VALIDATION_FAILED');
         }

@@ -244,11 +244,20 @@ export class Agent {
     // tagging and the lifecycle's analysis context. The composition root
     // (bootstrap) owns the session store; tests may inject their own.
     const snapshotStore = opts.snapshotStore ?? (await import("../../foundations/hashline/snapshot-store.js")).createSnapshotStore();
-    const { boundary: realBoundary, artifacts: sharedArtifacts } = await buildLocalBoundary({
+    const { InMemoryArtifactStore } = await import("../../capabilities/execution/in-memory-artifact-store.js");
+    const sharedArtifacts = new InMemoryArtifactStore();
+    const { createMediaVendorOperationHandler } = await import("../../domain/media/vendor-operation-handler.js");
+    const vendorOperationHandler = createMediaVendorOperationHandler({
+      runtime: () => this.providerRuntime,
+      artifacts: sharedArtifacts,
+    });
+    const { boundary: realBoundary } = await buildLocalBoundary({
+      artifacts: sharedArtifacts,
       hostCallbacks,
       workspaceRoot: opts.workspaceRoot ?? process.cwd(),
       snapshotStore,
       commitHelper: opts.commitHelper,
+      vendorOperationHandler,
     });
     // Spec 011 (T032/FR-019): containment preflight at startup. The status is
     // surfaced (TUI/status surfaces) so approval choices are disabled before

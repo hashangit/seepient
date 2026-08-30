@@ -107,6 +107,7 @@ export interface BrokeredEffectResult {
   requestId: string;
   status: "succeeded" | "failed" | "denied";
   output?: PreparedArtifactRef;
+  outputs?: PreparedArtifactRef[];
   /** Final HTTP status code for `http` requests (after redirects). */
   httpStatus?: number;
   effectiveDestination?: NetworkDestination;

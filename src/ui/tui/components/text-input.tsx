@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput, useStdout } from 'ink';
 import { useTheme } from '../hooks/use-theme.js';
 
 interface TextInputProps {
@@ -50,6 +50,24 @@ function moveVertical(value: string, cursor: number, dir: 1 | -1): number {
   return targetStart + targetCol;
 }
 
+// ── paste handling ───────────────────────────────────────────────────────
+
+// Ink strips one leading ESC from each input chunk, so a marker that began the
+// terminal's paste burst arrives as '[200~' (no ESC); markers embedded later
+// in the same chunk keep their ESC. Match both forms.
+const PASTE_OPEN = /(?:\x1b)?\[200~/;
+const PASTE_CLOSE = /(?:\x1b)?\[201~/;
+
+// A chunk following another within this window is machine-paced (a paste
+// split across stdin chunks); the fastest human typists bottom out ≈35ms
+// between keystrokes, so 10ms can never swallow a real Enter.
+const RAPID_CHUNK_MS = 10;
+
+/** Terminals send pasted newlines as CRLF or CR — the value stores '\n'. */
+function normalizeNewlines(s: string): string {
+  return s.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
 /**
  * Multi-line controlled text input with cursor control + history.
  *
@@ -67,6 +85,22 @@ export function TextInput({
   const theme = useTheme();
   const [cursor, setCursor] = useState(value.length);
   const selfUpdate = useRef(false);
+  const inPaste = useRef(false);
+  const lastChunkAt = useRef(0);
+  const pendingPaste = useRef<string | null>(null);
+  const pasteFlushScheduled = useRef(false);
+
+  // Ask the terminal to wrap pastes in 200~/201~ markers (bracketed paste).
+  // Only while live: overlays (disabled) keep raw-mode input as before, so
+  // their own useInput handlers never see marker-wrapped chunks. Written to
+  // the raw stream — useStdout().write is ignored once Ink has unmounted,
+  // and this mode must be restored even during teardown.
+  const { stdout } = useStdout();
+  useEffect(() => {
+    if (disabled) return;
+    stdout.write('\x1b[?2004h');
+    return () => { stdout.write('\x1b[?2004l'); };
+  }, [disabled, stdout]);
 
   useEffect(() => {
     if (selfUpdate.current) {
@@ -74,6 +108,10 @@ export function TextInput({
       return;
     }
     setCursor(value.length); // external change → cursor to end
+    // An external swap (Ctrl+C clear, history recall) must not be undone by
+    // paste text still queued for its flush.
+    pendingPaste.current = null;
+    inPaste.current = false;
   }, [value]);
 
   const at = Math.min(cursor, value.length);
@@ -84,8 +122,59 @@ export function TextInput({
     setCursor(at + text.length);
   };
 
+  // Machine-paced paste chunks can arrive faster than React commits state —
+  // inserting each through the current render's closure would compound on a
+  // stale value and silently drop earlier lines. Coalesce burst text and
+  // insert once per scheduler turn through the freshest insert closure.
+  const insertRef = useRef(insert);
+  insertRef.current = insert;
+  const queueInsert = (text: string): void => {
+    pendingPaste.current = (pendingPaste.current ?? '') + text;
+    if (pasteFlushScheduled.current) return;
+    pasteFlushScheduled.current = true;
+    setTimeout(() => {
+      pasteFlushScheduled.current = false;
+      const chunk = pendingPaste.current;
+      pendingPaste.current = null;
+      if (chunk) insertRef.current(chunk);
+    }, 0);
+  };
+  useEffect(() => () => {
+    pendingPaste.current = null;
+    pasteFlushScheduled.current = false;
+  }, []);
+
   useInput((inputChar, key) => {
     if (disabled) return;
+    const now = Date.now();
+    const rapid = now - lastChunkAt.current <= RAPID_CHUNK_MS;
+    lastChunkAt.current = now;
+    // Bracketed paste: everything between the 200~/201~ markers is literal
+    // text — embedded CR/LF insert newlines and never submit. The burst can
+    // split across stdin chunks, so paste state lives in a ref. A bare Esc
+    // chunk cancels a paste state that never saw its close marker (possible
+    // only if pasted text itself matches the open-marker pattern).
+    if (inPaste.current && key.escape) {
+      inPaste.current = false;
+      return;
+    }
+    if (inPaste.current || PASTE_OPEN.test(inputChar)) {
+      const body = inPaste.current ? inputChar : inputChar.replace(PASTE_OPEN, '');
+      inPaste.current = true;
+      const close = PASTE_CLOSE.exec(body);
+      const text = close ? body.slice(0, close.index) : body;
+      if (close) inPaste.current = false;
+      const normalized = normalizeNewlines(text);
+      if (normalized) queueInsert(normalized);
+      return;
+    }
+    // Unbracketed paste burst (terminal without 2004 support, or a split
+    // delivery): a multi-char chunk containing CR/LF is pasted text, not
+    // Enter — only a lone '\r' chunk (key.return below) submits.
+    if (inputChar.length > 1 && /[\r\n]/.test(inputChar)) {
+      queueInsert(normalizeNewlines(inputChar));
+      return;
+    }
     // Newline before submit. Ink doesn't parse the modified-return CSI a
     // terminal sends for Shift+Enter/Alt+Enter (`\x1B[27;<modifier>;13~`, where
     // 13=return); detect that raw sequence too, plus the key-flag paths + Ctrl+J.
@@ -93,10 +182,14 @@ export function TextInput({
     const isCtrlJ = !key.return && (inputChar === '\n' || inputChar === '\x0a' || (key.ctrl && inputChar === 'j'));
     const isModifiedReturnCSI = /\x1b?\[27;\d*;?13~/.test(inputChar);
     if (isModifiedReturn || isCtrlJ || isModifiedReturnCSI) {
-      insert('\n');
+      if (rapid) queueInsert('\n'); else insert('\n');
       return;
     }
     if (key.return) {
+      // Terminal without bracketed-paste support: the paste burst can still
+      // arrive split per line, each newline a lone CR chunk. Machine-paced
+      // after the previous chunk → paste newline, not a submit.
+      if (rapid) { queueInsert('\n'); return; }
       if (!ignoreReturn) onSubmit(value);
       return;
     }
@@ -132,7 +225,7 @@ export function TextInput({
     // sequences (e.g. leftover `\x1B[27;2;13~` from an unparsed modified key).
     const isCsi = /\x1b?\[\d[\d;]*[~A-Za-z]/.test(inputChar);
     if (inputChar && !key.ctrl && !key.meta && inputChar.length >= 1 && inputChar >= ' ' && !isCsi) {
-      insert(inputChar);
+      if (rapid) queueInsert(inputChar); else insert(inputChar);
     }
   });
 

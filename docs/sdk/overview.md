@@ -31,6 +31,10 @@ Configuration is passed as options objects. Return types are plain interfaces. T
 
 ## Installation
 
+::: tip Prerequisites
+Seepient Agent requires **Node.js >= 22.19.0**.
+:::
+
 ::: code-group
 
 ```bash [npm]
@@ -65,7 +69,7 @@ import type {
 ```
 
 ```typescript [Tools and factories]
-import { tool, CORE_TOOLS, COMM_TOOLS, ADVANCED_TOOLS, ALL_TOOLS } from "seepient";
+import { trustedHostTool, CORE_TOOLS, COMM_TOOLS, ADVANCED_TOOLS, ALL_TOOLS } from "seepient";
 ```
 
 ```typescript [React integration]
@@ -123,16 +127,31 @@ console.log(followUp.text);
 ### Custom tools
 
 ```typescript
-import { generateText, tool } from "seepient";
-import { z } from "zod";
+import { generateText, trustedHostTool } from "seepient";
 
-const weatherTool = tool({
-  description: "Get the current weather for a city",
-  parameters: z.object({ city: z.string() }),
-  execute: async ({ city }) => `Weather in ${city}: 72F, sunny`,
+const weatherTool = trustedHostTool({
+  definition: {
+    type: "function",
+    function: {
+      name: "get_weather",
+      description: "Get the current weather for a city",
+      parameters: {
+        type: "object",
+        properties: {
+          city: { type: "string", description: "City name" },
+        },
+        required: ["city"],
+      },
+    },
+  },
+  execute: async (args) => {
+    const { city } = (args ?? {}) as { city: string };
+    return `Weather in ${city}: 72F, sunny`;
+  },
 });
 
 const result = await generateText("What is the weather in Tokyo?", {
+  permissionPipeline: true,
   tools: [weatherTool],
 });
 ```

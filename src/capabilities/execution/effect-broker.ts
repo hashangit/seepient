@@ -30,6 +30,7 @@ import type { PreparationArtifactStore } from "../../foundations/contracts/execu
 import { createHash } from "node:crypto";
 import { PersistedReplayLedger } from "./persisted-replay-ledger.js";
 import { resolveSecretRef } from "../../foundations/security/credential-resolver.js";
+import { createSetupFailure } from "../../foundations/contracts/setup-failure.js";
 
 /** Loopback / private / link-local / reserved / cloud-metadata CIDRs (IPv4). */
 const DENIED_IPV4_PATTERNS: ReadonlyArray<RegExp> = [
@@ -379,10 +380,20 @@ export class EffectBroker implements EffectBrokerContract {
     if (this.vendorOperationHandler) {
       return await this.vendorOperationHandler(request);
     }
-    return this.denied(
-      request.requestId,
-      "EFFECT_UNSUPPORTED: No vendor operation handler configured",
+    const setup = createSetupFailure(
+      request.operation,
+      `${request.connector} vendor operation handler`,
+      "an AI provider runtime in /models or seepient.json",
     );
+    return {
+      requestId: request.requestId,
+      status: "denied",
+      error: {
+        code: "SETUP_REQUIRED",
+        message: setup.message,
+        retryable: false,
+      },
+    };
   }
 
   private async executeHttp(
@@ -450,20 +461,6 @@ export class EffectBroker implements EffectBrokerContract {
       const tavilyKey = this.resolveSecret("tavilyApiKey");
       if (tavilyKey) {
         cleanHeaders["authorization"] = `Bearer ${tavilyKey}`;
-        hasInjectedSecret = true;
-      }
-    } else if (
-      request.secretRefs?.includes("OPENAI_API_KEY") ||
-      request.secretRefs?.includes("openaiApiKey") ||
-      request.secretRefs?.includes("imageApiKey") ||
-      dest.host === "api.openai.com"
-    ) {
-      const key =
-        this.resolveSecret("openaiApiKey") ||
-        this.resolveSecret("OPENAI_API_KEY") ||
-        this.resolveSecret("imageApiKey");
-      if (key) {
-        cleanHeaders["authorization"] = `Bearer ${key}`;
         hasInjectedSecret = true;
       }
     }

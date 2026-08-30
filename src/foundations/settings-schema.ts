@@ -77,15 +77,6 @@ export const SETTINGS_CATEGORIES: {
 // ── Settings Map ───────────────────────────────────────────────────────
 
 const entries: [string, SettingsMapEntry][] = [
-  // Image
-  ['image.apiKey', { dotKey: 'image.apiKey', configPath: ['imageApiKey'], category: 'tools', label: 'Image Generation API Key' }],
-  ['image.baseUrl', { dotKey: 'image.baseUrl', configPath: ['imageBaseUrl'], category: 'tools', label: 'Image Generation Base URL' }],
-  ['image.model', { dotKey: 'image.model', configPath: ['imageModel'], category: 'tools', label: 'Image Generation Model' }],
-  ['image.size', { dotKey: 'image.size', configPath: ['imageSize'], category: 'tools', label: 'Image Size' }],
-  ['image.quality', { dotKey: 'image.quality', configPath: ['imageQuality'], category: 'tools', label: 'Image Quality' }],
-  ['image.style', { dotKey: 'image.style', configPath: ['imageStyle'], category: 'tools', label: 'Image Style' }],
-  ['image.n', { dotKey: 'image.n', configPath: ['imageN'], category: 'tools', label: 'Image Count' }],
-
   // SMTP
   ['smtp.host', { dotKey: 'smtp.host', configPath: ['smtpHost'], category: 'tools', label: 'SMTP Host' }],
   ['smtp.port', { dotKey: 'smtp.port', configPath: ['smtpPort'], category: 'tools', label: 'SMTP Port' }],
@@ -149,15 +140,6 @@ export function consentModeToApprovalMode(mode: ConsentMode): "manual" | "balanc
 // ── Settings Schema ────────────────────────────────────────────────────
 
 const schemaEntries: [string, SettingsSchemaEntry][] = [
-  // Image
-  ['image.apiKey', { type: 'string', secret: true, restartRequired: false }],
-  ['image.baseUrl', { type: 'string', secret: false, restartRequired: false }],
-  ['image.model', { type: 'string', secret: false, default: 'dall-e-3', restartRequired: false }],
-  ['image.size', { type: 'string', secret: false, default: '1024x1024', restartRequired: false }],
-  ['image.quality', { type: 'enum', secret: false, enumValues: ['standard', 'hd'], default: 'standard', restartRequired: false }],
-  ['image.style', { type: 'enum', secret: false, enumValues: ['vivid', 'natural'], default: 'vivid', restartRequired: false }],
-  ['image.n', { type: 'number', secret: false, default: 1, min: 1, max: 10, restartRequired: false }],
-
   // SMTP
   ['smtp.host', { type: 'string', secret: false, restartRequired: false, envVar: 'SMTP_HOST' }],
   ['smtp.port', { type: 'string', secret: false, restartRequired: false, envVar: 'SMTP_PORT' }],

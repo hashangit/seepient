@@ -47,9 +47,10 @@ console.log(agent.getUsage());
 | Name            | Type                                     | Default                    | Description |
 |-----------------|------------------------------------------|----------------------------|-------------|
 | `model`         | `string`                                 | Provider default           | Model identifier, e.g. `"gpt-5.4"`, `"claude-sonnet-4-6-20260320"` |
-| `provider`      | `ProviderType`                           | Config default             | `"openai"` \| `"anthropic"` \| `"glm"` \| `"openai-compatible"` |
+| `provider`      | `string`                                 | `"openai"`                 | Feeds the permission pipeline's `modelProviderClass` audit label (does not select inference provider; selection occurs via model/runtime) |
 | `systemPrompt`  | `string`                                 | `"You are a helpful assistant."` | System prompt prepended to every conversation |
-| `tools`         | `string[] \| UserToolDefinition[]`       | All built-in               | Tools available to the agent |
+| `tools`         | `(string \| UserToolDefinition \| AnyToolRegistration)[]` | All built-in               | Tool names, group constants, or custom tool registrations (`trustedHostTool`) |
+| `permissionPipeline` | `boolean`                           | `false`                    | Enable the unified domain permission pipeline and execution boundary |
 | `skills`        | `string[]`                               | *(none)*                   | Skill names to activate |
 | `maxSteps`      | `number`                                 | `10`                       | Maximum agent loop iterations per call |
 | `persist`       | `string \| PersistenceBackend \| PersistenceConfig` | *(none)*          | Directory path, backend instance, or config object (e.g. `{ type: "memory" }`). File persistence writes are **atomic** (tmp + rename). |
@@ -57,6 +58,10 @@ console.log(agent.getUsage());
 | `middleware`    | `Middleware[]`                            | *(none)*                   | Request/response pipeline functions (auth, logging, rate limiting, etc.) |
 | `metadata`     | `Record<string, unknown>`                 | `{}`                       | Adapter-specific metadata passed to middleware via `PipelineContext` |
 | `config`        | `Record<string, unknown>`                | `{}`                       | Extra config passed to tool handlers |
+
+::: note Tool Registration vs setTools()
+Custom host callbacks bind into the execution boundary at agent creation time. `setTools(tools: string[])` accepts tool names only by design and enables/disables already registered tools; custom registrations must be supplied at composition time in `createAgent({ tools: [...] })`.
+:::
 
 ## SdkAgent interface
 
@@ -68,9 +73,9 @@ The object returned by `createAgent()`:
 |--------|-----------|-------------|
 | `chat` | `(message: string) => Promise<AgentResponse>` | Send a message and get the full response. Context is preserved. |
 | `chatStream` | `(message: string, options?: StreamTextOptions) => Promise<StreamTextResult>` | Send a message with streaming output. Returns async iterables and SSE helpers. |
-| `switchProvider` | `(provider: ProviderType, model?: string) => Promise<void>` | Switch the LLM provider (and optionally model) mid-conversation. |
+| `switchProvider` | `(accountOrModel: string, model?: string) => Promise<void>` | Switch the provider account (and optionally model) used for subsequent calls. One argument switches the model only. |
 | `setSystemPrompt` | `(prompt: string) => void` | Update the system prompt. Replaces the existing system message in history. |
-| `setTools` | `(tools: string[]) => void` | Update the tool set available to the agent. |
+| `setTools` | `(tools: string[]) => void` | Update active tools by name. Custom tool registrations cannot be added dynamically via `setTools`. |
 | `abort` | `() => void` | Abort the currently running `chat()` or `chatStream()` call. Works correctly during streaming (v0.2.2+). |
 | `clear` | `() => void` | Clear conversation history. Keeps the system prompt. |
 | `getHistory` | `() => Message[]` | Return a copy of the full conversation history. |
@@ -143,24 +148,24 @@ console.log(`\nTokens: ${(await stream.usage).totalTokens}`);
 
 ### Provider switching
 
-Switch between providers mid-conversation:
+Switch the active provider account or model mid-conversation:
 
 ```typescript
 const agent = await createAgent({ provider: "openai", model: "gpt-5.4" });
 
-// Start with OpenAI
+// Start with the default resolution for the model
 const r1 = await agent.chat("What is the capital of France?");
 console.log(r1.text);
 
-// Switch to Anthropic for the next turn
-await agent.switchProvider("anthropic", "claude-sonnet-4-6-20260320");
+// Switch to another configured provider account for the next turn
+await agent.switchProvider("main", "claude-sonnet-4-6-20260320");
 
 const r2 = await agent.chat("Tell me more about its history");
 console.log(r2.text);
 ```
 
 ::: tip
-`switchProvider()` changes the provider for subsequent calls. The conversation history is preserved, so context carries over seamlessly.
+`switchProvider(account, model)` targets a provider account from your configuration; with a single argument it switches the model only. The conversation history is preserved, so context carries over seamlessly.
 :::
 
 ### Session persistence

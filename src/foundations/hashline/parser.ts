@@ -58,7 +58,7 @@ export function parsePatch(source: string): { sections: HashlineSection[] } {
     }
 
     if (!currentSection) {
-      hashError(`Patch must start with a [PATH#TAG] section header`, 'HASHLINE_PARSE_ERROR', true);
+      hashError(`Patch must start with a [PATH#TAG] section header. Expected e.g. [/abs/path.ts#a1f2] where a1f2 is the content-tag from read_file`, 'HASHLINE_PARSE_ERROR', true);
     }
 
     // Body continuation: +text
@@ -77,18 +77,18 @@ export function parsePatch(source: string): { sections: HashlineSection[] } {
     if (opKind === 'SWAP') {
       // SWAP start.=end:
       const rangeMatch = line.match(/SWAP\s+(\d+)\.=(\d+)\s*:?\s*$/i);
-      if (!rangeMatch) hashError(`Invalid SWAP syntax: "${line}"`, 'HASHLINE_PARSE_ERROR', true);
+      if (!rangeMatch) hashError(`Invalid SWAP syntax: "${line}". Expected "SWAP A.=B:" with just the range on the op line (single line: 2.=2) and new content on following lines prefixed "+", e.g. SWAP 2.=2:`, 'HASHLINE_PARSE_ERROR', true);
       currentOp = { type: 'swap', startLine: parseInt(rangeMatch[1], 10), endLine: parseInt(rangeMatch[2], 10), body: [] };
     } else if (opKind === 'SWAP.BLK') {
       const blkMatch = line.match(/SWAP\.BLK\s+(\d+)\s*:?\s*$/i);
       if (!blkMatch) hashError(`Invalid SWAP.BLK syntax: "${line}"`, 'HASHLINE_PARSE_ERROR', true);
       currentOp = { type: 'swap_block', startLine: parseInt(blkMatch[1], 10), body: [] };
     } else if (opKind === 'DEL') {
-      const delMatch = line.match(/DEL\s+(\d+)\.=(\d+)\s*$/i);
-      if (!delMatch) hashError(`Invalid DEL syntax: "${line}"`, 'HASHLINE_PARSE_ERROR', true);
+      const delMatch = line.match(/DEL\s+(\d+)\.=(\d+)\s*:?\s*$/i);
+      if (!delMatch) hashError(`Invalid DEL syntax: "${line}". Expected "DEL A.=B" (single line: 2.=2)`, 'HASHLINE_PARSE_ERROR', true);
       currentOp = { type: 'del', startLine: parseInt(delMatch[1], 10), endLine: parseInt(delMatch[2], 10) };
     } else if (opKind === 'DEL.BLK') {
-      const blkMatch = line.match(/DEL\.BLK\s+(\d+)\s*$/i);
+      const blkMatch = line.match(/DEL\.BLK\s+(\d+)\s*:?\s*$/i);
       if (!blkMatch) hashError(`Invalid DEL.BLK syntax: "${line}"`, 'HASHLINE_PARSE_ERROR', true);
       currentOp = { type: 'del_block', startLine: parseInt(blkMatch[1], 10) };
     } else if (opKind === 'INS.PRE' || opKind === 'INS.POST' || opKind === 'INS.HEAD' || opKind === 'INS.TAIL') {
@@ -101,7 +101,7 @@ export function parsePatch(source: string): { sections: HashlineSection[] } {
     } else if (opKind === 'REM') {
       hashError('REM (remove) operation is not yet implemented', 'HASHLINE_PARSE_ERROR', true);
     } else {
-      hashError(`Unknown operation: "${opKind}"`, 'HASHLINE_PARSE_ERROR', true);
+      hashError(`Unknown operation: "${opKind}". If this was file content, prefix the line with "+" (body rows must start with +)`, 'HASHLINE_PARSE_ERROR', true);
     }
   }
 

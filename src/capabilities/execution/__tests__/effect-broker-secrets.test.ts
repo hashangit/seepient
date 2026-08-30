@@ -96,7 +96,7 @@ describe("EffectBroker credential resolution & auth headers (P0-1)", () => {
     expect(JSON.stringify(bodyJson)).not.toContain("tvly-secret-12345");
   });
 
-  it("injects OpenAI API key into Authorization header for image/prompt endpoints", async () => {
+  it("does not inject Authorization header for api.openai.com requests without Tavily refs", async () => {
     let capturedHeaders: Record<string, string> = {};
 
     const mockNetwork: BrokerNetworkAdapter = {
@@ -116,7 +116,7 @@ describe("EffectBroker credential resolution & auth headers (P0-1)", () => {
     const broker = new EffectBroker({
       artifacts,
       network: mockNetwork,
-      secretResolver: (ref) => (ref === "openaiApiKey" || ref === "OPENAI_API_KEY" ? "sk-openai-key-999" : undefined),
+      secretResolver: (ref) => (ref === "tavilyApiKey" ? "tvly-key" : undefined),
     });
 
     const bodyArtifact = await artifacts.put(
@@ -131,7 +131,7 @@ describe("EffectBroker credential resolution & auth headers (P0-1)", () => {
       destination: { scheme: "https", host: "api.openai.com" },
       headers: { "content-type": "application/json" },
       body: bodyArtifact,
-      secretRefs: ["OPENAI_API_KEY"],
+      secretRefs: [],
     };
 
     const envelope: CapabilityEnvelope = {
@@ -142,7 +142,6 @@ describe("EffectBroker credential resolution & auth headers (P0-1)", () => {
       actionDigest: "digest-2",
       capabilities: [
         { kind: "network-destination", scheme: "https", host: "api.openai.com" },
-        { kind: "secret-ref", ref: "OPENAI_API_KEY" },
       ],
       lifetime: { kind: "action", actionDigest: "digest-2", consumeOnce: true },
       issuedBy: { kind: "service", authorityId: "policy-engine", authenticatedBy: "test" },
@@ -159,7 +158,7 @@ describe("EffectBroker credential resolution & auth headers (P0-1)", () => {
 
     const result = await broker.execute(request, envelope, auth);
     expect(result.status).toBe("succeeded");
-    expect(capturedHeaders.authorization).toBe("Bearer sk-openai-key-999");
+    expect(capturedHeaders.authorization).toBeUndefined();
   });
 
   it("executes external-send with wildcard recipient capabilities", async () => {

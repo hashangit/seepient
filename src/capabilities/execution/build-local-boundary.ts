@@ -48,6 +48,8 @@ export async function buildLocalBoundary(opts?: {
   workspaceRoot?: string;
   /** Network adapter override (tests inject a stub; default is the real Node adapter). */
   network?: BrokerNetworkAdapter;
+  /** Optional handler for vendor-operation broker requests (e.g. media generation/optimization). */
+  vendorOperationHandler?: (req: Extract<import("../../foundations/contracts/prepared-action.js").BrokeredEffectRequest, { kind: "vendor-operation" }>) => Promise<import("../../foundations/contracts/execution-brokers.js").BrokeredEffectResult>;
   /**
    * Session snapshot store for read-side tagging and edit-time patch
    * application (spec 019 FR-001). The composition root owns the store so
@@ -85,6 +87,7 @@ export async function buildLocalBoundary(opts?: {
   const effectBroker = new EffectBroker({
     artifacts,
     network: opts?.network ?? new NodeNetworkAdapter(),
+    vendorOperationHandler: opts?.vendorOperationHandler,
   });
 
   // Host callbacks map for built-in and custom tools (consulted by the

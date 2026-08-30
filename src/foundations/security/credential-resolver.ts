@@ -51,8 +51,6 @@ export interface ResolvedCredentials {
   dingtalkKeyword?: string;
   wecomWebhook?: string;
   wecomKeyword?: string;
-  openaiApiKey?: string;
-  openaiBaseUrl?: string;
   rawConfig: AppConfig;
 }
 
@@ -98,14 +96,6 @@ export function resolveCredentials(
   const dingtalkKeyword = resolve("DINGTALK_KEYWORD", "dingtalkKeyword", "notifications.dingtalk.keyword", ["notifications", "dingtalk", "keyword"]);
   const wecomWebhook = resolve("WECOM_WEBHOOK", "wecomWebhook", "notifications.wecom.webhook", ["notifications", "wecom", "webhook"]);
   const wecomKeyword = resolve("WECOM_KEYWORD", "wecomKeyword", "notifications.wecom.keyword", ["notifications", "wecom", "keyword"]);
-  const openaiApiKey = resolve("OPENAI_API_KEY", "openaiApiKey", "imageApiKey", "image.apiKey", ["image", "apiKey"]);
-  const openaiBaseUrl = resolve(
-    "OPENAI_BASE_URL",
-    "openaiBaseUrl",
-    "imageBaseUrl",
-    "image.baseUrl",
-    ["image", "baseUrl"],
-  ) || process.env.OPENAI_COMPAT_BASE_URL;
 
   const rawConfig: AppConfig = { ...global, ...local, ...custom };
 
@@ -122,8 +112,6 @@ export function resolveCredentials(
     dingtalkKeyword,
     wecomWebhook,
     wecomKeyword,
-    openaiApiKey,
-    openaiBaseUrl,
     rawConfig,
   };
 }
@@ -162,9 +150,6 @@ export function resolveSecretRef(
       return creds.wecomWebhook;
     case "wecomKeyword":
       return creds.wecomKeyword;
-    case "openaiApiKey":
-    case "imageApiKey":
-      return creds.openaiApiKey;
     default:
       return (
         (creds.rawConfig as Record<string, any>)[ref] ||

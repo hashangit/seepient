@@ -177,7 +177,7 @@ export interface GenerateTextOptions {
   model?: string;
   provider?: string;
   systemPrompt?: string;
-  tools?: string[] | UserToolDefinition[];
+  tools?: (string | UserToolDefinition | import("./contracts/custom-tools.js").AnyToolRegistration)[];
   skills?: string[] | boolean;
   cwd?: string;
   maxSteps?: number;
@@ -243,7 +243,7 @@ export interface AgentCreateOptions {
   model?: string;
   provider?: string;
   systemPrompt?: string;
-  tools?: string[] | UserToolDefinition[] | import("./contracts/custom-tools.js").AnyToolRegistration[];
+  tools?: (string | UserToolDefinition | import("./contracts/custom-tools.js").AnyToolRegistration)[];
   skills?: string[] | boolean;
   cwd?: string;
   maxSteps?: number;
@@ -265,7 +265,8 @@ export interface AgentCreateOptions {
 export interface SdkAgent {
   chat(message: string): Promise<AgentResponse>;
   chatStream(message: string, options?: StreamTextOptions): Promise<StreamTextResult>;
-  switchProvider(provider: string, model?: string): Promise<void>;
+  /** Switch the provider account (and optionally model) used for subsequent calls; one argument switches the model only. */
+  switchProvider(accountOrModel: string, model?: string): Promise<void>;
   setSystemPrompt(prompt: string): void;
   setTools(tools: string[]): void;
   abort(): void;

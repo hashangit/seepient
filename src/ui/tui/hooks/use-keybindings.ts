@@ -3,6 +3,8 @@ import { useInput } from 'ink';
 export interface KeybindingHandlers {
   onAbort: () => void;
   onExit: () => void;
+  /** Ctrl+C at idle with text in the input clears the draft instead of exiting. */
+  onClearDraft: () => void;
   onExpandToggle: () => void;
   onPalette: () => void;
   onClear: () => void;
@@ -17,6 +19,8 @@ export interface KeybindingHandlers {
 export interface KeybindingOptions {
   enabled: boolean;
   isRunning: boolean;
+  /** True when the prompt holds text — Ctrl+C clears it before ever exiting. */
+  hasDraft: boolean;
   /**
    * True while a permission prompt is open. Escape then belongs to the
    * prompt (deny the request, spec 011 FR-015) and must not also abort the
@@ -27,8 +31,9 @@ export interface KeybindingOptions {
 
 /**
  * Global keybindings. Disabled while a modal overlay is open (`enabled: false`)
- * so the overlay owns input. Ctrl+C aborts mid-run or exits when idle.
- * (Help is `/?`, not bare `?` — bare `?` would fire mid-question.)
+ * so the overlay owns input. Ctrl+C aborts mid-run, clears a draft at idle, or
+ * exits when idle with an empty input. (Help is `/?`, not bare `?` — bare `?`
+ * would fire mid-question.)
  */
 export function useKeybindings(
   handlers: KeybindingHandlers,
@@ -43,7 +48,11 @@ export function useKeybindings(
       else if (input === 't' || input === '\x14') {
         if (!opts.isRunning && handlers.onCycleFocus) handlers.onCycleFocus();
       }
-      else if (input === 'c' || input === '\x03') (opts.isRunning ? handlers.onAbort() : handlers.onExit());
+      else if (input === 'c' || input === '\x03') {
+        if (opts.isRunning) handlers.onAbort();
+        else if (opts.hasDraft) handlers.onClearDraft();
+        else handlers.onExit();
+      }
       return;
     }
     if ((key.shift && key.tab) || input === '\x1b[Z') {

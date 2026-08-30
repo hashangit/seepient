@@ -128,6 +128,7 @@ function operationEffects(op: PreparedOperation): ToolEffectKind[] {
     case "broker":
       if (op.request.kind === "http") return ["network-egress"];
       if (op.request.kind === "external-send") return ["external-send"];
+      if (op.request.kind === "vendor-operation") return ["network-egress"];
       return ["secret-use"];
     case "trusted-host":
       // Host tools are application authority; the effect vocabulary is what
@@ -364,15 +365,15 @@ export class PolicyEngine implements PolicyEngineContract {
       return op.kind === "trusted-host" ? op.toolName ?? op.registrationId : undefined;
     };
     const inCeiling = missing.every((c) => {
-      // Check the deployment ceiling first.
-      if (setCovers(context.deploymentCeiling, c)) return true;
-      // Host authority: allowlist membership only.
+      // Host authority: allowlist membership only (Spec 019 FR-006).
       if (c.kind === "trusted-host") {
         const id = hostRegistrationId(c);
         if (id && hostAllowlist.includes(id)) return true;
         hostDenyMessage = `Tool "${id ?? "unknown"}" runs with host authority and is not on the trusted-host allowlist. Add it under permissions.trustedHostAllowlist in your settings if you trust it.`;
         return false;
       }
+      // Check the deployment ceiling for other capabilities.
+      if (setCovers(context.deploymentCeiling, c)) return true;
       if (context.approvalMode !== "never" && context.workspaceRoot) {
         const root = canonicalPath(context.workspaceRoot);
         const withinRoot = (target: string): boolean => {
