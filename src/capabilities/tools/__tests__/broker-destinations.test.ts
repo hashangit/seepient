@@ -1,16 +1,13 @@
 /**
- * Brokered-tool destination contracts (spec 017 hotfix).
+ * Brokered-tool destination contracts (spec 017 hotfix & spec 010 media wiring).
  *
  * Every brokered HTTP analyzer must produce a `NetworkDestination` whose
  * `pathPrefix` names the real API path — the broker/adapter sends requests to
- * `pathPrefix || "/"`, so a missing or mis-keyed path silently hits the host
- * root (the bug that made web_search POST to https://api.tavily.com/ instead
- * of /search). Destinations are typed as NetworkDestination so a `path:` key
- * is a compile error, and these tests pin the runtime values for both
- * analyzer implementations (analyzers.ts and comm-analyzers.ts).
+ * `pathPrefix || "/"`. Destinations are typed as NetworkDestination so a `path:` key
+ * is a compile error.
  *
- * Also pins the Tavily request body: `search_depth` is the documented field
- * name (`depth` was silently ignored).
+ * Vendor-operation analyzers (generate_image, optimize_prompt) route through
+ * the connector broker with typed inputs.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -28,14 +25,19 @@ import {
 import {
   analyzeWebSearch as commAnalyzeWebSearch,
   analyzeReadWebsite as commAnalyzeReadWebsite,
-  analyzeGenerateImage as commAnalyzeGenerateImage,
 } from "../comm-analyzers.js";
 
 type HttpBrokerRequest = Extract<BrokeredEffectRequest, { kind: "http" }>;
+type VendorBrokerRequest = Extract<BrokeredEffectRequest, { kind: "vendor-operation" }>;
 
 function httpRequestOf(action: PreparedToolAction): HttpBrokerRequest {
   const operation = action.operation as Extract<PreparedToolAction["operation"], { kind: "broker" }>;
   return operation.request as HttpBrokerRequest;
+}
+
+function vendorRequestOf(action: PreparedToolAction): VendorBrokerRequest {
+  const operation = action.operation as Extract<PreparedToolAction["operation"], { kind: "broker" }>;
+  return operation.request as VendorBrokerRequest;
 }
 
 let tmpGlobal: string;
@@ -89,7 +91,6 @@ function makeCtx(): ToolAnalysisContext {
 
 type WebSearchAnalyzer = typeof analyzeWebSearch;
 type ReadWebsiteAnalyzer = typeof analyzeReadWebsite;
-type GenerateImageAnalyzer = typeof analyzeGenerateImage;
 
 async function webSearchFixture(analyzer: WebSearchAnalyzer) {
   const ctx = makeCtx();
@@ -106,9 +107,9 @@ async function readWebsiteFixture(analyzer: ReadWebsiteAnalyzer, url: string) {
 }
 
 describe.each([
-  ["analyzers.ts", analyzeWebSearch, analyzeReadWebsite, analyzeGenerateImage],
-  ["comm-analyzers.ts", commAnalyzeWebSearch, commAnalyzeReadWebsite, commAnalyzeGenerateImage],
-] as const)("brokered destinations (%s)", (_name, webSearch, readWebsite, generateImage) => {
+  ["analyzers.ts", analyzeWebSearch, analyzeReadWebsite],
+  ["comm-analyzers.ts", commAnalyzeWebSearch, commAnalyzeReadWebsite],
+] as const)("brokered HTTP destinations (%s)", (_name, webSearch, readWebsite) => {
   it("web_search targets /search with search_depth", async () => {
     const { destination, body } = await webSearchFixture(webSearch);
     expect(destination).toMatchObject({ scheme: "https", host: "api.tavily.com", pathPrefix: "/search" });
@@ -127,24 +128,24 @@ describe.each([
     const withQuery = await readWebsiteFixture(readWebsite, "https://x.test/search?a=1&b=2");
     expect(withQuery.pathPrefix).toBe("/search?a=1&b=2");
   });
-
-  it("generate_image targets the /v1/images/generations path of the default base", async () => {
-    const ctx = makeCtx();
-    const action = await generateImage({ prompt: "a cat" }, ctx);
-    expect(httpRequestOf(action).destination).toMatchObject({
-      host: "api.openai.com",
-      pathPrefix: "/v1/images/generations",
-    });
-  });
 });
 
-describe("optimize_prompt destination (analyzers.ts)", () => {
-  it("targets /v1/chat/completions of the default base", async () => {
+describe("vendor-operation destinations (analyzers.ts)", () => {
+  it("generate_image emits media/generate_image vendor operation", async () => {
+    const ctx = makeCtx();
+    const action = await analyzeGenerateImage({ prompt: "a cat" }, ctx);
+    const req = vendorRequestOf(action);
+    expect(req.connector).toBe("media");
+    expect(req.operation).toBe("generate_image");
+    expect((req.input as any).prompt).toBe("a cat");
+  });
+
+  it("optimize_prompt emits media/optimize_prompt vendor operation", async () => {
     const ctx = makeCtx();
     const action = await analyzeOptimizePrompt({ raw_prompt: "improve me" }, ctx);
-    expect(httpRequestOf(action).destination).toMatchObject({
-      host: "api.openai.com",
-      pathPrefix: "/v1/chat/completions",
-    });
+    const req = vendorRequestOf(action);
+    expect(req.connector).toBe("media");
+    expect(req.operation).toBe("optimize_prompt");
+    expect((req.input as any).raw_prompt).toBe("improve me");
   });
 });

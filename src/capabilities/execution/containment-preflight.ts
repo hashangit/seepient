@@ -15,23 +15,54 @@
  * is reported exactly like a missing binary (T213).
  */
 import { createNativeProcessSandbox } from "../../vendors/sandbox-runtime/index.js";
+import { probeCommitHelper, type CommitHelperProbe } from "../../vendors/native-fs-commit/index.js";
+
+/**
+ * Commit-helper state at startup (spec 019, FR-010): exact commits are on
+ * only when the probe verified the packaged binary; any other state is an
+ * honest "off" with the reason.
+ */
+export interface CommitHelperStatus {
+  exactCommit: boolean;
+  reason?: CommitHelperProbe["reason"];
+  digestVerified: boolean;
+}
+
+/** Render the startup status line for the commit helper (closed mapping). */
+export function formatCommitHelperStatus(s: CommitHelperStatus | undefined): string {
+  if (!s) return "exact commits: unknown";
+  if (s.exactCommit) return "exact commits: on";
+  if (s.reason === "digest-mismatch") return "exact commits: off (digest mismatch)";
+  return "exact commits: off (helper missing)";
+}
 
 export type ContainmentPreflightResult =
   | {
       ok: true;
       backend: "seatbelt" | "bubblewrap";
       workspaceRoot?: string;
+      commitHelper: CommitHelperStatus;
     }
   | {
       ok: false;
       reason: "unsupported-platform" | "binary-missing" | "primitive-unsupported";
       /** One actionable setup message, not a permission-policy lecture. */
       setupHint: string;
+      commitHelper: CommitHelperStatus;
     };
 
 export async function preflightContainment(opts?: {
   workspaceRoot?: string;
 }): Promise<ContainmentPreflightResult> {
+  // The helper probe runs alongside the sandbox probe so the status line is
+  // complete before any request; the boundary's buildLocalBoundary runs the
+  // SAME probe, so status and enforcement can never disagree.
+  const helperProbe = await probeCommitHelper();
+  const commitHelper: CommitHelperStatus = {
+    exactCommit: helperProbe.available,
+    reason: helperProbe.reason,
+    digestVerified: helperProbe.digestVerified ?? false,
+  };
   const sandbox = await createNativeProcessSandbox();
   const probe = sandbox.probe;
   if (!probe.available || probe.backend === "none") {
@@ -45,11 +76,13 @@ export async function preflightContainment(opts?: {
       ok: false,
       reason: probe.reason ?? "binary-missing",
       setupHint,
+      commitHelper,
     };
   }
   return {
     ok: true,
     backend: probe.backend,
     workspaceRoot: opts?.workspaceRoot,
+    commitHelper,
   };
 }

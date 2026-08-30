@@ -117,6 +117,8 @@ describe("write_file through the agent loop", () => {
         maxSteps: 5,
         hooks: createHookExecutor(),
         autoConfirm: true,
+        // spec 019: writes require the helper; pin it for this loop test.
+        commitHelper: (await import("../../capabilities/execution/__tests__/helpers/commit-helper-fakes.js")).diskBackedFakeHelper(),
       });
       const step = result.steps.find((s) => s.type === "tool_call" && s.toolCall?.name === "write_file");
       expect(step).toBeDefined();

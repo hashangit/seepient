@@ -44,17 +44,32 @@ export async function buildLocalBoundary(opts?: {
    */
   hostCallbacks?: Map<string, (args: unknown) => Promise<unknown>>;
   unsafeUncontained?: boolean;
-  allowFallback?: boolean;
   /** Workspace root for credential preflight resolution (defaults to cwd). */
   workspaceRoot?: string;
   /** Network adapter override (tests inject a stub; default is the real Node adapter). */
   network?: BrokerNetworkAdapter;
+  /** Optional handler for vendor-operation broker requests (e.g. media generation/optimization). */
+  vendorOperationHandler?: (req: Extract<import("../../foundations/contracts/prepared-action.js").BrokeredEffectRequest, { kind: "vendor-operation" }>) => Promise<import("../../foundations/contracts/execution-brokers.js").BrokeredEffectResult>;
+  /**
+   * Session snapshot store for read-side tagging and edit-time patch
+   * application (spec 019 FR-001). The composition root owns the store so
+   * the ReadFileExecutor and the analyzers share ONE store.
+   */
+  snapshotStore?: import("../../foundations/hashline/snapshot-store.js").SnapshotStore;
+  /**
+   * Commit-helper injection (tests / e2e pipelines). When supplied, the
+   * probe is skipped and this helper backs the FileCommitBroker — the same
+   * seam the broker unit tests use.
+   */
+  commitHelper?: import("../../vendors/native-fs-commit/index.js").NativeCommitHelper;
 }): Promise<BuildLocalBoundaryResult> {
   const artifacts = opts?.artifacts ?? new InMemoryArtifactStore();
 
   // Probe the native commit helper. When available → exactCommit:true.
-  const probe = await probeCommitHelper();
-  const helper = new PackagedCommitHelper(probe);
+  const probe = opts?.commitHelper
+    ? opts.commitHelper.probe
+    : await probeCommitHelper();
+  const helper = opts?.commitHelper ?? new PackagedCommitHelper(probe);
   const commitBroker = new FileCommitBroker({ artifacts, helper });
 
   // SEEPIENT_UNCONTAINED=1 is the environment form of the explicit opt-out;
@@ -72,6 +87,7 @@ export async function buildLocalBoundary(opts?: {
   const effectBroker = new EffectBroker({
     artifacts,
     network: opts?.network ?? new NodeNetworkAdapter(),
+    vendorOperationHandler: opts?.vendorOperationHandler,
   });
 
   // Host callbacks map for built-in and custom tools (consulted by the
@@ -81,10 +97,10 @@ export async function buildLocalBoundary(opts?: {
 
   const registry = new OperationExecutorRegistry();
   registry.register(new NoneExecutor());
-  registry.register(new ReadFileExecutor({ artifacts }));
-  registry.register(new CommitFilesExecutor({ broker: commitBroker, artifacts, useNative: probe.available, allowFallback: opts?.allowFallback ?? false }));
+  registry.register(new ReadFileExecutor({ artifacts, snapshotStore: opts?.snapshotStore }));
+  registry.register(new CommitFilesExecutor({ broker: commitBroker, artifacts, useNative: probe.available }));
   registry.register(new ProcessExecutor({ sandbox, unsafeUncontained }));
-  registry.register(new BrokerExecutor({ broker: effectBroker, artifacts, workspaceRoot: opts?.workspaceRoot }));
+  registry.register(new BrokerExecutor({ broker: effectBroker, artifacts, workspaceRoot: opts?.workspaceRoot, commitBroker }));
   registry.register(new TrustedHostExecutor(hostCallbacks));
 
   const boundary = new LocalExecutionBoundary({

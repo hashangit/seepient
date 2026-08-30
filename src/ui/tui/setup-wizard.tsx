@@ -33,14 +33,6 @@ export interface WizardExtrasGroup {
 /** All extras keys are schema-validated dot-keys (verified vs settings-schema). */
 export const EXTRAS_GROUPS: WizardExtrasGroup[] = [
   {
-    id: "image", label: "Image service",
-    fields: [
-      { dotKey: "image.apiKey", label: "API key", secret: true },
-      { dotKey: "image.baseUrl", label: "Base URL" },
-      { dotKey: "image.model", label: "Model" },
-    ],
-  },
-  {
     id: "email", label: "Email (SMTP)",
     fields: [
       { dotKey: "smtp.host", label: "Host" },

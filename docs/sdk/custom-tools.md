@@ -1,265 +1,198 @@
 ---
 title: Custom Tools
-description: Build and register custom tools using the tool() factory, Zod schemas, and tool groups.
+description: Register custom tools using explicit trust models (trustedHostTool).
 ---
 
 # Custom Tools
 
-Seepient Agent ships with 12 built-in tools, but you can create your own using the `tool()` factory. Custom tools are first-class citizens -- they work identically to built-in tools in `generateText()`, `streamText()`, and `createAgent()`.
+Seepient Agent ships with 15 built-in tools and provides explicit extension points for custom capabilities. Custom tools are registered with explicit trust models rather than ambient host authority.
 
-## `tool()` factory
+## Explicit Trust Models
 
-```typescript
-import { tool } from "seepient";
+Seepient recognizes three distinct custom-tool trust models:
 
-function tool(definition: UserToolDefinition): ToolModule
-```
+| Trust Model | Factory / Status | Description | Execution Authority |
+| ----------- | ---------------- | ----------- | ------------------- |
+| **Trusted Host** | `trustedHostTool()` | Arbitrary JavaScript callbacks with ambient host authority. | Host callback map (in-process). Audit-labelled. |
+| **Prepared Analyzer** | Planned (0.6.0) | Application analyzer generating serializable `PreparedToolAction` operations. | Boundary/broker pipeline. Policy-governed. |
+| **Broker Connector** | Planned (0.6.0) | Data-only argument-to-request mapping via JSON Pointers. | Typed broker backend. Zero developer callback execution. |
 
-### UserToolDefinition
-
-```typescript
-interface UserToolDefinition {
-  /** Tool name. Auto-generated if omitted (e.g. "custom_tool_1"). */
-  name?: string;
-
-  /** Description of what the tool does. The LLM uses this to decide when to call it. */
-  description: string;
-
-  /** Zod schema defining the tool's parameters. */
-  parameters: unknown;
-
-  /** The function that runs when the LLM calls this tool. */
-  execute: (args: unknown, context: ToolContext) => Promise<string | ToolResult>;
-}
-```
-
-### ToolContext
-
-Passed as the second argument to `execute`:
-
-```typescript
-interface ToolContext {
-  /** Report progress back during long-running operations. */
-  onUpdate?: (progress: { percentage: number; message?: string }) => void;
-
-  /** AbortSignal for cancellation. */
-  signal?: AbortSignal;
-
-  /** Extra config from the agent or generateText call. */
-  config?: Record<string, unknown>;
-}
-```
-
-### ToolResult
-
-Return a plain `string` for simple output, or a structured `ToolResult`:
-
-```typescript
-interface ToolResult {
-  output: string;
-  success: boolean;
-  metadata?: Record<string, unknown>;
-}
-```
-
-## Basic tool
-
-```typescript
-import { generateText, tool } from "seepient";
-
-const greeter = tool({
-  name: "greet",
-  description: "Greets a person by name",
-  parameters: z.object({
-    name: z.string().describe("The person's name"),
-  }),
-  execute: async ({ name }) => `Hello, ${name}! Welcome to Seepient Agent.`,
-});
-
-const result = await generateText("Greet Alice", {
-  tools: [greeter],
-});
-
-console.log(result.text);
-// => "Hello, Alice! Welcome to Seepient Agent."
-```
-
-## Tool with Zod parameters
-
-Zod schemas are automatically converted to JSON Schema for the LLM. Use `.describe()` to give the LLM hints about each parameter:
-
-```typescript
-import { generateText, tool } from "seepient";
-import { z } from "zod";
-
-const dbQuery = tool({
-  name: "db_query",
-  description: "Execute a read-only SQL query against the analytics database",
-  parameters: z.object({
-    sql: z.string().describe("SQL SELECT query to execute"),
-    database: z
-      .enum(["analytics", "users", "events"])
-      .describe("Target database"),
-    limit: z
-      .number()
-      .min(1)
-      .max(1000)
-      .default(100)
-      .describe("Max rows to return"),
-  }),
-  execute: async ({ sql, database, limit }) => {
-    const rows = await db.execute(sql, { database, limit });
-    return JSON.stringify(rows);
-  },
-});
-
-const result = await generateText(
-  "How many users signed up last week?",
-  { tools: [dbQuery] },
-);
-```
-
-::: tip
-Always use `.describe()` on your Zod fields. The descriptions are sent to the LLM and help it call the tool correctly.
+::: warning Deprecation: legacy `tool()` factory
+The legacy `tool({ execute })` factory is deprecated and fails closed at runtime. Migrate existing tools to `trustedHostTool()`.
 :::
 
-## Tool with progress reporting
+---
 
-Long-running tools can report progress via `context.onUpdate`:
+## 1. `trustedHostTool()`
+
+`trustedHostTool` registers an arbitrary JavaScript function. This is the primary extension point for embedding custom application logic, database access, or external APIs directly into an agent:
 
 ```typescript
-import { generateText, tool } from "seepient";
-import { z } from "zod";
+import { createAgent, trustedHostTool, type HostToolContext } from "seepient";
 
-const batchProcessor = tool({
-  name: "process_batch",
-  description: "Process a batch of items with progress tracking",
-  parameters: z.object({
-    items: z.array(z.string()).describe("Items to process"),
-  }),
-  execute: async ({ items }, context) => {
-    const results: string[] = [];
-
-    for (let i = 0; i < items.length; i++) {
-      // Check for cancellation
-      if (context.signal?.aborted) {
-        return "Batch processing was cancelled";
-      }
-
-      // Report progress
-      context.onUpdate?.({
-        percentage: Math.round(((i + 1) / items.length) * 100),
-        message: `Processing item ${i + 1} of ${items.length}`,
-      });
-
-      // Do the work
-      const result = await processItem(items[i]);
-      results.push(result);
-    }
-
-    return JSON.stringify({ processed: results.length, results });
+const queryBankTool = trustedHostTool({
+  definition: {
+    type: "function",
+    function: {
+      name: "query_bank_balance",
+      description: "Query bank account balance",
+      parameters: {
+        type: "object",
+        properties: {
+          accountId: { type: "string", description: "Account identifier" },
+        },
+        required: ["accountId"],
+      },
+    },
   },
-});
-```
-
-## Mixing custom and built-in tools
-
-Custom tools can be mixed with built-in tool names or group names:
-
-```typescript
-import { generateText, tool } from "seepient";
-import { z } from "zod";
-
-const lookupTool = tool({
-  name: "crm_lookup",
-  description: "Look up a customer in the CRM",
-  parameters: z.object({
-    email: z.string().email(),
-  }),
-  execute: async ({ email }) => {
-    const customer = await crm.findByEmail(email);
-    return JSON.stringify(customer);
+  execute: async (args: unknown, context: HostToolContext) => {
+    const { accountId } = (args ?? {}) as { accountId: string };
+    const balance = await bankService.getBalance(accountId);
+    return JSON.stringify({ accountId, balance });
   },
 });
 
-// Mix: built-in group name + individual built-in + custom tool
-const result = await generateText(
-  "Look up customer john@example.com and send them a summary email",
-  {
-    tools: ["core", "send_email", lookupTool],
-  },
-);
-```
-
-## Tool groups
-
-Seepient Agent organizes its 12 built-in tools into groups. You can reference groups by name:
-
-| Group         | Constant          | Tools                                                              |
-| ------------- | ----------------- | ------------------------------------------------------------------ |
-| **Core**      | `CORE_TOOLS`      | `execute_shell_command`, `read_file`, `write_file`, `get_current_datetime` |
-| **Comm**      | `COMM_TOOLS`      | `send_email`, `web_search`, `send_notification`                    |
-| **Advanced**  | `ADVANCED_TOOLS`  | `read_website`, `take_screenshot`, `generate_image`, `optimize_prompt`, `use_skill` |
-| **All**       | `ALL_TOOLS`       | All 12 built-in tools                                              |
-
-### Using group constants
-
-```typescript
-import { generateText, CORE_TOOLS, COMM_TOOLS, ALL_TOOLS } from "seepient";
-
-// By string name
-await generateText("Read ./package.json", { tools: ["core"] });
-
-// By constant (identical effect)
-await generateText("Read ./package.json", { tools: [CORE_TOOLS] });
-
-// Combine groups
-await generateText("Research and notify", {
-  tools: ["core", "comm"],
+// Pass directly to createAgent with permissionPipeline enabled:
+const agent = await createAgent({
+  permissionPipeline: true,
+  tools: [queryBankTool],
 });
+
+const response = await agent.chat("What is the balance of account acc_123?");
+console.log(response.text);
 ```
 
-### Resolving tools programmatically
+### Host Tool Requirements & Execution Rules
 
-Use `resolveTools()` to expand groups and names into concrete definitions:
+1. **Permission Pipeline Required**: Custom host tools require `permissionPipeline: true` on `createAgent()`, `generateText()`, or `streamText()`.
+2. **Automatic Allowlist Registration**: Passing a `trustedHostTool` registration explicitly in the `tools` array automatically binds the callback to the agent execution boundary and adds the tool name to the effective allowlist for that lifecycle.
+3. **Multi-Tenant / Server Root Gating**: In multi-tenant or server environments, host execution is additionally gated by the operator setting `permissions.trustedHostAllowlist`. Requests and model prompts cannot bypass this allowlist.
+
+---
+
+## 2. `preparedTool` (Planned in 0.6.0)
+ 
+The `preparedTool` trust model is defined for analyzers that inspect inputs and emit serializable operations for policy evaluation. Its execution runtime and dispatch wiring land with spec 020 in version 0.6.0. For custom capabilities today, use `trustedHostTool()`.
+ 
+---
+ 
+## 3. `brokerConnector` (Planned in 0.6.0)
+ 
+The `brokerConnector` trust model is defined for data-only argument-to-request mappings via JSON Pointers directly to backend brokers. Its connector registry and dispatch wiring land with spec 020 in version 0.6.0. For custom capabilities today, use `trustedHostTool()`.
+
+---
+
+## Migrating from Global `registerTool` to Per-Agent Composition
+
+The ambient global tool registry fallback has been removed. Built-in tools continue to be referenced by string names (e.g. `"read_file"` or `"core"`), but custom tools must now be passed explicitly as registration objects per agent or per call.
+
+### Before (Legacy ambient pattern)
 
 ```typescript
-import { resolveTools, ALL_TOOLS } from "seepient";
-
-// Expand "all" into individual tool definitions
-const definitions = resolveTools(["core", "web_search"]);
-// => ToolDefinition[] for execute_shell_command, read_file, write_file,
-//    get_current_datetime, web_search
-```
-
-## Registering tools globally
-
-Register a custom tool so it is available everywhere without passing it explicitly:
-
-```typescript
+// ❌ Legacy / Removed: Ambient global registration
 import { registerTool, tool } from "seepient";
 
 const myTool = tool({
-  name: "my_api",
-  description: "Call my internal API",
-  parameters: z.object({ endpoint: z.string() }),
-  execute: async ({ endpoint }) => {
-    const res = await fetch(`https://internal.api/${endpoint}`);
-    return await res.text();
-  },
+  name: "get_user_info",
+  description: "Get user info",
+  parameters: {},
+  execute: async () => ({ name: "Alice" }),
 });
 
-registerTool(myTool);
+registerTool(myTool); // No longer binds into execution boundary
 
-// Now available in any generateText/streamText/createAgent call
-const result = await generateText("Check the status of the API", {
-  tools: ["my_api"],
+const agent = await createAgent({
+  tools: ["get_user_info"], // Fails with HOST_TOOL_NOT_REGISTERED
 });
 ```
 
+### After (Per-agent explicit registration)
+
+```typescript
+// ✅ Recommended: Direct registration per agent
+import { createAgent, trustedHostTool } from "seepient";
+
+const userInfoTool = trustedHostTool({
+  definition: {
+    type: "function",
+    function: {
+      name: "get_user_info",
+      description: "Get user info",
+      parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
+  execute: async () => JSON.stringify({ name: "Alice" }),
+});
+
+const agent = await createAgent({
+  permissionPipeline: true,
+  tools: [userInfoTool],
+});
+```
+
+---
+
+## One-Shot `generateText()` and `streamText()`
+
+Custom tools work identically in stateless execution:
+
+```typescript
+import { generateText, trustedHostTool } from "seepient";
+
+const mathTool = trustedHostTool({
+  definition: {
+    type: "function",
+    function: {
+      name: "compute_square",
+      description: "Calculate square of a number",
+      parameters: {
+        type: "object",
+        properties: { n: { type: "number" } },
+        required: ["n"],
+      },
+    },
+  },
+  execute: async (args) => {
+    const { n } = (args ?? {}) as { n: number };
+    return String(n * n);
+  },
+});
+
+const result = await generateText("What is the square of 12?", {
+  permissionPipeline: true,
+  tools: [mathTool],
+});
+
+console.log(result.text);
+```
+
+---
+
+## Built-In Tool Groups
+
+Seepient Agent organizes its 15 built-in tools into groups:
+
+| Group | Constant | Tools |
+| ----- | -------- | ----- |
+| **Core** | `CORE_TOOLS` | `execute_shell_command`, `read_file`, `write_file`, `edit_file`, `get_current_datetime`, `manage_todos`, `render_widget` |
+| **Comm** | `COMM_TOOLS` | `send_email`, `web_search`, `send_notification` |
+| **Advanced** | `ADVANCED_TOOLS` | `read_website`, `take_screenshot`, `generate_image`, `optimize_prompt`, `use_skill` |
+| **All** | `ALL_TOOLS` | All 15 built-in tools |
+
+You can mix built-in group names, built-in tool names, and custom tool registrations in `tools`:
+
+```typescript
+const agent = await createAgent({
+  permissionPipeline: true,
+  tools: ["core", "web_search", userInfoTool],
+});
+```
+
+---
+
 ## Related APIs
 
+- [createAgent()](/sdk/create-agent) -- Stateful agent with custom tool composition
 - [generateText()](/sdk/generate-text) -- One-shot execution with tool support
 - [streamText()](/sdk/stream-text) -- Streaming execution with tool callbacks
-- [createAgent()](/sdk/create-agent) -- Stateful agent with dynamic tool switching
 - [Types](/sdk/types) -- Full TypeScript type reference

@@ -150,6 +150,7 @@ export interface Seepient {
   }>;
   getAssignments(): PurposeModelMap;
   getCatalog(): Promise<readonly AvailableModel[]>;
+  listProviders(): Promise<string[]>;
   reload(): Promise<{ revision: number }>;
   dispose(): Promise<void>;
 

@@ -23,6 +23,7 @@ import type { ExecutionBoundary } from "../../../foundations/contracts/execution
 import { LocalPolicyStore, computeWorkspaceId } from "../policy-store.js";
 import type { ToolAnalysisContext } from "../../../foundations/contracts/custom-tools.js";
 import { BrokerExecutor } from "../../../capabilities/execution/executors.js";
+import { createSnapshotStore, tagFor } from "../../../foundations/hashline/snapshot-store.js";
 import { EffectBroker } from "../../../capabilities/execution/effect-broker.js";
 
 const NOOP_BROKER: ApprovalBroker = {
@@ -113,6 +114,8 @@ describe("golden tool baseline (spec 017, T002 / T015 / T016 / QS-1)", () => {
       },
       artifacts,
       modelProviderClass: "*",
+      // spec 019: edit_file applies patches against the session store.
+      snapshotStore: createSnapshotStore(),
     };
   }
 
@@ -128,11 +131,14 @@ describe("golden tool baseline (spec 017, T002 / T015 / T016 / QS-1)", () => {
     });
 
     const ctx = await getAnalysisContext(wired.policyContext);
+    // spec 019: the store must know "test.txt" for the edit_file invocation.
+    ctx.snapshotStore!.record("test.txt", "hello world\n");
+    const testTag = tagFor("test.txt", "hello world\n");
 
     const toolInvocations: Array<{ name: string; args: unknown; expectedResult: "allow" | "needs-approval" | "backend-unsupported" }> = [
       { name: "read_file", args: { path: "test.txt" }, expectedResult: "allow" },
       { name: "write_file", args: { path: "new.txt", content: "data" }, expectedResult: "needs-approval" },
-      { name: "edit_file", args: { patch: "[test.txt#0000]\n+hi\n" }, expectedResult: "needs-approval" },
+      { name: "edit_file", args: { patch: `[test.txt#${testTag}]\n+hi\n` }, expectedResult: "needs-approval" },
       { name: "execute_shell_command", args: { command: "echo ok" }, expectedResult: "needs-approval" },
       { name: "use_skill", args: { skill_name: "sample-skill" }, expectedResult: "allow" },
       { name: "get_current_datetime", args: {}, expectedResult: "allow" },

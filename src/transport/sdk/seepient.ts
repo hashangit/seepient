@@ -491,6 +491,12 @@ export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<
       return runtime.modelCatalog.listAvailableModels(snapshot.config);
     },
 
+    async listProviders(): Promise<string[]> {
+      const snapshot = await runtime.createTurnSnapshot();
+      const catalog = await runtime.modelCatalog.listAvailableModels(snapshot.config);
+      return Array.from(new Set(catalog.map((m) => m.upstreamProvider))).sort();
+    },
+
     async reload(): Promise<{ revision: number }> {
       latestState = await managerApi.getState();
       return { revision: latestState.revision };

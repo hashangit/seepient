@@ -27,11 +27,15 @@ const currentDir = path.dirname(fileURLToPath(import.meta.url));
 export interface CommitHelperProbe {
   available: boolean;
   /** Why the helper is unavailable, when `available` is false. */
-  reason?: "binary-missing" | "primitive-unsupported" | "self-test-failed";
+  reason?: "binary-missing" | "primitive-unsupported" | "self-test-failed" | "digest-mismatch";
   /** Path to the resolved helper binary, when available. */
   binaryPath?: string;
   /** Platform the probe ran on. */
   platform: NodeJS.Platform;
+  /** True only when the packaged binary matched the shipped manifest digest
+   *  (spec 019, FR-009). The SEEPIENT_FS_COMMIT_BIN override bypasses the
+   *  manifest check by design, so it reports false. */
+  digestVerified: boolean;
 }
 
 /** A validated commit request handed to the native helper. */
@@ -86,10 +90,57 @@ function resolveBinaryPath(): string {
   );
 }
 
+/** The manifest directory for a resolved binary (sibling of the platform dir). */
+function resolveManifestPath(binaryPath: string): string {
+  return path.join(path.dirname(path.dirname(binaryPath)), "manifest.json");
+}
+
 /**
- * Startup self-test. Probes for the binary's existence and runs a single
- * exact-commit self-check (create temp, commit, verify). Failures are
- * reported as `available:false` — exact writes then fail closed.
+ * sha256 the binary and compare against its manifest entry. Exported for
+ * unit tests with fixture manifests.
+ */
+export async function verifyPackagedBinary(
+  binaryPath: string,
+  manifestPath: string,
+  platform: NodeJS.Platform,
+  arch: string = process.arch,
+): Promise<{ ok: boolean; reason?: "digest-mismatch" }> {
+  const { readFile } = await import("node:fs/promises");
+  let manifest: { version?: number; binaries?: Record<string, { sha256?: string }> };
+  try {
+    manifest = JSON.parse(await readFile(manifestPath, "utf-8"));
+  } catch {
+    // Missing or unreadable manifest: fail closed — an install whose
+    // integrity cannot be verified is indistinguishable from a tampered one.
+    return { ok: false, reason: "digest-mismatch" };
+  }
+  if (manifest.version !== 1) {
+    // Unknown manifest version: fail closed (spec 019 data-model).
+    return { ok: false, reason: "digest-mismatch" };
+  }
+  const entry = manifest.binaries?.[`${platform}-${arch}`];
+  if (!entry || typeof entry.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(entry.sha256)) {
+    return { ok: false, reason: "digest-mismatch" };
+  }
+  const bytes = await readFile(binaryPath);
+  const actual = createHash("sha256").update(bytes).digest("hex");
+  if (actual !== entry.sha256) {
+    return { ok: false, reason: "digest-mismatch" };
+  }
+  return { ok: true };
+}
+
+/**
+ * Startup self-test. Resolution order:
+ *  1. platform gate (darwin/linux only; win32 → primitive-unsupported),
+ *  2. `SEEPIENT_FS_COMMIT_BIN` override — exec-bit check only, EXEMPT from
+ *     the manifest check BY DESIGN (developer-built binary; documented as an
+ *     explicit trust decision, spec 019 D11),
+ *  3. packaged layout — digest verified against the shipped manifest
+ *     (fail closed on mismatch: `digest-mismatch`),
+ *  4. source layout (tsx dev runs) — no manifest exists by design; the
+ *     binary is available but `digestVerified:false` (from-source story,
+ *     spec 019 QS-1.5).
  */
 export async function probeCommitHelper(): Promise<CommitHelperProbe> {
   const platform = process.platform;
@@ -98,16 +149,36 @@ export async function probeCommitHelper(): Promise<CommitHelperProbe> {
       available: false,
       reason: "primitive-unsupported",
       platform,
+      digestVerified: false,
     };
   }
   const binaryPath = resolveBinaryPath();
+  const envOverride = Boolean(process.env.SEEPIENT_FS_COMMIT_BIN);
   try {
     await access(binaryPath, constants.X_OK);
-    return { available: true, binaryPath, platform };
   } catch {
     // Helper binary missing: fail closed
-    return { available: false, binaryPath: undefined, platform, reason: "binary-missing" };
+    return { available: false, binaryPath: undefined, platform, reason: "binary-missing", digestVerified: false };
   }
+  if (envOverride) {
+    return { available: true, binaryPath, platform, digestVerified: false };
+  }
+  // Manifest verification applies ONLY to the packaged (dist) layout; the
+  // source layout never carries a manifest (CI is the only manifest
+  // generator — contract: commits must never include a hand-written one).
+  const isPackagedLayout = currentDir.split(path.sep).includes("dist");
+  if (isPackagedLayout) {
+    const verification = await verifyPackagedBinary(
+      binaryPath,
+      resolveManifestPath(binaryPath),
+      platform,
+    );
+    if (!verification.ok) {
+      return { available: false, binaryPath: undefined, platform, reason: "digest-mismatch", digestVerified: false };
+    }
+    return { available: true, binaryPath, platform, digestVerified: true };
+  }
+  return { available: true, binaryPath, platform, digestVerified: false };
 }
 
 /**
@@ -119,7 +190,7 @@ export class PackagedCommitHelper implements NativeCommitHelper {
   readonly probe: CommitHelperProbe;
 
   constructor(probe?: CommitHelperProbe) {
-    this.probe = probe ?? { available: false, reason: "binary-missing", platform: process.platform };
+    this.probe = probe ?? { available: false, reason: "binary-missing", platform: process.platform, digestVerified: false };
   }
 
   get available(): boolean {
@@ -127,16 +198,15 @@ export class PackagedCommitHelper implements NativeCommitHelper {
   }
 
   async commit(req: NativeCommitRequest): Promise<NativeCommitResult> {
-    if (!this.probe.available) {
+    if (!this.probe.available || !this.probe.binaryPath) {
+      // No JS fallback exists (spec 019 FR-004): an unavailable probe always
+      // answers primitive-unsupported and the broker fails closed.
       return {
         ok: false,
         writtenSha256: "",
         errorCode: "primitive-unsupported",
         message: "Native exact-commit helper unavailable; no JS fallback",
       };
-    }
-    if (!this.probe.binaryPath) {
-      return this.nodeExactCommit(req);
     }
 
     // The real invocation passes destination + content over stdin and reads
@@ -203,21 +273,5 @@ export class PackagedCommitHelper implements NativeCommitHelper {
       });
       child.stdin.end(Buffer.from(req.content));
     });
-  }
-
-  private async nodeExactCommit(req: NativeCommitRequest): Promise<NativeCommitResult> {
-    try {
-      const dir = path.dirname(req.destination);
-      const { mkdir, writeFile, rename } = await import("node:fs/promises");
-      const { randomBytes } = await import("node:crypto");
-      await mkdir(dir, { recursive: true, mode: 0o755 });
-      const tmp = path.join(dir, `.commit.tmp.${process.pid}.${randomBytes(4).toString("hex")}`);
-      await writeFile(tmp, Buffer.from(req.content));
-      await rename(tmp, req.destination);
-      const sha = createHash("sha256").update(req.content).digest("hex");
-      return { ok: true, writtenSha256: sha };
-    } catch (err) {
-      return { ok: false, writtenSha256: "", errorCode: "io-error", message: (err as Error).message };
-    }
   }
 }

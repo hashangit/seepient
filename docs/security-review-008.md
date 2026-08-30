@@ -99,9 +99,12 @@ CommitFilesExecutor.execute()
       → wrapper verifies returned digest matches input
 ```
 
-**Reviewer question**: Is there any JS code path that writes to the destination
-without going through the helper? Is the helper binary checksummed before
-execution? (Probe `src/vendors/native-fs-commit/index.ts::probeCommitHelper`.)
+**Resolved (spec 019)**: there is NO JS write path — the interim fallback and
+its env opt-in were deleted (FR-013); `PackagedCommitHelper` answers
+`primitive-unsupported` whenever the probe is unavailable. The helper binary IS
+checksummed before execution: the probe verifies its sha256 against the shipped
+manifest and fails closed (`digest-mismatch`) on mismatch or an unknown
+manifest version (probe `src/vendors/native-fs-commit/index.ts::probeCommitHelper`).
 
 ### 2.4 Network egress
 
@@ -204,8 +207,11 @@ The reviewer signs off each item independently.
    `PersistedCapabilityLedger`, `PersistedReplayLedger`, and `TerminalEventOutbox` are
    durably persisted with atomic writes (`tmp` + `fsync` + `rename`, file locking, `0o600`/`0o700`).
 2. **The native `seepient-fs-commit` helper is a separate build artifact.** Its
-   source must be reviewed independently (Rust). The TS wrapper probes for the
-   binary and fails closed when absent.
+   Rust source lives in-repo at `native/fs-commit/` (spec 019) and must be
+   reviewed independently. The TS wrapper probes for the binary, verifies its
+   sha256 against the shipped `dist/native-fs-commit/manifest.json`, and fails
+   closed (`digest-mismatch`) on any mismatch; `SEEPIENT_FS_COMMIT_BIN` bypasses
+   the manifest check BY DESIGN as a documented developer trust decision.
 3. **The `sign()` callbacks in tests use fake signers.** Production wiring
    requires real mTLS-backed signing keys for dispatch signatures and broker
    lease tokens.

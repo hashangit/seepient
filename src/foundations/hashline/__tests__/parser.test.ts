@@ -123,4 +123,30 @@ DEL 2.=2`;
     const result = parsePatch(src);
     expect(result.sections[0].operations).toHaveLength(2);
   });
+
+  it('parses DEL and DEL.BLK with optional trailing colon', () => {
+    const src = `[f#beef]
+DEL 2.=4:
+DEL.BLK 7:`;
+    const result = parsePatch(src);
+    expect(result.sections[0].operations).toHaveLength(2);
+    expect(result.sections[0].operations[0]).toMatchObject({ type: 'del', startLine: 2, endLine: 4 });
+    expect(result.sections[0].operations[1]).toMatchObject({ type: 'del_block', startLine: 7 });
+  });
+
+  it('parses the exact example from the edit_file tool description', () => {
+    const example = `[/src/app.ts#a1f2]
+SWAP 2.=2:
++const x = 2;`;
+    const result = parsePatch(example);
+    expect(result.sections).toHaveLength(1);
+    expect(result.sections[0].path).toBe('/src/app.ts');
+    expect(result.sections[0].tag).toBe('a1f2');
+    expect(result.sections[0].operations[0]).toMatchObject({
+      type: 'swap',
+      startLine: 2,
+      endLine: 2,
+      body: ['const x = 2;'],
+    });
+  });
 });

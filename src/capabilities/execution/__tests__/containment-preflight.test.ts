@@ -19,7 +19,19 @@ describe("containment preflight (spec 011 T032)", () => {
       probe: { available: true, platform: "darwin", backend: "seatbelt" },
     });
     const result = await preflightContainment({ workspaceRoot: "/work" });
-    expect(result).toEqual({ ok: true, backend: "seatbelt", workspaceRoot: "/work" });
+    // commitHelper rides every result (spec 019 FR-010). The dev tree may or
+    // may not carry a binary built via `pnpm native:build`: absent →
+    // binary-missing/unverified; present (src layout) → on, digest-unverified.
+    if (result.commitHelper.exactCommit) {
+      expect(result.commitHelper).toEqual({ exactCommit: true, digestVerified: false });
+    } else {
+      expect(result.commitHelper).toEqual({ exactCommit: false, reason: "binary-missing", digestVerified: false });
+    }
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.backend).toBe("seatbelt");
+      expect(result.workspaceRoot).toBe("/work");
+    }
   });
 
   it("fails closed with a macOS setup hint when sandbox-exec is missing", async () => {

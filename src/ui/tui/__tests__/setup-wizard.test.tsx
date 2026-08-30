@@ -137,7 +137,7 @@ describe("SetupWizard — fresh flow (T021)", () => {
     await vi.waitFor(() => {
       expect(inst.lastFrame() ?? "").toContain("Optional integrations");
     }, { timeout: 3000 });
-    await type(inst, "5");            // extras → Done
+    await type(inst, "4");            // extras → Done
     await vi.waitFor(() => {
       expect(inst.lastFrame() ?? "").toContain("Setup complete");
     }, { timeout: 3000 });
@@ -172,7 +172,7 @@ describe("SetupWizard — skip rules on a configured state (T021/T026)", () => {
     await vi.waitFor(() => {
       expect(inst.lastFrame() ?? "").toContain("Optional integrations");
     }, { timeout: 3000 });
-    await type(inst, "5"); // extras → summary (choose [5] Done)
+    await type(inst, "4"); // extras → summary
     await vi.waitFor(() => {
       expect(inst.lastFrame() ?? "").toContain("Setup complete");
     }, { timeout: 3000 });
@@ -203,7 +203,7 @@ describe("SetupWizard — extras are per-key saves (T026, FR-006)", () => {
     await vi.waitFor(() => {
       expect(inst.lastFrame() ?? "").toContain("Optional integrations");
     }, { timeout: 3000 });
-    await type(inst, "3"); // Web search group
+    await type(inst, "2"); // Web search group
     await vi.waitFor(() => {
       expect(inst.lastFrame() ?? "").toContain("tavily");
     }, { timeout: 3000 });
@@ -214,7 +214,7 @@ describe("SetupWizard — extras are per-key saves (T026, FR-006)", () => {
     }, { timeout: 5000 });
     expect(settings.set).toHaveBeenCalledTimes(1);
     expect(inst.lastFrame() ?? "").toContain("✓"); // group marked done
-    await type(inst, "5"); // Done → summary
+    await type(inst, "4"); // Done → summary
     await vi.waitFor(() => {
       expect(inst.lastFrame() ?? "").toContain("search.tavilyApiKey");
     }, { timeout: 3000 });
@@ -289,7 +289,7 @@ describe("SetupWizard — exit & escape navigation (C4, SC-004)", () => {
     await vi.waitFor(() => {
       expect(inst.lastFrame() ?? "").toContain("Optional integrations");
     }, { timeout: 3000 });
-    await type(inst, "5"); // extras -> summary (no extra keys entered)
+    await type(inst, "4"); // extras -> summary (no extra keys entered)
     await vi.waitFor(() => {
       expect(inst.lastFrame() ?? "").toContain("Setup complete");
     }, { timeout: 3000 });
@@ -365,7 +365,7 @@ describe("SetupWizard — exit & escape navigation (C4, SC-004)", () => {
     await vi.waitFor(() => {
       expect(inst.lastFrame() ?? "").toContain("Optional integrations");
     }, { timeout: 3000 });
-    await type(inst, "5"); // extras -> summary (skip entering keys)
+    await type(inst, "4"); // extras -> summary (skip entering keys)
     await vi.waitFor(() => {
       expect(inst.lastFrame() ?? "").toContain("Setup complete");
     }, { timeout: 3000 });

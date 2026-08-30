@@ -7,7 +7,6 @@ import { ProviderRuntime } from "../providers/provider-runtime.js";
 import { ProviderConfigStore } from "../providers/config-store/provider-config-store.js";
 import { MemoryCredentialStore } from "../providers/credentials/memory-credential-store.js";
 import { createHookExecutor } from "../hooks.js";
-import { ImageTool } from "../../capabilities/tools/image.js";
 
 describe("Agent Loop Runtime Tool Injection & Propagation", () => {
   let tempDir: string;
@@ -72,14 +71,15 @@ describe("Agent Loop Runtime Tool Injection & Propagation", () => {
       },
     });
 
-    const output = await ImageTool.handler!(
-      { prompt: "A glowing galaxy", output_dir: tempDir },
-      { runtime },
+    const { generateImageRuntime } = await import("../../capabilities/media/media.js");
+    const result = await generateImageRuntime(
+      { prompt: "A glowing galaxy", outputDir: tempDir },
+      runtime,
     );
 
     expect(executeImageCalled).toBe(true);
-    expect(output).toContain("Successfully generated 1 image");
-    expect(output).toContain(tempDir);
+    expect(result.images).toHaveLength(1);
+    expect(result.images[0].mimeType).toBe("image/png");
   });
 
   it("propagates runtime errors without silently falling back", async () => {

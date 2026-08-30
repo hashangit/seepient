@@ -160,6 +160,48 @@ describe("ReadFileExecutor (T205)", () => {
   });
 });
 
+describe("ReadFileExecutor snapshot parity (spec 019 FR-001, T015)", () => {
+  it("records the content and appends [content-tag:N] when a store is wired", async () => {
+    const { createSnapshotStore, tagFor } = await import("../../../foundations/hashline/snapshot-store.js");
+    const store = createSnapshotStore();
+    const file = join(dir, "tagged.txt");
+    const content = "line 1\nline 2\n";
+    writeFileSync(file, content);
+    const executor = new ReadFileExecutor({ snapshotStore: store });
+    const action = actionWith("read-file", { destinationPath: file });
+    const result = await executor.execute(action, envelope(file), asOp(action.operation, "read-file"), {});
+    expect(result.state).toBe("succeeded");
+    if (result.state === "succeeded") {
+      // Legacy contract byte-for-byte (core.ts:77-79): content + blank line
+      // + tag, so a following edit_file patch header is valid.
+      const expectedTag = tagFor(file, content);
+      expect(result.result.output).toBe(`${content}\n\n[content-tag:${expectedTag}]`);
+    }
+    // The store gained the entry — the pipeline read→edit loop can resolve it.
+    expect(store.resolvePath(file)).not.toBeNull();
+  });
+
+  it("returns raw content when no store is wired (unchanged behavior)", async () => {
+    const file = join(dir, "raw.txt");
+    writeFileSync(file, "raw content");
+    const executor = new ReadFileExecutor();
+    const action = actionWith("read-file", { destinationPath: file });
+    const result = await executor.execute(action, envelope(file), asOp(action.operation, "read-file"), {});
+    expect(result.state).toBe("succeeded");
+    if (result.state === "succeeded") expect(result.result.output).toBe("raw content");
+  });
+
+  it("keeps the security-path denial unchanged", async () => {
+    const { createSnapshotStore } = await import("../../../foundations/hashline/snapshot-store.js");
+    const executor = new ReadFileExecutor({ snapshotStore: createSnapshotStore() });
+    const secPath = `${process.env.HOME ?? "~"}/.seepient/security/keys.json`;
+    const action = actionWith("read-file", { destinationPath: secPath });
+    const result = await executor.execute(action, envelope(secPath), asOp(action.operation, "read-file"), {});
+    expect(result.state).toBe("failed");
+    if (result.state === "failed") expect(result.error.code).toBe("SECURITY_PATH_DENIED");
+  });
+});
+
 describe("NoneExecutor", () => {
   it("returns the precomputed result", async () => {
     const executor = new NoneExecutor();
@@ -318,12 +360,12 @@ describe("TrustedHostExecutor", () => {
 });
 
 describe("CommitFilesExecutor fail-closed defaults (P0-1)", () => {
-  it("fails closed with EXACT_COMMIT_UNAVAILABLE when useNative:false and allowFallback:false", async () => {
+  it("fails closed with EXACT_COMMIT_UNAVAILABLE when the helper is unavailable", async () => {
     const artifacts = new InMemoryArtifactStore();
     const broker = new FileCommitBroker({ artifacts, helper: fakeHelper() as never });
     const dest = join(dir, "out.txt");
     const contentRef = await artifacts.put(Buffer.from("content"), "text/plain");
-    const executor = new CommitFilesExecutor({ broker, artifacts, useNative: false, allowFallback: false });
+    const executor = new CommitFilesExecutor({ broker, artifacts, useNative: false });
     const action = actionWith("commit-files", {});
     action.operation = {
       kind: "commit-files",
@@ -345,7 +387,10 @@ describe("CommitFilesExecutor fail-closed defaults (P0-1)", () => {
   it("production buildLocalBoundary() defaults to fail-closed exactCommit:false when native is missing", async () => {
     const { buildLocalBoundary } = await import("../build-local-boundary.js");
     const artifacts = new InMemoryArtifactStore();
-    const { boundary } = await buildLocalBoundary({ artifacts });
+    // Pin the helper to unavailable: the dev tree may or may not carry a
+    // binary built via `pnpm native:build` (spec 019 QS-1.5).
+    const { fakeHelper } = await import("./helpers/commit-helper-fakes.js");
+    const { boundary } = await buildLocalBoundary({ artifacts, commitHelper: fakeHelper({ available: false }) });
     expect(boundary.capabilities.exactCommit).toBe(false);
     const dest = join(dir, "should-not-be-written.txt");
     const contentRef = await artifacts.put(Buffer.from("do not write"), "text/plain");
@@ -369,6 +414,7 @@ describe("CommitFilesExecutor fail-closed defaults (P0-1)", () => {
     expect(existsSync(dest)).toBe(false);
   });
 });
+
 describe("BrokerExecutor web_search formatting", () => {
   it("formats Tavily search results into compact markdown snippet", async () => {
     const prevKey = process.env.TAVILY_API_KEY;

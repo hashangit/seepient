@@ -261,6 +261,21 @@ export class SettingsManager {
         }
         return String(raw);
       }
+      case 'array': {
+        if (typeof raw === 'string' && raw.trim() === '') return [];
+        const list = Array.isArray(raw)
+          ? raw
+          : typeof raw === 'string'
+            ? raw.split(',').map((s) => s.trim())
+            : [];
+        if (list.some((item) => typeof item !== 'string')) {
+          throw new SettingsError(`${dotKey} must be an array of strings.`, 'SETTINGS_VALIDATION_FAILED');
+        }
+        if (list.some((item) => item.trim().length === 0)) {
+          throw new SettingsError(`${dotKey} entries must be non-empty strings. Got: "${raw}"`, 'SETTINGS_VALIDATION_FAILED');
+        }
+        return list;
+      }
       case 'string': {
         const str = String(raw ?? '');
         // URL validation for baseUrl/webhook fields
@@ -305,6 +320,8 @@ export class SettingsManager {
         return val.toLowerCase() === 'true' || val === '1';
       case 'number':
         return Number(val);
+      case 'array':
+        return val.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
       default:
         return val;
     }

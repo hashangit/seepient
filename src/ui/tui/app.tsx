@@ -605,6 +605,11 @@ export function TuiApp({
     {
       onAbort: abort,
       onExit,
+      onClearDraft: () => {
+        draftRef.current = '';
+        historyIndexRef.current = -1;
+        setInput('');
+      },
       onExpandToggle: () => { resetView(); setExpanded((e) => !e); setStaticKey((k) => k + 1); },
       onPalette: () => setOverlay('palette'),
       onClear: clearAll,
@@ -612,7 +617,7 @@ export function TuiApp({
       onEscapeWidget: () => { if (focusedWidgetId) setFocusedWidgetId(null); },
       onCycleMode: () => { void cycleConsentMode(); },
     },
-    { enabled: overlay === null, isRunning, promptPending: !!pendingPermission },
+    { enabled: overlay === null, isRunning, promptPending: !!pendingPermission, hasDraft: input.length > 0 },
   );
 
   // T2: stabilize streaming text for live display. While markdown is reflowing
@@ -759,6 +764,8 @@ export function TuiApp({
         mcpCount={mcpCount}
         contextTokens={contextTokens}
         contextWindow={getModelMeta(agent.getModel())?.contextWindow}
+        exactCommit={agent.getContainmentStatus?.()?.commitHelper?.exactCommit}
+        exactCommitReason={agent.getContainmentStatus?.()?.commitHelper?.reason}
       />
     </Box>
   );

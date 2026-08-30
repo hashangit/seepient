@@ -5,7 +5,7 @@ description: Multi-provider LLM support with OpenAI, Anthropic, GLM, and OpenAI-
 
 # Providers
 
-Seepient Agent supports multiple LLM providers with a unified interface. Bring your own API keys from each provider and switch with a single option — all other code stays the same. Seepient Agent does not provide LLM inference.
+Seepient Agent supports multiple LLM providers with a unified interface. Bring your own API keys from each provider and switch seamlessly — all other code stays the same. Seepient Agent does not provide hosted LLM inference.
 
 ## ProviderType
 
@@ -57,20 +57,19 @@ GLM accepts both the alias (`"haiku"`, `"sonnet"`, `"opus"`) and the full model 
 
 ## Quick usage
 
-Pass `provider` and `model` as options:
+Pass `model` as an option:
 
 ```typescript
 import { generateText } from "seepient";
 
 const result = await generateText("Explain recursion", {
-  provider: "anthropic",
   model: "claude-sonnet-4-6-20260320",
 });
 ```
 
 ## Environment variable auto-detection
 
-Seepient Agent automatically detects API keys from environment variables. No code changes needed to switch providers.
+Seepient Agent automatically detects API keys from environment variables.
 
 ### Provider-specific keys
 
@@ -90,132 +89,97 @@ Seepient Agent automatically detects API keys from environment variables. No cod
 | `LLM_PROVIDER`        | Default provider: `"openai"`, `"anthropic"`, `"glm"`, or `"openai-compatible"` |
 | `LLM_MODEL`           | Generic model override for any provider (lower priority than provider-specific `*_MODEL` vars) |
 
-### Resolution order
-
-1. **Provider-specific env var** (e.g. `OPENAI_API_KEY`) -- highest priority
-2. **Error** -- if the selected provider's key is not set
-
 ```bash
 # Use Anthropic with its own key
 export ANTHROPIC_API_KEY=sk-ant-...
 export LLM_PROVIDER=anthropic
 ```
 
-## `configureProviders()`
+---
 
-Set up multiple providers programmatically at application startup:
+## Embedder Catalog & Provider API
+
+For multi-tenant applications and custom embedders, instantiate `createSeepient` to manage accounts, assignments, and query model catalogs:
 
 ```typescript
-import { configureProviders } from "seepient";
+import { createSeepient } from "seepient";
 
-configureProviders({
-  openai: {
-    apiKey: process.env.OPENAI_API_KEY!,
-    model: "gpt-5.4",
-  },
-  anthropic: {
-    apiKey: process.env.ANTHROPIC_API_KEY!,
-    model: "claude-sonnet-4-6-20260320",
-  },
-  glm: {
-    apiKey: process.env.GLM_API_KEY!,
-    model: "opus",
-  },
-  default: "openai",
+// In-memory isolated instance (e.g. per-tenant or test runner)
+const seepient = await createSeepient({
+  overlayFile: ":memory:",
+});
+
+// List distinct upstream providers (e.g. ["anthropic", "google", "openai"])
+const providers = await seepient.listProviders();
+
+// Inspect full available models catalog
+const catalog = await seepient.getCatalog();
+console.log(`Found ${catalog.length} available models across providers:`, providers);
+
+// Add a provider account programmatically
+await seepient.addProvider({
+  accountId: "team_anthropic",
+  upstreamProvider: "anthropic",
+  credential: { mode: "paste", keyValue: process.env.ANTHROPIC_API_KEY! },
 });
 ```
 
-### MultiProviderConfig
+---
+
+## Per-Account Discovery with `createProviderManagerApi`
+
+For fine-grained control over accounts and remote model discovery:
 
 ```typescript
-interface MultiProviderConfig {
-  openai?: { apiKey: string; model?: string };
-  anthropic?: { apiKey: string; model?: string };
-  glm?: { apiKey: string; model?: string };
-  "openai-compatible"?: { apiKey: string; baseUrl: string; model?: string };
-  default: ProviderType;
+import { createProviderManagerApi } from "seepient";
+
+const manager = createProviderManagerApi(runtime);
+
+// Retrieve current configuration state and accounts
+const state = await manager.getState();
+
+// Refresh discovered models from upstream API for an account
+const refreshResult = await manager.refreshModels("team_anthropic");
+if (refreshResult.ok) {
+  console.log(`Discovered ${refreshResult.discoveredCount} models`);
 }
 ```
 
-## `provider()` factory
-
-Build individual provider config objects:
-
-```typescript
-import { provider, configureProviders } from "seepient";
-
-configureProviders({
-  openai: provider("openai", "sk-...", { model: "gpt-5.4" }),
-  anthropic: provider("anthropic", "sk-ant-..."),
-  default: "openai",
-});
-```
-
-The `provider()` function returns a typed config object with `{ type, apiKey, model?, baseUrl?, timeout? }`:
-
-```typescript
-function provider(
-  type: ProviderType,
-  apiKey: string,
-  options?: { model?: string; baseUrl?: string; timeout?: number },
-): ProviderConfig
-```
-
-## Per-request provider override
-
-Every SDK function accepts `provider` and `model` options that override the global default:
-
-```typescript
-import { generateText } from "seepient";
-
-// Uses the globally configured default provider
-const r1 = await generateText("Hello");
-
-// Overrides to Anthropic for this request only
-const r2 = await generateText("Hello", {
-  provider: "anthropic",
-  model: "claude-sonnet-4-6-20260320",
-});
-
-// Uses GLM with the opus alias
-const r3 = await generateText("Hello", {
-  provider: "glm",
-  model: "opus",
-});
-```
+---
 
 ## Runtime provider switching with agents
 
-Use `agent.switchProvider()` to change providers mid-conversation:
+Use `agent.switchProvider()` to change the provider account (or model) mid-conversation:
 
 ```typescript
 import { createAgent } from "seepient";
 
 const agent = await createAgent({
-  provider: "openai",
   model: "gpt-5.4",
 });
 
-// First turn with OpenAI
+// First turn with the default provider account
 const r1 = await agent.chat("What is the capital of France?");
 console.log(r1.text);
 
-// Switch to Anthropic for the next turn
-await agent.switchProvider("anthropic", "claude-opus-4-6-20260320");
+// Switch to another configured provider account for the next turn
+await agent.switchProvider("team_anthropic", "claude-opus-4-6-20260320");
 
 const r2 = await agent.chat("Tell me more about its history");
 console.log(r2.text);
 
-// Switch to GLM
-await agent.switchProvider("glm", "opus");
+// Switch models within the default account
+await agent.switchProvider("opus");
 
 const r3 = await agent.chat("Summarize in Chinese");
 console.log(r3.text);
 ```
 
 ::: tip
-`switchProvider()` changes the provider for subsequent calls only. The conversation history is fully preserved across switches.
+`switchProvider(account, model)` targets a provider account from your configuration; with a single argument it switches the model only. The conversation history is fully preserved across switches.
 :::
+
+---
 
 ## OpenAI-compatible provider
 
@@ -225,73 +189,23 @@ Connect to any LLM API that exposes an OpenAI-compatible endpoint (Ollama, vLLM,
 import { generateText } from "seepient";
 
 const result = await generateText("Hello from local model", {
-  provider: "openai-compatible",
   model: "llama-3.3-70b",
-  apiKey: process.env.OPENAI_COMPAT_API_KEY,
-  baseUrl: process.env.OPENAI_COMPAT_BASE_URL,
-});
-```
-
-Or configure it globally:
-
-```typescript
-import { configureProviders } from "seepient";
-
-configureProviders({
-  "openai-compatible": {
-    apiKey: process.env.OPENAI_COMPAT_API_KEY!,
-    baseUrl: process.env.OPENAI_COMPAT_BASE_URL!,
-    model: "llama-3.3-70b",
+  config: {
+    openaiCompatBaseUrl: process.env.OPENAI_COMPAT_BASE_URL,
+    openaiCompatApiKey: process.env.OPENAI_COMPAT_API_KEY,
   },
-  default: "openai-compatible",
 });
 ```
 
 ::: warning
-The `baseUrl` option is required for the `openai-compatible` provider. It is ignored for the other providers.
+The `OPENAI_COMPAT_BASE_URL` is required for the `openai-compatible` provider.
 :::
 
-## Dynamic provider management
-
-Add, update, or remove providers at runtime:
-
-```typescript
-import {
-  addProvider,
-  updateProviderConfig,
-  removeProvider,
-} from "seepient";
-
-// Add a new provider
-addProvider("anthropic", {
-  apiKey: "sk-ant-...",
-  model: "claude-sonnet-4-6-20260320",
-});
-
-// Update just the model, keep existing apiKey
-updateProviderConfig("openai", { model: "gpt-5.4-mini" });
-
-// Remove a provider
-removeProvider("glm");
-```
-
-## Auto-detection from environment
-
-Use `resolveFromEnv()` to scan environment variables and build a `MultiProviderConfig` automatically:
-
-```typescript
-import { configureProviders, resolveFromEnv } from "seepient";
-
-const envConfig = resolveFromEnv();
-if (envConfig) {
-  configureProviders(envConfig);
-}
-```
-
-This is particularly useful for server deployments where configuration comes from environment variables.
+---
 
 ## Related APIs
 
-- [generateText()](/sdk/generate-text) -- Per-request provider override
-- [createAgent()](/sdk/create-agent) -- Runtime provider switching
+- [generateText()](/sdk/generate-text) -- Stateless text generation
+- [createAgent()](/sdk/create-agent) -- Stateful agent with provider switching
+- [Custom Tools](/sdk/custom-tools) -- Register custom tools and trust boundaries
 - [Types](/sdk/types) -- Full TypeScript type reference

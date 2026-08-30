@@ -48,7 +48,8 @@ export interface AgentLoopOptions {
    */
   wiredPipeline?: WiredActionLifecycle;
   /** Allow JS filesystem fallback for file commits when native helper is absent. */
-  allowFallback?: boolean;
+  /** Commit-helper injection for tests/e2e (spec 019): pins the probe. */
+  commitHelper?: import("../vendors/native-fs-commit/index.js").NativeCommitHelper;
 }
 
 export interface AgentLoopError {
@@ -272,7 +273,24 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
         hostCallbacks.set(mod.definition.function.name, (args) => mod.handler!(args as any, config));
       }
     }
-    const { boundary } = await buildLocalBoundary({ artifacts, hostCallbacks, allowFallback: options.allowFallback ?? true, workspaceRoot: options.cwd ?? process.cwd() });
+    // spec 019 FR-001: the session snapshot store rides in config (the same
+    // store the legacy handlers use); one instance backs read-side tagging
+    // AND analysis-time patch application.
+    const snapshotStore = (config as { snapshotStore?: import("../foundations/hashline/snapshot-store.js").SnapshotStore } | undefined)?.snapshotStore;
+
+    const { createMediaVendorOperationHandler } = await import("./media/vendor-operation-handler.js");
+    const vendorOperationHandler = runtime
+      ? createMediaVendorOperationHandler({ runtime, artifacts, signal })
+      : undefined;
+
+    const { boundary } = await buildLocalBoundary({
+      artifacts,
+      hostCallbacks,
+      workspaceRoot: options.cwd ?? process.cwd(),
+      snapshotStore,
+      commitHelper: options.commitHelper,
+      vendorOperationHandler,
+    });
     const broker = approveTool
       ? legacyApproveToolToBroker(approveTool)
       : autoConfirm
@@ -320,6 +338,18 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
       modelProviderClass = initialPlan.selectedTarget?.providerAccount || "normal";
     } catch {}
 
+    const imageCapabilityProbe = runtime
+      ? async () => {
+          try {
+            const snapshot = await runtime.createTurnSnapshot();
+            await runtime.resolvePlan(snapshot, "image-generation");
+            return { reachable: true };
+          } catch (e) {
+            return { reachable: false, reason: e instanceof Error ? e.message : String(e) };
+          }
+        }
+      : undefined;
+
     wiredPipeline = await buildActionLifecycle({
       principalId: "agent-user",
       runId: generateId(),
@@ -329,6 +359,12 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
       approvalBroker: broker,
       executionBoundary: boundary,
       artifacts,
+      snapshotStore,
+      imageCapabilityProbe,
+      // The wired host callbacks ARE the composition root's operator intent
+      // (spec 019 D8): they join the trusted-host allowlist alongside the
+      // settings default.
+      trustedHostAllowlist: [...(options as { trustedHostAllowlist?: string[] }).trustedHostAllowlist ?? ["use_skill"], ...hostCallbacks.keys()],
     });
   }
   if (!wiredPipeline) {

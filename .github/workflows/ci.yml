@@ -51,3 +51,47 @@ jobs:
             exit 1
           fi
           echo "OK: no jsx-runtime in headless outputs"
+
+  # spec 019 (FR-009/T031): the native commit helper builds on every
+  # supported target and passes its crate tests on the native runners, so a
+  # broken helper cannot silently regress between releases.
+  native-helper:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-14, target: aarch64-apple-darwin, cross: '' }
+          - { os: macos-14, target: x86_64-apple-darwin, cross: '' }
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, cross: '' }
+          - { os: ubuntu-24.04, target: aarch64-unknown-linux-gnu, cross: 'aarch64-linux-gnu-gcc' }
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross linker (linux-arm64)
+        if: matrix.cross != ''
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=${{ matrix.cross }}" >> "$GITHUB_ENV"
+
+      - name: Crate unit + integration tests (native targets)
+        if: matrix.cross == ''
+        run: cargo test --manifest-path native/fs-commit/Cargo.toml --release --target ${{ matrix.target }}
+
+      - name: Build release binary (${{ matrix.target }})
+        run: cargo build --manifest-path native/fs-commit/Cargo.toml --release --target ${{ matrix.target }}
+
+      - name: Verify the cross-built arm64 binary runs under emulation
+        if: matrix.cross != ''
+        run: |
+          sudo apt-get install -y qemu-user-static
+          file native/fs-commit/target/${{ matrix.target }}/release/seepient-fs-commit
+          echo | qemu-aarch64-static native/fs-commit/target/${{ matrix.target }}/release/seepient-fs-commit --commit /nonexistent/x || true

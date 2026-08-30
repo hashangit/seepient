@@ -196,6 +196,9 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
       modelProviderClass: activeProviderType ?? 'openai',
       approvalDeadlineMs,
       approvalMode,
+      // spec 019 FR-001: the session store bootstrap already owns (line ~62)
+      // drives read-side tagging and edit_file analysis.
+      snapshotStore: (fullConfig as any).snapshotStore,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
