@@ -76,32 +76,26 @@ The Seepient Agent **CLI** automatically loads `.env` files in your project root
 
 ## Programmatic Configuration
 
-For more control, use `configureProviders()`:
+For programmatic control over accounts and catalogs in embedder environments, use `createSeepient`:
 
 ```typescript
-import { configureProviders, generateText } from 'seepient'
+import { createSeepient } from 'seepient'
 
-// Configure all providers at once
-configureProviders({
-  openai: {
-    apiKey: process.env.OPENAI_API_KEY,
-    model: 'gpt-5.4'
-  },
-  anthropic: {
-    apiKey: process.env.ANTHROPIC_API_KEY,
-    model: 'claude-sonnet-4-6-20260320'
-  },
-  glm: {
-    apiKey: process.env.GLM_API_KEY,
-    model: 'opus'
-  },
-  default: 'openai'
+// Instantiate an isolated Seepient instance with memory storage
+const seepient = await createSeepient({
+  overlayFile: ':memory:',
 })
 
-// Use the configured provider
-const result = await generateText('Hello!', {
-  provider: 'openai' // Uses configured API key
+// Add provider accounts programmatically
+await seepient.addProvider({
+  id: 'team_anthropic',
+  provider: 'anthropic',
+  auth: { type: 'api_key', key: process.env.ANTHROPIC_API_KEY! },
 })
+
+// List available models across all configured providers
+const catalog = await seepient.getCatalog()
+const providers = await seepient.listProviders()
 ```
 
 ## Per-Request Overrides
@@ -215,17 +209,26 @@ export OPENAI_COMPAT_BASE_URL=https://api.together.xyz/v1
 
 ## Advanced Configuration
 
-### Custom Tool Configuration
+### Custom Tool Execution
 
 ```typescript
-import { configureProviders } from 'seepient'
+import { generateText, trustedHostTool } from 'seepient'
 
-configureProviders({
-  openai: {
-    apiKey: process.env.OPENAI_API_KEY,
-    model: 'gpt-5.4'
+const pingTool = trustedHostTool({
+  definition: {
+    type: 'function',
+    function: {
+      name: 'ping',
+      description: 'Ping health check',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
   },
-  default: 'openai'
+  execute: async () => 'pong',
+})
+
+const result = await generateText('Ping server', {
+  permissionPipeline: true,
+  tools: [pingTool],
 })
 ```
 

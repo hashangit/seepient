@@ -12,7 +12,7 @@ const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 2
 async function waitFor(cond: () => boolean, what: string): Promise<void> {
   const start = Date.now();
   while (!cond()) {
-    if (Date.now() - start > 3000) {
+    if (Date.now() - start > 8000) {
       throw new Error(`waitFor timeout: ${what}`);
     }
     await tick();

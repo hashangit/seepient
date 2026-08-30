@@ -106,6 +106,8 @@ export interface ActionLifecycleInputs {
    * composition wiring IS operator intent there.
    */
   trustedHostAllowlist?: string[];
+  /** Optional probe to test image capability reachability before prompting user. */
+  imageCapabilityProbe?: () => Promise<{ reachable: boolean; reason?: string }>;
   /** Optional: persisted capability ledger for authority consumption & revocation (T107a). */
   capabilityLedger?: PersistedCapabilityLedger;
   /**
@@ -464,6 +466,7 @@ export async function buildActionLifecycle(
       artifacts,
       modelProviderClass: inputs.modelProviderClass ?? "*",
       snapshotStore: inputs.snapshotStore,
+      imageCapabilityProbe: inputs.imageCapabilityProbe,
     },
     workspaceId,
   };

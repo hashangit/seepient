@@ -21,6 +21,8 @@ export {
   getAllToolDefinitions,
 } from "../../domain/tool-executor.js";
 
+import { getAllToolModules } from "../../domain/tool-executor.js";
+
 // ── spec 019 FR-006 (T022): host-callback wiring for trusted-host tools ──
 
 /**
@@ -36,6 +38,11 @@ export function extractHostCallbacks(
 ): { callbacks: Map<string, (args: unknown) => Promise<unknown>>; registrationIds: string[] } {
   const callbacks = new Map<string, (args: unknown) => Promise<unknown>>();
   const registrationIds: string[] = [];
+  for (const mod of getAllToolModules()) {
+    if (typeof mod.handler === "function" && mod.definition?.function?.name) {
+      callbacks.set(mod.definition.function.name, (args) => mod.handler!(args as never, {}));
+    }
+  }
   for (const input of tools ?? []) {
     const reg = input as import("../../foundations/contracts/custom-tools.js").TrustedHostToolRegistration | undefined;
     if (

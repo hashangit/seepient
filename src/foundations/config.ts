@@ -26,14 +26,6 @@ export function getLocalConfigFile(customCwd?: string): string {
 
 export interface AppConfig {
   hasExplicitModel?: boolean;
-  // Image gen (always OpenAI)
-  imageApiKey?: string;
-  imageBaseUrl?: string;
-  imageModel?: string;
-  imageSize?: string;
-  imageQuality?: string;
-  imageStyle?: string;
-  imageN?: number;
   // Existing tools (unchanged)
   smtpHost?: string;
   smtpPort?: string;

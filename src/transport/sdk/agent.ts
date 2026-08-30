@@ -2,7 +2,7 @@
  * Seepient SDK — createAgent()
  *
  * A persistent agent with session memory, provider switching, and abort support.
- * Wraps the LLMProvider directly (not the CLI-oriented Agent class) so results
+ * Wraps the ProviderRuntime directly (not the CLI-oriented Agent class) so results
  * are structured rather than printed to the console.
  */
 
@@ -92,6 +92,7 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
   const opts = options ?? {};
   const runtime: ProviderRuntime = (opts as any).runtime ?? (opts as any).providerRuntime ?? getDefaultProviderRuntime();
   let model = opts.model ?? "";
+  let providerAccount: string | undefined;
 
   // System prompt
   let systemPrompt = opts.systemPrompt ?? "You are a helpful assistant.";
@@ -151,8 +152,21 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
 
     const broker = legacyApproveToolToBroker(opts.approveTool);
     const { createSnapshotStore } = await import("../../foundations/hashline/snapshot-store.js");
+    const { InMemoryArtifactStore } = await import("../../capabilities/execution/in-memory-artifact-store.js");
+    const { createMediaVendorOperationHandler } = await import("../../domain/media/vendor-operation-handler.js");
     const snapshotStore = createSnapshotStore();
-    const { boundary, artifacts: sharedArtifacts } = await buildLocalBoundary({ workspaceRoot: opts.cwd ?? process.cwd(), snapshotStore, hostCallbacks });
+    const sharedArtifacts = new InMemoryArtifactStore();
+    const vendorOperationHandler = createMediaVendorOperationHandler({
+      runtime,
+      artifacts: sharedArtifacts,
+    });
+    const { boundary } = await buildLocalBoundary({
+      artifacts: sharedArtifacts,
+      workspaceRoot: opts.cwd ?? process.cwd(),
+      snapshotStore,
+      hostCallbacks,
+      vendorOperationHandler,
+    });
     const approvalMode = opts.consentMode
       ? (opts.consentMode === 'autonomous' ? 'autonomous' : opts.consentMode === 'ask-everything' ? 'manual' : 'balanced')
       : (opts.approveTool ? "manual" : "never");
@@ -262,7 +276,7 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
       runtime,
       turnSnapshot: snapshot,
       model,
-      modelOverride: opts.model,
+      modelOverride: currentModelOverride(),
       messages,
       toolDefs,
       systemPrompt: systemPrompt,
@@ -339,7 +353,7 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
           runtime,
           turnSnapshot: snapshot,
           model,
-          modelOverride: opts.model,
+          modelOverride: currentModelOverride(),
           messages,
           toolDefs,
           systemPrompt: systemPrompt,
@@ -426,8 +440,21 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
 
   // ── switchProvider() ────────────────────────────────────────────────────
 
-  async function switchProvider(providerType: string, newModel?: string): Promise<void> {
-    model = newModel ?? providerType;
+  /** Effective model routing for the loop: provider account + model, if set. */
+  function currentModelOverride(): { model?: string; providerAccount?: string } | undefined {
+    return providerAccount || model
+      ? { model: model || undefined, providerAccount }
+      : undefined;
+  }
+
+  async function switchProvider(accountOrModel: string, newModel?: string): Promise<void> {
+    if (newModel) {
+      providerAccount = accountOrModel || undefined;
+      model = newModel;
+    } else {
+      providerAccount = undefined;
+      model = accountOrModel;
+    }
   }
 
   // ── setSystemPrompt() ───────────────────────────────────────────────────

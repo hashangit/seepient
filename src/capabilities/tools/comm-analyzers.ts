@@ -333,114 +333,6 @@ export async function analyzeReadWebsite(
   });
 }
 
-/**
- * `generate_image` analyzer. Declares `secret-use` (OpenAI/DALL-E key),
- * `external-send` to the image API, and a `model-egress` for the response
- * (image URLs may re-enter model history as download links).
- */
-export async function analyzeGenerateImage(
-  args: { prompt: string; image_path?: string; mask_path?: string; n?: number; size?: string; model?: string },
-  ctx: ToolAnalysisContext,
-): Promise<PreparedToolAction> {
-  const cwd = ctx.workspace.canonicalRoot;
-  const inputTargets = await Promise.all(
-    [args.image_path, args.mask_path]
-      .filter((p): p is string => Boolean(p))
-      .map((p) => canonicalizePath(p, cwd)),
-  );
-
-  const { resolveCredentials } = await import("../../foundations/security/credential-resolver.js");
-  const creds = resolveCredentials();
-
-  const isLocal =
-    process.env.SEEPIENT_LOCAL_MEDIA === "1" ||
-    process.env.SEEPIENT_MEDIA_RUNTIME === "local";
-
-  const rawBaseUrl =
-    creds.openaiBaseUrl ||
-    process.env.OPENAI_COMPAT_BASE_URL ||
-    process.env.OPENAI_BASE_URL ||
-    "https://api.openai.com/v1";
-
-  let destination: NetworkDestination;
-  try {
-    const u = new URL(rawBaseUrl.startsWith("http") ? rawBaseUrl : `https://${rawBaseUrl}`);
-    destination = {
-      scheme: u.protocol === "http:" ? "http" : "https",
-      host: u.hostname,
-      port: u.port ? Number(u.port) : undefined,
-      pathPrefix: u.pathname.endsWith("/v1")
-        ? `${u.pathname}/images/generations`
-        : `${u.pathname.replace(/\/$/, "")}/v1/images/generations`,
-    };
-  } catch {
-    destination = { scheme: "https", host: "api.openai.com", pathPrefix: "/v1/images/generations" };
-  }
-
-  const secretRefs = ["OPENAI_API_KEY"];
-
-  const effects: EffectRequest[] = [
-    ...(isLocal
-      ? []
-      : [
-          { kind: "network-egress" as const, destinations: [destination] },
-          { kind: "secret-use" as const, secretRefs },
-        ]),
-    {
-      kind: "model-egress",
-      providerClass: ctx.modelProviderClass,
-      dataClasses: ["normal"],
-      sources: ["image-response"],
-    },
-  ];
-  if (inputTargets.length > 0) {
-    effects.unshift({
-      kind: "filesystem-read",
-      targets: inputTargets,
-      sensitivity: "normal",
-    });
-  }
-
-  const payloadBytes = Buffer.from(
-    JSON.stringify({ prompt: args.prompt, n: args.n ?? 1, size: args.size, model: args.model }),
-    "utf8",
-  );
-  const payloadArtifact = await ctx.artifacts.put(payloadBytes, "application/json");
-
-  const operation = isLocal
-    ? ({
-        kind: "none" as const,
-        result: { output: "image generated locally", success: true },
-      })
-    : ({
-        kind: "broker" as const,
-        request: {
-          kind: "http" as const,
-          requestId: generateId(),
-          destination,
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: payloadArtifact,
-          secretRefs,
-        },
-      });
-
-  return buildAction({
-    toolName: "generate_image",
-    ctx,
-    args,
-    argsDigest: digestArgs(args),
-    effects,
-    operation,
-    display: {
-      title: `Generate image`,
-      summary: (args.prompt ?? "").slice(0, 60),
-      canonicalTargets: isLocal ? [] : [`${destination.scheme}://${destination.host}${destination.pathPrefix ?? ""}`],
-    },
-    risk: "communications",
-  });
-}
-
 /** Extend the default analyzer registry with the comm-tool analyzers. */
 export const COMM_ANALYZERS: Record<string, (args: unknown, ctx: ToolAnalysisContext) => Promise<PreparedToolAction>> = {
   send_email: (a, c) => analyzeSendEmail(a as { to: string; subject: string; body: string; attachments?: string[] }, c),
@@ -448,11 +340,6 @@ export const COMM_ANALYZERS: Record<string, (args: unknown, ctx: ToolAnalysisCon
   send_notification: (a, c) =>
     analyzeSendNotification(a as { platform: "feishu" | "dingtalk" | "wecom"; content: string }, c),
   read_website: (a, c) => analyzeReadWebsite(a as { url: string }, c),
-  generate_image: (a, c) =>
-    analyzeGenerateImage(
-      a as { prompt: string; image_path?: string; mask_path?: string; n?: number; size?: string; model?: string },
-      c,
-    ),
 };
 
 // Suppress unused import in some build configurations.

@@ -17,6 +17,7 @@ dist/
 # OS files
 .DS_Store
 Thumbs.db
+Library/
 
 # IDE / Editor
 .vscode/

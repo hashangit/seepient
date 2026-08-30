@@ -33,6 +33,11 @@ export interface ToolAnalysisContext {
    * the SAME store instance backs the read-side tagging in the boundary.
    */
   snapshotStore?: import("../hashline/snapshot-store.js").SnapshotStore;
+  /**
+   * Optional runtime reachability probe for image generation capability.
+   * If provided, returns reachable status and remediation reason if unconfigured.
+   */
+  imageCapabilityProbe?: () => Promise<{ reachable: boolean; reason?: string }>;
 }
 
 export interface WorkspaceSnapshot {

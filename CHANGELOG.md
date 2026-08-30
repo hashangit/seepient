@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.5.7] - 2026-08-30
+
+### Media capability ProviderRuntime routing & vendor-neutral migration
+
+**Breaking / transition (pre-1.0):**
+- Legacy `image.*` settings (`image.apiKey`, `image.baseUrl`, `image.model`, `image.size`, `image.quality`, `image.style`, `image.n`) and corresponding `AppConfig` fields are **removed**. Image generation and prompt optimization now route exclusively through `ProviderRuntime` (spec 010/012 architecture).
+- Remediation: Configure image generation models in `/models` or CLI `seepient models image` under the `image-generation` purpose slot.
+- `generate_image` and `optimize_prompt` tools now emit vendor-neutral `vendor-operation` broker requests; legacy hardcoded OpenAI preflights, SDK fallbacks, and automatic bearer-header injection on `api.openai.com` requests have been decommissioned.
+- `generate_image` without explicit `output_path` or `output_dir` now defaults to a deterministic filename in the workspace root committed through the `FileCommitBroker` pipeline.
+- Wired `vendorOperationHandler` via shared `createMediaVendorOperationHandler` across CLI, SDK, and agent-loop composition roots, resolving runtime `EFFECT_UNSUPPORTED` broker errors on real surfaces.
+
+### Shell error reduction & analyzer validation
+
+* `analyzeExecuteShellCommand` performs analyzer-time syntax validation (`/bin/sh -n -c`) before permission prompting on POSIX systems, returning `SHELL_SYNTAX_INVALID` with raw shell diagnostics and actionable quoting remediation hints.
+* Extended system prompts and `execute_shell_command` definitions with shell quoting conventions, deprecation adaptation (e.g. ImageMagick 7 `convert` -> `magick`), and purpose-built tool guidance (`generate_image` instead of manual shell drawing).
+* Corrected stale quoting model documentation in `AsrtSandbox` (`src/vendors/sandbox-runtime/index.ts`).
+
 ### Exact-commit enforcement and native helper (spec 019)
 
 **Breaking / transition (pre-1.0):** the interim JavaScript filesystem fallback
@@ -39,10 +56,16 @@ skips checksum verification).
   verified; the status bar shows `exact commits: on | off (helper missing) |
   off (digest mismatch)` at startup.
 * Trusted-host execution is registry-only: the ambient tool-registry fallback
-  is deleted, custom `trustedHostTool` tools are wired by the SDK composition
-  roots, and a `permissions.trustedHostAllowlist` setting (default
-  `["use_skill"]`) replaces the blanket trusted-host exemption — denial
+  is deleted (calls to unregistered host tools fail closed with `HOST_TOOL_NOT_REGISTERED`),
+  custom `trustedHostTool` factory is now exported directly from the package entry
+  (`seepient`) (with `preparedTool` and `brokerConnector` landing alongside their
+  execution paths in 0.6.0), and a `permissions.trustedHostAllowlist` setting
+  (default `["use_skill"]`) replaces the blanket trusted-host exemption — denial
   messages name the setting.
+  **Embedder migration**: Migrate global `registerTool(...)` invocations to
+  explicit per-agent or per-call `trustedHostTool` registrations passed in the
+  `tools` array alongside `permissionPipeline: true`. Explicit registrations
+  automatically join the effective trusted-host allowlist for that lifecycle.
 * Project-local `.env` files may no longer set `SEEPIENT_UNCONTAINED` or
   `SEEPIENT_FS_COMMIT_BIN`; refused variables produce one loud warning each
   and are never applied (dotenv precedence otherwise unchanged).

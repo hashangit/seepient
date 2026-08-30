@@ -48,7 +48,7 @@ console.log(`\nDone. ${(await stream.usage).totalTokens} tokens used.`);
 | `model`         | `string`                                 | Provider default | Model identifier |
 | `provider`      | `ProviderType`                           | Config default   | Provider to use |
 | `systemPrompt`  | `string`                                 | *(none)*         | System message prepended to the conversation |
-| `tools`         | `string[] \| UserToolDefinition[]`       | All built-in     | Tools available to the agent |
+| `tools`         | `(string \| UserToolDefinition \| AnyToolRegistration)[]` | All built-in     | Built-in tool names, group names (`"core"`, `"all"`), or custom tool registrations (`trustedHostTool`) |
 | `skills`        | `string[]`                               | *(none)*         | Skills to activate |
 | `maxSteps`      | `number`                                 | `10`             | Maximum agent loop iterations |
 | `temperature`   | `number`                                 | Provider default | Sampling temperature |

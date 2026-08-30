@@ -14,7 +14,6 @@ import {
   analyzeWebSearch,
   analyzeSendNotification,
   analyzeReadWebsite,
-  analyzeGenerateImage,
   COMM_ANALYZERS,
 } from "../comm-analyzers.js";
 import { InMemoryArtifactStore } from "../../../capabilities/execution/in-memory-artifact-store.js";
@@ -91,17 +90,8 @@ describe("comm analyzers (T103)", () => {
     expect(action.operation.kind).toBe("broker");
   });
 
-  it("generate_image declares OPENAI_API_KEY secret + image API destination", async () => {
-    const action = await analyzeGenerateImage({ prompt: "cat" }, ctx());
-    if (action.operation.kind === "broker" && action.operation.request.kind === "http") {
-      expect(action.operation.request.destination.host).toBe("api.openai.com");
-      expect(action.operation.request.secretRefs).toContain("OPENAI_API_KEY");
-    }
-  });
-
-  it("COMM_ANALYZERS registry exposes all five tools", () => {
+  it("COMM_ANALYZERS registry exposes all four comm tools", () => {
     expect(Object.keys(COMM_ANALYZERS).sort()).toEqual([
-      "generate_image",
       "read_website",
       "send_email",
       "send_notification",

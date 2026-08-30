@@ -37,42 +37,7 @@ export function deriveConfigGrants(options: ConfigDerivedGrantsOptions = {}): Ca
     );
   }
 
-  // 2. Image generation / prompt optimization endpoint
-  const rawBaseUrl =
-    creds.openaiBaseUrl ||
-    (config as any).imageBaseUrl ||
-    (config as any).baseUrl ||
-    env.OPENAI_COMPAT_BASE_URL ||
-    env.OPENAI_BASE_URL ||
-    "https://api.openai.com/v1";
-  const rawApiKey =
-    creds.openaiApiKey ||
-    (config as any).imageApiKey ||
-    (config as any).apiKey ||
-    env.OPENAI_API_KEY;
-
-  if (rawApiKey) {
-    try {
-      const u = new URL(rawBaseUrl.startsWith("http") ? rawBaseUrl : `https://${rawBaseUrl}`);
-      capabilities.push({
-        kind: "network-destination",
-        scheme: u.protocol === "http:" ? "http" : "https",
-        host: u.hostname,
-        ...(u.port ? { port: Number(u.port) } : {}),
-      });
-    } catch {
-      capabilities.push({
-        kind: "network-destination",
-        scheme: "https",
-        host: "api.openai.com",
-      });
-    }
-    capabilities.push({ kind: "secret-ref", ref: "OPENAI_API_KEY" });
-    if ((config as any).imageApiKey) capabilities.push({ kind: "secret-ref", ref: "imageApiKey" });
-    if ((config as any).apiKey) capabilities.push({ kind: "secret-ref", ref: "apiKey" });
-  }
-
-  // 3. SMTP email
+  // 2. SMTP email
   const smtpHost = creds.smtpHost || env.SMTP_HOST;
   if (smtpHost) {
     capabilities.push({ kind: "secret-ref", ref: "smtpHost" });

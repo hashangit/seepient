@@ -32,7 +32,7 @@ describe('schema-manager round-trip', () => {
   const sampleKeys = [
     'smtp.host', 'smtp.port', 'smtp.user', 'smtp.pass',
     'permissions.consentMode', 'agent.autoConfirm',
-    'image.model', 'image.n',
+    'permissions.approvalTimeoutMs',
   ];
 
   it.each(sampleKeys)('set+get round-trip for %s', async (dotKey) => {
@@ -40,7 +40,7 @@ describe('schema-manager round-trip', () => {
     const schema = SETTINGS_SCHEMA.get(dotKey)!;
     let testVal: string;
     if (schema.type === 'boolean') testVal = 'true';
-    else if (schema.type === 'number') testVal = '2';
+    else if (schema.type === 'number') testVal = String(schema.min ?? 2);
     else if (schema.type === 'enum') testVal = schema.enumValues![0];
     else testVal = 'test-value';
 
@@ -50,10 +50,10 @@ describe('schema-manager round-trip', () => {
   });
 
   it('persists dotKey to correct AppConfig path', async () => {
-    const m = mgr({ imageApiKey: 'sk-old' });
-    await m.set('image.apiKey', 'sk-new123456');
+    const m = mgr({ tavilyApiKey: 'tvly-old' });
+    await m.set('search.tavilyApiKey', 'tvly-new123456');
     const file = JSON.parse(await fs.readFile(configPath, 'utf-8'));
-    expect(file.imageApiKey).toBe('sk-new123456');
+    expect(file.tavilyApiKey).toBe('tvly-new123456');
   });
 
   it('env var takes priority in origin resolution', () => {
@@ -71,9 +71,9 @@ describe('schema-manager round-trip', () => {
 
 describe('secret masking', () => {
   it('masks 8+ char secrets as first3...last4', () => {
-    const m = mgr({ imageApiKey: 'sk-abcdefgh1234567890' });
-    const r = m.get('image.apiKey');
-    expect(r.value).toBe('sk-...7890');
+    const m = mgr({ tavilyApiKey: 'tvly-abcdefgh1234567890' });
+    const r = m.get('search.tavilyApiKey');
+    expect(r.value).toBe('tvl...7890');
     expect(r.masked).toBe(true);
   });
 
@@ -100,7 +100,7 @@ describe('validation', () => {
   });
 
   it('rejects non-number for number fields', async () => {
-    await expect(mgr().set('image.n', 'abc')).rejects.toThrow('must be a number');
+    await expect(mgr().set('permissions.approvalTimeoutMs', 'abc')).rejects.toThrow('must be a number');
   });
 
   it('rejects invalid boolean', async () => {
@@ -108,7 +108,7 @@ describe('validation', () => {
   });
 
   it('rejects invalid URL for baseUrl fields', async () => {
-    await expect(mgr().set('image.baseUrl', 'not-a-url')).rejects.toThrow('must be a valid URL');
+    await expect(mgr().set('notifications.feishu.webhook', 'not-a-url')).rejects.toThrow('must be a valid URL');
   });
 
   it('rejects invalid hostname for smtp.host', async () => {
@@ -201,7 +201,7 @@ describe('error handling', () => {
 
   it('validation error has SETTINGS_VALIDATION_FAILED code', async () => {
     try {
-      await mgr().set('image.n', 'abc');
+      await mgr().set('permissions.approvalTimeoutMs', 'abc');
     } catch (e: any) {
       expect(e).toBeInstanceOf(SettingsError);
       expect(e.code).toBe('SETTINGS_VALIDATION_FAILED');
