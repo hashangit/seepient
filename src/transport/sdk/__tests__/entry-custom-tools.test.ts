@@ -15,6 +15,8 @@ import {
   createAgent,
   generateText,
   createSeepient,
+  preparedTool,
+  brokerConnector,
   trustedHostTool,
   type AnyToolRegistration,
   type TrustedHostToolRegistration,
@@ -23,10 +25,6 @@ import {
   type LegacyHostToolRegistration,
   type HostToolContext,
 } from "../index.js";
-import {
-  preparedTool,
-  brokerConnector,
-} from "../custom-tools.js";
 import { createMockRuntime } from "../../../domain/__tests__/test-doubles.js";
 
 let dir: string;
@@ -67,7 +65,29 @@ describe("SDK Entry Re-exports (W1)", () => {
         },
       },
       allowedOperationKinds: ["commit-files"],
-      analyze: async () => ({} as never),
+      analyze: async () => {
+        const target = {
+          canonicalPath: "/workspace/prep.txt",
+          canonicalParent: "/workspace",
+          basename: "prep.txt",
+          exists: false,
+          finalSymlink: false,
+        };
+        return {
+          operation: {
+            kind: "commit-files" as const,
+            commits: [
+              {
+                destination: target,
+                content: { artifactId: "art-prep", byteLength: 5, mediaType: "text/plain", sha256: "sha256:5678" },
+              },
+            ],
+          },
+          effects: [{ kind: "filesystem-write" as const, targets: [{ target, mode: "create" }] }],
+          risk: "edit" as const,
+          display: { title: "prep_action", summary: "Prepare action", canonicalTargets: [target.canonicalPath], effects: ["filesystem-write" as const] },
+        };
+      },
     });
     expect(prepReg.kind).toBe("prepared");
     expect(prepReg.trust).toBe("analyzer");

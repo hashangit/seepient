@@ -77,6 +77,53 @@ export interface FileCommitBroker {
   ): Promise<FileWriteMetadata>;
 }
 
+// ── Network adapter & Commit helper contracts ───────────────────────────
+
+export interface BrokerNetworkResponse {
+  status: number;
+  bytes: Uint8Array;
+  effectiveHost: string;
+  effectiveIp: string;
+  headers: Record<string, string>;
+}
+
+export interface BrokerNetworkAdapter {
+  resolve(host: string): Promise<string[]>;
+  fetch(
+    destination: NetworkDestination,
+    init: { method: string; headers: Record<string, string>; body?: Uint8Array; signal?: AbortSignal },
+  ): Promise<BrokerNetworkResponse>;
+}
+
+export interface CommitHelper {
+  readonly available: boolean;
+  readonly probe: {
+    available: boolean;
+    reason?: "binary-missing" | "primitive-unsupported" | "self-test-failed" | "digest-mismatch";
+    binaryPath?: string;
+    platform: NodeJS.Platform;
+    digestVerified: boolean;
+  };
+  commit(req: {
+    destination: string;
+    content: Uint8Array;
+    expected?: { exists: boolean; sha256?: string };
+  }): Promise<{
+    ok: boolean;
+    writtenSha256: string;
+    errorCode?:
+      | "target-symlink"
+      | "parent-symlink"
+      | "parent-replaced"
+      | "snapshot-changed"
+      | "cross-device-rename"
+      | "io-error"
+      | "timeout"
+      | "primitive-unsupported";
+    message?: string;
+  }>;
+}
+
 // ── Typed effect, egress, and secret broker ─────────────────────────────
 
 export interface BrokerAuthContext {

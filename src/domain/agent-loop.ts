@@ -16,6 +16,7 @@ import { getModelMeta } from "../foundations/models-catalog.js";
 import type { WiredActionLifecycle } from "./permissions/action-lifecycle-factory.js";
 import type { PermissionRequest } from "../foundations/contracts/permission-policy.js";
 import { resolveAnalyzerWithFallback } from "./permissions/default-analyzers.js";
+import { makeRegistrationAnalyzer } from "./permissions/registration-dispatch.js";
 import type { ProviderRuntime, TurnSnapshot } from "./providers/provider-runtime.js";
 
 // ProviderFactory for per-skill model switching
@@ -622,7 +623,10 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
         if (wiredPipeline) {
           // Every tool goes through the pipeline — dedicated analyzer or
           // generic fallback. No tool falls through to the legacy matrix.
-          const analyzer = resolveAnalyzerWithFallback(wiredPipeline.analyzers, tc.name);
+          const registration = wiredPipeline.registrations?.get(tc.name);
+          const analyzer = registration
+            ? makeRegistrationAnalyzer(registration)
+            : resolveAnalyzerWithFallback(wiredPipeline.analyzers, tc.name);
           if (analyzer) {
             let result: any = undefined;
             try {
