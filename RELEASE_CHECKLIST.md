@@ -56,8 +56,10 @@ Update all version strings and documentation artifacts in lockstep:
 - [ ] **`CHANGELOG.md`**:
   - Add new section under `[Unreleased]` formatted as `## [vX.Y.Z] - YYYY-MM-DD`.
   - Document all major changes, new capabilities, fixes, and architectural improvements.
-- [ ] **`RELEASE_NOTES-vX.Y.Z.md`**:
+- [ ] **`RELEASE_NOTES-vX.Y.Z.md` (MANDATORY)**:
   - Create release notes file in repo root (picked up automatically by `.github/workflows/release.yml` for GitHub Releases).
+  - **Product POV (Mandatory)**: Write from a product POV focusing on developer capabilities, practical user impact, and concrete functionality rather than internal implementation minutiae.
+  - **Unslop Skill (Mandatory)**: The **`unslop`** skill MUST be used to eliminate AI writing tells, marketing fluff, decorative emojis in prose/headers, em dash overuse, and boilerplate clichés. Ensure crisp, human, opinionated engineering prose.
 - [ ] **Logo & Version Fallbacks**:
   - `src/ui/tui/components/logo-banner.tsx`: Resolves dynamically from `package.json` with fallback.
 - [ ] **`README.md` (MANDATORY)**: Update feature highlights, SDK examples, API changes, version references, and command flags to reflect the new release. Never release without verifying `README.md` accuracy.
