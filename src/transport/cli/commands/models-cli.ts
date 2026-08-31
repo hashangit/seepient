@@ -6,6 +6,7 @@
  * and `generate image`. Refactored onto ProviderManagerApi controller (013 US8 / R15).
  */
 
+import path from "node:path";
 import { Command } from "commander";
 import chalk from "chalk";
 import { getDefaultProviderRuntime } from "../../../domain/providers/provider-runtime.js";
@@ -504,19 +505,33 @@ export function registerModelsCommands(program: Command, apiOverride?: ProviderM
     .option("--output <dir>", "Output directory for generated images", ".")
     .action(async (opts) => {
       const runtime = getDefaultProviderRuntime();
+      const count = parseInt(opts.count, 10) || 1;
+      const resolvedOutputDir = path.resolve(opts.output ?? ".");
+      const destinations: string[] = [];
+      const timestamp = Date.now();
+      for (let i = 0; i < count; i++) {
+        destinations.push(path.join(resolvedOutputDir, `generated-${timestamp}-${i + 1}.png`));
+      }
+
+      const { createCliImageCommitContext } = await import("../../../domain/media/cli-image-commit.js");
+      const { commitBroker, envelope } = await createCliImageCommitContext(destinations);
+
       const res = await generateImagesStructured(
         {
           prompt: opts.prompt,
           mode: opts.operation === "variation" ? "variation" : opts.operation === "edit" ? "edit" : "text-to-image",
           size: opts.aspectRatio === "16:9" ? "1792x1024" : opts.aspectRatio === "9:16" ? "1024x1792" : "1024x1024",
           quality: opts.qualityPreset === "high" ? "hd" : "standard",
-          n: parseInt(opts.count, 10) || 1,
+          n: count,
           imagePath: opts.image,
           maskPath: opts.mask,
           outputDir: opts.output,
+          destinations,
         },
         {
           runtime,
+          commitBroker,
+          envelope,
         },
       );
 

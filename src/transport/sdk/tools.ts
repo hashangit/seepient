@@ -66,3 +66,6 @@ export function extractHostCallbacks(
  * T005/T025 — `permissions.trustedHostAllowlist` default).
  */
 export const DEFAULT_TRUSTED_HOST_ALLOWLIST: readonly string[] = ["use_skill"];
+
+// ── spec 020 FR-001 (US2): registration extraction for prepared/connector tools ──
+export { extractRegistrations, type ToolRegistrationMap } from "../../domain/permissions/tool-registration-map.js";

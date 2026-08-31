@@ -61,7 +61,7 @@ export async function buildLocalBoundary(opts?: {
    * probe is skipped and this helper backs the FileCommitBroker — the same
    * seam the broker unit tests use.
    */
-  commitHelper?: import("../../vendors/native-fs-commit/index.js").NativeCommitHelper;
+  commitHelper?: import("../../foundations/contracts/execution-brokers.js").CommitHelper;
 }): Promise<BuildLocalBoundaryResult> {
   const artifacts = opts?.artifacts ?? new InMemoryArtifactStore();
 

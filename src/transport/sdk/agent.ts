@@ -26,7 +26,7 @@ import type {
 import { getDefaultProviderRuntime, type ProviderRuntime } from "../../domain/providers/provider-runtime.js";
 import { createHookExecutor } from "../../domain/hooks.js";
 import { StreamManager } from "../../domain/streaming/stream-manager.js";
-import { resolveTools, getAllToolDefinitions, extractHostCallbacks } from "./tools.js";
+import { resolveTools, getAllToolDefinitions, extractHostCallbacks, extractRegistrations } from "./tools.js";
 import { DEFAULT_TRUSTED_HOST_ALLOWLIST } from "./tools.js";
 import { createPersistenceBackend, persistSession } from "../../domain/sessions/session-store.js";
 
@@ -125,6 +125,13 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
   // boundary's host-callback map (registered callbacks ONLY after the
   // ambient fallback deletion) and join the operator allowlist.
   const { callbacks: hostCallbacks, registrationIds } = extractHostCallbacks(opts.tools);
+  // spec 020 FR-001: custom preparedTool and brokerConnector registrations
+  const registrations = extractRegistrations(opts.tools);
+  if (registrations.size > 0 && !opts.permissionPipeline) {
+    throw new Error(
+      "Custom tools (preparedTool, brokerConnector) require permissionPipeline: true. Set permissionPipeline: true in options.",
+    );
+  }
 
   // Hooks
   const hookExecutor = createHookExecutor(opts.hooks);
@@ -166,6 +173,8 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
       snapshotStore,
       hostCallbacks,
       vendorOperationHandler,
+      commitHelper: opts.commitHelper,
+      network: opts.network,
     });
     const approvalMode = opts.consentMode
       ? (opts.consentMode === 'autonomous' ? 'autonomous' : opts.consentMode === 'ask-everything' ? 'manual' : 'balanced')
@@ -184,6 +193,7 @@ export async function createAgent(options?: AgentCreateOptions): Promise<SdkAgen
       artifacts: sharedArtifacts,
       snapshotStore,
       trustedHostAllowlist: [...DEFAULT_TRUSTED_HOST_ALLOWLIST, ...registrationIds],
+      registrations,
       terminalOutbox: auditOutbox,
     });
   }

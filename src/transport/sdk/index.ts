@@ -19,7 +19,7 @@ import type {
 import { getDefaultProviderRuntime, type ProviderRuntime } from "../../domain/providers/provider-runtime.js";
 import { createHookExecutor } from "../../domain/hooks.js";
 import { StreamManager } from "../../domain/streaming/stream-manager.js";
-import { resolveTools, getAllToolDefinitions, extractHostCallbacks, DEFAULT_TRUSTED_HOST_ALLOWLIST } from "./tools.js";
+import { resolveTools, getAllToolDefinitions, extractHostCallbacks, extractRegistrations, DEFAULT_TRUSTED_HOST_ALLOWLIST } from "./tools.js";
 import { runAgentLoop } from "../../domain/agent-loop.js";
 import { initializeSkillRegistry } from "../../capabilities/skills/index.js";
 import { buildSkillCatalog } from "../../domain/skills/skill-catalog.js";
@@ -55,6 +55,8 @@ export type { UiError, ManagerState, ProviderManagerApi, ResolutionPreview, Prob
 export { createProviderManagerApi, isOAuthSupported, getCanonicalOAuthFlowId } from "../cli/provider-manager-api.js";
 export { tool, CORE_TOOLS, COMM_TOOLS, ADVANCED_TOOLS, ALL_TOOLS } from "./tools.js";
 export {
+  preparedTool,
+  brokerConnector,
   trustedHostTool,
   type AnyToolRegistration,
   type TrustedHostToolRegistration,
@@ -195,6 +197,13 @@ export async function generateText(
   // spec 019 FR-006: explicit trustedHostTool registrations wire into the
   // boundary's host-callback map and join the operator allowlist.
   const { callbacks: hostCallbacks, registrationIds } = extractHostCallbacks(opts.tools);
+  // spec 020 FR-001: custom preparedTool and brokerConnector registrations
+  const registrations = extractRegistrations(opts.tools);
+  if (registrations.size > 0 && !opts.permissionPipeline) {
+    throw new Error(
+      "Custom tools (preparedTool, brokerConnector) require permissionPipeline: true. Set permissionPipeline: true in options.",
+    );
+  }
 
   // Hooks
   const hooks = createHookExecutor(opts.hooks);
@@ -235,6 +244,8 @@ export async function generateText(
       snapshotStore,
       hostCallbacks,
       vendorOperationHandler,
+      commitHelper: opts.commitHelper,
+      network: opts.network,
     });
     const approvalMode = opts.consentMode
       ? (opts.consentMode === 'autonomous' ? 'autonomous' : opts.consentMode === 'ask-everything' ? 'manual' : 'balanced')
@@ -253,6 +264,7 @@ export async function generateText(
       artifacts: sharedArtifacts,
       snapshotStore,
       trustedHostAllowlist: [...DEFAULT_TRUSTED_HOST_ALLOWLIST, ...registrationIds],
+      registrations,
     });
   }
 
@@ -328,6 +340,13 @@ export async function streamText(
   // spec 019 FR-006: explicit trustedHostTool registrations wire into the
   // boundary's host-callback map and join the operator allowlist.
   const { callbacks: hostCallbacks, registrationIds } = extractHostCallbacks(opts.tools);
+  // spec 020 FR-001: custom preparedTool and brokerConnector registrations
+  const registrations = extractRegistrations(opts.tools);
+  if (registrations.size > 0 && !opts.permissionPipeline) {
+    throw new Error(
+      "Custom tools (preparedTool, brokerConnector) require permissionPipeline: true. Set permissionPipeline: true in options.",
+    );
+  }
 
   // Hooks — merge stream-level callbacks with any base hooks
   const mergedHooks = { ...opts.hooks };
@@ -373,6 +392,8 @@ export async function streamText(
       snapshotStore,
       hostCallbacks,
       vendorOperationHandler,
+      commitHelper: opts.commitHelper,
+      network: opts.network,
     });
     const approvalMode = opts.consentMode
       ? (opts.consentMode === 'autonomous' ? 'autonomous' : opts.consentMode === 'ask-everything' ? 'manual' : 'balanced')
@@ -391,6 +412,7 @@ export async function streamText(
       artifacts: sharedArtifacts,
       snapshotStore,
       trustedHostAllowlist: [...DEFAULT_TRUSTED_HOST_ALLOWLIST, ...registrationIds],
+      registrations,
     });
   }
 
@@ -417,7 +439,7 @@ export async function streamText(
         wiredPipeline,
         onStep: (step) => {
           if (opts.onStep) opts.onStep(step);
-          if (step.type === "text" && step.content) {
+          if ((step.type === "text_delta" || step.type === "text") && step.content) {
             if (opts.onText) opts.onText(step.content);
             stream.enqueueText(step.content);
           }
@@ -433,11 +455,15 @@ export async function streamText(
         },
       });
 
-      // fullText: join all text deltas that were enqueued
-      const allText = result.steps
-        .filter((s) => s.type === "text")
+      // fullText: join all text deltas that were enqueued or last assistant content
+      const lastAssistant = [...result.messages]
+        .reverse()
+        .find((m) => m.role === "assistant" && m.content);
+      const textFromSteps = result.steps
+        .filter((s) => s.type === "text_delta" || s.type === "text")
         .map((s) => s.content ?? "")
         .join("");
+      const allText = textFromSteps || (lastAssistant?.content ?? "");
 
       stream.resolveText(allText);
       stream.resolveUsage(result.usage);

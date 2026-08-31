@@ -81,6 +81,9 @@ export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<
 
   return {
     async createAgent(agentOpts: AgentOptions): Promise<PublicAgent> {
+      const { extractRegistrations } = await import("./tools.js");
+      extractRegistrations(agentOpts.tools as any);
+
       let currentOverride: ModelAssignmentOverride | undefined = agentOpts.override ? { ...agentOpts.override } : undefined;
       const conversationMessages: CanonicalMessage[] = [];
 
@@ -179,11 +182,14 @@ export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<
             let stepStopReason: any = "end_turn";
             let stepUsage: any;
 
+            const { resolveTools } = await import("./tools.js");
+            const resolvedToolDefs = agentOpts.tools ? resolveTools(agentOpts.tools as any) : undefined;
+
             for await (const ev of runtime.executeLanguage(
               plan,
               {
                 messages: conversationMessages,
-                tools: agentOpts.tools as any,
+                tools: resolvedToolDefs as any,
               },
             )) {
               if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") {
@@ -245,7 +251,13 @@ export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<
             // Execute tools and append tool_result
             const toolResults: ContentBlock[] = [];
             for (const tc of toolCalls) {
-              const toolDef = (agentOpts.tools as any[])?.find((t) => t.name === tc.name);
+              const toolDef = (agentOpts.tools as any[])?.find((t) => {
+                if (!t) return false;
+                if (typeof t === "string") return t === tc.name;
+                if (t.name === tc.name) return true;
+                if (t.definition?.function?.name === tc.name) return true;
+                return false;
+              });
               let output = "";
               let isError = false;
               if (toolDef && typeof toolDef.execute === "function") {
@@ -258,6 +270,9 @@ export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<
                   output = `Error: ${err.message}`;
                   isError = true;
                 }
+              } else if (toolDef && (toolDef.kind === "prepared" || toolDef.kind === "broker-connector")) {
+                output = `Error: Custom tool registration "${tc.name}" requires the permission pipeline. Use createAgent({ permissionPipeline: true }) from "seepient".`;
+                isError = true;
               } else {
                 output = `Error: Tool "${tc.name}" is not implemented`;
                 isError = true;

@@ -20,7 +20,27 @@ describe("custom-tool registration (T304, QS-3.6)", () => {
       definition: { type: "function", function: { name: "p1", description: "d", parameters: { type: "object", properties: {}, required: [] } } },
       allowedOperationKinds: ["commit-files"],
       async analyze() {
-        return {} as never;
+        const target = {
+          canonicalPath: "/workspace/out.txt",
+          canonicalParent: "/workspace",
+          basename: "out.txt",
+          exists: false,
+          finalSymlink: false,
+        };
+        return {
+          operation: {
+            kind: "commit-files" as const,
+            commits: [
+              {
+                destination: target,
+                content: { artifactId: "art-1", byteLength: 10, mediaType: "text/plain", sha256: "sha256:1234" },
+              },
+            ],
+          },
+          effects: [{ kind: "filesystem-write" as const, targets: [{ target, mode: "create" }] }],
+          risk: "edit" as const,
+          display: { title: "p1", summary: "d", canonicalTargets: [target.canonicalPath], effects: ["filesystem-write" as const] },
+        };
       },
     });
     expect(reg.kind).toBe("prepared");
