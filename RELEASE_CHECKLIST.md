@@ -72,51 +72,46 @@ Update all version strings and documentation artifacts in lockstep:
 
 ---
 
-## 🔀 Phase 3: Pull Request & Automated Ito Code Review
+## 🔀 Phase 3: Pull Request & Review (MANDATORY)
 
-Before merging into `main`, run automated code review via **Ito** and deliberate on all findings:
+Opening a Pull Request is **strictly mandatory** for all releases. Never merge directly into `main` without an open PR:
 
-- [ ] **Open Pull Request**:
+- [ ] **Push Release Branch**:
   - Commit all release prep changes to your feature/release branch and push to origin:
     ```bash
     git add package.json CHANGELOG.md RELEASE_NOTES-vX.Y.Z.md README.md AGENTS.md src/
     git commit -m "chore(release): bump version to vX.Y.Z and add release notes"
     git push -u origin <release-branch>
     ```
-  - Open a PR targeting `main`:
+- [ ] **Open Pull Request (Mandatory)**:
+  - Open a PR targeting `main` using the GitHub CLI:
     ```bash
     gh pr create --title "Release vX.Y.Z" --body "Release vX.Y.Z preparation and quality gates."
     ```
-- [ ] **Ito Code Review Run**:
-  - Wait for the connected **Ito** code review integration to finish reviewing the PR diff and submit its findings.
-- [ ] **Deliberate & Validate Findings**:
-  - Inspect all comments, flags, and suggested fixes from Ito.
-  - Deliberate and validate each point: confirm whether the feedback identifies actual bugs, edge cases, type issues, or architectural drift.
-  - Discard/clarify false positives with reasoned deliberation; never blindly apply unverified bot suggestions.
-- [ ] **Apply Fixes & Re-test**:
-  - Apply validated fixes directly to the branch.
-  - Re-run local verification to ensure zero regressions:
+- [ ] **Code Review & Deliberation**:
+  - Run automated or peer reviews on the PR.
+  - Inspect all comments, flags, and suggested fixes.
+  - Apply validated fixes directly to the branch and re-verify:
     ```bash
     pnpm exec tsc --noEmit && pnpm test && pnpm run build
     ```
-  - Push the updates and ensure all Ito review discussions are resolved cleanly.
 - [ ] **Merge Gate Clearance**:
-  - **Only proceed to merge once Ito code review is complete, all valid issues are addressed, and all PR checks are green.**
+  - **Only proceed to merge once the PR is open, all checks are green, and all valid issues are resolved.**
 
 ---
 
 ## 🔀 Phase 4: Merging & Tagging
 
-- [ ] **Merge Pull Request to `main`**:
+- [ ] **Merge Pull Request to `main` (via GitHub CLI)**:
   ```bash
   gh pr merge --merge --delete-branch
   ```
-  *(Or fast-forward / merge locally if required)*:
+  *(Always pull the merged `main` locally)*:
   ```bash
   git checkout main
   git pull origin main
   ```
-- [ ] **Create Annotated Tag**:
+- [ ] **Create Annotated Tag on `main`**:
   ```bash
   git tag -a vX.Y.Z -m "Release vX.Y.Z - <Summary of Release>"
   ```
