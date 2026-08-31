@@ -60,7 +60,7 @@ Update all version strings and documentation artifacts in lockstep:
   - Create release notes file in repo root (picked up automatically by `.github/workflows/release.yml` for GitHub Releases).
 - [ ] **Logo & Version Fallbacks**:
   - `src/ui/tui/components/logo-banner.tsx`: Resolves dynamically from `package.json` with fallback.
-- [ ] **`README.md`**: Update feature highlights, version references, and command examples as needed.
+- [ ] **`README.md` (MANDATORY)**: Update feature highlights, SDK examples, API changes, version references, and command flags to reflect the new release. Never release without verifying `README.md` accuracy.
 - [ ] **`ARCHITECTURE.md` & Source Layout Sync**:
   - Update `ARCHITECTURE.md` in repository root and `Architecture/ARCHITECTURE.md` in the Obsidian vault.
   - Keep the **Source Layout** directory tree, layer descriptions, and **Key Files** table in sync with any refactoring, newly created directories, or removed files.
