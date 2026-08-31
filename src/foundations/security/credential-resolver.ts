@@ -150,10 +150,19 @@ export function resolveSecretRef(
       return creds.wecomWebhook;
     case "wecomKeyword":
       return creds.wecomKeyword;
-    default:
-      return (
-        (creds.rawConfig as Record<string, any>)[ref] ||
-        (process.env[ref.toUpperCase()] ?? process.env[ref])
-      );
+    case "tavily":
+      return creds.tavilyApiKey;
+    default: {
+      const direct = (creds as unknown as Record<string, unknown>)[ref];
+      if (typeof direct === "string" && direct) return direct;
+      if (typeof process !== "undefined" && process.env) {
+        const envVal =
+          process.env[ref] ??
+          process.env[ref.toUpperCase()] ??
+          process.env[ref.replace(/([A-Z])/g, "_$1").toUpperCase()];
+        if (typeof envVal === "string" && envVal) return envVal;
+      }
+      return undefined;
+    }
   }
 }

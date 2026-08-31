@@ -361,9 +361,10 @@ export class BrokerExecutor implements OperationExecutor {
     operation: Extract<PreparedToolAction["operation"], { kind: "broker" }>,
     _opts: { signal?: AbortSignal; onUpdate?: (u: ToolProgress) => void },
   ): Promise<ExecutionResult> {
-    // Preflight credential checks (spec 017, T014)
+    // Preflight credential checks (spec 017, T014; spec 020, T015)
     const { resolveCredentials } = await import("../../foundations/security/credential-resolver.js");
     const creds = resolveCredentials(undefined, this.workspaceRoot);
+
     if (action.toolName === "web_search" && !creds.tavilyApiKey) {
       const failure = createSetupFailure("web_search", "Tavily API key", "TAVILY_API_KEY / search.tavilyApiKey");
       return {
@@ -380,6 +381,29 @@ export class BrokerExecutor implements OperationExecutor {
           operationKind: "broker",
         },
       };
+    }
+
+    if (action.toolName !== "web_search" && operation.request.secretRefs && operation.request.secretRefs.length > 0) {
+      for (const ref of operation.request.secretRefs) {
+        const canonicalRef = ref === "tavily" ? "tavilyApiKey" : ref;
+        const resolvedVal = (creds as unknown as Record<string, unknown>)[canonicalRef] ?? (creds as unknown as Record<string, unknown>)[ref];
+        if (!resolvedVal) {
+          return {
+            state: "failed",
+            error: {
+              code: "CONNECTOR_SECRET_UNRESOLVED",
+              message: `Required secret reference "${ref}" cannot be resolved. Configure ${ref} in environment or credentials store.`,
+              retryable: false,
+            },
+            evidence: {
+              backend: "local-native",
+              actionDigest: action.actionDigest,
+              executorId: "broker-secret-preflight",
+              operationKind: "broker",
+            },
+          };
+        }
+      }
     }
     if (action.toolName === "send_email" && (!creds.smtpHost || !creds.smtpUser || !creds.smtpPass)) {
       const failure = createSetupFailure("send_email", "SMTP configuration", "SMTP_HOST / smtp.host");
@@ -544,7 +568,12 @@ export class BrokerExecutor implements OperationExecutor {
         let text = new TextDecoder().decode(bytes);
         // The model reads page text, not markup — and context is not free.
         if (action.toolName === "read_website") text = htmlToText(text);
-        if (action.toolName === "web_search") text = formatSearchResults(text);
+        if (
+          action.toolName === "web_search" ||
+          (operation.request.kind === "http" && operation.request.destination?.host === "api.tavily.com")
+        ) {
+          text = formatSearchResults(text);
+        }
         outputText = capBrokerOutput(text);
       } catch {
         outputText = `<broker artifact ${result.output.artifactId}>`;

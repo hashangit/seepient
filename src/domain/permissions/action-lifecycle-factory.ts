@@ -106,6 +106,8 @@ export interface ActionLifecycleInputs {
    * composition wiring IS operator intent there.
    */
   trustedHostAllowlist?: string[];
+  /** Spec 020: custom tool registrations mapped by name (preparedTool, brokerConnector). */
+  registrations?: import("./tool-registration-map.js").ToolRegistrationMap;
   /** Optional probe to test image capability reachability before prompting user. */
   imageCapabilityProbe?: () => Promise<{ reachable: boolean; reason?: string }>;
   /** Optional: persisted capability ledger for authority consumption & revocation (T107a). */
@@ -138,6 +140,8 @@ export interface WiredActionLifecycle {
   activeCapabilities: { capabilities: Capability[] };
   /** Analyzer registry. Tool calls without a matching analyzer fall through. */
   analyzers: Record<string, ToolAnalyzer>;
+  /** Spec 020: custom tool registrations map. */
+  registrations?: import("./tool-registration-map.js").ToolRegistrationMap;
   /** Per-run analysis context (artifacts, workspace snapshot). */
   analysisContext: Omit<ToolAnalysisContext, "toolCallId">;
   /** The backing policy store (for /permissions read/write). */
@@ -450,6 +454,7 @@ export async function buildActionLifecycle(
     policyContext,
     activeCapabilities,
     analyzers: ALL_ANALYZERS,
+    registrations: inputs.registrations,
     auditStore,
     terminalOutbox,
     capabilityLedger,

@@ -7,10 +7,13 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import type { FileCommitBroker } from '../../foundations/contracts/execution-brokers.js';
+import type { CapabilityEnvelope } from '../../foundations/contracts/permission-policy.js';
 
 export interface ImageRequest {
   prompt?: string;
   outputPath?: string;
+  destinations?: string[];
   imagePath?: string;
   maskPath?: string;
   mode?: 'text-to-image' | 'variation' | 'edit';
@@ -27,6 +30,8 @@ export interface MediaConfig {
   signal?: AbortSignal;
   timeoutMs?: number;
   runtime?: any;
+  commitBroker?: FileCommitBroker;
+  envelope?: CapabilityEnvelope;
 }
 
 export interface RuntimeImageOutput {
@@ -178,16 +183,22 @@ export async function generateImagesStructured(
     };
   }
 
+  if (!config.commitBroker || !config.envelope) {
+    return {
+      success: false,
+      files: [],
+      error: "Exact-commit broker and capability envelope are required for image file output; write refused.",
+      errorType: "invalid_request",
+      status: 400,
+    };
+  }
+
+  const generatedFiles: string[] = [];
   try {
     const execResult = await generateImageRuntime(req, config.runtime, config.signal, config.timeoutMs);
-    const generatedFiles: string[] = [];
 
     if (req.outputPath) {
       const resolvedPath = path.resolve(req.outputPath);
-      const parentDir = path.dirname(resolvedPath);
-      if (!fs.existsSync(parentDir)) {
-        fs.mkdirSync(parentDir, { recursive: true });
-      }
       for (let i = 0; i < execResult.images.length; i++) {
         let dest = resolvedPath;
         if (i > 0) {
@@ -195,20 +206,24 @@ export async function generateImagesStructured(
           const base = ext ? resolvedPath.slice(0, -ext.length) : resolvedPath;
           dest = `${base}-${i + 1}${ext || ".png"}`;
         }
-        fs.writeFileSync(dest, execResult.images[i].bytes);
+        await config.commitBroker.commit({
+          envelope: config.envelope,
+          destination: dest,
+          content: execResult.images[i].bytes,
+        });
         generatedFiles.push(dest);
       }
     } else {
       const resolvedOutputDir = path.resolve(req.outputDir ?? ".");
-      if (!fs.existsSync(resolvedOutputDir)) {
-        fs.mkdirSync(resolvedOutputDir, { recursive: true });
-      }
       for (let i = 0; i < execResult.images.length; i++) {
         const img = execResult.images[i];
-        const fileName = `generated-${Date.now()}-${i + 1}.png`;
-        const filePath = path.join(resolvedOutputDir, fileName);
-        fs.writeFileSync(filePath, img.bytes);
-        generatedFiles.push(filePath);
+        const dest = req.destinations?.[i] ?? path.join(resolvedOutputDir, `generated-${Date.now()}-${i + 1}.png`);
+        await config.commitBroker.commit({
+          envelope: config.envelope,
+          destination: dest,
+          content: img.bytes,
+        });
+        generatedFiles.push(dest);
       }
     }
 
@@ -239,7 +254,7 @@ export async function generateImagesStructured(
 
     return {
       success: false,
-      files: [],
+      files: generatedFiles,
       error: `Error generating image: ${err.message}`,
       errorType,
       status,

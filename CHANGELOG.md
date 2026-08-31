@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.6.0] - 2026-08-31
+
+### Custom-tool execution parity (spec 020)
+
+**Restored surface & explicit trust models:**
+- Restored `preparedTool` and `brokerConnector` factories and types from the package entry (`src/transport/sdk/index.ts`).
+- Exposed explicit trust models (`preparedTool`, `brokerConnector`, `trustedHostTool`), custom tool registration support, and typed `commitHelper` on `createAgent`, `generateText`, and `streamText`.
+- **`preparedTool` execution pipeline**: Custom analyzers return an untrusted `PreparedActionDraft` (`operation`, `effects`, `risk`, `display`); platform stamps identity fields and computes digests fail-closed via `buildPreparedAction`, executing through the policy engine, approval broker, and execution boundary with exact-commit guarantees.
+- **`brokerConnector` data-only execution**: Declarative argument-to-request mappings using JSON Pointers (RFC 6901) execute directly against backend brokers (e.g. `web-search`) with zero embedder code execution and construction-guaranteed secret isolation.
+- Fixed deny-messaging for custom tools (FR-009): registration-present analyzer failures surface exact validator/analyzer remediation, never the misleading `trustedHostAllowlist` hint.
+
+### CLI image saves exact commit verification
+- Replaced direct `fs.writeFileSync` saves in CLI image generation (`generate image`) with exact-commit execution via `FileCommitBroker` with action-scoped capability envelopes, ensuring all model-authored image file outputs are audited and exact-commit checked.
+
 ## [v0.5.7] - 2026-08-30
 
 ### Media capability ProviderRuntime routing & vendor-neutral migration

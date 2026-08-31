@@ -13,11 +13,23 @@
 
 import type { ToolDefinition } from "./tool.js";
 import type {
-  PreparedToolAction,
   PreparedOperation,
+  ActionDisplay,
 } from "./prepared-action.js";
-import type { JsonValue } from "./tool-effects.js";
+import type { JsonValue, EffectRequest, ToolRiskCategory } from "./tool-effects.js";
 import type { ToolResult } from "../types.js";
+
+/**
+ * Draft returned by a custom preparedTool analyzer.
+ * Platform stamps identity fields (runId, toolCallId, toolName, principalId)
+ * and computes digests (argsDigest, actionDigest).
+ */
+export interface PreparedActionDraft {
+  operation: PreparedOperation;
+  effects: EffectRequest[];
+  risk: ToolRiskCategory;
+  display: ActionDisplay;
+}
 
 /** Context passed to an analyzer. Pure except for read-only snapshot/probe. */
 export interface ToolAnalysisContext {
@@ -65,7 +77,7 @@ export interface PreparedToolRegistration {
   analyze(
     args: unknown,
     context: ToolAnalysisContext,
-  ): Promise<PreparedToolAction>;
+  ): Promise<PreparedActionDraft>;
 }
 
 /**

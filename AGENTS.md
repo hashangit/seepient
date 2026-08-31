@@ -214,7 +214,7 @@ Current layout of the Obsidian vault (annotated):
 │       ├── contracts/                # native-helper-protocol, exact-commit-gating, trusted-host-allowlist
 │       ├── quickstart.md             # QS-0.1–QS-2.3 validation scenarios + production budgets
 │       └── tasks.md                  # T001–T041 dependency-ordered, US1–US7 story phases, test-first gates
-│   └── 020-custom-tool-execution-parity/ # Custom-tool execution parity (020 — plan+tasks complete, 0.6.0)
+│   └── 020-custom-tool-execution-parity/ # Custom-tool execution parity (020 — SHIPPED in v0.6.0)
 │       ├── spec.md                   # Make preparedTool/brokerConnector execute; FR-001–FR-009, M1–M14, SC-001–SC-006
 │       ├── plan.md                   # P0 draft contract+constructor → P1 preparedTool dispatch (SDK roots + factory seam) → P2 connector registry → P3 export restoration + decision table
 │       ├── research.md               # 0.5.7 review evidence E1–E10 + decisions D1–D16 (incl. review amendments F1–F7, R1–R4)
@@ -222,6 +222,14 @@ Current layout of the Obsidian vault (annotated):
 │       ├── contracts/                # prepared-tool-execution, broker-connector-registry, trust-model-selection (decision table)
 │       ├── quickstart.md             # QS-0.1–QS-3.3 validation scenarios + QS-P production budgets
 │       └── tasks.md                  # T001–T023 dependency-ordered, US1–US4 story phases, test-first gates
+│   └── 021-stateless-sdk-workers/    # Stateless SDK workers & embedder-owned storage (021 — planned)
+│       ├── spec.md                   # Multi-tenant state injection; FR-001–FR-011, M1–M8, SC-001–SC-005
+│       ├── plan.md                   # P0 injection road → P1 zero-write gate + server parity → P2 reference worker + docs
+│       ├── research.md               # Verification evidence E1–E12 + decisions D1–D10 + scrutiny S1–S3 (2026-08-31, HEAD 643e316)
+│       ├── data-model.md             # Option model, store contract inventory, state classification table
+│       ├── contracts/                # store-contracts, sdk-injection-options, worker-deployment
+│       ├── quickstart.md             # QS-0–QS-4 validation scenarios + production budgets
+│       └── tasks.md                  # T001–T018 dependency-ordered, US1–US3 story phases, test-first gates
 ├── 010-provider-management-redesign/ # Provider mgmt redesign: contracts + runtime + purpose/tier routing
 │   ├── spec.md                       # Problem, 5 blockers + 4 gaps, scope decisions, success criteria
 │   ├── plan.md                       # P0-P7 phased plan (contracts → Pi adapter → runtime → resolution → surfaces → reliability)
@@ -460,7 +468,30 @@ Keep `CONTEXT.md` under 20 lines total. Do NOT summarize the full conversation �
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-- **UPCOMING (plan + tasks complete — implementation next, branch `020-custom-tool-execution-parity`, target 0.6.0)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/020-custom-tool-execution-parity/plan.md`
+- **UPCOMING (plan + tasks complete — implementation next, branch `021-stateless-sdk-workers`, from `main` after 020)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/021-stateless-sdk-workers/plan.md`
+  — Stateless SDK workers & embedder-owned storage (021): multi-tenant embedders
+  get every piece of tenant state (credentials, provider config, audit, policy,
+  capability ledger, sessions) flowing through injectable contracts into their
+  own DB, with defaults byte-identical. Mostly road-building: the contracts and
+  `buildActionLifecycle` inputs exist (policyStore/auditStore/capabilityLedger,
+  factory :65/:67/:112); the SDK options never reached them — runtime read via
+  untyped casts, `principalId` hardcoded "sdk-user", `createAgent` hardcodes
+  `LocalAuditStore`. Three verified repairs ride along: session persistence is
+  write-only today (random sessionId, load-always-null, bare persistSession, no
+  resume, no metadata — FR-006 fixes the round-trip), `CapabilityLedger` is a
+  concrete class needing interface extraction (PolicyEngine :233), and the
+  skills registry is a module singleton readable across agents in one process.
+  A headless zero-write integration test (FR-008) is the acceptance gate and
+  the enforcement of M8: 016's session-index and 018's injection records must
+  target store contracts, never direct disk. Custom AuditStores own durability
+  + recovery (contract obligations: append "written" = fsynced, idempotent by
+  key; SDK skips outbox/recoverIndeterminateActions for non-local stores).
+  Tenancy stays orchestration: Seepient learns only principalId + stores.
+  Includes server startup parity (http/index.ts:185-242) and a reference
+  worker with HTTP-callback stores; Docker scheduler multi-host and kernel
+  tier explicitly out (isolation ladder is deployment guidance). P0 ≈5d,
+  P1 ≈3d, P2 ≈2d.
+- **SHIPPED (spec 020 complete, v0.6.0, branch `020-custom-tool-execution-parity`)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/020-custom-tool-execution-parity/plan.md`
   — Custom-tool execution parity (020): 008's two policy-governed custom-tool
   rungs are contract-only (T005 types + T304 registration shipped; analyzer
   dispatch never consults SDK registrations — `resolveAnalyzerWithFallback`
