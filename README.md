@@ -390,23 +390,80 @@ console.log(response.text);
 await seepient.dispose();
 ```
 
-### Custom Tools
+### Custom Tools (Explicit Trust Models)
+
+Seepient supports three explicit trust models for custom tools with full permission pipeline governance:
+
 ```ts
-import { createAgent, tool } from 'seepient';
+import { createAgent, trustedHostTool, preparedTool, brokerConnector } from 'seepient';
+
+// 1. Host Execution (trusted code execution on local machine)
+const diskTool = trustedHostTool({
+  definition: {
+    type: 'function',
+    function: {
+      name: 'check_disk',
+      description: 'Check disk usage',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  execute: async () => JSON.stringify(await getDiskUsage()),
+});
+
+// 2. Governed Preparation (custom analyzer, exact-commit execution)
+const reportTool = preparedTool({
+  definition: {
+    type: 'function',
+    function: {
+      name: 'save_report',
+      description: 'Save structured status report',
+      parameters: {
+        type: 'object',
+        properties: { content: { type: 'string' } },
+        required: ['content'],
+      },
+    },
+  },
+  allowedOperationKinds: ['commit-files'],
+  analyze: async (args, ctx) => {
+    const artifact = await ctx.artifacts.put(Buffer.from(args.content), 'text/plain');
+    const target = { canonicalPath: '/workspace/report.txt', exists: false, canonicalParent: '/workspace', basename: 'report.txt', finalSymlink: false };
+    return {
+      operation: { kind: 'commit-files', commits: [{ destination: target, content: artifact }] },
+      effects: [{ kind: 'filesystem-write', targets: [{ target, mode: 'create' }] }],
+      risk: 'edit',
+      display: { title: 'Save report', summary: 'Write report.txt', canonicalTargets: [target.canonicalPath], effects: ['filesystem-write'] },
+    };
+  },
+});
+
+// 3. Declarative Broker Connector (data-only mapping, zero embedder execution)
+const searchTool = brokerConnector({
+  definition: {
+    type: 'function',
+    function: {
+      name: 'web_search',
+      description: 'Search documentation',
+      parameters: {
+        type: 'object',
+        properties: { query: { type: 'string' } },
+        required: ['query'],
+      },
+    },
+  },
+  connector: 'web-search',
+  mapping: {
+    version: 1,
+    operation: 'search',
+    argumentBindings: { query: '/query' },
+    secretRefs: ['tavilyApiKey'],
+  },
+});
 
 const agent = await createAgent({
   provider: 'openai',
-  tools: [
-    tool({
-      name: 'check_disk',
-      description: 'Check disk usage',
-      parameters: {},
-      execute: async () => {
-        const usage = await getDiskUsage();
-        return JSON.stringify(usage);
-      },
-    }),
-  ],
+  permissionPipeline: true,
+  tools: [diskTool, reportTool, searchTool],
 });
 ```
 
