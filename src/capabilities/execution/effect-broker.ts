@@ -457,8 +457,31 @@ export class EffectBroker implements EffectBrokerContract {
     // 2e-ii. Inject authorized secret credentials for verified destinations & secretRefs.
     // Tavily authenticates via the Authorization Bearer header only (per their
     // API reference); the key is never duplicated into the request body.
-    if (dest.host === "api.tavily.com" || request.secretRefs?.includes("tavilyApiKey")) {
-      const tavilyKey = this.resolveSecret("tavilyApiKey");
+    if (request.secretRefs && request.secretRefs.length > 0) {
+      for (const ref of request.secretRefs) {
+        const canonical = ref === "tavily" ? "tavilyApiKey" : ref;
+        const val = this.resolveSecret(canonical) ?? this.resolveSecret(ref);
+        if (!val) {
+          return {
+            requestId: request.requestId,
+            status: "failed",
+            error: {
+              code: "CONNECTOR_SECRET_UNRESOLVED",
+              message: `Required secret reference "${ref}" cannot be resolved. Configure ${ref} in environment or credential store.`,
+              retryable: false,
+            },
+          };
+        }
+        if (canonical === "tavilyApiKey" || dest.host === "api.tavily.com") {
+          cleanHeaders["authorization"] = `Bearer ${val}`;
+          hasInjectedSecret = true;
+        } else if (!cleanHeaders["authorization"]) {
+          cleanHeaders["authorization"] = `Bearer ${val}`;
+          hasInjectedSecret = true;
+        }
+      }
+    } else if (dest.host === "api.tavily.com") {
+      const tavilyKey = this.resolveSecret("tavilyApiKey") ?? this.resolveSecret("tavily");
       if (tavilyKey) {
         cleanHeaders["authorization"] = `Bearer ${tavilyKey}`;
         hasInjectedSecret = true;

@@ -64,25 +64,53 @@ describe("Media Execution via ProviderRuntime (QS-P5.3a & QS-P5.3b)", () => {
       adapter,
     });
 
+    const { InMemoryArtifactStore } = await import("../../../capabilities/execution/in-memory-artifact-store.js");
+    const { FileCommitBroker } = await import("../../../capabilities/execution/file-commit-broker.js");
+    const { diskBackedFakeHelper, fakeCommitEnvelope } = await import("../../../capabilities/execution/__tests__/helpers/commit-helper-fakes.js");
+    const destFile = join(tempDir, "output.png");
+    const commitBroker = new FileCommitBroker({
+      artifacts: new InMemoryArtifactStore(),
+      helper: diskBackedFakeHelper(),
+    });
+    const envelope = {
+      ...fakeCommitEnvelope(destFile),
+      capabilities: [{ kind: "commit-file" as const, path: destFile }],
+    };
+
     const res = await generateImagesStructured(
       {
         prompt: "A beautiful mountain",
         n: 1,
         size: "1536x1024",
         quality: "hd",
-        outputDir: tempDir,
+        outputPath: destFile,
       },
       {
         runtime,
+        commitBroker,
+        envelope,
       },
     );
 
     expect(res.success).toBe(true);
     expect(res.files.length).toBe(1);
-    expect(res.files[0].startsWith(tempDir)).toBe(true);
+    expect(res.files[0]).toBe(destFile);
     expect(capturedReq.prompt).toBe("A beautiful mountain");
     expect(capturedReq.aspectRatio).toBe("16:9");
     expect(capturedReq.qualityPreset).toBe("high");
+
+    // Also assert that invoking without commitBroker/envelope fails closed
+    const refused = await generateImagesStructured(
+      {
+        prompt: "A beautiful mountain",
+        outputPath: destFile,
+      },
+      {
+        runtime,
+      },
+    );
+    expect(refused.success).toBe(false);
+    expect(refused.error).toContain("Exact-commit broker");
   });
 
   it("executes optimizePrompt through ProviderRuntime.executeLanguage on text.efficient", async () => {

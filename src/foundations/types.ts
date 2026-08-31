@@ -199,6 +199,10 @@ export interface GenerateTextOptions {
   consentMode?: "ask-everything" | "edit-enabled" | "autonomous";
   deploymentCeiling?: import("./contracts/permission-policy.js").CapabilitySet | import("./contracts/permission-policy.js").Capability[];
   principalPolicy?: import("./contracts/permission-policy.js").CapabilitySet | import("./contracts/permission-policy.js").Capability[];
+  /** Optional commit helper override for test/embedder injection. */
+  commitHelper?: import("./contracts/execution-brokers.js").CommitHelper;
+  /** Optional network adapter override for test/embedder injection. */
+  network?: import("./contracts/execution-brokers.js").BrokerNetworkAdapter;
 }
 
 export interface GenerateTextResult {
@@ -260,6 +264,10 @@ export interface AgentCreateOptions {
   consentMode?: "ask-everything" | "edit-enabled" | "autonomous";
   deploymentCeiling?: import("./contracts/permission-policy.js").CapabilitySet | import("./contracts/permission-policy.js").Capability[];
   principalPolicy?: import("./contracts/permission-policy.js").CapabilitySet | import("./contracts/permission-policy.js").Capability[];
+  /** Optional commit helper override for test/embedder injection. */
+  commitHelper?: import("./contracts/execution-brokers.js").CommitHelper;
+  /** Optional network adapter override for test/embedder injection. */
+  network?: import("./contracts/execution-brokers.js").BrokerNetworkAdapter;
 }
 
 export interface SdkAgent {

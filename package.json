@@ -1,6 +1,6 @@
 {
   "name": "seepient",
-  "version": "0.5.7",
+  "version": "0.6.0",
   "type": "module",
   "main": "dist/ui/cli/index.js",
   "exports": {
@@ -33,7 +33,6 @@
     "test:coverage": "vitest run --coverage",
     "bench:provider": "vitest run src/domain/providers/__tests__/provider-benchmark.test.ts",
     "native:build": "cargo build --manifest-path native/fs-commit/Cargo.toml --release && node scripts/place-native-helper.cjs",
-    "native:test": "cargo test --manifest-path native/fs-commit/Cargo.toml",
     "native:test": "cargo test --manifest-path native/fs-commit/Cargo.toml",
     "prepublishOnly": "pnpm run build"
   },
