@@ -67,7 +67,7 @@ Sanctioned roots may wire all layers but contain no policy logic:
 - TUI: `src/ui/tui/index.tsx`, `hooks/use-agent.ts`
 - REPL: `src/ui/repl/repl.ts`
 - Server: `src/transport/http/index.ts`, `server-core.ts`, `standalone.ts`
-- SDK: `src/transport/sdk/index.ts`, `agent.ts`
+- SDK: `src/transport/sdk/index.ts`, `seepient.ts`
 - Worker scheduler service: `src/transport/worker-scheduler/standalone.ts`
 
 ## Security invariants

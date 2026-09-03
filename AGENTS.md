@@ -222,14 +222,22 @@ Current layout of the Obsidian vault (annotated):
 │       ├── contracts/                # prepared-tool-execution, broker-connector-registry, trust-model-selection (decision table)
 │       ├── quickstart.md             # QS-0.1–QS-3.3 validation scenarios + QS-P production budgets
 │       └── tasks.md                  # T001–T023 dependency-ordered, US1–US4 story phases, test-first gates
-│   └── 021-stateless-sdk-workers/    # Stateless SDK workers & embedder-owned storage (021 — planned)
-│       ├── spec.md                   # Multi-tenant state injection; FR-001–FR-011, M1–M8, SC-001–SC-005
+│   └── 021-stateless-sdk-workers/    # Stateless SDK workers & embedder-owned storage (021 — IMPLEMENTED)
+│       ├── spec.md                   # Multi-tenant state injection; FR-001–FR-012, M1–M8, SC-001–SC-005
 │       ├── plan.md                   # P0 injection road → P1 zero-write gate + server parity → P2 reference worker + docs
 │       ├── research.md               # Verification evidence E1–E12 + decisions D1–D10 + scrutiny S1–S3 (2026-08-31, HEAD 643e316)
 │       ├── data-model.md             # Option model, store contract inventory, state classification table
 │       ├── contracts/                # store-contracts, sdk-injection-options, worker-deployment
 │       ├── quickstart.md             # QS-0–QS-4 validation scenarios + production budgets
-│       └── tasks.md                  # T001–T018 dependency-ordered, US1–US3 story phases, test-first gates
+│       ├── tasks.md                  # T001–T018 dependency-ordered, US1–US3 story phases, test-first gates
+│       └── 021-1-skill-sources/      # Sub-spec: injectable skill sources (021-1 — planned, same branch/release)
+│           ├── spec.md               # SkillSource/SkillStore + inline tier; FR-001–FR-009, M1–M6, SC-001–SC-005
+│           ├── plan.md               # P0 contract+composition+inline → P1 write path+016/018 coordination → P2 example+docs
+│           ├── research.md           # Skills-gap design ledger E1–E6 + decisions D1–D7 (2026-08-31)
+│           ├── data-model.md         # SkillRecord, last-wins composition, generated-skill write path
+│           ├── contracts/            # skill-source-contract, sdk-skill-options
+│           ├── quickstart.md         # QS-S0–QS-S4 validation scenarios + budgets
+│           └── tasks.md              # T001–T013 dependency-ordered, US1–US3 story phases, test-first gates
 ├── 010-provider-management-redesign/ # Provider mgmt redesign: contracts + runtime + purpose/tier routing
 │   ├── spec.md                       # Problem, 5 blockers + 4 gaps, scope decisions, success criteria
 │   ├── plan.md                       # P0-P7 phased plan (contracts → Pi adapter → runtime → resolution → surfaces → reliability)
@@ -294,7 +302,7 @@ UI → Transport → Domain → Capabilities → Vendors
 
 **Hard rules:** no layer-skipping, no importing upward, no `utils/` grab-bag; no service-SDK import outside `src/vendors/`; sibling capabilities never import each other (shared vocabulary moves to `foundations/contracts/`); kebab-case file/folder names everywhere. UI frameworks (Ink, React, Commander, ws, figlet) are the sanctioned substrate of `ui/`.
 
-**Composition roots** may wire across all layers — for wiring only, no logic. Sanctioned roots: CLI (`src/ui/cli/index.ts`, `src/transport/cli/bootstrap.ts`, `agent.ts`), TUI (`src/ui/tui/index.tsx`, `hooks/use-agent.ts`), REPL (`src/ui/repl/repl.ts`), Server (`src/transport/http/index.ts`, `server-core.ts`, `standalone.ts`), SDK (`src/transport/sdk/index.ts`, `agent.ts`). Tolerated type-only edges: transport commands importing `SkillRegistry`/`Target` types, `rest-gateway.ts` gateway types.
+**Composition roots** may wire across all layers — for wiring only, no logic. Sanctioned roots: CLI (`src/ui/cli/index.ts`, `src/transport/cli/bootstrap.ts`, `agent.ts`), TUI (`src/ui/tui/index.tsx`, `hooks/use-agent.ts`), REPL (`src/ui/repl/repl.ts`), Server (`src/transport/http/index.ts`, `server-core.ts`, `standalone.ts`), SDK (`src/transport/sdk/index.ts`, `seepient.ts`). Tolerated type-only edges: transport commands importing `SkillRegistry`/`Target` types, `rest-gateway.ts` gateway types.
 
 ## Key Files
 
@@ -336,7 +344,7 @@ UI → Transport → Domain → Capabilities → Vendors
 | HTTP transport | `src/transport/http/` | REST handlers, `provider-management/` routes (accounts, assignments, oauth, catalog), server core, standalone |
 | WebSocket | `src/transport/ws/` | Dispatcher (`ws-handlers.ts`), `connection-registry.ts`, message handlers (`chat`, `approvals`, `provider-mutations`, `session-control`) |
 | Auth | `src/transport/auth/` | API keys + scopes |
-| SDK transport | `src/transport/sdk/` | `generateText`, `streamText`, `createAgent`, option resolution |
+| SDK transport | `src/transport/sdk/` | `createSeepient`, `createAgent`, `generateText`, `streamText`, option resolution |
 
 Unified provider architecture behind `ProviderRuntime` (`src/domain/providers/provider-runtime.ts`) and `AggregateInferenceAdapter` (`src/capabilities/inference/aggregate-adapter.ts`):
 
@@ -468,7 +476,7 @@ Keep `CONTEXT.md` under 20 lines total. Do NOT summarize the full conversation �
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-- **UPCOMING (plan + tasks complete — implementation next, branch `021-stateless-sdk-workers`, from `main` after 020)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/021-stateless-sdk-workers/plan.md`
+- **IMPLEMENTED (branch `021-stateless-sdk-workers`)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/021-stateless-sdk-workers/plan.md`
   — Stateless SDK workers & embedder-owned storage (021): multi-tenant embedders
   get every piece of tenant state (credentials, provider config, audit, policy,
   capability ledger, sessions) flowing through injectable contracts into their
@@ -490,7 +498,15 @@ shell commands, and other important information, read the current plan:
   Includes server startup parity (http/index.ts:185-242) and a reference
   worker with HTTP-callback stores; Docker scheduler multi-host and kernel
   tier explicitly out (isolation ladder is deployment guidance). P0 ≈5d,
-  P1 ≈3d, P2 ≈2d.
+  P1 ≈3d, P2 ≈2d. Sub-spec 021-1 (`021-1-skill-sources/`, plan + tasks
+  complete — implementation next, T001–T013, same branch/release): injectable `SkillSource`/
+  `SkillStore` + inline-skills tier so skill content joins the store-contract
+  family — serverless light shape gets a working skill system (ambient fs
+  discovery silently no-ops there today), embedders compose global +
+  tenant-scoped skills from their own DB with last-wins shadowing, and 016's
+  generated-skill writer retargets the store instead of disk (fail-closed
+  without one). Consolidated SDK guide covering 020 + 021 + 021-1 is 021
+  task T016 (docs/sdk/). 021-1 ≈1 week.
 - **SHIPPED (spec 020 complete, v0.6.0, branch `020-custom-tool-execution-parity`)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/020-custom-tool-execution-parity/plan.md`
   — Custom-tool execution parity (020): 008's two policy-governed custom-tool
   rungs are contract-only (T005 types + T304 registration shipped; analyzer

@@ -1,49 +1,22 @@
-export interface SkillModelConfig {
-  provider?: string;   // e.g., 'openai', 'anthropic', 'glm', 'openai-compatible'
-  model: string;       // model id or nickname (e.g., 'gpt-5.4', 'sonnet', 'claude-haiku-4-5-20251001')
-}
+export type {
+  SkillModelConfig,
+  SkillFrontmatter,
+  Skill,
+  SkillMetadata,
+  SkillRegistryContract as SkillRegistry,
+} from "../../foundations/contracts/skill-registry.js";
 
-export interface SkillFrontmatter {
-  name: string;
-  description: string;
-  version?: string;
-  author?: string;
-  tags?: string[];
-  allowedTools?: string[];
-  priority?: number;
-  // Dynamic arguments
-  args?: string[];               // Declared argument names, e.g., ['environment', 'service']
-  // Per-skill model selection
-  model?: SkillModelConfig;      // Preferred model for this skill
-}
+import type { Skill } from "../../foundations/contracts/skill-registry.js";
 
-export interface Skill {
-  name: string;
-  description: string;
-  version: string;
-  author?: string;
-  tags: string[];
-  allowedTools?: string[];
-  priority: number;
-  basePath: string;
-  source: string;
-  frontmatter: SkillFrontmatter;
-  filePath: string;
-}
-
-export interface SkillMetadata {
-  name: string;
-  description: string;
-  version: string;
-  tags: string[];
-  allowedTools?: string[];
-}
-
-export interface SkillRegistry {
-  get(name: string): Skill | undefined;
-  getAll(): Skill[];
-  getMetadata(): SkillMetadata[];
-  getBody(name: string): Promise<string | undefined>;
+/**
+ * SkillSource signature seam placeholder for Spec 021-1.
+ * Will be replaced in-place in Spec 021-1 by the canonical contract:
+ * `list(): Promise<SkillRecord[]>`.
+ */
+export interface SkillSource {
+  readonly id: string;
+  readonly kind: string;
+  load?(cwd: string): Promise<Skill[]>;
 }
 
 /** Default maximum skill body size in characters (~8k tokens at 4 chars/token). */

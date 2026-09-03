@@ -13,6 +13,7 @@ import * as path from "path";
 import { homedir } from "os";
 
 import { getSyncBuiltinCatalog } from "../../domain/providers/model-catalog.js";
+import { getDefaultProviderRuntime, ProviderRuntime } from "../../domain/providers/provider-runtime.js";
 import { serverGenerateText, serverStreamText } from "./server-core.js";
 import { createRestHandler, type RestHandlerContext } from "./rest.js";
 import { setupWebSocket, closeWebSocket, type WebSocketHandlerContext } from "../ws/websocket.js";
@@ -36,6 +37,16 @@ export interface ServerOptions {
   sessionTTL?: number;
   /** Spec 008 / 017: route every tool call through the Domain policy pipeline. */
   permissionPipeline?: boolean;
+  /** Spec 021 (FR-010): Injected ProviderRuntime */
+  runtime?: import("../../domain/providers/provider-runtime.js").ProviderRuntime | import("../../foundations/contracts/provider-runtime.js").ProviderRuntimeContract;
+  /** Injected session persistence backend (Spec 021) */
+  persist?: import("../../foundations/types.js").PersistenceBackend;
+  /** Spec 021 (FR-010): Injected tenant audit store */
+  auditStore?: import("../../foundations/contracts/execution-brokers.js").AuditStore;
+  /** Spec 021 (FR-010): Injected tenant policy store */
+  policyStore?: import("../../foundations/contracts/execution-brokers.js").PolicyStore;
+  /** Spec 021 (FR-010): Injected tenant capability ledger */
+  capabilityLedger?: import("../../foundations/contracts/capability-ledger.js").CapabilityLedger;
 }
 
 interface ReadPackageJson {
@@ -181,31 +192,36 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
         "the local CLI/SDK for tool execution.",
     );
   }
+  const getServerRuntime = () => options?.runtime ?? getDefaultProviderRuntime();
+
   if (serverPermissionPipelineEnabled) {
     const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
     const { NoneApprovalBroker } = await import("../approval-brokers.js");
     const { LocalAuditStore, TerminalEventOutbox, recoverIndeterminateActions } = await import("../../domain/permissions/audit-recorder.js");
     const rootDir = process.cwd();
-    const serverAuditStore = new LocalAuditStore({ root: rootDir });
+    const serverAuditStore = options?.auditStore ?? new LocalAuditStore({ root: rootDir });
+    const isCustomAuditStore = options?.auditStore && (options.auditStore.isLocal === false || (options.auditStore.isLocal === undefined && !(options.auditStore instanceof LocalAuditStore)));
     // The outbox MUST be backed by the SAME LocalAuditStore the per-request
     // lifecycles use, otherwise the flush timer + recovery operate on a
     // different pending-event set than the one live requests populate.
-    const serverOutbox = new TerminalEventOutbox(serverAuditStore);
+    const serverOutbox = isCustomAuditStore ? undefined : new TerminalEventOutbox(serverAuditStore as import("../../domain/permissions/audit-recorder.js").LocalAuditStore);
 
     // The periodic flush timer MUST start regardless of whether the one-time
     // recovery (reload/flush/recover) succeeds — a recovery failure must not
     // leave the server running with no drain path. Create it outside the try.
-    try {
-      await serverOutbox.reload();
-      await serverOutbox.flush();
-      await recoverIndeterminateActions(serverAuditStore, serverOutbox);
-    } catch (e) {
-      console.warn("[server] Audit outbox recovery initialization failed:", e instanceof Error ? e.message : String(e));
+    if (serverOutbox) {
+      try {
+        await serverOutbox.reload();
+        await serverOutbox.flush();
+        await recoverIndeterminateActions(serverAuditStore as import("../../domain/permissions/audit-recorder.js").LocalAuditStore, serverOutbox);
+      } catch (e) {
+        console.warn("[server] Audit outbox recovery initialization failed:", e instanceof Error ? e.message : String(e));
+      }
+      outboxFlushTimer = setInterval(() => {
+        serverOutbox.flush().catch(() => {});
+      }, 10_000);
+      outboxFlushTimer.unref();
     }
-    outboxFlushTimer = setInterval(() => {
-      serverOutbox.flush().catch(() => {});
-    }, 10_000);
-    outboxFlushTimer.unref();
 
     // A fail-closed boundary: no operation kind is supported, so policy denies
     // every effectful action with `backend-unsupported` before dispatch. The
@@ -248,6 +264,8 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
         executionBoundary: unsupportedBoundary,
         approvalMode: "never",
         auditStore: serverAuditStore,
+        policyStore: options?.policyStore,
+        capabilityLedger: options?.capabilityLedger,
         terminalOutbox: serverOutbox,
       });
     };
@@ -263,6 +281,7 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
   const sessionManager = new ServerSessionManager({
     sessionDir,
     sessionTTL,
+    backend: options?.persist,
   });
   sessionManager.startCleanup();
 
@@ -325,21 +344,22 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
     version,
     startTime,
     sessionManager,
+    runtime: options?.runtime,
     generateText: async (opts) => {
       // Spec 008: construct a per-request pipeline with the authenticated
       // principal's identity. No shared state between requests.
       let wiredPipeline: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle | undefined;
       if (serverPipelineFactory) {
         wiredPipeline = await serverPipelineFactory({
-          principalId: (opts as { apiKeyHash?: string }).apiKeyHash ?? "anonymous",
-          tenantId: (opts as { tenantId?: string }).tenantId ?? "default",
-          sessionId: (opts as { sessionId?: string }).sessionId ?? `sess-${Date.now()}`,
+          principalId: opts.principalId ?? opts.apiKeyHash ?? "anonymous",
+          tenantId: opts.tenantId ?? "default",
+          sessionId: opts.sessionId ?? `sess-${Date.now()}`,
           runId: `run-${Date.now()}`,
           workspaceRoot: process.cwd(),
           modelProviderClass: (opts.provider ?? "openai") as string,
         });
       }
-      return serverGenerateText({ ...opts, wiredPipeline }, gatewayMiddleware);
+      return serverGenerateText({ ...opts, runtime: getServerRuntime(), wiredPipeline }, gatewayMiddleware);
     },
     listModels,
     listSkills,
@@ -377,15 +397,15 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
       let wiredPipeline: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle | undefined;
       if (serverPipelineFactory) {
         wiredPipeline = await serverPipelineFactory({
-          principalId: (opts as { apiKeyHash?: string }).apiKeyHash ?? "anonymous",
-          tenantId: (opts as { tenantId?: string }).tenantId ?? "default",
+          principalId: opts.principalId ?? opts.apiKeyHash ?? "anonymous",
+          tenantId: opts.tenantId ?? "default",
           sessionId: opts.sessionId ?? `sess-${Date.now()}`,
           runId: `run-${Date.now()}`,
           workspaceRoot: process.cwd(),
           modelProviderClass: (opts.provider ?? "openai") as string,
         });
       }
-      serverStreamText({ ...opts, wiredPipeline }, gatewayMiddleware).catch((err: any) => {
+      serverStreamText({ ...opts, runtime: getServerRuntime(), wiredPipeline }, gatewayMiddleware).catch((err: any) => {
         opts.onError({
           code: "STREAM_ERROR",
           message: err instanceof Error ? err.message : "Stream failed",

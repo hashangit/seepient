@@ -43,7 +43,7 @@ import {
   requiredCapabilities,
   setCovers,
 } from "./capability-store.js";
-import type { PersistedCapabilityLedger } from "./persisted-capability-ledger.js";
+import type { CapabilityLedger } from "../../foundations/contracts/capability-ledger.js";
 import { buildApprovalChoices, buildApprovalOptions } from "./approval-options.js";
 import { realpathSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -230,12 +230,12 @@ function deny(
  */
 export class PolicyEngine implements PolicyEngineContract {
   private readonly policyDigest: string;
-  private readonly ledger?: PersistedCapabilityLedger;
+  private readonly ledger?: CapabilityLedger;
   private readonly now: () => number;
 
   constructor(
     policyDigest: string,
-    opts?: { ledger?: PersistedCapabilityLedger; now?: () => number },
+    opts?: { ledger?: CapabilityLedger; now?: () => number },
   ) {
     this.policyDigest = policyDigest;
     this.ledger = opts?.ledger;

@@ -102,6 +102,17 @@ export interface BrokerConnectorRegistration {
 }
 
 /**
+ * Optional static declaration for a trustedHostTool to provide explicit
+ * effects, risk level, and display information to the PolicyEngine and
+ * ActionLifecycle, rather than defaulting to ambient-authority sensitive.
+ */
+export interface TrustedHostToolDeclaration {
+  effects?: EffectRequest[];
+  risk?: ToolRiskCategory;
+  display?: Partial<ActionDisplay>;
+}
+
+/**
  * Host-trusted tool registration. Application authority, not model-grant
  * authority; always audit-labelled; disabled by default for server and
  * multi-tenant roots and only an operator allowlist can enable them.
@@ -109,6 +120,7 @@ export interface BrokerConnectorRegistration {
 export interface TrustedHostToolRegistration {
   trust: "host";
   definition: ToolDefinition;
+  declaration?: TrustedHostToolDeclaration;
   execute(args: unknown, context: HostToolContext): Promise<string | ToolResult>;
 }
 

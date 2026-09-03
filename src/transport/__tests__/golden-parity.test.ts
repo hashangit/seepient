@@ -81,7 +81,7 @@ describe("013 Golden Cross-Surface Parity (FR-039 / T056)", () => {
       listSkills: () => [],
       generateText: vi.fn(),
       sessionManager: { getSession: vi.fn() } as any,
-      providerRuntime: runtime3,
+      runtime: runtime3,
     });
 
     // ── Operation 1: Add Provider Account ──────────────────────────────

@@ -57,7 +57,7 @@ Instructions on how to operate the hello system.
     const hostCallbacks = new Map<string, (args: unknown) => Promise<unknown>>();
     for (const mod of getAllToolModules()) {
       if (mod.handler) {
-        hostCallbacks.set(mod.definition.function.name, (args) => mod.handler!(args as never, {}));
+        hostCallbacks.set(mod.definition.function.name, (args) => mod.handler!(args as never, {}, { skills: registry }));
       }
     }
     const { boundary, artifacts } = await buildLocalBoundary({
@@ -123,7 +123,7 @@ Instructions on how to operate the hello system.
     const hostCallbacks = new Map<string, (args: unknown) => Promise<unknown>>();
     for (const mod of getAllToolModules()) {
       if (mod.handler) {
-        hostCallbacks.set(mod.definition.function.name, (args) => mod.handler!(args as never, {}));
+        hostCallbacks.set(mod.definition.function.name, (args) => mod.handler!(args as never, {}, { skills: registry }));
       }
     }
     const { boundary, artifacts } = await buildLocalBoundary({

@@ -185,7 +185,6 @@ describe("Multi-tool per-agent composition (W1, W2)", () => {
     const tools: AnyToolRegistration[] = [getBalanceTool, transferTool];
 
     const agent = await createAgent({
-      permissionPipeline: true,
       runtime: runtime as never,
       tools,
       cwd: dir,
@@ -239,7 +238,6 @@ describe("generateText with trustedHostTool registration (W2)", () => {
     ]);
 
     const result = await generateText("Calculate tax on 1000", {
-      permissionPipeline: true,
       runtime: runtime as never,
       tools: [calculateTaxTool],
       cwd: dir,

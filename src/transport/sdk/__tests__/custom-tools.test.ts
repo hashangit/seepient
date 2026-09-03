@@ -119,4 +119,72 @@ describe("custom-tool registration (T304, QS-3.6)", () => {
     expect(legacy.trust).not.toBe("host");
     expect(legacy.trust).toBe("legacy-host");
   });
+
+  it("trustedHostTool accepts optional static declaration and preserves it", () => {
+    const reg = trustedHostTool({
+      definition: {
+        type: "function",
+        function: { name: "declared_tool", description: "d", parameters: { type: "object", properties: {}, required: [] } },
+      },
+      declaration: {
+        risk: "safe",
+        effects: [{ kind: "host-callback", toolName: "declared_tool" }],
+        display: { title: "Declared Tool", summary: "Runs safe logic" },
+      },
+      async execute() {
+        return "ok";
+      },
+    });
+
+    expect(reg.declaration).toBeDefined();
+    expect(reg.declaration?.risk).toBe("safe");
+    expect(reg.declaration?.display?.title).toBe("Declared Tool");
+  });
+
+  it("makeRegistrationAnalyzer honors trustedHostTool declaration and fails closed on invalid risk", async () => {
+    const { makeRegistrationAnalyzer } = await import("../../../domain/permissions/registration-dispatch.js");
+
+    const validReg = trustedHostTool({
+      definition: {
+        type: "function",
+        function: { name: "safe_tool", description: "d", parameters: { type: "object", properties: {}, required: [] } },
+      },
+      declaration: {
+        risk: "safe",
+        display: { title: "Safe Tool" },
+      },
+      async execute() {
+        return "ok";
+      },
+    });
+
+    const analyzer = makeRegistrationAnalyzer(validReg);
+    const mockCtx: any = {
+      principalId: "user-1",
+      runId: "run-1",
+      toolCallId: "call-1",
+      modelProviderClass: "openai",
+    };
+
+    const action = await analyzer({}, mockCtx);
+    expect(action.risk).toBe("safe");
+    expect(action.display.title).toBe("Safe Tool");
+
+    // Invalid risk category fails closed
+    const invalidReg = trustedHostTool({
+      definition: {
+        type: "function",
+        function: { name: "invalid_tool", description: "d", parameters: { type: "object", properties: {}, required: [] } },
+      },
+      declaration: {
+        risk: "ultra-high" as any,
+      },
+      async execute() {
+        return "ok";
+      },
+    });
+
+    const badAnalyzer = makeRegistrationAnalyzer(invalidReg);
+    await expect(badAnalyzer({}, mockCtx)).rejects.toThrow('Invalid risk category "ultra-high"');
+  });
 });

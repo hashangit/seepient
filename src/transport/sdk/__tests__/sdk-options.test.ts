@@ -52,7 +52,7 @@ describe('SDK opts.model override', () => {
 
     expect(runAgentLoopMock).toHaveBeenCalledTimes(1);
     const passedModel = runAgentLoopMock.mock.calls[0][0].modelOverride;
-    expect(passedModel).toBe('override-model');
+    expect(passedModel).toEqual({ model: 'override-model', providerAccount: undefined });
   });
 
   it('generateText passes undefined when opts.model omitted', async () => {
@@ -71,7 +71,7 @@ describe('SDK opts.model override', () => {
     const res = await streamText('hi', { tools: [], model: 'override-stream' });
     await res.fullText;
 
-    expect(runAgentLoopMock.mock.calls[0][0].modelOverride).toBe('override-stream');
+    expect(runAgentLoopMock.mock.calls[0][0].modelOverride).toEqual({ model: 'override-stream', providerAccount: undefined });
   });
 
   it('createAgent uses opts.model over the resolved default', async () => {

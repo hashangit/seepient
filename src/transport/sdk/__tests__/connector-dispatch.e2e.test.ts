@@ -260,7 +260,6 @@ describe("brokerConnector Dispatch & Parity (QS-2.1 – QS-2.4)", () => {
     ]);
 
     const agent = await createAgent({
-      permissionPipeline: true,
       runtime: runtime as never,
       tools: [badConnectorTool],
       approveTool: async () => {
@@ -274,5 +273,81 @@ describe("brokerConnector Dispatch & Parity (QS-2.1 – QS-2.4)", () => {
     const history = agent.getHistory();
     const toolMsg = history.find((m) => m.role === "tool");
     expect(toolMsg?.content).toContain("CONNECTOR_UNKNOWN");
+  });
+
+  it("executes generic HTTP connector and enforces SSRF protection against loopback/private hosts", async () => {
+    let capturedUrl: string | undefined;
+    const mockNetwork: BrokerNetworkAdapter = {
+      async resolve() { return ["93.184.216.34"]; },
+      async fetch(dest) {
+        capturedUrl = `${dest.scheme}://${dest.host}${dest.pathPrefix}`;
+        const bytes = Buffer.from(JSON.stringify({ message: "hello remote" }), "utf8");
+        return {
+          status: 200,
+          headers: { "content-type": "application/json" },
+          bytes,
+          effectiveHost: dest.host,
+          effectiveIp: "93.184.216.34",
+        };
+      },
+    };
+
+    const httpTool = brokerConnector({
+      definition: {
+        type: "function",
+        function: {
+          name: "fetch_data",
+          description: "Fetch data",
+          parameters: { type: "object", properties: { endpoint: { type: "string" } }, required: ["endpoint"] },
+        },
+      },
+      connector: "http",
+      mapping: {
+        version: 1,
+        operation: "get",
+        argumentBindings: { url: "/endpoint" },
+      },
+    });
+
+    const runtime = createMockRuntime([
+      {
+        toolCalls: [
+          { id: "tc_http", name: "fetch_data", args: { endpoint: "https://api.example.com/items" } },
+        ],
+      },
+      { content: "HTTP fetch complete." },
+    ]);
+
+    const agent = await createAgent({
+      runtime: runtime as never,
+      tools: [httpTool],
+      network: mockNetwork,
+      consentMode: "autonomous",
+    } as never);
+
+    const res = await agent.chat("Fetch data");
+    expect(res.text).toBe("HTTP fetch complete.");
+    expect(capturedUrl).toBe("https://api.example.com/items");
+
+    // SSRF rejection test:
+    const ssrfRuntime = createMockRuntime([
+      {
+        toolCalls: [
+          { id: "tc_ssrf", name: "fetch_data", args: { endpoint: "http://127.0.0.1:8080/secret" } },
+        ],
+      },
+      { content: "Blocked." },
+    ]);
+
+    const ssrfAgent = await createAgent({
+      runtime: ssrfRuntime as never,
+      tools: [httpTool],
+      consentMode: "autonomous",
+    } as never);
+
+    await ssrfAgent.chat("Fetch loopback");
+    const history = ssrfAgent.getHistory();
+    const toolMsg = history.find((m) => m.role === "tool");
+    expect(toolMsg?.content).toContain("SSRF protection");
   });
 });

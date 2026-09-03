@@ -26,7 +26,7 @@ export interface ProviderFactory {
 }
 
 export interface AgentLoopOptions {
-  runtime: ProviderRuntime;
+  runtime: ProviderRuntime | import("../foundations/contracts/provider-runtime.js").ProviderRuntimeContract;
   model?: string;
   messages: Message[];
   toolDefs: ToolDefinition[];
@@ -41,6 +41,8 @@ export interface AgentLoopOptions {
   providerFactory?: ProviderFactory;
   turnSnapshot?: TurnSnapshot;
   modelOverride?: string | { model?: string; providerAccount?: string };
+  purpose?: string;
+  tier?: string;
   middleware?: Middleware[];
   approveTool?: ApproveToolFn;
   autoConfirm?: boolean;
@@ -433,7 +435,12 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
         acc = new StreamingResponseAccumulator();
         reasoningText = "";
         try {
-          const plan = await runtime.resolvePlan(snapshot, "text", "standard", stepOverride);
+          const plan = await runtime.resolvePlan(
+            snapshot,
+            (options.purpose ?? "text") as any,
+            (options.tier ?? "standard") as any,
+            stepOverride,
+          );
           currentModel = plan.selectedTarget.model;
 
           for await (const event of runtime.executeLanguage(plan, { messages: canonicalMessages, tools: toolDefs as any }, { signal })) {
@@ -465,7 +472,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
         } catch (err) {
           const seepientErr = toSeepientError(err, "PROVIDER_ERROR");
           finishReason = "error";
-          loopError = { message: seepientErr.message, code: "PROVIDER_ERROR", retryable: seepientErr.retryable, provider: currentModel };
+          loopError = { message: seepientErr.message, code: seepientErr.code || "PROVIDER_ERROR", retryable: seepientErr.retryable, provider: currentModel };
           await hooks.onError(seepientErr);
           break;
         }
@@ -620,6 +627,27 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
         // PolicyEngine, optionally brokered through ApprovalBroker, executed
         // via the boundary, and audited. This is the path that closes the
         // confirmed defects (autoConfirm bypass, unsandboxed spawn, etc.).
+        if (!wiredPipeline) {
+          const duration = now() - start;
+          const output = `Error: Tool execution failed. No execution pipeline was wired for tool "${tc.name}".`;
+          messages.push({
+            id: generateId(),
+            role: "tool",
+            content: output,
+            toolCallId: tc.id,
+            timestamp: now(),
+          });
+          const failStep: StepResult = {
+            type: "tool_call",
+            toolCall: { id: tc.id, name: tc.name, args: parsedArgs, result: output, duration },
+            timestamp: now(),
+          };
+          steps.push(failStep);
+          await hooks.onStep(failStep);
+          if (onStep) onStep(failStep);
+          continue;
+        }
+
         if (wiredPipeline) {
           // Every tool goes through the pipeline — dedicated analyzer or
           // generic fallback. No tool falls through to the legacy matrix.
@@ -716,7 +744,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
           // not run through the legacy handler; the model gets a structured
           // denial so it can adapt. This is the reviewer's design: "tools
           // without truthful effect analyzers must fail closed."
-          output = `Tool "${tc.name}" is not supported under the permission pipeline (no analyzer registered). Use the legacy path (disable --permission-pipeline) or add an analyzer for this tool.`;
+          output = `Error: Tool "${tc.name}" is not supported under the execution pipeline (no analyzer registered). Add an analyzer or custom tool registration for this tool.`;
           const duration = now() - start;
           messages.push({
             id: generateId(),

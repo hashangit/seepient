@@ -2,9 +2,9 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
-    "rootDir": "./src",
+    "rootDir": ".",
     "declaration": false
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "examples/**/*"],
   "exclude": ["node_modules"]
 }

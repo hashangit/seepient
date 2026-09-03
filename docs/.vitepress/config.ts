@@ -48,6 +48,7 @@ export default defineConfig({
             { text: 'Hooks', link: '/sdk/hooks' },
             { text: 'Structured Output', link: '/sdk/structured-output' },
             { text: 'Sessions', link: '/sdk/sessions' },
+            { text: 'Stateless Workers', link: '/embedding/workers' },
             { text: 'React Hook', link: '/sdk/react-hook' },
             { text: 'Types', link: '/sdk/types' }
           ]

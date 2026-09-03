@@ -328,6 +328,9 @@ export interface WebSocketHandlerContext {
     maxSteps?: number;
     skills?: string[];
     sessionId?: string;
+    apiKeyHash?: string;
+    tenantId?: string;
+    principalId?: string;
     approveTool?: import("../../foundations/types.js").ApproveToolFn;
     onText: (delta: string) => void;
     onToolCall: (info: { name: string; args: Record<string, unknown>; callId: string }) => void;
