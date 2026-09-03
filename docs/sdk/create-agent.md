@@ -40,17 +40,25 @@ console.log(agent.getUsage());
 
 ## Parameters
 
-### `options` (optional)
+::: tip Stateless Embedding
+For multi-tenant workers and cloud functions requiring full state injection (audit, policy, capability ledger, sessions), use `createAgent`, `generateText`, or `streamText`. See [Embedding in Stateless Workers](/embedding/workers) for full architecture details.
+:::
 
-`AgentCreateOptions` -- all fields optional:
+### `options` (optional)
 
 | Name            | Type                                     | Default                    | Description |
 |-----------------|------------------------------------------|----------------------------|-------------|
 | `model`         | `string`                                 | Provider default           | Model identifier, e.g. `"gpt-5.4"`, `"claude-sonnet-4-6-20260320"` |
 | `provider`      | `string`                                 | `"openai"`                 | Feeds the permission pipeline's `modelProviderClass` audit label (does not select inference provider; selection occurs via model/runtime) |
+| `runtime`       | `ProviderRuntime`                        | `getDefaultProviderRuntime()` | Provider runtime instance managing credentials, configurations, and inference adapters |
+| `principalId`   | `string`                                 | `"sdk-user"`               | Identity of the calling principal/user, threaded into audit events and capability grants |
+| `sessionId`     | `string`                                 | Auto-generated UUID        | Explicit session ID for tracking and persistence |
+| `auditStore`    | `AuditStore`                             | Local file audit store     | Injected audit store for recording action lifecycle events |
+| `policyStore`   | `PolicyStore`                            | Local file policy store    | Injected policy store for grant snapshots and mutations |
+| `capabilityLedger` | `CapabilityLedger`                    | Local file capability ledger | Injected ledger for capability lease consumption and revocations |
 | `systemPrompt`  | `string`                                 | `"You are a helpful assistant."` | System prompt prepended to every conversation |
-| `tools`         | `(string \| UserToolDefinition \| AnyToolRegistration)[]` | All built-in               | Tool names, group constants, or custom tool registrations (`trustedHostTool`) |
-| `permissionPipeline` | `boolean`                           | `false`                    | Enable the unified domain permission pipeline and execution boundary |
+| `tools`         | `(string \| UserToolDefinition \| AnyToolRegistration)[]` | All built-in               | Tool names, group constants, or custom tool registrations (`trustedHostTool`, `preparedTool`, `brokerConnector`) |
+| `consentMode`   | `ConsentMode`                            | `approveTool ? "manual" : "edit-enabled"` | Permission consent mode (`"ask-everything"`, `"edit-enabled"`, `"autonomous"`) |
 | `skills`        | `string[]`                               | *(none)*                   | Skill names to activate |
 | `maxSteps`      | `number`                                 | `10`                       | Maximum agent loop iterations per call |
 | `persist`       | `string \| PersistenceBackend \| PersistenceConfig` | *(none)*          | Directory path, backend instance, or config object (e.g. `{ type: "memory" }`). File persistence writes are **atomic** (tmp + rename). |

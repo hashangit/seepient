@@ -13,6 +13,13 @@ import { safeSend, pendingApprovals, durableApprovalStore } from "./connection-r
 
 export const APPROVAL_TIMEOUT_MS = 30_000; // 30 seconds
 
+export interface WsApprovalContext {
+  principalId?: string;
+  tenantId?: string;
+  sessionId?: string;
+  runId?: string;
+}
+
 /**
  * Build the durable-store request record for the WS legacy surface (spec 011
  * T022 review fix). The legacy server loop has no Domain policy evaluation on
@@ -25,12 +32,18 @@ export const APPROVAL_TIMEOUT_MS = 30_000; // 30 seconds
 export function wsLegacyApprovalRequest(
   callId: string,
   callName: string,
+  contextOrNow?: WsApprovalContext | number,
   now = Date.now(),
 ): PermissionRequest {
+  const context: WsApprovalContext = typeof contextOrNow === "object" ? contextOrNow : {};
+  const timestamp = typeof contextOrNow === "number" ? contextOrNow : now;
+  const principalId = context.principalId ?? "ws-user";
+  const runId = context.runId ?? "ws-run";
+
   return {
     requestId: callId,
-    principalId: "ws-user",
-    runId: "ws-run",
+    principalId,
+    runId,
     toolCallId: callId,
     actionDigest: callId,
     action: { title: callName, summary: callName, canonicalTargets: [], effects: [] },
@@ -40,7 +53,7 @@ export function wsLegacyApprovalRequest(
         optionId: `ws-exact-${callId}`,
         actionDigest: callId,
         kind: "exact",
-        label: `Only this call — ${callName} (legacy server surface)`,
+        label: `Only this call — ${callName} (${principalId})`,
         capabilities: [],
         supportedLifetimes: ["action"],
       },
@@ -57,8 +70,8 @@ export function wsLegacyApprovalRequest(
       },
     ],
     offeredLifetimes: ["action"],
-    createdAt: now,
-    expiresAt: now + APPROVAL_TIMEOUT_MS,
+    createdAt: timestamp,
+    expiresAt: timestamp + APPROVAL_TIMEOUT_MS,
   };
 }
 
@@ -67,15 +80,22 @@ export function wsLegacyApprovalRequest(
  * Sends a `tool_approval_request` to the client and waits for a
  * `tool_approval_response`. Falls back to auto-deny on timeout.
  */
-export function createServerApproveTool(ws: WebSocket): ApproveToolFn {
+export function createServerApproveTool(
+  ws: WebSocket,
+  context?: WsApprovalContext,
+): ApproveToolFn {
   return async (call) => {
     const callId = crypto.randomUUID();
     const continuationId = `cont-${callId}`;
+    const principalId = context?.principalId ?? "ws-user";
+    const tenantId = context?.tenantId ?? "default";
+    const sessionId = context?.sessionId ?? "ws-session";
+    const runId = context?.runId ?? "ws-run";
 
     durableApprovalStore.create({
-      request: wsLegacyApprovalRequest(callId, call.name),
-      tenantId: "default",
-      sessionId: "ws-session",
+      request: wsLegacyApprovalRequest(callId, call.name, { principalId, tenantId, sessionId, runId }),
+      tenantId,
+      sessionId,
       continuationId,
     });
 

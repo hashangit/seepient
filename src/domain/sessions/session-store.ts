@@ -73,6 +73,7 @@ export class FilePersistenceBackend implements PersistenceBackend {
           createdAt: existing.createdAt,
           updatedAt: now,
           provider: data.provider ?? existing.provider,
+          providerAccount: data.providerAccount ?? existing.providerAccount,
           model: data.model ?? existing.model,
           metadata: data.metadata ?? existing.metadata,
         }
@@ -82,6 +83,7 @@ export class FilePersistenceBackend implements PersistenceBackend {
           createdAt: now,
           updatedAt: now,
           provider: data.provider,
+          providerAccount: data.providerAccount,
           model: data.model,
           metadata: data.metadata,
         };
@@ -150,6 +152,7 @@ export class MemoryPersistenceBackend implements PersistenceBackend {
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
       provider: data.provider ?? existing?.provider,
+      providerAccount: data.providerAccount ?? existing?.providerAccount,
       model: data.model ?? existing?.model,
       metadata: data.metadata ?? existing?.metadata,
     });
@@ -220,7 +223,7 @@ export async function persistSession(
   backend: PersistenceBackend,
   sessionId: string,
   messages: Message[],
-  opts?: { provider?: string; model?: string; metadata?: Record<string, unknown> },
+  opts?: { provider?: string; providerAccount?: string; model?: string; metadata?: Record<string, unknown> },
 ): Promise<void> {
   await backend.save(sessionId, {
     id: sessionId,
@@ -229,6 +232,7 @@ export async function persistSession(
     // backends — they assign it on first save and preserve it on overwrite.
     updatedAt: Date.now(),
     provider: opts?.provider,
+    providerAccount: opts?.providerAccount,
     model: opts?.model,
     metadata: opts?.metadata,
   } as SessionData);

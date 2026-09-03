@@ -52,6 +52,11 @@ console.log(result.usage);
 |-----------------|------------------------------------------|---------|-------------|
 | `model`         | `string`                                 | Provider default | Model identifier, e.g. `"gpt-5.4"`, `"claude-sonnet-4-6-20260320"` |
 | `provider`      | `ProviderType`                           | Config default   | `"openai"` \| `"anthropic"` \| `"glm"` \| `"openai-compatible"` |
+| `runtime`       | `ProviderRuntime`                        | `getDefaultProviderRuntime()` | Provider runtime instance managing credentials, configurations, and inference adapters |
+| `principalId`   | `string`                                 | `"sdk-user"` | Identity of the calling principal/user, threaded into audit events and capability grants |
+| `auditStore`    | `AuditStore`                             | Local file audit store | Injected audit store for recording action lifecycle events |
+| `policyStore`   | `PolicyStore`                            | Local file policy store | Injected policy store for grant snapshots and mutations |
+| `capabilityLedger` | `CapabilityLedger`                    | Local file capability ledger | Injected ledger for capability lease consumption and revocations |
 | `systemPrompt`  | `string`                                 | *(none)*         | Prepended as a system message before the user prompt |
 | `tools`         | `(string \| UserToolDefinition \| AnyToolRegistration)[]` | All built-in     | Built-in tool names, group names (`"core"`, `"all"`), or custom tool registrations (`trustedHostTool`) |
 | `skills`        | `string[]`                               | *(none)*         | Skill names to activate for this invocation |

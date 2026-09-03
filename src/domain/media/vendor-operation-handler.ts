@@ -1,4 +1,4 @@
-import type { ProviderRuntime } from "../providers/provider-runtime.js";
+import type { ProviderRuntime, ProviderRuntimeContract } from "../providers/provider-runtime.js";
 import type { InMemoryArtifactStore } from "../../capabilities/execution/in-memory-artifact-store.js";
 import type { BrokeredEffectRequest, PreparedArtifactRef } from "../../foundations/contracts/prepared-action.js";
 import type { BrokeredEffectResult } from "../../foundations/contracts/execution-brokers.js";
@@ -7,7 +7,7 @@ import { InferenceError } from "../../foundations/errors.js";
 import { createSetupFailure } from "../../foundations/contracts/setup-failure.js";
 
 export interface MediaVendorOperationHandlerOptions {
-  runtime: ProviderRuntime | (() => ProviderRuntime | undefined);
+  runtime: ProviderRuntime | ProviderRuntimeContract | (() => ProviderRuntime | ProviderRuntimeContract | undefined);
   artifacts: InMemoryArtifactStore;
   signal?: AbortSignal;
 }

@@ -147,14 +147,16 @@ const weatherTool = trustedHostTool({
   execute: async (args) => {
     const { city } = (args ?? {}) as { city: string };
     return `Weather in ${city}: 72F, sunny`;
-  },
-});
-
 const result = await generateText("What is the weather in Tokyo?", {
-  permissionPipeline: true,
   tools: [weatherTool],
 });
 ```
+
+### Migration Note: Permission Pipeline & Pre-Grants
+
+Starting in v0.6.1, the permission pipeline is mandatory and active by default across all SDK entry points (`createSeepient`, `createAgent`, `generateText`, `streamText`).
+- The legacy `permissionPipeline` flag has been removed.
+- The legacy `grants` option has been removed. Instead, use `consentMode: "autonomous"` to permit safe unattended execution within policy boundaries, or define explicit scoped capability sets via `principalPolicy` or `deploymentCeiling`.
 
 ### HTTP SSE endpoint
 

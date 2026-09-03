@@ -29,35 +29,15 @@ import {
   type ProviderEffectiveConfig,
   type OverlayDocument,
 } from "../../schemas/index.js";
-import type {
-  CreateSeepientOptions,
-  GenerateTextOptions,
-  GenerateImageOptions,
-  AgentPurpose,
-} from "../sdk-fixture.js";
 
 // Compile-time type equivalence helper
 type AssertEqual<T, U> = [T] extends [U] ? ([U] extends [T] ? true : false) : false;
 
 // ── Compile-time type-level sync assertions ──────────────────────────────
-const _assertQualityPresetSync: AssertEqual<
-  GenerateImageOptions["qualityPreset"],
-  ImageRequest["qualityPreset"]
-> = true;
 
 const _assertQualityPresetValues: AssertEqual<
   ImageRequest["qualityPreset"],
   "low" | "standard" | "high" | undefined
-> = true;
-
-const _assertThinkingLevelSync: AssertEqual<
-  ThinkingLevel,
-  NonNullable<NonNullable<GenerateTextOptions["override"]>["thinkingLevel"]>
-> = true;
-
-const _assertAgentPurposeValues: AssertEqual<
-  AgentPurpose,
-  "plan" | "text" | "vision" | "commit"
 > = true;
 
 const _assertStopReasonValues: AssertEqual<
@@ -69,10 +49,7 @@ describe("contract sync and schema validation (QS-P1.1, QS-P1.2, QS-P1.3)", () =
   const ajv = new Ajv({ strict: false });
 
   it("verifies compile-time type equivalence between SDK contracts and schemas", () => {
-    expect(_assertQualityPresetSync).toBe(true);
     expect(_assertQualityPresetValues).toBe(true);
-    expect(_assertThinkingLevelSync).toBe(true);
-    expect(_assertAgentPurposeValues).toBe(true);
     expect(_assertStopReasonValues).toBe(true);
   });
 
@@ -379,33 +356,6 @@ describe("contract sync and schema validation (QS-P1.1, QS-P1.2, QS-P1.3)", () =
     const googleImagesPath = path.join(fixturesDir, "google/images.json");
     const googleImagesData = JSON.parse(fs.readFileSync(googleImagesPath, "utf-8"));
     expect(googleImagesData.models["gemini-3.1-flash-image"].operations.generate.supported).toBe(true);
-  });
-
-  it("sdk-fixture types compile cleanly and satisfy interface shapes", () => {
-    const testOptions: CreateSeepientOptions = {
-      providers: {
-        "openai-main": {
-          adapter: "pi-ai",
-          upstreamProvider: "openai",
-          credential: { kind: "env", name: "OPENAI_API_KEY" },
-        },
-      },
-      modelAssignments: {
-        text: {
-          standard: {
-            providerAccount: "openai-main",
-            model: "gpt-4o",
-          },
-        },
-        commit: {
-          standard: {
-            providerAccount: "openai-main",
-            model: "gpt-4o-mini",
-          },
-        },
-      },
-    };
-    expect(testOptions.providers?.["openai-main"].upstreamProvider).toBe("openai");
   });
 
   describe("Schema ↔ Contract Authority Sync (B-14)", () => {

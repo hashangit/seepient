@@ -131,8 +131,172 @@ export const WEB_SEARCH_CONNECTOR: BrokerConnectorDescriptor = {
   },
 };
 
+const DENIED_HOSTS_SSRF: ReadonlySet<string> = new Set([
+  "localhost",
+  "metadata.google.internal",
+  "metadata.aws.internal",
+  "169.254.169.254",
+  "fd00:ec2::254",
+  "[::1]",
+]);
+
+const DENIED_IPV4_SSRF: ReadonlyArray<RegExp> = [
+  /^127\./,
+  /^10\./,
+  /^192\.168\./,
+  /^172\.(1[6-9]|2\d|3[01])\./,
+  /^169\.254\./,
+  /^0\./,
+  /^22[4-5]\./,
+  /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./,
+];
+
+const DENIED_IPV6_SSRF: ReadonlyArray<RegExp> = [
+  /^::1$/,
+  /^fc[0-9a-f][0-9a-f]:/i,
+  /^fd[0-9a-f][0-9a-f]:/i,
+  /^fe80:/i,
+  /^::ffff:127\./i,
+  /^::ffff:10\./i,
+  /^::ffff:192\.168\./i,
+  /^::ffff:172\.(1[6-9]|2\d|3[01])\./i,
+  /^::ffff:169\.254\./i,
+  /^64:ff9b:/i,
+];
+
+function isDeniedAddressSSRF(host: string): boolean {
+  const normalized = host.toLowerCase().trim();
+  if (DENIED_HOSTS_SSRF.has(normalized)) return true;
+  for (const pattern of DENIED_IPV4_SSRF) {
+    if (pattern.test(normalized)) return true;
+  }
+  for (const pattern of DENIED_IPV6_SSRF) {
+    if (pattern.test(normalized)) return true;
+  }
+  return false;
+}
+
+/** Built-in generic HTTP connector descriptor with SSRF protection */
+export const HTTP_CONNECTOR: BrokerConnectorDescriptor = {
+  id: "http",
+  supportedOperations: ["request", "get", "post", "put", "delete"],
+  async buildRequest(
+    mapping: DeclarativeConnectorMapping,
+    boundArgs: Record<string, unknown>,
+    ctx: ToolAnalysisContext,
+  ): Promise<EvaluatedConnectorMapping> {
+    const rawUrl = boundArgs.url ?? mapping.constants?.url;
+    if (typeof rawUrl !== "string" || !rawUrl.trim()) {
+      throw new ConnectorMappingError(
+        `"url" is required and must be a non-empty string`,
+        "CONNECTOR_MAPPING_INVALID",
+      );
+    }
+
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(rawUrl);
+    } catch {
+      throw new ConnectorMappingError(
+        `Invalid URL "${rawUrl}" provided to http connector`,
+        "CONNECTOR_MAPPING_INVALID",
+      );
+    }
+
+    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+      throw new ConnectorMappingError(
+        `Invalid protocol "${parsedUrl.protocol}". Only "http:" and "https:" are allowed`,
+        "CONNECTOR_MAPPING_INVALID",
+      );
+    }
+
+    if (isDeniedAddressSSRF(parsedUrl.hostname)) {
+      throw new ConnectorMappingError(
+        `SSRF protection: destination host "${parsedUrl.hostname}" is forbidden (loopback/private/metadata)`,
+        "CONNECTOR_MAPPING_INVALID",
+      );
+    }
+
+    const op = mapping.operation.toLowerCase();
+    const method = op === "request"
+      ? (typeof boundArgs.method === "string" ? boundArgs.method.toUpperCase() : "GET")
+      : op.toUpperCase();
+
+    const destination: NetworkDestination = {
+      scheme: parsedUrl.protocol.replace(":", "") as "http" | "https",
+      host: parsedUrl.hostname,
+      port: parsedUrl.port ? parseInt(parsedUrl.port, 10) : undefined,
+      pathPrefix: parsedUrl.pathname,
+    };
+
+    const secretRefs = mapping.secretRefs ?? [];
+    for (const ref of secretRefs) {
+      if (!ref || typeof ref !== "string") {
+        throw new ConnectorMappingError(
+          `Secret reference must be a non-empty string`,
+          "CONNECTOR_SECRET_UNRESOLVED",
+        );
+      }
+    }
+
+    const rawHeaders = boundArgs.headers ?? mapping.constants?.headers;
+    const headers: Record<string, string> = {};
+    if (rawHeaders && typeof rawHeaders === "object") {
+      for (const [k, v] of Object.entries(rawHeaders)) {
+        if (typeof v === "string") headers[k] = v;
+      }
+    }
+
+    let bodyArtifactRef: import("../../foundations/contracts/prepared-action.js").PreparedArtifactRef | undefined;
+    const rawBody = boundArgs.body ?? mapping.constants?.body;
+    if (rawBody !== undefined) {
+      const bodyBytes = typeof rawBody === "string"
+        ? Buffer.from(rawBody, "utf8")
+        : Buffer.from(JSON.stringify(rawBody), "utf8");
+      const contentType = headers["Content-Type"] ?? headers["content-type"] ?? (typeof rawBody === "string" ? "text/plain" : "application/json");
+      bodyArtifactRef = await ctx.artifacts.put(bodyBytes, contentType);
+    }
+
+    const effects: EffectRequest[] = [
+      { kind: "network-egress", destinations: [destination] },
+    ];
+    if (secretRefs.length > 0) {
+      effects.push({ kind: "secret-use", secretRefs });
+    }
+
+    const operation: PreparedOperation = {
+      kind: "broker",
+      request: {
+        kind: "http",
+        requestId: generateId(),
+        destination,
+        method,
+        headers,
+        body: bodyArtifactRef,
+        secretRefs,
+      },
+    };
+
+    const risk: import("../../foundations/contracts/tool-effects.js").ToolRiskCategory =
+      method === "GET" || method === "HEAD" ? "safe" : "edit";
+
+    return {
+      operation,
+      effects,
+      risk,
+      display: {
+        title: `HTTP ${method}`,
+        summary: rawUrl,
+        canonicalTargets: [rawUrl],
+        effects: secretRefs.length > 0 ? ["network-egress", "secret-use"] : ["network-egress"],
+      },
+    };
+  },
+};
+
 const registry = new Map<string, BrokerConnectorDescriptor>([
   [WEB_SEARCH_CONNECTOR.id, WEB_SEARCH_CONNECTOR],
+  [HTTP_CONNECTOR.id, HTTP_CONNECTOR],
 ]);
 
 export function registerBrokerConnector(descriptor: BrokerConnectorDescriptor): void {
@@ -146,6 +310,7 @@ export function getBrokerConnector(id: string): BrokerConnectorDescriptor | unde
 export function clearBrokerConnectors(): void {
   registry.clear();
   registry.set(WEB_SEARCH_CONNECTOR.id, WEB_SEARCH_CONNECTOR);
+  registry.set(HTTP_CONNECTOR.id, HTTP_CONNECTOR);
 }
 
 /**

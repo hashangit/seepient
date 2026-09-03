@@ -33,6 +33,10 @@ export interface RestHandlerContext {
     tools?: string[];
     maxSteps?: number;
     skills?: string[];
+    apiKeyHash?: string;
+    tenantId?: string;
+    principalId?: string;
+    sessionId?: string;
   }) => Promise<GenerateTextResult>;
   /** List available models grouped by provider */
   listModels: () => Record<string, string[]>;
@@ -43,7 +47,7 @@ export interface RestHandlerContext {
   /** Gateway REST handler — delegated for all /v1/gateway/* routes */
   gatewayHandler?: (req: IncomingMessage, res: ServerResponse, path: string, method: string) => Promise<void>;
   /** Provider runtime instance */
-  providerRuntime?: import("../../domain/providers/provider-runtime.js").ProviderRuntime;
+  runtime?: import("../../foundations/contracts/provider-runtime.js").ProviderRuntimeContract;
 }
 
 interface ChatRequest {
@@ -77,6 +81,12 @@ function sendError(
   message: string,
 ): void {
   sendJSON(res, statusCode, { error: { code, message } });
+}
+
+function isMutableRuntime(rt: unknown): boolean {
+  if (!rt || typeof (rt as any).getConfigStore !== "function") return false;
+  const store = (rt as any).getConfigStore();
+  return store != null && typeof store.updateOverlay === "function";
 }
 
 function parseBody(req: IncomingMessage): Promise<string> {
@@ -209,7 +219,7 @@ export function createRestHandler(ctx: RestHandlerContext) {
 
     try {
       const getRuntime = async () => {
-        if (ctx.providerRuntime) return ctx.providerRuntime;
+        if (ctx.runtime) return ctx.runtime;
         const { getDefaultProviderRuntime } = await import("../../domain/providers/provider-runtime.js");
         return getDefaultProviderRuntime();
       };
@@ -243,70 +253,90 @@ export function createRestHandler(ctx: RestHandlerContext) {
           const key = authMiddleware(req);
           if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
           const { handleGetProviderRuntime } = await import("./provider-management/accounts.js");
-          await handleGetProviderRuntime(req, res, await getRuntime(), key);
+          await handleGetProviderRuntime(req, res, (await getRuntime()) as any, key);
           break;
         }
         case "catalog": {
           const key = authMiddleware(req);
           if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
           const { handleGetCatalog } = await import("./provider-management/catalog.js");
-          await handleGetCatalog(req, res, await getRuntime(), key);
+          await handleGetCatalog(req, res, (await getRuntime()) as any, key);
           break;
         }
         case "models_resolve": {
           const key = authMiddleware(req);
           if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
           const { handleResolveModel } = await import("./provider-management/catalog.js");
-          await handleResolveModel(req, res, await getRuntime(), key);
+          await handleResolveModel(req, res, (await getRuntime()) as any, key);
           break;
         }
         case "models_assignments": {
           const key = authMiddleware(req);
           if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
           const { handleGetAssignments } = await import("./provider-management/assignments.js");
-          await handleGetAssignments(req, res, await getRuntime(), key, route.params.purpose, route.params.tier);
+          await handleGetAssignments(req, res, (await getRuntime()) as any, key, route.params.purpose, route.params.tier);
           break;
         }
         case "models_assignment_put": {
           const key = authMiddleware(req);
           if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
+          const rt = await getRuntime();
+          if (!isMutableRuntime(rt)) {
+            sendError(res, 501, "NOT_IMPLEMENTED", "Injected provider runtime does not implement configuration mutations");
+            break;
+          }
           const { handlePutAssignment } = await import("./provider-management/assignments.js");
-          await handlePutAssignment(req, res, await getRuntime(), key, route.params.purpose, route.params.tier);
+          await handlePutAssignment(req, res, rt as any, key, route.params.purpose, route.params.tier);
           break;
         }
         case "models_assignment_delete": {
           const key = authMiddleware(req);
           if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
+          const rt = await getRuntime();
+          if (!isMutableRuntime(rt)) {
+            sendError(res, 501, "NOT_IMPLEMENTED", "Injected provider runtime does not implement configuration mutations");
+            break;
+          }
           const { handleDeleteAssignment } = await import("./provider-management/assignments.js");
-          await handleDeleteAssignment(req, res, await getRuntime(), key, route.params.purpose, route.params.tier);
+          await handleDeleteAssignment(req, res, rt as any, key, route.params.purpose, route.params.tier);
           break;
         }
         case "providers_v2_list": {
           const key = authMiddleware(req);
           if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
           const { handleGetProviders } = await import("./provider-management/accounts.js");
-          await handleGetProviders(req, res, await getRuntime(), key);
+          await handleGetProviders(req, res, (await getRuntime()) as any, key);
           break;
         }
         case "provider_v2_get": {
           const key = authMiddleware(req);
           if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
           const { handleGetProviders } = await import("./provider-management/accounts.js");
-          await handleGetProviders(req, res, await getRuntime(), key, route.params.providerId);
+          await handleGetProviders(req, res, (await getRuntime()) as any, key, route.params.providerId);
           break;
         }
         case "provider_v2_put": {
           const key = authMiddleware(req);
           if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
+          const rt = await getRuntime();
+          if (!isMutableRuntime(rt)) {
+            sendError(res, 501, "NOT_IMPLEMENTED", "Injected provider runtime does not implement configuration mutations");
+            break;
+          }
           const { handlePutProvider } = await import("./provider-management/accounts.js");
-          await handlePutProvider(req, res, await getRuntime(), key, route.params.providerId);
+          await handlePutProvider(req, res, rt as any, key, route.params.providerId);
           break;
         }
         case "provider_v2_delete": {
           const key = authMiddleware(req);
           if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
+          const rt = await getRuntime();
+          if (!isMutableRuntime(rt)) {
+            sendError(res, 501, "NOT_IMPLEMENTED", "Injected provider runtime does not implement configuration mutations");
+            break;
+          }
           const { handleDeleteProvider } = await import("./provider-management/accounts.js");
-          await handleDeleteProvider(req, res, await getRuntime(), key, route.params.providerId);
+          await handleDeleteProvider(req, res, rt as any, key, route.params.providerId);
           break;
         }
         case "provider_probe": {
@@ -315,28 +345,43 @@ export function createRestHandler(ctx: RestHandlerContext) {
           const urlObj = new URL(req.url ?? "/", "http://localhost");
           const full = urlObj.searchParams.get("full") === "true";
           const { handleProbeProvider } = await import("./provider-management/catalog.js");
-          await handleProbeProvider(req, res, await getRuntime(), key, route.params.providerId, full);
+          await handleProbeProvider(req, res, (await getRuntime()) as any, key, route.params.providerId, full);
           break;
         }
         case "provider_oauth_start": {
           const key = authMiddleware(req);
           if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
+          const rt = await getRuntime();
+          if (!isMutableRuntime(rt)) {
+            sendError(res, 501, "NOT_IMPLEMENTED", "Injected provider runtime does not implement configuration mutations");
+            break;
+          }
           const { handleOAuthStart } = await import("./provider-management/oauth.js");
-          await handleOAuthStart(req, res, await getRuntime(), key, route.params.providerId);
+          await handleOAuthStart(req, res, rt as any, key, route.params.providerId);
           break;
         }
         case "provider_oauth_complete": {
           const key = authMiddleware(req);
           if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
+          const rt = await getRuntime();
+          if (!isMutableRuntime(rt)) {
+            sendError(res, 501, "NOT_IMPLEMENTED", "Injected provider runtime does not implement configuration mutations");
+            break;
+          }
           const { handleOAuthComplete } = await import("./provider-management/oauth.js");
-          await handleOAuthComplete(req, res, await getRuntime(), key, route.params.providerId);
+          await handleOAuthComplete(req, res, rt as any, key, route.params.providerId);
           break;
         }
         case "provider_refresh_models": {
           const key = authMiddleware(req);
           if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
+          const rt = await getRuntime();
+          if (!isMutableRuntime(rt)) {
+            sendError(res, 501, "NOT_IMPLEMENTED", "Injected provider runtime does not implement configuration mutations");
+            break;
+          }
           const { handleRefreshModels } = await import("./provider-management/catalog.js");
-          await handleRefreshModels(req, res, await getRuntime(), key, route.params.providerId);
+          await handleRefreshModels(req, res, rt as any, key, route.params.providerId);
           break;
         }
         case "gateway":

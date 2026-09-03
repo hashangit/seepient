@@ -7,7 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v0.6.0] - 2026-08-31
+### Unified SDK Consolidation & Release Hardening (spec 021 hardening)
+
+**Breaking changes (pre-1.0 in-place upgrade):**
+- **Single governed entry point**: Decommissioned ungoverned `seepient.ts` entry point (`SeepientExecutionResult`, `SeepientOptions`, `SeepientSession`, `executeTurn`, `createSeepientSession`). All programmatic interactions now route through `createSeepient` / `createAgent` (`src/transport/sdk/seepient.ts`), `generateText`, and `streamText`.
+- **Mandatory permission pipeline**: The `permissionPipeline` boolean flag has been removed from `AgentCreateOptions` and `GenerateTextOptions`. The unified permission pipeline, execution boundary, and audit recording are now active by default across all SDK calls.
+- **`grants` option removal**: The legacy `grants?: GrantSpec[]` option has been deleted. Embedders should use `consentMode: "autonomous"` for safe automated execution within policy, or declare explicit scoped capabilities via `principalPolicy` or `deploymentCeiling`.
+- **Custom tools explicit trust**: Removed `permissionPipeline: true` requirement for custom tool registrations. `trustedHostTool` now supports optional static `declaration?: TrustedHostToolDeclaration` (`effects`, `risk`, `display`), enabling refined risk ratings beyond ambient destructive authority.
+- **Generic HTTP broker connector**: Added `http` connector descriptor with built-in SSRF protection (blocking loopback, private, and metadata IPs) and execution-time secret reference enforcement.
+- **Stateless HTTP server mutations**: Injected `ProviderRuntime` contracts without mutation implementations (`updateOverlay`) return `501 NOT_IMPLEMENTED` with zero filesystem writes when mutation endpoints are called.
+
+### Security
+
+**Dependency vulnerability remediation:**
+- **`js-yaml` (GHSA-5p4m-2wfm-xmqj)**: Bumped exact pin to `4.3.2` and updated workspace override, eliminating quadratic CPU consumption / DoS on untrusted OpenAPI spec imports.
+- **`fast-uri` (CVE-2026-18446)**: Added workspace override resolving to `3.1.6`, closing host-confusion vulnerability in URI resolution.
+- **`hono` (CVEs)**: Added workspace override resolving to `4.13.5`, addressing transitive dependency advisories.
+- **`ajv` (GHSA-2g4f-4pwh-qvx6)**: Moved `ajv` (`8.18.0`) from runtime `dependencies` to `devDependencies`, eliminating it from the shipped runtime dependency tree.
+- **`postcss` (docs)**: Added `docs/package.json` override resolving `postcss` to `^8.5.23`, patching build tooling.
+- **Automated security scanning & CI gates**:
+  - Added CodeQL code scanning workflow (`.github/workflows/codeql.yml`) for automated JavaScript/TypeScript vulnerability detection.
+  - Added `pnpm audit --prod` verification step to CI workflow (`.github/workflows/ci.yml`).
+
+### Stateless SDK Workers & Embedder-Owned Storage (spec 021)
+
+**Stateless multi-tenant embedding & state injection:**
+- **Store contract injection**: Extended `createAgent`, `generateText`, `streamText`, and `createServer` with typed options accepting external `runtime`, `principalId`, `sessionId`, `auditStore`, `policyStore`, and `capabilityLedger`.
+- **Zero local disk writes**: When all state stores are injected (`auditStore`, `policyStore`, `capabilityLedger`, along with `runtime` and `persist`), the SDK runs completely statelessly with zero directory creation or persistent state writes to the host filesystem outside the active workspace. Emits a construction warning if partial store injection is detected.
+- **Attributed WebSocket approval records**: Threaded caller identity (`apiKeyHash`, session, tenant) into server-side durable approval request records, ensuring approval audits accurately reflect the authenticated caller rather than a static placeholder.
+- **Per-agent skill registry ownership**: Removed module-singleton skill registry in favor of per-instance ownership passed via execution context, eliminating cross-agent state contamination in shared worker processes.
+- **Auditing and durability**: Injected audit stores receive full action lifecycle events with caller `principalId` pass-through; custom stores enforce pre-dispatch durability.
+- **Execution error contracts & abort semantics**: `agent.chat()` now rejects with `SeepientError` preserving `code` and `retryable` on loop execution errors (with failed turn user messages guaranteed persisted to the session store before throw), while user-initiated aborts (`agent.abort()`) resolve cleanly with partial assistant text and token usage.
+- **First-class provider account session routing**: Added first-class `providerAccount` field to `SessionData` and `persistSession()`, ensuring session resumes and provider switches maintain clean channel separation from embedder `metadata`.
+- **Reference worker & documentation**: Added reference worker example (`examples/worker/`) demonstrating remote store adapters, permission-gated execution, and interactive approval relay; added deployment guide (`docs/embedding/workers.md`).
+- **Cleaned up legacy shims**: Replaced untyped `providerRuntime` casts across HTTP server and transport adapters with typed `runtime` options (pre-1.0 in-place upgrade).
 
 ### Custom-tool execution parity (spec 020)
 

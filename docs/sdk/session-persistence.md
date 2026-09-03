@@ -20,9 +20,20 @@ const agent = await createAgent({
 await agent.chat("My name is Alice");
 await agent.chat("I am working on a React project");
 
-// In a new process, recreate with the same path:
-// const agent2 = await createAgent({ persist: "./sessions/my-agent" });
-// History is loaded automatically.
+// Explicit Session ID & Multi-Turn Resumption (Spec 021)
+const agent1 = await createAgent({
+  sessionId: "user-alice-session",
+  persist: myCustomBackend,
+});
+await agent1.chat("Remember my project context");
+
+// In a subsequent worker/request:
+const agent2 = await createAgent({
+  sessionId: "user-alice-session",
+  persist: myCustomBackend,
+});
+// Full conversation history is loaded automatically from myCustomBackend
+console.log(agent2.sessionId); // "user-alice-session"
 ```
 
 ## PersistenceBackend interface

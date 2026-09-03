@@ -477,11 +477,13 @@ const agent = await createAgent({
 
 ## Server Mode
 
-Run Seepient Agent as a standalone HTTP/WebSocket server for remote agent access.
+Run Seepient Agent as a standalone HTTP/WebSocket server for remote agent access or stateless worker deployments.
 
 ### Starting the Server
 ```bash
-# Start with default settings
+# Start with default settings (port 7337)
+seepient server
+# or via dedicated binary
 seepient-server
 
 # Generate an API key
@@ -491,16 +493,33 @@ seepient-server --generate-api-key
 seepient-server --port 8080
 ```
 
+### Programmatic Server Creation & Custom Store Injection
+```ts
+import { createServer } from "seepient/server";
+
+// Stateless worker mode with custom runtime and in-memory stores
+const server = await createServer({
+  port: 7337,
+  runtime: myCustomRuntime,
+  sessionStore: myRedisSessionStore,
+  auditStore: myRemoteAuditStore,
+});
+```
+
 ### REST API
 ```bash
-# Send a prompt
-curl -X POST http://localhost:7337/api/chat \
+# Send a chat message
+curl -X POST http://localhost:7337/v1/chat \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"message": "Check disk usage", "provider": "openai"}'
+  -d '{"message": "Check disk usage", "model": "gpt-5.4"}'
 
-# List sessions
-curl http://localhost:7337/api/sessions \
+# List active sessions
+curl http://localhost:7337/v1/sessions \
+  -H "Authorization: Bearer YOUR_API_KEY"
+
+# Model catalog & live resolution
+curl http://localhost:7337/v1/models \
   -H "Authorization: Bearer YOUR_API_KEY"
 ```
 

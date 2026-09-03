@@ -1,10 +1,9 @@
 /**
- * P3 permission-pipeline opt-in flag (spec 008, T302/T303).
+ * Mandatory permission-pipeline options (Spec 021 release hardening).
  *
- * Verifies the `permissionPipeline` flag is accepted on every surface's
- * options (GenerateTextOptions, StreamTextOptions, AgentCreateOptions) and
- * defaults to false (legacy behavior preserved). The composition root
- * constructs the ActionLifecycle when true; the agent loop routes through it.
+ * Verifies that the permission pipeline options are accepted directly on every surface's
+ * options (GenerateTextOptions, StreamTextOptions, AgentCreateOptions) and that the
+ * pipeline is active by default without needing an opt-in flag.
  */
 import { describe, it, expect } from "vitest";
 import type {
@@ -13,36 +12,30 @@ import type {
   AgentCreateOptions,
 } from "../../../foundations/types.js";
 
-describe("permissionPipeline opt-in flag (T302/T303)", () => {
-  it("GenerateTextOptions accepts permissionPipeline", () => {
-    const opts: GenerateTextOptions = { permissionPipeline: true };
-    expect(opts.permissionPipeline).toBe(true);
+describe("mandatory permission pipeline options", () => {
+  it("GenerateTextOptions accepts consentMode and stores directly", () => {
+    const opts: GenerateTextOptions = { consentMode: "edit-enabled" };
+    expect(opts.consentMode).toBe("edit-enabled");
   });
 
-  it("StreamTextOptions inherits permissionPipeline", () => {
-    const opts: StreamTextOptions = { permissionPipeline: true, onText: () => {} };
-    expect(opts.permissionPipeline).toBe(true);
+  it("StreamTextOptions inherits consentMode and store options", () => {
+    const opts: StreamTextOptions = { consentMode: "autonomous", onText: () => {} };
+    expect(opts.consentMode).toBe("autonomous");
   });
 
-  it("AgentCreateOptions accepts permissionPipeline", () => {
-    const opts: AgentCreateOptions = { permissionPipeline: true };
-    expect(opts.permissionPipeline).toBe(true);
-  });
-
-  it("permissionPipeline defaults to undefined (legacy path) when omitted", () => {
-    const opts: GenerateTextOptions = {};
-    expect(opts.permissionPipeline).toBeUndefined();
+  it("AgentCreateOptions accepts consentMode and store options", () => {
+    const opts: AgentCreateOptions = { consentMode: "ask-everything" };
+    expect(opts.consentMode).toBe("ask-everything");
   });
 
   it("typed options (consentMode/deploymentCeiling/principalPolicy) accepted alongside approveTool", () => {
     const opts: GenerateTextOptions = {
-      permissionPipeline: true,
       approveTool: async () => true,
       consentMode: "edit-enabled",
-      grants: [{ tool: "write_file", pattern: "/p/a.txt" }],
+      principalPolicy: { version: 1, capabilities: [] },
     };
     expect(opts.approveTool).toBeDefined();
     expect(opts.consentMode).toBe("edit-enabled");
-    expect(opts.grants).toHaveLength(1);
+    expect(opts.principalPolicy).toEqual({ version: 1, capabilities: [] });
   });
 });

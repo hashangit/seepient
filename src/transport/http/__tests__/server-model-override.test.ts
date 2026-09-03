@@ -26,8 +26,8 @@ describe("server model-override handling (QS-P0.1)", () => {
         message: "Hello",
         provider: "openai",
         model: "gpt-5.4-mini",
-        providerRuntime: runtime,
-      } as any,
+        runtime,
+      },
     );
 
     expect(receivedPlan?.selectedTarget?.model).toBe("gpt-5.4-mini");
@@ -57,7 +57,7 @@ describe("server model-override handling (QS-P0.1)", () => {
         message: "Hello",
         provider: "openai",
         model: "gpt-5.4-mini",
-        providerRuntime: runtime,
+        runtime,
         onText: (delta: string) => textDeltas.push(delta),
         onToolCall: () => {},
         onToolResult: () => {},
@@ -66,7 +66,7 @@ describe("server model-override handling (QS-P0.1)", () => {
         onDone: (res: any) => {
           doneResult = res;
         },
-      } as any,
+      },
     );
 
     expect(receivedPlan?.selectedTarget?.model).toBe("gpt-5.4-mini");
