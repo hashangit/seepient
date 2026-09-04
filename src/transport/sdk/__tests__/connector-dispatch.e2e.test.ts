@@ -89,7 +89,6 @@ describe("brokerConnector Dispatch & Parity (QS-2.1 – QS-2.4)", () => {
     };
 
     const agent = await createAgent({
-      permissionPipeline: true,
       runtime: runtime as never,
       tools: [searchTool],
       network: mockNetwork,
@@ -169,7 +168,6 @@ describe("brokerConnector Dispatch & Parity (QS-2.1 – QS-2.4)", () => {
     };
 
     const agent = await createAgent({
-      permissionPipeline: true,
       runtime: runtime as never,
       tools: [searchTool],
       network: mockNetwork,
@@ -218,7 +216,6 @@ describe("brokerConnector Dispatch & Parity (QS-2.1 – QS-2.4)", () => {
     ]);
 
     const agent2 = await createAgent({
-      permissionPipeline: true,
       consentMode: "autonomous",
       runtime: runtime2 as never,
       tools: [missingSecretTool],

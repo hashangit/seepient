@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createMockRuntime } from "../../../domain/__tests__/test-doubles.js";
-import { generateText, streamText } from "../index.js";
-import { createAgent } from "../agent.js";
+import { createAgent, generateText, streamText } from "../index.js";
 import { serverStreamText } from "../../http/server-core.js";
 import { SeepientError } from "../../../foundations/errors.js";
 

@@ -186,7 +186,7 @@ const queryBankTool = trustedHostTool({
 ```
 
 ### Host Tool Rules
-1. **Permission Pipeline Required**: Custom host tools require `permissionPipeline: true`.
+1. **Governed Execution by Default**: Custom host tools execute governed within the unified permission pipeline and execution boundary.
 2. **Automatic Allowlist Registration**: Passing a `trustedHostTool` in the `tools` array automatically binds the callback to the agent execution boundary.
 3. **Multi-Tenant Gating**: Server roots enforce `permissions.trustedHostAllowlist`.
 
@@ -200,7 +200,6 @@ You can combine built-in tool groups and custom tools across any trust model:
 import { createAgent, CORE_TOOLS } from "seepient";
 
 const agent = await createAgent({
-  permissionPipeline: true,
   tools: [
     ...CORE_TOOLS,
     searchTool,     // brokerConnector

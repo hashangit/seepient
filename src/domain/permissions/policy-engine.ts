@@ -477,14 +477,15 @@ export class PolicyEngine implements PolicyEngineContract {
     }
 
     // 5. needs-approval — only if the interaction mode can represent it.
+    const firstMissing = missing[0];
+    const spec = firstMissing ? formatCapabilitySpec(firstMissing) : "required capability";
+
     if (context.interaction.mode === "none") {
       // Headless surfaces: typed denial immediately with exact remediation.
       pushLayer(trace, "backend", "deny");
-      const firstMissing = missing[0];
-      const spec = firstMissing ? formatCapabilitySpec(firstMissing) : "required capability";
       return deny(
         "approval-unavailable",
-        `Headless run: ${spec} is not predeclared. Allow it with: /permissions propose ${spec} (interactive), or pass --mode autonomous, or supply SDK policy options.`,
+        `Headless run: ${spec} is not predeclared. Pass consentMode (e.g. "autonomous") or provide an approval callback (approveTool).`,
         trace,
       );
     }
@@ -493,7 +494,7 @@ export class PolicyEngine implements PolicyEngineContract {
       pushLayer(trace, "backend", "deny");
       return deny(
         "approval-unavailable",
-        "Approval mode is 'never' and a capability is missing",
+        `Approval mode is 'never' and ${spec} is not predeclared. Pass consentMode (e.g. "autonomous") or provide an approval callback (approveTool).`,
         trace,
       );
     }
