@@ -227,7 +227,6 @@ const pingTool = trustedHostTool({
 })
 
 const result = await generateText('Ping server', {
-  permissionPipeline: true,
   tools: [pingTool],
 })
 ```

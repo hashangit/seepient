@@ -107,7 +107,6 @@ describe("preparedTool Dispatch & Parity (QS-1.1 – QS-1.6)", () => {
     ]);
 
     const agent = await createAgent({
-      permissionPipeline: true,
       runtime: runtime as never,
       tools: [reportTool],
       cwd: dir,
@@ -173,7 +172,6 @@ describe("preparedTool Dispatch & Parity (QS-1.1 – QS-1.6)", () => {
     ]);
 
     const genRes = await generateText("Write note via generateText", {
-      permissionPipeline: true,
       runtime: genRuntime as never,
       tools: [makeTool("gen")],
       cwd: dir,
@@ -195,7 +193,6 @@ describe("preparedTool Dispatch & Parity (QS-1.1 – QS-1.6)", () => {
     ]);
 
     const stream = await streamText("Write note via streamText", {
-      permissionPipeline: true,
       runtime: streamRuntime as never,
       tools: [makeTool("stream")],
       cwd: dir,
@@ -239,7 +236,6 @@ describe("preparedTool Dispatch & Parity (QS-1.1 – QS-1.6)", () => {
     ]);
 
     const agent = await createAgent({
-      permissionPipeline: true,
       runtime: runtime as never,
       tools: [brokenDraftTool],
       cwd: dir,
@@ -283,7 +279,6 @@ describe("preparedTool Dispatch & Parity (QS-1.1 – QS-1.6)", () => {
     ]);
 
     const agent = await createAgent({
-      permissionPipeline: true,
       runtime: runtime as never,
       tools: [throwingTool],
       cwd: dir,
@@ -327,7 +322,6 @@ describe("preparedTool Dispatch & Parity (QS-1.1 – QS-1.6)", () => {
 
     // Autonomous consent mode should not prompt for allowed operations within ceiling
     const agent = await createAgent({
-      permissionPipeline: true,
       consentMode: "autonomous",
       runtime: runtime as never,
       tools: [makeSimpleReport()],
@@ -374,7 +368,6 @@ describe("preparedTool Dispatch & Parity (QS-1.1 – QS-1.6)", () => {
     ]);
 
     const agent = await createAgent({
-      permissionPipeline: true,
       runtime: runtime as never,
       tools: [toolWithCommit],
       cwd: dir,

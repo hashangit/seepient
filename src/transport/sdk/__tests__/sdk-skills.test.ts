@@ -37,7 +37,7 @@ describe('SDK createAgent skill support', () => {
 
   it('initializes the skill registry and injects catalog into the system message', async () => {
     mockRunAgentLoop();
-    const { createAgent } = await import('../agent.js');
+    const { createAgent } = await import('../index.js');
     const agent = await createAgent({ systemPrompt: 'BASE' });
 
     const history = agent.getHistory();
@@ -56,7 +56,7 @@ describe('SDK createAgent skill support', () => {
 
   it('clear() re-seeds the system message with catalog (one copy, no accumulation)', async () => {
     mockRunAgentLoop();
-    const { createAgent } = await import('../agent.js');
+    const { createAgent } = await import('../index.js');
     const agent = await createAgent({ systemPrompt: 'BASE' });
 
     const before = agent.getHistory().find((m: any) => m.role === 'system')?.content ?? '';
@@ -73,7 +73,7 @@ describe('SDK createAgent skill support', () => {
 
   it('skills: false disables skill initialization', async () => {
     mockRunAgentLoop();
-    const { createAgent } = await import('../agent.js');
+    const { createAgent } = await import('../index.js');
     const agent = await createAgent({ systemPrompt: 'BASE', skills: false });
 
     const sysMsg = agent.getHistory().find((m: any) => m.role === 'system');

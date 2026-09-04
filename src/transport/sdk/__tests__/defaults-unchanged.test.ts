@@ -48,7 +48,7 @@ describe("QS-0: Defaults unchanged", () => {
     expect(r1).toBe(r2);
   });
 
-  it("createAgent with permissionPipeline default options writes to security/audit/sdk-user", async () => {
+  it("createAgent with default options writes to security/audit/sdk-user", async () => {
     const mockRuntime = createMockRuntime([
       {
         toolCalls: [

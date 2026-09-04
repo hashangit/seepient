@@ -76,7 +76,6 @@ describe("QS-3: Server Store Injection (FR-010)", () => {
     });
 
     const server = await createServer({
-      permissionPipeline: true,
       runtime,
       auditStore,
       policyStore,
@@ -160,9 +159,7 @@ describe("QS-3: Server Store Injection (FR-010)", () => {
   });
 
   it("default server startup without injected stores retains default behavior", async () => {
-    const server = await createServer({
-      permissionPipeline: true,
-    });
+    const server = await createServer();
     activeServers.push(server);
     expect(server).toBeDefined();
   });

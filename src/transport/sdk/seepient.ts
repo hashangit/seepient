@@ -63,9 +63,13 @@ import { SeepientError } from "../../foundations/errors.js";
 
 // ── Session persistence helpers ──────────────────────────────────────────
 
+const SESSION_ID_RE = /^[a-zA-Z0-9_-]+$/;
+
 function validateSessionId(sessionId: string): void {
-  if (/[/\\]/.test(sessionId) || sessionId.includes("..")) {
-    throw new Error("Invalid session ID");
+  if (!sessionId || !SESSION_ID_RE.test(sessionId)) {
+    throw new Error(
+      `Invalid session ID "${sessionId}". Only alphanumeric characters, dashes, and underscores are allowed.`,
+    );
   }
 }
 
@@ -79,13 +83,13 @@ async function persistSession(
     model?: string;
     metadata?: Record<string, unknown>;
   },
+  createdAt?: number,
 ): Promise<void> {
-  const existing = await backend.load(id);
   const nowMs = Date.now();
   await backend.save(id, {
     id,
     messages,
-    createdAt: existing?.createdAt ?? nowMs,
+    createdAt: createdAt ?? nowMs,
     updatedAt: nowMs,
     metadata: options.metadata,
     provider: options.provider,
@@ -253,6 +257,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   // State & session loading
   const messages: Message[] = [];
   let backend: PersistenceBackend | null = null;
+  let sessionCreatedAt = Date.now();
   if (opts.persist) {
     if (typeof opts.persist === "string") {
       backend = createPersistenceBackend({ type: "file", path: opts.persist });
@@ -266,6 +271,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
       const existing = await backend.load(sessionId);
       if (existing) {
         messages.push(...existing.messages);
+        if (existing.createdAt) sessionCreatedAt = existing.createdAt;
         if (!provider && existing.provider) provider = existing.provider;
         if (!providerAccount && existing.providerAccount) providerAccount = existing.providerAccount;
         if (!model && existing.model) model = existing.model;
@@ -405,12 +411,18 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
 
   async function persistMessages(): Promise<void> {
     if (backend) {
-      await persistSession(backend, sessionId, messages, {
-        provider,
-        providerAccount,
-        model,
-        metadata,
-      });
+      await persistSession(
+        backend,
+        sessionId,
+        messages,
+        {
+          provider,
+          providerAccount,
+          model,
+          metadata,
+        },
+        sessionCreatedAt,
+      );
     }
   }
 

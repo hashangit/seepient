@@ -76,7 +76,7 @@ describe('SDK opts.model override', () => {
 
   it('createAgent uses opts.model over the resolved default', async () => {
     const { runAgentLoopMock } = mockEntryPoints('resolved-default-model');
-    const { createAgent } = await import('../agent.js');
+    const { createAgent } = await import('../index.js');
 
     const agent = await createAgent({ tools: [], model: 'override-agent' });
     await agent.chat('hi');
@@ -86,7 +86,7 @@ describe('SDK opts.model override', () => {
 
   it('createAgent switchProvider routes subsequent chats through the account + model', async () => {
     const { runAgentLoopMock } = mockEntryPoints('resolved-default-model');
-    const { createAgent } = await import('../agent.js');
+    const { createAgent } = await import('../index.js');
 
     const agent = await createAgent({ tools: [] });
     await agent.switchProvider('main', 'switched-model');

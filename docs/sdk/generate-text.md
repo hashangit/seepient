@@ -181,7 +181,6 @@ const dbQuery = trustedHostTool({
 });
 
 const result = await generateText("How many users signed up last week?", {
-  permissionPipeline: true,
   tools: [dbQuery],
 });
 ```

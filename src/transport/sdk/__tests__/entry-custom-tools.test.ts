@@ -113,7 +113,7 @@ describe("SDK Entry Re-exports (W1)", () => {
 });
 
 describe("Multi-tool per-agent composition (W1, W2)", () => {
-  it("executes multiple registered trustedHostTools through createAgent({ permissionPipeline: true }) without global registry", async () => {
+  it("executes multiple registered trustedHostTools through createAgent without global registry", async () => {
     const calls: string[] = [];
 
     const getBalanceTool = trustedHostTool({

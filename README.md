@@ -462,7 +462,6 @@ const searchTool = brokerConnector({
 
 const agent = await createAgent({
   provider: 'openai',
-  permissionPipeline: true,
   tools: [diskTool, reportTool, searchTool],
 });
 ```

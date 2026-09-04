@@ -35,8 +35,6 @@ export interface ServerOptions {
   cors?: boolean;
   /** Session TTL in seconds (default: 86400 = 24 hours) */
   sessionTTL?: number;
-  /** Spec 008 / 017: route every tool call through the Domain policy pipeline. */
-  permissionPipeline?: boolean;
   /** Spec 021 (FR-010): Injected ProviderRuntime */
   runtime?: import("../../domain/providers/provider-runtime.js").ProviderRuntime | import("../../foundations/contracts/provider-runtime.js").ProviderRuntimeContract;
   /** Injected session persistence backend (Spec 021) */

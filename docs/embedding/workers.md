@@ -10,7 +10,7 @@ Seepient provides complete, fail-closed policy enforcement and sandbox execution
 - **Embedder Storage Sovereignty**: The embedder owns and supplies store adapters for sessions, audit logs, policies, capability consumption, and provider configurations.
 
 > [!NOTE]
-> **Embedder SDK Entry Points**: Stateless store injection is supported on `createAgent`, `generateText`, and `streamText`. The high-level `createSeepient()` facade is an opinionated local convenience wrapper that constructs its own internal `ProviderRuntime` and local state; stateless worker embedders should use `createAgent`, `generateText`, or `streamText` directly.
+> **Embedder SDK Entry Points**: Stateless store injection is supported on `createAgent`, `generateText`, and `streamText`. To operate statelessly without local disk writes, embedders inject their own store contracts (`auditStore`, `policyStore`, `capabilityLedger`, `runtime`, and `persist`).
 
 ---
 
@@ -160,7 +160,6 @@ For interactive human-in-the-loop approvals:
 
 ```typescript
 const agent = await createAgent({
-  permissionPipeline: true,
   principalId: "tenant-user-123",
   sessionId: "session-abc",
   cwd: "/workspace",

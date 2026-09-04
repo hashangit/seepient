@@ -226,7 +226,6 @@ describe("Consumer Reference Scenario: 5-Tool Mixed-Rung Agent (QS-3.3)", () => 
     };
 
     const agent = await createAgent({
-      permissionPipeline: true,
       runtime: runtime as never,
       network: mockNetwork,
       tools: [getAccounts, getTransactions, transferFunds, exportReport, lookupRates],
