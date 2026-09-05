@@ -39,6 +39,7 @@ Library/
 
 # Temporary files
 .tmp/
+*.visual-check.*
 
 # Logs
 *.log

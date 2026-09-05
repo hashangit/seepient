@@ -7,36 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Unified SDK Consolidation & Release Hardening (spec 021 hardening)
+## [v0.6.1] - 2026-09-06
 
-**Breaking changes (pre-1.0 in-place upgrade):**
-- **Single governed entry point (`createSeepient`)**: Decommissioned ungoverned `seepient.ts` entry point (`SeepientExecutionResult`, `SeepientOptions`, `SeepientSession`, `executeTurn`, `createSeepientSession`). Removed legacy `createAgent` export — use `createSeepient` (the API is otherwise identical). All programmatic interactions now route through `createSeepient` (`src/transport/sdk/seepient.ts`), `generateText`, and `streamText`.
-- **SDK type canonicalization**: Renamed `AgentCreateOptions` → `CreateSeepientOptions` and `SdkAgent` → `Seepient` directly in place; eliminated redundant alias types.
-- **On-instance compatibility aliases removed**: Removed legacy v2 instance methods `run`, `stream`, `messages`, `switchModel`, and child agent creation from `Seepient`. Use `chat`, `chatStream`, `getHistory`, and `switchProvider`.
-- **Caller-owned promise mutex**: Replaced shared lock resolver on `Seepient` with caller-owned promise mutex (`acquire(): Promise<() => void>`), preventing lock starvation across concurrent or aborted turns.
-- **Fail-closed `trustedHostTool` declaration validation**: Effect declarations on `trustedHostTool` now validate against the ordered allowlist (`network-egress`, `secret-use`, `model-egress`) and require corresponding non-empty descriptor fields (`destinations`, `secretRefs`, `dataClasses`).
-- **Mandatory permission pipeline**: The `permissionPipeline` boolean flag has been removed from `CreateSeepientOptions` and `GenerateTextOptions`. The unified permission pipeline, execution boundary, and audit recording are now active by default across all SDK calls.
-- **`grants` option removal**: The legacy `grants?: GrantSpec[]` option has been deleted. Embedders should use `consentMode: "autonomous"` for safe automated execution within policy, or declare explicit scoped capabilities via `principalPolicy` or `deploymentCeiling`.
-- **Generic HTTP broker connector**: Added `http` connector descriptor with built-in SSRF protection (blocking loopback, private, and metadata IPs) and execution-time secret reference enforcement.
-- **Stateless HTTP server mutations**: Injected `ProviderRuntime` contracts without mutation implementations (`updateOverlay`) return `501 NOT_IMPLEMENTED` with zero filesystem writes when mutation endpoints are called.
-
-### Security
-
-**Dependency vulnerability remediation:**
-- **`js-yaml` (GHSA-5p4m-2wfm-xmqj)**: Bumped exact pin to `4.3.2` and updated workspace override, eliminating quadratic CPU consumption / DoS on untrusted OpenAPI spec imports.
-- **`fast-uri` (CVE-2026-18446)**: Added workspace override resolving to `3.1.6`, closing host-confusion vulnerability in URI resolution.
-- **`hono` (CVEs)**: Added workspace override resolving to `4.13.5`, addressing transitive dependency advisories.
-- **`ajv` (GHSA-2g4f-4pwh-qvx6)**: Moved `ajv` (`8.18.0`) from runtime `dependencies` to `devDependencies`, eliminating it from the shipped runtime dependency tree.
-- **`postcss` (docs)**: Added `docs/package.json` override resolving `postcss` to `^8.5.23`, patching build tooling.
-- **Automated security scanning & CI gates**:
-  - Added CodeQL code scanning workflow (`.github/workflows/codeql.yml`) for automated JavaScript/TypeScript vulnerability detection.
-  - Added `pnpm audit --prod` verification step to CI workflow (`.github/workflows/ci.yml`).
-
-### Stateless SDK Workers & Embedder-Owned Storage (spec 021)
+### Stateless SDK workers and embedder-owned storage (spec 021)
 
 **Stateless multi-tenant embedding & state injection:**
-- **Store contract injection**: Extended `createAgent`, `generateText`, `streamText`, and `createServer` with typed options accepting external `runtime`, `principalId`, `sessionId`, `auditStore`, `policyStore`, and `capabilityLedger`.
-- **Zero local disk writes**: When all state stores are injected (`auditStore`, `policyStore`, `capabilityLedger`, along with `runtime` and `persist`), the SDK runs completely statelessly with zero directory creation or persistent state writes to the host filesystem outside the active workspace. Emits a construction warning if partial store injection is detected.
+- **Store contract injection**: Extended `createSeepient`, `generateText`, `streamText`, and `createServer` with typed options accepting external `runtime`, `principalId`, `sessionId`, `auditStore`, `policyStore`, and `capabilityLedger`.
+- **Zero local disk writes**: When all state stores are injected (`auditStore`, `policyStore`, `capabilityLedger`, along with `runtime` and `sessionStore`), the SDK runs completely statelessly with zero directory creation or persistent state writes to the host filesystem outside the active workspace. Emits a construction warning if partial store injection is detected.
 - **Attributed WebSocket approval records**: Threaded caller identity (`apiKeyHash`, session, tenant) into server-side durable approval request records, ensuring approval audits accurately reflect the authenticated caller rather than a static placeholder.
 - **Per-agent skill registry ownership**: Removed module-singleton skill registry in favor of per-instance ownership passed via execution context, eliminating cross-agent state contamination in shared worker processes.
 - **Auditing and durability**: Injected audit stores receive full action lifecycle events with caller `principalId` pass-through; custom stores enforce pre-dispatch durability.
@@ -44,6 +21,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **First-class provider account session routing**: Added first-class `providerAccount` field to `SessionData` and `persistSession()`, ensuring session resumes and provider switches maintain clean channel separation from embedder `metadata`.
 - **Reference worker & documentation**: Added reference worker example (`examples/worker/`) demonstrating remote store adapters, permission-gated execution, and interactive approval relay; added deployment guide (`docs/embedding/workers.md`).
 - **Cleaned up legacy shims**: Replaced untyped `providerRuntime` casts across HTTP server and transport adapters with typed `runtime` options (pre-1.0 in-place upgrade).
+
+### Unified SDK consolidation and release hardening (spec 021 hardening)
+
+**Breaking changes (pre-1.0 in-place upgrade):**
+- **Single governed entry point (`createSeepient`)**: Decommissioned ungoverned `seepient.ts` entry point (`SeepientExecutionResult`, `SeepientOptions`, `SeepientSession`, `executeTurn`, `createSeepientSession`). Removed legacy `createAgent` export in favor of `createSeepient`. All programmatic interactions now route through `createSeepient` (`src/transport/sdk/seepient.ts`), `generateText`, and `streamText`.
+- **SDK type canonicalization**: Renamed `AgentCreateOptions` → `CreateSeepientOptions` and `SdkAgent` → `Seepient` directly in place; eliminated redundant alias types.
+- **On-instance compatibility aliases removed**: Removed legacy v2 instance methods `run`, `stream`, `messages`, `switchModel`, and child agent creation from `Seepient`. Standardized on `chat`, `chatStream`, `getHistory`, and `switchProvider`.
+- **Caller-owned promise mutex**: Replaced shared lock resolver on `Seepient` with caller-owned promise mutex (`acquire(): Promise<() => void>`), preventing lock starvation across concurrent or aborted turns.
+- **Fail-closed `trustedHostTool` declaration validation**: Effect declarations on `trustedHostTool` now validate against the ordered allowlist (`network-egress`, `secret-use`, `model-egress`) and require corresponding non-empty descriptor fields (`destinations`, `secretRefs`, `dataClasses`).
+- **Mandatory permission pipeline**: The `permissionPipeline` boolean flag has been removed from `CreateSeepientOptions` and `GenerateTextOptions`. The unified permission pipeline, execution boundary, and audit recording are now active by default across all SDK calls.
+- **`grants` option removal**: The legacy `grants?: GrantSpec[]` option has been deleted. Embedders should use `consentMode: "autonomous"` for safe automated execution within policy, or declare explicit scoped capabilities via `principalPolicy` or `deploymentCeiling`.
+- **Generic HTTP broker connector**: Added `http` connector descriptor with built-in SSRF protection (blocking loopback, private, and metadata IPs) and execution-time secret reference enforcement.
+- **Stateless HTTP server mutations**: Injected `ProviderRuntime` contracts without mutation implementations (`updateOverlay`) return `501 NOT_IMPLEMENTED` with zero filesystem writes when mutation endpoints are called.
+
+### Production Docker container stack
+
+- **Standalone production build**: Upgraded `Dockerfile` to a multi-stage Debian Slim container supporting both standalone HTTP/WebSocket server and container-optimized CLI modes.
+- **Pre-packaged browser and fonts**: Bundles system Chromium (`/usr/bin/chromium`) and `fonts-noto-cjk` / `fonts-noto-color-emoji` directly in the image for tofu-free web captures and Playwright browser tools.
+- **Native verification**: Compiles and installs the native `seepient-fs-commit` Rust helper binary inside the container (`SEEPIENT_FS_COMMIT_BIN=/usr/local/bin/seepient-fs-commit`).
+- **Hardened execution defaults**: Runs unprivileged as `appuser` (UID 1001) under `dumb-init` PID 1 supervisor, with persistent volumes for sessions (`/data/sessions`), custom skills (`/mnt/skills`), and workspace (`/workspace`).
+- **Updated compose service**: Aligned `docker-compose.yml` with health checks, environment file support, and security options (`no-new-privileges:true`).
+
+### Dynamic skill registry threading
+
+- **Dynamic discovery propagation**: Threaded `skillRegistry` dynamically into `hostCallbacks` and the agent loop configuration, ensuring skills discovered at runtime are available to `use_skill` across subagents and turn callbacks.
+
+### Modernized provider configuration and documentation
+
+- **Zero-config auto-discovery**: Documented automatic detection of standard environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, `GROQ_API_KEY`, `GLM_API_KEY`).
+- **Interactive TUI dock & setup wizard**: Documented visual catalog browsing and tiered model assignment via `seepient setup` and `/models` (`Ctrl+M`).
+- **Flexible credential storage**: Documented OS Keychain (`keychain`), OAuth session (`seepient`), custom environment pointer (`env`), and unauthenticated local (`none`) storage options.
+- **Legacy cleanup**: Removed obsolete `OPENAI_COMPAT_*` keys, deprecated shims, and outdated model references across docs and configuration schemas.
+
+### Security and supply chain
+
+- **Dependency vulnerability remediation**:
+  - `js-yaml` (GHSA-5p4m-2wfm-xmqj): Bumped exact pin to `4.3.2` to eliminate quadratic CPU consumption / DoS on untrusted OpenAPI spec imports.
+  - `fast-uri` (CVE-2026-18446): Added workspace override resolving to `3.1.6`, closing host-confusion vulnerability in URI resolution.
+  - `hono` (CVEs): Added workspace override resolving to `4.13.5`, addressing transitive dependency advisories.
+  - `ajv` (GHSA-2g4f-4pwh-qvx6): Moved `ajv` (`8.18.0`) from runtime `dependencies` to `devDependencies`.
+  - `postcss` (docs): Added `docs/package.json` override resolving `postcss` to `^8.5.23`.
+- **Automated security scanning & CI gates**:
+  - Added CodeQL code scanning workflow (`.github/workflows/codeql.yml`) for automated JavaScript/TypeScript vulnerability detection.
+  - Added `pnpm audit --prod` verification step to CI workflow (`.github/workflows/ci.yml`).
+
+## [v0.6.0] - 2026-08-31
 
 ### Custom-tool execution parity (spec 020)
 
