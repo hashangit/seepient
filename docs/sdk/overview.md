@@ -13,7 +13,7 @@ Seepient Agent is organized in three layers of increasing statefulness:
 
 ```
 generateText()   -- One-shot. Stateless. No memory between calls.
-createAgent()    -- Stateful. Multi-turn with session persistence.
+createSeepient() -- Stateful. Multi-turn with session persistence.
 Server           -- Remote. REST + WebSocket for distributed deployments.
 ```
 
@@ -25,7 +25,7 @@ The SDK is built around plain functions and plain objects, not class instances:
 
 - **`generateText(prompt, options?)`** -- returns a `Promise<GenerateTextResult>`
 - **`streamText(prompt, options?)`** -- returns a `Promise<StreamTextResult>` with async iterables
-- **`createAgent(options?)`** -- returns a `Promise<SdkAgent>` with `.chat()`, `.chatStream()`, and lifecycle methods
+- **`createSeepient(options?)`** -- returns a `Promise<Seepient>` with `.chat()`, `.chatStream()`, and lifecycle methods
 
 Configuration is passed as options objects. Return types are plain interfaces. There are no base classes to extend.
 
@@ -56,7 +56,7 @@ yarn add seepient
 ::: code-group
 
 ```typescript [ESM -- recommended]
-import { generateText, streamText, createAgent } from "seepient";
+import { generateText, streamText, createSeepient } from "seepient";
 ```
 
 ```typescript [SDK types only]
@@ -64,7 +64,7 @@ import type {
   GenerateTextOptions,
   GenerateTextResult,
   StreamTextResult,
-  SdkAgent,
+  Seepient,
 } from "seepient";
 ```
 
@@ -109,9 +109,9 @@ const finalText = await stream.fullText;
 ### Multi-turn agent
 
 ```typescript
-import { createAgent } from "seepient";
+import { createSeepient } from "seepient";
 
-const agent = await createAgent({
+const agent = await createSeepient({
   model: "gpt-5.4",
   systemPrompt: "You are a concise coding assistant.",
 });
@@ -154,7 +154,7 @@ const result = await generateText("What is the weather in Tokyo?", {
 
 ### Migration Note: Permission Pipeline & Pre-Grants
 
-Starting in v0.6.1, the permission pipeline is mandatory and active by default across all SDK entry points (`createSeepient`, `createAgent`, `generateText`, `streamText`).
+Starting in v0.6.1, the permission pipeline is mandatory and active by default across all SDK entry points (`createSeepient`, `generateText`, `streamText`).
 - The legacy `permissionPipeline` flag has been removed.
 - The legacy `grants` option has been removed. Instead, use `consentMode: "autonomous"` to permit safe unattended execution within policy boundaries, or define explicit scoped capability sets via `principalPolicy` or `deploymentCeiling`.
 
@@ -200,4 +200,4 @@ Pass tool names as strings, or use group names (`"core"`, `"comm"`, `"advanced"`
 |------|-------------|
 | [generateText()](/sdk/generate-text) | One-shot agent execution with tools, hooks, and structured output |
 | [streamText()](/sdk/stream-text) | Streaming execution with async iterables and SSE helpers |
-| [createAgent()](/sdk/create-agent) | Stateful multi-turn agent with session persistence |
+| [createSeepient()](/sdk/create-seepient) | Stateful multi-turn agent with session persistence |

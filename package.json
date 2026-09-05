@@ -19,6 +19,7 @@
     "seepient-server": "dist/transport/http/standalone.js"
   },
   "scripts": {
+    "clean": "rm -rf dist",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
@@ -34,7 +35,7 @@
     "bench:provider": "vitest run src/domain/providers/__tests__/provider-benchmark.test.ts",
     "native:build": "cargo build --manifest-path native/fs-commit/Cargo.toml --release && node scripts/place-native-helper.cjs",
     "native:test": "cargo test --manifest-path native/fs-commit/Cargo.toml",
-    "prepublishOnly": "pnpm run build"
+    "prepublishOnly": "pnpm run clean && pnpm run build"
   },
   "files": [
     "dist/foundations",

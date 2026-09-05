@@ -19,7 +19,7 @@ import { mkdtempSync, rmSync, realpathSync, readFileSync, existsSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  createAgent,
+  createSeepient,
   trustedHostTool,
   preparedTool,
   brokerConnector,
@@ -225,7 +225,7 @@ describe("Consumer Reference Scenario: 5-Tool Mixed-Rung Agent (QS-3.3)", () => 
       },
     };
 
-    const agent = await createAgent({
+    const agent = await createSeepient({
       runtime: runtime as never,
       network: mockNetwork,
       tools: [getAccounts, getTransactions, transferFunds, exportReport, lookupRates],

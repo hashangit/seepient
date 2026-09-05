@@ -2,14 +2,14 @@
  * Mandatory permission-pipeline options (Spec 021 release hardening).
  *
  * Verifies that the permission pipeline options are accepted directly on every surface's
- * options (GenerateTextOptions, StreamTextOptions, AgentCreateOptions) and that the
+ * options (GenerateTextOptions, StreamTextOptions, CreateSeepientOptions) and that the
  * pipeline is active by default without needing an opt-in flag.
  */
 import { describe, it, expect } from "vitest";
 import type {
   GenerateTextOptions,
   StreamTextOptions,
-  AgentCreateOptions,
+  CreateSeepientOptions,
 } from "../../../foundations/types.js";
 
 describe("mandatory permission pipeline options", () => {
@@ -23,8 +23,8 @@ describe("mandatory permission pipeline options", () => {
     expect(opts.consentMode).toBe("autonomous");
   });
 
-  it("AgentCreateOptions accepts consentMode and store options", () => {
-    const opts: AgentCreateOptions = { consentMode: "ask-everything" };
+  it("CreateSeepientOptions accepts consentMode and store options", () => {
+    const opts: CreateSeepientOptions = { consentMode: "ask-everything" };
     expect(opts.consentMode).toBe("ask-everything");
   });
 

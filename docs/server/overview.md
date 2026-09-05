@@ -7,6 +7,10 @@ description: Seepient Agent Server architecture, startup options, and quick-star
 
 Seepient Agent can be deployed as a standalone container exposing an HTTP REST API and a WebSocket endpoint on port **7337**. The server delegates directly to the core agent loop (`runAgentLoop`) with authentication, session management, and real-time streaming -- ready for production workloads behind a load balancer or directly on bare metal.
 
+::: warning Operating Mode: Inference & Planning Only
+The HTTP server runs in inference and planning mode this release; effectful tool execution fails closed with `backend-unsupported` by design until the worker-scheduler spec ships isolated remote execution. HTTP mutation endpoints return `501 NOT_IMPLEMENTED` with zero filesystem writes.
+:::
+
 ## Architecture
 
 ```

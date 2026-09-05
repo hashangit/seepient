@@ -8,6 +8,7 @@ import { generateId } from "../foundations/id.js";
 import { StreamingResponseAccumulator } from "./streaming/stream-accumulator.js";
 import { normalizeToolResult } from "./tool-executor.js";
 import type { HookExecutor } from "./hooks.js";
+import { createHookExecutor } from "./hooks.js";
 import type { Middleware, PipelineContext } from "../foundations/contracts/middleware.js";
 import { compose } from "../foundations/contracts/middleware.js";
 import { extractPattern } from "../foundations/grant-pattern.js";
@@ -32,7 +33,7 @@ export interface AgentLoopOptions {
   toolDefs: ToolDefinition[];
   systemPrompt?: string;          // Prepended as system message if provided
   maxSteps: number;
-  hooks: HookExecutor;
+  hooks?: HookExecutor;
   signal?: AbortSignal;
   config?: Record<string, unknown>;
   cwd?: string;
@@ -148,7 +149,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
     toolDefs,
     systemPrompt,
     maxSteps,
-    hooks,
+    hooks = createHookExecutor(),
     signal,
     config: rawConfig = {},
     metadata = {},
@@ -165,7 +166,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
 
   // ── No middleware: run loop directly (backward compatible) ────────────
   if (!middleware || middleware.length === 0) {
-    return executeLoop({ ...options, config });
+    return executeLoop({ ...options, hooks, config });
   }
 
   // ── With middleware: wrap loop in pipeline ────────────────────────────
@@ -185,6 +186,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
       // Rebuild options from ctx to capture middleware mutations (e.g., injected tools)
       const mergedOptions: AgentLoopOptions = {
         ...options,
+        hooks,
         toolDefs: ctx.toolDefs,
         config: {
           ...config,
@@ -249,13 +251,15 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     toolDefs,
     systemPrompt,
     maxSteps,
-    hooks,
+    hooks: rawHooks,
     signal,
     config = {},
     metadata = {},
     onStep,
     providerFactory,
   } = options;
+
+  const hooks = rawHooks ?? createHookExecutor();
 
   const approveTool = options.approveTool;
   const autoConfirm = options.autoConfirm;
@@ -334,8 +338,8 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
         : undefined;
       const initialPlan = await runtime.resolvePlan(
         initialSnapshot,
-        "text",
-        "standard",
+        (options.purpose ?? "text") as any,
+        (options.tier ?? "standard") as any,
         initialOverride,
       );
       modelProviderClass = initialPlan.selectedTarget?.providerAccount || "normal";

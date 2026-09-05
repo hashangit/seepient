@@ -39,8 +39,44 @@ export function makeRegistrationAnalyzer(
         if (decl.risk && !["safe", "read", "edit", "sensitive", "destructive"].includes(decl.risk)) {
           throw new Error(`Invalid risk category "${decl.risk}" in trustedHostTool declaration`);
         }
-        if (decl.effects && !Array.isArray(decl.effects)) {
-          throw new Error(`effects in trustedHostTool declaration must be an array`);
+        if (decl.effects) {
+          if (!Array.isArray(decl.effects)) {
+            throw new Error(`effects in trustedHostTool declaration must be an array`);
+          }
+          const ALLOWED_EFFECT_KINDS = ["network-egress", "secret-use", "model-egress"];
+          for (const effect of decl.effects) {
+            if (!effect || typeof effect !== "object" || !("kind" in effect)) {
+              throw new Error(`Invalid effect in trustedHostTool declaration: must be an object with a "kind" property`);
+            }
+            const kind = (effect as any).kind;
+            if (!ALLOWED_EFFECT_KINDS.includes(kind)) {
+              throw new Error(
+                `Invalid effect kind "${kind}" in trustedHostTool declaration. Allowed kinds: ${ALLOWED_EFFECT_KINDS.join(", ")}`,
+              );
+            }
+            if (kind === "network-egress") {
+              const dests = (effect as any).destinations;
+              if (!Array.isArray(dests) || dests.length === 0) {
+                throw new Error(
+                  `Invalid effect "network-egress" in trustedHostTool declaration: "destinations" must be a non-empty array`,
+                );
+              }
+            } else if (kind === "secret-use") {
+              const refs = (effect as any).secretRefs;
+              if (!Array.isArray(refs) || refs.length === 0) {
+                throw new Error(
+                  `Invalid effect "secret-use" in trustedHostTool declaration: "secretRefs" must be a non-empty array`,
+                );
+              }
+            } else if (kind === "model-egress") {
+              const classes = (effect as any).dataClasses;
+              if (!Array.isArray(classes) || classes.length === 0) {
+                throw new Error(
+                  `Invalid effect "model-egress" in trustedHostTool declaration: "dataClasses" must be a non-empty array`,
+                );
+              }
+            }
+          }
         }
       }
 
@@ -51,7 +87,7 @@ export function makeRegistrationAnalyzer(
         args: jsonArgs as any,
       };
 
-      const effects: EffectRequest[] = decl?.effects ?? [
+      const effects: EffectRequest[] = (decl?.effects as EffectRequest[]) ?? [
         { kind: "host-callback", toolName },
         {
           kind: "model-egress",

@@ -2,7 +2,7 @@
  * PreparedTool Dispatch E2E Test Suite (Spec 020, US2, QS-1.1 – QS-1.6)
  *
  * Verifies:
- *  - QS-1.1: preparedTool executes through createAgent({ permissionPipeline: true })
+ *  - QS-1.1: preparedTool executes through createSeepient({ permissionPipeline: true })
  *            with effect-described approval prompt and digests in audit.
  *  - QS-1.2: Parity across generateText and streamText.
  *  - QS-1.3: Malformed drafts fail closed without showing approval prompt.
@@ -15,7 +15,7 @@ import { mkdtempSync, rmSync, realpathSync, readFileSync, existsSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  createAgent,
+  createSeepient,
   generateText,
   streamText,
 } from "../index.js";
@@ -46,7 +46,7 @@ function canonicalTarget(filePath: string): CanonicalPathTarget {
 }
 
 describe("preparedTool Dispatch & Parity (QS-1.1 – QS-1.6)", () => {
-  it("QS-1.1: executes preparedTool via createAgent with effect-described approval and exact commit", async () => {
+  it("QS-1.1: executes preparedTool via createSeepient with effect-described approval and exact commit", async () => {
     let capturedPrompt: any;
     const targetFile = "weekly-report.txt";
     const reportPath = join(dir, targetFile);
@@ -106,7 +106,7 @@ describe("preparedTool Dispatch & Parity (QS-1.1 – QS-1.6)", () => {
       { content: "Report successfully generated and saved." },
     ]);
 
-    const agent = await createAgent({
+    const agent = await createSeepient({
       runtime: runtime as never,
       tools: [reportTool],
       cwd: dir,
@@ -235,7 +235,7 @@ describe("preparedTool Dispatch & Parity (QS-1.1 – QS-1.6)", () => {
       { content: "Handled error." },
     ]);
 
-    const agent = await createAgent({
+    const agent = await createSeepient({
       runtime: runtime as never,
       tools: [brokenDraftTool],
       cwd: dir,
@@ -278,7 +278,7 @@ describe("preparedTool Dispatch & Parity (QS-1.1 – QS-1.6)", () => {
       { content: "Tool failed." },
     ]);
 
-    const agent = await createAgent({
+    const agent = await createSeepient({
       runtime: runtime as never,
       tools: [throwingTool],
       cwd: dir,
@@ -321,7 +321,7 @@ describe("preparedTool Dispatch & Parity (QS-1.1 – QS-1.6)", () => {
     ]);
 
     // Autonomous consent mode should not prompt for allowed operations within ceiling
-    const agent = await createAgent({
+    const agent = await createSeepient({
       consentMode: "autonomous",
       runtime: runtime as never,
       tools: [makeSimpleReport()],
@@ -367,7 +367,7 @@ describe("preparedTool Dispatch & Parity (QS-1.1 – QS-1.6)", () => {
       { content: "Done." },
     ]);
 
-    const agent = await createAgent({
+    const agent = await createSeepient({
       runtime: runtime as never,
       tools: [toolWithCommit],
       cwd: dir,

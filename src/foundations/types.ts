@@ -236,9 +236,9 @@ export interface StreamTextResult {
   toSSEStream: () => ReadableStream;
 }
 
-// ── createAgent ───────────────────────────────────────────────────────
+// ── createSeepient ───────────────────────────────────────────────────
 
-export interface AgentCreateOptions {
+export interface CreateSeepientOptions {
   model?: string;
   provider?: string;
   providerAccount?: string;
@@ -279,9 +279,7 @@ export interface AgentCreateOptions {
   capabilityLedger?: import("./contracts/capability-ledger.js").CapabilityLedger;
 }
 
-export type CreateSeepientOptions = AgentCreateOptions;
-
-export interface SdkAgent {
+export interface Seepient {
   readonly sessionId: string;
   chat(message: string): Promise<AgentResponse>;
   chatStream(message: string, options?: StreamTextOptions): Promise<StreamTextResult>;
@@ -309,16 +307,7 @@ export interface SdkAgent {
   reload(): Promise<{ revision: number }>;
   resolve(opts: { purpose: any; tier?: any; override?: any }): Promise<any>;
   dispose(): Promise<void>;
-
-  // ── Surface compatibility aliases ──────────────────────────────────────
-  createAgent(opts: AgentCreateOptions): Promise<SdkAgent>;
-  run(input: string | any[]): Promise<any>;
-  stream(input: string | any[]): Promise<any>;
-  readonly messages: any[];
-  switchModel(override: { providerAccount?: string; model?: string; thinkingLevel?: any }): Promise<void>;
 }
-
-export type Seepient = SdkAgent;
 
 export interface AgentResponse {
   text: string;

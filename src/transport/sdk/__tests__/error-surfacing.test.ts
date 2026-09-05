@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createMockRuntime } from "../../../domain/__tests__/test-doubles.js";
-import { createAgent, generateText, streamText } from "../index.js";
+import { createSeepient, generateText, streamText } from "../index.js";
 import { serverStreamText } from "../../http/server-core.js";
 import { SeepientError } from "../../../foundations/errors.js";
 
@@ -51,7 +51,7 @@ describe("Centralized Loop Error Surfacing (Task 1.2)", () => {
 
   it("chat() throws typed SeepientError on provider failure", async () => {
     const runtime = createFailingRuntime("SERVICE_UNAVAILABLE", "Model offline");
-    const agent = await createAgent({
+    const agent = await createSeepient({
       runtime: runtime as any,
       model: "mock-model",
     });
@@ -88,7 +88,7 @@ describe("Centralized Loop Error Surfacing (Task 1.2)", () => {
 
   it("chatStream invokes onError and finishes with error on provider failure", async () => {
     const runtime = createFailingRuntime("AUTH_FAILURE", "Invalid API key");
-    const agent = await createAgent({
+    const agent = await createSeepient({
       runtime: runtime as any,
       model: "mock-model",
     });

@@ -4,7 +4,7 @@
  * Constructs a fully-wired ActionLifecycle from the inputs a composition root
  * has at hand: workspace, principal, policy store, approval broker, execution
  * boundary, and audit store. The returned lifecycle is what `runAgentLoop`
- * invokes per tool call when `permissionPipeline: true`.
+ * invokes per tool call (always active across all surfaces).
  *
  * This module is the *only* place that assembles a complete pipeline. It
  * exists so transport composition roots (CLI bootstrap, SDK agent, server

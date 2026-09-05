@@ -3,7 +3,7 @@
  *
  * Verifies the core statelessness claim (FR-008, M8):
  * When all tenant state stores (auditStore, policyStore, capabilityLedger,
- * persistence, runtime) are injected into createAgent, generateText, or streamText:
+ * persistence, runtime) are injected into createSeepient, generateText, or streamText:
  * ZERO files or directories are created or modified outside the workspace
  * (specifically within HOME or SEEPIENT_SECURITY_DIR).
  *
@@ -25,7 +25,7 @@ import { mkdtempSync, rmSync, realpathSync, readdirSync, statSync, existsSync, w
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  createAgent,
+  createSeepient,
   generateText,
   streamText,
 } from "../index.js";
@@ -122,7 +122,7 @@ Instructions.
     rmSync(workspaceDir, { recursive: true, force: true });
   });
 
-  it("zero files/dirs created outside workspace during createAgent with all stores injected", async () => {
+  it("zero files/dirs created outside workspace during createSeepient with all stores injected", async () => {
     const homeBefore = snapshotDir(homeDir);
     const secBefore = snapshotDir(secDir);
 
@@ -155,7 +155,7 @@ Instructions.
       ],
     });
 
-    const agent = await createAgent({
+    const agent = await createSeepient({
       principalId: "worker-principal",
       sessionId: "worker-session-1",
       cwd: workspaceDir,
@@ -260,7 +260,7 @@ Instructions.
     expect(secDiffs).toEqual([]);
   });
 
-  it("zero files/dirs created outside workspace during createAgent with a real ProviderRuntime instance", async () => {
+  it("zero files/dirs created outside workspace during createSeepient with a real ProviderRuntime instance", async () => {
     const homeBefore = snapshotDir(homeDir);
     const secBefore = snapshotDir(secDir);
 
@@ -290,7 +290,7 @@ Instructions.
 
     expect(runtime instanceof ProviderRuntime).toBe(true);
 
-    const agent = await createAgent({
+    const agent = await createSeepient({
       principalId: "worker-principal",
       sessionId: "worker-session-real-rt",
       cwd: workspaceDir,

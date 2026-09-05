@@ -1,7 +1,7 @@
 /**
  * QS-0 — defaults unchanged (Spec 021 P0 gate).
  *
- * Verifies that running createAgent, generateText, and streamText without
+ * Verifies that running createSeepient, generateText, and streamText without
  * any store/runtime injection options preserves default behavior, defaults
  * to "sdk-user" principal identity, writes to ~/.seepient/security, and
  * memoizes getDefaultProviderRuntime().
@@ -12,7 +12,7 @@ import { mkdtempSync, rmSync, realpathSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  createAgent,
+  createSeepient,
   generateText,
   getDefaultProviderRuntime,
 } from "../index.js";
@@ -48,7 +48,7 @@ describe("QS-0: Defaults unchanged", () => {
     expect(r1).toBe(r2);
   });
 
-  it("createAgent with default options writes to security/audit/sdk-user", async () => {
+  it("createSeepient with default options writes to security/audit/sdk-user", async () => {
     const mockRuntime = createMockRuntime([
       {
         toolCalls: [
@@ -62,7 +62,7 @@ describe("QS-0: Defaults unchanged", () => {
       { content: "File written successfully." },
     ]);
 
-    const agent = await createAgent({
+    const agent = await createSeepient({
       cwd: workspaceDir,
       runtime: mockRuntime,
     });
@@ -119,7 +119,7 @@ describe("QS-0: Defaults unchanged", () => {
       { content: "Tool call was denied." },
     ]);
 
-    const agent = await createAgent({
+    const agent = await createSeepient({
       cwd: workspaceDir,
       runtime: mockRuntime,
       // No approval broker or approveTool provided
@@ -135,10 +135,10 @@ describe("QS-0: Defaults unchanged", () => {
     await agent.close();
   });
 
-  it("createAgent with explicit persist path writes session files", async () => {
+  it("createSeepient with explicit persist path writes session files", async () => {
     const sessionDir = join(workspaceDir, "sessions");
     const mockRuntime = createMockRuntime([{ content: "Saved session." }]);
-    const agent = await createAgent({
+    const agent = await createSeepient({
       sessionId: "default-session-123",
       persist: sessionDir,
       cwd: workspaceDir,

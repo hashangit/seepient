@@ -8,7 +8,7 @@ description: Complete TypeScript types reference for the Seepient Agent SDK.
 Complete TypeScript type definitions for the Seepient Agent SDK. All types are exported from `"seepient"`.
 
 ```typescript
-import type { Message, GenerateTextResult, SdkAgent } from "seepient";
+import type { Message, GenerateTextResult, Seepient } from "seepient";
 ```
 
 ## Core Types
@@ -123,6 +123,12 @@ interface GenerateTextOptions {
   model?: string;
   /** Feeds the permission pipeline's modelProviderClass audit label. */
   provider?: string;
+  /** Purpose routing hint for provider runtime selection. */
+  purpose?: "text" | "plan" | "vision" | "commit";
+  /** Capability tier hint for provider runtime selection. */
+  tier?: "efficient" | "standard" | "complex";
+  /** Provider account identifier (persisted and restored with session). */
+  providerAccount?: string;
   /** System message prepended to the conversation. */
   systemPrompt?: string;
   /** Tools available: string names, group constants, or custom tool registrations. */
@@ -229,10 +235,10 @@ interface StreamTextResult {
 
 ## Agent Types
 
-### AgentCreateOptions
+### CreateSeepientOptions
 
 ```typescript
-interface AgentCreateOptions {
+interface CreateSeepientOptions {
   /** Model identifier. */
   model?: string;
   /** Feeds the permission pipeline's modelProviderClass audit label. */
@@ -272,10 +278,10 @@ interface AgentCreateOptions {
 }
 ```
 
-### SdkAgent
+### Seepient
 
 ```typescript
-interface SdkAgent {
+interface Seepient {
   /** Active session identifier. */
   readonly sessionId: string;
   /** Send a message and get the full response. Context is preserved. */
@@ -987,7 +993,7 @@ interface CapabilityLedger {
 
 - [generateText()](/sdk/generate-text) -- One-shot execution
 - [streamText()](/sdk/stream-text) -- Streaming execution
-- [createAgent()](/sdk/create-agent) -- Stateful multi-turn agent
+- [createSeepient()](/sdk/create-seepient) -- Stateful multi-turn agent
 - [Stateless Workers](/embedding/workers) -- Multi-tenant worker embedding
 - [Custom Tools](/sdk/custom-tools) -- Building custom tools
 - [Hooks](/sdk/hooks) -- Lifecycle callbacks

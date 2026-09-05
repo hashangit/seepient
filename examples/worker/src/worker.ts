@@ -10,7 +10,7 @@
  */
 
 import {
-  createAgent,
+  createSeepient,
   type AuditStore,
   type PolicyStore,
   type CapabilityLedger,
@@ -20,7 +20,7 @@ import {
   type DecisionAuthority,
   type PersistenceBackend,
   type SessionData,
-  type SdkAgent,
+  type Seepient,
   type ProviderRuntime,
   type RevokeFilter,
   type ConsentMode,
@@ -249,7 +249,7 @@ export class RemotePersistenceBackend implements PersistenceBackend {
 /**
  * Create and configure a tenant-scoped worker agent instance.
  */
-export async function createWorkerAgent(config: WorkerTaskConfig): Promise<SdkAgent> {
+export async function createWorkerAgent(config: WorkerTaskConfig): Promise<Seepient> {
   if (!config.controlPlaneUrl && (!config.auditStore || !config.policyStore || !config.capabilityLedger)) {
     throw new Error("[worker] controlPlaneUrl is required when external stores are not explicitly provided");
   }
@@ -258,7 +258,7 @@ export async function createWorkerAgent(config: WorkerTaskConfig): Promise<SdkAg
   const capabilityLedger = config.capabilityLedger ?? new RemoteCapabilityLedger(config.controlPlaneUrl);
   const persistence = config.persistence ?? (config.controlPlaneUrl ? new RemotePersistenceBackend(config.controlPlaneUrl) : undefined);
 
-  const agent = await createAgent({
+  const agent = await createSeepient({
     principalId: config.principalId,
     sessionId: config.sessionId,
     cwd: config.workspaceDir,

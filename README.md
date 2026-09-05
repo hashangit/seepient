@@ -43,7 +43,7 @@ Unlike "screen-seeing" agents (such as OpenClaw) that rely on visual interpretat
 - 🌐 **Web Search**: Integrated with Tavily for real-time information retrieval.
 - 🕒 **Time Accuracy**: Built-in tool to get precise system date and time for correct temporal context.
 - 📧 **Communication**: Send emails and push notifications to chat groups automatically.
-- 📦 **TypeScript SDK v2**: Programmatic access via `createSeepient`, `createAgent`, `streamText`, `generateText`.
+- 📦 **TypeScript SDK**: Programmatic access via `createSeepient`, `streamText`, `generateText`.
 - 🖥 **Server Mode**: Standalone HTTP/WebSocket server with REST v2 management API (`/v1/providers`, `/v1/models` with ETag/If-Match), API key auth, and session management.
 - 🛠 **Skills System**: Loadable skill packs from directories with `@path` file references, turn-scoped skill switching, and custom tool creation.
 - 🛡️ **Security & Permission Pipeline**: Single Domain-owned enforcement pipeline (`PolicyEngine` → `ApprovalBroker` → `ExecutionBoundary` → `AuditRecorder`) default-on across CLI, TUI, SDK, and HTTP/WebSocket server.
@@ -51,7 +51,8 @@ Unlike "screen-seeing" agents (such as OpenClaw) that rely on visual interpretat
 - 💾 **Durable Approvals & 0600 Audit**: File-locked atomic NDJSON stores and append-only `0600` audit logs (`~/.seepient/audit.log`) with fsync before mutation commits.
 - 🐳 **Server Worker Backend**: ephemeral Docker worker container scheduler with mTLS transport, Ed25519/HMAC signed dispatches, and secret-free worker execution environments.
 - 🏗️ **Clean Modular Architecture**: Strict responsibility-driven layers (`UI → Transport → Domain → Capabilities → Vendors → Foundations`) with decomposed route modules, isolated WebSocket message families, centralized connection registry, and decoupled TUI state hooks.
-- 🖥️ **Interactive TUI**: In a TTY, a full-screen Ink/React UI — bordered always-on input, streaming feed, session manager, message queue/`/steer`, and inline `write_file` diffs (atomic, crash-safe writes).
+- 🖥️ **Interactive TUI**: In a TTY, a full-screen Ink/React UI with bordered always-on input, streaming feed, interactive terminal widgets (tables, forms, charts), session manager, message queue/`/steer`, and inline `write_file` diffs (atomic, crash-safe writes).
+
 ## Tech Stack
 - **Runtime**: Node.js
 - **Language**: TypeScript
@@ -94,7 +95,7 @@ npm install seepient
 ```
 ```ts
 // Main exports
-import { createAgent, streamText, generateText } from 'seepient';
+import { createSeepient, streamText, generateText } from 'seepient';
 // Server utilities
 import { createServer } from 'seepient/server';
 ```
@@ -133,63 +134,402 @@ import { createServer } from 'seepient/server';
 
 ## Usage
 
-### Interactive Mode
-Simply run `seepient` to enter the chat loop.
+### 1. Terminal User Interface (TUI)
+
+Running `seepient` in any standard terminal launches a full-screen interactive interface built with Ink and React:
+
 ```bash
 seepient
 > List all TypeScript files in the src folder.
 ```
 
-### Interactive TUI
+When piped into scripts or run with `--no-interactive`, Seepient automatically drops back to a simple readline loop or standard stdout stream.
 
-In a terminal (TTY), `seepient` launches a full-screen Ink/React TUI instead of the readline loop: a bordered always-visible input, a streaming message feed, a persistent task panel (`manage_todos`), session list/resume/export, and inline diffs for `write_file`. File writes are atomic (same-dir temp + `fs.rename`, so a crash never corrupts the file) and render as a green/red unified diff in the tool block; Ctrl+O expands collapsed blocks, and `/clear` starts a fresh session. It falls back to the readline REPL when piped or run with `--no-interactive`.
+#### Key Interface Highlights
 
-### Headless Mode (One-Shot)
-Run a single command and exit.
+- ✍️ **The Composer**: Multiline editing (`Shift+Enter`), input history (`↑`/`↓`), and bracketed paste protection so large code snippets never run before you are ready.
+- 📁 **File & Command Autocomplete**: Type `@` to fuzzy-search your project and insert file paths directly. Type `/` to browse built-in commands and installed skills.
+- 🔄 **Atomic Diffs & Live Feed**: Syntax-highlighted green and red file diffs render right in your feed. Edits write to temporary files first, then rename atomically so a crash never corrupts your code.
+- 🧩 **Interactive Terminal Widgets**: The agent can render rich UI components inline: data tables, interactive forms, bar charts, status grids, and tree inspectors. Press `Tab` or `Ctrl+T` to focus a widget, use `↑`/`↓` and `Enter` to submit inputs or actions, and press `Esc` to return to typing.
+- 🎯 **In-Flight Steering**: Need to change direction? Type while the agent runs to queue follow-up messages, or use `/steer <instruction>` to cancel the active run and redirect immediately.
+- 📋 **Task Tracking & Reasoning**: Long workflows display an active checklist powered by `manage_todos`. Reasoning models stream their thoughts into dedicated collapsible blocks (`Ctrl+O`).
+- 📊 **Live Status & File Alerts**: The bottom status line tracks your active model, context token consumption, real-time cost accounting, and alerts you if files change externally while idle.
+
+#### Modal Overlays, Palettes & Docks
+
+Certain commands take over the terminal with dedicated full-screen panels or popup overlays so you can manage complex tasks without leaving your session:
+
+- 🔍 **Command Palette (`Ctrl+P`)**: A fuzzy-search launcher that pops up over your screen. Type any keyword to filter through built-in commands and installed skills, then press `Enter` to run.
+- 🎛️ **Model Manager Dock (`/models` or `/providers`)**: A multi-tab configuration dock. Visually assign models to specific tasks (`text`, `vision`, `plan`, `commit`, `media`), browse catalog models with live pricing, probe provider connectivity, or trigger OAuth sign-in (`/login`).
+- 🗂️ **Session Selector (`/sessions`)**: A search overlay listing your past conversations. Browse by title, see message counts, and switch sessions with `Enter`. Press `e` to export JSON, `t` to write a clean transcript, `r` to rename, or `d` to delete.
+- ⚙️ **Settings Editor (`/settings`)**: An interactive configuration browser. Toggle feature flags, pick enum options with radio selectors, and update values directly without hand-editing `setting.json`.
+- 🧙 **Setup Wizard (`/setup`)**: A guided onboarding workflow that walks you through adding providers, testing API credentials, and selecting your default models.
+- 🛡️ **Permission Prompt**: When a tool requires approval (such as shell commands or network requests), an approval card appears with exact file targets and risk levels. Press `1`–`9` to select an option, `Enter` to confirm, or `Esc`/`q` to deny.
+- ⚠️ **Autonomous Mode Guard**: If you switch to autonomous mode (`/mode autonomous`), a confirmation modal appears to ensure you acknowledge the safety implications before proceeding.
+
+#### Common Slash Commands
+
+Type `/` in the composer for fuzzy autocomplete across all commands and custom skills.
+
+| Category | Command | Description |
+| :--- | :--- | :--- |
+| **Models & Accounts** | `/models [query]` | Open Model Manager dock to assign models, fallback chains, and test connections |
+| | `/login [provider]` | Start OAuth sign-in flow for subscription providers (e.g. `/login anthropic`) |
+| | `/logout <account>` | Log out of a provider account and remove cached credentials |
+| | `/setup` | Launch the interactive first-run onboarding wizard |
+| **Session Control** | `/steer <message>` | Interrupt the active run and switch immediately to a new instruction |
+| | `/sessions` | Open session manager to resume, rename (`r`), export (`e`), or delete (`d`) sessions |
+| | `/clear` | Clear feed, reset tasks, rotate session ID, and start a fresh session (`Ctrl+L`) |
+| | `/compact` | Summarize conversation history to free up context window tokens |
+| | `/exit` | Terminate session and exit to shell |
+| **Governance & System** | `/mode [mode]` | View or switch consent mode (`ask-everything`, `edit-enabled`, `autonomous`) |
+| | `/permissions` | Inspect active capabilities, grants, and deployment ceiling policies |
+| | `/settings` | Open interactive settings editor (or `get`/`set <key> <val>` from prompt) |
+| | `/context` | Show token breakdown across system instructions, history, tools, and skills |
+| | `/skills` | List all discovered skills with paths and tool permissions (or run `/<skill-name>`) |
+| | `/gateway` | Manage API gateway targets, routes, credentials, and audit logs |
+| | `/?` | Open the built-in keyboard shortcuts cheat sheet |
+
+#### Essential Keyboard Shortcuts
+
+| Shortcut | Action |
+| :--- | :--- |
+| `Ctrl+P` | Open command palette (search and run commands & skills) |
+| `Ctrl+O` | Expand or collapse tool output blocks and diff viewers |
+| `Ctrl+L` | Clear feed and start fresh (same as `/clear`) |
+| `Shift+Tab` | Cycle consent mode (`ask-everything` ⇄ `edit-enabled` ⇄ `autonomous`) |
+| `Ctrl+C` | Abort current run (or clear draft / exit when idle) |
+| `Shift+Enter` | Insert newline in prompt (also `Alt+Enter` or `Ctrl+J`) |
+| `↑` / `↓` | Move between prompt lines, or cycle prompt history at the top/bottom boundary |
+| `@path` | Fuzzy-find and insert workspace file path |
+| `Tab` / `Ctrl+T` | Cycle focus between prompt composer and live interactive widgets |
+| `Esc` | Abort run, return focus from widgets to prompt, or close any open overlay |
+| `/?` | Show full in-terminal shortcut and command reference |
+
+> **Tip**: In permission prompts, press `1`–`9` to select an option directly, `Enter` to approve, or `Esc`/`q` to deny. In the session selector, press `e` to export JSON, `t` for a text transcript, `r` to rename, and `d` to delete.
+
+---
+
+### 2. TypeScript SDK & Programmatic Usage
+
+Seepient Agent provides a TypeScript SDK for building agent-powered applications.
+
+#### Basic Agent
+```ts
+import { createSeepient } from 'seepient';
+
+const seepient = await createSeepient({
+  provider: 'anthropic',
+  model: 'claude-sonnet-4-5-20250929',
+});
+
+const result = await seepient.chat('List all running Docker containers');
+console.log(result.text);
+```
+
+#### Streaming
+```ts
+import { streamText } from 'seepient';
+
+const stream = await streamText('Analyze the logs for errors', {
+  provider: 'openai',
+});
+
+for await (const chunk of stream.textStream) {
+  process.stdout.write(chunk);
+}
+```
+
+#### Structured Output
+```ts
+import { generateText } from 'seepient';
+
+const result = await generateText('Extract the top 3 issues from these logs', {
+  provider: 'anthropic',
+});
+console.log(result.text);
+```
+
+#### Programmatic Instance Management
+Use `createSeepient` for instance-scoped lifecycle control, custom tool registration, and provider management:
+
+```ts
+import { createSeepient } from 'seepient';
+
+// Initialize with automatic settings resolution (~/.seepient/setting.json or env vars)
+const seepient = await createSeepient();
+
+// Resolve model assignments dynamically
+const resolved = await seepient.resolve({ purpose: 'text', tier: 'standard' });
+console.log(`Resolved model: ${resolved.model.id} on ${resolved.providerAccount}`);
+
+// Clean disposal of runtime resources
+await seepient.dispose();
+```
+
+#### Custom Tools (Explicit Trust Models)
+Seepient supports three explicit trust models for custom tools with full permission pipeline governance:
+
+```ts
+import { createSeepient, trustedHostTool, preparedTool, brokerConnector } from 'seepient';
+
+// 1. Host Execution (trusted code execution on local machine)
+const diskTool = trustedHostTool({
+  definition: {
+    type: 'function',
+    function: {
+      name: 'check_disk',
+      description: 'Check disk usage',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  execute: async () => JSON.stringify(await getDiskUsage()),
+});
+
+// 2. Governed Preparation (custom analyzer, exact-commit execution)
+const reportTool = preparedTool({
+  definition: {
+    type: 'function',
+    function: {
+      name: 'save_report',
+      description: 'Save structured status report',
+      parameters: {
+        type: 'object',
+        properties: { content: { type: 'string' } },
+        required: ['content'],
+      },
+    },
+  },
+  allowedOperationKinds: ['commit-files'],
+  analyze: async (args, ctx) => {
+    const artifact = await ctx.artifacts.put(Buffer.from(args.content), 'text/plain');
+    const target = { canonicalPath: '/workspace/report.txt', exists: false, canonicalParent: '/workspace', basename: 'report.txt', finalSymlink: false };
+    return {
+      operation: { kind: 'commit-files', commits: [{ destination: target, content: artifact }] },
+      effects: [{ kind: 'filesystem-write', targets: [{ target, mode: 'create' }] }],
+      risk: 'edit',
+      display: { title: 'Save report', summary: 'Write report.txt', canonicalTargets: [target.canonicalPath], effects: ['filesystem-write'] },
+    };
+  },
+});
+
+// 3. Declarative Broker Connector (data-only mapping, zero embedder execution)
+const searchTool = brokerConnector({
+  definition: {
+    type: 'function',
+    function: {
+      name: 'web_search',
+      description: 'Search documentation',
+      parameters: {
+        type: 'object',
+        properties: { query: { type: 'string' } },
+        required: ['query'],
+      },
+    },
+  },
+  connector: 'web-search',
+  mapping: {
+    version: 1,
+    operation: 'search',
+    argumentBindings: { query: '/query' },
+    secretRefs: ['tavilyApiKey'],
+  },
+});
+
+const seepient = await createSeepient({
+  provider: 'openai',
+  tools: [diskTool, reportTool, searchTool],
+});
+```
+
+#### Session Persistence
+```ts
+const seepient = await createSeepient({
+  provider: 'anthropic',
+  persist: 'my-session',          // Resume a previous session
+});
+```
+
+#### Programmatic Server Creation & Custom Store Injection
+```ts
+import { createServer } from "seepient/server";
+
+// Stateless worker mode with custom runtime and in-memory stores
+const server = await createServer({
+  port: 7337,
+  runtime: myCustomRuntime,
+  persist: myRedisBackend,
+  auditStore: myRemoteAuditStore,
+});
+```
+
+#### Programmatic Gateway Client
+```ts
+import { gateway } from 'seepient';
+const gw = await gateway.createGateway({ enabled: true, semanticTopK: 3, defaultRateLimitPerMin: 60, maxAuditLogsInMemory: 1000 });
+```
+
+---
+
+### 3. Command Line Interface (CLI)
+
+The `seepient` command line provides headless automation, scriptable subcommands, and CI/CD integration.
+
+#### Execution Modes & Global Options
+
+Run queries directly from your shell:
+
 ```bash
+# Headless one-shot: process prompt and exit
 seepient "Check disk usage and save the report to usage.txt" --no-interactive
-```
 
-### Auto-Confirm (CI/CD)
-Automatically approve all tool executions (dangerous, use with caution or in sandboxes).
-```bash
+# Autonomous mode (CI/CD): auto-approve tool execution within deployment ceiling
 seepient "Refactor src/index.ts to use ES modules" -y
+
+# Quick provider override: specify model or provider for a single run
+seepient -p anthropic -m claude-sonnet-4-5-20250929 "Audit this repository for security risks"
+
+# Resume a previous conversation by session ID, or resume the latest session
+seepient -r last "Continue with the remaining test failures"
 ```
 
-### Provider Selection
-Use a specific provider for a single command:
-```bash
-seepient -p anthropic "Analyze this code for security issues"
-```
+##### Global CLI Flags
 
-### Switch Providers Mid-Conversation
-In interactive mode, type `/models` to switch between configured providers:
-```bash
-seepient
-> /models  # Select Anthropic from the list
-> Now analyze this with Claude...
-```
+| Flag | Description |
+| :--- | :--- |
+| `-m, --model <model>` | Override the model for this query (e.g. `gpt-4o`, `claude-sonnet-4-5-20250929`) |
+| `-p, --provider <provider>` | Override the provider account (`openai`, `anthropic`, `glm`, `openai-compatible`) |
+| `-n, --no-interactive` | Exit immediately after completing the query (headless execution) |
+| `-y, --yes` | Autonomous mode: auto-approve actions within deployment ceiling (alias for `--mode autonomous`) |
+| `--mode <mode>` | Set consent mode: `edit-enabled` (default) \| `ask-everything` \| `autonomous` |
+| `-r, --resume <id>` | Resume a conversation by session ID, or pass `last` for the most recent session |
+| `--docker` | Run in container mode: implies `--no-interactive` and suppresses interactive prompts |
 
-### CLI Options
-- `-m, --model <model>`: Specify the LLM model (default: `gpt-4o`).
-- `-p, --provider <provider>`: Specify the LLM provider (`openai-compatible`, `openai`, `anthropic`, `glm`).
-- `-n, --no-interactive`: Exit after processing the initial query (Headless mode).
-- `-y, --yes`: Autonomous mode: auto-approve actions within deployment ceiling (alias for `--mode autonomous`).
-- `--mode <mode>`: Consent mode: `ask-everything` | `edit-enabled` (default) | `autonomous`.
-- `--docker`: Run in Docker-optimized non-interactive mode (auto-detected in containers).
-- `--generate-api-key`: Generate an API key for server mode (use with `seepient-server`).
+#### Consent Modes & Security Governance
 
-### Interactive Commands
-- `/models`: Switch between configured providers during a conversation.
-- `/mode [mode]`: View or switch consent mode (`ask-everything`, `edit-enabled`, `autonomous`). You can also press `Shift+Tab` in the TUI to cycle modes.
-- `/permissions [status|propose]`: Inspect active capabilities, grants, and deployment ceiling policies.
-- `/exit` or `/quit`: End the session.
+Every tool execution passes through a single, fail-closed Domain policy pipeline (`PolicyEngine` → `ApprovalBroker` → `ExecutionBoundary` → `AuditRecorder`). Seepient enforces three canonical consent modes:
 
-### Consent Modes & Security
-Seepient uses a single, fail-closed Domain policy pipeline (`PolicyEngine` → `ApprovalBroker` → `ExecutionBoundary` → `AuditRecorder`) with three canonical consent modes:
-- **`edit-enabled` (Default)**: Workspace edits, reads, and normal operations are pre-approved. Prompts for human confirmation on high-risk shell commands and outbound communications.
+- **`edit-enabled` (Default)**: Pre-approves workspace edits, reads, and normal development tools. Prompts for human confirmation before running high-risk shell commands or outbound network actions.
 - **`ask-everything`**: Prompts for confirmation before executing any tool with external side effects or model egress.
-- **`autonomous`**: Executes all actions permitted by the deployment ceiling without interactive prompts (ideal for sandboxed automation or CI/CD with `-y`).
+- **`autonomous`**: Executes all actions permitted by your deployment ceiling without interactive prompts. Ideal for sandboxed environments or CI/CD pipelines with `-y`.
+
+#### Subcommands Reference
+
+##### Setup Wizard (`seepient setup`)
+Configure providers, API keys, and model defaults in an interactive guided wizard:
+```bash
+seepient setup               # Saves to global config (~/.seepient/setting.json)
+seepient setup --project     # Saves to project-level config (.seepient/setting.json)
+```
+
+##### Model Management (`seepient models`)
+Inspect model assignments, browse the live upstream catalog, and configure routing across purposes (`text`, `vision`, `plan`, `commit`, `media`) and tiers (`standard`, `complex`, `efficient`):
+
+| Subcommand | Description | Key Options |
+| :--- | :--- | :--- |
+| `models list` | List configured purpose assignments | `--resolved` (show active runtime targets), `--json` |
+| `models browse [query]` | Search catalog models with reachability, context window, and pricing | `--reachable-only`, `--json` |
+| `models resolve <slot>` | Dry-run preview of the selected target and fallback chain (e.g. `text.standard`) | `--json` |
+| `models set <slot> <target>` | Assign a model to a slot (e.g. `text.standard anthropic/claude-sonnet-5`) | `--thinking <none\|low\|medium\|high>`, `--json` |
+| `models fallback <slot> <targets>` | Configure ordered fallback candidates (e.g. `anthropic/claude-sonnet-5,openai/gpt-4o`) | `--json` |
+| `models status` | Display active assignments and credential health across all slots | `--json` |
+| `models check` | Pre-flight sanity check ensuring required model slots are configured | `--require <slots>`, `--offline`, `--json` |
+| `models probe <provider>` | Test connectivity, latency, and credential validity for a provider | `--json` |
+| `models discover <account>` | Query an account's `/models` endpoint to discover newly available upstream models | `--json` |
+
+##### Provider Account Management (`seepient providers`)
+Manage connected provider accounts, credentials, and custom endpoints:
+
+| Subcommand | Description | Key Options |
+| :--- | :--- | :--- |
+| `providers list` | List all configured provider accounts and their status | `--pool <language\|image>`, `--json` |
+| `providers add <id>` | Add a new provider account | `--upstream <provider>`, `--credential env:VAR\|none`, `--url <url>`, `--allow-private`, `--compat <compat>` |
+| `providers edit <id>` | Update an existing provider account's configuration | `--upstream`, `--credential`, `--url`, `--allow-private`, `--compat` |
+| `providers remove <id>` | Remove a provider account | `--force` (bypass active slot references), `--json` |
+
+##### Authentication & Tokens (`seepient auth`)
+Manage provider credentials and issue server API keys:
+
+| Subcommand | Description | Key Options |
+| :--- | :--- | :--- |
+| `auth login <provider>` | Configure credentials or initiate OAuth sign-in | `--key <apiKey>`, `--env-var <name>`, `--upstream <provider>` |
+| `auth logout <provider>` | Remove stored credentials for an account | `--json` |
+| `auth issue-token` | Generate a scoped server API key token (SHA-256 hashed at rest) | `--scope <agent:run\|agent:read\|provider:admin\|admin>`, `--label <name>` |
+
+##### Direct Media Generation (`seepient generate`)
+Generate or edit images directly from the command line using your configured image model:
+```bash
+seepient generate image --prompt "Architectural blueprint of a headless agent system" --aspect-ratio 16:9 --output ./assets
+```
+Supported options: `--prompt <text>`, `--operation <generate|variation|edit|mask>`, `--aspect-ratio <1:1|16:9|9:16>`, `--quality-preset <low|standard|high>`, `--count <n>`, `--image <path>`, `--mask <path>`, `--output <dir>`.
+
+---
+
+### 4. Server Mode
+
+Run Seepient Agent as a standalone HTTP/WebSocket server for remote agent access or stateless worker deployments. The HTTP server operates in inference and planning mode in this release; effectful tool execution fails closed with `backend-unsupported` by design until the isolated worker scheduler ships.
+
+#### Starting the Server
+```bash
+# Start with default settings (port 7337)
+seepient-server
+
+# Generate a server API key
+seepient-server --generate-api-key
+
+# Custom port and host
+seepient-server --port 8080 --host 0.0.0.0
+```
+
+#### REST API
+```bash
+# Send a chat message
+curl -X POST http://localhost:7337/v1/chat \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Check disk usage", "model": "gpt-5.4"}'
+
+# List active sessions
+curl http://localhost:7337/v1/sessions \
+  -H "Authorization: Bearer YOUR_API_KEY"
+
+# Model catalog & live resolution
+curl http://localhost:7337/v1/models \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+#### WebSocket Streaming
+```ts
+const ws = new WebSocket('ws://localhost:7337/ws?token=YOUR_API_KEY');
+
+ws.onopen = () => {
+  ws.send(JSON.stringify({
+    type: 'chat',
+    message: 'Analyze the error logs',
+    provider: 'anthropic',
+  }));
+};
+
+ws.onmessage = (event) => {
+  const chunk = JSON.parse(event.data);
+  process.stdout.write(chunk.text);
+};
+```
+
+#### Programmatic Server Creation & Custom Store Injection
+```ts
+import { createServer } from "seepient/server";
+
+// Stateless worker mode with custom runtime and in-memory stores
+const server = await createServer({
+  port: 7337,
+  runtime: myCustomRuntime,
+  persist: myRedisBackend,
+  auditStore: myRemoteAuditStore,
+});
+```
+
+---
 
 ## Configuration
 
@@ -255,24 +595,6 @@ Seepient Agent features unified Provider Management with a shared interactive TU
 }
 ```
 
-### CLI Commands for Models & Providers
-- `seepient models list`: List configured model assignments across purposes and tiers.
-- `seepient models browse [query] [--json] [--reachable-only]`: Search catalog models with reachability, context window, and pricing.
-- `seepient models resolve <purpose.tier> [--json]`: Dry-run resolution preview with active target, fallback chain, and unresolvables.
-- `seepient models set <purpose.tier> <account/model>`: Update an assignment (e.g. `seepient models set text.standard anthropic/claude-sonnet-5`).
-- `seepient models fallback <purpose.tier> <account/model>,...`: Configure ordered fallback candidates.
-- `seepient models status`: Display live status and thinking levels for active assignments.
-- `seepient models probe <provider>`: Test provider connectivity and credentials.
-- `seepient models discover <account>`: Discover available models from the account's `/models` endpoint.
-- `seepient providers add/edit/remove/list`: Manage configured provider accounts (supports `--credential env:NAME|none`).
-- `seepient auth login/logout/issue-token`: Manage credentials, OAuth device-code flows, and scoped management tokens.
-
-### Interactive TUI & Slash Commands
-- `/models`: Open the Model Manager dock to manage purpose assignments, test accounts, and browse the model catalog.
-- `/login [provider]`: Start an OAuth sign-in flow directly from the conversation composer.
-- `/logout [account]`: Log out of a provider account and remove cached credentials.
-- `/setup`: Launch the first-run onboarding setup wizard.
-
 > **⚠️ Security Note**: Never commit API keys or secrets in plaintext into git repositories. Use environment variables (e.g., `OPENAI_API_KEY`), `seepient auth login` with system keychain storage, or OAuth provider sign-in.
 
 ## Integrations
@@ -297,7 +619,7 @@ Seepient Agent v0.3.0 introduces a universal API gateway that connects to downst
 }
 ```
 
-**CLI Commands**: `/gateway list|add|remove|toggle|routes|credentials|audit|usage`
+**Interactive TUI / REPL Command**: `/gateway list|add|remove|toggle|routes|credentials|audit|usage`
 
 **REST API**: `GET/POST/PATCH/DELETE /v1/gateway/*` (admin scope required for mutations)
 
@@ -331,214 +653,6 @@ Configure webhooks to receive alerts or reports in your team chat apps.
 ### Date & Time
 Built-in utility to provide the agent with the current system time, ensuring accurate handling of relative time requests.
 - **Usage**: "What's the date today?" or "Remind me to check the logs next Monday."
-
-## SDK & Programmatic Usage
-
-Seepient Agent provides a TypeScript SDK for building agent-powered applications.
-
-### Basic Agent
-```ts
-import { createAgent } from 'seepient';
-
-const agent = await createAgent({
-  provider: 'anthropic',
-  model: 'claude-sonnet-4-5-20250929',
-});
-
-const result = await agent.chat('List all running Docker containers');
-console.log(result.text);
-```
-
-### Streaming
-```ts
-import { streamText } from 'seepient';
-
-const stream = await streamText('Analyze the logs for errors', {
-  provider: 'openai',
-});
-
-for await (const chunk of stream.textStream) {
-  process.stdout.write(chunk);
-}
-```
-
-### Structured Output
-```ts
-import { generateText } from 'seepient';
-
-const result = await generateText('Extract the top 3 issues from these logs', {
-  provider: 'anthropic',
-});
-console.log(result.text);
-```
-
-### Programmatic Instance (SDK v2)
-
-Use `createSeepient` for instance-scoped lifecycle control, custom tool registration, and stream handling:
-
-```ts
-import { createSeepient } from 'seepient';
-
-// Initialize with automatic settings resolution (~/.seepient/setting.json or env vars)
-const seepient = await createSeepient();
-
-// One-shot generation with purpose/tier routing
-const response = await seepient.generateText('Explain quantum computing in three bullet points');
-console.log(response.text);
-
-// Clean disposal of runtime resources
-await seepient.dispose();
-```
-
-### Custom Tools (Explicit Trust Models)
-
-Seepient supports three explicit trust models for custom tools with full permission pipeline governance:
-
-```ts
-import { createAgent, trustedHostTool, preparedTool, brokerConnector } from 'seepient';
-
-// 1. Host Execution (trusted code execution on local machine)
-const diskTool = trustedHostTool({
-  definition: {
-    type: 'function',
-    function: {
-      name: 'check_disk',
-      description: 'Check disk usage',
-      parameters: { type: 'object', properties: {}, required: [] },
-    },
-  },
-  execute: async () => JSON.stringify(await getDiskUsage()),
-});
-
-// 2. Governed Preparation (custom analyzer, exact-commit execution)
-const reportTool = preparedTool({
-  definition: {
-    type: 'function',
-    function: {
-      name: 'save_report',
-      description: 'Save structured status report',
-      parameters: {
-        type: 'object',
-        properties: { content: { type: 'string' } },
-        required: ['content'],
-      },
-    },
-  },
-  allowedOperationKinds: ['commit-files'],
-  analyze: async (args, ctx) => {
-    const artifact = await ctx.artifacts.put(Buffer.from(args.content), 'text/plain');
-    const target = { canonicalPath: '/workspace/report.txt', exists: false, canonicalParent: '/workspace', basename: 'report.txt', finalSymlink: false };
-    return {
-      operation: { kind: 'commit-files', commits: [{ destination: target, content: artifact }] },
-      effects: [{ kind: 'filesystem-write', targets: [{ target, mode: 'create' }] }],
-      risk: 'edit',
-      display: { title: 'Save report', summary: 'Write report.txt', canonicalTargets: [target.canonicalPath], effects: ['filesystem-write'] },
-    };
-  },
-});
-
-// 3. Declarative Broker Connector (data-only mapping, zero embedder execution)
-const searchTool = brokerConnector({
-  definition: {
-    type: 'function',
-    function: {
-      name: 'web_search',
-      description: 'Search documentation',
-      parameters: {
-        type: 'object',
-        properties: { query: { type: 'string' } },
-        required: ['query'],
-      },
-    },
-  },
-  connector: 'web-search',
-  mapping: {
-    version: 1,
-    operation: 'search',
-    argumentBindings: { query: '/query' },
-    secretRefs: ['tavilyApiKey'],
-  },
-});
-
-const agent = await createAgent({
-  provider: 'openai',
-  tools: [diskTool, reportTool, searchTool],
-});
-```
-
-### Session Persistence
-```ts
-const agent = await createAgent({
-  provider: 'anthropic',
-  persist: 'my-session',          // Resume a previous session
-});
-```
-
-## Server Mode
-
-Run Seepient Agent as a standalone HTTP/WebSocket server for remote agent access or stateless worker deployments.
-
-### Starting the Server
-```bash
-# Start with default settings (port 7337)
-seepient server
-# or via dedicated binary
-seepient-server
-
-# Generate an API key
-seepient-server --generate-api-key
-
-# Custom port
-seepient-server --port 8080
-```
-
-### Programmatic Server Creation & Custom Store Injection
-```ts
-import { createServer } from "seepient/server";
-
-// Stateless worker mode with custom runtime and in-memory stores
-const server = await createServer({
-  port: 7337,
-  runtime: myCustomRuntime,
-  sessionStore: myRedisSessionStore,
-  auditStore: myRemoteAuditStore,
-});
-```
-
-### REST API
-```bash
-# Send a chat message
-curl -X POST http://localhost:7337/v1/chat \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Check disk usage", "model": "gpt-5.4"}'
-
-# List active sessions
-curl http://localhost:7337/v1/sessions \
-  -H "Authorization: Bearer YOUR_API_KEY"
-
-# Model catalog & live resolution
-curl http://localhost:7337/v1/models \
-  -H "Authorization: Bearer YOUR_API_KEY"
-```
-
-### WebSocket Streaming
-```ts
-const ws = new WebSocket('ws://localhost:7337/ws?token=YOUR_API_KEY');
-
-ws.onopen = () => {
-  ws.send(JSON.stringify({
-    type: 'chat',
-    message: 'Analyze the error logs',
-    provider: 'anthropic',
-  }));
-};
-
-ws.onmessage = (event) => {
-  const chunk = JSON.parse(event.data);
-  process.stdout.write(chunk.text);
-};
-```
 
 ## Skills System
 
@@ -676,4 +790,3 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 GitHub: [https://github.com/hashangit/seepient](https://github.com/hashangit/seepient)
 
 ---
-

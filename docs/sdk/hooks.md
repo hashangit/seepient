@@ -69,14 +69,14 @@ The agent loop triggers hooks in this order:
 5. [always]     onFinish(result)         -- loop terminated
 ```
 
-## Using hooks with createAgent
+## Using hooks with createSeepient
 
-Hooks work identically with `createAgent()`. They fire on every `chat()` and `chatStream()` call:
+Hooks work identically with `createSeepient()`. They fire on every `chat()` and `chatStream()` call:
 
 ```typescript
-import { createAgent } from "seepient";
+import { createSeepient } from "seepient";
 
-const agent = await createAgent({
+const agent = await createSeepient({
   tools: ["core", "web_search"],
   hooks: {
     beforeToolCall: ({ name, args }) => {
@@ -271,5 +271,5 @@ ws.on("connection", (socket) => {
 
 - [generateText()](/sdk/generate-text) -- One-shot execution with hooks
 - [streamText()](/sdk/stream-text) -- Streaming with `onText`, `onToolCall`, `onToolResult` callbacks
-- [createAgent()](/sdk/create-agent) -- Stateful agent with persistent hooks
+- [createSeepient()](/sdk/create-seepient) -- Stateful agent with persistent hooks
 - [Types](/sdk/types) -- Full TypeScript type reference

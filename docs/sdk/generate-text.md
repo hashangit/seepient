@@ -323,5 +323,5 @@ When `finishReason` is `"error"`, the loop still returns a partial result rather
 ## Related APIs
 
 - [streamText()](/sdk/stream-text) -- Streaming variant with async iterables
-- [createAgent()](/sdk/create-agent) -- Stateful multi-turn agent
+- [createSeepient()](/sdk/create-seepient) -- Stateful multi-turn agent
 - [Tools](/tools/reference) -- Built-in and custom tool reference
