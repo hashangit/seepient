@@ -145,7 +145,7 @@ describe("PermissionPrompt rendering (T028)", () => {
     return tick().then(() => {
       const frame = lastFrame()!;
       expect(frame).toContain("Read `/proj/a.txt`");
-      expect(frame).toContain("Seepient will remember this permission until you close it.");
+      expect(compactFrame(frame)).toContain("seepient will remember this permission until you close it.");
     });
   });
 

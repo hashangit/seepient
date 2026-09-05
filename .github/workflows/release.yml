@@ -26,6 +26,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Build native helper
+        run: pnpm native:build
+
       - run: pnpm test
 
   # spec 019 (FR-009/T031): build the native commit helper on the platform
