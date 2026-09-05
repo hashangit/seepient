@@ -21,7 +21,7 @@ Seepient Agent is a high-stability, open-source automation framework specificall
 Unlike "screen-seeing" agents (such as OpenClaw) that rely on visual interpretation, Seepient Agent is built on a foundation of precise command-driven execution. This makes it significantly more **stable**, **robust from an engineering perspective**, and **easier to scale** across complex environments—whether it's a local server, a CI/CD pipeline, or thousands of containerized nodes.
 
 ## Why Seepient Agent?
-- 🐳 **Docker Native**: Built to run safely inside containers. Minimal footprint (Node.js/Alpine friendly).
+- 🐳 **Docker Native**: Built to run safely inside containers with pre-packaged Chromium, CJK fonts, non-root security, and native helper binaries.
 - 🚀 **Better Engineering**: Operates via precise system APIs and shell commands rather than unstable visual recognition, ensuring deterministic outcomes.
 - 🛡️ **Superior Stability**: Immune to issues like UI rendering, screen resolution, or network lag that plague vision-based agents.
 - 📈 **Massive Scalability**: Low resource consumption allows orchestrating thousands of instances (e.g., in K8s) for true automation swarms.
@@ -533,27 +533,81 @@ const server = await createServer({
 
 ## Configuration
 
-Seepient Agent uses a hierarchical configuration system.
+Seepient loads configuration through a clear hierarchy:
 
-**Priority Order (Highest to Lowest):**
-1.  **CLI Arguments**: (e.g., `-m gpt-4o`)
-2.  **Environment Variables**: (`OPENAI_API_KEY`, `.env` file)
-3.  **Project Config**: (`./.seepient/setting.json` in current directory)
-4.  **Global Config**: (`~/.seepient/setting.json`)
+1. **CLI arguments**: Explicit flags take top precedence (e.g. `-m <model>`, `-p <provider>`).
+2. **Environment variables**: System shell variables and `.env` files.
+3. **Project configuration**: `./.seepient/setting.json` in the current workspace.
+4. **Global configuration**: `~/.seepient/setting.json` in your home directory.
 
-### Supported Configuration Keys (JSON)
+### Core environment variables
 
-**Environment Variables:**
-- `SEEPIENT_SHELL_APPROVE`: Shell command approval mode (`auto`, `deny`, or unset for interactive)
-- `SEEPIENT_SKILLS_PATH`: Colon-separated list of additional skill directories
-- `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GLM_API_KEY`: Provider API keys
-- `OPENAI_COMPAT_API_KEY`, `OPENAI_COMPAT_BASE_URL`, `OPENAI_COMPAT_MODEL`: OpenAI-compatible provider settings
+| Variable | Purpose | Default |
+|:---|:---|:---|
+| `SEEPIENT_SHELL_APPROVE` | Shell command approval: `auto` (approve all), `deny` (block all), or unset (interactive prompt) | unset |
+| `SEEPIENT_CONSENT_MODE` | Runtime permission level: `ask-everything`, `edit-enabled`, or `autonomous` | `edit-enabled` |
+| `SEEPIENT_SKILLS_PATH` | Colon-separated list of custom skill directories | unset |
+| `SEEPIENT_SESSION_DIR` | Directory for persisted conversation history | `~/.seepient/sessions` |
 
-### Provider Management (v2 Architecture)
+---
 
-Seepient Agent features unified Provider Management with a shared interactive TUI dock (`/models`), first-run setup wizard (`seepient setup`), OAuth subscription sign-in (`/login`, `seepient auth login`), purpose × tier routing, dynamic upstream catalog discovery, multi-target automatic fallback, circuit-breaker cooldowns, and full cross-surface parity across CLI, Server, and SDK:
+## Provider management
 
-**Configuration (`~/.seepient/setting.json` or `.seepient/setting.json`):**
+Seepient routes model requests across upstream providers with automatic catalog discovery, multi-target fallback chains, and cross-surface parity between the TUI, CLI, Server, and SDK.
+
+### Setting up providers
+
+You can configure providers in three ways:
+
+#### 1. Zero-config auto-discovery
+If you have standard provider API keys in your environment or `.env`, Seepient detects them automatically at boot:
+- `OPENAI_API_KEY` (OpenAI)
+- `ANTHROPIC_API_KEY` (Anthropic Claude)
+- `GEMINI_API_KEY` (Google Gemini)
+- `DEEPSEEK_API_KEY` (DeepSeek)
+- `GROQ_API_KEY` (Groq)
+- `GLM_API_KEY` (Z.ai GLM)
+
+#### 2. Guided wizard and interactive TUI dock
+- Run `seepient setup` for the first-run interactive onboarding wizard.
+- In the TUI, press `Ctrl+M` or run `/models` to open the Model & Provider Dock. Browse models, test credentials, and switch active tiers visually.
+
+#### 3. CLI commands
+Add accounts, sign in with OAuth, and map models from the shell:
+
+```bash
+# Sign in with OAuth or configure API keys interactively
+seepient auth login openai
+seepient auth login anthropic
+
+# Configure using a custom environment variable or key directly
+seepient auth login my-openai --env-var CUSTOM_OPENAI_KEY
+seepient auth login my-claude --key sk-ant-...
+
+# Register a local endpoint (Ollama, LM Studio, vLLM) without credentials
+seepient providers add ollama-local --upstream openai --base-url http://127.0.0.1:11434/v1 --credential none
+
+# Assign default models by purpose and tier
+seepient models set text.standard openai/gpt-5.6-terra
+seepient models set text.efficient openai/gpt-5.6-luna
+seepient models set plan.standard openai/gpt-5.6-sol
+```
+
+### Credential storage options
+
+Credentials are never stored in plaintext within version-controlled repositories:
+
+| Storage mode | `kind` | Description |
+|:---|:---|:---|
+| **OS Keychain** | `keychain` | Encrypted via macOS Keychain or Linux Secret Service. No plaintext keys touch disk. |
+| **OAuth / Session** | `seepient` | Secure token storage with automatic token refresh for subscription sign-ins. |
+| **Environment pointer** | `env` | Stores only the variable name (e.g. `OPENAI_API_KEY`). The secret stays in your shell environment. |
+| **None** | `none` | For local inference endpoints that do not require authentication (e.g. Ollama, LM Studio). |
+
+### Configuration shape (`setting.json`)
+
+When saved to `~/.seepient/setting.json` or `.seepient/setting.json`, your provider configuration and tiered assignments use this format:
+
 ```json
 {
   "providers": {
@@ -595,19 +649,19 @@ Seepient Agent features unified Provider Management with a shared interactive TU
 }
 ```
 
-> **⚠️ Security Note**: Never commit API keys or secrets in plaintext into git repositories. Use environment variables (e.g., `OPENAI_API_KEY`), `seepient auth login` with system keychain storage, or OAuth provider sign-in.
+---
 
 ## Integrations
 
-### Gateway (MCP Client + REST Proxy + OpenAPI Adapter)
+### Gateway (MCP client, REST proxy, OpenAPI adapter)
 
-Seepient Agent v0.3.0 introduces a universal API gateway that connects to downstream MCP servers and REST APIs:
+Seepient includes a universal API gateway that connects to downstream MCP servers and REST APIs:
 
-- **Semantic Injection**: Middleware scores your message against all discovered tools and injects the top-K most relevant directly into the agent's tool context. Zero context pollution.
-- **Proxy Pattern**: Generic tools (`gateway_route`, `gateway_call_tool`, etc.) let the agent navigate targets when semantic injection finds no match.
-- **OpenAPI Import**: Import any OpenAPI spec (JSON/YAML) and auto-register all operations as a REST target.
-- **Credential Trust Guard**: Admin-registered targets can resolve stored credentials; agent-registered targets cannot — preventing credential exfiltration.
-- **Audit Logging**: Ring-buffer audit logs with per-target usage summaries for debugging and self-healing.
+- **Semantic injection**: Middleware scores your message against all discovered tools and injects the top-K most relevant directly into the agent tool context.
+- **Proxy pattern**: Generic tools (`gateway_route`, `gateway_call_tool`) let the agent navigate targets when semantic injection finds no match.
+- **OpenAPI import**: Import any OpenAPI spec (JSON/YAML) and auto-register all operations as a REST target.
+- **Credential trust guard**: Admin-registered targets can resolve stored credentials; agent-registered targets cannot, preventing credential exfiltration.
+- **Audit logging**: Ring-buffer audit logs with per-target usage summaries for debugging and self-healing.
 
 **Configuration** (`~/.seepient/setting.json` or env vars):
 ```json
@@ -619,7 +673,7 @@ Seepient Agent v0.3.0 introduces a universal API gateway that connects to downst
 }
 ```
 
-**Interactive TUI / REPL Command**: `/gateway list|add|remove|toggle|routes|credentials|audit|usage`
+**Interactive TUI command**: `/gateway list|add|remove|toggle|routes|credentials|audit|usage`
 
 **REST API**: `GET/POST/PATCH/DELETE /v1/gateway/*` (admin scope required for mutations)
 
@@ -628,15 +682,6 @@ Seepient Agent v0.3.0 introduces a universal API gateway that connects to downst
 import { gateway } from 'seepient';
 const gw = await gateway.createGateway({ enabled: true, semanticTopK: 3, defaultRateLimitPerMin: 60, maxAuditLogsInMemory: 1000 });
 ```
-
-### Multi-Provider LLM Support
-Seepient Agent supports multiple AI providers with seamless switching:
-- **OpenAI**: GPT-4, GPT-3.5-turbo, and latest models
-- **Anthropic**: Claude Sonnet, Haiku, Opus models
-- **GLM**: Z.ai GLM-4.5, GLM-4.7, GLM-5.1 models
-- **OpenAI-Compatible**: DeepSeek, LocalLLM, Ollama, LM Studio, and any OpenAI-compatible endpoint
-
-Configure multiple providers during setup and switch between them using `/models` command or `-p` flag.
 
 ### Web Search (Tavily)
 Seepient Agent can search the web if you provide a Tavily API Key during setup or in config.
@@ -696,70 +741,87 @@ Skills are discovered in priority order (last wins):
 export SEEPIENT_SKILLS_PATH=/path/to/skills:/another/path
 ```
 
-## Docker Support
+## Docker support
 
-Seepient Agent includes a production-ready [`Dockerfile`](./Dockerfile) (Node 22.19 Slim) and [`docker-compose.yml`](./docker-compose.yml) for containerized deployment.
+Seepient includes a production multi-stage [`Dockerfile`](./Dockerfile) based on Node 22 Slim, plus a [`docker-compose.yml`](./docker-compose.yml) file for container deployment.
 
-### Quick Start with Docker
+### Quick start with Docker
 
 ```bash
 # Clone and build
 git clone https://github.com/hashangit/seepient.git
 cd seepient
-docker build -t seepient-server .
+docker build -t seepient .
 
-# Run the server
+# Run the server with persistent sessions and a mounted workspace
 docker run -d -p 7337:7337 \
-  -e OPENAI_API_KEY=sk-... \
-  seepient-server
+  --name seepient-server \
+  --env-file .env \
+  -v seepient-sessions:/data/sessions \
+  -v $(pwd)/workspace:/workspace \
+  seepient
 
-# Or use Docker Compose
+# Or start with Docker Compose
 docker compose up -d
 ```
 
-### Docker-Optimized CLI Mode
+### Run CLI commands in containers
+
 Use `--docker` for non-interactive execution inside containers:
+
 ```bash
 docker run --rm \
-  -e OPENAI_API_KEY=sk-... \
-  -e SEEPIENT_SHELL_APPROVE=auto \
-  seepient-server seepient "Check disk usage" --docker
+  --env-file .env \
+  -v $(pwd)/workspace:/workspace \
+  seepient seepient chat "Check disk usage" --docker
 ```
 
-Seepient Agent auto-detects Docker and non-interactive environments. When running in a container, it adjusts behavior accordingly (no interactive prompts, streamlined output).
+When Seepient detects a container or non-interactive shell (or when passed `--docker`), it turns off interactive prompts and formats output cleanly for log streams.
 
-### Shell Approval in Containers
-Set `SEEPIENT_SHELL_APPROVE` to control how shell commands are approved without interactive prompts:
-- `auto`: Automatically approve all commands (use in trusted/sandboxed environments)
-- `deny`: Deny all shell command execution
-- _(unset)_: Interactive prompt (default, requires a TTY)
+### Shell approval in containers
+
+Set `SEEPIENT_SHELL_APPROVE` to control command execution without interactive prompts:
+- `auto`: Approve commands automatically (recommended for isolated containers)
+- `deny`: Block all shell execution
+- _(unset)_: Ask interactively (requires a TTY)
+
+### Docker Compose setup
+
+The repo includes [`docker-compose.yml`](./docker-compose.yml) configured with volume persistence, health checks, and non-root security options:
 
 ```yaml
-# docker-compose.yml example
 services:
   seepient:
     build: .
+    image: seepient:latest
+    container_name: seepient-server
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - SEEPIENT_SESSION_DIR=/data/sessions
     ports:
       - "7337:7337"
-    environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - SEEPIENT_SHELL_APPROVE=auto
-      - SEEPIENT_SKILLS_PATH=/app/skills
+    volumes:
+      - seepient-sessions:/data/sessions
+      - ./skills:/mnt/skills:ro
+      - ./workspace:/workspace
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  seepient-sessions:
+    driver: local
 ```
 
-### Non-Latin Font Issues in Screenshots
-When running Seepient Agent inside a Docker container (especially Alpine or Debian Slim), screenshots of websites with non-Latin text (e.g., CJK characters) may display text as square boxes ("tofu") due to missing fonts. Emojis (e.g., 🔥) may also appear as squares.
+### Built-in browser and font support
 
-**Solution:** Install CJK (Chinese/Japanese/Korean) and Emoji fonts in your container.
-
-**For Debian/Ubuntu:**
-```bash
-apt-get update && apt-get install -y fonts-noto-cjk fonts-wqy-zenhei fonts-noto-color-emoji
-```
-
-**For Alpine Linux:**
-```apk add font-noto-cjk font-noto-emoji```
+The production image comes with tools pre-installed for web workflows:
+- **System Chromium**: Playwright uses system Chromium (`/usr/bin/chromium`) instead of downloading a separate browser binary.
+- **CJK and emoji fonts**: `fonts-noto-cjk` and `fonts-noto-color-emoji` are baked into the image, so web page screenshots render Chinese, Japanese, Korean, and emoji glyphs properly without tofu boxes.
+- **Native commit helper**: Compiles and installs `seepient-fs-commit` for exact atomic file operations.
+- **Non-root user**: Runs under `appuser` (UID 1001) supervised by `dumb-init` for proper signal handling.
 
 ## License
 
