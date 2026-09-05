@@ -88,7 +88,7 @@
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.67",
     "@anthropic-ai/sdk": "^0.52.0",
-    "@earendil-works/pi-ai": "0.84.4",
+    "@earendil-works/pi-ai": "0.85.1",
     "@google/genai": "2.15.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@mozilla/readability": "^0.6.0",
