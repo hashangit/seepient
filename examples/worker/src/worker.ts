@@ -45,6 +45,7 @@ export interface WorkerTaskConfig {
   persistence?: PersistenceBackend;
   consentMode?: ConsentMode;
   relayApproval?: (req: PermissionRequest) => Promise<PermissionDecision>;
+  commitHelper?: any;
 }
 
 /**
@@ -268,6 +269,7 @@ export async function createWorkerAgent(config: WorkerTaskConfig): Promise<Seepi
     capabilityLedger,
     persist: persistence,
     consentMode: config.consentMode ?? "ask-everything",
+    commitHelper: config.commitHelper,
     approvalBroker: {
       mode: "callback",
       request: async (req: PermissionRequest) => {

@@ -29,6 +29,9 @@ jobs:
       - name: Typecheck
         run: pnpm exec tsc --noEmit
 
+      - name: Build native helper
+        run: pnpm native:build
+
       - name: Test
         run: pnpm test
 

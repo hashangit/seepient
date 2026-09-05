@@ -20,6 +20,7 @@ import {
 } from "../src/worker.js";
 import { createStubApp } from "../src/stub-app.js";
 import { createFakeRuntime } from "../../../src/transport/sdk/__tests__/helpers/fake-stores.js";
+import { diskBackedFakeHelper } from "../../../src/capabilities/execution/__tests__/helpers/commit-helper-fakes.js";
 
 describe("QS-4: Reference Worker End-to-End", () => {
   let homeDir: string;
@@ -92,6 +93,7 @@ describe("QS-4: Reference Worker End-to-End", () => {
       runtime,
       controlPlaneUrl: `http://127.0.0.1:${controlPlanePort}`,
       consentMode: "ask-everything",
+      commitHelper: diskBackedFakeHelper(),
     });
 
     const response = await workerAgent.chat("Get time and write summary");
