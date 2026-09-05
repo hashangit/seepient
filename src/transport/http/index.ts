@@ -13,7 +13,7 @@ import * as path from "path";
 import { homedir } from "os";
 
 import { getSyncBuiltinCatalog } from "../../domain/providers/model-catalog.js";
-import { getDefaultProviderRuntime, ProviderRuntime } from "../../domain/providers/provider-runtime.js";
+import { getDefaultProviderRuntime } from "../../domain/providers/provider-runtime.js";
 import { serverGenerateText, serverStreamText } from "./server-core.js";
 import { createRestHandler, type RestHandlerContext } from "./rest.js";
 import { setupWebSocket, closeWebSocket, type WebSocketHandlerContext } from "../ws/websocket.js";

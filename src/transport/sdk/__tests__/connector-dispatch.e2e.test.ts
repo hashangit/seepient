@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { createAgent } from "../index.js";
+import { createSeepient } from "../index.js";
 import { brokerConnector } from "../custom-tools.js";
 import { createMockRuntime } from "../../../domain/__tests__/test-doubles.js";
 import type { BrokerNetworkAdapter } from "../../../capabilities/execution/effect-broker.js";
@@ -19,7 +19,7 @@ describe("brokerConnector Dispatch & Parity (QS-2.1 – QS-2.4)", () => {
     process.env = { ...ORIGINAL_ENV };
   });
 
-  it("QS-2.1: executes brokerConnector via createAgent with zero embedder code execution and stubbed network", async () => {
+  it("QS-2.1: executes brokerConnector via createSeepient with zero embedder code execution and stubbed network", async () => {
     process.env.TAVILY_API_KEY = "tvly-test-valid-key-999";
 
     const searchTool = brokerConnector({
@@ -88,7 +88,7 @@ describe("brokerConnector Dispatch & Parity (QS-2.1 – QS-2.4)", () => {
       },
     };
 
-    const agent = await createAgent({
+    const agent = await createSeepient({
       runtime: runtime as never,
       tools: [searchTool],
       network: mockNetwork,
@@ -167,7 +167,7 @@ describe("brokerConnector Dispatch & Parity (QS-2.1 – QS-2.4)", () => {
       },
     };
 
-    const agent = await createAgent({
+    const agent = await createSeepient({
       runtime: runtime as never,
       tools: [searchTool],
       network: mockNetwork,
@@ -215,7 +215,7 @@ describe("brokerConnector Dispatch & Parity (QS-2.1 – QS-2.4)", () => {
       { content: "Unresolved secret handled." },
     ]);
 
-    const agent2 = await createAgent({
+    const agent2 = await createSeepient({
       consentMode: "autonomous",
       runtime: runtime2 as never,
       tools: [missingSecretTool],
@@ -256,7 +256,7 @@ describe("brokerConnector Dispatch & Parity (QS-2.1 – QS-2.4)", () => {
       { content: "Handled failure." },
     ]);
 
-    const agent = await createAgent({
+    const agent = await createSeepient({
       runtime: runtime as never,
       tools: [badConnectorTool],
       approveTool: async () => {
@@ -315,7 +315,7 @@ describe("brokerConnector Dispatch & Parity (QS-2.1 – QS-2.4)", () => {
       { content: "HTTP fetch complete." },
     ]);
 
-    const agent = await createAgent({
+    const agent = await createSeepient({
       runtime: runtime as never,
       tools: [httpTool],
       network: mockNetwork,
@@ -336,7 +336,7 @@ describe("brokerConnector Dispatch & Parity (QS-2.1 – QS-2.4)", () => {
       { content: "Blocked." },
     ]);
 
-    const ssrfAgent = await createAgent({
+    const ssrfAgent = await createSeepient({
       runtime: ssrfRuntime as never,
       tools: [httpTool],
       consentMode: "autonomous",

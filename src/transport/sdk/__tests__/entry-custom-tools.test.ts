@@ -3,7 +3,7 @@
  *
  * Verifies:
  *  1. Custom tool factories and types are exported directly from package entry.
- *  2. Multi-tool per-agent execution through createAgent({ permissionPipeline: true }).
+ *  2. Multi-tool per-agent execution through createSeepient({ permissionPipeline: true }).
  *  3. generateText execution with explicit trustedHostTool registrations.
  *  4. Seepient.listProviders() derives distinct upstream providers from the catalog.
  */
@@ -12,7 +12,6 @@ import { mkdtempSync, rmSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  createAgent,
   generateText,
   createSeepient,
   preparedTool,
@@ -113,7 +112,7 @@ describe("SDK Entry Re-exports (W1)", () => {
 });
 
 describe("Multi-tool per-agent composition (W1, W2)", () => {
-  it("executes multiple registered trustedHostTools through createAgent without global registry", async () => {
+  it("executes multiple registered trustedHostTools through createSeepient without global registry", async () => {
     const calls: string[] = [];
 
     const getBalanceTool = trustedHostTool({
@@ -184,7 +183,7 @@ describe("Multi-tool per-agent composition (W1, W2)", () => {
 
     const tools: AnyToolRegistration[] = [getBalanceTool, transferTool];
 
-    const agent = await createAgent({
+    const agent = await createSeepient({
       runtime: runtime as never,
       tools,
       cwd: dir,

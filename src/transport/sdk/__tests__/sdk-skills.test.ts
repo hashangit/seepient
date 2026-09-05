@@ -1,7 +1,7 @@
 /**
  * Tests for SDK agent skill support.
  *
- * Boundary under test: that createAgent() initializes the skill registry
+ * Boundary under test: that createSeepient() initializes the skill registry
  * (so use_skill works), injects the catalog into the system message, and
  * respects the `skills: false` opt-out. runAgentLoop is mocked.
  */
@@ -29,7 +29,7 @@ function mockRunAgentLoop() {
   return fn;
 }
 
-describe('SDK createAgent skill support', () => {
+describe('SDK createSeepient skill support', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
@@ -37,8 +37,8 @@ describe('SDK createAgent skill support', () => {
 
   it('initializes the skill registry and injects catalog into the system message', async () => {
     mockRunAgentLoop();
-    const { createAgent } = await import('../index.js');
-    const agent = await createAgent({ systemPrompt: 'BASE' });
+    const { createSeepient } = await import('../index.js');
+    const agent = await createSeepient({ systemPrompt: 'BASE' });
 
     const history = agent.getHistory();
     const sysMsg = history.find((m: any) => m.role === 'system');
@@ -56,8 +56,8 @@ describe('SDK createAgent skill support', () => {
 
   it('clear() re-seeds the system message with catalog (one copy, no accumulation)', async () => {
     mockRunAgentLoop();
-    const { createAgent } = await import('../index.js');
-    const agent = await createAgent({ systemPrompt: 'BASE' });
+    const { createSeepient } = await import('../index.js');
+    const agent = await createSeepient({ systemPrompt: 'BASE' });
 
     const before = agent.getHistory().find((m: any) => m.role === 'system')?.content ?? '';
     const countBefore = (before.match(/AVAILABLE SKILLS/g) || []).length;
@@ -73,8 +73,8 @@ describe('SDK createAgent skill support', () => {
 
   it('skills: false disables skill initialization', async () => {
     mockRunAgentLoop();
-    const { createAgent } = await import('../index.js');
-    const agent = await createAgent({ systemPrompt: 'BASE', skills: false });
+    const { createSeepient } = await import('../index.js');
+    const agent = await createSeepient({ systemPrompt: 'BASE', skills: false });
 
     const sysMsg = agent.getHistory().find((m: any) => m.role === 'system');
     expect(sysMsg?.content).toBe('BASE'); // no catalog appended

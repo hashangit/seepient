@@ -10,7 +10,7 @@ Seepient provides complete, fail-closed policy enforcement and sandbox execution
 - **Embedder Storage Sovereignty**: The embedder owns and supplies store adapters for sessions, audit logs, policies, capability consumption, and provider configurations.
 
 > [!NOTE]
-> **Embedder SDK Entry Points**: Stateless store injection is supported on `createAgent`, `generateText`, and `streamText`. To operate statelessly without local disk writes, embedders inject their own store contracts (`auditStore`, `policyStore`, `capabilityLedger`, `runtime`, and `persist`).
+> **Embedder SDK Entry Points**: Stateless store injection is supported on `createSeepient`, `generateText`, and `streamText`. To operate statelessly without local disk writes, embedders inject their own store contracts (`auditStore`, `policyStore`, `capabilityLedger`, `runtime`, and `persist`).
 
 ---
 
@@ -159,7 +159,7 @@ For interactive human-in-the-loop approvals:
 3. Once the end-user decides, the embedder resolves the promise with `true` (approved) or `false` (denied).
 
 ```typescript
-const agent = await createAgent({
+const agent = await createSeepient({
   principalId: "tenant-user-123",
   sessionId: "session-abc",
   cwd: "/workspace",
@@ -177,7 +177,7 @@ const agent = await createAgent({
 
 ### 2. Resume Pattern (Serverless Execution)
 For execution that spans multiple requests:
-1. Initialize `createAgent({ sessionId: "sess-123", persist: myBackend })`.
+1. Initialize `createSeepient({ sessionId: "sess-123", persist: myBackend })`.
 2. Execute `await agent.chat(...)`. Session messages and metadata automatically save to `myBackend`.
 3. Release the worker / request context.
 4. On subsequent requests with the same `sessionId`, history is restored automatically from `myBackend`.

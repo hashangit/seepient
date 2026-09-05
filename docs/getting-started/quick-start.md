@@ -151,13 +151,13 @@ All other code remains the same!
 
 ## Step 6: Create an Agent
 
-For complex, multi-step tasks, use `createAgent`:
+For complex, multi-step tasks, use `createSeepient`:
 
 ```typescript
-import { createAgent } from 'seepient'
+import { createSeepient } from 'seepient'
 
 async function main() {
-  const agent = await createAgent({
+  const agent = await createSeepient({
     provider: 'openai',
     model: 'gpt-5.4',
     tools: ['execute_shell_command', 'read_file', 'web_search']

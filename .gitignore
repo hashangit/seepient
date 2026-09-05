@@ -35,6 +35,10 @@ Library/
 .codex/
 .commandcode/
 .specify/
+.pi/
+
+# Temporary files
+.tmp/
 
 # Logs
 *.log

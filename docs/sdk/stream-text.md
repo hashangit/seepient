@@ -268,4 +268,4 @@ for await (const chunk of stream.textStream) {
 ## Related APIs
 
 - [generateText()](/sdk/generate-text) -- Non-streaming one-shot execution
-- [createAgent()](/sdk/create-agent) -- Stateful agent with `.chatStream()` method
+- [createSeepient()](/sdk/create-seepient) -- Stateful agent with `.chatStream()` method

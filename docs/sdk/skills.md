@@ -52,12 +52,12 @@ const result = await generateText("Deploy the staging environment", {
 });
 ```
 
-### With createAgent
+### With createSeepient
 
 ```typescript
-import { createAgent } from "seepient";
+import { createSeepient } from "seepient";
 
-const agent = await createAgent({
+const agent = await createSeepient({
   skills: ["docker-ops", "code-review"],
   tools: ["core", "comm"],
 });
@@ -76,7 +76,7 @@ import { initializeSkillRegistry } from "seepient";
 await initializeSkillRegistry(process.cwd());
 ```
 
-Call this at application startup to ensure skills are discovered before the first agent invocation. Seepient Agent calls this automatically when you pass `skills` to `generateText()` or `createAgent()`, but you may call it explicitly to pre-load skills or inspect the registry.
+Call this at application startup to ensure skills are discovered before the first agent invocation. Seepient Agent calls this automatically when you pass `skills` to `generateText()` or `createSeepient()`, but you may call it explicitly to pre-load skills or inspect the registry.
 
 ## Skill search paths
 
@@ -522,6 +522,6 @@ The `use_skill` tool path does **not** perform provider switching or `@path` res
 ## Related APIs
 
 - [generateText()](/sdk/generate-text) -- One-shot execution with skills
-- [createAgent()](/sdk/create-agent) -- Stateful agent with skill support
+- [createSeepient()](/sdk/create-seepient) -- Stateful agent with skill support
 - [Custom Tools](/sdk/custom-tools) -- Build custom tools
 - [Types](/sdk/types) -- Full TypeScript type reference

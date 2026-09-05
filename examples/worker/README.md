@@ -26,3 +26,10 @@ When packaging a stateless worker container image (e.g. Docker, gVisor, Firecrac
 - **Native Helper (`fs-commit`)**: The precompiled native helper binary (`native/fs-commit/target/release/seepient-fs-commit` or platform binary) should be baked into the container image or mounted read-only.
 - **Linux Sandbox**: The container should provide `bwrap` (Bubblewrap) or `nsjail` in the image PATH if machine execution tools (`execute_shell_command`, etc.) are enabled. Without them, execution tools fail closed with `ISOLATION_UNAVAILABLE`.
 - **Stateless Filesystem**: Worker container filesystems can be completely ephemeral (`read-only` root with `tmpfs` mounts); all audit records, session messages, capability records, and policies route to the embedder control plane.
+
+## Embedding in Production Applications
+
+> **Note on Imports**: This example imports modules via relative paths (`../../src/index.js`) so that it compiles and runs directly within the monorepo test configuration without publishing. In your standalone application or container, install the package and import the canonical entry point:
+> ```typescript
+> import { createSeepient } from "seepient";
+> ```

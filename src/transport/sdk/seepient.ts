@@ -29,9 +29,8 @@ import {
   createPersistenceBackend,
 } from "../../domain/sessions/session-store.js";
 import type {
-  AgentCreateOptions,
   CreateSeepientOptions,
-  SdkAgent,
+  Seepient,
   AgentResponse,
   StreamTextOptions,
   StreamTextResult,
@@ -177,7 +176,7 @@ export function warnIfPartialStoreInjection(opts: {
  * Supports single-turn chat, multi-turn conversations, streaming responses,
  * model switching, tool execution, session persistence, and provider management.
  */
-export async function createSeepient(options?: CreateSeepientOptions): Promise<SdkAgent> {
+export async function createSeepient(options?: CreateSeepientOptions): Promise<Seepient> {
   const opts = options ?? {};
 
   // If providers, modelAssignments, or overlay options are passed without an explicit runtime,
@@ -387,19 +386,14 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
 
   // Concurrency guard (Promise-chain mutex)
   let lock: Promise<void> = Promise.resolve();
-  let releaseLock: (() => void) | null = null;
 
-  function acquire(): Promise<void> {
+  function acquire(): Promise<() => void> {
     const prev = lock;
+    let myRelease!: () => void;
     lock = new Promise<void>((r) => {
-      releaseLock = r;
+      myRelease = r;
     });
-    return prev;
-  }
-
-  function release(): void {
-    releaseLock?.();
-    releaseLock = null;
+    return prev.then(() => myRelease);
   }
 
   const cumulativeUsage: CumulativeUsage = {
@@ -435,7 +429,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   // ── chat() ──────────────────────────────────────────────────────────────
 
   async function chat(userMessage: string): Promise<AgentResponse> {
-    await acquire();
+    const release = await acquire();
     try {
       activeAbortController = new AbortController();
 
@@ -498,7 +492,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     userMessage: string,
     streamOptions?: StreamTextOptions,
   ): Promise<StreamTextResult> {
-    await acquire();
+    const release = await acquire();
 
     try {
       const streamAbort = new AbortController();
@@ -847,69 +841,6 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     }
   }
 
-  // ── Surface Compatibility Helpers ──────────────────────────────────────
-
-  async function createChildAgent(childOpts: AgentCreateOptions): Promise<SdkAgent> {
-    return createSeepient({
-      ...opts,
-      ...childOpts,
-      runtime,
-    });
-  }
-
-  async function run(input: string | any[]): Promise<any> {
-    const promptText = typeof input === "string"
-      ? input
-      : input.find((b: any) => b.type === "text")?.text ?? "";
-    const res = await chat(promptText);
-    const snapshot = await runtime.createTurnSnapshot();
-    const plan = await runtime.resolvePlan(
-      snapshot,
-      (purpose ?? "text") as any,
-      (tier ?? "standard") as any,
-      currentModelOverride(),
-    );
-    return {
-      stopReason: "end_turn",
-      content: [{ type: "text", text: res.text }],
-      usage: res.usage,
-      servedBy: {
-        providerAccount: plan.selectedTarget.providerAccount,
-        model: plan.selectedTarget.model,
-        thinkingLevel: plan.selectedTarget.thinkingLevel,
-      },
-    };
-  }
-
-  async function stream(input: string | any[]): Promise<AsyncIterable<any>> {
-    const promptText = typeof input === "string"
-      ? input
-      : input.find((b: any) => b.type === "text")?.text ?? "";
-    const res = await chatStream(promptText);
-    async function* eventGenerator() {
-      for await (const chunk of res.textStream) {
-        yield {
-          type: "content_block_delta",
-          delta: { type: "text_delta", text: chunk },
-        };
-      }
-      yield {
-        type: "finish",
-        stopReason: "end_turn",
-        usage: await res.usage,
-      };
-    }
-    return eventGenerator();
-  }
-
-  async function switchModel(override: { providerAccount?: string; model?: string; thinkingLevel?: any }): Promise<void> {
-    if (override.providerAccount && override.model) {
-      await switchProvider(override.providerAccount, override.model);
-    } else if (override.model) {
-      await switchProvider(override.model);
-    }
-  }
-
   return {
     sessionId,
     chat,
@@ -935,17 +866,5 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     reload,
     resolve,
     dispose,
-
-    // Compatibility
-    createAgent: createChildAgent,
-    run,
-    stream,
-    get messages() {
-      return messages.filter((m) => m.role !== "system");
-    },
-    switchModel,
   };
 }
-
-/** Pre-1.0 backward compatibility alias */
-export const createAgent = createSeepient;

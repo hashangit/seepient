@@ -230,7 +230,7 @@ Current layout of the Obsidian vault (annotated):
 │       ├── contracts/                # store-contracts, sdk-injection-options, worker-deployment
 │       ├── quickstart.md             # QS-0–QS-4 validation scenarios + production budgets
 │       ├── tasks.md                  # T001–T018 dependency-ordered, US1–US3 story phases, test-first gates
-│       └── 021-1-skill-sources/      # Sub-spec: injectable skill sources (021-1 — planned, same branch/release)
+│       ├── 021-1-skill-sources/      # Sub-spec: injectable skill sources (021-1 — planned, same branch/release)
 │           ├── spec.md               # SkillSource/SkillStore + inline tier; FR-001–FR-009, M1–M6, SC-001–SC-005
 │           ├── plan.md               # P0 contract+composition+inline → P1 write path+016/018 coordination → P2 example+docs
 │           ├── research.md           # Skills-gap design ledger E1–E6 + decisions D1–D7 (2026-08-31)
@@ -238,6 +238,14 @@ Current layout of the Obsidian vault (annotated):
 │           ├── contracts/            # skill-source-contract, sdk-skill-options
 │           ├── quickstart.md         # QS-S0–QS-S4 validation scenarios + budgets
 │           └── tasks.md              # T001–T013 dependency-ordered, US1–US3 story phases, test-first gates
+│       └── 021-2-review-remediation/ # Sub-spec: consolidated review repairs (021-2 — planned; gates 021-1, same branch/release)
+│           ├── spec.md               # Release safety + server sessions + transport hardening + docs truth; FR-001–FR-019, M1–M12, SC-001–SC-010
+│           ├── plan.md               # US1 release safety → US2 sessions/WS integrity → US3 type truth ∥ US4 hardening/docs (blast-radius table)
+│           ├── research.md           # Four-source consolidation: E1–E24 verified evidence, D1–D15 decisions, S1–S5 scrutiny
+│           ├── data-model.md         # Changed shapes: pack gate, REST sessions, WS guard, pinned fetch, limits, logging
+│           ├── contracts/            # release-artifact-contract, server-session-surface, transport-hardening, sdk-parity-and-type-truth
+│           ├── quickstart.md         # QS-0–QS-7 validation scenarios + QS-P production budgets
+│           └── tasks.md              # T001–T027 dependency-ordered, US1–US4 stories, test-first gates
 ├── 010-provider-management-redesign/ # Provider mgmt redesign: contracts + runtime + purpose/tier routing
 │   ├── spec.md                       # Problem, 5 blockers + 4 gaps, scope decisions, success criteria
 │   ├── plan.md                       # P0-P7 phased plan (contracts → Pi adapter → runtime → resolution → surfaces → reliability)
@@ -476,6 +484,44 @@ Keep `CONTEXT.md` under 20 lines total. Do NOT summarize the full conversation �
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
+- **ACTIVE PLAN (sub-spec of 021; gates 021-1)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/021-stateless-sdk-workers/021-2-review-remediation/plan.md`
+  — Review remediation (021-2): consolidation of four review passes (two
+  product reviews, ultra-deep repo review, owner SSRF analysis), every
+  finding re-verified against the working tree (research.md E1–E24).
+  US1 release safety (MVP, gates tagging): uncommitted T033 made
+  `prepublishOnly` run `clean` (rm -rf dist), which would wipe CI-staged
+  native exact-commit binaries at the next npm publish — restore the hook,
+  add `pack:verify` (static hook assertion + tarball file-list gate) in
+  CI before publish; the Docker image cannot boot (entrypoint targets
+  deleted dist/adapters + nonexistent --serve) — fix to standalone
+  server + CI image-health job; cut 0.7.0 with reconstructed [v0.6.0];
+  delete scratch artifacts. US2 server sessions & WS integrity (with US1,
+  gates 021-1 per M7): WS chat never registers ServerSessionManager
+  sessions (createSession dead code, addMessage silent no-op, user
+  messages never stored) — id-preserving createSession({id}), register on
+  first turn, persist user+assistant; GET /v1/sessions implemented (owner
+  decision); POST /v1/chat accepts sessionId, handler is the persistence
+  actor (owner decision); WS busy guard REQUEST_IN_FLIGHT + abort reaches
+  the live stream + UUID pipeline identities; chatStream mutex deadlock
+  fixed (finally awaited persistMessages before release). US3 SDK type
+  truth: purpose/tier on generateText/streamText; narrow
+  TrustedHostToolEffectDeclaration to the three validated kinds (type
+  admits what runtime rejects today); one isLocalAuditStore predicate.
+  US4 transport hardening & docs truth (owner direction — in this spec,
+  not deferred): SSRF safeSsrfFetch validates DNS then plain-fetches the
+  hostname again (rebinding TOCTOU, hop-cap-less redirects, range gaps) —
+  reuse the existing NodeNetworkAdapter pinned-socket technique
+  (effect-broker.ts:668-715) via a domain/network wrapper (no layer skip,
+  no third-party client), injectable resolver for rebinding tests; DoS
+  caps (10MB body/413, 1MiB WS maxPayload, per-key 429 rate limit, all
+  env-tunable, CORS allowlist opt-in); JSON-line request logging with
+  requestId + sanitized 500s; BSL-1.1 footer, remove phantom
+  seepient/react guide, sessionStore→persist, fidelity-tier + keying
+  docs, layered-defense note (IMDSv2/egress = embedder infra).
+  Deferred by M11: hashKey truncation, native-helper spawn timeout,
+  Actions SHA pinning, full console migration, WS token endpoint,
+  worker-callback credentials. ≈9 focused days. tasks.md ready
+  (T001–T027).
 - **IMPLEMENTED (branch `021-stateless-sdk-workers`)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/021-stateless-sdk-workers/plan.md`
   — Stateless SDK workers & embedder-owned storage (021): multi-tenant embedders
   get every piece of tenant state (credentials, provider config, audit, policy,
@@ -499,7 +545,8 @@ shell commands, and other important information, read the current plan:
   worker with HTTP-callback stores; Docker scheduler multi-host and kernel
   tier explicitly out (isolation ladder is deployment guidance). P0 ≈5d,
   P1 ≈3d, P2 ≈2d. Sub-spec 021-1 (`021-1-skill-sources/`, plan + tasks
-  complete — implementation next, T001–T013, same branch/release): injectable `SkillSource`/
+  complete — implementation starts after 021-2 lands, T001–T013, same
+  branch/release): injectable `SkillSource`/
   `SkillStore` + inline-skills tier so skill content joins the store-contract
   family — serverless light shape gets a working skill system (ambient fs
   discovery silently no-ops there today), embedders compose global +

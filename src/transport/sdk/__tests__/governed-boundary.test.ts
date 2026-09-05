@@ -3,9 +3,8 @@
  *
  * Asserts that every SDK entry point:
  * 1. createSeepient
- * 2. createAgent
- * 3. generateText
- * 4. streamText
+ * 2. generateText
+ * 3. streamText
  *
  * routes through the governed permission pipeline and execution boundary,
  * recording audit events in the injected AuditStore and enforcing fail-closed
@@ -18,7 +17,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   createSeepient,
-  createAgent,
   generateText,
   streamText,
   trustedHostTool,
@@ -86,7 +84,7 @@ describe("Governed Boundary Test Suite (Task 3.1)", () => {
     await seepient.close();
   });
 
-  it("createAgent (alias) routes through governed boundary and audit store", async () => {
+  it("createSeepient multi-turn conversation routes through governed boundary and audit store", async () => {
     const auditStore = new FakeAuditStore();
     const policyStore = new FakePolicyStore();
     const capabilityLedger = new FakeCapabilityLedger();
@@ -107,7 +105,7 @@ describe("Governed Boundary Test Suite (Task 3.1)", () => {
       ],
     });
 
-    const agent = await createAgent({
+    const agent = await createSeepient({
       cwd: workspaceDir,
       runtime,
       auditStore,

@@ -41,7 +41,7 @@ export default defineConfig({
             { text: 'Overview', link: '/sdk/overview' },
             { text: 'generateText', link: '/sdk/generate-text' },
             { text: 'streamText', link: '/sdk/stream-text' },
-            { text: 'createAgent', link: '/sdk/create-agent' },
+            { text: 'createSeepient', link: '/sdk/create-seepient' },
             { text: 'Custom Tools', link: '/sdk/custom-tools' },
             { text: 'Providers', link: '/sdk/providers' },
             { text: 'Skills', link: '/sdk/skills' },

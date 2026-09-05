@@ -5,7 +5,7 @@
  * 1. Two agents in one process with distinct injected stores and principals
  *    produce completely disjoint audit, policy, and capability ledger state.
  * 2. Custom AuditStore skips outbox and flushAudit() returns 0.
- * 3. SdkAgent exposes sessionId and validates it fail-fast against SESSION_ID_RE.
+ * 3. Seepient exposes sessionId and validates it fail-fast against SESSION_ID_RE.
  * 4. Session round-trip via sessionId restores conversation history and
  *    passes provider, model, and metadata on every persist.
  */
@@ -14,7 +14,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createAgent, generateText, streamText } from "../index.js";
+import { createSeepient, generateText, streamText } from "../index.js";
 import {
   FakeAuditStore,
   FakePolicyStore,
@@ -89,7 +89,7 @@ describe("QS-1: Store injection and session round-trip", () => {
       ],
     });
 
-    const agentA = await createAgent({
+    const agentA = await createSeepient({
       principalId: "tenant-alpha",
       auditStore: auditA,
       policyStore: policyA,
@@ -99,7 +99,7 @@ describe("QS-1: Store injection and session round-trip", () => {
       model: "mock-model-a",
     });
 
-    const agentB = await createAgent({
+    const agentB = await createSeepient({
       principalId: "tenant-beta",
       auditStore: auditB,
       policyStore: policyB,
@@ -165,7 +165,7 @@ describe("QS-1: Store injection and session round-trip", () => {
 
   it("fails fast on invalid sessionId format", async () => {
     await expect(
-      createAgent({
+      createSeepient({
         sessionId: "invalid/session/id",
       }),
     ).rejects.toThrow(/Invalid session ID/);
@@ -188,7 +188,7 @@ describe("QS-1: Store injection and session round-trip", () => {
     const customSessionId = "tenant-42-session-7";
     const customMetadata = { tenantId: "tenant-42", env: "production" };
 
-    const agent1 = await createAgent({
+    const agent1 = await createSeepient({
       sessionId: customSessionId,
       persist: backend,
       metadata: customMetadata,
@@ -213,7 +213,7 @@ describe("QS-1: Store injection and session round-trip", () => {
     await agent1.close();
 
     // Create a new agent with the SAME sessionId and backend
-    const agent2 = await createAgent({
+    const agent2 = await createSeepient({
       sessionId: customSessionId,
       persist: backend,
       runtime,
@@ -248,7 +248,7 @@ describe("QS-1: Store injection and session round-trip", () => {
       ],
     });
 
-    const agent = await createAgent({
+    const agent = await createSeepient({
       runtime,
       cwd: workspaceA,
       model: "mock-model",
@@ -273,7 +273,7 @@ describe("QS-1: Store injection and session round-trip", () => {
       }),
     });
 
-    const agent = await createAgent({
+    const agent = await createSeepient({
       sessionId: "err-sess-1",
       persist: backend,
       runtime,
@@ -352,7 +352,7 @@ describe("QS-1: Store injection and session round-trip", () => {
     });
 
     // Create agent resuming this session WITHOUT providing provider/providerAccount/model/metadata in options
-    const agent = await createAgent({
+    const agent = await createSeepient({
       sessionId,
       persist: backend,
       runtime,
@@ -386,7 +386,7 @@ describe("QS-1: Store injection and session round-trip", () => {
     const auditStore = new FakeAuditStore();
     const runtime = createFakeRuntime();
 
-    const agent = await createAgent({
+    const agent = await createSeepient({
       auditStore,
       runtime,
       cwd: workspaceA,

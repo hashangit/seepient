@@ -128,7 +128,7 @@ describe("custom-tool registration (T304, QS-3.6)", () => {
       },
       declaration: {
         risk: "safe",
-        effects: [{ kind: "host-callback", toolName: "declared_tool" }],
+        effects: [{ kind: "network-egress", destinations: ["api.example.com"] }],
         display: { title: "Declared Tool", summary: "Runs safe logic" },
       },
       async execute() {
@@ -186,5 +186,105 @@ describe("custom-tool registration (T304, QS-3.6)", () => {
 
     const badAnalyzer = makeRegistrationAnalyzer(invalidReg);
     await expect(badAnalyzer({}, mockCtx)).rejects.toThrow('Invalid risk category "ultra-high"');
+  });
+
+  it("validates declared effects fail-closed against allowlist and shape requirements (Task 2.1)", async () => {
+    const { makeRegistrationAnalyzer } = await import("../../../domain/permissions/registration-dispatch.js");
+    const mockCtx: any = {
+      principalId: "user-1",
+      runId: "run-1",
+      toolCallId: "call-1",
+      modelProviderClass: "openai",
+    };
+
+    // 1. Each valid kind passes
+    const validEffectsReg = trustedHostTool({
+      definition: {
+        type: "function",
+        function: { name: "valid_effects_tool", description: "d", parameters: { type: "object", properties: {}, required: [] } },
+      },
+      declaration: {
+        effects: [
+          { kind: "network-egress", destinations: ["https://api.stripe.com"] },
+          { kind: "secret-use", secretRefs: ["STRIPE_API_KEY"] },
+          { kind: "model-egress", dataClasses: ["sensitive"] },
+        ],
+      },
+      async execute() {
+        return "ok";
+      },
+    });
+    const validAnalyzer = makeRegistrationAnalyzer(validEffectsReg);
+    const action = await validAnalyzer({}, mockCtx);
+    expect(action.effects).toHaveLength(3);
+    expect(action.effects.map((e) => e.kind)).toEqual(["network-egress", "secret-use", "model-egress"]);
+
+    // 2. Unknown effect kind fails with teaching error
+    const unknownKindReg = trustedHostTool({
+      definition: {
+        type: "function",
+        function: { name: "unknown_tool", description: "d", parameters: { type: "object", properties: {}, required: [] } },
+      },
+      declaration: {
+        effects: [{ kind: "filesystem-write" } as any],
+      },
+      async execute() {
+        return "ok";
+      },
+    });
+    await expect(makeRegistrationAnalyzer(unknownKindReg)({}, mockCtx)).rejects.toThrow(
+      'Invalid effect kind "filesystem-write" in trustedHostTool declaration. Allowed kinds: network-egress, secret-use, model-egress',
+    );
+
+    // 3. network-egress without destinations fails
+    const missingDestReg = trustedHostTool({
+      definition: {
+        type: "function",
+        function: { name: "dest_tool", description: "d", parameters: { type: "object", properties: {}, required: [] } },
+      },
+      declaration: {
+        effects: [{ kind: "network-egress", destinations: [] }],
+      },
+      async execute() {
+        return "ok";
+      },
+    });
+    await expect(makeRegistrationAnalyzer(missingDestReg)({}, mockCtx)).rejects.toThrow(
+      'Invalid effect "network-egress" in trustedHostTool declaration: "destinations" must be a non-empty array',
+    );
+
+    // 4. secret-use without refs fails
+    const missingRefsReg = trustedHostTool({
+      definition: {
+        type: "function",
+        function: { name: "secret_tool", description: "d", parameters: { type: "object", properties: {}, required: [] } },
+      },
+      declaration: {
+        effects: [{ kind: "secret-use", secretRefs: [] }],
+      },
+      async execute() {
+        return "ok";
+      },
+    });
+    await expect(makeRegistrationAnalyzer(missingRefsReg)({}, mockCtx)).rejects.toThrow(
+      'Invalid effect "secret-use" in trustedHostTool declaration: "secretRefs" must be a non-empty array',
+    );
+
+    // 5. model-egress without dataClasses fails
+    const missingClassesReg = trustedHostTool({
+      definition: {
+        type: "function",
+        function: { name: "model_tool", description: "d", parameters: { type: "object", properties: {}, required: [] } },
+      },
+      declaration: {
+        effects: [{ kind: "model-egress", dataClasses: [] }],
+      },
+      async execute() {
+        return "ok";
+      },
+    });
+    await expect(makeRegistrationAnalyzer(missingClassesReg)({}, mockCtx)).rejects.toThrow(
+      'Invalid effect "model-egress" in trustedHostTool declaration: "dataClasses" must be a non-empty array',
+    );
   });
 });

@@ -24,7 +24,7 @@ features:
     details: Reusable AI behavior packages. Share and compose complex agent capabilities across projects.
   - icon: 🔧
     title: Functional API
-    details: Clean, composable functions like `generateText`, `streamText`, and `createAgent` for any use case.
+    details: Clean, composable functions like `generateText`, `streamText`, and `createSeepient` for any use case.
   - icon: 🐳
     title: Docker-Native
     details: Deploy anywhere as a container. Includes WebSocket + REST API server for production workloads.

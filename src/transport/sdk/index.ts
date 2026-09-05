@@ -1,7 +1,7 @@
 /**
  * Seepient SDK — Public entry point
  *
- * Exports `generateText`, `streamText`, `createAgent`, and all public types,
+ * Exports `generateText`, `streamText`, `createSeepient`, and all public types,
  * tool factories, provider helpers, and skill utilities.
  */
 
@@ -35,7 +35,7 @@ import * as path from 'path';
 
 // ── Re-exports ───────────────────────────────────────────────────────────
 
-export { createSeepient, createAgent, warnIfPartialStoreInjection } from "./seepient.js";
+export { createSeepient, warnIfPartialStoreInjection } from "./seepient.js";
 import { warnIfPartialStoreInjection } from "./seepient.js";
 export type {
   Seepient,
@@ -121,8 +121,6 @@ export type {
   GenerateTextResult,
   StreamTextOptions,
   StreamTextResult,
-  AgentCreateOptions,
-  SdkAgent,
   AgentResponse,
   SessionStore,
   SessionData,
