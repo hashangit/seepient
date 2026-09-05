@@ -8,7 +8,6 @@
  */
 
 import { ToolModule } from '../../foundations/contracts/tool.js';
-import { getSkillRegistry } from '../../capabilities/skills/index.js';
 import { limitSkillBody } from '../../capabilities/skills/types.js';
 
 export const UseSkillTool: ToolModule = {
@@ -36,14 +35,14 @@ export const UseSkillTool: ToolModule = {
       }
     }
   },
-  handler: async (args: any) => {
-    const registry = getSkillRegistry();
+  handler: async (args: any, config?: any, extra?: any) => {
+    const registry = extra?.skills ?? config?.skills;
     if (!registry) return "Error: Skill system not initialized.";
 
     const { skill_name, args: skillArgs } = args;
     const skill = registry.get(skill_name);
     if (!skill) {
-      return `Error: Skill '${skill_name}' not found. Available skills: ${registry.getAll().map(s => s.name).join(', ')}`;
+      return `Error: Skill '${skill_name}' not found. Available skills: ${registry.getAll().map((s: any) => s.name).join(', ')}`;
     }
 
     const body = await registry.getBody(skill_name);

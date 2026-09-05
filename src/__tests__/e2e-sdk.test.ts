@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createMockRuntime } from "../domain/__tests__/test-doubles.js";
-import { generateText, createAgent } from "../transport/sdk/index.js";
+import { generateText, createSeepient } from "../transport/sdk/index.js";
 
 describe("SDK e2e — generateText with mock runtime", () => {
   it("runs generateText end-to-end", async () => {
@@ -73,7 +73,7 @@ describe("SDK e2e — chatStream with a streaming runtime", () => {
       },
     ]);
 
-    const agent = await createAgent({ runtime, tools: [], maxSteps: 1 } as any);
+    const agent = await createSeepient({ runtime, tools: [], maxSteps: 1 } as any);
 
     const result = await agent.chatStream("hi");
     const chunks: string[] = [];

@@ -18,6 +18,29 @@ export interface EvaluatedConnectorMapping {
   display: ActionDisplay;
 }
 
+/** Builtin broker connector metadata registry. */
+export interface BuiltinBrokerConnectorMeta {
+  id: string;
+  displayName: string;
+  description: string;
+  supportedOperations: string[];
+}
+
+export const BUILTIN_BROKER_CONNECTORS: readonly BuiltinBrokerConnectorMeta[] = [
+  {
+    id: "web-search",
+    displayName: "Web Search",
+    description: "Search web using external search providers (e.g. Tavily)",
+    supportedOperations: ["search"],
+  },
+  {
+    id: "http",
+    displayName: "HTTP Endpoint",
+    description: "Generic outbound HTTP request to an allowed remote endpoint with SSRF protection",
+    supportedOperations: ["request", "get", "post", "put", "delete"],
+  },
+] as const;
+
 /** Descriptor for a supported platform broker connector (closed v1 registry). */
 export interface BrokerConnectorDescriptor {
   id: string;

@@ -3,7 +3,7 @@ import ora from 'ora';
 import * as path from 'path';
 import { getAllToolDefinitions } from '../../domain/tool-executor.js';
 import { buildSystemPrompt } from '../../domain/prompts/system-prompts.js';
-import { initializeSkillRegistry, getSkillRegistry } from '../../capabilities/skills/index.js';
+import { initializeSkillRegistry } from '../../capabilities/skills/index.js';
 import type { SkillRegistry } from '../../capabilities/skills/types.js';
 import { runAgentLoop, type ProviderFactory } from '../../domain/agent-loop.js';
 import { now } from '../../domain/context/message-convert.js';
@@ -236,7 +236,12 @@ export class Agent {
       const fnName = tool.definition.function.name;
       if (tool.handler) {
         hostCallbacks.set(fnName, async (args: unknown) => {
-          return tool.handler!(args as never, this.config);
+          const skills = this.skillRegistry ?? undefined;
+          return tool.handler!(
+            args as never,
+            { ...this.config, skills },
+            { skills },
+          );
         });
       }
     }
@@ -614,7 +619,7 @@ export class Agent {
         toolDefs: getAllToolDefinitions(),
         maxSteps: 30,
         hooks: createHookExecutor(),
-        config: { ...this.config, agentName: 'cli', runtime },
+        config: { ...this.config, agentName: 'cli', runtime, skills: this.skillRegistry ?? undefined },
         signal,
         approveTool: wrappedApproveTool,
         autoConfirm: this.autoConfirm,

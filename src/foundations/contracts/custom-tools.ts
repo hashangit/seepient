@@ -16,7 +16,7 @@ import type {
   PreparedOperation,
   ActionDisplay,
 } from "./prepared-action.js";
-import type { JsonValue, EffectRequest, ToolRiskCategory } from "./tool-effects.js";
+import type { JsonValue, EffectRequest, ToolRiskCategory, NetworkDestination } from "./tool-effects.js";
 import type { ToolResult } from "../types.js";
 
 /**
@@ -101,6 +101,23 @@ export interface BrokerConnectorRegistration {
   mapping: DeclarativeConnectorMapping;
 }
 
+export type TrustedHostToolEffectDeclaration =
+  | { kind: "network-egress"; destinations: (NetworkDestination | string)[] | "dynamic" }
+  | { kind: "secret-use"; secretRefs: string[] }
+  | { kind: "model-egress"; dataClasses: string[]; providerClass?: string; sources?: string[] }
+  | EffectRequest;
+
+/**
+ * Optional static declaration for a trustedHostTool to provide explicit
+ * effects, risk level, and display information to the PolicyEngine and
+ * ActionLifecycle, rather than defaulting to ambient-authority sensitive.
+ */
+export interface TrustedHostToolDeclaration {
+  effects?: (EffectRequest | TrustedHostToolEffectDeclaration)[];
+  risk?: ToolRiskCategory;
+  display?: Partial<ActionDisplay>;
+}
+
 /**
  * Host-trusted tool registration. Application authority, not model-grant
  * authority; always audit-labelled; disabled by default for server and
@@ -109,6 +126,7 @@ export interface BrokerConnectorRegistration {
 export interface TrustedHostToolRegistration {
   trust: "host";
   definition: ToolDefinition;
+  declaration?: TrustedHostToolDeclaration;
   execute(args: unknown, context: HostToolContext): Promise<string | ToolResult>;
 }
 

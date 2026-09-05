@@ -5,24 +5,36 @@ description: Persist and restore agent conversation history with built-in and cu
 
 # Session Persistence
 
-Seepient Agent agents can persist conversation history across process restarts using session stores. Pass a `persist` option to `createAgent()` and the agent automatically saves and loads messages.
+Seepient Agent agents can persist conversation history across process restarts using session stores. Pass a `persist` option to `createSeepient()` and the agent automatically saves and loads messages.
 
 ## Quick example
 
 ```typescript
-import { createAgent } from "seepient";
+import { createSeepient } from "seepient";
 
 // File-based persistence -- sessions stored as JSON files
-const agent = await createAgent({
+const agent = await createSeepient({
   persist: "./sessions/my-agent",
 });
 
 await agent.chat("My name is Alice");
 await agent.chat("I am working on a React project");
 
-// In a new process, recreate with the same path:
-// const agent2 = await createAgent({ persist: "./sessions/my-agent" });
-// History is loaded automatically.
+// Explicit Session ID & Multi-Turn Resumption (Spec 021)
+const agent1 = await createSeepient({
+  sessionId: "user-alice-session",
+  providerAccount: "team-anthropic", // Persisted and restored with session
+  persist: myCustomBackend,
+});
+await agent1.chat("Remember my project context");
+
+// In a subsequent worker/request:
+const agent2 = await createSeepient({
+  sessionId: "user-alice-session",
+  persist: myCustomBackend,
+});
+// Full conversation history and providerAccount are loaded automatically from myCustomBackend
+console.log(agent2.sessionId); // "user-alice-session"
 ```
 
 ## PersistenceBackend interface
@@ -106,7 +118,7 @@ import { createPersistenceBackend } from "seepient";
 const store = createPersistenceBackend({ type: "memory" });
 
 // Useful for testing
-const agent = await createAgent({
+const agent = await createSeepient({
   persist: store,
 });
 ```
@@ -126,14 +138,14 @@ const agent = await createAgent({
 | Distributed deployment        | Custom Redis store   |
 | Serverless functions          | Custom database store|
 
-## Usage with createAgent
+## Usage with createSeepient
 
 ### File path (string)
 
 Pass a directory path as a string. Seepient Agent creates a `FilePersistenceBackend` automatically:
 
 ```typescript
-const agent = await createAgent({
+const agent = await createSeepient({
   persist: "./data/sessions",
 });
 ```
@@ -147,19 +159,19 @@ import { createPersistenceBackend } from "seepient";
 
 const store = createPersistenceBackend({ type: "file", path: "./data/sessions" });
 
-const agent = await createAgent({
+const agent = await createSeepient({
   persist: store,
 });
 ```
 
 ### Auto-generated session IDs
 
-When you use `createAgent()` with a `persist` option, Seepient Agent auto-generates a session ID. Each agent instance gets its own session file:
+When you use `createSeepient()` with a `persist` option, Seepient Agent auto-generates a session ID. Each agent instance gets its own session file:
 
 ```typescript
 // Each creates a separate session file
-const agent1 = await createAgent({ persist: "./sessions" });
-const agent2 = await createAgent({ persist: "./sessions" });
+const agent1 = await createSeepient({ persist: "./sessions" });
+const agent2 = await createSeepient({ persist: "./sessions" });
 
 await agent1.chat("Hello from agent 1");
 await agent2.chat("Hello from agent 2");
@@ -174,7 +186,7 @@ await agent2.chat("Hello from agent 2");
 The session is automatically saved after each `chat()` and `chatStream()` call:
 
 ```typescript
-const agent = await createAgent({ persist: "./sessions" });
+const agent = await createSeepient({ persist: "./sessions" });
 
 // Saves to disk after each call
 await agent.chat("First message");    // Session saved
@@ -187,11 +199,11 @@ When an agent is created with a persist path that contains existing session data
 
 ```typescript
 // Process 1: create and chat
-const agent = await createAgent({ persist: "./sessions/app" });
+const agent = await createSeepient({ persist: "./sessions/app" });
 await agent.chat("Remember: project uses TypeScript");
 
 // Process 2: resume (same path)
-const resumedAgent = await createAgent({ persist: "./sessions/app" });
+const resumedAgent = await createSeepient({ persist: "./sessions/app" });
 const reply = await resumedAgent.chat("What language does the project use?");
 // The agent remembers the TypeScript context
 ```
@@ -201,7 +213,7 @@ const reply = await resumedAgent.chat("What language does the project use?");
 Use `agent.clear()` to reset conversation history. The session file is updated:
 
 ```typescript
-const agent = await createAgent({ persist: "./sessions" });
+const agent = await createSeepient({ persist: "./sessions" });
 
 await agent.chat("Some context");
 agent.clear();
@@ -253,7 +265,7 @@ Implement the `PersistenceBackend` interface to use any backend.
 ### Redis session store
 
 ```typescript
-import { createAgent, type PersistenceBackend, type SessionData } from "seepient";
+import { createSeepient, type PersistenceBackend, type SessionData } from "seepient";
 import { createClient } from "redis";
 
 const redis = createClient({ url: "redis://localhost:6379" });
@@ -285,13 +297,13 @@ const redisStore: PersistenceBackend = {
   },
 };
 
-const agent = await createAgent({ persist: redisStore });
+const agent = await createSeepient({ persist: redisStore });
 ```
 
 ### Database session store
 
 ```typescript
-import { createAgent, type PersistenceBackend, type SessionData } from "seepient";
+import { createSeepient, type PersistenceBackend, type SessionData } from "seepient";
 
 // Example with a generic database client
 const dbStore: PersistenceBackend = {
@@ -326,7 +338,7 @@ const dbStore: PersistenceBackend = {
   },
 };
 
-const agent = await createAgent({ persist: dbStore });
+const agent = await createSeepient({ persist: dbStore });
 ```
 
 ::: tip
@@ -357,5 +369,5 @@ const testStore = createPersistenceBackend({ type: "memory" });
 
 ## Related APIs
 
-- [createAgent()](/sdk/create-agent) -- Stateful agent with `persist` option
+- [createSeepient()](/sdk/create-seepient) -- Stateful agent with `persist` option
 - [Types](/sdk/types) -- Full TypeScript type reference including `PersistenceBackend` and `SessionData`

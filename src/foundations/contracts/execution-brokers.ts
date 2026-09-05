@@ -339,6 +339,12 @@ export interface ActionAuditEvent {
  * without a terminal record is recovered as `indeterminate`.
  */
 export interface AuditStore {
+  /**
+   * Indicates whether this store relies on the local NDJSON outbox and
+   * filesystem recovery timers. Set to `true` for local filesystem stores,
+   * or `false` / omitted for remote / distributed / in-memory stores.
+   */
+  readonly isLocal?: boolean;
   append(
     event: ActionAuditEvent,
     opts: { idempotencyKey: string },

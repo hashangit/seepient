@@ -5,7 +5,7 @@ description: Complete reference for all 12 built-in tools in Seepient Agent with
 
 # Built-in Tools Reference
 
-Seepient Agent includes 12 built-in tools organized into four groups. Every tool works identically across `generateText`, `streamText`, `createAgent`, the CLI, and the server REST API.
+Seepient Agent includes 12 built-in tools organized into four groups. Every tool works identically across `generateText`, `streamText`, `createSeepient`, the CLI, and the server REST API.
 
 ## Quick Import
 

@@ -112,4 +112,16 @@ describe("wsApprovalDecision (T022)", () => {
       expect(decision.optionId).toBe("ws-exact-call-9");
     }
   });
+
+  it("threads authenticated caller identity into approval request records (Finding 1)", () => {
+    const request = wsLegacyApprovalRequest("call-10", "delete_file", {
+      principalId: "key-hash-abc",
+      tenantId: "tenant-xyz",
+      sessionId: "session-123",
+      runId: "run-456",
+    });
+    expect(request.principalId).toBe("key-hash-abc");
+    expect(request.runId).toBe("run-456");
+    expect(request.approvalOptions[0].label).toContain("key-hash-abc");
+  });
 });

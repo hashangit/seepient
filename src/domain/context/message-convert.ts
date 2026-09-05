@@ -24,6 +24,9 @@ export function estimateTokens(text: string): number {
  * Uses the proper class hierarchy based on the error code.
  */
 export function toSeepientError(err: unknown, code: string): SeepientError {
+  if (err instanceof SeepientError) {
+    return err;
+  }
   const message = err instanceof Error ? err.message : String(err);
 
   switch (code) {

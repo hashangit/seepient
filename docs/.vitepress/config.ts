@@ -41,13 +41,14 @@ export default defineConfig({
             { text: 'Overview', link: '/sdk/overview' },
             { text: 'generateText', link: '/sdk/generate-text' },
             { text: 'streamText', link: '/sdk/stream-text' },
-            { text: 'createAgent', link: '/sdk/create-agent' },
+            { text: 'createSeepient', link: '/sdk/create-seepient' },
             { text: 'Custom Tools', link: '/sdk/custom-tools' },
             { text: 'Providers', link: '/sdk/providers' },
             { text: 'Skills', link: '/sdk/skills' },
             { text: 'Hooks', link: '/sdk/hooks' },
             { text: 'Structured Output', link: '/sdk/structured-output' },
             { text: 'Sessions', link: '/sdk/sessions' },
+            { text: 'Stateless Workers', link: '/embedding/workers' },
             { text: 'React Hook', link: '/sdk/react-hook' },
             { text: 'Types', link: '/sdk/types' }
           ]

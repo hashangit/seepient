@@ -111,6 +111,8 @@ export interface ToolContext {
   onUpdate?: (progress: { percentage?: number; message?: string }) => void;
   signal?: AbortSignal;
   config?: Record<string, unknown>;
+  /** Spec 021 (FR-007): Per-agent skills registry instance */
+  skills?: import("./contracts/skill-registry.js").SkillRegistryContract;
 }
 
 export interface ToolResult {
@@ -161,21 +163,10 @@ export interface Hooks {
 
 // ── generateText ──────────────────────────────────────────────────────
 
-/**
- * A pre-granted tool permission for the SDK `grants` option. The matching
- * rules mirror the CLI --allow flag and the GrantStore: `pattern` is a prefix
- * the relevant arg must start with (command string for shell, path for
- * write/edit); omit it for a tool-level grant. Grants skip the approval
- * prompt for matching calls.
- */
-export interface GrantSpec {
-  tool: string;
-  pattern?: string;
-}
-
 export interface GenerateTextOptions {
   model?: string;
   provider?: string;
+  providerAccount?: string;
   systemPrompt?: string;
   tools?: (string | UserToolDefinition | import("./contracts/custom-tools.js").AnyToolRegistration)[];
   skills?: string[] | boolean;
@@ -190,12 +181,10 @@ export interface GenerateTextOptions {
   metadata?: Record<string, unknown>;
   middleware?: Middleware[];
   approveTool?: ApproveToolFn;
-  /** Pre-grant tools so matching calls skip the approval prompt. */
-  grants?: GrantSpec[];
+  approvalBroker?: import("./contracts/permission-policy.js").ApprovalBroker;
   /**
    * Spec 008 / 017 domain policy pipeline options:
    */
-  permissionPipeline?: boolean;
   consentMode?: "ask-everything" | "edit-enabled" | "autonomous";
   deploymentCeiling?: import("./contracts/permission-policy.js").CapabilitySet | import("./contracts/permission-policy.js").Capability[];
   principalPolicy?: import("./contracts/permission-policy.js").CapabilitySet | import("./contracts/permission-policy.js").Capability[];
@@ -203,6 +192,12 @@ export interface GenerateTextOptions {
   commitHelper?: import("./contracts/execution-brokers.js").CommitHelper;
   /** Optional network adapter override for test/embedder injection. */
   network?: import("./contracts/execution-brokers.js").BrokerNetworkAdapter;
+  /** Spec 021 (FR-001/FR-002/FR-003): Typed runtime and store injection */
+  runtime?: import("./contracts/provider-runtime.js").ProviderRuntimeContract;
+  principalId?: string;
+  auditStore?: import("./contracts/execution-brokers.js").AuditStore;
+  policyStore?: import("./contracts/execution-brokers.js").PolicyStore;
+  capabilityLedger?: import("./contracts/capability-ledger.js").CapabilityLedger;
 }
 
 export interface GenerateTextResult {
@@ -241,11 +236,20 @@ export interface StreamTextResult {
   toSSEStream: () => ReadableStream;
 }
 
-// ── createAgent ───────────────────────────────────────────────────────
+// ── createSeepient ───────────────────────────────────────────────────
 
-export interface AgentCreateOptions {
+export interface CreateSeepientOptions {
   model?: string;
   provider?: string;
+  providerAccount?: string;
+  purpose?: string;
+  tier?: string;
+  providers?: Record<string, any>;
+  modelAssignments?: import("./schemas/provider-config.js").PurposeModelMap;
+  credentials?: import("./contracts/credential-store.js").CredentialStore;
+  overlayFile?: string;
+  adapter?: import("./contracts/backend-ports.js").InferenceAdapter;
+  override?: { providerAccount?: string; model?: string; thinkingLevel?: any };
   systemPrompt?: string;
   tools?: (string | UserToolDefinition | import("./contracts/custom-tools.js").AnyToolRegistration)[];
   skills?: string[] | boolean;
@@ -257,10 +261,8 @@ export interface AgentCreateOptions {
   metadata?: Record<string, unknown>;
   middleware?: Middleware[];
   approveTool?: ApproveToolFn;
-  /** Pre-grant tools so matching calls skip the approval prompt. */
-  grants?: GrantSpec[];
+  approvalBroker?: import("./contracts/permission-policy.js").ApprovalBroker;
   /** Spec 008 / 017 domain policy pipeline options: */
-  permissionPipeline?: boolean;
   consentMode?: "ask-everything" | "edit-enabled" | "autonomous";
   deploymentCeiling?: import("./contracts/permission-policy.js").CapabilitySet | import("./contracts/permission-policy.js").Capability[];
   principalPolicy?: import("./contracts/permission-policy.js").CapabilitySet | import("./contracts/permission-policy.js").Capability[];
@@ -268,9 +270,17 @@ export interface AgentCreateOptions {
   commitHelper?: import("./contracts/execution-brokers.js").CommitHelper;
   /** Optional network adapter override for test/embedder injection. */
   network?: import("./contracts/execution-brokers.js").BrokerNetworkAdapter;
+  /** Spec 021 (FR-001/FR-002/FR-003/FR-006): Typed runtime, session, and store injection */
+  runtime?: import("./contracts/provider-runtime.js").ProviderRuntimeContract;
+  principalId?: string;
+  sessionId?: string;
+  auditStore?: import("./contracts/execution-brokers.js").AuditStore;
+  policyStore?: import("./contracts/execution-brokers.js").PolicyStore;
+  capabilityLedger?: import("./contracts/capability-ledger.js").CapabilityLedger;
 }
 
-export interface SdkAgent {
+export interface Seepient {
+  readonly sessionId: string;
   chat(message: string): Promise<AgentResponse>;
   chatStream(message: string, options?: StreamTextOptions): Promise<StreamTextResult>;
   /** Switch the provider account (and optionally model) used for subsequent calls; one argument switches the model only. */
@@ -285,6 +295,18 @@ export interface SdkAgent {
   flushAudit(): Promise<number>;
   /** Close agent and flush remaining audit records. */
   close(): Promise<void>;
+
+  // ── Provider management parity methods (Spec 013 / Spec 021) ───────────
+  addProvider(input: import("./contracts/provider-manager-api.js").AccountInput): Promise<import("./contracts/provider-manager-api.js").SaveResult>;
+  removeProvider(id: string, opts?: { force?: boolean }): Promise<import("./contracts/provider-manager-api.js").DeleteResult>;
+  setAssignment(purpose: any, tier: any, target: import("./contracts/provider-manager-api.js").AssignmentTarget): Promise<import("./contracts/provider-manager-api.js").SaveResult>;
+  clearAssignment(purpose: any, tier: any): Promise<import("./contracts/provider-manager-api.js").SaveResult>;
+  getCatalog(): Promise<readonly import("./schemas/inference.js").AvailableModel[]>;
+  getAssignments(): import("./schemas/provider-config.js").PurposeModelMap;
+  listProviders(): Promise<string[]>;
+  reload(): Promise<{ revision: number }>;
+  resolve(opts: { purpose: any; tier?: any; override?: any }): Promise<any>;
+  dispose(): Promise<void>;
 }
 
 export interface AgentResponse {
@@ -334,6 +356,7 @@ export interface SessionData {
   createdAt: number;
   updatedAt: number;
   provider?: string;
+  providerAccount?: string;
   model?: string;
   /** Arbitrary metadata for backends or consumers (e.g., TTL, apiKeyHash). */
   metadata?: Record<string, unknown>;

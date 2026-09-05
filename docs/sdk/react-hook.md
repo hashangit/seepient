@@ -390,13 +390,13 @@ For multi-turn conversations, create a persistent agent and map sessions to user
 
 ```typescript
 import express from "express";
-import { createAgent } from "seepient";
+import { createSeepient } from "seepient";
 
 const app = express();
 app.use(express.json());
 
 // Map user IDs to agents
-const agents = new Map<string, Awaited<ReturnType<typeof createAgent>>>();
+const agents = new Map<string, Awaited<ReturnType<typeof createSeepient>>>();
 
 app.post("/api/chat", async (req, res) => {
   const { messages, sessionId } = req.body;
@@ -404,7 +404,7 @@ app.post("/api/chat", async (req, res) => {
   // Get or create agent for this session
   let agent = agents.get(sessionId);
   if (!agent) {
-    agent = await createAgent({
+    agent = await createSeepient({
       persist: `./sessions/${sessionId}`,
       tools: ["core", "web_search"],
     });
@@ -483,6 +483,6 @@ const { messages, input, handleSubmit } = useChat({
 ## Related APIs
 
 - [streamText()](/sdk/stream-text) -- Backend SSE streaming with `toResponse()`
-- [createAgent()](/sdk/create-agent) -- Stateful agent with `chatStream()`
+- [createSeepient()](/sdk/create-seepient) -- Stateful agent with `chatStream()`
 - [Session Persistence](/sdk/session-persistence) -- Managing agent sessions
 - [Types](/sdk/types) -- Full TypeScript type reference

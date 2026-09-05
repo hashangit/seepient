@@ -227,7 +227,6 @@ const pingTool = trustedHostTool({
 })
 
 const result = await generateText('Ping server', {
-  permissionPipeline: true,
   tools: [pingTool],
 })
 ```
@@ -312,13 +311,13 @@ In interactive TUI mode, you can type `/mode [mode]` or press `Shift+Tab` to cyc
 ### SDK Usage
 
 ```typescript
-import { generateText, createAgent } from 'seepient'
+import { generateText, createSeepient } from 'seepient'
 
 await generateText('Refactor codebase', {
   consentMode: 'autonomous' // Or 'edit-enabled' | 'ask-everything'
 })
 
-const agent = createAgent({
+const agent = createSeepient({
   consentMode: 'edit-enabled'
 })
 ```

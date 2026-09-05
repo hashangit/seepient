@@ -23,8 +23,14 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Audit runtime dependencies
+        run: pnpm audit --prod
+
       - name: Typecheck
         run: pnpm exec tsc --noEmit
+
+      - name: Build native helper
+        run: pnpm native:build
 
       - name: Test
         run: pnpm test

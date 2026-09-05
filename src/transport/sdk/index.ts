@@ -1,7 +1,7 @@
 /**
  * Seepient SDK — Public entry point
  *
- * Exports `generateText`, `streamText`, `createAgent`, and all public types,
+ * Exports `generateText`, `streamText`, `createSeepient`, and all public types,
  * tool factories, provider helpers, and skill utilities.
  */
 
@@ -28,30 +28,31 @@ import {
   toSeepientError,
 } from "../../domain/context/message-convert.js";
 import { generateId } from "../../foundations/id.js";
+import { surfaceLoopError, extractLoopError } from "./error-surfacing.js";
 import type { Middleware } from "../../foundations/contracts/middleware.js";
 import { homedir } from 'os';
 import * as path from 'path';
 
 // ── Re-exports ───────────────────────────────────────────────────────────
 
-export { createAgent } from "./agent.js";
-export { createSeepient } from "./seepient.js";
+export { createSeepient, warnIfPartialStoreInjection } from "./seepient.js";
+import { warnIfPartialStoreInjection } from "./seepient.js";
 export type {
   Seepient,
   CreateSeepientOptions,
-  AgentOptions as SeepientAgentOptions,
-  GenerateTextOptions as SeepientGenerateTextOptions,
-  GenerateImageOptions as SeepientGenerateImageOptions,
-  ResolveOptions as SeepientResolveOptions,
+} from "../../foundations/types.js";
+export type { CredentialStore } from "../../foundations/contracts/credential-store.js";
+export type {
   AccountInput,
   SaveResult,
   DeleteResult,
   AssignmentTarget,
-  PurposeId,
-  Tier,
-  AvailableModel,
-} from "../../foundations/contracts/sdk-fixture.js";
-export type { UiError, ManagerState, ProviderManagerApi, ResolutionPreview, ProbeResult } from "../../foundations/contracts/provider-manager-api.js";
+  UiError,
+  ManagerState,
+  ProviderManagerApi,
+  ResolutionPreview,
+  ProbeResult,
+} from "../../foundations/contracts/provider-manager-api.js";
 export { createProviderManagerApi, isOAuthSupported, getCanonicalOAuthFlowId } from "../cli/provider-manager-api.js";
 export { tool, CORE_TOOLS, COMM_TOOLS, ADVANCED_TOOLS, ALL_TOOLS } from "./tools.js";
 export {
@@ -67,6 +68,15 @@ export {
 } from "./custom-tools.js";
 export { settings, SettingsError } from "./settings.js";
 export { createRuntimeSkillProviderSwitcher } from "../../domain/skills/skill-invoker.js";
+export { getDefaultProviderRuntime, ProviderRuntime } from "../../domain/providers/provider-runtime.js";
+export { ProviderConfigStore } from "../../domain/providers/config-store/provider-config-store.js";
+export { MemoryCredentialStore } from "../../domain/providers/credentials/memory-credential-store.js";
+export type { AuditStore, PolicyStore, ActionAuditEvent, PolicySnapshot } from "../../foundations/contracts/execution-brokers.js";
+export type { CapabilityLedger, RevokeFilter } from "../../foundations/contracts/capability-ledger.js";
+export type { CapabilitySet, DecisionAuthority, ApprovalBroker, PermissionRequest, PermissionDecision } from "../../foundations/contracts/permission-policy.js";
+export type { ProviderRuntimeContract } from "../../foundations/contracts/provider-runtime.js";
+export type { SkillRegistryContract } from "../../foundations/contracts/skill-registry.js";
+export type { ConsentMode } from "../../foundations/settings-schema.js";
 export type { SSEOptions } from "./http.js";
 
 // Re-export middleware pipeline
@@ -111,8 +121,6 @@ export type {
   GenerateTextResult,
   StreamTextOptions,
   StreamTextResult,
-  AgentCreateOptions,
-  SdkAgent,
   AgentResponse,
   SessionStore,
   SessionData,
@@ -144,27 +152,31 @@ export {
 
 /**
  * Resolve the skill catalog for a one-shot SDK call. Returns the system prompt
- * with the catalog appended, or the prompt unchanged when skills are disabled
- * or none are found. Best-effort: discovery failures are swallowed.
+ * with the catalog appended and the held SkillRegistry instance, or the prompt
+ * unchanged when skills are disabled or none are found. Best-effort: discovery
+ * failures are swallowed.
  */
-async function resolveSkillCatalog(
+async function resolveSkills(
   systemPrompt: string | undefined,
   skills: string[] | boolean | undefined,
   cwd?: string,
-): Promise<string | undefined> {
-  if (skills === false) return systemPrompt;
+): Promise<{ systemPrompt: string | undefined; skillRegistry?: import("../../capabilities/skills/types.js").SkillRegistry }> {
+  if (skills === false) return { systemPrompt };
   try {
-    const registry = await initializeSkillRegistry(cwd ?? process.cwd());
-    let metadata = registry.getMetadata();
+    const skillRegistry = await initializeSkillRegistry(cwd ?? process.cwd());
+    let metadata = skillRegistry.getMetadata();
     if (Array.isArray(skills)) {
       const wanted = new Set(skills);
       metadata = metadata.filter(s => wanted.has(s.name));
     }
-    if (metadata.length === 0) return systemPrompt;
+    if (metadata.length === 0) return { systemPrompt, skillRegistry };
     const catalog = buildSkillCatalog(metadata);
-    return systemPrompt ? systemPrompt + '\n\n' + catalog : catalog;
+    return {
+      systemPrompt: systemPrompt ? systemPrompt + '\n\n' + catalog : catalog,
+      skillRegistry,
+    };
   } catch {
-    return systemPrompt;
+    return { systemPrompt };
   }
 }
 
@@ -190,26 +202,21 @@ export async function generateText(
 ): Promise<GenerateTextResult> {
   const opts = options ?? {};
   const maxSteps = opts.maxSteps ?? 10;
-  const runtime: ProviderRuntime = (opts as any).runtime ?? (opts as any).providerRuntime ?? getDefaultProviderRuntime();
+  const runtime = opts.runtime ?? getDefaultProviderRuntime();
+
+  // Resolve skill catalog and append to the system prompt
+  const { systemPrompt, skillRegistry } = await resolveSkills(opts.systemPrompt, opts.skills, opts.cwd);
 
   // Resolve tools
   const toolDefs = opts.tools ? resolveTools(opts.tools) : getAllToolDefinitions();
   // spec 019 FR-006: explicit trustedHostTool registrations wire into the
   // boundary's host-callback map and join the operator allowlist.
-  const { callbacks: hostCallbacks, registrationIds } = extractHostCallbacks(opts.tools);
+  const { callbacks: hostCallbacks, registrationIds } = extractHostCallbacks(opts.tools, { skills: skillRegistry });
   // spec 020 FR-001: custom preparedTool and brokerConnector registrations
   const registrations = extractRegistrations(opts.tools);
-  if (registrations.size > 0 && !opts.permissionPipeline) {
-    throw new Error(
-      "Custom tools (preparedTool, brokerConnector) require permissionPipeline: true. Set permissionPipeline: true in options.",
-    );
-  }
 
   // Hooks
   const hooks = createHookExecutor(opts.hooks);
-
-  // Resolve skill catalog and append to the system prompt
-  const systemPrompt = await resolveSkillCatalog(opts.systemPrompt, opts.skills, opts.cwd);
 
   // Build message list
   const messages: Message[] = [];
@@ -220,53 +227,52 @@ export async function generateText(
     timestamp: now(),
   });
 
-  // Spec 008 opt-in: construct the wired pipeline for this call when
-  // permissionPipeline is set. (createAgent does this once; generateText and
-  // streamText build it per-call since they're stateless.)
-  let wiredPipeline: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle | undefined;
-  if (opts.permissionPipeline) {
-    const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
-    const { legacyApproveToolToBroker } = await import("../legacy-adapter.js");
-    const { buildLocalBoundary } = await import("../../capabilities/execution/build-local-boundary.js");
-    const { createSnapshotStore } = await import("../../foundations/hashline/snapshot-store.js");
-    const { InMemoryArtifactStore } = await import("../../capabilities/execution/in-memory-artifact-store.js");
-    const { createMediaVendorOperationHandler } = await import("../../domain/media/vendor-operation-handler.js");
-    const snapshotStore = createSnapshotStore();
-    const sharedArtifacts = new InMemoryArtifactStore();
-    const vendorOperationHandler = createMediaVendorOperationHandler({
-      runtime,
-      artifacts: sharedArtifacts,
-      signal: (opts as any).signal,
-    });
-    const { boundary } = await buildLocalBoundary({
-      artifacts: sharedArtifacts,
-      workspaceRoot: opts.cwd ?? process.cwd(),
-      snapshotStore,
-      hostCallbacks,
-      vendorOperationHandler,
-      commitHelper: opts.commitHelper,
-      network: opts.network,
-    });
-    const approvalMode = opts.consentMode
-      ? (opts.consentMode === 'autonomous' ? 'autonomous' : opts.consentMode === 'ask-everything' ? 'manual' : 'balanced')
-      : (opts.approveTool ? "manual" : "never");
+  const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
+  const { legacyApproveToolToBroker } = await import("../legacy-adapter.js");
+  const { buildLocalBoundary } = await import("../../capabilities/execution/build-local-boundary.js");
+  const { createSnapshotStore } = await import("../../foundations/hashline/snapshot-store.js");
+  const { InMemoryArtifactStore } = await import("../../capabilities/execution/in-memory-artifact-store.js");
+  const { createMediaVendorOperationHandler } = await import("../../domain/media/vendor-operation-handler.js");
+  const snapshotStore = createSnapshotStore();
+  const sharedArtifacts = new InMemoryArtifactStore();
+  const vendorOperationHandler = createMediaVendorOperationHandler({
+    runtime,
+    artifacts: sharedArtifacts,
+    signal: (opts as any).signal,
+  });
+  const { boundary } = await buildLocalBoundary({
+    artifacts: sharedArtifacts,
+    workspaceRoot: opts.cwd ?? process.cwd(),
+    snapshotStore,
+    hostCallbacks,
+    vendorOperationHandler,
+    commitHelper: opts.commitHelper,
+    network: opts.network,
+  });
+  const approvalMode = opts.consentMode
+    ? (opts.consentMode === 'autonomous' ? 'autonomous' : opts.consentMode === 'ask-everything' ? 'manual' : 'balanced')
+    : (opts.approvalBroker || opts.approveTool ? "manual" : "never");
 
-    wiredPipeline = await buildActionLifecycle({
-      principalId: "sdk-user",
-      runId: generateId(),
-      workspaceRoot: opts.cwd ?? process.cwd(),
-      modelProviderClass: (opts.provider ?? "openai") as string,
-      approvalBroker: legacyApproveToolToBroker(opts.approveTool),
-      executionBoundary: boundary,
-      approvalMode,
-      deploymentCeiling: toCapabilitySet(opts.deploymentCeiling),
-      principalPolicy: toCapabilitySet(opts.principalPolicy),
-      artifacts: sharedArtifacts,
-      snapshotStore,
-      trustedHostAllowlist: [...DEFAULT_TRUSTED_HOST_ALLOWLIST, ...registrationIds],
-      registrations,
-    });
-  }
+  warnIfPartialStoreInjection(opts);
+
+  const wiredPipeline = await buildActionLifecycle({
+    principalId: opts.principalId ?? "sdk-user",
+    runId: generateId(),
+    workspaceRoot: opts.cwd ?? process.cwd(),
+    modelProviderClass: (opts.provider ?? "openai") as string,
+    approvalBroker: opts.approvalBroker ?? legacyApproveToolToBroker(opts.approveTool),
+    executionBoundary: boundary,
+    approvalMode,
+    deploymentCeiling: toCapabilitySet(opts.deploymentCeiling),
+    principalPolicy: toCapabilitySet(opts.principalPolicy),
+    artifacts: sharedArtifacts,
+    snapshotStore,
+    trustedHostAllowlist: [...DEFAULT_TRUSTED_HOST_ALLOWLIST, ...registrationIds],
+    registrations,
+    auditStore: opts.auditStore,
+    policyStore: opts.policyStore,
+    capabilityLedger: opts.capabilityLedger,
+  });
 
   const snapshot = await runtime.createTurnSnapshot();
 
@@ -274,19 +280,23 @@ export async function generateText(
     runtime,
     turnSnapshot: snapshot,
     model: opts.model,
-    modelOverride: opts.model,
+    modelOverride: opts.providerAccount || opts.model
+      ? { providerAccount: opts.providerAccount, model: opts.model }
+      : undefined,
     messages,
     toolDefs,
     systemPrompt,
     maxSteps,
     hooks,
     signal: opts.signal,
-    config: { ...opts.config, runtime },
+    config: { ...opts.config, runtime, skills: skillRegistry },
     metadata: opts.metadata,
     middleware: opts.middleware,
     approveTool: opts.approveTool,
     wiredPipeline,
   });
+
+  surfaceLoopError(result);
 
   // Get the final text
   const lastAssistant = [...result.messages]
@@ -311,21 +321,6 @@ export async function generateText(
 
 /**
  * Run a one-shot agent loop with streaming callbacks.
- *
- * Returns AsyncIterables for text and steps, plus `toResponse()` and
- * `toSSEStream()` for HTTP server integration.
- *
- * Note: The current provider.chat() API returns full responses (not deltas),
- * so onText receives the complete text at once. Future versions will integrate
- * with provider-level streaming.
- *
- * @example
- * ```ts
- * const stream = await streamText("Explain quantum computing", {
- *   onText: (delta) => process.stdout.write(delta),
- * });
- * const finalText = await stream.fullText;
- * ```
  */
 export async function streamText(
   prompt: string,
@@ -333,27 +328,22 @@ export async function streamText(
 ): Promise<StreamTextResult> {
   const opts = options ?? {};
   const maxSteps = opts.maxSteps ?? 10;
-  const runtime: ProviderRuntime = (opts as any).runtime ?? (opts as any).providerRuntime ?? getDefaultProviderRuntime();
+  const runtime = opts.runtime ?? getDefaultProviderRuntime();
+
+  // Resolve skill catalog and append to the system prompt
+  const { systemPrompt, skillRegistry } = await resolveSkills(opts.systemPrompt, opts.skills, opts.cwd);
 
   // Resolve tools
   const toolDefs = opts.tools ? resolveTools(opts.tools) : getAllToolDefinitions();
   // spec 019 FR-006: explicit trustedHostTool registrations wire into the
   // boundary's host-callback map and join the operator allowlist.
-  const { callbacks: hostCallbacks, registrationIds } = extractHostCallbacks(opts.tools);
+  const { callbacks: hostCallbacks, registrationIds } = extractHostCallbacks(opts.tools, { skills: skillRegistry });
   // spec 020 FR-001: custom preparedTool and brokerConnector registrations
   const registrations = extractRegistrations(opts.tools);
-  if (registrations.size > 0 && !opts.permissionPipeline) {
-    throw new Error(
-      "Custom tools (preparedTool, brokerConnector) require permissionPipeline: true. Set permissionPipeline: true in options.",
-    );
-  }
 
   // Hooks — merge stream-level callbacks with any base hooks
   const mergedHooks = { ...opts.hooks };
   const hooks = createHookExecutor(mergedHooks);
-
-  // Resolve skill catalog and append to the system prompt
-  const systemPrompt = await resolveSkillCatalog(opts.systemPrompt, opts.skills, opts.cwd);
 
   // Build message list
   const messages: Message[] = [];
@@ -366,55 +356,63 @@ export async function streamText(
 
   // Abort controller
   const abortController = new AbortController();
+  if (opts.signal) {
+    if (opts.signal.aborted) {
+      abortController.abort(opts.signal.reason);
+    } else {
+      opts.signal.addEventListener("abort", () => abortController.abort(opts.signal?.reason), { once: true });
+    }
+  }
 
   // Stream manager handles queues, async iterables, and SSE
   const stream = new StreamManager();
 
-  // Spec 008 opt-in: build the wired pipeline for this stream call.
-  let wiredPipeline: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle | undefined;
-  if (opts.permissionPipeline) {
-    const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
-    const { legacyApproveToolToBroker } = await import("../legacy-adapter.js");
-    const { buildLocalBoundary } = await import("../../capabilities/execution/build-local-boundary.js");
-    const { createSnapshotStore } = await import("../../foundations/hashline/snapshot-store.js");
-    const { InMemoryArtifactStore } = await import("../../capabilities/execution/in-memory-artifact-store.js");
-    const { createMediaVendorOperationHandler } = await import("../../domain/media/vendor-operation-handler.js");
-    const snapshotStore = createSnapshotStore();
-    const sharedArtifacts = new InMemoryArtifactStore();
-    const vendorOperationHandler = createMediaVendorOperationHandler({
-      runtime,
-      artifacts: sharedArtifacts,
-      signal: abortController.signal,
-    });
-    const { boundary } = await buildLocalBoundary({
-      artifacts: sharedArtifacts,
-      workspaceRoot: opts.cwd ?? process.cwd(),
-      snapshotStore,
-      hostCallbacks,
-      vendorOperationHandler,
-      commitHelper: opts.commitHelper,
-      network: opts.network,
-    });
-    const approvalMode = opts.consentMode
-      ? (opts.consentMode === 'autonomous' ? 'autonomous' : opts.consentMode === 'ask-everything' ? 'manual' : 'balanced')
-      : (opts.approveTool ? "manual" : "never");
+  const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
+  const { legacyApproveToolToBroker } = await import("../legacy-adapter.js");
+  const { buildLocalBoundary } = await import("../../capabilities/execution/build-local-boundary.js");
+  const { createSnapshotStore } = await import("../../foundations/hashline/snapshot-store.js");
+  const { InMemoryArtifactStore } = await import("../../capabilities/execution/in-memory-artifact-store.js");
+  const { createMediaVendorOperationHandler } = await import("../../domain/media/vendor-operation-handler.js");
+  const snapshotStore = createSnapshotStore();
+  const sharedArtifacts = new InMemoryArtifactStore();
+  const vendorOperationHandler = createMediaVendorOperationHandler({
+    runtime,
+    artifacts: sharedArtifacts,
+    signal: abortController.signal,
+  });
+  const { boundary } = await buildLocalBoundary({
+    artifacts: sharedArtifacts,
+    workspaceRoot: opts.cwd ?? process.cwd(),
+    snapshotStore,
+    hostCallbacks,
+    vendorOperationHandler,
+    commitHelper: opts.commitHelper,
+    network: opts.network,
+  });
+  const approvalMode = opts.consentMode
+    ? (opts.consentMode === 'autonomous' ? 'autonomous' : opts.consentMode === 'ask-everything' ? 'manual' : 'balanced')
+    : (opts.approvalBroker || opts.approveTool ? "manual" : "never");
 
-    wiredPipeline = await buildActionLifecycle({
-      principalId: "sdk-user",
-      runId: generateId(),
-      workspaceRoot: opts.cwd ?? process.cwd(),
-      modelProviderClass: (opts.provider ?? "openai") as string,
-      approvalBroker: legacyApproveToolToBroker(opts.approveTool),
-      executionBoundary: boundary,
-      approvalMode,
-      deploymentCeiling: toCapabilitySet(opts.deploymentCeiling),
-      principalPolicy: toCapabilitySet(opts.principalPolicy),
-      artifacts: sharedArtifacts,
-      snapshotStore,
-      trustedHostAllowlist: [...DEFAULT_TRUSTED_HOST_ALLOWLIST, ...registrationIds],
-      registrations,
-    });
-  }
+  warnIfPartialStoreInjection(opts);
+
+  const wiredPipeline = await buildActionLifecycle({
+    principalId: opts.principalId ?? "sdk-user",
+    runId: generateId(),
+    workspaceRoot: opts.cwd ?? process.cwd(),
+    modelProviderClass: (opts.provider ?? "openai") as string,
+    approvalBroker: opts.approvalBroker ?? legacyApproveToolToBroker(opts.approveTool),
+    executionBoundary: boundary,
+    approvalMode,
+    deploymentCeiling: toCapabilitySet(opts.deploymentCeiling),
+    principalPolicy: toCapabilitySet(opts.principalPolicy),
+    artifacts: sharedArtifacts,
+    snapshotStore,
+    trustedHostAllowlist: [...DEFAULT_TRUSTED_HOST_ALLOWLIST, ...registrationIds],
+    registrations,
+    auditStore: opts.auditStore,
+    policyStore: opts.policyStore,
+    capabilityLedger: opts.capabilityLedger,
+  });
 
   // Run loop in background
   (async () => {
@@ -425,14 +423,16 @@ export async function streamText(
         runtime,
         turnSnapshot: snapshot,
         model: opts.model,
-        modelOverride: opts.model,
+        modelOverride: opts.providerAccount || opts.model
+          ? { providerAccount: opts.providerAccount, model: opts.model }
+          : undefined,
         messages,
         toolDefs,
         systemPrompt,
         maxSteps,
         hooks,
         signal: abortController.signal,
-        config: { ...opts.config, runtime },
+        config: { ...opts.config, runtime, skills: skillRegistry },
         metadata: opts.metadata,
         middleware: opts.middleware,
         approveTool: opts.approveTool,
@@ -448,7 +448,9 @@ export async function streamText(
               opts.onToolCall({ name: step.toolCall.name, args: step.toolCall.args, callId: step.toolCall.id });
             }
             if (opts.onToolResult) {
-              opts.onToolResult({ callId: step.toolCall.id, output: step.toolCall.result, success: true });
+              const output = step.toolCall.result;
+              const success = typeof output === "string" ? !output.startsWith("Error:") : true;
+              opts.onToolResult({ callId: step.toolCall.id, output, success });
             }
           }
           stream.enqueueStep(step);
@@ -467,7 +469,13 @@ export async function streamText(
 
       stream.resolveText(allText);
       stream.resolveUsage(result.usage);
-      stream.resolveFinish(result.finishReason);
+      const loopErr = extractLoopError(result);
+      if (loopErr) {
+        if (opts.onError) opts.onError(loopErr);
+        stream.resolveFinish("error");
+      } else {
+        stream.resolveFinish(result.finishReason);
+      }
     } catch (err) {
       const seepientErr = toSeepientError(err, "PROVIDER_ERROR");
       if (opts.onError) opts.onError(seepientErr);

@@ -87,7 +87,7 @@ describe("REST Provider Management v2 API (QS-P6.3 & QS-P6.4)", () => {
     listSkills: () => [],
     generateText: vi.fn(),
     sessionManager: { getSession: vi.fn() },
-    providerRuntime: runtime,
+    runtime,
   };
 
   const handler = createRestHandler(dummyCtx);

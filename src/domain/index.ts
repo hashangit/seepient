@@ -54,9 +54,9 @@ export type {
   // streamText
   StreamTextOptions,
   StreamTextResult,
-  // createAgent
-  AgentCreateOptions,
-  SdkAgent,
+  // createSeepient
+  CreateSeepientOptions,
+  Seepient,
   AgentResponse,
   // Session
   SessionStore,

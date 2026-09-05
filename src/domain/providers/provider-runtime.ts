@@ -22,7 +22,8 @@ import {
   type Tier,
   resolveInvocationPlan,
 } from "./assignment-resolver.js";
-export type { TurnSnapshot, InvocationPlan };
+import type { ProviderRuntimeContract } from "../../foundations/contracts/provider-runtime.js";
+export type { TurnSnapshot, InvocationPlan, ProviderRuntimeContract };
 import {
   type ModelAssignmentOverride,
   DEFAULT_RETRY_POLICY,
@@ -215,7 +216,7 @@ export interface CapabilityHealth {
  * Central ProviderRuntime managing turn snapshots, plan resolution, execution dispatch,
  * and multi-target retries with cooldown tracking and dynamic catalog synchronization.
  */
-export class ProviderRuntime extends EventEmitter {
+export class ProviderRuntime extends EventEmitter implements ProviderRuntimeContract {
   readonly configStore: ProviderConfigStore;
   readonly credentialStore: CredentialStore;
   readonly modelCatalog: ModelCatalog;
