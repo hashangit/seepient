@@ -222,7 +222,7 @@ Current layout of the Obsidian vault (annotated):
 │       ├── contracts/                # prepared-tool-execution, broker-connector-registry, trust-model-selection (decision table)
 │       ├── quickstart.md             # QS-0.1–QS-3.3 validation scenarios + QS-P production budgets
 │       └── tasks.md                  # T001–T023 dependency-ordered, US1–US4 story phases, test-first gates
-│   └── 021-stateless-sdk-workers/    # Stateless SDK workers & embedder-owned storage (021 — IMPLEMENTED)
+│   └── 021-stateless-sdk-workers/    # Stateless SDK workers & embedder-owned storage (021 — SHIPPED in v0.6.1)
 │       ├── spec.md                   # Multi-tenant state injection; FR-001–FR-012, M1–M8, SC-001–SC-005
 │       ├── plan.md                   # P0 injection road → P1 zero-write gate + server parity → P2 reference worker + docs
 │       ├── research.md               # Verification evidence E1–E12 + decisions D1–D10 + scrutiny S1–S3 (2026-08-31, HEAD 643e316)
@@ -522,7 +522,7 @@ shell commands, and other important information, read the current plan:
   Actions SHA pinning, full console migration, WS token endpoint,
   worker-callback credentials. ≈9 focused days. tasks.md ready
   (T001–T027).
-- **IMPLEMENTED (branch `021-stateless-sdk-workers`)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/021-stateless-sdk-workers/plan.md`
+- **SHIPPED (Spec 021 complete, v0.6.1, branch `021-stateless-sdk-workers`)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/021-stateless-sdk-workers/plan.md`
   — Stateless SDK workers & embedder-owned storage (021): multi-tenant embedders
   get every piece of tenant state (credentials, provider config, audit, policy,
   capability ledger, sessions) flowing through injectable contracts into their
