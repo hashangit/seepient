@@ -25,7 +25,6 @@ services:
 
     # Runtime environment overrides
     environment:
-      - SEEPIENT_SHELL_APPROVE=auto   # auto-approve shell commands in container
       - SEEPIENT_SESSION_DIR=/data/sessions
 
     # Port mapping — server listens on 7337 by default
