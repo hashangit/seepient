@@ -59,6 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dependency vulnerability remediation**:
   - `js-yaml` (GHSA-5p4m-2wfm-xmqj): Bumped exact pin to `4.3.2` to eliminate quadratic CPU consumption / DoS on untrusted OpenAPI spec imports.
   - `fast-uri` (CVE-2026-18446): Added workspace override resolving to `3.1.6`, closing host-confusion vulnerability in URI resolution.
+  - `qs` (GHSA-x5fp-wj9c-mxmx): Added workspace override resolving to `^6.16.0`, eliminating DoS vulnerability in transitive query parser.
   - `hono` (CVEs): Added workspace override resolving to `4.13.5`, addressing transitive dependency advisories.
   - `ajv` (GHSA-2g4f-4pwh-qvx6): Moved `ajv` (`8.18.0`) from runtime `dependencies` to `devDependencies`.
   - `postcss` (docs): Added `docs/package.json` override resolving `postcss` to `^8.5.23`.

@@ -38,5 +38,5 @@ Fixed an issue where runtime skill imports did not propagate to subagents or loo
 - **Legacy configuration cleanup**: Removed obsolete `OPENAI_COMPAT_*` keys and deprecated compatibility shims.
 
 #### 6. Security and dependency updates
-- Upgraded `js-yaml` (4.3.2), `fast-uri` (3.1.6), and `hono` (4.13.5) to remediate transitive security advisories.
+- Upgraded `js-yaml` (4.3.2), `fast-uri` (3.1.6), `hono` (4.13.5), and `qs` (6.16.0) to remediate transitive security advisories.
 - Added automated CodeQL analysis and production dependency audit checks to CI release gates.
