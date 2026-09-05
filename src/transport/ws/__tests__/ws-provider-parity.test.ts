@@ -18,7 +18,7 @@ describe("WS Provider Parity (FR-040 / T057)", () => {
 
     const state: ConnectionState = {
       sessionId: null,
-      currentAbortController: null,
+      activeChats: new Set(),
       activeProvider: null,
       activeModel: null,
       apiKeyHash: "hash-1",
@@ -59,7 +59,7 @@ describe("WS Provider Parity (FR-040 / T057)", () => {
 
     const state: ConnectionState = {
       sessionId: null,
-      currentAbortController: null,
+      activeChats: new Set(),
       activeProvider: null,
       activeModel: null,
       apiKeyHash: "hash-2",
@@ -93,7 +93,7 @@ describe("WS Provider Parity (FR-040 / T057)", () => {
 
     const state: ConnectionState = {
       sessionId: null,
-      currentAbortController: null,
+      activeChats: new Set(),
       activeProvider: null,
       activeModel: null,
       apiKeyHash: "hash-3",

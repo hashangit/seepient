@@ -14,12 +14,27 @@ import type { Message } from "../../foundations/types.js";
 import { safeSend } from "./connection-registry.js";
 import { createServerApproveTool } from "./approvals.js";
 
-export function handleChat(
+export async function handleChat(
   ws: WebSocket,
   msg: ChatMessage,
   state: ConnectionState,
   ctx: WebSocketHandlerContext,
-): void {
+): Promise<void> {
+  // Busy guard: only one active chat turn per connection
+  if (state.activeChats.size > 0) {
+    safeSend(ws, {
+      type: "error",
+      code: "REQUEST_IN_FLIGHT",
+      retryable: true,
+      message: "Another chat turn is already in flight for this connection",
+    });
+    return;
+  }
+
+  // Set up abort controller
+  const abortController = new AbortController();
+  state.activeChats.add(abortController);
+
   const serverMsgId = crypto.randomUUID();
 
   // Acknowledge
@@ -30,18 +45,62 @@ export function handleChat(
     timestamp: new Date().toISOString(),
   });
 
-  // Create session if needed
-  if (!state.sessionId && msg.sessionId) {
-    state.sessionId = msg.sessionId;
-  }
-
-  // Set up abort controller
-  const abortController = new AbortController();
-  state.currentAbortController = abortController;
-
   // Resolve options with connection-level overrides
   const provider = msg.options?.provider ?? state.activeProvider ?? undefined;
   const model = msg.options?.model ?? state.activeModel ?? undefined;
+
+  // Session attachment
+  const targetSessionId = msg.sessionId ?? state.sessionId ?? undefined;
+  if (targetSessionId) {
+    try {
+      let session = await ctx.sessionManager.getSession(targetSessionId, state.apiKeyHash);
+      if (!session) {
+        session = await ctx.sessionManager.createSession(
+          state.apiKey?.key ?? state.apiKeyHash,
+          {
+            id: targetSessionId,
+            provider,
+            model,
+            apiKeyHash: state.apiKeyHash,
+          },
+        );
+      }
+      state.sessionId = session.id;
+    } catch (err: unknown) {
+      state.activeChats.delete(abortController);
+      const message = err instanceof Error ? err.message : String(err);
+      if (/Maximum concurrent sessions|session limit/i.test(message)) {
+        safeSend(ws, {
+          type: "error",
+          code: "SESSION_LIMIT",
+          retryable: false,
+          message,
+        });
+        return;
+      }
+      safeSend(ws, {
+        type: "error",
+        code: "SESSION_ERROR",
+        retryable: false,
+        message,
+      });
+      return;
+    }
+
+    if (abortController.signal.aborted) {
+      state.activeChats.delete(abortController);
+      return;
+    }
+
+    // Record user message before streaming
+    const userMsg: Message = {
+      id: msg.id,
+      role: "user",
+      content: msg.message,
+      timestamp: Date.now(),
+    };
+    ctx.sessionManager.addMessage(state.sessionId, userMsg);
+  }
 
   // Stream text
   try {
@@ -102,6 +161,7 @@ export function handleChat(
           provider: error.provider,
           tool: error.tool,
         });
+        state.activeChats.delete(abortController);
       },
       onDone: (result) => {
         safeSend(ws, {
@@ -122,7 +182,7 @@ export function handleChat(
           ctx.sessionManager.addMessage(state.sessionId, assistantMsg);
         }
 
-        state.currentAbortController = null;
+        state.activeChats.delete(abortController);
       },
     });
   } catch (err: unknown) {
@@ -133,7 +193,7 @@ export function handleChat(
       retryable: false,
       message,
     });
-    state.currentAbortController = null;
+    state.activeChats.delete(abortController);
   }
 }
 
@@ -142,9 +202,11 @@ export function handleAbort(
   _msg: AbortMessage,
   state: ConnectionState,
 ): void {
-  if (state.currentAbortController) {
-    state.currentAbortController.abort();
-    state.currentAbortController = null;
+  if (state.activeChats.size > 0) {
+    for (const controller of state.activeChats) {
+      controller.abort();
+    }
+    state.activeChats.clear();
     safeSend(ws, {
       type: "error",
       code: "ABORTED",

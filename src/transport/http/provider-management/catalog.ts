@@ -3,11 +3,13 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+import * as crypto from "node:crypto";
 import type { ProviderRuntime } from "../../../domain/providers/provider-runtime.js";
 import type { ApiKeyEntry } from "../../auth/auth.js";
 import { hasScope } from "../../auth/auth.js";
 import { createProviderManagerApi } from "../../cli/provider-manager-api.js";
 import { sendJSON, sendError, parseBody } from "./http-util.js";
+import { logTransportEvent } from "../../logging.js";
 
 export async function handleGetCatalog(
   req: IncomingMessage,
@@ -129,6 +131,12 @@ export async function handleProbeProvider(
         if (err?.message?.includes("SSRF Blocked")) {
           ssrfBlocked = true;
         }
+        logTransportEvent({
+          level: "warn",
+          event: "probe",
+          requestId: crypto.randomUUID(),
+          error: err?.message ?? String(err),
+        });
       } finally {
         clearTimeout(timeout);
       }

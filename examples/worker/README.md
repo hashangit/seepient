@@ -29,7 +29,7 @@ When packaging a stateless worker container image (e.g. Docker, gVisor, Firecrac
 
 ## Embedding in Production Applications
 
-> **Note on Imports**: This example imports modules via relative paths (`../../src/index.js`) so that it compiles and runs directly within the monorepo test configuration without publishing. In your standalone application or container, install the package and import the canonical entry point:
+> **Note on Imports**: This example imports modules via relative paths (`../../../src/transport/sdk/index.js`) so that it compiles and runs directly within the monorepo test configuration without publishing. In your standalone application or container, install the package and import the canonical entry point:
 > ```typescript
 > import { createSeepient } from "seepient";
 > ```

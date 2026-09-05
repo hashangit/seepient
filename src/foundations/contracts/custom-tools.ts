@@ -104,8 +104,7 @@ export interface BrokerConnectorRegistration {
 export type TrustedHostToolEffectDeclaration =
   | { kind: "network-egress"; destinations: (NetworkDestination | string)[] | "dynamic" }
   | { kind: "secret-use"; secretRefs: string[] }
-  | { kind: "model-egress"; dataClasses: string[]; providerClass?: string; sources?: string[] }
-  | EffectRequest;
+  | { kind: "model-egress"; dataClasses: string[]; providerClass?: string; sources?: string[] };
 
 /**
  * Optional static declaration for a trustedHostTool to provide explicit
@@ -113,7 +112,7 @@ export type TrustedHostToolEffectDeclaration =
  * ActionLifecycle, rather than defaulting to ambient-authority sensitive.
  */
 export interface TrustedHostToolDeclaration {
-  effects?: (EffectRequest | TrustedHostToolEffectDeclaration)[];
+  effects?: TrustedHostToolEffectDeclaration[];
   risk?: ToolRiskCategory;
   display?: Partial<ActionDisplay>;
 }

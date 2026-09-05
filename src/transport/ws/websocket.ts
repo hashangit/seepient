@@ -48,7 +48,7 @@ export async function setupWebSocket(
     return null;
   }
 
-  wss = new wsModule.WebSocketServer({ noServer: true, path: "/ws" });
+  wss = new wsModule.WebSocketServer({ noServer: true, path: "/ws", maxPayload: 1 << 20 });
 
   wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     handleConnection(ws, req, ctx);

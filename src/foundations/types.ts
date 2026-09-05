@@ -7,6 +7,9 @@
 
 import type { SeepientError as SeepientErrorType } from "./errors.js";
 import type { Middleware } from "./contracts/middleware.js";
+import type { Purpose, Tier } from "./contracts/provider-runtime.js";
+
+export type { Purpose, Tier };
 
 // ── Permissions ────────────────────────────────────────────────────────
 
@@ -167,6 +170,8 @@ export interface GenerateTextOptions {
   model?: string;
   provider?: string;
   providerAccount?: string;
+  purpose?: Purpose;
+  tier?: Tier;
   systemPrompt?: string;
   tools?: (string | UserToolDefinition | import("./contracts/custom-tools.js").AnyToolRegistration)[];
   skills?: string[] | boolean;
@@ -242,8 +247,8 @@ export interface CreateSeepientOptions {
   model?: string;
   provider?: string;
   providerAccount?: string;
-  purpose?: string;
-  tier?: string;
+  purpose?: Purpose;
+  tier?: Tier;
   providers?: Record<string, any>;
   modelAssignments?: import("./schemas/provider-config.js").PurposeModelMap;
   credentials?: import("./contracts/credential-store.js").CredentialStore;

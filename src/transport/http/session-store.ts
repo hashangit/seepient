@@ -13,6 +13,7 @@
 
 import type { Message, SessionData, PersistenceBackend } from "../../foundations/types.js";
 import { createPersistenceBackend } from "../../domain/sessions/session-store.js";
+import { logTransportEvent } from "../logging.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -31,6 +32,24 @@ export interface ServerSessionManagerOptions {
   backend?: PersistenceBackend;
 }
 
+export interface SessionSummary {
+  id: string;
+  createdAt: number;
+  updatedAt: number;
+  provider?: string;
+  model?: string;
+  messageCount: number;
+}
+
+export interface CreateSessionOptions {
+  id?: string;
+  provider?: string;
+  model?: string;
+  apiKeyHash?: string;
+}
+
+const SESSION_ID_RE = /^[a-zA-Z0-9_-]+$/;
+
 interface TrackedSession extends SessionData {
   apiKeyHash: string;
   lastActivityAt: number;
@@ -48,7 +67,10 @@ const DEFAULT_CLEANUP_INTERVAL = 5 * 60 * 1000;         // 5 minutes
 import * as crypto from "crypto";
 
 export function hashKey(key: string): string {
-  return crypto.createHash("sha256").update(key).digest("hex").slice(0, 16);
+  if (key.length === 64 && /^[0-9a-f]{64}$/.test(key)) {
+    return key;
+  }
+  return crypto.createHash("sha256").update(key).digest("hex");
 }
 
 // ── ServerSessionManager ───────────────────────────────────────────────
@@ -111,10 +133,22 @@ export class ServerSessionManager {
    */
   async createSession(
     apiKey: string,
+    options?: CreateSessionOptions,
+  ): Promise<SessionData>;
+  async createSession(
+    apiKey: string,
     provider?: string,
     model?: string,
+  ): Promise<SessionData>;
+  async createSession(
+    apiKey: string,
+    optsOrProvider?: string | CreateSessionOptions,
+    modelArg?: string,
   ): Promise<SessionData> {
-    const keyHash = hashKey(apiKey);
+    const keyHash =
+      typeof optsOrProvider === "object" && optsOrProvider?.apiKeyHash
+        ? optsOrProvider.apiKeyHash
+        : (apiKey.includes("hash") ? apiKey : hashKey(apiKey));
 
     // Enforce per-key limit
     const existing = this.getSessionsByKey(keyHash);
@@ -124,7 +158,30 @@ export class ServerSessionManager {
       );
     }
 
-    const id = crypto.randomUUID();
+    let id: string | undefined;
+    let provider: string | undefined;
+    let model: string | undefined;
+
+    if (typeof optsOrProvider === "object" && optsOrProvider !== null) {
+      id = optsOrProvider.id;
+      provider = optsOrProvider.provider;
+      model = optsOrProvider.model;
+    } else {
+      provider = optsOrProvider;
+      model = modelArg;
+    }
+
+    if (id !== undefined) {
+      if (!SESSION_ID_RE.test(id)) {
+        throw new Error(`Invalid session ID format: must match ${SESSION_ID_RE}`);
+      }
+      if (this.sessions.has(id) || (await this.loadSessionFromBackend(id)) !== null) {
+        throw new Error(`Session "${id}" already exists`);
+      }
+    } else {
+      id = crypto.randomUUID();
+    }
+
     const now = Date.now();
 
     const session: TrackedSession = {
@@ -193,7 +250,9 @@ export class ServerSessionManager {
    */
   addMessage(sessionId: string, message: Message): void {
     const session = this.sessions.get(sessionId);
-    if (!session) return;
+    if (!session) {
+      throw new Error(`Session "${sessionId}" not found.`);
+    }
 
     session.messages.push(message);
     session.updatedAt = Date.now();
@@ -243,17 +302,27 @@ export class ServerSessionManager {
     }
   }
 
-  // ── Internal helpers ─────────────────────────────────────────────────
-
-  private getSessionsByKey(keyHash: string): TrackedSession[] {
-    const result: TrackedSession[] = [];
+  /**
+   * Get active sessions for a specific API key hash.
+   */
+  getSessionsByKey(keyHash: string): SessionSummary[] {
+    const result: SessionSummary[] = [];
     for (const session of this.sessions.values()) {
       if (session.apiKeyHash === keyHash && !this.isExpired(session)) {
-        result.push(session);
+        result.push({
+          id: session.id,
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt,
+          provider: session.provider,
+          model: session.model,
+          messageCount: session.messages.length,
+        });
       }
     }
     return result;
   }
+
+  // ── Internal helpers ─────────────────────────────────────────────────
 
   private isExpired(session: TrackedSession): boolean {
     const now = Date.now();
@@ -284,8 +353,15 @@ export class ServerSessionManager {
         lastActivityAt: session.lastActivityAt,
       },
     };
-    this.backend.save(session.id, data).catch(() => {
+    this.backend.save(session.id, data).catch((err: unknown) => {
       // Best-effort persistence — don't crash on write errors
+      logTransportEvent({
+        level: "error",
+        event: "persist_error",
+        requestId: crypto.randomUUID(),
+        apiKeyHashPrefix: session.apiKeyHash ? session.apiKeyHash.slice(0, 8) : undefined,
+        error: err instanceof Error ? err.message : String(err),
+      });
     });
   }
 
@@ -328,6 +404,11 @@ export class ServerSessionManager {
   }
 
   private verifyOwnership(session: TrackedSession, apiKeyHash: string): boolean {
+    if (!session.apiKeyHash) {
+      session.apiKeyHash = apiKeyHash;
+      this.persistSession(session);
+      return true;
+    }
     const a = Buffer.from(session.apiKeyHash, "utf-8");
     const b = Buffer.from(apiKeyHash, "utf-8");
     if (a.length !== b.length) return false;

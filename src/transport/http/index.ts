@@ -10,6 +10,7 @@
 import * as http from "http";
 import * as fs from "fs";
 import * as path from "path";
+import * as crypto from "node:crypto";
 import { homedir } from "os";
 
 import { getSyncBuiltinCatalog } from "../../domain/providers/model-catalog.js";
@@ -115,12 +116,27 @@ function listSkills(): { name: string; description: string; tags: string[] }[] {
 
 // ── CORS helper ────────────────────────────────────────────────────────
 
+function getCorsAllowlist(): string[] | null {
+  const envVal = process.env.SEEPIENT_CORS_ORIGINS;
+  if (!envVal) return null;
+  return envVal.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+}
+
 function addCORSHeaders(
   req: http.IncomingMessage,
   res: http.ServerResponse,
 ): void {
-  const origin = req.headers.origin ?? "*";
-  res.setHeader("Access-Control-Allow-Origin", origin);
+  const allowlist = getCorsAllowlist();
+  const origin = req.headers.origin;
+
+  if (allowlist !== null) {
+    if (origin && allowlist.includes(origin.toLowerCase())) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+    }
+  } else {
+    res.setHeader("Access-Control-Allow-Origin", origin ?? "*");
+  }
+
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Seepient-API-Key");
   res.setHeader("Access-Control-Max-Age", "86400");
@@ -196,13 +212,14 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
     const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
     const { NoneApprovalBroker } = await import("../approval-brokers.js");
     const { LocalAuditStore, TerminalEventOutbox, recoverIndeterminateActions } = await import("../../domain/permissions/audit-recorder.js");
+    const { isLocalAuditStore } = await import("../../foundations/contracts/execution-brokers.js");
     const rootDir = process.cwd();
     const serverAuditStore = options?.auditStore ?? new LocalAuditStore({ root: rootDir });
-    const isCustomAuditStore = options?.auditStore && (options.auditStore.isLocal === false || (options.auditStore.isLocal === undefined && !(options.auditStore instanceof LocalAuditStore)));
+    const isLocalStore = isLocalAuditStore(serverAuditStore);
     // The outbox MUST be backed by the SAME LocalAuditStore the per-request
     // lifecycles use, otherwise the flush timer + recovery operate on a
     // different pending-event set than the one live requests populate.
-    const serverOutbox = isCustomAuditStore ? undefined : new TerminalEventOutbox(serverAuditStore as import("../../domain/permissions/audit-recorder.js").LocalAuditStore);
+    const serverOutbox = isLocalStore ? new TerminalEventOutbox(serverAuditStore as import("../../domain/permissions/audit-recorder.js").LocalAuditStore) : undefined;
 
     // The periodic flush timer MUST start regardless of whether the one-time
     // recovery (reload/flush/recover) succeeds — a recovery failure must not
@@ -351,8 +368,8 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
         wiredPipeline = await serverPipelineFactory({
           principalId: opts.principalId ?? opts.apiKeyHash ?? "anonymous",
           tenantId: opts.tenantId ?? "default",
-          sessionId: opts.sessionId ?? `sess-${Date.now()}`,
-          runId: `run-${Date.now()}`,
+          sessionId: opts.sessionId ?? crypto.randomUUID(),
+          runId: crypto.randomUUID(),
           workspaceRoot: process.cwd(),
           modelProviderClass: (opts.provider ?? "openai") as string,
         });
@@ -397,8 +414,8 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
         wiredPipeline = await serverPipelineFactory({
           principalId: opts.principalId ?? opts.apiKeyHash ?? "anonymous",
           tenantId: opts.tenantId ?? "default",
-          sessionId: opts.sessionId ?? `sess-${Date.now()}`,
-          runId: `run-${Date.now()}`,
+          sessionId: opts.sessionId ?? crypto.randomUUID(),
+          runId: crypto.randomUUID(),
           workspaceRoot: process.cwd(),
           modelProviderClass: (opts.provider ?? "openai") as string,
         });

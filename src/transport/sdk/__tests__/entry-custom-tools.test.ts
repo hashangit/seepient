@@ -3,7 +3,7 @@
  *
  * Verifies:
  *  1. Custom tool factories and types are exported directly from package entry.
- *  2. Multi-tool per-agent execution through createSeepient({ permissionPipeline: true }).
+ *  2. Multi-tool per-agent execution through createSeepient().
  *  3. generateText execution with explicit trustedHostTool registrations.
  *  4. Seepient.listProviders() derives distinct upstream providers from the catalog.
  */

@@ -5,8 +5,10 @@
  */
 
 import type { IncomingMessage } from "node:http";
+import * as crypto from "node:crypto";
 import { authMiddleware } from "../auth/auth.js";
 import { hashKey } from "../http/session-store.js";
+import { logTransportEvent } from "../logging.js";
 import type {
   WebSocket,
   ClientMessage,
@@ -62,7 +64,7 @@ export function handleConnection(
 
   const state: ConnectionState = {
     sessionId: null,
-    currentAbortController: null,
+    activeChats: new Set(),
     activeProvider: null,
     activeModel: null,
     apiKeyHash: key.keyHash ?? (key.key ? hashKey(key.key) : ""),
@@ -86,6 +88,15 @@ export function handleConnection(
       });
       return;
     }
+
+    const requestId = (msg as any).id ?? crypto.randomUUID();
+    logTransportEvent({
+      level: "info",
+      event: "ws_dispatch",
+      requestId,
+      method: msg.type,
+      apiKeyHashPrefix: state.apiKeyHash ? state.apiKeyHash.slice(0, 8) : undefined,
+    });
 
     switch (msg.type) {
       case "chat":
@@ -151,22 +162,29 @@ export function handleConnection(
   // ── Close ──────────────────────────────────────────────────────────
 
   ws.on("close", () => {
-    // Abort any in-flight stream
-    if (state.currentAbortController) {
-      state.currentAbortController.abort();
-      state.currentAbortController = null;
+    // Abort any in-flight streams
+    for (const controller of state.activeChats) {
+      controller.abort();
     }
+    state.activeChats.clear();
     activeConnections.delete(ws);
   });
 
   // ── Error ──────────────────────────────────────────────────────────
 
   ws.on("error", (err: Error) => {
+    logTransportEvent({
+      level: "error",
+      event: "ws_error",
+      requestId: crypto.randomUUID(),
+      apiKeyHashPrefix: state.apiKeyHash ? state.apiKeyHash.slice(0, 8) : undefined,
+      error: err.message,
+    });
     console.error("[ws] Connection error:", err.message);
-    if (state.currentAbortController) {
-      state.currentAbortController.abort();
-      state.currentAbortController = null;
+    for (const controller of state.activeChats) {
+      controller.abort();
     }
+    state.activeChats.clear();
     activeConnections.delete(ws);
   });
 }

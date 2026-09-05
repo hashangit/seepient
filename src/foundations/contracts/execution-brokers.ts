@@ -352,6 +352,20 @@ export interface AuditStore {
   getTerminal(actionId: string): Promise<ActionAuditEvent | undefined>;
 }
 
+/**
+ * Determines whether an audit store relies on local NDJSON outbox recovery.
+ * Explicit `isLocal: true` / `isLocal: false` on the store takes precedence over class identity.
+ * If `isLocal` is undefined, returns true if the object is identified as a LocalAuditStore.
+ */
+export function isLocalAuditStore(store: unknown): boolean {
+  if (!store || typeof store !== "object") return false;
+  const s = store as { isLocal?: boolean; constructor?: { name?: string } };
+  if (typeof s.isLocal === "boolean") {
+    return s.isLocal;
+  }
+  return s.constructor?.name === "LocalAuditStore";
+}
+
 /** Structural tool outcome used by hooks and transport events. */
 export interface ToolOutcome {
   state:
