@@ -1,472 +1,779 @@
 /**
- * Seepient v2 Instance-First SDK Implementation
+ * Seepient SDK — Unified Headless Agent & Instance Implementation (Spec 021 Hardening).
  *
- * Implements the contract defined in `src/foundations/contracts/sdk-fixture.ts`.
+ * Consolidates the SDK around a single governed entry point. All tool execution
+ * routes through the ActionLifecycle pipeline (PolicyEngine, ApprovalBroker,
+ * ExecutionBoundary, AuditStore).
  */
 
-import { ProviderRuntime, getDefaultProviderRuntime } from "../../domain/providers/provider-runtime.js";
+import {
+  getDefaultProviderRuntime,
+  ProviderRuntime,
+} from "../../domain/providers/provider-runtime.js";
+import type { ProviderRuntimeContract } from "../../foundations/contracts/provider-runtime.js";
 import { ProviderConfigStore } from "../../domain/providers/config-store/provider-config-store.js";
 import { MemoryCredentialStore } from "../../domain/providers/credentials/memory-credential-store.js";
 import { AggregateInferenceAdapter } from "../../capabilities/inference/aggregate-adapter.js";
-import { InferenceError, InferenceErrorCode, SeepientError } from "../../foundations/errors.js";
-import type { ResolutionPreview } from "../cli/provider-manager-api.js";
+import { runAgentLoop } from "../../domain/agent-loop.js";
+import { createHookExecutor } from "../../domain/hooks.js";
+import { resolveTools, getAllToolDefinitions } from "../../domain/tool-executor.js";
+import {
+  DEFAULT_TRUSTED_HOST_ALLOWLIST,
+  extractHostCallbacks,
+  extractRegistrations,
+} from "./tools.js";
+import { initializeSkillRegistry } from "../../capabilities/skills/index.js";
+import { buildSkillCatalog } from "../../domain/skills/skill-catalog.js";
+import { StreamManager } from "../../domain/streaming/stream-manager.js";
+import {
+  createPersistenceBackend,
+} from "../../domain/sessions/session-store.js";
 import type {
-  Seepient,
   CreateSeepientOptions,
-  AgentOptions,
-  Agent as PublicAgent,
-  GenerateTextOptions,
-  GenerateImageOptions,
-  ResolveOptions,
-  TurnResult,
-  ModelAssignmentOverride,
-  ProviderId,
+  Seepient,
+  AgentResponse,
+  StreamTextOptions,
+  StreamTextResult,
+  Message,
+  CumulativeUsage,
+  PersistenceBackend,
+  PersistenceConfig,
+  SessionStore,
+  SessionData,
+} from "../../foundations/types.js";
+import type {
   AccountInput,
   SaveResult,
   DeleteResult,
+  AssignmentTarget,
   PurposeId,
   Tier,
-  AssignmentTarget,
-  AvailableModel,
-} from "../../foundations/contracts/sdk-fixture.js";
-import type {
-  ContentBlock,
-  CanonicalMessage,
-  StreamEvent,
-  InferenceResponse,
-  ImageResult,
-  UpstreamModel,
-  ThinkingLevel,
-} from "../../foundations/schemas/inference.js";
+  ResolutionPreview,
+} from "../../foundations/contracts/provider-manager-api.js";
+import type { AvailableModel } from "../../foundations/schemas/inference.js";
 import type { PurposeModelMap } from "../../foundations/schemas/provider-config.js";
+import {
+  now,
+  toSeepientError,
+} from "../../domain/context/message-convert.js";
+import { generateId } from "../../foundations/id.js";
+import { surfaceLoopError, extractLoopError } from "./error-surfacing.js";
+import { SeepientError } from "../../foundations/errors.js";
 
-export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<Seepient> {
-  const configStore = new ProviderConfigStore(opts.overlayFile ?? ":memory:");
-  if (opts.providers || opts.modelAssignments || opts.retryPolicy) {
-    const currentOverlay = await configStore.getOverlay();
-    await configStore.updateOverlay(
-      {
-        providers: opts.providers as any,
-        modelAssignments: opts.modelAssignments as any,
-        retryPolicy: opts.retryPolicy as any,
-      },
-      currentOverlay.revision,
+// ── Session persistence helpers ──────────────────────────────────────────
+
+const SESSION_ID_RE = /^[a-zA-Z0-9_-]+$/;
+
+function validateSessionId(sessionId: string): void {
+  if (!sessionId || !SESSION_ID_RE.test(sessionId)) {
+    throw new Error(
+      `Invalid session ID "${sessionId}". Only alphanumeric characters, dashes, and underscores are allowed.`,
     );
   }
+}
 
-  const credentialStore = opts.credentials ?? new MemoryCredentialStore();
-  const adapter = opts.adapter ?? new AggregateInferenceAdapter(undefined, undefined, credentialStore);
+async function persistSession(
+  backend: PersistenceBackend,
+  id: string,
+  messages: Message[],
+  options: {
+    provider?: string;
+    providerAccount?: string;
+    model?: string;
+    metadata?: Record<string, unknown>;
+  },
+  createdAt?: number,
+): Promise<void> {
+  const nowMs = Date.now();
+  await backend.save(id, {
+    id,
+    messages,
+    createdAt: createdAt ?? nowMs,
+    updatedAt: nowMs,
+    metadata: options.metadata,
+    provider: options.provider,
+    providerAccount: options.providerAccount,
+    model: options.model,
+  });
+}
 
-  const runtime = new ProviderRuntime({
-    configStore,
-    credentialStore,
-    adapter,
+function wrapAsPersistenceBackend(store: SessionStore | PersistenceBackend): PersistenceBackend {
+  if ("__persistenceBackend" in store && store.__persistenceBackend) {
+    return store as PersistenceBackend;
+  }
+  const s = store as SessionStore;
+  return {
+    __persistenceBackend: true,
+    async save(id: string, data: SessionData) {
+      await s.save(id, data.messages);
+    },
+    async load(id: string): Promise<SessionData | null> {
+      const messages = await s.load(id);
+      if (!messages) return null;
+      return { id, messages, createdAt: Date.now(), updatedAt: Date.now() };
+    },
+    async delete(id: string) {
+      await s.delete(id);
+    },
+    async list() {
+      return s.list();
+    },
+  };
+}
+
+function toCapabilitySet(
+  cap:
+    | import("../../foundations/contracts/permission-policy.js").CapabilitySet
+    | import("../../foundations/contracts/permission-policy.js").Capability[]
+    | undefined,
+): import("../../foundations/contracts/permission-policy.js").CapabilitySet | undefined {
+  if (!cap) return undefined;
+  if (Array.isArray(cap)) {
+    return { version: 1, capabilities: cap };
+  }
+  return cap;
+}
+
+/**
+ * Warn when an embedder injects some but not all permission state stores.
+ * Stateless workers require all stores to be injected; missing stores fall back to local disk.
+ */
+export function warnIfPartialStoreInjection(opts: {
+  auditStore?: unknown;
+  policyStore?: unknown;
+  capabilityLedger?: unknown;
+}): void {
+  const injectedStores = {
+    auditStore: Boolean(opts.auditStore),
+    policyStore: Boolean(opts.policyStore),
+    capabilityLedger: Boolean(opts.capabilityLedger),
+  };
+  const storeCount =
+    Number(injectedStores.auditStore) +
+    Number(injectedStores.policyStore) +
+    Number(injectedStores.capabilityLedger);
+  if (storeCount > 0 && storeCount < 3) {
+    const missing = Object.entries(injectedStores)
+      .filter(([_, present]) => !present)
+      .map(([name]) => name);
+    const present = Object.entries(injectedStores)
+      .filter(([_, present]) => present)
+      .map(([name]) => name);
+    console.warn(
+      `[seepient] WARNING: Partial state store injection detected. ` +
+        `Injected: [${present.join(", ")}]. Missing: [${missing.join(", ")}]. ` +
+        `Missing stores will fall back to local disk at ~/.seepient or ./.seepient. ` +
+        `For fully stateless worker execution, all three permission stores (auditStore, policyStore, capabilityLedger) must be injected.`,
+    );
+  }
+}
+
+// ── Primary Factory: createSeepient ──────────────────────────────────────
+
+/**
+ * Create a governed Seepient agent instance.
+ *
+ * Supports single-turn chat, multi-turn conversations, streaming responses,
+ * model switching, tool execution, session persistence, and provider management.
+ */
+export async function createSeepient(options?: CreateSeepientOptions): Promise<Seepient> {
+  const opts = options ?? {};
+
+  // If providers, modelAssignments, or overlay options are passed without an explicit runtime,
+  // bootstrap a configured ProviderRuntime
+  let bootstrapRuntime: ProviderRuntimeContract | ProviderRuntime | undefined = opts.runtime;
+  if (!bootstrapRuntime) {
+    if (opts.providers || opts.modelAssignments || opts.credentials || opts.overlayFile || opts.adapter) {
+      const configStore = new ProviderConfigStore(opts.overlayFile ?? ":memory:");
+      if (opts.providers || opts.modelAssignments) {
+        const currentOverlay = await configStore.getOverlay();
+        await configStore.updateOverlay(
+          {
+            providers: opts.providers as any,
+            modelAssignments: opts.modelAssignments as any,
+          },
+          currentOverlay.revision,
+        );
+      }
+      const credentialStore = opts.credentials ?? new MemoryCredentialStore();
+      const adapter = opts.adapter ?? new AggregateInferenceAdapter(undefined, undefined, credentialStore);
+      bootstrapRuntime = new ProviderRuntime({
+        configStore,
+        credentialStore,
+        adapter,
+      });
+    } else {
+      bootstrapRuntime = getDefaultProviderRuntime();
+    }
+  }
+  const runtime: ProviderRuntimeContract | ProviderRuntime = bootstrapRuntime;
+
+  const sessionId = opts.sessionId ?? generateId();
+  validateSessionId(sessionId);
+
+  let provider = opts.provider;
+  let providerAccount = opts.providerAccount ?? opts.override?.providerAccount;
+  let model = opts.model ?? opts.override?.model ?? "";
+  let purpose = opts.purpose;
+  let tier = opts.tier;
+  let metadata = opts.metadata;
+
+  // System prompt
+  let systemPrompt = opts.systemPrompt ?? "You are a helpful assistant.";
+
+  // Skills
+  let skillCatalog = "";
+  let skillRegistry: import("../../capabilities/skills/types.js").SkillRegistry | undefined;
+  if (opts.skills !== false) {
+    try {
+      skillRegistry = await initializeSkillRegistry(opts.cwd ?? process.cwd());
+      let meta = skillRegistry.getMetadata();
+      if (Array.isArray(opts.skills)) {
+        const wanted = new Set(opts.skills);
+        meta = meta.filter((s) => wanted.has(s.name));
+      }
+      if (meta.length > 0) {
+        skillCatalog = buildSkillCatalog(meta);
+      }
+    } catch {
+      /* skill init is best-effort — don't block creation */
+    }
+  }
+
+  const composeSystem = () =>
+    skillCatalog ? systemPrompt + "\n\n" + skillCatalog : systemPrompt;
+
+  // Tools
+  let toolDefs = opts.tools ? resolveTools(opts.tools) : getAllToolDefinitions();
+  const { callbacks: hostCallbacks, registrationIds } = extractHostCallbacks(opts.tools, {
+    skills: skillRegistry,
+  });
+  const registrations = extractRegistrations(opts.tools);
+
+  // Hooks
+  const hookExecutor = createHookExecutor(opts.hooks);
+
+  // State & session loading
+  const messages: Message[] = [];
+  let backend: PersistenceBackend | null = null;
+  let sessionCreatedAt = Date.now();
+  if (opts.persist) {
+    if (typeof opts.persist === "string") {
+      backend = createPersistenceBackend({ type: "file", path: opts.persist });
+    } else if ("type" in opts.persist && typeof opts.persist.type === "string") {
+      backend = createPersistenceBackend(opts.persist as PersistenceConfig);
+    } else if ("save" in opts.persist && "load" in opts.persist) {
+      backend = wrapAsPersistenceBackend(opts.persist as SessionStore | PersistenceBackend);
+    }
+
+    if (backend) {
+      const existing = await backend.load(sessionId);
+      if (existing) {
+        messages.push(...existing.messages);
+        if (existing.createdAt) sessionCreatedAt = existing.createdAt;
+        if (!provider && existing.provider) provider = existing.provider;
+        if (!providerAccount && existing.providerAccount) providerAccount = existing.providerAccount;
+        if (!model && existing.model) model = existing.model;
+        if (!metadata && existing.metadata) metadata = existing.metadata;
+      }
+    }
+  }
+
+  if (messages.length === 0 && systemPrompt) {
+    messages.push({
+      id: generateId(),
+      role: "system",
+      content: composeSystem(),
+      timestamp: now(),
+    });
+  }
+
+  // Action lifecycle pipeline
+  const { buildActionLifecycle } = await import(
+    "../../domain/permissions/action-lifecycle-factory.js"
+  );
+  const { legacyApproveToolToBroker } = await import("../legacy-adapter.js");
+  const { buildLocalBoundary } = await import(
+    "../../capabilities/execution/build-local-boundary.js"
+  );
+  const {
+    LocalAuditStore,
+    TerminalEventOutbox,
+    recoverIndeterminateActions,
+  } = await import("../../domain/permissions/audit-recorder.js");
+
+  warnIfPartialStoreInjection(opts);
+
+  let auditOutbox:
+    | import("../../domain/permissions/audit-recorder.js").TerminalEventOutbox
+    | undefined;
+  const isLocalStore =
+    !opts.auditStore ||
+    opts.auditStore.isLocal === true ||
+    (opts.auditStore.isLocal === undefined &&
+      opts.auditStore instanceof LocalAuditStore);
+  const auditStore = opts.auditStore ?? new LocalAuditStore();
+  if (isLocalStore) {
+    auditOutbox = new TerminalEventOutbox(
+      auditStore as InstanceType<typeof LocalAuditStore>,
+    );
+    await auditOutbox.reload();
+    await auditOutbox.flush().catch(() => {});
+    await recoverIndeterminateActions(
+      auditStore as InstanceType<typeof LocalAuditStore>,
+      auditOutbox,
+    ).catch(() => {});
+  }
+
+  const broker =
+    opts.approvalBroker ?? legacyApproveToolToBroker(opts.approveTool);
+  const { createSnapshotStore } = await import(
+    "../../foundations/hashline/snapshot-store.js"
+  );
+  const { InMemoryArtifactStore } = await import(
+    "../../capabilities/execution/in-memory-artifact-store.js"
+  );
+  const { createMediaVendorOperationHandler } = await import(
+    "../../domain/media/vendor-operation-handler.js"
+  );
+  const snapshotStore = createSnapshotStore();
+  const sharedArtifacts = new InMemoryArtifactStore();
+  const vendorOperationHandler = createMediaVendorOperationHandler({
+    runtime,
+    artifacts: sharedArtifacts,
+  });
+  const { boundary } = await buildLocalBoundary({
+    artifacts: sharedArtifacts,
+    workspaceRoot: opts.cwd ?? process.cwd(),
+    snapshotStore,
+    hostCallbacks,
+    vendorOperationHandler,
+    commitHelper: opts.commitHelper,
+    network: opts.network,
+  });
+  const approvalMode = opts.consentMode
+    ? opts.consentMode === "autonomous"
+      ? "autonomous"
+      : opts.consentMode === "ask-everything"
+      ? "manual"
+      : "balanced"
+    : opts.approvalBroker || opts.approveTool
+    ? "manual"
+    : "never";
+
+  const wiredPipeline = await buildActionLifecycle({
+    principalId: opts.principalId ?? "sdk-user",
+    runId: sessionId,
+    sessionId,
+    workspaceRoot: opts.cwd ?? process.cwd(),
+    modelProviderClass: (provider ?? "openai") as string,
+    approvalBroker: broker,
+    executionBoundary: boundary,
+    approvalMode,
+    deploymentCeiling: toCapabilitySet(opts.deploymentCeiling),
+    principalPolicy: toCapabilitySet(opts.principalPolicy),
+    artifacts: sharedArtifacts,
+    snapshotStore,
+    trustedHostAllowlist: [...DEFAULT_TRUSTED_HOST_ALLOWLIST, ...registrationIds],
+    registrations,
+    auditStore,
+    policyStore: opts.policyStore,
+    capabilityLedger: opts.capabilityLedger,
+    terminalOutbox: auditOutbox,
   });
 
-  let isDisposed = false;
+  let activeAbortController: AbortController = new AbortController();
 
-  const ensureNotDisposed = () => {
-    if (isDisposed) {
-      throw new InferenceError({
-        code: "invalid_request",
-        message: "Seepient instance has been disposed",
-        retryable: false,
-      });
-    }
+  // Concurrency guard (Promise-chain mutex)
+  let lock: Promise<void> = Promise.resolve();
+
+  function acquire(): Promise<() => void> {
+    const prev = lock;
+    let myRelease!: () => void;
+    lock = new Promise<void>((r) => {
+      myRelease = r;
+    });
+    return prev.then(() => myRelease);
+  }
+
+  const cumulativeUsage: CumulativeUsage = {
+    totalPromptTokens: 0,
+    totalCompletionTokens: 0,
+    totalCost: 0,
+    requestCount: 0,
   };
 
-  const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
-  const managerApi = createProviderManagerApi(runtime);
-  let latestState = await managerApi.getState();
+  async function persistMessages(): Promise<void> {
+    if (backend) {
+      await persistSession(
+        backend,
+        sessionId,
+        messages,
+        {
+          provider,
+          providerAccount,
+          model,
+          metadata,
+        },
+        sessionCreatedAt,
+      );
+    }
+  }
 
-  return {
-    async createAgent(agentOpts: AgentOptions): Promise<PublicAgent> {
-      const { extractRegistrations } = await import("./tools.js");
-      extractRegistrations(agentOpts.tools as any);
+  function currentModelOverride(): { model?: string; providerAccount?: string } | undefined {
+    return providerAccount || model
+      ? { model: model || undefined, providerAccount }
+      : undefined;
+  }
 
-      let currentOverride: ModelAssignmentOverride | undefined = agentOpts.override ? { ...agentOpts.override } : undefined;
-      const conversationMessages: CanonicalMessage[] = [];
+  // ── chat() ──────────────────────────────────────────────────────────────
 
-      if (agentOpts.systemPrompt) {
-        conversationMessages.push({
-          role: "system",
-          content: [{ type: "text", text: agentOpts.systemPrompt }],
-        });
-      }
+  async function chat(userMessage: string): Promise<AgentResponse> {
+    const release = await acquire();
+    try {
+      activeAbortController = new AbortController();
+
+      messages.push({
+        id: generateId(),
+        role: "user",
+        content: userMessage,
+        timestamp: now(),
+      });
+
+      const maxSteps = opts.maxSteps ?? 10;
+      const snapshot = await runtime.createTurnSnapshot();
+
+      const result = await runAgentLoop({
+        runtime,
+        turnSnapshot: snapshot,
+        model,
+        modelOverride: currentModelOverride(),
+        purpose,
+        tier,
+        messages,
+        toolDefs,
+        systemPrompt: systemPrompt,
+        maxSteps,
+        hooks: hookExecutor,
+        signal: activeAbortController.signal,
+        config: { ...opts.config, runtime, skills: skillRegistry },
+        metadata,
+        middleware: opts.middleware,
+        approveTool: opts.approveTool,
+        wiredPipeline,
+      });
+
+      cumulativeUsage.totalPromptTokens += result.usage.promptTokens;
+      cumulativeUsage.totalCompletionTokens += result.usage.completionTokens;
+      cumulativeUsage.totalCost += result.usage.cost;
+      cumulativeUsage.requestCount += 1;
+
+      await persistMessages();
+      surfaceLoopError(result);
+
+      const lastAssistant = [...messages]
+        .reverse()
+        .find((m) => m.role === "assistant" && m.content);
+      const text = lastAssistant?.content ?? "";
 
       return {
-        get messages() {
-          return conversationMessages;
-        },
+        text,
+        toolCalls: result.toolCalls,
+        usage: result.usage,
+      };
+    } finally {
+      release();
+    }
+  }
 
-        clearConversation() {
-          conversationMessages.length = 0;
-          if (agentOpts.systemPrompt) {
-            conversationMessages.push({
-              role: "system",
-              content: [{ type: "text", text: agentOpts.systemPrompt }],
-            });
-          }
-        },
+  // ── chatStream() ────────────────────────────────────────────────────────
 
-        async switchModel(override: ModelAssignmentOverride) {
-          currentOverride = { ...override };
-        },
+  async function chatStream(
+    userMessage: string,
+    streamOptions?: StreamTextOptions,
+  ): Promise<StreamTextResult> {
+    const release = await acquire();
 
-        async promoteOverrideToAssignment(scope: "provider:admin", expectedRevision: number) {
-          if (scope !== "provider:admin") {
-            throw new InferenceError({
-              code: "invalid_request",
-              message: "Scope 'provider:admin' required to promote override to assignment",
-              retryable: false,
-            });
-          }
-          if (!currentOverride?.model) {
-            throw new InferenceError({
-              code: "invalid_request",
-              message: "No active model override to promote",
-              retryable: false,
-            });
-          }
+    try {
+      const streamAbort = new AbortController();
+      activeAbortController = streamAbort;
+      const mergedHooks = {
+        ...opts.hooks,
+      };
+      const streamHookExecutor = createHookExecutor(mergedHooks);
+
+      messages.push({
+        id: generateId(),
+        role: "user",
+        content: userMessage,
+        timestamp: now(),
+      });
+
+      const maxSteps = opts.maxSteps ?? 10;
+      const stream = new StreamManager();
+
+      (async () => {
+        try {
           const snapshot = await runtime.createTurnSnapshot();
-          const resolvedPlan = await runtime.resolvePlan(
-            snapshot,
-            agentOpts.purpose,
-            agentOpts.tier,
-            currentOverride,
-          );
-          const tier = agentOpts.tier ?? "standard";
-          const res = await runtime.updateOverlay(
-            {
-              modelAssignments: {
-                [agentOpts.purpose]: {
-                  [tier]: {
-                    providerAccount: currentOverride.providerAccount ?? resolvedPlan.selectedTarget.providerAccount,
-                    model: currentOverride.model,
-                    thinkingLevel: currentOverride.thinkingLevel,
-                  },
-                },
-              } as any,
-            },
-            expectedRevision,
-          );
-          return { revision: res.revision };
-        },
 
-        async run(input: string | ContentBlock[]): Promise<TurnResult> {
-          const userContent = typeof input === "string" ? [{ type: "text" as const, text: input }] : (input.filter((b) => b.type === "text" || b.type === "image") as any);
-          conversationMessages.push({
-            role: "user",
-            content: userContent,
+          const result = await runAgentLoop({
+            runtime,
+            turnSnapshot: snapshot,
+            model,
+            modelOverride: currentModelOverride(),
+            purpose,
+            tier,
+            messages,
+            toolDefs,
+            systemPrompt: systemPrompt,
+            maxSteps,
+            hooks: streamHookExecutor,
+            signal: streamAbort.signal,
+            config: { ...opts.config, runtime, skills: skillRegistry },
+            metadata,
+            middleware: opts.middleware,
+            approveTool: opts.approveTool,
+            wiredPipeline,
+            onStep: (step) => {
+              if (streamOptions?.onStep) streamOptions.onStep(step);
+              if (
+                (step.type === "text" || step.type === "text_delta") &&
+                step.content
+              ) {
+                if (streamOptions?.onText) streamOptions.onText(step.content);
+                stream.enqueueText(step.content);
+              }
+              if (step.type === "tool_call" && step.toolCall) {
+                if (streamOptions?.onToolCall) {
+                  streamOptions.onToolCall({
+                    name: step.toolCall.name,
+                    args: step.toolCall.args,
+                    callId: step.toolCall.id,
+                  });
+                }
+                if (streamOptions?.onToolResult) {
+                  const output = step.toolCall.result;
+                  const success =
+                    typeof output === "string"
+                      ? !output.startsWith("Error:")
+                      : true;
+                  streamOptions.onToolResult({
+                    callId: step.toolCall.id,
+                    output,
+                    success,
+                  });
+                }
+              }
+              stream.enqueueStep(step);
+            },
           });
 
-          let currentStep = 0;
-          const maxSteps = 10;
-          let snapshot = await runtime.createTurnSnapshot();
-          let plan = await runtime.resolvePlan(
-            snapshot,
-            agentOpts.purpose,
-            agentOpts.tier,
-            currentOverride,
-          );
+          cumulativeUsage.totalPromptTokens += result.usage.promptTokens;
+          cumulativeUsage.totalCompletionTokens += result.usage.completionTokens;
+          cumulativeUsage.totalCost += result.usage.cost;
+          cumulativeUsage.requestCount += 1;
 
-          let finalStopReason: any = "end_turn";
-          let finalUsage: any;
-          let finalContent: ContentBlock[] = [];
+          const lastAssistant = [...messages]
+            .reverse()
+            .find((m) => m.role === "assistant" && m.content);
+          const finalText = lastAssistant?.content ?? "";
 
-          while (currentStep < maxSteps) {
-            currentStep++;
-            let fullText = "";
-            let toolCalls: Array<{ id: string; name: string; input: string }> = [];
-            let currentToolCall: { id: string; name: string; input: string } | null = null;
-            let stepStopReason: any = "end_turn";
-            let stepUsage: any;
-
-            const { resolveTools } = await import("./tools.js");
-            const resolvedToolDefs = agentOpts.tools ? resolveTools(agentOpts.tools as any) : undefined;
-
-            for await (const ev of runtime.executeLanguage(
-              plan,
-              {
-                messages: conversationMessages,
-                tools: resolvedToolDefs as any,
-              },
-            )) {
-              if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") {
-                fullText += ev.delta.text;
-              } else if (
-                ev.type === "content_block_start" &&
-                ((ev.block?.type as any) === "tool_call" || ev.block?.type === "tool_use")
-              ) {
-                currentToolCall = { id: (ev.block as any).id, name: (ev.block as any).name, input: "" };
-              } else if (ev.type === "content_block_delta" && ev.delta.type === "tool_input_delta") {
-                if (currentToolCall) {
-                  currentToolCall.input += ev.delta.partialJson;
-                }
-              } else if (ev.type === "content_block_stop") {
-                if (currentToolCall) {
-                  toolCalls.push(currentToolCall);
-                  currentToolCall = null;
-                }
-              } else if (ev.type === "finish") {
-                stepStopReason = ev.stopReason;
-                stepUsage = ev.usage;
-              } else if (ev.type === "error") {
-                throw new InferenceError({
-                  code: ev.error.code as InferenceErrorCode,
-                  message: ev.error.message,
-                  retryable: ev.error.retryable,
-                });
-              }
-            }
-
-            finalStopReason = stepStopReason;
-            finalUsage = stepUsage;
-
-            const assistantBlocks: ContentBlock[] = [];
-            if (fullText) {
-              assistantBlocks.push({ type: "text", text: fullText });
-            }
-            for (const tc of toolCalls) {
-              let parsedInput = {};
-              try { parsedInput = JSON.parse(tc.input); } catch {}
-              assistantBlocks.push({
-                type: "tool_use",
-                id: tc.id,
-                name: tc.name,
-                input: parsedInput,
-              } as any);
-            }
-
-            conversationMessages.push({
-              role: "assistant",
-              content: assistantBlocks as any,
-            });
-            finalContent = assistantBlocks;
-
-            if (toolCalls.length === 0 || stepStopReason !== "tool_use") {
-              break;
-            }
-
-            // Execute tools and append tool_result
-            const toolResults: ContentBlock[] = [];
-            for (const tc of toolCalls) {
-              const toolDef = (agentOpts.tools as any[])?.find((t) => {
-                if (!t) return false;
-                if (typeof t === "string") return t === tc.name;
-                if (t.name === tc.name) return true;
-                if (t.definition?.function?.name === tc.name) return true;
-                return false;
-              });
-              let output = "";
-              let isError = false;
-              if (toolDef && typeof toolDef.execute === "function") {
-                try {
-                  let parsed = {};
-                  try { parsed = JSON.parse(tc.input); } catch {}
-                  const res = await toolDef.execute(parsed, { runtime });
-                  output = typeof res === "string" ? res : JSON.stringify(res);
-                } catch (err: any) {
-                  output = `Error: ${err.message}`;
-                  isError = true;
-                }
-              } else if (toolDef && (toolDef.kind === "prepared" || toolDef.kind === "broker-connector")) {
-                output = `Error: Custom tool registration "${tc.name}" requires the permission pipeline. Use createAgent({ permissionPipeline: true }) from "seepient".`;
-                isError = true;
-              } else {
-                output = `Error: Tool "${tc.name}" is not implemented`;
-                isError = true;
-              }
-
-              toolResults.push({
-                type: "tool_result",
-                toolUseId: tc.id,
-                content: output,
-                isError,
-              } as any);
-            }
-
-            conversationMessages.push({
-              role: "user",
-              content: toolResults as any,
-            });
-
-            snapshot = await runtime.createTurnSnapshot();
-            plan = await runtime.resolvePlan(
-              snapshot,
-              agentOpts.purpose,
-              agentOpts.tier,
-              currentOverride,
-            );
+          stream.resolveText(finalText);
+          stream.resolveUsage(result.usage);
+          const loopErr = extractLoopError(result);
+          if (loopErr) {
+            if (streamOptions?.onError) streamOptions.onError(loopErr);
+            stream.resolveFinish("error");
+          } else {
+            stream.resolveFinish(result.finishReason);
           }
-
-          return {
-            stopReason: finalStopReason,
-            content: finalContent,
-            usage: finalUsage,
-            servedBy: {
-              providerAccount: plan.selectedTarget.providerAccount,
-              model: plan.selectedTarget.model,
-              thinkingLevel: plan.selectedTarget.thinkingLevel,
-            },
-          };
-        },
-
-        async stream(input: string | ContentBlock[]): Promise<AsyncIterable<StreamEvent>> {
-          const userContent = typeof input === "string" ? [{ type: "text" as const, text: input }] : (input.filter((b) => b.type === "text" || b.type === "image") as any);
-          const userMsg: CanonicalMessage = {
-            role: "user",
-            content: userContent,
-          };
-          conversationMessages.push(userMsg);
-
-          const snapshot = await runtime.createTurnSnapshot();
-          const plan = await runtime.resolvePlan(
-            snapshot,
-            agentOpts.purpose,
-            agentOpts.tier,
-            currentOverride,
-          );
-
-          async function* generateEvents(): AsyncGenerator<StreamEvent> {
-            let fullText = "";
-            let success = false;
-            try {
-              for await (const event of runtime.executeLanguage(plan, {
-                messages: conversationMessages,
-                tools: agentOpts.tools as any,
-              })) {
-                if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-                  fullText += event.delta.text;
-                }
-                yield event;
-                if (event.type === "finish") {
-                  success = true;
-                }
-              }
-              if (success && fullText) {
-                conversationMessages.push({
-                  role: "assistant",
-                  content: [{ type: "text", text: fullText }],
-                });
-              }
-            } finally {
-              if (!success) {
-                const idx = conversationMessages.lastIndexOf(userMsg);
-                if (idx >= 0) conversationMessages.splice(idx, 1);
-              }
-            }
-          }
-
-          return generateEvents();
-        },
-
-        async dispose(): Promise<void> {
-          conversationMessages.length = 0;
-        },
-      };
-    },
-
-    async generateText(opts: GenerateTextOptions): Promise<InferenceResponse> {
-      const text = typeof opts.prompt === "string" ? opts.prompt : opts.prompt.map((b: any) => (b.type === "text" ? b.text : "")).join("");
-      const snapshot = await runtime.createTurnSnapshot();
-      const plan = await runtime.resolvePlan(snapshot, "text", "standard", opts.override);
-      const canonicalMessages: CanonicalMessage[] = [
-        {
-          role: "user",
-          content: [{ type: "text", text }],
-        },
-      ];
-
-      let fullText = "";
-      let stopReason: any = "end_turn";
-      let usage: any;
-
-      for await (const ev of runtime.executeLanguage(plan, {
-        messages: canonicalMessages,
-      })) {
-        if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") {
-          fullText += ev.delta.text;
-        } else if (ev.type === "finish") {
-          stopReason = ev.stopReason;
-          usage = ev.usage;
+        } catch (err) {
+          const seepientErr = toSeepientError(err, "PROVIDER_ERROR");
+          if (streamOptions?.onError) streamOptions.onError(seepientErr);
+          stream.resolveText("");
+          stream.resolveUsage({
+            promptTokens: 0,
+            completionTokens: 0,
+            totalTokens: 0,
+            cost: 0,
+          });
+          stream.resolveFinish("error");
+        } finally {
+          stream.complete();
+          await persistMessages();
+          release();
         }
-      }
+      })();
 
       return {
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text: fullText }],
-        },
-        stopReason,
-        usage,
+        textStream: stream.textStream,
+        steps: stream.stepsStream,
+        fullText: stream.fullText,
+        usage: stream.usage,
+        finishReason: stream.finishReason,
+        abort: () => streamAbort.abort(),
+        toResponse: () => stream.toResponse(),
+        toSSEStream: () => stream.toSSEStream(),
       };
-    },
+    } catch (_err) {
+      release();
+      throw _err;
+    }
+  }
 
-    async streamText(opts: any): Promise<AsyncIterable<StreamEvent>> {
-      const text = typeof opts.prompt === "string" ? opts.prompt : opts.prompt.map((b: any) => (b.type === "text" ? b.text : "")).join("");
-      const snapshot = await runtime.createTurnSnapshot();
-      const plan = await runtime.resolvePlan(snapshot, "text", "standard", opts.override);
-      const canonicalMessages: CanonicalMessage[] = [
-        {
-          role: "user",
-          content: [{ type: "text", text }],
-        },
-      ];
+  async function switchProvider(
+    accountOrModel: string,
+    newModel?: string,
+  ): Promise<void> {
+    if (newModel) {
+      providerAccount = accountOrModel || undefined;
+      model = newModel;
+    } else {
+      providerAccount = undefined;
+      model = accountOrModel;
+    }
+  }
 
-      return runtime.executeLanguage(plan, {
-        messages: canonicalMessages,
-      });
-    },
-
-    async generateImage(opts: any): Promise<any> {
-      const snapshot = await runtime.createTurnSnapshot();
-      const plan = await runtime.resolvePlan(snapshot, "image-generation", "standard", opts.override);
-
-      const res = await runtime.executeImage(plan, {
-        prompt: opts.prompt,
-        operation: opts.operation,
-        aspectRatio: opts.aspectRatio,
-        qualityPreset: opts.qualityPreset,
-        inputImage: opts.image ?? opts.inputImage,
-        mask: opts.mask,
-        count: opts.count,
-        style: opts.style,
-      });
-
-      return {
-        images: res.images.map((img: any) => ({
-          mimeType: img.mimeType as any,
-          bytes: img.bytes,
-          format: img.format,
-          aspectRatio: img.aspectRatio,
-          revisedPrompt: img.revisedPrompt,
-        })),
-        usage: {
-          imagesGenerated: res.images.length,
-          cost: res.usage?.cost ?? (res as any).cost,
-        },
-        servedBy: {
-          providerAccount: plan.selectedTarget.providerAccount,
-          model: plan.selectedTarget.model,
-        },
+  function setSystemPrompt(prompt: string): void {
+    systemPrompt = prompt;
+    const content = composeSystem();
+    const sysIdx = messages.findIndex((m) => m.role === "system");
+    if (sysIdx >= 0) {
+      messages[sysIdx] = {
+        id: messages[sysIdx].id,
+        role: "system",
+        content,
+        timestamp: now(),
       };
-    },
+    } else {
+      messages.unshift({
+        id: generateId(),
+        role: "system",
+        content,
+        timestamp: now(),
+      });
+    }
+  }
 
-    async resolve(opts: ResolveOptions): Promise<{
-      model: AvailableModel;
-      providerAccount: ProviderId;
-      thinkingLevel?: ThinkingLevel;
-      via: "requested" | "fallback-chain";
-      failureTargets: Array<{ providerAccount: string; model: string }>;
-    }> {
-      const res = await managerApi.resolvePreview(opts.purpose as PurposeId, opts.tier, opts.override);
+  function setTools(tools: string[]): void {
+    toolDefs = resolveTools(tools);
+  }
+
+  function abort(): void {
+    activeAbortController.abort();
+  }
+
+  function clear(): void {
+    messages.length = 0;
+    if (systemPrompt) {
+      messages.push({
+        id: generateId(),
+        role: "system",
+        content: composeSystem(),
+        timestamp: now(),
+      });
+    }
+  }
+
+  function getHistory(): Message[] {
+    return [...messages];
+  }
+
+  function getUsage(): CumulativeUsage {
+    return { ...cumulativeUsage };
+  }
+
+  async function flushAudit(): Promise<number> {
+    if (auditOutbox) {
+      return auditOutbox.flush();
+    }
+    return 0;
+  }
+
+  async function close(): Promise<void> {
+    abort();
+    await flushAudit();
+  }
+
+  // ── Provider Management Methods ─────────────────────────────────────────
+
+  const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
+  const managerApi = typeof (runtime as any).getConfigStore === "function"
+    ? createProviderManagerApi(runtime as any)
+    : null;
+  let latestState = managerApi ? await managerApi.getState() : { revision: 0, assignments: {} as PurposeModelMap };
+
+  async function addProvider(input: AccountInput): Promise<SaveResult> {
+    if (!managerApi) {
+      throw new SeepientError("Injected provider runtime does not support configuration mutations", "NOT_IMPLEMENTED", false);
+    }
+    const res = await managerApi.saveAccount(input);
+    if (res.ok) latestState = await managerApi.getState();
+    return res;
+  }
+
+  async function removeProvider(id: string, opts?: { force?: boolean }): Promise<DeleteResult> {
+    if (!managerApi) {
+      throw new SeepientError("Injected provider runtime does not support configuration mutations", "NOT_IMPLEMENTED", false);
+    }
+    const res = await managerApi.deleteAccount(id, opts);
+    if (res.ok) latestState = await managerApi.getState();
+    return res;
+  }
+
+  async function setAssignment(purpose: any, tier: any, target: AssignmentTarget): Promise<SaveResult> {
+    if (!managerApi) {
+      throw new SeepientError("Injected provider runtime does not support configuration mutations", "NOT_IMPLEMENTED", false);
+    }
+    const res = await managerApi.setAssignment(purpose, tier, target);
+    if (res.ok) latestState = await managerApi.getState();
+    return res;
+  }
+
+  async function clearAssignment(purpose: any, tier: any): Promise<SaveResult> {
+    if (!managerApi) {
+      throw new SeepientError("Injected provider runtime does not support configuration mutations", "NOT_IMPLEMENTED", false);
+    }
+    const res = await managerApi.clearAssignment(purpose, tier);
+    if (res.ok) latestState = await managerApi.getState();
+    return res;
+  }
+
+  async function getCatalog(): Promise<readonly AvailableModel[]> {
+    const snapshot = await runtime.createTurnSnapshot();
+    if ((runtime as any).modelCatalog) {
+      return (runtime as any).modelCatalog.listAvailableModels(snapshot.config);
+    }
+    return (snapshot.catalog as any) ?? [];
+  }
+
+  function getAssignments(): PurposeModelMap {
+    return latestState.assignments ?? {};
+  }
+
+  async function listProviders(): Promise<string[]> {
+    const catalog = await getCatalog();
+    return Array.from(new Set(catalog.map((m) => m.upstreamProvider))).sort();
+  }
+
+  async function reload(): Promise<{ revision: number }> {
+    if (managerApi) {
+      latestState = await managerApi.getState();
+      return { revision: latestState.revision };
+    }
+    const snap = await runtime.createTurnSnapshot();
+    return { revision: snap.revision };
+  }
+
+  async function resolve(resolveOpts: { purpose: any; tier?: any; override?: any }): Promise<any> {
+    if (managerApi) {
+      const res = await managerApi.resolvePreview(resolveOpts.purpose as PurposeId, resolveOpts.tier, resolveOpts.override);
       if ("ok" in res && res.ok === false) {
         throw new SeepientError(res.message || "Resolution failed", res.code, false);
       }
       const preview = res as ResolutionPreview;
       const snapshot = await runtime.createTurnSnapshot();
-      const availableModels = await runtime.modelCatalog.listAvailableModels(snapshot.config);
+      const availableModels = await getCatalog();
       const targetModelId = preview.selectedTarget.model;
       const targetAcct = preview.selectedTarget.providerAccount;
 
@@ -474,7 +781,7 @@ export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<
         availableModels.find((m) => m.id === targetModelId && m.reachableVia.includes(targetAcct)) ??
         availableModels.find((m) => m.id === targetModelId);
 
-      const model: AvailableModel = foundModel ?? {
+      const resolvedModel: AvailableModel = foundModel ?? {
         id: targetModelId,
         displayName: targetModelId,
         upstreamProvider: targetAcct,
@@ -489,65 +796,75 @@ export async function createSeepient(opts: CreateSeepientOptions = {}): Promise<
       };
 
       return {
-        model,
+        model: resolvedModel,
         providerAccount: preview.selectedTarget.providerAccount,
         thinkingLevel: (preview.selectedTarget as any).thinkingLevel,
         via: preview.via,
         failureTargets: [...(preview.failureTargets ?? [])],
       };
-    },
+    }
+    const snapshot = await runtime.createTurnSnapshot();
+    const plan = await runtime.resolvePlan(
+      snapshot,
+      resolveOpts.purpose,
+      resolveOpts.tier,
+      resolveOpts.override,
+    );
+    const catalog = await getCatalog();
+    const targetModelId = plan.selectedTarget.model;
+    const targetAcct = plan.selectedTarget.providerAccount;
+    const foundModel =
+      catalog.find((m) => m.id === targetModelId && m.reachableVia.includes(targetAcct)) ??
+      catalog.find((m) => m.id === targetModelId) ?? {
+        id: targetModelId,
+        displayName: targetModelId,
+        upstreamProvider: targetAcct,
+        contextWindow: 0,
+        capabilities: { toolUse: false, streaming: false, vision: false },
+        provenance: "user-declared",
+        reachableVia: [targetAcct],
+      };
 
-    getAssignments(): PurposeModelMap {
-      return latestState.assignments ?? {};
-    },
+    return {
+      model: foundModel,
+      providerAccount: plan.selectedTarget.providerAccount,
+      thinkingLevel: plan.selectedTarget.thinkingLevel,
+      via: plan.failureTargets?.length ? "fallback-chain" : "requested",
+      failureTargets: plan.failureTargets ?? [],
+    };
+  }
 
-    async getCatalog(): Promise<readonly AvailableModel[]> {
-      const snapshot = await runtime.createTurnSnapshot();
-      return runtime.modelCatalog.listAvailableModels(snapshot.config);
-    },
+  async function dispose(): Promise<void> {
+    await close();
+    if (typeof (runtime as any).removeAllListeners === "function") {
+      (runtime as any).removeAllListeners();
+    }
+  }
 
-    async listProviders(): Promise<string[]> {
-      const snapshot = await runtime.createTurnSnapshot();
-      const catalog = await runtime.modelCatalog.listAvailableModels(snapshot.config);
-      return Array.from(new Set(catalog.map((m) => m.upstreamProvider))).sort();
-    },
+  return {
+    sessionId,
+    chat,
+    chatStream,
+    switchProvider,
+    setSystemPrompt,
+    setTools,
+    abort,
+    clear,
+    getHistory,
+    getUsage,
+    flushAudit,
+    close,
 
-    async reload(): Promise<{ revision: number }> {
-      latestState = await managerApi.getState();
-      return { revision: latestState.revision };
-    },
-
-    async addProvider(input: AccountInput): Promise<SaveResult> {
-      ensureNotDisposed();
-      const res = await managerApi.saveAccount(input);
-      if (res.ok) latestState = res.state;
-      return res;
-    },
-
-    async removeProvider(id: string, opts?: { force?: boolean }): Promise<DeleteResult> {
-      ensureNotDisposed();
-      const res = await managerApi.deleteAccount(id, opts);
-      if (res.ok) latestState = res.state;
-      return res;
-    },
-
-    async setAssignment(purpose: PurposeId, tier: Tier | null, target: AssignmentTarget): Promise<SaveResult> {
-      ensureNotDisposed();
-      const res = await managerApi.setAssignment(purpose, tier, target);
-      if (res.ok) latestState = res.state;
-      return res;
-    },
-
-    async clearAssignment(purpose: PurposeId, tier: Tier | null): Promise<SaveResult> {
-      ensureNotDisposed();
-      const res = await managerApi.clearAssignment(purpose, tier);
-      if (res.ok) latestState = res.state;
-      return res;
-    },
-
-    async dispose(): Promise<void> {
-      isDisposed = true;
-      runtime.removeAllListeners();
-    },
+    // Provider management
+    addProvider,
+    removeProvider,
+    setAssignment,
+    clearAssignment,
+    getCatalog,
+    getAssignments,
+    listProviders,
+    reload,
+    resolve,
+    dispose,
   };
 }

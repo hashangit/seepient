@@ -5,7 +5,7 @@ describe("Seepient smoke test — module resolution", () => {
     const sdk = await import("../transport/sdk/index.js");
     expect(typeof sdk.generateText).toBe("function");
     expect(typeof sdk.streamText).toBe("function");
-    expect(typeof sdk.createAgent).toBe("function");
+    expect(typeof sdk.createSeepient).toBe("function");
     expect(typeof sdk.settings).toBe("object");
     expect(typeof sdk.compose).toBe("function");
   });

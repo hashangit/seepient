@@ -53,9 +53,12 @@ export function handleChat(
       maxSteps: msg.options?.maxSteps ?? 10,
       skills: msg.options?.skills,
       sessionId: state.sessionId ?? undefined,
-      // Spec 008: pass the authenticated API-key hash as principal identity.
+      // Spec 008 / Spec 021 review: pass authenticated identity to approval records
       ...(state.apiKeyHash ? { apiKeyHash: state.apiKeyHash } : {}),
-      approveTool: createServerApproveTool(ws),
+      approveTool: createServerApproveTool(ws, {
+        principalId: state.apiKeyHash,
+        sessionId: state.sessionId ?? undefined,
+      }),
       signal: abortController.signal,
       onText: (delta) => {
         safeSend(ws, {

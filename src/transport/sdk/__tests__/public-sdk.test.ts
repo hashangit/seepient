@@ -3,8 +3,8 @@ import { createSeepient } from "../seepient.js";
 import { AggregateInferenceAdapter } from "../../../capabilities/inference/aggregate-adapter.js";
 import type { LanguageBackend } from "../../../foundations/contracts/backend-ports.js";
 
-describe("Public SDK v2 Instance-First Contract (QS-P6.6)", () => {
-  it("initializes instance, resolves models, and executes agent run/stream", async () => {
+describe("Public SDK Instance Contract (QS-P6.6)", () => {
+  it("initializes instance, resolves models, and executes chat/chatStream", async () => {
     const mockLanguageBackend: LanguageBackend = {
       chatStream: async function* () {
         yield {
@@ -19,7 +19,7 @@ describe("Public SDK v2 Instance-First Contract (QS-P6.6)", () => {
         yield {
           type: "content_block_delta",
           index: 0,
-          delta: { type: "text_delta", text: "Response from SDK v2" },
+          delta: { type: "text_delta", text: "Response from SDK" },
         };
         yield {
           type: "content_block_stop",
@@ -32,7 +32,7 @@ describe("Public SDK v2 Instance-First Contract (QS-P6.6)", () => {
         };
       },
       chat: async () => ({
-        message: { role: "assistant", content: [{ type: "text", text: "Response from SDK v2" }] },
+        message: { role: "assistant", content: [{ type: "text", text: "Response from SDK" }] },
         stopReason: "end_turn",
       }),
     };
@@ -63,22 +63,24 @@ describe("Public SDK v2 Instance-First Contract (QS-P6.6)", () => {
     expect(resolved.providerAccount).toBe("main");
     expect(resolved.model.id).toBe("gpt-4o");
 
-    // Test Agent creation and execution
-    const agent = await seepient.createAgent({
-      purpose: "text",
-      tier: "standard",
-    });
+    // Test execution through chat()
+    const turn = await seepient.chat("Hello");
+    expect(turn.text).toBe("Response from SDK");
+    const dialogueMessages = seepient.getHistory().filter((m) => m.role !== "system");
+    expect(dialogueMessages.length).toBe(2);
 
-    const turn = await agent.run("Hello");
-    expect(turn.content[0].type).toBe("text");
-    expect((turn.content[0] as any).text).toBe("Response from SDK v2");
-    expect(agent.messages.length).toBe(2);
+    // Test execution through chatStream()
+    const stream = await seepient.chatStream("Hello again");
+    let streamed = "";
+    for await (const chunk of stream.textStream) {
+      streamed += chunk;
+    }
+    expect(streamed).toBe("Response from SDK");
 
-    // Test model switching
-    await agent.switchModel({ model: "gpt-4o-mini" });
+    // Test provider/model switching
+    await seepient.switchProvider("gpt-4o-mini");
 
     // Test dispose
-    await agent.dispose();
     await seepient.dispose();
   });
 

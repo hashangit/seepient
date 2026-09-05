@@ -21,6 +21,12 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
 import { createHash } from "node:crypto";
+import type {
+  CapabilityLedger,
+  RevokeFilter,
+} from "../../foundations/contracts/capability-ledger.js";
+
+export type { RevokeFilter, CapabilityLedger };
 
 /** A ledger entry — either a consumed action or a revoked run/session. */
 type LedgerEntry =
@@ -41,12 +47,6 @@ type LedgerEntry =
       revokedAt: number;
     };
 
-/** Revocation filter — what to revoke. */
-export interface RevokeFilter {
-  runId?: string;
-  sessionId?: string;
-}
-
 /**
  * Persisted capability ledger. Backed by an append-only NDJSON file with
  * fsync on every append; the in-memory index is rebuilt on startup.
@@ -54,7 +54,7 @@ export interface RevokeFilter {
  * `consume()` and `revoke()` are the only mutation paths. Lookups are
  * synchronous after load() completes.
  */
-export class PersistedCapabilityLedger {
+export class PersistedCapabilityLedger implements CapabilityLedger {
   private readonly dir: string;
   private readonly file: string;
   /** Consumed actionDigests (action-scoped). */
@@ -248,7 +248,7 @@ export class PersistedCapabilityLedger {
 export function checkRunLifetime(
   runId: string,
   expiresAt: number,
-  ledger: PersistedCapabilityLedger,
+  ledger: CapabilityLedger,
   now: number,
 ): "ok" | "expired" | "revoked" {
   if (ledger.isRunRevoked(runId)) return "revoked";
@@ -263,7 +263,7 @@ export function checkRunLifetime(
 export function checkSessionLifetime(
   sessionId: string,
   expiresAt: number | undefined,
-  ledger: PersistedCapabilityLedger,
+  ledger: CapabilityLedger,
   now: number,
 ): "ok" | "expired" | "revoked" {
   if (ledger.isSessionRevoked(sessionId)) return "revoked";

@@ -52,7 +52,7 @@ describe('SDK opts.model override', () => {
 
     expect(runAgentLoopMock).toHaveBeenCalledTimes(1);
     const passedModel = runAgentLoopMock.mock.calls[0][0].modelOverride;
-    expect(passedModel).toBe('override-model');
+    expect(passedModel).toEqual({ model: 'override-model', providerAccount: undefined });
   });
 
   it('generateText passes undefined when opts.model omitted', async () => {
@@ -71,24 +71,24 @@ describe('SDK opts.model override', () => {
     const res = await streamText('hi', { tools: [], model: 'override-stream' });
     await res.fullText;
 
-    expect(runAgentLoopMock.mock.calls[0][0].modelOverride).toBe('override-stream');
+    expect(runAgentLoopMock.mock.calls[0][0].modelOverride).toEqual({ model: 'override-stream', providerAccount: undefined });
   });
 
-  it('createAgent uses opts.model over the resolved default', async () => {
+  it('createSeepient uses opts.model over the resolved default', async () => {
     const { runAgentLoopMock } = mockEntryPoints('resolved-default-model');
-    const { createAgent } = await import('../agent.js');
+    const { createSeepient } = await import('../index.js');
 
-    const agent = await createAgent({ tools: [], model: 'override-agent' });
+    const agent = await createSeepient({ tools: [], model: 'override-agent' });
     await agent.chat('hi');
 
     expect(runAgentLoopMock.mock.calls[0][0].modelOverride).toEqual({ model: 'override-agent', providerAccount: undefined });
   });
 
-  it('createAgent switchProvider routes subsequent chats through the account + model', async () => {
+  it('createSeepient switchProvider routes subsequent chats through the account + model', async () => {
     const { runAgentLoopMock } = mockEntryPoints('resolved-default-model');
-    const { createAgent } = await import('../agent.js');
+    const { createSeepient } = await import('../index.js');
 
-    const agent = await createAgent({ tools: [] });
+    const agent = await createSeepient({ tools: [] });
     await agent.switchProvider('main', 'switched-model');
     await agent.chat('hi');
 

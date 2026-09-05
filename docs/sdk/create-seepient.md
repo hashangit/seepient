@@ -1,28 +1,28 @@
 ---
-title: createAgent()
+title: createSeepient()
 description: Stateful multi-turn agent with session persistence, provider switching, and cumulative usage tracking.
 ---
 
-# createAgent()
+# createSeepient()
 
 Create a persistent agent with session memory, provider switching, and abort support. Unlike `generateText()` which is stateless, an agent maintains conversation history across calls.
 
 ## Signature
 
 ```typescript
-function createAgent(options?: AgentCreateOptions): Promise<SdkAgent>
+function createSeepient(options?: CreateSeepientOptions): Promise<Seepient>
 ```
 
 ::: warning
-`createAgent()` is async -- always `await` it. The agent needs to resolve the provider configuration and optionally load persisted session state before it is ready.
+`createSeepient()` is async -- always `await` it. The agent needs to resolve the provider configuration and optionally load persisted session state before it is ready.
 :::
 
 ## Quick example
 
 ```typescript
-import { createAgent } from "seepient";
+import { createSeepient } from "seepient";
 
-const agent = await createAgent({
+const agent = await createSeepient({
   model: "gpt-5.4",
   systemPrompt: "You are a concise coding assistant.",
 });
@@ -40,17 +40,28 @@ console.log(agent.getUsage());
 
 ## Parameters
 
-### `options` (optional)
+::: tip Stateless Embedding
+For multi-tenant workers and cloud functions requiring full state injection (audit, policy, capability ledger, sessions), use `createSeepient`, `generateText`, or `streamText`. See [Embedding in Stateless Workers](/embedding/workers) for full architecture details.
+:::
 
-`AgentCreateOptions` -- all fields optional:
+### `options` (optional)
 
 | Name            | Type                                     | Default                    | Description |
 |-----------------|------------------------------------------|----------------------------|-------------|
 | `model`         | `string`                                 | Provider default           | Model identifier, e.g. `"gpt-5.4"`, `"claude-sonnet-4-6-20260320"` |
 | `provider`      | `string`                                 | `"openai"`                 | Feeds the permission pipeline's `modelProviderClass` audit label (does not select inference provider; selection occurs via model/runtime) |
+| `purpose`       | `"text" \| "plan" \| "vision" \| "commit"` | `"text"`                 | Purpose routing hint for provider runtime model resolution |
+| `tier`          | `"efficient" \| "standard" \| "complex"` | *(none)*                   | Model capability tier hint |
+| `runtime`       | `ProviderRuntime`                        | `getDefaultProviderRuntime()` | Provider runtime instance managing credentials, configurations, and inference adapters |
+| `principalId`   | `string`                                 | `"sdk-user"`               | Identity of the calling principal/user, threaded into audit events and capability grants |
+| `sessionId`     | `string`                                 | Auto-generated UUID        | Explicit session ID for tracking and persistence |
+| `providerAccount` | `string`                               | *(none)*                   | Active provider account name (persisted and restored with session state) |
+| `auditStore`    | `AuditStore`                             | Local file audit store     | Injected audit store for recording action lifecycle events |
+| `policyStore`   | `PolicyStore`                            | Local file policy store    | Injected policy store for grant snapshots and mutations |
+| `capabilityLedger` | `CapabilityLedger`                    | Local file capability ledger | Injected ledger for capability lease consumption and revocations |
 | `systemPrompt`  | `string`                                 | `"You are a helpful assistant."` | System prompt prepended to every conversation |
-| `tools`         | `(string \| UserToolDefinition \| AnyToolRegistration)[]` | All built-in               | Tool names, group constants, or custom tool registrations (`trustedHostTool`) |
-| `permissionPipeline` | `boolean`                           | `false`                    | Enable the unified domain permission pipeline and execution boundary |
+| `tools`         | `(string \| UserToolDefinition \| AnyToolRegistration)[]` | All built-in               | Tool names, group constants, or custom tool registrations (`trustedHostTool`, `preparedTool`, `brokerConnector`) |
+| `consentMode`   | `ConsentMode`                            | `"edit-enabled"`           | Permission consent mode (`"ask-everything"`, `"edit-enabled"`, `"autonomous"`) |
 | `skills`        | `string[]`                               | *(none)*                   | Skill names to activate |
 | `maxSteps`      | `number`                                 | `10`                       | Maximum agent loop iterations per call |
 | `persist`       | `string \| PersistenceBackend \| PersistenceConfig` | *(none)*          | Directory path, backend instance, or config object (e.g. `{ type: "memory" }`). File persistence writes are **atomic** (tmp + rename). |
@@ -59,13 +70,23 @@ console.log(agent.getUsage());
 | `metadata`     | `Record<string, unknown>`                 | `{}`                       | Adapter-specific metadata passed to middleware via `PipelineContext` |
 | `config`        | `Record<string, unknown>`                | `{}`                       | Extra config passed to tool handlers |
 
-::: note Tool Registration vs setTools()
-Custom host callbacks bind into the execution boundary at agent creation time. `setTools(tools: string[])` accepts tool names only by design and enables/disables already registered tools; custom registrations must be supplied at composition time in `createAgent({ tools: [...] })`.
+::: info Permission Pipeline Always Active
+The permission pipeline is always active across all SDK entry points (`createSeepient`, `generateText`, `streamText`). Every tool execution is evaluated by policy and recorded in the audit trail.
 :::
 
-## SdkAgent interface
+::: note Tool Registration and Declaration Validation
+Custom host callbacks bind into the execution boundary at agent creation time. `setTools(tools: string[])` accepts tool names only by design and enables/disables already registered tools; custom registrations must be supplied at composition time in `createSeepient({ tools: [...] })`.
 
-The object returned by `createAgent()`:
+When declaring `trustedHostTool`, declarations fail closed with descriptive errors if unknown effects are supplied or required descriptor fields are omitted:
+- Allowed `effects`: `"network-egress"`, `"secret-use"`, `"model-egress"` (in that order).
+- `"network-egress"` requires `destinations: string[]`.
+- `"secret-use"` requires `secretRefs: string[]`.
+- `"model-egress"` requires `dataClasses: string[]`.
+:::
+
+## Seepient interface
+
+The object returned by `createSeepient()`:
 
 ### Methods
 
@@ -76,7 +97,7 @@ The object returned by `createAgent()`:
 | `switchProvider` | `(accountOrModel: string, model?: string) => Promise<void>` | Switch the provider account (and optionally model) used for subsequent calls. One argument switches the model only. |
 | `setSystemPrompt` | `(prompt: string) => void` | Update the system prompt. Replaces the existing system message in history. |
 | `setTools` | `(tools: string[]) => void` | Update active tools by name. Custom tool registrations cannot be added dynamically via `setTools`. |
-| `abort` | `() => void` | Abort the currently running `chat()` or `chatStream()` call. Works correctly during streaming (v0.2.2+). |
+| `abort` | `() => void` | Abort the currently running `chat()` or `chatStream()` call. Works correctly during streaming. |
 | `clear` | `() => void` | Clear conversation history. Keeps the system prompt. |
 | `getHistory` | `() => Message[]` | Return a copy of the full conversation history. |
 | `getUsage` | `() => CumulativeUsage` | Return cumulative token usage across all calls. |
@@ -111,9 +132,9 @@ interface CumulativeUsage {
 ### Basic multi-turn conversation
 
 ```typescript
-import { createAgent } from "seepient";
+import { createSeepient } from "seepient";
 
-const agent = await createAgent({
+const agent = await createSeepient({
   systemPrompt: "You are a helpful travel advisor.",
 });
 
@@ -133,7 +154,9 @@ console.log(`Total requests: ${agent.getUsage().requestCount}`);
 Use `chatStream()` for real-time output:
 
 ```typescript
-const agent = await createAgent({
+import { createSeepient } from "seepient";
+
+const agent = await createSeepient({
   model: "claude-sonnet-4-6-20260320",
   provider: "anthropic",
 });
@@ -151,7 +174,9 @@ console.log(`\nTokens: ${(await stream.usage).totalTokens}`);
 Switch the active provider account or model mid-conversation:
 
 ```typescript
-const agent = await createAgent({ provider: "openai", model: "gpt-5.4" });
+import { createSeepient } from "seepient";
+
+const agent = await createSeepient({ provider: "openai", model: "gpt-5.4" });
 
 // Start with the default resolution for the model
 const r1 = await agent.chat("What is the capital of France?");
@@ -173,20 +198,20 @@ console.log(r2.text);
 Persist conversation history so the agent can resume across process restarts:
 
 ```typescript
-import { createAgent } from "seepient";
+import { createSeepient } from "seepient";
 
-// Option 1: File-based persistence (backward compatible — just pass a path)
-const agent = await createAgent({
+// Option 1: File-based persistence (just pass a path)
+const agent = await createSeepient({
   persist: "./sessions/my-agent",
 });
 
 // Option 2: In-memory persistence (great for testing)
-const agent2 = await createAgent({
+const agent2 = await createSeepient({
   persist: { type: "memory" },
 });
 
 // Option 3: Explicit file config
-const agent3 = await createAgent({
+const agent3 = await createSeepient({
   persist: { type: "file", path: "/var/data/sessions" },
 });
 
@@ -194,7 +219,7 @@ await agent.chat("My name is Alice");
 await agent.chat("I'm working on a React project");
 
 // In a new process, recreate the agent with the same persist path:
-// const agent2 = await createAgent({ persist: "./sessions/my-agent" });
+// const agent2 = await createSeepient({ persist: "./sessions/my-agent" });
 // The conversation history will be loaded automatically.
 ```
 
@@ -203,9 +228,11 @@ await agent.chat("I'm working on a React project");
 Register custom backends (Redis, SQLite, encrypted storage, etc.) with `registerBackend`:
 
 ```typescript
-import { registerBackend, createAgent, type PersistenceBackend, type SessionData } from "seepient";
+import { registerBackend, createSeepient, type PersistenceBackend, type SessionData } from "seepient";
 
 class RedisBackend implements PersistenceBackend {
+  readonly __persistenceBackend = true as const;
+
   constructor(private url: string) { /* connect */ }
 
   async save(sessionId: string, data: SessionData): Promise<void> {
@@ -228,16 +255,12 @@ class RedisBackend implements PersistenceBackend {
 registerBackend("redis", (config) => new RedisBackend(config.url as string));
 
 // Then use by type name
-const agent = await createAgent({
+const agent = await createSeepient({
   persist: { type: "redis", url: "redis://localhost:6379" },
 });
 ```
 
 #### Pass a backend instance directly
-
-::: warning Breaking change in v0.2.2
-Custom `PersistenceBackend` implementations must include `readonly __persistenceBackend = true as const`. Without this brand field, the SDK will wrap your backend and strip `createdAt`, `provider`, `model`, and `metadata` from saved data.
-:::
 
 ```typescript
 const myBackend: PersistenceBackend = {
@@ -248,7 +271,7 @@ const myBackend: PersistenceBackend = {
   async list() { return []; },
 };
 
-const agent = await createAgent({ persist: myBackend });
+const agent = await createSeepient({ persist: myBackend });
 ```
 
 ### Dynamic tools
@@ -256,7 +279,9 @@ const agent = await createAgent({ persist: myBackend });
 Change the available tools at runtime:
 
 ```typescript
-const agent = await createAgent({
+import { createSeepient } from "seepient";
+
+const agent = await createSeepient({
   tools: ["core"], // Only shell, read_file, write_file, datetime
 });
 
@@ -271,7 +296,9 @@ await agent.chat("Now search for the latest version of this package on npm");
 ### Abort a running call
 
 ```typescript
-const agent = await createAgent();
+import { createSeepient } from "seepient";
+
+const agent = await createSeepient();
 
 // Start a long-running request
 const promise = agent.chat("Analyze all files in this repository");
@@ -289,13 +316,15 @@ try {
 ::: info
 `abort()` cancels the in-flight HTTP request to the LLM provider, not just the agent loop between steps. The `AbortSignal` propagates through to the underlying provider SDK (OpenAI, Anthropic, etc.), so network resources are released immediately.
 
-**Concurrency:** As of v0.2.2, `chat()` and `chatStream()` are serialized — a second call blocks until the first completes. This prevents concurrent mutations of the shared message history.
+**Concurrency:** Mutex acquisition ensures caller-owned lock release: `chat()` and `chatStream()` are serialized — a second call blocks until the first completes. This prevents concurrent mutations of the shared message history.
 :::
 
 ### Inspect history
 
 ```typescript
-const agent = await createAgent();
+import { createSeepient } from "seepient";
+
+const agent = await createSeepient();
 await agent.chat("Hello");
 await agent.chat("What can you do?");
 
@@ -315,7 +344,7 @@ console.log(agent.getHistory().length); // 1 (just the system prompt)
 
 ```typescript
 interface PersistenceBackend {
-  /** Brand discriminator — distinguishes from SessionStore */
+  /** Brand discriminator */
   readonly __persistenceBackend: true;
   save(sessionId: string, data: SessionData): Promise<void>;
   load(sessionId: string): Promise<SessionData | null>;
@@ -337,8 +366,6 @@ Built-in backends and factory functions:
 
 - **`createPersistenceBackend(config)`** -- Creates a backend from a config object
 - **`registerBackend(type, factory)`** -- Registers a custom backend type
-- **`createSessionStore(path?)`** -- Legacy file-backed store (deprecated, use `createPersistenceBackend`)
-- **`createMemoryStore()`** -- Legacy in-memory store (deprecated, use `{ type: "memory" }`)
 
 ## Middleware
 
@@ -346,13 +373,13 @@ Add cross-cutting concerns (logging, auth, rate limiting) to agent execution:
 
 ```typescript
 import {
-  createAgent,
+  createSeepient,
   loggingMiddleware,
   rateLimitMiddleware,
   authMiddleware,
 } from "seepient";
 
-const agent = await createAgent({
+const agent = await createSeepient({
   middleware: [
     authMiddleware({
       validate: (ctx) => !!ctx.metadata.apiKey,
@@ -386,7 +413,7 @@ const auditLog: Middleware = async (ctx, next) => {
   console.log(`[audit] request ${ctx.requestId} finished in ${Date.now() - start}ms`);
 };
 
-const agent = await createAgent({ middleware: [auditLog] });
+const agent = await createSeepient({ middleware: [auditLog] });
 ```
 
 ## Related APIs

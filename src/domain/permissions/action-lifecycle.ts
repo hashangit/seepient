@@ -51,7 +51,7 @@ import {
   scopeGlobalPolicyCapabilities,
 } from "./policy-store.js";
 import { covers, setCovers } from "./capability-store.js";
-import type { PersistedCapabilityLedger } from "./persisted-capability-ledger.js";
+import type { CapabilityLedger } from "../../foundations/contracts/capability-ledger.js";
 import { typedDenyReason } from "./deny-reasons.js";
 import { redactAuditCapability } from "./audit-redaction.js";
 import { deepFreeze, validFor } from "./approval-options.js";
@@ -81,7 +81,7 @@ export interface ActionLifecycleOptions {
    * actionDigest → capability-expired deny. Run/session revocation is also
    * checked here before the dispatched audit event.
    */
-  capabilityLedger?: PersistedCapabilityLedger;
+  capabilityLedger?: CapabilityLedger;
   sessionId?: string;
   /**
    * Protected policy store + workspace identity for persistent
@@ -148,7 +148,7 @@ export class ActionLifecycle {
   private readonly persistentBaselineCapabilities: Capability[];
 
   private readonly terminalOutbox?: { enqueue: (event: import("../../foundations/contracts/execution-brokers.js").ActionAuditEvent, idempotencyKey: string) => void };
-  private readonly capabilityLedger?: PersistedCapabilityLedger;
+  private readonly capabilityLedger?: CapabilityLedger;
 
   constructor(opts: ActionLifecycleOptions) {
     this.policy = opts.policy;

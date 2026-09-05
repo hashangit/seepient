@@ -152,9 +152,9 @@ if (refreshResult.ok) {
 Use `agent.switchProvider()` to change the provider account (or model) mid-conversation:
 
 ```typescript
-import { createAgent } from "seepient";
+import { createSeepient } from "seepient";
 
-const agent = await createAgent({
+const agent = await createSeepient({
   model: "gpt-5.4",
 });
 
@@ -206,6 +206,6 @@ The `OPENAI_COMPAT_BASE_URL` is required for the `openai-compatible` provider.
 ## Related APIs
 
 - [generateText()](/sdk/generate-text) -- Stateless text generation
-- [createAgent()](/sdk/create-agent) -- Stateful agent with provider switching
+- [createSeepient()](/sdk/create-seepient) -- Stateful agent with provider switching
 - [Custom Tools](/sdk/custom-tools) -- Register custom tools and trust boundaries
 - [Types](/sdk/types) -- Full TypeScript type reference

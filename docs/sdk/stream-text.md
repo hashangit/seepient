@@ -47,6 +47,11 @@ console.log(`\nDone. ${(await stream.usage).totalTokens} tokens used.`);
 |-----------------|------------------------------------------|---------|-------------|
 | `model`         | `string`                                 | Provider default | Model identifier |
 | `provider`      | `ProviderType`                           | Config default   | Provider to use |
+| `runtime`       | `ProviderRuntime`                        | `getDefaultProviderRuntime()` | Provider runtime instance managing credentials, configurations, and inference adapters |
+| `principalId`   | `string`                                 | `"sdk-user"`     | Identity of the calling principal/user, threaded into audit events and capability grants |
+| `auditStore`    | `AuditStore`                             | Local file audit store | Injected audit store for recording action lifecycle events |
+| `policyStore`   | `PolicyStore`                            | Local file policy store | Injected policy store for grant snapshots and mutations |
+| `capabilityLedger` | `CapabilityLedger`                    | Local file capability ledger | Injected ledger for capability lease consumption and revocations |
 | `systemPrompt`  | `string`                                 | *(none)*         | System message prepended to the conversation |
 | `tools`         | `(string \| UserToolDefinition \| AnyToolRegistration)[]` | All built-in     | Built-in tool names, group names (`"core"`, `"all"`), or custom tool registrations (`trustedHostTool`) |
 | `skills`        | `string[]`                               | *(none)*         | Skills to activate |
@@ -263,4 +268,4 @@ for await (const chunk of stream.textStream) {
 ## Related APIs
 
 - [generateText()](/sdk/generate-text) -- Non-streaming one-shot execution
-- [createAgent()](/sdk/create-agent) -- Stateful agent with `.chatStream()` method
+- [createSeepient()](/sdk/create-seepient) -- Stateful agent with `.chatStream()` method

@@ -24,9 +24,6 @@ node_modules/
 .dual-graph/
 .qwen/
 
-# Install scripts (not needed in npm package)
-install.bat
-install.sh
 
 # Docs not needed at runtime
 CLAUDE.md

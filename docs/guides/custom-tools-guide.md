@@ -15,7 +15,7 @@ A tool is a function that an LLM can invoke during generation. Each tool has:
 - A **parameter schema** (Zod or JSON Schema) that defines the inputs
 - An **execute function** that runs when the LLM calls the tool
 
-Seepient Agent ships with 12 built-in tools (see [Tools Reference](/tools/reference)). Custom tools use the same interface, so they work identically in `generateText`, `streamText`, and `createAgent`.
+Seepient Agent ships with 12 built-in tools (see [Tools Reference](/tools/reference)). Custom tools use the same interface, so they work identically in `generateText`, `streamText`, and `createSeepient`.
 
 ## Step 1: Define a Tool with Zod Schema
 

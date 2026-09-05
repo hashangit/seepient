@@ -24,23 +24,22 @@ docker build -t seepient-server .
 
 ## Build and Run
 
-### Using the `seepient server` command
+### Running the Server
 
-After building, start the server inside the container using `seepient server`:
+Start the standalone server inside the container using the `seepient-server` binary (or default container command):
 
 ```bash
 docker run -d \
   --name seepient \
   -p 7337:7337 \
   -e OPENAI_API_KEY=sk-... \
-  seepient-server \
-  seepient server
+  seepient-server
 ```
 
 Generate an API key for authenticated access:
 
 ```bash
-docker exec -it seepient seepient server --generate-api-key
+docker exec -it seepient seepient-server --generate-api-key
 ```
 
 This prints a key like `sk_seepient_a1b2c3...` and stores it in `~/.seepient/server-keys.json`.

@@ -1,7 +1,7 @@
 import type { ToolRiskCategory, ToolContext, ToolResult } from "../types.js";
 
 /** Optional execution context pieces a caller (the agent loop) can pass in. */
-export type ToolExecExtra = Pick<ToolContext, "onUpdate" | "signal">;
+export type ToolExecExtra = Pick<ToolContext, "onUpdate" | "signal" | "skills">;
 
 export interface ToolDefinition {
   type: "function";

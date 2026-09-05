@@ -5,7 +5,9 @@ import { resolveTools, getAllToolDefinitions } from "../../domain/tool-executor.
 import { now } from "../../domain/context/message-convert.js";
 import { generateId } from "../../foundations/id.js";
 import { getDefaultProviderRuntime, type ProviderRuntime } from "../../domain/providers/provider-runtime.js";
+import type { ProviderRuntimeContract } from "../../foundations/contracts/provider-runtime.js";
 import type { Middleware } from "../../foundations/contracts/middleware.js";
+import { extractLoopError } from "../sdk/error-surfacing.js";
 import { initializeSkillRegistry } from "../../capabilities/skills/index.js";
 import { buildSkillCatalog } from "../../domain/skills/skill-catalog.js";
 
@@ -14,7 +16,7 @@ import { buildSkillCatalog } from "../../domain/skills/skill-catalog.js";
  * prompt with the catalog appended, or undefined when no skills are found.
  * Best-effort: discovery failures are swallowed.
  */
-async function resolveServerSkillCatalog(skills?: string[]): Promise<string | undefined> {
+async function resolveServerSkills(skills?: string[]): Promise<{ skillCatalog?: string; skillRegistry?: import("../../capabilities/skills/types.js").SkillRegistry }> {
   try {
     const registry = await initializeSkillRegistry(process.cwd());
     let metadata = registry.getMetadata();
@@ -22,10 +24,10 @@ async function resolveServerSkillCatalog(skills?: string[]): Promise<string | un
       const wanted = new Set(skills);
       metadata = metadata.filter(s => wanted.has(s.name));
     }
-    if (metadata.length === 0) return undefined;
-    return buildSkillCatalog(metadata);
+    if (metadata.length === 0) return { skillRegistry: registry };
+    return { skillCatalog: buildSkillCatalog(metadata), skillRegistry: registry };
   } catch {
-    return undefined;
+    return {};
   }
 }
 
@@ -40,12 +42,13 @@ export async function serverGenerateText(
     tools?: string[];
     maxSteps?: number;
     skills?: string[];
+    runtime?: ProviderRuntime | ProviderRuntimeContract;
     /** Spec 008 wired pipeline (constructed by createServer). */
     wiredPipeline?: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle;
   },
   middleware?: Middleware[],
 ): Promise<GenerateTextResult> {
-  const runtime: ProviderRuntime = (options as any).providerRuntime ?? getDefaultProviderRuntime();
+  const runtime = options.runtime ?? getDefaultProviderRuntime();
 
   // Resolve tools
   const toolDefs = options.tools ? resolveTools(options.tools) : getAllToolDefinitions();
@@ -54,7 +57,7 @@ export async function serverGenerateText(
   const hooks = createHookExecutor();
 
   // Resolve skill catalog
-  const skillCatalog = await resolveServerSkillCatalog(options.skills);
+  const { skillCatalog, skillRegistry } = await resolveServerSkills(options.skills);
 
   // Build message list
   const messages: Message[] = [];
@@ -85,7 +88,7 @@ export async function serverGenerateText(
     maxSteps: options.maxSteps ?? 5,
     hooks,
     middleware,
-    config: { agentName: "server", runtime },
+    config: { agentName: "server", runtime, skills: skillRegistry },
     wiredPipeline: options.wiredPipeline,
   });
 
@@ -119,6 +122,7 @@ export async function handleAgentChatStream(
     maxSteps?: number;
     skills?: string[];
     approveTool?: ApproveToolFn;
+    runtime?: ProviderRuntime | ProviderRuntimeContract;
     /** Spec 008 wired pipeline (constructed by createServer). */
     wiredPipeline?: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle;
     onText: (chunk: string) => void;
@@ -131,13 +135,13 @@ export async function handleAgentChatStream(
   },
   middleware?: Middleware[],
 ): Promise<void> {
-  const runtime: ProviderRuntime = (opts as any).providerRuntime ?? getDefaultProviderRuntime();
+  const runtime = opts.runtime ?? getDefaultProviderRuntime();
   const toolDefs = opts.tools ? resolveTools(opts.tools) : getAllToolDefinitions();
   const hooks = createHookExecutor();
 
   // Load session or create initial message list
   const messages: Message[] = [];
-  const skillCatalog = await resolveServerSkillCatalog(opts.skills);
+  const { skillCatalog, skillRegistry } = await resolveServerSkills(opts.skills);
   if (skillCatalog) {
     messages.push({
       id: generateId(),
@@ -170,7 +174,7 @@ export async function handleAgentChatStream(
       approveTool: opts.approveTool,
       signal: opts.signal,
       middleware: middleware ?? [],
-      config: { agentName: "server", runtime },
+      config: { agentName: "server", runtime, skills: skillRegistry },
       wiredPipeline: opts.wiredPipeline,
       onStep: (step) => {
         if ((step.type === "text" || step.type === "text_delta") && step.content) {
@@ -193,11 +197,24 @@ export async function handleAgentChatStream(
       },
     });
 
-    opts.onDone({
-      text: accumulatedText,
-      usage: result.usage,
-      finishReason: result.finishReason,
-    });
+    const loopErr = extractLoopError(result);
+    if (loopErr) {
+      opts.onError({
+        code: loopErr.code,
+        message: loopErr.message,
+      });
+      opts.onDone({
+        text: accumulatedText,
+        usage: result.usage,
+        finishReason: "error",
+      });
+    } else {
+      opts.onDone({
+        text: accumulatedText,
+        usage: result.usage,
+        finishReason: result.finishReason,
+      });
+    }
   } catch (err) {
     opts.onError({
       code: "STREAM_ERROR",

@@ -45,7 +45,7 @@ The legacy `tool({ execute })` factory is deprecated and fails closed at runtime
 `brokerConnector` registers a declarative mapping from tool arguments directly to a platform-supported broker. No embedder code executes during preparation or execution.
 
 ```typescript
-import { createAgent, brokerConnector } from "seepient";
+import { createSeepient, brokerConnector } from "seepient";
 
 const searchTool = brokerConnector({
   definition: {
@@ -86,7 +86,7 @@ const searchTool = brokerConnector({
 `preparedTool` registers an analyzer that prepares a serializable operation draft (`operation`, `effects`, `risk`, `display`). The platform stamps identity and computes digests, then routes the operation through the policy engine and execution boundary.
 
 ```typescript
-import { createAgent, preparedTool } from "seepient";
+import { createSeepient, preparedTool } from "seepient";
 import { join } from "node:path";
 
 const reportTool = preparedTool({
@@ -161,7 +161,7 @@ const reportTool = preparedTool({
 `trustedHostTool` registers an arbitrary JavaScript function with ambient in-process authority.
 
 ```typescript
-import { createAgent, trustedHostTool, type HostToolContext } from "seepient";
+import { createSeepient, trustedHostTool, type HostToolContext } from "seepient";
 
 const queryBankTool = trustedHostTool({
   definition: {
@@ -178,6 +178,13 @@ const queryBankTool = trustedHostTool({
       },
     },
   },
+  declaration: {
+    risk: "high",
+    effects: [
+      { kind: "network-egress", destinations: ["api.bank.com"] },
+      { kind: "secret-use", secretRefs: ["BANK_API_KEY"] },
+    ],
+  },
   execute: async (args: unknown, _context: HostToolContext) => {
     const { accountId } = (args ?? {}) as { accountId: string };
     return JSON.stringify({ accountId, balance: 4200 });
@@ -186,7 +193,7 @@ const queryBankTool = trustedHostTool({
 ```
 
 ### Host Tool Rules
-1. **Permission Pipeline Required**: Custom host tools require `permissionPipeline: true`.
+1. **Governed Execution by Default**: Custom host tools execute governed within the unified permission pipeline and execution boundary.
 2. **Automatic Allowlist Registration**: Passing a `trustedHostTool` in the `tools` array automatically binds the callback to the agent execution boundary.
 3. **Multi-Tenant Gating**: Server roots enforce `permissions.trustedHostAllowlist`.
 
@@ -197,10 +204,9 @@ const queryBankTool = trustedHostTool({
 You can combine built-in tool groups and custom tools across any trust model:
 
 ```typescript
-import { createAgent, CORE_TOOLS } from "seepient";
+import { createSeepient, CORE_TOOLS } from "seepient";
 
-const agent = await createAgent({
-  permissionPipeline: true,
+const agent = await createSeepient({
   tools: [
     ...CORE_TOOLS,
     searchTool,     // brokerConnector
@@ -214,7 +220,7 @@ const agent = await createAgent({
 
 ## Related APIs
 
-- [createAgent()](/sdk/create-agent) -- Stateful agent with custom tool composition
+- [createSeepient()](/sdk/create-seepient) -- Stateful agent with custom tool composition
 - [generateText()](/sdk/generate-text) -- One-shot execution with tool support
 - [streamText()](/sdk/stream-text) -- Streaming execution with tool callbacks
 - [Types](/sdk/types) -- Full TypeScript type reference

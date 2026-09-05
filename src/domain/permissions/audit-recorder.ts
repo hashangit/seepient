@@ -77,6 +77,7 @@ interface AuditFileEntry {
  * an outbox marker that is cleared only after the append fsyncs.
  */
 export class LocalAuditStore implements AuditStoreContract {
+  readonly isLocal = true;
   private readonly dir: string;
 
   constructor(opts?: { root?: string }) {

@@ -35,12 +35,13 @@ import { getAllToolModules } from "../../domain/tool-executor.js";
  */
 export function extractHostCallbacks(
   tools?: readonly unknown[],
+  extra?: { skills?: import("../../capabilities/skills/types.js").SkillRegistry },
 ): { callbacks: Map<string, (args: unknown) => Promise<unknown>>; registrationIds: string[] } {
   const callbacks = new Map<string, (args: unknown) => Promise<unknown>>();
   const registrationIds: string[] = [];
   for (const mod of getAllToolModules()) {
     if (typeof mod.handler === "function" && mod.definition?.function?.name) {
-      callbacks.set(mod.definition.function.name, (args) => mod.handler!(args as never, {}));
+      callbacks.set(mod.definition.function.name, (args) => mod.handler!(args as never, {}, { skills: extra?.skills }));
     }
   }
   for (const input of tools ?? []) {

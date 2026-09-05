@@ -8,7 +8,7 @@ description: Complete TypeScript types reference for the Seepient Agent SDK.
 Complete TypeScript type definitions for the Seepient Agent SDK. All types are exported from `"seepient"`.
 
 ```typescript
-import type { Message, GenerateTextResult, SdkAgent } from "seepient";
+import type { Message, GenerateTextResult, Seepient } from "seepient";
 ```
 
 ## Core Types
@@ -123,12 +123,16 @@ interface GenerateTextOptions {
   model?: string;
   /** Feeds the permission pipeline's modelProviderClass audit label. */
   provider?: string;
+  /** Purpose routing hint for provider runtime selection. */
+  purpose?: "text" | "plan" | "vision" | "commit";
+  /** Capability tier hint for provider runtime selection. */
+  tier?: "efficient" | "standard" | "complex";
+  /** Provider account identifier (persisted and restored with session). */
+  providerAccount?: string;
   /** System message prepended to the conversation. */
   systemPrompt?: string;
   /** Tools available: string names, group constants, or custom tool registrations. */
   tools?: (string | UserToolDefinition | AnyToolRegistration)[];
-  /** Enable the unified domain permission pipeline and execution boundary. */
-  permissionPipeline?: boolean;
   /** Skill names to activate. */
   skills?: string[];
   /** Maximum agent loop iterations (tool call rounds). Default: 10. */
@@ -231,20 +235,30 @@ interface StreamTextResult {
 
 ## Agent Types
 
-### AgentCreateOptions
+### CreateSeepientOptions
 
 ```typescript
-interface AgentCreateOptions {
+interface CreateSeepientOptions {
   /** Model identifier. */
   model?: string;
   /** Feeds the permission pipeline's modelProviderClass audit label. */
   provider?: string;
+  /** Injected provider runtime managing model assignments, credentials, and adapters. */
+  runtime?: ProviderRuntime | ProviderRuntimeContract;
+  /** Authenticated principal identity. */
+  principalId?: string;
+  /** Explicit session identifier. */
+  sessionId?: string;
+  /** Injected audit store for recording action lifecycle events. */
+  auditStore?: AuditStore;
+  /** Injected policy store for workspace grant snapshot atomicity. */
+  policyStore?: PolicyStore;
+  /** Injected capability ledger for lease consumption and revocations. */
+  capabilityLedger?: CapabilityLedger;
   /** System prompt prepended to every conversation. */
   systemPrompt?: string;
   /** Tools available: string names, group constants, or custom registrations. */
   tools?: (string | UserToolDefinition | AnyToolRegistration)[];
-  /** Enable the unified domain permission pipeline and execution boundary. */
-  permissionPipeline?: boolean;
   /** Skill names to activate. */
   skills?: string[];
   /** Maximum agent loop iterations. Default: 10. */
@@ -264,10 +278,12 @@ interface AgentCreateOptions {
 }
 ```
 
-### SdkAgent
+### Seepient
 
 ```typescript
-interface SdkAgent {
+interface Seepient {
+  /** Active session identifier. */
+  readonly sessionId: string;
   /** Send a message and get the full response. Context is preserved. */
   chat(message: string): Promise<AgentResponse>;
   /** Send a message with streaming output. */
@@ -286,6 +302,10 @@ interface SdkAgent {
   getHistory(): Message[];
   /** Return cumulative token usage across all calls. */
   getUsage(): CumulativeUsage;
+  /** Flush buffered audit logs. */
+  flushAudit(): Promise<number>;
+  /** Clean up resources and close open handles. */
+  close(): Promise<void>;
 }
 ```
 
@@ -588,6 +608,8 @@ interface SessionData {
   updatedAt: number;
   /** Provider used for this session. */
   provider?: ProviderType;
+  /** Explicit provider account identifier used for routing. */
+  providerAccount?: string;
   /** Model used for this session. */
   model?: string;
   /** Arbitrary metadata (e.g. apiKeyHash for server sessions). */
@@ -915,11 +937,64 @@ type BackendFactory = (config: PersistenceConfig) => PersistenceBackend;
 function registerBackend(type: string, factory: BackendFactory): void;
 ```
 
+## Store Interfaces (Stateless Workers)
+
+### AuditStore
+
+```typescript
+interface AuditStore {
+  /** Append an audit event; must guarantee durability before resolving "written". */
+  append(
+    event: ActionAuditEvent,
+    opts: { idempotencyKey: string },
+  ): Promise<"written" | "duplicate">;
+  /** Retrieve terminal event for a given action ID. */
+  getTerminal(actionId: string): Promise<ActionAuditEvent | undefined>;
+}
+```
+
+### PolicyStore
+
+```typescript
+interface PolicyStore {
+  /** Read the policy snapshot for a workspace. */
+  read(workspaceId: string): Promise<PolicySnapshot>;
+  /** Atomically compare and update the snapshot with optimistic locking. */
+  compareAndSet(
+    workspaceId: string,
+    expectedVersion: number,
+    next: CapabilitySet,
+    actor: DecisionAuthority,
+    mutation?: { mutationId: string },
+  ): Promise<PolicySnapshot>;
+}
+```
+
+### CapabilityLedger
+
+```typescript
+interface CapabilityLedger {
+  /** Initialize or synchronize ledger state. */
+  load(): Promise<void>;
+  /** Record capability lease consumption against an action digest. Returns true if recorded, false on replay. */
+  consume(envelopeId: string, actionDigest: string): Promise<boolean>;
+  /** Revoke matching capability grants. */
+  revoke(filter: RevokeFilter): Promise<void>;
+  /** Check if an action digest was already consumed. */
+  isConsumedDigest(actionDigest: string): boolean;
+  /** Check if a run has been revoked. */
+  isRunRevoked(runId: string): boolean;
+  /** Check if a session has been revoked. */
+  isSessionRevoked(sessionId: string): boolean;
+}
+```
+
 ## Related pages
 
 - [generateText()](/sdk/generate-text) -- One-shot execution
 - [streamText()](/sdk/stream-text) -- Streaming execution
-- [createAgent()](/sdk/create-agent) -- Stateful multi-turn agent
+- [createSeepient()](/sdk/create-seepient) -- Stateful multi-turn agent
+- [Stateless Workers](/embedding/workers) -- Multi-tenant worker embedding
 - [Custom Tools](/sdk/custom-tools) -- Building custom tools
 - [Hooks](/sdk/hooks) -- Lifecycle callbacks
 - [Providers](/sdk/providers) -- Multi-provider configuration

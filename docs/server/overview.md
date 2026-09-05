@@ -7,6 +7,10 @@ description: Seepient Agent Server architecture, startup options, and quick-star
 
 Seepient Agent can be deployed as a standalone container exposing an HTTP REST API and a WebSocket endpoint on port **7337**. The server delegates directly to the core agent loop (`runAgentLoop`) with authentication, session management, and real-time streaming -- ready for production workloads behind a load balancer or directly on bare metal.
 
+::: warning Operating Mode: Inference & Planning Only
+The HTTP server runs in inference and planning mode this release; effectful tool execution fails closed with `backend-unsupported` by design until the worker-scheduler spec ships isolated remote execution. HTTP mutation endpoints return `501 NOT_IMPLEMENTED` with zero filesystem writes.
+:::
+
 ## Architecture
 
 ```
@@ -67,12 +71,34 @@ seepient server
 ```
 
 ```bash [Node.js]
-import { startServer } from "seepient/server";
+import { createServer } from "seepient/server";
 
-await startServer({ port: 7337 });
+const server = await createServer({ port: 7337 });
 ```
 
 :::
+
+## Programmatic Server Creation & Stateless Workers
+
+For distributed worker fleets or custom orchestration, `createServer()` accepts injected contracts for provider runtimes, session stores, and audit loggers:
+
+```typescript
+import { createServer } from "seepient/server";
+
+const server = await createServer({
+  port: 7337,
+  runtime: myCustomProviderRuntime,
+  sessionStore: myDistributedSessionStore,
+  auditStore: myRemoteAuditStore,
+});
+```
+
+::: note Standalone Binary vs Programmatic createServer
+The `seepient server` CLI and `seepient-server` binary are configured via environment variables (`PORT`, `HOST`, `SEEPIENT_API_KEYS_FILE`, `SEEPIENT_SECURITY_DIR`) and CLI flags. To inject custom in-memory or database-backed store contracts (`runtime`, `sessionStore`, `auditStore`, `policyStore`, `capabilityLedger`), use the programmatic `createServer()` API from `seepient/server`.
+:::
+
+### Stateless Worker Mutation Guard
+When an injected `ProviderRuntimeContract` does not implement configuration mutations (`updateOverlay`), mutation endpoints (`PUT /v1/models/assignments/*`, `DELETE /v1/models/assignments/*`, `PUT /v1/providers/*`, `DELETE /v1/providers/*`) return `501 NOT_IMPLEMENTED` with zero filesystem writes. This ensures headless container workers remain strictly stateless without accidental disk mutations.
 
 ## Quick start
 

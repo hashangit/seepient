@@ -123,4 +123,66 @@ describe('CLI Agent skill catalog injection', () => {
     expect(runLoop.mock.calls[1][0].providerFactory).toBeUndefined();
     expect(agent.getModel()).toBe('base-model');
   });
+
+  it('threads skillRegistry to runAgentLoop config for use_skill tool execution', async () => {
+    const runLoop = mockRunAgentLoop();
+    const { Agent } = await import('../agent.js');
+    const agent = new Agent(mockRuntime(), 'test-model', {}, 'BASE_PROMPT');
+    await agent.initializeSkills();
+    await agent.chat('hi', undefined as any);
+
+    const opts = runLoop.mock.calls[0][0];
+    expect(opts.config?.skills).toBeDefined();
+    expect(opts.config?.skills).toBe(agent.getSkillRegistry());
+  });
+
+  it('governed permission pipeline dynamically resolves skillRegistry for use_skill tool execution', async () => {
+    vi.doUnmock('../../../domain/agent-loop.js');
+    const { createMockRuntime } = await import('../../../domain/__tests__/test-doubles.js');
+    const { createSnapshotStore } = await import('../../../foundations/hashline/snapshot-store.js');
+    const { diskBackedFakeHelper } = await import('../../../capabilities/execution/__tests__/helpers/commit-helper-fakes.js');
+    const { tmpdir } = await import('os');
+    const { mkdtemp, rm } = await import('fs/promises');
+    const { join } = await import('path');
+
+    const tempDir = await mkdtemp(join(tmpdir(), 'seepient-cli-skill-'));
+    try {
+      const runtime = createMockRuntime([
+        {
+          toolCalls: [
+            { id: "tc-skill", name: "use_skill", args: { skill_name: "non-existent-skill" } },
+          ],
+        },
+        { content: "tool call handled" },
+      ]);
+
+      const { Agent } = await import('../agent.js');
+      const agent = new Agent(runtime, 'test-model', { snapshotStore: createSnapshotStore() }, 'BASE_PROMPT', null, 'openai');
+
+      // Enable permission pipeline FIRST (which builds hostCallbacks before skills init)
+      await agent.enablePermissionPipeline({
+        workspaceRoot: tempDir,
+        modelProviderClass: 'openai',
+        auditRoot: tempDir,
+        commitHelper: diskBackedFakeHelper(),
+      });
+      agent.setPipelineApproveTool(async () => true);
+
+      // Initialize skills SECOND (setting this.skillRegistry after pipeline was constructed)
+      await agent.initializeSkills();
+      expect(agent.getSkillRegistry()).toBeDefined();
+
+      // Execute chat turn — the model calls use_skill
+      const response = await agent.chat('use non-existent-skill', undefined as any);
+      expect(response).toBeDefined();
+
+      // Check messages: the tool result must NOT be "Error: Skill system not initialized."
+      const toolResultMessage = agent.getMessages().find((m) => m.role === 'tool');
+      expect(toolResultMessage).toBeDefined();
+      expect(toolResultMessage?.content).not.toContain('Skill system not initialized');
+      expect(toolResultMessage?.content).toContain('not found');
+    } finally {
+      await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    }
+  });
 });

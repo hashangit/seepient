@@ -1,6 +1,6 @@
 /**
  * E2E through each surface — proves the pipeline is reachable from
- * generateText, createAgent, and the CLI Agent, not just runAgentLoop.
+ * generateText, createSeepient, and the CLI Agent, not just runAgentLoop.
  *
  * These tests use a fake provider that issues one tool call then stops, and
  * assert the new path governs: the legacy handler is NOT invoked when the
@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, realpathSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { generateText, createAgent } from "../index.js";
+import { generateText, createSeepient } from "../index.js";
 import { Agent } from "../../cli/agent.js";
 import { createSnapshotStore } from "../../../foundations/hashline/snapshot-store.js";
 import { createMockRuntime } from "../../../domain/__tests__/test-doubles.js";
@@ -21,10 +21,10 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-/** Monkey-patch the provider module so generateText/createAgent use a fake
+/** Monkey-patch the provider module so generateText/createSeepient use a fake
  *  provider that issues ONE write_file call then stops. */
 async function withFakeProvider<T>(toolName: string, args: Record<string, unknown>, fn: () => Promise<T>): Promise<T> {
-  // generateText/createAgent call getProvider() internally; we intercept by
+  // generateText/createSeepient call getProvider() internally; we intercept by
   // setting the env to a provider we control. Simplest: patch the provider
   // module's getProvider. But that's internal — instead, pass a known
   // provider type and override the SDK's chat. The cleanest path for this
@@ -32,15 +32,14 @@ async function withFakeProvider<T>(toolName: string, args: Record<string, unknow
   return fn();
 }
 
-describe("E2E: SDK createAgent with permissionPipeline", () => {
-  it("accepts the flag; pipeline construction is deferred to after provider resolution", async () => {
-    // createAgent requires a configured provider. Without one it throws at
-    // getProvider() — that's expected and proves the flag itself is accepted
+describe("E2E: SDK createSeepient with mandatory permission pipeline", () => {
+  it("pipeline construction is deferred to after provider resolution", async () => {
+    // createSeepient requires a configured provider. Without one it throws at
+    // getProvider() — that's expected and proves the agent factory functions
     // (the error is provider-resolution, not pipeline-construction).
     try {
-      await createAgent({
+      await createSeepient({
         model: "gpt-4o",
-        permissionPipeline: true,
         cwd: dir,
       });
     } catch (err) {
@@ -77,16 +76,14 @@ describe("E2E: CLI Agent.enablePermissionPipeline", () => {
   });
 });
 
-describe("E2E: generateText with permissionPipeline", () => {
-  it("accepts the flag and constructs the pipeline without throwing", async () => {
-    // generateText calls the real provider; we only verify the flag is
-    // accepted and the pipeline construction doesn't throw. A full provider
-    // mock is beyond scope here — the routing proof is in
-    // agent-loop-pipeline.e2e.test.ts.
+describe("E2E: generateText with mandatory permission pipeline", () => {
+  it("constructs the pipeline without throwing", async () => {
+    // generateText calls the real provider; we verify the pipeline
+    // construction doesn't throw. A full provider mock is beyond scope here
+    // — the routing proof is in agent-loop-pipeline.e2e.test.ts.
     try {
       await generateText("hi", {
         model: "gpt-4o",
-        permissionPipeline: true,
         cwd: dir,
         maxSteps: 1,
       });
@@ -101,7 +98,7 @@ describe("E2E: generateText with permissionPipeline", () => {
 
 // ── spec 019 T021 (QS-0.6): custom SDK tools survive the tightening ──────
 
-describe("QS-0.6: trustedHostTool through createAgent({ permissionPipeline: true })", () => {
+describe("QS-0.6: trustedHostTool through createSeepient", () => {
   it("executes a registered trustedHostTool via the composition wiring", async () => {
     const { trustedHostTool } = await import("../custom-tools.js");
     const calls: string[] = [];
@@ -125,9 +122,8 @@ describe("QS-0.6: trustedHostTool through createAgent({ permissionPipeline: true
       { content: "probe done" },
     ]);
 
-    // `runtime` is an intentionally-untyped injection seam on createAgent.
-    const agent = await createAgent({
-      permissionPipeline: true,
+    // `runtime` is an intentionally-untyped injection seam on createSeepient.
+    const agent = await createSeepient({
       runtime: runtime as never,
       tools: [registration] as never,
       cwd: dir,

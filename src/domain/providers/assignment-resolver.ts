@@ -5,46 +5,28 @@ import type { CredentialStore } from "../../foundations/contracts/credential-sto
 import type {
   PurposeModelMap,
   ModelAssignment,
-  ModelAssignmentOverride,
 } from "../../foundations/schemas/provider-config.js";
 import type { UpstreamModel, ThinkingLevel } from "../../foundations/schemas/inference.js";
 import type { ProviderEffectiveConfig } from "../../foundations/schemas/provider-config.js";
 import { SeepientError, InferenceError } from "../../foundations/errors.js";
 import { normalizeProviderName } from "../../foundations/models-catalog.js";
 
-export type Purpose =
-  | "plan"
-  | "text"
-  | "coding"
-  | "vision"
-  | "commit"
-  | "image-generation"
-  | "video-generation"
-  | "tts"
-  | "stt"
-  | "dreaming"
-  | "data"
-  | "media.image"
-  | "media.speech"
-  | "media.transcription"
-  | "media.video";
+export type {
+  Purpose,
+  Tier,
+  TurnSnapshot,
+  InferenceTarget,
+  InvocationPlan,
+  ModelAssignmentOverride,
+} from "../../foundations/contracts/provider-runtime.js";
 
-export type Tier = "efficient" | "standard" | "complex";
-
-export interface TurnSnapshot {
-  revision: number;
-  createdAt: string;
-  catalog: readonly UpstreamModel[];
-  config: ProviderEffectiveConfig;
-  assignments: PurposeModelMap;
-}
-
-export interface InvocationPlan {
-  readonly selectedTarget: InferenceTarget;
-  readonly failureTargets: readonly InferenceTarget[];
-  readonly snapshot?: TurnSnapshot;
-  readonly warnings?: readonly string[];
-}
+import type {
+  Purpose,
+  Tier,
+  TurnSnapshot,
+  InvocationPlan,
+  ModelAssignmentOverride,
+} from "../../foundations/contracts/provider-runtime.js";
 
 /**
  * Resolves an immutable InvocationPlan for an agent step based on snapshot, purpose, tier, and overrides.

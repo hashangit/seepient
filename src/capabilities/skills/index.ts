@@ -1,4 +1,4 @@
-export type { Skill, SkillFrontmatter, SkillMetadata, SkillRegistry, SkillModelConfig, TruncationResult } from './types.js';
+export type { Skill, SkillFrontmatter, SkillMetadata, SkillRegistry, SkillModelConfig, TruncationResult, SkillSource } from './types.js';
 export { parseSkillFile, parseFrontmatter } from './parser.js';
 export { discoverSkills, getSkillPaths } from './loader.js';
 export { DefaultSkillRegistry } from './registry.js';
@@ -9,13 +9,20 @@ export { limitSkillBody, getSkillBodyLimits } from './types.js';
 
 import { discoverSkills } from './loader.js';
 import { DefaultSkillRegistry } from './registry.js';
-import { SkillRegistry } from './types.js';
+import type { SkillRegistry, SkillSource } from './types.js';
 
-let registry: SkillRegistry | null = null;
-
-export async function initializeSkillRegistry(cwd: string): Promise<SkillRegistry> {
+/**
+ * Initialize a skill registry for the given workspace cwd.
+ *
+ * @param cwd Active workspace directory
+ * @param options.sources Extensible skill sources (Spec 021-1 signature seam; placeholder for 021-1 implementation)
+ */
+export async function initializeSkillRegistry(
+  cwd: string,
+  options?: { sources?: SkillSource[] },
+): Promise<SkillRegistry> {
   const skills = await discoverSkills(cwd);
-  registry = new DefaultSkillRegistry(skills);
+  const registry = new DefaultSkillRegistry(skills);
 
   if (process.env.SEEPIENT_SKILLS_DEBUG) {
     console.log(`[SKILLS] Loaded ${skills.length} skills`);
@@ -24,9 +31,5 @@ export async function initializeSkillRegistry(cwd: string): Promise<SkillRegistr
     }
   }
 
-  return registry;
-}
-
-export function getSkillRegistry(): SkillRegistry | null {
   return registry;
 }

@@ -4,7 +4,7 @@
  * Constructs a fully-wired ActionLifecycle from the inputs a composition root
  * has at hand: workspace, principal, policy store, approval broker, execution
  * boundary, and audit store. The returned lifecycle is what `runAgentLoop`
- * invokes per tool call when `permissionPipeline: true`.
+ * invokes per tool call (always active across all surfaces).
  *
  * This module is the *only* place that assembles a complete pipeline. It
  * exists so transport composition roots (CLI bootstrap, SDK agent, server
@@ -44,6 +44,7 @@ import type { PolicyStore } from "../../foundations/contracts/execution-brokers.
 import type { PreparedToolAction } from "../../foundations/contracts/prepared-action.js";
 import type { ToolAnalysisContext } from "../../foundations/contracts/custom-tools.js";
 import type { AuditStore } from "../../foundations/contracts/execution-brokers.js";
+import type { CapabilityLedger } from "../../foundations/contracts/capability-ledger.js";
 import { InMemoryArtifactStore } from "../../capabilities/execution/in-memory-artifact-store.js";
 import * as path from "node:path";
 import { PersistedCapabilityLedger } from "./persisted-capability-ledger.js";
@@ -110,8 +111,8 @@ export interface ActionLifecycleInputs {
   registrations?: import("./tool-registration-map.js").ToolRegistrationMap;
   /** Optional probe to test image capability reachability before prompting user. */
   imageCapabilityProbe?: () => Promise<{ reachable: boolean; reason?: string }>;
-  /** Optional: persisted capability ledger for authority consumption & revocation (T107a). */
-  capabilityLedger?: PersistedCapabilityLedger;
+  /** Optional: capability ledger for authority consumption & revocation (T107a, spec 021). */
+  capabilityLedger?: CapabilityLedger;
   /**
    * Optional: a caller-supplied terminal-event outbox. When provided AND the
    * audit store is a `LocalAuditStore`, the lifecycle uses THIS outbox instead
@@ -151,8 +152,8 @@ export interface WiredActionLifecycle {
   /** Terminal-event outbox (when the audit store is LocalAuditStore). Composition
    *  roots call `outbox.flush()` on a timer and check `outbox.isHealthy()`. */
   terminalOutbox?: import("./audit-recorder.js").TerminalEventOutbox;
-  /** Persisted capability ledger for action consumption & run/session revocation (T107a). */
-  capabilityLedger?: PersistedCapabilityLedger;
+  /** Capability ledger for action consumption & run/session revocation (T107a, spec 021). */
+  capabilityLedger?: CapabilityLedger;
   /** The backing audit store, for crash-recovery on startup. */
   auditStore: AuditStore;
 }
