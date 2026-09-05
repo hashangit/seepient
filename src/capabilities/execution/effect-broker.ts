@@ -31,6 +31,7 @@ import { createHash } from "node:crypto";
 import { PersistedReplayLedger } from "./persisted-replay-ledger.js";
 import { resolveSecretRef } from "../../foundations/security/credential-resolver.js";
 import { createSetupFailure } from "../../foundations/contracts/setup-failure.js";
+import { pinnedFetch } from "./pinned-fetch.js";
 
 /** Loopback / private / link-local / reserved / cloud-metadata CIDRs (IPv4). */
 const DENIED_IPV4_PATTERNS: ReadonlyArray<RegExp> = [
@@ -665,97 +666,30 @@ export class NodeNetworkAdapter implements BrokerNetworkAdapter {
     destination: NetworkDestination,
     init: { method: string; headers: Record<string, string>; body?: Uint8Array; signal?: AbortSignal },
   ): Promise<BrokerNetworkResponse> {
-    // T210c: Resolve IPs BEFORE opening the connection. Pin the resolved IP and
-    // force the socket lookup callback to connect to THAT IP.
     const resolvedIps = await this.resolve(destination.host);
     if (resolvedIps.length === 0) {
       throw new Error(`DNS resolution failed for ${destination.host}`);
     }
-    const pinnedIp = resolvedIps[0];
     const isHttps = destination.scheme === "https";
     const port = destination.port ?? (isHttps ? 443 : 80);
+    const url = `${destination.scheme}://${destination.host}${port ? `:${port}` : ""}${destination.pathPrefix || "/"}`;
 
-    const httpModule = isHttps ? await import("node:https") : await import("node:http");
-
-    return new Promise((resolvePromise, rejectPromise) => {
-      const isV6 = pinnedIp.includes(":");
-      const family = isV6 ? 6 : 4;
-      const allAddresses = resolvedIps.map((ip) => ({
-        address: ip,
-        family: ip.includes(":") ? 6 : 4,
-      }));
-
-      const reqOpts = {
-        method: init.method,
-        hostname: destination.host,
-        port,
-        path: destination.pathPrefix || "/",
-        headers: {
-          ...init.headers,
-          host: destination.host,
-        },
-        servername: isHttps ? destination.host : undefined,
-        // Force net/tls connect to the pre-resolved IPs (true DNS rebinding
-        // protection). Node >= 20 with autoSelectFamily requests the `all`
-        // form and expects [{address, family}]; answering that request with
-        // the legacy single-address form makes net throw
-        // ERR_INVALID_IP_ADDRESS ("Invalid IP address: undefined").
-        lookup: (
-          _h: string,
-          opts: { all?: boolean },
-          cb: (
-            err: Error | null,
-            result: string | Array<{ address: string; family: number }>,
-            family?: number,
-          ) => void,
-        ) => {
-          if (opts?.all) cb(null, allAddresses);
-          else cb(null, pinnedIp, family);
-        },
-      };
-
-      const req = httpModule.request(reqOpts, (res) => {
-        const socketIp = res.socket.remoteAddress || pinnedIp;
-        // Lower-case header keys so the broker can read `location` uniformly.
-        const headers: Record<string, string> = {};
-        for (const [k, v] of Object.entries(res.headers ?? {})) {
-          if (typeof v === "string") headers[k.toLowerCase()] = v;
-          else if (Array.isArray(v)) headers[k.toLowerCase()] = v.join(", ");
-        }
-        const chunks: Buffer[] = [];
-        res.on("data", (chunk: Buffer) => chunks.push(chunk));
-        res.on("end", () => {
-          const bytes = new Uint8Array(Buffer.concat(chunks));
-          resolvePromise({
-            status: res.statusCode ?? 200,
-            bytes,
-            effectiveHost: destination.host,
-            effectiveIp: socketIp,
-            headers,
-          });
-        });
-        res.on("error", rejectPromise);
-      });
-
-      req.on("error", rejectPromise);
-
-      if (init.signal) {
-        if (init.signal.aborted) {
-          req.destroy(new Error("aborted"));
-          rejectPromise(new Error("aborted"));
-          return;
-        }
-        init.signal.addEventListener("abort", () => {
-          req.destroy(new Error("aborted"));
-          rejectPromise(new Error("aborted"));
-        });
-      }
-
-      if (init.body && init.body.length > 0) {
-        req.write(Buffer.from(init.body));
-      }
-      req.end();
+    const res = await pinnedFetch({
+      url,
+      ips: resolvedIps,
+      method: init.method,
+      headers: init.headers,
+      body: init.body,
+      signal: init.signal,
     });
+
+    return {
+      status: res.status,
+      bytes: res.bytes,
+      effectiveHost: destination.host,
+      effectiveIp: res.effectiveIp,
+      headers: res.headers,
+    };
   }
 }
 

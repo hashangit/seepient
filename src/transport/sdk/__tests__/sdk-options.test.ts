@@ -94,4 +94,27 @@ describe('SDK opts.model override', () => {
 
     expect(runAgentLoopMock.mock.calls[0][0].modelOverride).toEqual({ model: 'switched-model', providerAccount: 'main' });
   });
+
+  it('generateText passes purpose and tier to runAgentLoop', async () => {
+    const { runAgentLoopMock } = mockEntryPoints('resolved-default-model');
+    const { generateText } = await import('../index.js');
+
+    await generateText('hi', { tools: [], purpose: 'coding', tier: 'complex' } as any);
+
+    expect(runAgentLoopMock).toHaveBeenCalledTimes(1);
+    expect(runAgentLoopMock.mock.calls[0][0].purpose).toBe('coding');
+    expect(runAgentLoopMock.mock.calls[0][0].tier).toBe('complex');
+  });
+
+  it('streamText passes purpose and tier to runAgentLoop', async () => {
+    const { runAgentLoopMock } = mockEntryPoints('resolved-default-model');
+    const { streamText } = await import('../index.js');
+
+    const res = await streamText('hi', { tools: [], purpose: 'plan', tier: 'efficient' } as any);
+    await res.fullText;
+
+    expect(runAgentLoopMock).toHaveBeenCalledTimes(1);
+    expect(runAgentLoopMock.mock.calls[0][0].purpose).toBe('plan');
+    expect(runAgentLoopMock.mock.calls[0][0].tier).toBe('efficient');
+  });
 });

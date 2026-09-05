@@ -35,7 +35,7 @@ import * as path from 'path';
 
 // ── Re-exports ───────────────────────────────────────────────────────────
 
-export { createSeepient, warnIfPartialStoreInjection } from "./seepient.js";
+export { createSeepient } from "./seepient.js";
 import { warnIfPartialStoreInjection } from "./seepient.js";
 export type {
   Seepient,
@@ -67,7 +67,6 @@ export {
   type HostToolContext,
 } from "./custom-tools.js";
 export { settings, SettingsError } from "./settings.js";
-export { createRuntimeSkillProviderSwitcher } from "../../domain/skills/skill-invoker.js";
 export { getDefaultProviderRuntime, ProviderRuntime } from "../../domain/providers/provider-runtime.js";
 export { ProviderConfigStore } from "../../domain/providers/config-store/provider-config-store.js";
 export { MemoryCredentialStore } from "../../domain/providers/credentials/memory-credential-store.js";
@@ -75,9 +74,7 @@ export type { AuditStore, PolicyStore, ActionAuditEvent, PolicySnapshot } from "
 export type { CapabilityLedger, RevokeFilter } from "../../foundations/contracts/capability-ledger.js";
 export type { CapabilitySet, DecisionAuthority, ApprovalBroker, PermissionRequest, PermissionDecision } from "../../foundations/contracts/permission-policy.js";
 export type { ProviderRuntimeContract } from "../../foundations/contracts/provider-runtime.js";
-export type { SkillRegistryContract } from "../../foundations/contracts/skill-registry.js";
 export type { ConsentMode } from "../../foundations/settings-schema.js";
-export type { SSEOptions } from "./http.js";
 
 // Re-export middleware pipeline
 export {
@@ -129,6 +126,8 @@ export type {
   SkillMetadata,
   SeepientError,
   ToolRiskCategory,
+  Purpose,
+  Tier,
 } from "../../foundations/types.js";
 
 function toCapabilitySet(cap: import("../../foundations/contracts/permission-policy.js").CapabilitySet | import("../../foundations/contracts/permission-policy.js").Capability[] | undefined): import("../../foundations/contracts/permission-policy.js").CapabilitySet | undefined {
@@ -283,6 +282,8 @@ export async function generateText(
     modelOverride: opts.providerAccount || opts.model
       ? { providerAccount: opts.providerAccount, model: opts.model }
       : undefined,
+    purpose: opts.purpose,
+    tier: opts.tier,
     messages,
     toolDefs,
     systemPrompt,
@@ -426,6 +427,8 @@ export async function streamText(
         modelOverride: opts.providerAccount || opts.model
           ? { providerAccount: opts.providerAccount, model: opts.model }
           : undefined,
+        purpose: opts.purpose,
+        tier: opts.tier,
         messages,
         toolDefs,
         systemPrompt,

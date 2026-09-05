@@ -136,6 +136,9 @@ jobs:
           console.log("manifest:", JSON.stringify(manifest.binaries, null, 2));
           '
 
+      - name: Verify pack contents
+        run: pnpm run pack:verify
+
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

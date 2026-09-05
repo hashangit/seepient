@@ -101,3 +101,29 @@ jobs:
           sudo apt-get install -y qemu-user-static
           file native/fs-commit/target/${{ matrix.target }}/release/seepient-fs-commit
           echo | qemu-aarch64-static native/fs-commit/target/${{ matrix.target }}/release/seepient-fs-commit --commit /nonexistent/x || true
+
+  # spec 021-2 (FR-019/T007): the container image boots standalone server and responds 200 on /v1/health
+  docker-build-and-health:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t seepient:test .
+
+      - name: Start container and verify /v1/health
+        run: |
+          docker run -d --name seepient-test -p 7337:7337 seepient:test
+          for i in $(seq 1 30); do
+            status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:7337/v1/health || true)
+            if [ "$status" = "200" ]; then
+              echo "Server health check passed with HTTP 200"
+              docker stop seepient-test
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Server failed to become healthy within 30s"
+          docker logs seepient-test
+          docker stop seepient-test
+          exit 1

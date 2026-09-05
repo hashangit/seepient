@@ -5,6 +5,7 @@
  * handler. All responses are JSON with proper Content-Type headers.
  */
 
+import * as crypto from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "http";
 import type {
   SkillMetadata,
@@ -18,6 +19,8 @@ import {
   handleGetSettingsSchema,
   type SettingsHandlerContext,
 } from "./settings-handlers.js";
+import { globalRateLimiter } from "./rate-limit.js";
+import { logTransportEvent } from "../logging.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -57,6 +60,7 @@ interface ChatRequest {
   tools?: string[];
   maxSteps?: number;
   skills?: string[];
+  sessionId?: string;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -89,10 +93,37 @@ function isMutableRuntime(rt: unknown): boolean {
   return store != null && typeof store.updateOverlay === "function";
 }
 
+export class PayloadTooLargeError extends Error {
+  constructor(message = "Request payload exceeds maximum allowed size") {
+    super(message);
+    this.name = "PayloadTooLargeError";
+  }
+}
+
+function getMaxBodyBytes(): number {
+  if (process.env.SEEPIENT_MAX_BODY_BYTES !== undefined) {
+    const parsed = parseInt(process.env.SEEPIENT_MAX_BODY_BYTES, 10);
+    return isNaN(parsed) ? 10 * 1024 * 1024 : parsed;
+  }
+  return 10 * 1024 * 1024;
+}
+
 function parseBody(req: IncomingMessage): Promise<string> {
+  const maxBytes = getMaxBodyBytes();
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    let received = 0;
+    req.on("data", (chunk: Buffer) => {
+      received += chunk.length;
+      if (maxBytes > 0 && received > maxBytes) {
+        if (typeof req.destroy === "function") {
+          req.destroy();
+        }
+        reject(new PayloadTooLargeError(`Request body exceeded maximum limit of ${maxBytes} bytes`));
+        return;
+      }
+      chunks.push(chunk);
+    });
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
     req.on("error", reject);
   });
@@ -184,8 +215,13 @@ function matchRoute(
     return { handler: "provider_refresh_models", params: { providerId: refreshMatch[1] } };
   }
 
+  // GET /v1/sessions
+  if (method === "GET" && path === "/v1/sessions") {
+    return { handler: "sessions_list", params: {} };
+  }
+
   // GET /v1/sessions/:id
-  const sessionMatch = path.match(/^\/v1\/sessions\/([a-f0-9-]+)$/);
+  const sessionMatch = path.match(/^\/v1\/sessions\/([a-zA-Z0-9_-]+)$/);
   if (method === "GET" && sessionMatch) {
     return { handler: "session", params: { id: sessionMatch[1] } };
   }
@@ -209,6 +245,36 @@ export function createRestHandler(ctx: RestHandlerContext) {
     req: IncomingMessage,
     res: ServerResponse,
   ): Promise<void> {
+    const startMs = Date.now();
+    const requestId = crypto.randomUUID();
+    (req as any).requestId = requestId;
+
+    res.on("finish", () => {
+      const durationMs = Date.now() - startMs;
+      const authKey = (req as any).apiKey;
+      let apiKeyHashPrefix: string | undefined;
+      if (authKey) {
+        const h = authKey.keyHash || (authKey.key ? hashKey(authKey.key) : "");
+        if (h) apiKeyHashPrefix = h.slice(0, 8);
+      } else {
+        const rawToken = req.headers.authorization?.replace(/^Bearer\s+/i, "");
+        if (rawToken) {
+          apiKeyHashPrefix = hashKey(rawToken).slice(0, 8);
+        }
+      }
+      logTransportEvent({
+        level: res.statusCode >= 500 ? "error" : "info",
+        event: "http_request",
+        requestId,
+        method: req.method ?? "GET",
+        path: (req.url ?? "/").split("?")[0],
+        status: res.statusCode,
+        durationMs,
+        apiKeyHashPrefix,
+        error: (res as any).__internalErrorMessage,
+      });
+    });
+
     const route = matchRoute(req.url ?? "/", req.method ?? "GET");
 
     if (!route) {
@@ -218,6 +284,25 @@ export function createRestHandler(ctx: RestHandlerContext) {
     }
 
     try {
+      if (route.handler === "health") {
+        await handleHealth(req, res, ctx);
+        return;
+      }
+
+      // Authenticated routes: enforce auth and rate limiting
+      const key = authMiddleware(req);
+      if (!key) {
+        sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key");
+        return;
+      }
+      (req as any).apiKey = key;
+
+      const keyHash = key.keyHash || (key.key ? hashKey(key.key) : "anonymous");
+      if (!globalRateLimiter.consume(keyHash)) {
+        sendError(res, 429, "RATE_LIMITED", "Rate limit exceeded. Please try again later.");
+        return;
+      }
+
       const getRuntime = async () => {
         if (ctx.runtime) return ctx.runtime;
         const { getDefaultProviderRuntime } = await import("../../domain/providers/provider-runtime.js");
@@ -236,6 +321,9 @@ export function createRestHandler(ctx: RestHandlerContext) {
           break;
         case "chat":
           await handleChat(req, res, ctx);
+          break;
+        case "sessions_list":
+          await handleListSessions(req, res, ctx);
           break;
         case "session":
           await handleGetSession(req, res, ctx, route.params.id);
@@ -395,9 +483,14 @@ export function createRestHandler(ctx: RestHandlerContext) {
           sendError(res, 404, "NOT_FOUND", "Unknown endpoint");
       }
     } catch (err: unknown) {
+      if (err instanceof PayloadTooLargeError || (err as any)?.name === "PayloadTooLargeError") {
+        sendError(res, 413, "PAYLOAD_TOO_LARGE", (err as Error).message);
+        return;
+      }
       const message = err instanceof Error ? err.message : "Internal server error";
+      (res as any).__internalErrorMessage = message;
       console.error("[rest] Unhandled error:", message);
-      sendError(res, 500, "INTERNAL_ERROR", message);
+      sendError(res, 500, "INTERNAL_ERROR", "Internal server error");
     }
   };
 }
@@ -465,7 +558,11 @@ async function handleChat(
   let body: string;
   try {
     body = await parseBody(req);
-  } catch {
+  } catch (err: unknown) {
+    if (err instanceof PayloadTooLargeError || (err as any)?.name === "PayloadTooLargeError") {
+      sendError(res, 413, "PAYLOAD_TOO_LARGE", (err as Error).message);
+      return;
+    }
     sendError(res, 400, "BAD_REQUEST", "Failed to read request body");
     return;
   }
@@ -484,6 +581,35 @@ async function handleChat(
     return;
   }
 
+  const keyHash = key.keyHash ?? (key.key ? hashKey(key.key) : "");
+
+  // If sessionId is provided, verify it exists and belongs to caller
+  let sessionId = parsed.sessionId;
+  if (sessionId) {
+    const session = await ctx.sessionManager.getSession(sessionId, keyHash);
+    if (!session) {
+      sendError(res, 404, "NOT_FOUND", `Session "${sessionId}" not found`);
+      return;
+    }
+  } else {
+    try {
+      const created = await ctx.sessionManager.createSession(key.key ?? keyHash, { apiKeyHash: keyHash });
+      sessionId = created.id;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      sendError(res, 429, "SESSION_LIMIT", msg);
+      return;
+    }
+  }
+
+  // Persist user message
+  ctx.sessionManager.addMessage(sessionId, {
+    id: crypto.randomUUID(),
+    role: "user",
+    content: parsed.message,
+    timestamp: Date.now(),
+  });
+
   // Execute
   try {
     const result = await ctx.generateText({
@@ -495,27 +621,60 @@ async function handleChat(
       skills: parsed.skills,
       // Spec 008: pass authenticated principal identity (hashed API key) so
       // the per-request pipeline constructor derives `principalId` from it.
-      apiKeyHash: key.keyHash ?? (key.key ? hashKey(key.key) : ""),
+      apiKeyHash: keyHash,
+      sessionId,
     } as any);
+
+    // Persist assistant message
+    ctx.sessionManager.addMessage(sessionId, {
+      id: crypto.randomUUID(),
+      role: "assistant",
+      content: result.text,
+      timestamp: Date.now(),
+    });
 
     sendJSON(res, 200, {
       text: result.text,
       toolCalls: result.toolCalls,
       usage: result.usage,
       finishReason: result.finishReason,
+      sessionId,
     });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Generation failed";
+    const rawMessage = err instanceof Error ? err.message : "Generation failed";
     const isProviderError =
-      message.includes("not configured") || message.includes("API key");
+      rawMessage.includes("not configured") || rawMessage.includes("API key");
+
+    (res as any).__internalErrorMessage = rawMessage;
 
     sendJSON(res, isProviderError ? 502 : 500, {
       error: {
         code: isProviderError ? "PROVIDER_ERROR" : "GENERATION_ERROR",
-        message,
+        message: isProviderError ? rawMessage : "Internal server error during generation",
       },
     });
   }
+}
+
+async function handleListSessions(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: RestHandlerContext,
+): Promise<void> {
+  const key = authMiddleware(req);
+  if (!key) {
+    sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key");
+    return;
+  }
+
+  if (!hasScope(key, "agent:read") && !hasScope(key, "agent:run")) {
+    sendError(res, 403, "FORBIDDEN", "API key lacks 'agent:read' scope");
+    return;
+  }
+
+  const keyHash = key.keyHash ?? (key.key ? hashKey(key.key) : "");
+  const summaries = ctx.sessionManager.getSessionsByKey(keyHash);
+  sendJSON(res, 200, summaries);
 }
 
 async function handleGetSession(

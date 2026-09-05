@@ -2,7 +2,7 @@
  * PreparedTool Dispatch E2E Test Suite (Spec 020, US2, QS-1.1 – QS-1.6)
  *
  * Verifies:
- *  - QS-1.1: preparedTool executes through createSeepient({ permissionPipeline: true })
+ *  - QS-1.1: preparedTool executes through createSeepient()
  *            with effect-described approval prompt and digests in audit.
  *  - QS-1.2: Parity across generateText and streamText.
  *  - QS-1.3: Malformed drafts fail closed without showing approval prompt.

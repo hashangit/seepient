@@ -286,5 +286,29 @@ describe("custom-tool registration (T304, QS-3.6)", () => {
     await expect(makeRegistrationAnalyzer(missingClassesReg)({}, mockCtx)).rejects.toThrow(
       'Invalid effect "model-egress" in trustedHostTool declaration: "dataClasses" must be a non-empty array',
     );
+
+    // 6. model-egress with dataClasses fills default providerClass and sources
+    const validModelEgressReg = trustedHostTool({
+      definition: {
+        type: "function",
+        function: { name: "valid_egress_tool", description: "d", parameters: { type: "object", properties: {}, required: [] } },
+      },
+      declaration: {
+        effects: [{ kind: "model-egress", dataClasses: ["normal", "sensitive"] }],
+      },
+      async execute() {
+        return "ok";
+      },
+    });
+    const analyzer = makeRegistrationAnalyzer(validModelEgressReg);
+    const prepared = await analyzer({}, mockCtx);
+    expect(prepared.effects).toEqual([
+      {
+        kind: "model-egress",
+        dataClasses: ["normal", "sensitive"],
+        providerClass: "openai",
+        sources: ["valid_egress_tool"],
+      },
+    ]);
   });
 });

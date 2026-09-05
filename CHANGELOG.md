@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.7.0] - 2026-09-06
+
+### Review remediation: release pipeline, server sessions, transport hardening & docs truth (spec 021-2)
+
+**Release pipeline & packaging safety (US1):**
+- **Static publish hook safety**: Restored `prepublishOnly` to `pnpm run build` (HEAD semantics); added `pnpm run pack:verify` static hook assertion preventing clean/delete scripts in publish hooks and verifying native exact-commit helper staging.
+- **Release workflow gate**: Added `pack:verify` gate to `.github/workflows/release.yml` between staging and npm publish.
+- **Docker standalone server entrypoint**: Aligned `Dockerfile` to launch `dist/transport/http/standalone.js` behind `dumb-init` by default; updated usage documentation; removed deprecated `SEEPIENT_SHELL_APPROVE`. Added CI container image build & health check.
+- **Artifact hygiene**: Removed untracked visual check artifacts and stale architecture dumps.
+
+**Server sessions & WebSocket integrity (US2):**
+- **Id-preserving session lifecycle**: `createSession` adopts client-supplied IDs across memory and persistence backends with strict charset validation and collision refusal. `addMessage` fails loudly on missing sessions.
+- **`GET /v1/sessions` endpoint**: Added authenticated collection listing returning `SessionSummary` metadata for the caller's key only (no message bodies).
+- **REST session resumption**: `POST /v1/chat` accepts optional `sessionId`, resumes conversation history, persists turn messages, and echoes session identity.
+- **WebSocket concurrency guard & lifecycle**: Single in-flight chat per connection with `REQUEST_IN_FLIGHT` error frame; abort signals reach active streaming controllers; pipeline identities use UUIDs.
+- **SDK turn mutex durability**: `chatStream` `finally` block guarantees mutex `release()` executes even if session persistence fails.
+
+**SDK parity & type truth (US3):**
+- **One-shot option parity**: Added `purpose` and `tier` options to `GenerateTextOptions` and `StreamTextOptions`, threaded to agent loop resolution.
+- **Declaration type narrowing**: Narrowed `TrustedHostToolEffectDeclaration` to supported effect kinds (`network-egress`, `secret-use`, `model-egress`), injecting boundary defaults and eliminating untyped casts.
+- **Unified local store predicate**: Added `isLocalAuditStore` helper unifying local filesystem store detection across SDK, HTTP server, and lifecycle factory.
+- **Runtime contract extension**: Extended `ProviderRuntimeContract` with optional inspection and listener cleanup methods, eliminating `(runtime as any)` probes.
+
+**Transport hardening & documentation truth (US4):**
+- **SSRF socket IP pinning**: Reused socket lookup override primitive via `pinnedFetch` to connect strictly to pre-validated IP addresses, eliminating DNS rebinding TOCTOU windows. Added 5-hop redirect limit and extended private/reserved CIDR blocks.
+- **Transport DoS caps**: Enforced 10 MB default body limit on REST requests (`413 PAYLOAD_TOO_LARGE`), 1 MiB WebSocket frame size (`maxPayload`), 300 rpm per-key token bucket rate limiter (`429 RATE_LIMITED`), and configurable CORS allowlist (`SEEPIENT_CORS_ORIGINS`).
+- **Structured request logging**: Added JSON-line logger with `requestId` correlation at transport seams; sanitized 500 error responses to prevent internal detail leaks.
+- **Documentation truth**: Corrected docs license to BUSL-1.1; removed phantom `seepient/react` guide; corrected `/sdk/session-persistence` links and server `persist` option.
+
 ## [v0.6.1] - 2026-09-06
 
 ### Stateless SDK workers and embedder-owned storage (spec 021)
@@ -73,10 +102,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Restored surface & explicit trust models:**
 - Restored `preparedTool` and `brokerConnector` factories and types from the package entry (`src/transport/sdk/index.ts`).
-- Exposed explicit trust models (`preparedTool`, `brokerConnector`, `trustedHostTool`), custom tool registration support, and typed `commitHelper` on `createAgent`, `generateText`, and `streamText`.
+- Exposed explicit trust models (`preparedTool`, `brokerConnector`, `trustedHostTool`), custom tool registration support, and typed `commitHelper` on `createSeepient`, `generateText`, and `streamText`.
 - **`preparedTool` execution pipeline**: Custom analyzers return an untrusted `PreparedActionDraft` (`operation`, `effects`, `risk`, `display`); platform stamps identity fields and computes digests fail-closed via `buildPreparedAction`, executing through the policy engine, approval broker, and execution boundary with exact-commit guarantees.
 - **`brokerConnector` data-only execution**: Declarative argument-to-request mappings using JSON Pointers (RFC 6901) execute directly against backend brokers (e.g. `web-search`) with zero embedder code execution and construction-guaranteed secret isolation.
 - Fixed deny-messaging for custom tools (FR-009): registration-present analyzer failures surface exact validator/analyzer remediation, never the misleading `trustedHostAllowlist` hint.
+
+### Permission tool baseline & consent modes (spec 017)
+- **Consent modes & wildcard capabilities**: Added three consent modes (`ask-everything`, `edit-enabled`, `autonomous`) and three wildcard capability kinds (`tools:*`, `network:*`, `secrets:*`). Brokered-tool lockout repair and config-derived grants.
 
 ### CLI image saves exact commit verification
 - Replaced direct `fs.writeFileSync` saves in CLI image generation (`generate image`) with exact-commit execution via `FileCommitBroker` with action-scoped capability envelopes, ensuring all model-authored image file outputs are audited and exact-commit checked.

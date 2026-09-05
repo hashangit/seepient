@@ -19,6 +19,7 @@ export interface WS {
   WebSocketServer: new (options: {
     noServer?: boolean;
     path?: string;
+    maxPayload?: number;
   }) => WSServer;
 }
 
@@ -349,7 +350,7 @@ export interface WebSocketHandlerContext {
 
 export interface ConnectionState {
   sessionId: string | null;
-  currentAbortController: AbortController | null;
+  activeChats: Set<AbortController>;
   activeProvider: string | null;
   activeModel: string | null;
   apiKeyHash: string;

@@ -44,6 +44,7 @@ import type { PolicyStore } from "../../foundations/contracts/execution-brokers.
 import type { PreparedToolAction } from "../../foundations/contracts/prepared-action.js";
 import type { ToolAnalysisContext } from "../../foundations/contracts/custom-tools.js";
 import type { AuditStore } from "../../foundations/contracts/execution-brokers.js";
+import { isLocalAuditStore } from "../../foundations/contracts/execution-brokers.js";
 import type { CapabilityLedger } from "../../foundations/contracts/capability-ledger.js";
 import { InMemoryArtifactStore } from "../../capabilities/execution/in-memory-artifact-store.js";
 import * as path from "node:path";
@@ -400,8 +401,8 @@ export async function buildActionLifecycle(
   // per-request lifecycle. When the audit store is not a LocalAuditStore, a
   // caller outbox cannot apply and is ignored.
   let terminalOutbox: import("./audit-recorder.js").TerminalEventOutbox | undefined;
-  if (auditStore instanceof LocalAuditStore) {
-    terminalOutbox = inputs.terminalOutbox ?? new (await import("./audit-recorder.js")).TerminalEventOutbox(auditStore);
+  if (isLocalAuditStore(auditStore)) {
+    terminalOutbox = inputs.terminalOutbox ?? new (await import("./audit-recorder.js")).TerminalEventOutbox(auditStore as any);
   }
 
   const lifecycle = new ActionLifecycle({

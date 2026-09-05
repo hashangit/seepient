@@ -22,6 +22,7 @@ import {
   extractHostCallbacks,
   extractRegistrations,
 } from "./tools.js";
+import { isLocalAuditStore } from "../../foundations/contracts/execution-brokers.js";
 import { initializeSkillRegistry } from "../../capabilities/skills/index.js";
 import { buildSkillCatalog } from "../../domain/skills/skill-catalog.js";
 import { StreamManager } from "../../domain/streaming/stream-manager.js";
@@ -307,11 +308,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   let auditOutbox:
     | import("../../domain/permissions/audit-recorder.js").TerminalEventOutbox
     | undefined;
-  const isLocalStore =
-    !opts.auditStore ||
-    opts.auditStore.isLocal === true ||
-    (opts.auditStore.isLocal === undefined &&
-      opts.auditStore instanceof LocalAuditStore);
+  const isLocalStore = !opts.auditStore || isLocalAuditStore(opts.auditStore);
   const auditStore = opts.auditStore ?? new LocalAuditStore();
   if (isLocalStore) {
     auditOutbox = new TerminalEventOutbox(
@@ -600,8 +597,16 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
           stream.resolveFinish("error");
         } finally {
           stream.complete();
-          await persistMessages();
-          release();
+          try {
+            await persistMessages();
+          } catch (persistErr) {
+            console.error("[seepient] chatStream persistence failed:", persistErr);
+            const seepientErr = toSeepientError(persistErr, "PERSISTENCE_ERROR");
+            if (streamOptions?.onError) streamOptions.onError(seepientErr);
+            stream.resolveFinish("error");
+          } finally {
+            release();
+          }
         }
       })();
 
@@ -698,8 +703,8 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   // ── Provider Management Methods ─────────────────────────────────────────
 
   const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
-  const managerApi = typeof (runtime as any).getConfigStore === "function"
-    ? createProviderManagerApi(runtime as any)
+  const managerApi = typeof runtime.getConfigStore === "function"
+    ? createProviderManagerApi(runtime as ProviderRuntime)
     : null;
   let latestState = managerApi ? await managerApi.getState() : { revision: 0, assignments: {} as PurposeModelMap };
 
@@ -741,10 +746,10 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
 
   async function getCatalog(): Promise<readonly AvailableModel[]> {
     const snapshot = await runtime.createTurnSnapshot();
-    if ((runtime as any).modelCatalog) {
-      return (runtime as any).modelCatalog.listAvailableModels(snapshot.config);
+    if (runtime.modelCatalog) {
+      return await runtime.modelCatalog.listAvailableModels(snapshot.config);
     }
-    return (snapshot.catalog as any) ?? [];
+    return (snapshot.catalog as unknown as readonly AvailableModel[]) ?? [];
   }
 
   function getAssignments(): PurposeModelMap {
@@ -836,8 +841,8 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
 
   async function dispose(): Promise<void> {
     await close();
-    if (typeof (runtime as any).removeAllListeners === "function") {
-      (runtime as any).removeAllListeners();
+    if (typeof runtime.removeAllListeners === "function") {
+      runtime.removeAllListeners();
     }
   }
 

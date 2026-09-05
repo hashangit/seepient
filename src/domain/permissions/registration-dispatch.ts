@@ -87,15 +87,61 @@ export function makeRegistrationAnalyzer(
         args: jsonArgs as any,
       };
 
-      const effects: EffectRequest[] = (decl?.effects as EffectRequest[]) ?? [
-        { kind: "host-callback", toolName },
-        {
-          kind: "model-egress",
-          providerClass: ctx.modelProviderClass,
-          dataClasses: ["normal", "sensitive"],
-          sources: [toolName],
-        },
-      ];
+      const effects: EffectRequest[] = decl?.effects
+        ? decl.effects.map((e): EffectRequest => {
+            if (e.kind === "model-egress") {
+              return {
+                kind: "model-egress",
+                dataClasses: e.dataClasses,
+                providerClass: e.providerClass ?? ctx.modelProviderClass,
+                sources: e.sources ?? [toolName],
+              };
+            }
+            if (e.kind === "network-egress") {
+              return {
+                kind: "network-egress",
+                destinations:
+                  e.destinations === "dynamic"
+                    ? "dynamic"
+                    : e.destinations.map((d) => {
+                        if (typeof d !== "string") return d;
+                        if (d.startsWith("http://")) {
+                          try {
+                            const u = new URL(d);
+                            return { scheme: "http" as const, host: u.hostname, port: u.port ? Number(u.port) : undefined };
+                          } catch {
+                            return { scheme: "http" as const, host: d.replace(/^http:\/\//, "") };
+                          }
+                        }
+                        if (d.startsWith("https://")) {
+                          try {
+                            const u = new URL(d);
+                            return { scheme: "https" as const, host: u.hostname, port: u.port ? Number(u.port) : undefined };
+                          } catch {
+                            return { scheme: "https" as const, host: d.replace(/^https:\/\//, "") };
+                          }
+                        }
+                        return { scheme: "https" as const, host: d };
+                      }),
+              };
+            }
+            if (e.kind === "secret-use") {
+              return {
+                kind: "secret-use",
+                secretRefs: e.secretRefs,
+              };
+            }
+            throw new Error(`Unsupported effect declaration kind: ${(e as any).kind}`);
+          })
+        : [
+            { kind: "host-callback", toolName },
+            {
+              kind: "model-egress",
+              providerClass: ctx.modelProviderClass,
+              dataClasses: ["normal", "sensitive"],
+              sources: [toolName],
+            },
+          ];
 
       const risk: ToolRiskCategory = decl?.risk ?? "destructive";
 

@@ -7,7 +7,7 @@
 #
 # Usage:
 #   Server mode (default):  docker run -p 7337:7337 seepient
-#   CLI mode:               docker run seepient seepient chat "hello" --docker
+#   CLI mode:               docker run --entrypoint node seepient dist/ui/cli/index.js chat "hello"
 #   With env file:          docker run -p 7337:7337 --env-file .env seepient
 # ============================================================================
 
@@ -28,7 +28,7 @@ RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /build
 
 # Copy dependency manifests first for layer caching
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 
 # Install ALL dependencies (including devDependencies for tsc)
 RUN pnpm install --frozen-lockfile

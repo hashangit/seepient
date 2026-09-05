@@ -7,7 +7,7 @@
  * bypassed.
  *
  * What this proves:
- *  - permissionPipeline/wiredPipeline routes through the new path (not dead).
+ *  - wiredPipeline routes through the new path (not dead).
  *  - autoConfirm:true no longer bypasses the pipeline (defect #3 closed).
  *  - a denied tool call does NOT reach the tool handler (defect #1 closed
  *    for the new path).
