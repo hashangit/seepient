@@ -9,19 +9,11 @@ Sessions enable multi-turn conversations by persisting message history between r
 
 ## Overview
 
-```
-┌─────────────────────────────────────────────┐
-│            Session Lifecycle                 │
-│                                              │
-│  Create ──► Active ──► Inactive ──► Expired  │
-│              │           │          │         │
-│              │     30 min idle    24 hr TTL  │
-│              │           │          │         │
-│              └───────────┴──────────┘         │
-│                     Cleanup (every 5 min)     │
-└─────────────────────────────────────────────┘
-```
-
+<DiagramStates
+  :states="['Create', 'Active', 'Inactive', 'Expired']"
+  :transitions="['on first request', '30 min idle', '24 hr TTL']"
+  loop="Cleanup sweep runs every 5 minutes"
+/>
 ## Storage
 
 Sessions are stored as individual JSON files on disk:

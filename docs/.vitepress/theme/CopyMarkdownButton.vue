@@ -5,7 +5,7 @@ import { useData } from 'vitepress'
 const { page, frontmatter } = useData()
 const copied = ref(false)
 
-const isDocPage = computed(() => frontmatter.value.layout !== 'home')
+const isDocPage = computed(() => frontmatter.value.layout === undefined)
 
 const rawModules = import.meta.glob<string>('../../**/*.md', {
   query: '?raw',

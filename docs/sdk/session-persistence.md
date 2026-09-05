@@ -64,6 +64,33 @@ interface PersistenceBackend {
 Third-party `PersistenceBackend` implementations must now include `readonly __persistenceBackend = true as const`. This brand field prevents the SDK from accidentally wrapping a `PersistenceBackend` and stripping metadata (`createdAt`, `provider`, `model`, custom `metadata`).
 :::
 
+## Persistence Fidelity Tiers
+
+Seepient supports two tiers of session persistence contracts with distinct fidelity guarantees:
+
+| Contract | Structure | Metadata Support | Tradeoff |
+|---|---|---|---|
+| `PersistenceBackend` | Full `SessionData` object (`messages`, `createdAt`, `updatedAt`, `provider`, `model`, `providerAccount`, `metadata`) | Full fidelity. Preserves exact creation times, model configurations, and custom application metadata across process restarts. | **Recommended for production.** Requires implementing `save`, `load`, `delete`, and `list` with the brand discriminator `readonly __persistenceBackend = true as const`. |
+| `SessionStore` (Adapter) | Array of `Message[]` (`get`, `set`) | Messages only. Automatically wrapped via `wrapAsPersistenceBackend`. | Discards provider, model, and custom metadata. Generates synthetic timestamps (`createdAt`/`updatedAt` set to load time). Best for simple or legacy backends. |
+
+### When to choose which contract
+
+- **Choose `PersistenceBackend`** when building production multi-tenant backends, worker fleets, or when you need audit logs and conversation resumption to accurately reflect the originating provider and model parameters.
+- **Choose `SessionStore`** only when adapting legacy key-value stores that store exclusively raw message arrays and do not need session-level metadata.
+
+## Asymmetric Storage Keying
+
+When injecting storage contracts into `createSeepient` or `createServer` in distributed or multi-tenant architectures, understand that Seepient partitions state across different scoping keys along distinct fault and security boundaries:
+
+| Store Contract | Scoping Key | Scope Boundary | Purpose |
+|---|---|---|---|
+| `AuditStore` | `principalId` | Actor / Identity | Durably attributes every tool execution and security decision to the authenticated user, API key, or system principal. |
+| `CapabilityLedger` | `principalId` | Actor / Identity | Tracks granted capabilities, active approvals, and one-shot authorizations per actor. |
+| `PersistenceBackend` | `sessionId` | Conversation | Isolates chat turns, message histories, and session resumes to a single conversational thread. |
+| `PolicyStore` | `workspace` | Directory / Filesystem | Governs filesystem paths, tool consent modes, and sandbox boundaries for the specific project workspace. |
+
+This asymmetric design guarantees that actor accountability (`principalId`) is never conflated with workspace filesystem policies or conversation threads (`sessionId`).
+
 ## Built-in stores
 
 Seepient Agent ships with two session store implementations.

@@ -994,7 +994,7 @@ interface CapabilityLedger {
 - [generateText()](/sdk/generate-text) -- One-shot execution
 - [streamText()](/sdk/stream-text) -- Streaming execution
 - [createSeepient()](/sdk/create-seepient) -- Stateful multi-turn agent
-- [Stateless Workers](/embedding/workers) -- Multi-tenant worker embedding
+- [Stateless Workers](/sdk/stateless-workers) -- Multi-tenant worker embedding
 - [Custom Tools](/sdk/custom-tools) -- Building custom tools
 - [Hooks](/sdk/hooks) -- Lifecycle callbacks
 - [Providers](/sdk/providers) -- Multi-provider configuration

@@ -41,7 +41,7 @@ console.log(agent.getUsage());
 ## Parameters
 
 ::: tip Stateless Embedding
-For multi-tenant workers and cloud functions requiring full state injection (audit, policy, capability ledger, sessions), use `createSeepient`, `generateText`, or `streamText`. See [Embedding in Stateless Workers](/embedding/workers) for full architecture details.
+For multi-tenant workers and cloud functions requiring full state injection (audit, policy, capability ledger, sessions), use `createSeepient`, `generateText`, or `streamText`. See [Stateless Workers](/sdk/stateless-workers) for full architecture details.
 :::
 
 ### `options` (optional)
