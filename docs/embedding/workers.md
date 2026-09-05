@@ -1,185 +1,100 @@
-# Embedding Seepient in Stateless Workers
+---
+title: Stateless workers
+description: Multi-tenant embedder storage, zero-disk operation, and worker deployment patterns.
+---
 
-This guide explains how multi-tenant platforms, cloud workers (containers, microVMs, serverless functions), and orchestrators embed the Seepient SDK statelessly.
+# Stateless workers
 
-## Overview
+This guide explains how multi-tenant platforms, serverless functions, and containerized orchestrators embed the Seepient SDK without writing state to the local worker filesystem.
 
-Seepient provides complete, fail-closed policy enforcement and sandbox execution. When deployed in multi-tenant environments:
-- **Isolation Principle**: Tenant A cannot read, write, or reach Tenant B's data, commands, or credentials through Seepient, short of a host-process or kernel compromise.
-- **Stateless Operation**: When tenant state stores are injected, the SDK writes **zero** persistent state to the local worker filesystem.
-- **Embedder Storage Sovereignty**: The embedder owns and supplies store adapters for sessions, audit logs, policies, capability consumption, and provider configurations.
+## Core principles
 
-> [!NOTE]
-> **Embedder SDK Entry Points**: Stateless store injection is supported on `createSeepient`, `generateText`, and `streamText`. To operate statelessly without local disk writes, embedders inject their own store contracts (`auditStore`, `policyStore`, `capabilityLedger`, `runtime`, and `persist`).
+When deployed in multi-tenant environments:
+- **Tenant isolation**: Tenant A cannot read, write, or access Tenant B's data, commands, or credentials through Seepient.
+- **Zero local disk writes**: When embedder store adapters are injected, the SDK writes zero persistent state to the local disk.
+- **Embedder storage sovereignty**: The host application owns and supplies the database adapters for sessions, audit logs, policies, and credentials.
 
 ---
 
-## Deployment Shapes & Isolation Ladder
+## Deployment models
 
-### Shape A: Serverless & Lightweight (e.g. Vercel Functions, Cloudflare Workers)
+### Model A: Serverless and ephemeral (Lambda, Cloudflare Workers)
 - Runs inside short-lived execution contexts.
-- Uses brokered tools (web search, fetch, media, notifications, email, skills) where data operations are contained by construction.
-- Machine execution tools fail closed (`ISOLATION_UNAVAILABLE`) if OS sandbox containment binaries are not present.
-- Every state store is injected; one-shot requests or session resume patterns are used across requests.
+- Uses brokered tools (web search, notifications, email, media) where operations are contained by design.
+- Direct machine execution tools fail closed if OS sandbox containment binaries are not present.
+- Every state store is injected on initialization.
 
-### Shape B: Worker Tier (Container / MicroVM per Tenant)
-- Each tenant or task runs inside an isolated container (Docker, gVisor) or microVM (Firecracker).
-- The Seepient agent executes inside the worker, with the OS-level sandbox isolating tool executions from the host and ambient network.
-- Persistent state routes back to the embedder control plane via injected store adapters.
-
-### Isolation Ladder
-
-| Tier | Isolation Mechanism | Guarantee |
-|---|---|---|
-| **1. Container** | Docker / OCI container per tenant | Separates host-process sharing; kernel is shared. |
-| **2. Syscall Interception** | gVisor / Kata Containers per tenant | Syscall filtering; covers kernel attack surfaces. |
-| **3. MicroVM** | Firecracker / Cloud Hypervisor per tenant | Hardware virtualization; kernel compromise is guest-scoped. |
+### Model B: Container worker tier (Docker, microVM per tenant)
+- Each tenant task runs inside an isolated container (Docker, gVisor) or microVM (Firecracker).
+- The Seepient agent executes inside the worker, with OS-level sandboxing (Bubblewrap) isolating tool executions from the container root.
+- Persistent state routes back to the embedder database via injected store contracts.
 
 ---
 
-## Worker-Local State Inventory (FR-009)
+## Injecting storage contracts
 
-When running in stateless worker mode, state is strictly classified:
+To run statelessly, inject custom store implementations when creating the agent:
 
-| State Kind | Scope | Storage Location | Notes |
+```typescript
+import { createSeepient } from 'seepient'
+import type {
+  SessionStore,
+  AuditStore,
+  PolicyStore,
+  CapabilityLedger
+} from 'seepient'
+
+const agent = createSeepient({
+  // Injected tenant storage adapters
+  sessionStore: myDatabaseSessionStore,
+  auditStore: myPostgresAuditStore,
+  policyStore: myRedisPolicyStore,
+  capabilityLedger: myLedgerStore,
+
+  // Tenant configuration
+  tenantId: 'tenant_abc123',
+  sessionId: 'sess_task_987',
+
+  // Provider configuration
+  provider: 'anthropic',
+  model: 'claude-3-7-sonnet'
+})
+
+const result = await agent.run('Process incoming customer request')
+```
+
+::: warning Store injection completeness
+Stateless operation requires injecting all four permission and persistence contracts (`sessionStore`, `auditStore`, `policyStore`, and `capabilityLedger`). If any store is omitted, the missing store falls back to writing to `~/.seepient` on the local filesystem.
+:::
+
+---
+
+## State classification
+
+| State category | Scope | Storage location | Description |
 |---|---|---|---|
-| **Settings** | Worker-local | Env variables / Container image | Ephemeral per-worker configuration. |
-| **Model Catalog Cache** | Worker-local | Ephemeral in-memory | Rebuilt on startup / cached ephemerally. |
-| **Sandbox & Native Binaries** | Worker-local | Container image / Mount | Native helper (`fs-commit`) and sandbox (`bwrap`). |
-| **Skills Definitions** | Worker-local | Read-only image / Mount | Bundled skill definitions. |
-| **Session History** | **Tenant-scoped** | Injected `PersistenceBackend` | Stored in embedder's database. |
-| **Action Audit Trail** | **Tenant-scoped** | Injected `AuditStore` | Enforces pre-dispatch durability. |
-| **Grants & Policies** | **Tenant-scoped** | Injected `PolicyStore` | Optimistic concurrency & history. |
-| **Capability Leases** | **Tenant-scoped** | Injected `CapabilityLedger` | Consumption digests & revocations. |
-| **Model Credentials** | **Tenant-scoped** | Injected `ProviderRuntime` | Managed via `ProviderConfigStore` & `CredentialStore`. |
-
-> [!IMPORTANT]
-> **Rule for Queued Specs (M8 Invariant)**: Any future state class (such as 016 session indexing or 018 per-run injection records) must target injected store contracts or extend the contract set; never write directly to the local filesystem on the SDK path.
-
-> [!WARNING]
-> **All-or-Nothing Store Injection**: Stateless operation is all-or-nothing. If you inject some stores (e.g. `auditStore` and `policyStore`) but omit others (e.g. `capabilityLedger`), the SDK emits a warning at construction time and the missing stores quietly fall back to local disk at `~/.seepient`. To guarantee zero local disk writes in multi-tenant environments, inject all three permission stores (`auditStore`, `policyStore`, and `capabilityLedger`), along with `runtime` and `persist`.
+| **Settings** | Worker-local | Environment variables | Ephemeral per-worker configuration. |
+| **Model catalog** | Worker-local | In-memory cache | Cached catalog entries refreshed on startup. |
+| **Sandbox binaries** | Worker-local | Container image | Compiled helper (`fs-commit`) and sandbox (`bwrap`). |
+| **Skill definitions** | Worker-local | Read-only image mount | Bundled skill instructions. |
+| **Session history** | Tenant-scoped | Injected `SessionStore` | Messages and tool invocations saved in database. |
+| **Audit trail** | Tenant-scoped | Injected `AuditStore` | Tamper-evident execution log entries. |
+| **Grants and policies** | Tenant-scoped | Injected `PolicyStore` | Tenant permission rules and consent levels. |
+| **Credentials** | Tenant-scoped | Injected `ProviderRuntime` | API keys retrieved from tenant secrets vault. |
 
 ---
 
-## State Store Contracts & Obligations
+## Layered network defense
 
-Seepient exports TypeScript interfaces for all tenant state stores:
+When deploying workers in cloud environments (AWS, GCP, Azure, Kubernetes):
 
-### 1. `PersistenceBackend` (Session History)
-Handles loading and saving conversation messages and session metadata.
+1. **Application-layer controls (Seepient)**:
+   - **Socket IP pinning**: All outbound HTTP requests through `safeSsrfFetch` resolve destination hostnames, validate resolved IP addresses against private and link-local ranges, and pin the TCP connection directly to the validated IP using `pinnedFetch`. This prevents time-of-check to time-of-use (TOCTOU) DNS rebinding attacks.
+   - **Strict range validation**: Private IPv4 (RFC 1918), link-local (`169.254.169.254`), loopback, documentation/carrier-grade NAT (`192.0.0.0/24`, `198.18.0.0/15`), multicast, and mapped IPv6 ranges are blocked by default.
+   - **Redirect bounding**: HTTP redirects are capped at 5 hops, and every intermediate target URL is re-validated and re-pinned.
 
-```typescript
-interface PersistenceBackend {
-  readonly __persistenceBackend: true;
-  save(id: string, data: SessionData): Promise<void>;
-  load(id: string): Promise<SessionData | null>;
-  delete(id: string): Promise<void>;
-  list(): Promise<string[]>;
-}
-```
-- **Tenant Channel**: Seepient passes `provider`, `model`, and `metadata` on every save for tenant keying.
+2. **Infrastructure-layer controls (Embedder)**:
+   - **IMDSv2 enforcement**: Configure worker virtual machines or container hosts to enforce IMDSv2 (session token required) with hop limit set to 1 (`--http-put-response-hop-limit 1` in AWS EC2). This ensures containers cannot access instance metadata even if container network namespaces share the host interface.
+   - **Egress segmentation**: Restrict worker egress at the VPC security group or network policy level. Workers executing unconstrained user tools should not have network access to internal control plane services, databases, or cloud provider APIs.
+   - **Complementary roles**: Application-layer pinning protects against loopback sidecar exploits and DNS rebinding to internal services; network egress segmentation and IMDSv2 protect against unauthorized external routing and infrastructure credential exfiltration.
 
-### 2. `AuditStore` (Security & Action Audits)
-Records all policy evaluation and tool execution events.
-
-```typescript
-interface AuditStore {
-  /** Append an audit event; must guarantee durability before resolving "written". */
-  append(
-    event: ActionAuditEvent,
-    opts: { idempotencyKey: string },
-  ): Promise<"written" | "duplicate">;
-  /** Retrieve terminal event for a given action ID. */
-  getTerminal(actionId: string): Promise<ActionAuditEvent | undefined>;
-}
-```
-- **Durability Obligation**: Returning `"written"` must guarantee the record is flushed to persistent storage before tool effects execute.
-- **Idempotency**: Duplicate appends with the same `idempotencyKey` (`<actionId>:<state>`) must return `"duplicate"`, never a second record.
-- **Crash Recovery**: Custom stores own their own crash recovery; Seepient skips local NDJSON outbox timers.
-
-### 3. `PolicyStore` (Workspace Grants & Rules)
-Persists user and policy grants with optimistic concurrency.
-
-```typescript
-interface PolicyStore {
-  /** Read the policy snapshot for a workspace. */
-  read(workspaceId: string): Promise<PolicySnapshot>;
-  /** Atomically compare and update the snapshot with optimistic locking. */
-  compareAndSet(
-    workspaceId: string,
-    expectedVersion: number,
-    next: CapabilitySet,
-    actor: DecisionAuthority,
-    mutation?: { mutationId: string },
-  ): Promise<PolicySnapshot>;
-}
-```
-
-### 4. `CapabilityLedger` (Consumption & Revocations)
-Records capability lease consumption and evaluates runtime revocations.
-
-```typescript
-interface CapabilityLedger {
-  /** Initialize or synchronize ledger state (async startup sync). */
-  load(): Promise<void>;
-  /** Record capability lease consumption against an action digest. */
-  consume(envelopeId: string, actionDigest: string): Promise<boolean>;
-  /** Revoke matching capability grants. */
-  revoke(filter: RevokeFilter): Promise<void>;
-  /** Check if an action digest was already consumed (synchronous in-memory check). */
-  isConsumedDigest(actionDigest: string): boolean;
-  /** Check if a run has been revoked (synchronous in-memory check). */
-  isRunRevoked(runId: string): boolean;
-  /** Check if a session has been revoked (synchronous in-memory check). */
-  isSessionRevoked(sessionId: string): boolean;
-}
-```
-- **Sync Checking Model**: While `load()`, `consume()`, and `revoke()` are asynchronous for remote synchronization, the gate check methods (`isConsumedDigest`, `isRunRevoked`, and `isSessionRevoked`) are synchronous in-memory checks called hot on every tool invocation. Ensure your implementation hydrates relevant digests during `load()`.
-
-### 5. `ProviderRuntime` (Credentials & Models)
-Encapsulates tenant model assignments and credentials without exposing secrets.
-
-```typescript
-import { ProviderRuntime, ProviderConfigStore, MemoryCredentialStore } from "seepient";
-
-const runtime = new ProviderRuntime({
-  configStore: new ProviderConfigStore(":memory:"),
-  credentialStore: new MemoryCredentialStore(),
-});
-```
-
----
-
-## Interactive Patterns
-
-### 1. Approval Relay Pattern
-For interactive human-in-the-loop approvals:
-1. Embedder initializes agent with an `approveTool` callback.
-2. When a risky action requires confirmation, `approveTool` blocks and sends the request payload to the embedder's approval API / WebSocket.
-3. Once the end-user decides, the embedder resolves the promise with `true` (approved) or `false` (denied).
-
-```typescript
-const agent = await createSeepient({
-  principalId: "tenant-user-123",
-  sessionId: "session-abc",
-  cwd: "/workspace",
-  runtime,
-  auditStore,
-  policyStore,
-  capabilityLedger,
-  persist: persistenceBackend,
-  consentMode: "ask-everything",
-  approveTool: async (req) => {
-    return await embedderClient.requestUserApproval(req);
-  },
-});
-```
-
-### 2. Resume Pattern (Serverless Execution)
-For execution that spans multiple requests:
-1. Initialize `createSeepient({ sessionId: "sess-123", persist: myBackend })`.
-2. Execute `await agent.chat(...)`. Session messages and metadata automatically save to `myBackend`.
-3. Release the worker / request context.
-4. On subsequent requests with the same `sessionId`, history is restored automatically from `myBackend`.
-
-See [`examples/worker/`](https://github.com/seepient/seepient/tree/main/examples/worker) in the repository for a complete runnable implementation with a stub control plane application.

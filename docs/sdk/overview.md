@@ -72,10 +72,6 @@ import type {
 import { trustedHostTool, CORE_TOOLS, COMM_TOOLS, ADVANCED_TOOLS, ALL_TOOLS } from "seepient";
 ```
 
-```typescript [React integration]
-import { createUseChat } from "seepient/react";
-```
-
 ```typescript [Server]
 import { createServer } from "seepient/server";
 ```

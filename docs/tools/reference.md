@@ -1,11 +1,11 @@
 ---
 title: Built-in Tools Reference
-description: Complete reference for all 12 built-in tools in Seepient Agent with parameters, examples, and notes.
+description: Complete reference for all 15 built-in tools in Seepient Agent with parameters, examples, and notes.
 ---
 
 # Built-in Tools Reference
 
-Seepient Agent includes 12 built-in tools organized into four groups. Every tool works identically across `generateText`, `streamText`, `createSeepient`, the CLI, and the server REST API.
+Seepient Agent includes 15 built-in tools organized into four groups. Every tool works identically across `generateText`, `streamText`, `createSeepient`, the CLI, and the server REST API.
 
 ## Quick Import
 
@@ -410,7 +410,7 @@ const result = await generateText(
 - Returns an error if the skill name is not found in the registry.
 - Lists available skills in the error message if the requested skill is not found.
 - Arguments support template substitution (`$1`, `$2`, `$ALL`, etc.) in the skill body.
-- See [Custom Skills Guide](/guides/custom-skills-guide) for creating custom skills.
+- See [Skills System Guide](/guides/skills) for creating custom skills.
 
 ---
 
