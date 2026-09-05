@@ -2,12 +2,13 @@
 # Seepient Dockerfile — Production Multi-Stage Build
 # ============================================================================
 # Builds a minimal production image with Chromium + CJK fonts for Playwright
-# browser tools. Supports both CLI mode and server mode.
+# browser tools, compiles the native fs-commit helper, and supports both
+# standalone server mode and CLI mode.
 #
 # Usage:
-#   Server mode (default):  docker run seepient
-#   CLI mode:               docker run seepient seepient chat "hello"
-#   With env file:          docker run --env-file .env seepient
+#   Server mode (default):  docker run -p 7337:7337 seepient
+#   CLI mode:               docker run seepient seepient chat "hello" --docker
+#   With env file:          docker run -p 7337:7337 --env-file .env seepient
 # ============================================================================
 
 # ---------------------------------------------------------------------------
@@ -15,7 +16,13 @@
 # ---------------------------------------------------------------------------
 FROM node:22.19-slim AS builder
 
-# Install pnpm
+# Install build dependencies: pnpm + Rust/Cargo for native commit helper
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    cargo \
+    gcc \
+    libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
 WORKDIR /build
@@ -33,6 +40,12 @@ COPY src/ ./src/
 # Compile TypeScript to JavaScript
 RUN pnpm run build
 
+# Copy native helper source and build for Linux
+COPY native/ ./native/
+COPY scripts/ ./scripts/
+RUN cargo build --manifest-path native/fs-commit/Cargo.toml --release \
+    && node scripts/place-native-helper.cjs
+
 # Prune devDependencies — keep only what's needed at runtime
 RUN pnpm prune --prod
 
@@ -43,7 +56,7 @@ FROM node:22.19-slim AS production
 
 # Container metadata
 LABEL org.opencontainers.image.title="Seepient Agent"
-LABEL org.opencontainers.image.description="Lightweight AI agent CLI with multi-provider LLM support"
+LABEL org.opencontainers.image.description="Lightweight AI agent CLI and server with multi-provider LLM support"
 LABEL org.opencontainers.image.source="https://github.com/hashangit/seepient"
 LABEL org.opencontainers.image.licenses="BUSL-1.1"
 
@@ -68,10 +81,8 @@ ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 # Production environment
 ENV NODE_ENV=production
 
-# Shell tool auto-approve for non-interactive containers
-# Set to "auto" to allow command execution without prompts
-# Set to "deny" (or leave unset) to block commands in non-interactive mode
-ENV SEEPIENT_SHELL_APPROVE=auto
+# Point native exact-commit helper to the Linux binary
+ENV SEEPIENT_FS_COMMIT_BIN=/usr/local/bin/seepient-fs-commit
 
 # Create non-root user for security
 RUN groupadd --gid 1001 appuser \
@@ -85,12 +96,20 @@ COPY --from=builder /build/dist/           ./dist/
 COPY --from=builder /build/node_modules/   ./node_modules/
 COPY --from=builder /build/package.json    ./
 
+# Copy compiled native helper binary to /usr/local/bin
+COPY --from=builder /build/native/fs-commit/target/release/seepient-fs-commit /usr/local/bin/seepient-fs-commit
+
 # Copy bundled skills
 COPY skills/ ./skills/
 
 # Copy license and documentation
 COPY LICENSE  ./
 COPY README.md ./
+
+# Link CLI and server binaries to system PATH
+RUN ln -s /app/dist/ui/cli/index.js /usr/local/bin/seepient \
+    && ln -s /app/dist/transport/http/standalone.js /usr/local/bin/seepient-server \
+    && chmod +x /app/dist/ui/cli/index.js /app/dist/transport/http/standalone.js /usr/local/bin/seepient-fs-commit
 
 # Create volume mount points for persistent data
 # - /data/sessions: conversation session history
@@ -110,7 +129,7 @@ WORKDIR /workspace
 # Server port
 EXPOSE 7337
 
-# Health check — verifies the server is responding
+# Health check — verifies the server is responding on /v1/health
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD node -e "const http = require('http'); \
     const req = http.get('http://localhost:7337/v1/health', (res) => { \
@@ -119,12 +138,8 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     req.on('error', () => process.exit(1)); \
     req.setTimeout(5000, () => { req.destroy(); process.exit(1); });"
 
-# Entrypoint: node with the CLI adapter
-# This allows both server mode (default CMD) and CLI commands
-ENTRYPOINT ["dumb-init", "--", "node", "dist/adapters/cli/index.js"]
+# Entrypoint: dumb-init as PID 1 supervisor
+ENTRYPOINT ["dumb-init", "--"]
 
-# Default command: start the server adapter
-# Override with any seepient CLI subcommand, e.g.:
-#   docker run seepient chat "explain this code"
-#   docker run seepient --help
-CMD ["--serve"]
+# Default command: start the standalone HTTP/WebSocket server
+CMD ["node", "/app/dist/transport/http/standalone.js"]

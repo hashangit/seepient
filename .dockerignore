@@ -13,13 +13,15 @@ node_modules
 # Build output (rebuilt inside the container)
 dist
 
-# TypeScript source (not needed at runtime — dist/ is used instead)
-src
-tsconfig.json
-*.ts
-!*.d.ts
-
-# Development tools and IDE configs
+# Development tools, agent state, and local caches
+.agents
+.codex
+.commandcode
+.specify
+.pi
+.tmp
+.seepient
+.pnpm-store
 .claude
 .dual-graph
 .qwen
@@ -29,16 +31,11 @@ tsconfig.json
 *.swo
 *~
 
+# Native build cache
+native/**/target
+
 # Documentation site source (docs are published separately)
 docs
-
-# Claude/LLM context files
-claude_docs
-CLAUDE.md
-GEMINI.md
-
-# Homebrew formula (packaged separately)
-homebrew
 
 # OS-generated files
 .DS_Store

@@ -140,8 +140,8 @@ export class BrokerLeaseError extends Error {
 /**
  * Validate that the deployment network topology isolates the broker on its
  * own network. The reference deployment uses `broker-net`; workers attach to
- * `broker-net` and can reach ONLY the effect-broker. `docker-compose.008.yml`
- * encodes this. This function is a structural check the operator can run.
+ * `broker-net` and can reach ONLY the effect-broker. The reference deployment
+ * topology encodes this. This function is a structural check the operator can run.
  */
 export function validateNetworkTopology(opts: {
   services: Array<{
