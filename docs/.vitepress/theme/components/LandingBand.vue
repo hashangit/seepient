@@ -21,7 +21,7 @@ const branch = `${withBase('/textures/branch.jpg')}`
           anything moved underneath — a symlink, a race, a stale buffer — the
           write is refused.
         </p>
-        <a class="band-link" href="/seepient/security/exact-commit">How exact commit works →</a>
+        <a class="band-link" href="/security/exact-commit">How exact commit works →</a>
       </div>
 
       <aside class="band-panel" v-reveal aria-label="Commit verification steps">

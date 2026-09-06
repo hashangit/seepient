@@ -17,7 +17,7 @@ Rather than running unchecked model code directly on your machine, Seepient orga
     { title: 'Memory', tagline: 'What it keeps', chips: ['Session History', '0600 Audit Log', 'Settings', 'Vault'] }
   ]"
 />
-You can view the <a href="/seepient/seepient-architecture.html" target="_blank" rel="noreferrer">interactive architecture diagram</a> in full screen.
+You can view the <a href="/seepient-architecture.html" target="_blank" rel="noreferrer">interactive architecture diagram</a> in full screen.
 
 ---
 

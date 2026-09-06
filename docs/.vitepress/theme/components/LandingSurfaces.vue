@@ -5,28 +5,28 @@ const surfaces = [
     name: 'Terminal UI',
     cmd: 'seepient',
     body: 'Full-screen Ink interface with streaming output, live widgets, inline diff review and slash commands.',
-    link: '/seepient/tui/overview',
+    link: '/tui/overview',
   },
   {
     idx: '02',
     name: 'CLI',
     cmd: 'git diff | seepient "review for regressions"',
     body: 'One-shot prompts, Unix pipes and non-interactive -y runs for scripts, cron jobs and CI.',
-    link: '/seepient/cli/overview',
+    link: '/cli/overview',
   },
   {
     idx: '03',
     name: 'TypeScript SDK',
     cmd: "const agent = createSeepient({ stores })",
     body: 'generateText and streamText with injectable storage, custom tools, hooks and purpose routing.',
-    link: '/seepient/sdk/overview',
+    link: '/sdk/overview',
   },
   {
     idx: '04',
     name: 'Server',
     cmd: 'seepient-server --port 7337',
     body: 'REST and WebSocket surface with scoped API keys, session persistence and an mTLS worker scheduler.',
-    link: '/seepient/server/overview',
+    link: '/server/overview',
   },
 ]
 </script>

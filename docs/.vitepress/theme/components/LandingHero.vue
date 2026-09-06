@@ -18,7 +18,7 @@ const shore = `${withBase('/textures/shore.jpg')}`
         audit trail across all of them.
       </p>
       <div class="hero-actions" v-reveal>
-        <a class="lp-btn lp-btn--ink" href="/seepient/guides/quick-start">Get started</a>
+        <a class="lp-btn lp-btn--ink" href="/guides/quick-start">Get started</a>
         <a class="lp-btn lp-btn--ghost" href="https://github.com/hashangit/seepient">Star on GitHub</a>
       </div>
     </div>

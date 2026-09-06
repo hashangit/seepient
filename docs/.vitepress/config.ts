@@ -3,7 +3,7 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   title: 'Seepient',
   description: 'An autonomous AI agent species: TUI, CLI, SDK, and server over one runtime',
-  base: '/seepient/',
+  base: '/',
   appearance: false,
   head: [
     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/logo.svg' }]
