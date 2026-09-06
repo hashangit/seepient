@@ -19,12 +19,15 @@ FROM node:22.19-slim AS builder
 # Install build dependencies: pnpm + a current Rust toolchain for the native
 # commit helper (Cargo.lock v4 needs cargo >= 1.78; the apt cargo is older).
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
     curl \
     gcc \
     libc6-dev \
-    && rm -rf /var/lib/apt/lists/* \
-    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-       | sh -s -- -y --profile minimal --default-toolchain stable
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh \
+    && sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain stable \
+    && rm /tmp/rustup-init.sh
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 # Pin pnpm to the version the lockfile/CI use — `pnpm@latest` makes corepack
