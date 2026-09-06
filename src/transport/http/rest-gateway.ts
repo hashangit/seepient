@@ -35,13 +35,11 @@ function sendError(
   sendJSON(res, statusCode, { error: { code, message } });
 }
 
+// W160: gateway bodies go through the shared capped reader (413).
+import { parseBody as parseCappedBody } from "./body.js";
+
 function parseBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
-    req.on("error", reject);
-  });
+  return parseCappedBody(req);
 }
 
 async function parseJsonBody<T>(req: IncomingMessage, res: ServerResponse): Promise<T | null> {

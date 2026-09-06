@@ -21,6 +21,7 @@ import {
 } from "./settings-handlers.js";
 import { globalRateLimiter, RateLimiter } from "./rate-limit.js";
 import { logTransportEvent } from "../logging.js";
+import { parseBody, PayloadTooLargeError } from "./body.js";
 import { extractLoopError } from "../sdk/error-surfacing.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -106,55 +107,6 @@ function isMutableRuntime(rt: unknown): boolean {
   if (!rt || typeof (rt as any).getConfigStore !== "function") return false;
   const store = (rt as any).getConfigStore();
   return store != null && typeof store.updateOverlay === "function";
-}
-
-export class PayloadTooLargeError extends Error {
-  constructor(message = "Request payload exceeds maximum allowed size") {
-    super(message);
-    this.name = "PayloadTooLargeError";
-  }
-}
-
-function getMaxBodyBytes(ctx?: RestHandlerContext): number {
-  if (process.env.SEEPIENT_MAX_BODY_BYTES !== undefined) {
-    const parsed = parseInt(process.env.SEEPIENT_MAX_BODY_BYTES, 10);
-    return isNaN(parsed) ? (ctx?.maxBodyBytes ?? 10 * 1024 * 1024) : parsed;
-  }
-  return ctx?.maxBodyBytes ?? 10 * 1024 * 1024;
-}
-
-function parseBody(req: IncomingMessage, ctx?: RestHandlerContext): Promise<string> {
-  const maxBytes = getMaxBodyBytes(ctx);
-  const clHeader = req.headers["content-length"];
-  if (clHeader !== undefined) {
-    const contentLength = parseInt(clHeader, 10);
-    if (!isNaN(contentLength) && maxBytes > 0 && contentLength > maxBytes) {
-      if (typeof req.pause === "function") {
-        req.pause();
-      }
-      return Promise.reject(
-        new PayloadTooLargeError(`Request body exceeded maximum limit of ${maxBytes} bytes`),
-      );
-    }
-  }
-
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let received = 0;
-    req.on("data", (chunk: Buffer) => {
-      received += chunk.length;
-      if (maxBytes > 0 && received > maxBytes) {
-        if (typeof req.pause === "function") {
-          req.pause();
-        }
-        reject(new PayloadTooLargeError(`Request body exceeded maximum limit of ${maxBytes} bytes`));
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
-    req.on("error", reject);
-  });
 }
 
 function matchRoute(
@@ -341,9 +293,7 @@ export function createRestHandler(ctx: RestHandlerContext) {
       };
 
       switch (route.handler) {
-        case "health":
-          await handleHealth(req, res, ctx);
-          break;
+        // "health" is handled before the authenticated section — unreachable here
         case "models":
           await handleModels(req, res, ctx);
           break;
@@ -726,12 +676,13 @@ async function handleChat(
     const isProviderError =
       rawMessage.includes("not configured") || rawMessage.includes("API key");
 
+    // W162: bodies carry generic text; raw detail goes to the request log.
     (res as any).__internalErrorMessage = rawMessage;
 
     sendJSON(res, isProviderError ? 502 : 500, {
       error: {
         code: isProviderError ? "PROVIDER_ERROR" : "GENERATION_ERROR",
-        message: isProviderError ? rawMessage : "Internal server error during generation",
+        message: isProviderError ? "Generation failed" : "Internal server error during generation",
       },
     });
   } finally {

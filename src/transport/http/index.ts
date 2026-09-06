@@ -198,6 +198,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     modelProviderClass: string;
   }) => Promise<import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle>;
   let outboxFlushTimer: NodeJS.Timeout | undefined;
+  let serverOutboxRef: import("../../domain/permissions/audit-recorder.js").TerminalEventOutbox | undefined;
   let serverPipelineFactory: PipelineFactory | undefined;
   const serverPermissionPipelineEnabled = true;
   // FROZEN SCOPE (R9.1): the server control plane does NOT execute model-
@@ -235,6 +236,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     // lifecycles use, otherwise the flush timer + recovery operate on a
     // different pending-event set than the one live requests populate.
     const serverOutbox = isLocalStore ? new TerminalEventOutbox(serverAuditStore as import("../../domain/permissions/audit-recorder.js").LocalAuditStore) : undefined;
+    serverOutboxRef = serverOutbox;
 
     // The periodic flush timer MUST start regardless of whether the one-time
     // recovery (reload/flush/recover) succeeds — a recovery failure must not
@@ -334,12 +336,17 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     getOtherClients: (excludeWs) => wsRegistry.getOtherClients(excludeWs),
   };
 
-  // Wire registered server settings: settings value -> env override -> default
+  // Wire registered server settings: env override -> settings value -> default
   const corsOriginsSetting = settingsManager.get("server.corsOrigins").value as string | undefined;
   const maxBodyBytesSetting = settingsManager.get("server.maxBodyBytes").value as number | undefined;
   const rateLimitRpmSetting = settingsManager.get("server.rateLimitRpm").value as number | undefined;
 
-  const serverRateLimiter = new RateLimiter(rateLimitRpmSetting ?? 300);
+  // W161: re-read server.rateLimitRpm per consume — a settings PATCH takes
+  // effect on the next request instead of silently requiring a restart.
+  const serverRateLimiter = new RateLimiter(
+    rateLimitRpmSetting ?? 300,
+    () => settingsManager.get("server.rateLimitRpm").value as number | undefined,
+  );
   globalRateLimiter.setDefaultRpm(rateLimitRpmSetting ?? 300);
 
   // Initialize gateway (if enabled)
@@ -450,9 +457,10 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
         });
       }
       serverStreamText({ ...opts, runtime: getServerRuntime(), wiredPipeline }, gatewayMiddleware).catch((err: any) => {
+        // W162: generic wire text; raw detail in the request log only.
         opts.onError({
           code: "STREAM_ERROR",
-          message: err instanceof Error ? err.message : "Stream failed",
+          message: "Stream failed",
         });
         opts.onDone({
           text: "",
@@ -478,8 +486,24 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
 
   // Graceful shutdown handler — registered ONLY when this server listens.
   // An embedder using listen:false owns its process signal handling (W130).
-  const shutdown = () => {
+  const shutdown = async () => {
     console.log("[server] Shutting down...");
+    // W162: in-flight keep-alive sockets would otherwise hold the close open
+    // and never reach the close-event cleanup. Terminate them up front.
+    server.closeAllConnections?.();
+    // One bounded outbox flush so durable audit events are not lost to the
+    // force-exit timer (W162).
+    try {
+      await Promise.race([
+        serverOutboxRef?.flush() ?? Promise.resolve(),
+        new Promise((resolve) => {
+          const t = setTimeout(resolve, 2000);
+          if (typeof t.unref === "function") t.unref();
+        }),
+      ]);
+    } catch {
+      // durability best-effort — the timer still drains via its interval
+    }
     server.close(() => {
       console.log("[server] Server closed.");
       process.exit(0);
@@ -489,16 +513,17 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
   };
 
   const willListen = options?.listen !== false;
+  const shutdownListener = () => void shutdown();
   if (willListen) {
-    process.on("SIGINT", shutdown);
-    process.on("SIGTERM", shutdown);
+    process.on("SIGINT", shutdownListener);
+    process.on("SIGTERM", shutdownListener);
   }
 
   // Dispose handle: un-registers this server's signal handlers so repeated
   // constructions in tests/embedders do not accumulate listeners.
   (server as SeepientHttpServer).dispose = () => {
-    process.removeListener("SIGINT", shutdown);
-    process.removeListener("SIGTERM", shutdown);
+    process.removeListener("SIGINT", shutdownListener);
+    process.removeListener("SIGTERM", shutdownListener);
   };
 
   // Listen immediately unless listen: false
@@ -507,7 +532,9 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     const host = options?.host ?? "0.0.0.0";
     await new Promise<void>((resolve) => {
       server.listen(port, host, () => {
-        console.log(`[seepient] Server listening on ${host}:${port}`);
+        // W162: port 0 means an OS-assigned ephemeral port — print the real one.
+        const boundPort = (server.address() as { port?: number } | null)?.port ?? port;
+        console.log(`[seepient] Server listening on ${host}:${boundPort}`);
         resolve();
       });
     });

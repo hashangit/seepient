@@ -196,6 +196,8 @@ pm2 startup
 | `LLM_MODEL` | Default model for OpenAI-compatible provider (default: `gpt-5.4`) | No |
 | `LLM_PROVIDER` | Default provider (auto-detected if not set) | No |
 | `SEEPIENT_SKILLS_PATH` | Colon-separated paths to skill directories | No |
+| `SEEPIENT_MAX_BODY_BYTES` | Request body size cap in bytes across all REST routes (default: 10485760). Set to `0` for an unlimited body size | No |
+| `SEEPIENT_RATE_LIMIT_RPM` | Per-key requests-per-minute cap for REST and WebSocket traffic (default: 300). Set to `0` to disable | No |
 
 ::: tip Provider auto-detection
 If `LLM_PROVIDER` is not set, the server uses the first configured provider. If `OPENAI_API_KEY` is set, OpenAI becomes the default. Otherwise, the first provider with a configured API key is used.

@@ -14,9 +14,15 @@ export interface TokenBucket {
 export class RateLimiter {
   private buckets = new Map<string, TokenBucket>();
   private defaultRpm: number;
+  /**
+   * W161: optional live rpm source (e.g. the settings manager) — re-read per
+   * consume so a settings PATCH takes effect without a restart.
+   */
+  private rpmProvider?: () => number | undefined;
 
-  constructor(defaultRpm = 300) {
+  constructor(defaultRpm = 300, rpmProvider?: () => number | undefined) {
     this.defaultRpm = defaultRpm;
+    this.rpmProvider = rpmProvider;
   }
 
   setDefaultRpm(rpm: number): void {
@@ -32,7 +38,8 @@ export class RateLimiter {
       const parsed = parseInt(process.env.SEEPIENT_RATE_LIMIT_RPM, 10);
       return isNaN(parsed) ? this.defaultRpm : parsed;
     }
-    return this.defaultRpm;
+    // W161: re-read the live settings value on every lookup.
+    return this.rpmProvider?.() ?? this.defaultRpm;
   }
 
   /**

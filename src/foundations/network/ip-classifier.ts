@@ -79,19 +79,20 @@ export function parseIpToBytes(rawIp: string): { family: 4 | 6; bytes: Uint8Arra
     }
 
     const words: number[] = [];
+    // W164: strict per-group hex validation — parseInt silently truncates
+    // trailing garbage ("1234g" -> 0x1234), which could hide a hostile group.
+    const isHexGroup = (g: string) => /^[0-9a-fA-F]{1,4}$/.test(g);
     for (const p of leftParts) {
-      const val = parseInt(p, 16);
-      if (isNaN(val) || val < 0 || val > 0xffff) return null;
-      words.push(val);
+      if (!isHexGroup(p)) return null;
+      words.push(parseInt(p, 16));
     }
     const zeroWordsNeeded = totalWordsExpected - specifiedWordsCount;
     for (let i = 0; i < zeroWordsNeeded; i++) {
       words.push(0);
     }
     for (const p of rightParts) {
-      const val = parseInt(p, 16);
-      if (isNaN(val) || val < 0 || val > 0xffff) return null;
-      words.push(val);
+      if (!isHexGroup(p)) return null;
+      words.push(parseInt(p, 16));
     }
 
     const bytes = new Uint8Array(16);

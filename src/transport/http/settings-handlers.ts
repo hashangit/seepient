@@ -11,6 +11,7 @@ import type { SettingsManagerLike } from '../../foundations/contracts/settings-m
 import type { WebSocket, ConnectionState } from '../ws/ws-types.js';
 import type { ApiKeyEntry, KeyScope } from '../auth/auth.js';
 import { hasScope } from '../auth/auth.js';
+import { parseBody } from './body.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -75,14 +76,13 @@ function requireWsScope(state: ConnectionState, scope: KeyScope): boolean {
 }
 
 async function readBody(req: IncomingMessage): Promise<any> {
-  return new Promise((resolve, reject) => {
-    let data = '';
-    req.on('data', (chunk) => { data += chunk; });
-    req.on('end', () => {
-      try { resolve(JSON.parse(data)); } catch { reject(new Error('Invalid JSON')); }
-    });
-    req.on('error', reject);
-  });
+  // W160: settings PATCH bodies go through the shared capped reader (413).
+  const data = await parseBody(req);
+  try {
+    return JSON.parse(data);
+  } catch {
+    throw new Error('Invalid JSON');
+  }
 }
 
 const VALID_CATEGORIES: Set<string> = new Set(SETTINGS_CATEGORIES.map(c => c.key));
