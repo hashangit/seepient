@@ -80,6 +80,21 @@ describe("canonicalizePath (T102)", () => {
     expect(t.exists).toBe(true);
     expect(t.finalSymlink).toBe(true);
   });
+
+  it("throws Model contract violation when path is undefined, non-string, or empty", async () => {
+    await expect(canonicalizePath(undefined as any, dir)).rejects.toThrow(/Model contract violation: "path" argument must be a non-empty string/);
+    await expect(canonicalizePath("" as any, dir)).rejects.toThrow(/Model contract violation: "path" argument must be a non-empty string/);
+    await expect(canonicalizePath("   " as any, dir)).rejects.toThrow(/Model contract violation: "path" argument must be a non-empty string/);
+    await expect(canonicalizePath(123 as any, dir)).rejects.toThrow(/Model contract violation: "path" argument must be a non-empty string/);
+  });
+});
+
+describe("analyzeWriteFile contract validation", () => {
+  it("throws Model contract violation when content parameter is missing or not a string", async () => {
+    const analysisContext = ctx().ctx;
+    await expect(analyzeWriteFile({ path: "file.txt" } as any, analysisContext)).rejects.toThrow(/Model contract violation: Missing or invalid required parameter "content"/);
+    await expect(analyzeWriteFile({ path: "file.txt", content: 123 as any }, analysisContext)).rejects.toThrow(/Model contract violation: Missing or invalid required parameter "content"/);
+  });
 });
 
 describe("sensitivity classification (T104)", () => {

@@ -295,11 +295,18 @@ export function useAgent({ agent, feed, consentMode, widgetHost }: UseAgentArgs)
           } catch (err) { /* ignore malformed widget; degrade gracefully */ }
           return;
         }
+        const isFailed = typeof tc.result === 'string' && (
+          tc.result.startsWith('Error') ||
+          tc.result.startsWith('[model-egress denied]') ||
+          tc.result.startsWith('Tool execution denied') ||
+          tc.result === 'denied' ||
+          step.metadata?.errorKind === 'contract_violation'
+        );
         feedRef.current.appendEntry({
           kind: 'tool',
           name: tc.name,
           args: tc.args,
-          status: 'ok',
+          status: isFailed ? 'fail' : 'ok',
           output: tc.result,
           durationMs: tc.duration,
           metadata: step.metadata,

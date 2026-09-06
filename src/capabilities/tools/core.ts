@@ -12,12 +12,12 @@ export const ShellTool: ToolModule = {
     type: "function",
     function: {
       name: "execute_shell_command",
-      description: "Execute a shell command on the host machine. Use this to run scripts, list files, or interact with the system. Single-quote arguments containing spaces or special characters; do not mix quote types inside one argument.",
+      description: "Execute a shell command on the host machine. Use this to run scripts, list files, or interact with the system. Single-quote arguments containing spaces or special characters; do not mix quote types inside one argument. Provide arguments adhering strictly to the JSON schema.",
       parameters: {
         type: "object",
         properties: {
-          command: { type: "string", description: "The shell command to execute." },
-          rationale: { type: "string", description: "Explain why you are running this command." },
+          command: { type: "string", description: "The shell command to execute. Must be a non-empty string." },
+          rationale: { type: "string", description: "Explanation of why you are running this command. Must be a non-empty string." },
           approval: APPROVAL_SCHEMA
         },
         required: ["command", "rationale"]
@@ -66,7 +66,7 @@ export const ReadFileTool: ToolModule = {
       parameters: {
         type: "object",
         properties: {
-          path: { type: "string", description: "The path to the file to read." }
+          path: { type: "string", description: "The path to the file to read (absolute or workspace-relative). Must be a non-empty string." }
         },
         required: ["path"]
       }
@@ -134,12 +134,12 @@ export const WriteFileTool: ToolModule = {
     type: "function",
     function: {
       name: "write_file",
-      description: "Write content to a file. Overwrites existing files.",
+      description: "Write full text content to a file at the specified path. Overwrites existing files. Provide arguments as strictly valid JSON conforming to the schema; in the 'content' field, ensure all quotes and newlines are properly JSON-escaped.",
       parameters: {
         type: "object",
         properties: {
-          path: { type: "string", description: "The path to the file to write." },
-          content: { type: "string", description: "The content to write." },
+          path: { type: "string", description: "The path to the file to write (absolute or workspace-relative). Must be a non-empty string." },
+          content: { type: "string", description: "The complete file content to write. Must be a valid JSON string (ensure quotes are escaped as \\\" and newlines as \\n)." },
           approval: APPROVAL_SCHEMA
         },
         required: ["path", "content"]

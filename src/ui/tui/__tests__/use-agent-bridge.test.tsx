@@ -175,10 +175,10 @@ function fakeLegacyAgent(): FakeAgent {
   }) as unknown as FakeAgent;
 }
 
-function mountHook(agent: Agent): { api: () => AgentApi | null; unmount: () => void } {
+function mountHook(agent: Agent, customFeed?: FeedApi): { api: () => AgentApi | null; unmount: () => void } {
   const box: { current: AgentApi | null } = { current: null };
   function Harness() {
-    const api = useAgent({ agent, feed });
+    const api = useAgent({ agent, feed: customFeed ?? feed });
     useEffect(() => {
       box.current = api;
     });
@@ -408,4 +408,112 @@ describe("use-agent native bridge (T010)", () => {
     expect(api()!.pendingPermission).toBeNull();
     unmount();
   });
+
+  it("records tool status as 'fail' on errors or denials, and 'ok' on success", async () => {
+    const appendedEntries: any[] = [];
+    const testFeed: FeedApi = {
+      entries: [],
+      appendEntry: (entry) => {
+        appendedEntries.push(entry);
+        return "entry-id";
+      },
+      updateEntry: () => {},
+      clear: () => {},
+      updateBlockEntry: () => {},
+    };
+
+    const agent = {
+      createAbortSignal: () => new AbortController().signal,
+      isPermissionPipelineEnabled: () => false,
+      setPipelineApprovalBroker: () => {},
+      abort: () => {},
+      chat: async (
+        _input: string,
+        _signal?: AbortSignal,
+        _approveTool?: unknown,
+        onStep?: (step: { type: string; content?: string; toolCall?: unknown }) => void,
+      ) => {
+        // Successful tool call
+        onStep?.({
+          type: "tool_call",
+          content: "",
+          toolCall: {
+            id: "t1",
+            name: "read_file",
+            args: { path: "/p/a.txt" },
+            result: "file contents",
+            duration: 10,
+          },
+        });
+        // Errored tool call (e.g. model contract violation or runtime crash)
+        onStep?.({
+          type: "tool_call",
+          content: "",
+          toolCall: {
+            id: "t2",
+            name: "write_file",
+            args: { raw: "..." },
+            result: 'Error: The "path" argument must be of type string. Received undefined',
+            duration: 1,
+          },
+        });
+        // Denied tool call
+        onStep?.({
+          type: "tool_call",
+          content: "",
+          toolCall: {
+            id: "t3",
+            name: "execute_shell_command",
+            args: { command: "rm -rf /" },
+            result: "Tool execution denied: policy violation",
+            duration: 5,
+          },
+        });
+        // Legitimate tool call whose output contains the word 'denied'
+        onStep?.({
+          type: "tool_call",
+          content: "",
+          toolCall: {
+            id: "t4",
+            name: "read_file",
+            args: { path: "/p/auth.ts" },
+            result: "const state = 'access denied by security policy';",
+            duration: 8,
+          },
+        });
+        return {
+          finishReason: "success",
+          usage: { promptTokens: 1, completionTokens: 1, cost: 0 },
+        };
+      },
+    } as unknown as Agent;
+
+    const { api, unmount } = mountHook(agent, testFeed);
+    await tick();
+
+    await api()!.submit("test tool statuses");
+    await tick();
+
+    const toolEntries = appendedEntries.filter((e) => e.kind === "tool");
+    expect(toolEntries).toHaveLength(4);
+    expect(toolEntries[0]).toMatchObject({
+      name: "read_file",
+      status: "ok",
+    });
+    expect(toolEntries[1]).toMatchObject({
+      name: "write_file",
+      status: "fail",
+    });
+    expect(toolEntries[2]).toMatchObject({
+      name: "execute_shell_command",
+      status: "fail",
+    });
+    expect(toolEntries[3]).toMatchObject({
+      name: "read_file",
+      status: "ok",
+    });
+
+    unmount();
+  });
 });
+
