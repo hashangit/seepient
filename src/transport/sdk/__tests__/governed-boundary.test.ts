@@ -17,8 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   createSeepient,
-  generateText,
-  streamText,
+  askSeepient,
   trustedHostTool,
 } from "../index.js";
 import {
@@ -127,7 +126,7 @@ describe("Governed Boundary Test Suite (Task 3.1)", () => {
     await agent.close();
   });
 
-  it("generateText routes through governed boundary and audit store", async () => {
+  it("askSeepient routes through governed boundary and audit store", async () => {
     const auditStore = new FakeAuditStore();
     const policyStore = new FakePolicyStore();
     const capabilityLedger = new FakeCapabilityLedger();
@@ -148,7 +147,7 @@ describe("Governed Boundary Test Suite (Task 3.1)", () => {
       ],
     });
 
-    const res = await generateText("Write file", {
+    const res = await askSeepient("Write file", {
       cwd: workspaceDir,
       runtime,
       auditStore,
@@ -167,7 +166,7 @@ describe("Governed Boundary Test Suite (Task 3.1)", () => {
     expect(writeEvent).toBeDefined();
   });
 
-  it("streamText routes through governed boundary and audit store", async () => {
+  it("askSeepient with stream: true routes through governed boundary and audit store", async () => {
     const auditStore = new FakeAuditStore();
     const policyStore = new FakePolicyStore();
     const capabilityLedger = new FakeCapabilityLedger();
@@ -188,7 +187,7 @@ describe("Governed Boundary Test Suite (Task 3.1)", () => {
       ],
     });
 
-    const streamRes = await streamText("Stream write file", {
+    const streamRes = await askSeepient("Stream write file", { stream: true,
       cwd: workspaceDir,
       runtime,
       auditStore,

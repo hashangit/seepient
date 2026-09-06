@@ -1,15 +1,15 @@
 /**
  * Seepient SDK — Public entry point
  *
- * Exports `generateText`, `streamText`, `createSeepient`, and all public types,
+ * Exports `askSeepient`, `createSeepient`, and all public types,
  * tool factories, provider helpers, and skill utilities.
  */
 
 import type {
-  GenerateTextOptions,
-  GenerateTextResult,
-  StreamTextOptions,
-  StreamTextResult,
+  AskSeepientOptions,
+  AskSeepientResult,
+  AskSeepientStreamResult,
+  RunSeepientServerOptions,
   Message,
   StepResult,
   ToolCall,
@@ -114,10 +114,10 @@ export type {
   ToolContext,
   ToolResult,
   Hooks,
-  GenerateTextOptions,
-  GenerateTextResult,
-  StreamTextOptions,
-  StreamTextResult,
+  AskSeepientOptions,
+  AskSeepientResult,
+  AskSeepientStreamResult,
+  RunSeepientServerOptions,
   AgentResponse,
   SessionStore,
   SessionData,
@@ -147,7 +147,7 @@ export {
 
 
 
-// ── generateText ─────────────────────────────────────────────────────────
+// ── askSeepient ──────────────────────────────────────────────────────────
 
 /**
  * Resolve the skill catalog for a one-shot SDK call. Returns the system prompt
@@ -171,7 +171,7 @@ async function resolveSkills(
     if (metadata.length === 0) return { systemPrompt, skillRegistry };
     const catalog = buildSkillCatalog(metadata);
     return {
-      systemPrompt: systemPrompt ? systemPrompt + '\n\n' + catalog : catalog,
+      systemPrompt: systemPrompt ? systemPrompt + "\n\n" + catalog : catalog,
       skillRegistry,
     };
   } catch {
@@ -180,25 +180,49 @@ async function resolveSkills(
 }
 
 /**
- * Run a one-shot agent loop and return the structured result.
+ * Unified one-shot execution entry point (stateless).
  *
- * Creates fresh state for each call (stateless). Handles tool calls
- * automatically until the provider returns no more tool calls or
- * `maxSteps` is reached.
+ * Runs an agent loop for a single prompt-response completion with autonomous
+ * tool execution loop up to a maximum step limit.
+ *
+ * When `options.stream` is `true`, returns an `AskSeepientStreamResult` with
+ * async iterables (`textStream`, `steps`) and Web API SSE helpers (`toResponse()`, `toSSEStream()`).
+ *
+ * When `options.stream` is falsy or omitted, returns an `AskSeepientResult`.
  *
  * @example
  * ```ts
- * const result = await generateText("What is the weather in SF?", {
+ * // Non-streaming one-shot
+ * const result = await askSeepient("What is the weather in SF?", {
  *   tools: ["web_search"],
  *   maxSteps: 5,
  * });
  * console.log(result.text);
+ *
+ * // Streaming one-shot
+ * const stream = await askSeepient("Explain quantum computing", {
+ *   stream: true,
+ *   onText: (delta) => process.stdout.write(delta),
+ * });
+ * for await (const chunk of stream.textStream) { ... }
  * ```
  */
-export async function generateText(
+export async function askSeepient(
   prompt: string,
-  options?: GenerateTextOptions,
-): Promise<GenerateTextResult> {
+  options: AskSeepientOptions & { stream: true },
+): Promise<AskSeepientStreamResult>;
+export async function askSeepient(
+  prompt: string,
+  options?: AskSeepientOptions & { stream?: false },
+): Promise<AskSeepientResult>;
+export async function askSeepient(
+  prompt: string,
+  options?: AskSeepientOptions,
+): Promise<AskSeepientResult | AskSeepientStreamResult>;
+export async function askSeepient(
+  prompt: string,
+  options?: AskSeepientOptions,
+): Promise<AskSeepientResult | AskSeepientStreamResult> {
   const opts = options ?? {};
   const maxSteps = opts.maxSteps ?? 10;
   const runtime = opts.runtime ?? getDefaultProviderRuntime();
@@ -213,9 +237,6 @@ export async function generateText(
   const { callbacks: hostCallbacks, registrationIds } = extractHostCallbacks(opts.tools, { skills: skillRegistry });
   // spec 020 FR-001: custom preparedTool and brokerConnector registrations
   const registrations = extractRegistrations(opts.tools);
-
-  // Hooks
-  const hooks = createHookExecutor(opts.hooks);
 
   // Build message list
   const messages: Message[] = [];
@@ -249,7 +270,7 @@ export async function generateText(
     network: opts.network,
   });
   const approvalMode = opts.consentMode
-    ? (opts.consentMode === 'autonomous' ? 'autonomous' : opts.consentMode === 'ask-everything' ? 'manual' : 'balanced')
+    ? (opts.consentMode === "autonomous" ? "autonomous" : opts.consentMode === "ask-everything" ? "manual" : "balanced")
     : (opts.approvalBroker || opts.approveTool ? "manual" : "never");
 
   warnIfPartialStoreInjection(opts);
@@ -273,6 +294,125 @@ export async function generateText(
     capabilityLedger: opts.capabilityLedger,
   });
 
+  if (opts.stream) {
+    // Hooks — merge stream-level callbacks with any base hooks
+    const mergedHooks = { ...opts.hooks };
+    const hooks = createHookExecutor(mergedHooks);
+
+    // Abort controller
+    const abortController = new AbortController();
+    if (opts.signal) {
+      if (opts.signal.aborted) {
+        abortController.abort(opts.signal.reason);
+      } else {
+        opts.signal.addEventListener("abort", () => abortController.abort(opts.signal?.reason), { once: true });
+      }
+    }
+
+    // Stream manager handles queues, async iterables, and SSE
+    const stream = new StreamManager();
+
+    (async () => {
+      try {
+        const snapshot = await runtime.createTurnSnapshot();
+
+        const result = await runAgentLoop({
+          runtime,
+          turnSnapshot: snapshot,
+          model: opts.model,
+          modelOverride: opts.providerAccount || opts.model
+            ? { providerAccount: opts.providerAccount, model: opts.model }
+            : undefined,
+          purpose: opts.purpose,
+          tier: opts.tier,
+          messages,
+          toolDefs,
+          systemPrompt,
+          maxSteps,
+          hooks,
+          signal: abortController.signal,
+          config: { ...opts.config, runtime, skills: skillRegistry },
+          metadata: opts.metadata,
+          middleware: opts.middleware,
+          approveTool: opts.approveTool,
+          wiredPipeline,
+          onStep: (step: StepResult) => {
+            if (opts.onStep) opts.onStep(step);
+            if (
+              (step.type === "text" || step.type === "text_delta") &&
+              step.content
+            ) {
+              if (opts.onText) opts.onText(step.content);
+              stream.enqueueText(step.content);
+            }
+            if (step.type === "tool_call" && step.toolCall) {
+              if (opts.onToolCall) {
+                opts.onToolCall({
+                  name: step.toolCall.name,
+                  args: step.toolCall.args,
+                  callId: step.toolCall.id,
+                });
+              }
+              if (opts.onToolResult) {
+                const output = step.toolCall.result;
+                const success =
+                  typeof output === "string"
+                    ? !output.startsWith("Error:")
+                    : true;
+                opts.onToolResult({
+                  callId: step.toolCall.id,
+                  output,
+                  success,
+                });
+              }
+            }
+            stream.enqueueStep(step);
+          },
+        });
+
+        const lastAssistant = [...result.messages]
+          .reverse()
+          .find((m) => m.role === "assistant" && m.content);
+        const textFromSteps = result.steps
+          .filter((s: StepResult) => s.type === "text" || s.type === "text_delta")
+          .map((s: StepResult) => s.content ?? "")
+          .join("");
+        const allText = textFromSteps || (lastAssistant?.content ?? "");
+
+        stream.resolveText(allText);
+        stream.resolveUsage(result.usage);
+        const loopErr = extractLoopError(result);
+        if (loopErr) {
+          if (opts.onError) opts.onError(loopErr);
+          stream.resolveFinish("error");
+        } else {
+          stream.resolveFinish(result.finishReason);
+        }
+      } catch (err) {
+        const seepientErr = toSeepientError(err, "PROVIDER_ERROR");
+        if (opts.onError) opts.onError(seepientErr);
+        stream.resolveText("");
+        stream.resolveUsage({ promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 });
+        stream.resolveFinish("error");
+      } finally {
+        stream.complete();
+      }
+    })();
+
+    return {
+      textStream: stream.textStream,
+      steps: stream.stepsStream,
+      fullText: stream.fullText,
+      usage: stream.usage,
+      finishReason: stream.finishReason,
+      abort: () => abortController.abort(),
+      toResponse: (respOpts?: { headers?: Record<string, string> }) => stream.toResponse(respOpts),
+      toSSEStream: () => stream.toSSEStream(),
+    };
+  }
+
+  // Non-streaming (default)
+  const hooks = createHookExecutor(opts.hooks);
   const snapshot = await runtime.createTurnSnapshot();
 
   const result = await runAgentLoop({
@@ -295,209 +435,51 @@ export async function generateText(
     middleware: opts.middleware,
     approveTool: opts.approveTool,
     wiredPipeline,
+    onStep: opts.onStep || opts.onText || opts.onToolCall || opts.onToolResult ? (step: StepResult) => {
+      if (opts.onStep) opts.onStep(step);
+      if ((step.type === "text" || step.type === "text_delta") && step.content) {
+        if (opts.onText) opts.onText(step.content);
+      }
+      if (step.type === "tool_call" && step.toolCall) {
+        if (opts.onToolCall) {
+          opts.onToolCall({
+            name: step.toolCall.name,
+            args: step.toolCall.args,
+            callId: step.toolCall.id,
+          });
+        }
+        if (opts.onToolResult) {
+          const output = step.toolCall.result;
+          const success =
+            typeof output === "string"
+              ? !output.startsWith("Error:")
+              : true;
+          opts.onToolResult({
+            callId: step.toolCall.id,
+            output,
+            success,
+          });
+        }
+      }
+    } : undefined,
   });
 
   surfaceLoopError(result);
 
-  // Get the final text
   const lastAssistant = [...result.messages]
     .reverse()
     .find((m) => m.role === "assistant" && m.content);
   const text = lastAssistant?.content ?? "";
 
-  const genResult: GenerateTextResult = {
+  const askResult: AskSeepientResult = {
     text,
     steps: result.steps,
     toolCalls: result.toolCalls,
     usage: result.usage,
-    finishReason: result.finishReason as GenerateTextResult["finishReason"],
+    finishReason: result.finishReason as AskSeepientResult["finishReason"],
     messages: result.messages,
   };
 
-  await hooks.onFinish(genResult);
-  return genResult;
-}
-
-// ── streamText ───────────────────────────────────────────────────────────
-
-/**
- * Run a one-shot agent loop with streaming callbacks.
- */
-export async function streamText(
-  prompt: string,
-  options?: StreamTextOptions,
-): Promise<StreamTextResult> {
-  const opts = options ?? {};
-  const maxSteps = opts.maxSteps ?? 10;
-  const runtime = opts.runtime ?? getDefaultProviderRuntime();
-
-  // Resolve skill catalog and append to the system prompt
-  const { systemPrompt, skillRegistry } = await resolveSkills(opts.systemPrompt, opts.skills, opts.cwd);
-
-  // Resolve tools
-  const toolDefs = opts.tools ? resolveTools(opts.tools) : getAllToolDefinitions();
-  // spec 019 FR-006: explicit trustedHostTool registrations wire into the
-  // boundary's host-callback map and join the operator allowlist.
-  const { callbacks: hostCallbacks, registrationIds } = extractHostCallbacks(opts.tools, { skills: skillRegistry });
-  // spec 020 FR-001: custom preparedTool and brokerConnector registrations
-  const registrations = extractRegistrations(opts.tools);
-
-  // Hooks — merge stream-level callbacks with any base hooks
-  const mergedHooks = { ...opts.hooks };
-  const hooks = createHookExecutor(mergedHooks);
-
-  // Build message list
-  const messages: Message[] = [];
-  messages.push({
-    id: generateId(),
-    role: "user",
-    content: prompt,
-    timestamp: now(),
-  });
-
-  // Abort controller
-  const abortController = new AbortController();
-  if (opts.signal) {
-    if (opts.signal.aborted) {
-      abortController.abort(opts.signal.reason);
-    } else {
-      opts.signal.addEventListener("abort", () => abortController.abort(opts.signal?.reason), { once: true });
-    }
-  }
-
-  // Stream manager handles queues, async iterables, and SSE
-  const stream = new StreamManager();
-
-  const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
-  const { legacyApproveToolToBroker } = await import("../legacy-adapter.js");
-  const { buildLocalBoundary } = await import("../../capabilities/execution/build-local-boundary.js");
-  const { createSnapshotStore } = await import("../../foundations/hashline/snapshot-store.js");
-  const { InMemoryArtifactStore } = await import("../../capabilities/execution/in-memory-artifact-store.js");
-  const { createMediaVendorOperationHandler } = await import("../../domain/media/vendor-operation-handler.js");
-  const snapshotStore = createSnapshotStore();
-  const sharedArtifacts = new InMemoryArtifactStore();
-  const vendorOperationHandler = createMediaVendorOperationHandler({
-    runtime,
-    artifacts: sharedArtifacts,
-    signal: abortController.signal,
-  });
-  const { boundary } = await buildLocalBoundary({
-    artifacts: sharedArtifacts,
-    workspaceRoot: opts.cwd ?? process.cwd(),
-    snapshotStore,
-    hostCallbacks,
-    vendorOperationHandler,
-    commitHelper: opts.commitHelper,
-    network: opts.network,
-  });
-  const approvalMode = opts.consentMode
-    ? (opts.consentMode === 'autonomous' ? 'autonomous' : opts.consentMode === 'ask-everything' ? 'manual' : 'balanced')
-    : (opts.approvalBroker || opts.approveTool ? "manual" : "never");
-
-  warnIfPartialStoreInjection(opts);
-
-  const wiredPipeline = await buildActionLifecycle({
-    principalId: opts.principalId ?? "sdk-user",
-    runId: generateId(),
-    workspaceRoot: opts.cwd ?? process.cwd(),
-    modelProviderClass: (opts.provider ?? "openai") as string,
-    approvalBroker: opts.approvalBroker ?? legacyApproveToolToBroker(opts.approveTool),
-    executionBoundary: boundary,
-    approvalMode,
-    deploymentCeiling: toCapabilitySet(opts.deploymentCeiling),
-    principalPolicy: toCapabilitySet(opts.principalPolicy),
-    artifacts: sharedArtifacts,
-    snapshotStore,
-    trustedHostAllowlist: [...DEFAULT_TRUSTED_HOST_ALLOWLIST, ...registrationIds],
-    registrations,
-    auditStore: opts.auditStore,
-    policyStore: opts.policyStore,
-    capabilityLedger: opts.capabilityLedger,
-  });
-
-  // Run loop in background
-  (async () => {
-    try {
-      const snapshot = await runtime.createTurnSnapshot();
-
-      const result = await runAgentLoop({
-        runtime,
-        turnSnapshot: snapshot,
-        model: opts.model,
-        modelOverride: opts.providerAccount || opts.model
-          ? { providerAccount: opts.providerAccount, model: opts.model }
-          : undefined,
-        purpose: opts.purpose,
-        tier: opts.tier,
-        messages,
-        toolDefs,
-        systemPrompt,
-        maxSteps,
-        hooks,
-        signal: abortController.signal,
-        config: { ...opts.config, runtime, skills: skillRegistry },
-        metadata: opts.metadata,
-        middleware: opts.middleware,
-        approveTool: opts.approveTool,
-        wiredPipeline,
-        onStep: (step) => {
-          if (opts.onStep) opts.onStep(step);
-          if ((step.type === "text_delta" || step.type === "text") && step.content) {
-            if (opts.onText) opts.onText(step.content);
-            stream.enqueueText(step.content);
-          }
-          if (step.type === "tool_call" && step.toolCall) {
-            if (opts.onToolCall) {
-              opts.onToolCall({ name: step.toolCall.name, args: step.toolCall.args, callId: step.toolCall.id });
-            }
-            if (opts.onToolResult) {
-              const output = step.toolCall.result;
-              const success = typeof output === "string" ? !output.startsWith("Error:") : true;
-              opts.onToolResult({ callId: step.toolCall.id, output, success });
-            }
-          }
-          stream.enqueueStep(step);
-        },
-      });
-
-      // fullText: join all text deltas that were enqueued or last assistant content
-      const lastAssistant = [...result.messages]
-        .reverse()
-        .find((m) => m.role === "assistant" && m.content);
-      const textFromSteps = result.steps
-        .filter((s) => s.type === "text_delta" || s.type === "text")
-        .map((s) => s.content ?? "")
-        .join("");
-      const allText = textFromSteps || (lastAssistant?.content ?? "");
-
-      stream.resolveText(allText);
-      stream.resolveUsage(result.usage);
-      const loopErr = extractLoopError(result);
-      if (loopErr) {
-        if (opts.onError) opts.onError(loopErr);
-        stream.resolveFinish("error");
-      } else {
-        stream.resolveFinish(result.finishReason);
-      }
-    } catch (err) {
-      const seepientErr = toSeepientError(err, "PROVIDER_ERROR");
-      if (opts.onError) opts.onError(seepientErr);
-      stream.resolveText("");
-      stream.resolveUsage({ promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 });
-      stream.resolveFinish("error");
-    } finally {
-      stream.complete();
-    }
-  })();
-
-  return {
-    textStream: stream.textStream,
-    steps: stream.stepsStream,
-    fullText: stream.fullText,
-    usage: stream.usage,
-    finishReason: stream.finishReason,
-    abort: () => abortController.abort(),
-    toResponse: () => stream.toResponse(),
-    toSSEStream: () => stream.toSSEStream(),
-  };
+  await hooks.onFinish(askResult);
+  return askResult;
 }

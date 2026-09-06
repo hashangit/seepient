@@ -7,19 +7,18 @@
  */
 import { describe, it, expect } from "vitest";
 import type {
-  GenerateTextOptions,
-  StreamTextOptions,
+  AskSeepientOptions,
   CreateSeepientOptions,
 } from "../../../foundations/types.js";
 
 describe("mandatory permission pipeline options", () => {
-  it("GenerateTextOptions accepts consentMode and stores directly", () => {
-    const opts: GenerateTextOptions = { consentMode: "edit-enabled" };
+  it("AskSeepientOptions accepts consentMode and stores directly", () => {
+    const opts: AskSeepientOptions = { consentMode: "edit-enabled" };
     expect(opts.consentMode).toBe("edit-enabled");
   });
 
-  it("StreamTextOptions inherits consentMode and store options", () => {
-    const opts: StreamTextOptions = { consentMode: "autonomous", onText: () => {} };
+  it("AskSeepientOptions accepts stream: true with consentMode", () => {
+    const opts: AskSeepientOptions = { consentMode: "autonomous", stream: true, onText: () => {} };
     expect(opts.consentMode).toBe("autonomous");
   });
 
@@ -29,7 +28,7 @@ describe("mandatory permission pipeline options", () => {
   });
 
   it("typed options (consentMode/deploymentCeiling/principalPolicy) accepted alongside approveTool", () => {
-    const opts: GenerateTextOptions = {
+    const opts: AskSeepientOptions = {
       approveTool: async () => true,
       consentMode: "edit-enabled",
       principalPolicy: { version: 1, capabilities: [] },

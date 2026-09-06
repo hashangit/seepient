@@ -19,9 +19,9 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { createServer, startServer, initializeSkills } from "./index.js";
+import { runSeepientServer, initializeSkills } from "./index.js";
 import { generateApiKey } from "../auth/auth.js";
-import type { ServerOptions } from "./index.js";
+import type { RunSeepientServerOptions } from "./index.js";
 
 // ── Version ────────────────────────────────────────────────────────────
 
@@ -79,7 +79,7 @@ async function main(): Promise<void> {
     process.env.SEEPIENT_API_KEYS_FILE = apiKeysFile;
   }
 
-  const options: ServerOptions = {
+  const options: RunSeepientServerOptions = {
     host,
     ...(isNaN(port) || port <= 0 ? {} : { port }),
     ...(isNaN(sessionTTL) || sessionTTL <= 0 ? {} : { sessionTTL }),
@@ -92,7 +92,7 @@ async function main(): Promise<void> {
     await initializeSkills();
 
     // Start server
-    const server = await startServer(options);
+    const server = await runSeepientServer(options);
 
     const actualPort = (server.address() as any)?.port ?? options.port ?? 7337;
     process.stdout.write(

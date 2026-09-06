@@ -48,12 +48,12 @@ export type {
   ToolResult,
   // Hooks
   Hooks,
-  // generateText
-  GenerateTextOptions,
-  GenerateTextResult,
-  // streamText
-  StreamTextOptions,
-  StreamTextResult,
+  // askSeepient
+  AskSeepientOptions,
+  AskSeepientResult,
+  AskSeepientStreamResult,
+  // runSeepientServer
+  RunSeepientServerOptions,
   // createSeepient
   CreateSeepientOptions,
   Seepient,

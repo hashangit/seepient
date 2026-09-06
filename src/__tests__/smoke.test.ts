@@ -3,8 +3,7 @@ import { describe, it, expect } from "vitest";
 describe("Seepient smoke test — module resolution", () => {
   it("SDK public surface imports without error", async () => {
     const sdk = await import("../transport/sdk/index.js");
-    expect(typeof sdk.generateText).toBe("function");
-    expect(typeof sdk.streamText).toBe("function");
+    expect(typeof sdk.askSeepient).toBe("function");
     expect(typeof sdk.createSeepient).toBe("function");
     expect(typeof sdk.settings).toBe("object");
     expect(typeof sdk.compose).toBe("function");

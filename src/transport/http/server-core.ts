@@ -1,4 +1,4 @@
-import type { GenerateTextResult, Usage, Message, ApproveToolFn, StepResult } from "../../foundations/types.js";
+import type { AskSeepientResult, Usage, Message, ApproveToolFn, StepResult } from "../../foundations/types.js";
 import { runAgentLoop } from "../../domain/agent-loop.js";
 import { createHookExecutor } from "../../domain/hooks.js";
 import { resolveTools, getAllToolDefinitions } from "../../domain/tool-executor.js";
@@ -50,7 +50,7 @@ export async function serverGenerateText(
     wiredPipeline?: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle;
   },
   middleware?: Middleware[],
-): Promise<GenerateTextResult> {
+): Promise<AskSeepientResult> {
   const runtime = options.runtime ?? getDefaultProviderRuntime();
 
   // Resolve tools
@@ -110,7 +110,7 @@ export async function serverGenerateText(
     steps: result.steps,
     toolCalls: result.toolCalls,
     usage: result.usage,
-    finishReason: result.finishReason as GenerateTextResult["finishReason"],
+    finishReason: result.finishReason as AskSeepientResult["finishReason"],
     messages: result.messages,
   };
 }

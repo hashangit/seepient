@@ -31,6 +31,7 @@ await agent1.chat("Remember my project context");
 // In a subsequent worker/request:
 const agent2 = await createSeepient({
   sessionId: "user-alice-session",
+  principalId: "user-alice", // Must match the principal that created the session
   persist: myCustomBackend,
 });
 // Full conversation history and providerAccount are loaded automatically from myCustomBackend
@@ -90,6 +91,10 @@ When injecting storage contracts into `createSeepient` or `createServer` in dist
 | `PolicyStore` | `workspace` | Directory / Filesystem | Governs filesystem paths, tool consent modes, and sandbox boundaries for the specific project workspace. |
 
 This asymmetric design guarantees that actor accountability (`principalId`) is never conflated with workspace filesystem policies or conversation threads (`sessionId`).
+
+::: warning Session ownership — resume is principal-bound
+Persisted sessions carry the `principalId` that created them (default `"sdk-user"`). Resuming a session under a different `principalId` fails closed with a `SESSION_OWNERSHIP_MISMATCH` error — the conversation history is never restored or continued across principals, even when tenants share one `PersistenceBackend`. Sessions persisted before ownership tracking (and sessions stored through the metadata-less `SessionStore` adapter) carry no owner stamp and are likewise not resumable. Custom `PersistenceBackend` implementations must round-trip the `principalId` field of `SessionData` to preserve this guarantee.
+:::
 
 ## Built-in stores
 

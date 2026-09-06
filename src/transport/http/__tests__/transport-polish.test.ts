@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { EventEmitter } from "node:events";
-import { createServer } from "../index.js";
+import { runSeepientServer } from "../index.js";
 import { createRestHandler, type RestHandlerContext } from "../rest.js";
 import { ServerSessionManager } from "../session-store.js";
 import { MemoryPersistenceBackend } from "../../../domain/sessions/session-store.js";
@@ -110,7 +110,7 @@ describe("Phase 5: Transport Polish (W024, W025, W026)", () => {
     it("SEEPIENT_CORS_ORIGINS='*' allows arbitrary origin and sets Vary: Origin", async () => {
       process.env.SEEPIENT_CORS_ORIGINS = "*";
 
-      const server = await createServer({
+      const server = await runSeepientServer({ listen: false,
         persist: new MemoryPersistenceBackend(),
       });
 
@@ -130,7 +130,7 @@ describe("Phase 5: Transport Polish (W024, W025, W026)", () => {
     it("preflight OPTIONS with SEEPIENT_CORS_ORIGINS='*' responds with CORS and Vary: Origin", async () => {
       process.env.SEEPIENT_CORS_ORIGINS = "*";
 
-      const server = await createServer({
+      const server = await runSeepientServer({ listen: false,
         persist: new MemoryPersistenceBackend(),
       });
 
@@ -153,7 +153,7 @@ describe("Phase 5: Transport Polish (W024, W025, W026)", () => {
     it("specific origin allowlist allows matching origin and rejects non-matching", async () => {
       process.env.SEEPIENT_CORS_ORIGINS = "https://trusted.com, https://app.internal";
 
-      const server = await createServer({
+      const server = await runSeepientServer({ listen: false,
         persist: new MemoryPersistenceBackend(),
       });
 
@@ -192,7 +192,7 @@ describe("Phase 5: Transport Polish (W024, W025, W026)", () => {
         },
       });
 
-      const server = await createServer({
+      const server = await runSeepientServer({ listen: false,
         settingsManager,
         persist: new MemoryPersistenceBackend(),
       });
@@ -232,7 +232,7 @@ describe("Phase 5: Transport Polish (W024, W025, W026)", () => {
         },
       });
 
-      const server = await createServer({
+      const server = await runSeepientServer({ listen: false,
         settingsManager,
         persist: new MemoryPersistenceBackend(),
       });
@@ -268,7 +268,7 @@ describe("Phase 5: Transport Polish (W024, W025, W026)", () => {
         },
       });
 
-      const server = await createServer({
+      const server = await runSeepientServer({ listen: false,
         settingsManager,
         persist: new MemoryPersistenceBackend(),
       });

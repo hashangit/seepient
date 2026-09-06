@@ -8,13 +8,15 @@
  * 3. Seepient exposes sessionId and validates it fail-fast against SESSION_ID_RE.
  * 4. Session round-trip via sessionId restores conversation history and
  *    passes provider, model, and metadata on every persist.
+ * 5. Session resume is bound to the owning principalId — cross-tenant and
+ *    unstamped (legacy) resumes fail closed with SESSION_OWNERSHIP_MISMATCH.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createSeepient, generateText, streamText } from "../index.js";
+import { createSeepient, askSeepient } from "../index.js";
 import {
   FakeAuditStore,
   FakePolicyStore,
@@ -289,7 +291,7 @@ describe("QS-1: Store injection and session round-trip", () => {
     await agent.close();
   });
 
-  it("generateText accepts injected runtime and principalId with pipeline enabled by default", async () => {
+  it("askSeepient accepts injected runtime and principalId with pipeline enabled by default", async () => {
     const auditStore = new FakeAuditStore();
     const policyStore = new FakePolicyStore();
     const capabilityLedger = new FakeCapabilityLedger();
@@ -308,7 +310,7 @@ describe("QS-1: Store injection and session round-trip", () => {
       ],
     });
 
-    const result = await generateText("Do one-shot task", {
+    const result = await askSeepient("Do one-shot task", {
       principalId: "tenant-oneshot",
       auditStore,
       policyStore,
@@ -345,6 +347,7 @@ describe("QS-1: Store injection and session round-trip", () => {
       messages: [{ id: "msg-1", role: "user", content: "Initial message", timestamp: 1000 }],
       createdAt: 1000,
       updatedAt: 1000,
+      principalId: "sdk-user",
       provider: "anthropic",
       providerAccount: "mock-account",
       model: "mock-model",
@@ -379,6 +382,81 @@ describe("QS-1: Store injection and session round-trip", () => {
     expect(lastSave.data.metadata).toEqual({ tenantId: "tenant-99", region: "us-east-1" });
 
     await agent.close();
+  });
+
+  it("rejects resuming a session under a different principal (tenant isolation)", async () => {
+    const backend = new RecordingPersistenceBackend();
+    const runtime = createFakeRuntime({ responses: [{ content: "Alpha reply" }] });
+
+    const alpha = await createSeepient({
+      sessionId: "sess-tenant-isolation",
+      principalId: "tenant-alpha",
+      auditStore: new FakeAuditStore(),
+      policyStore: new FakePolicyStore(),
+      capabilityLedger: new FakeCapabilityLedger(),
+      persist: backend,
+      runtime,
+      model: "mock-model",
+    });
+    await alpha.chat("alpha confidential message");
+    await alpha.close();
+
+    // Saves are stamped with the owning principal
+    const lastSave = backend.saves[backend.saves.length - 1];
+    expect(lastSave.data.principalId).toBe("tenant-alpha");
+
+    // A different principal cannot resume the session — history stays isolated
+    await expect(
+      createSeepient({
+        sessionId: "sess-tenant-isolation",
+        principalId: "tenant-beta",
+        auditStore: new FakeAuditStore(),
+        policyStore: new FakePolicyStore(),
+        capabilityLedger: new FakeCapabilityLedger(),
+        persist: backend,
+        runtime,
+        model: "mock-model",
+      }),
+    ).rejects.toMatchObject({ code: "SESSION_OWNERSHIP_MISMATCH" });
+
+    // The owning principal still resumes with history intact
+    const resumed = await createSeepient({
+      sessionId: "sess-tenant-isolation",
+      principalId: "tenant-alpha",
+      auditStore: new FakeAuditStore(),
+      policyStore: new FakePolicyStore(),
+      capabilityLedger: new FakeCapabilityLedger(),
+      persist: backend,
+      runtime,
+      model: "mock-model",
+    });
+    expect(
+      resumed.getHistory().some((m) => m.role === "user" && m.content === "alpha confidential message"),
+    ).toBe(true);
+    await resumed.close();
+  });
+
+  it("fails closed when resuming a session persisted without an owner", async () => {
+    const backend = new RecordingPersistenceBackend();
+    const sessionId = "sess-unstamped-legacy";
+    await backend.save(sessionId, {
+      id: sessionId,
+      messages: [{ id: "msg-legacy", role: "user", content: "legacy message", timestamp: 1000 }],
+      createdAt: 1000,
+      updatedAt: 1000,
+    });
+
+    await expect(
+      createSeepient({
+        sessionId,
+        auditStore: new FakeAuditStore(),
+        policyStore: new FakePolicyStore(),
+        capabilityLedger: new FakeCapabilityLedger(),
+        persist: backend,
+        runtime: createFakeRuntime({ responses: [{ content: "unused" }] }),
+        model: "mock-model",
+      }),
+    ).rejects.toMatchObject({ code: "SESSION_OWNERSHIP_MISMATCH" });
   });
 
   it("warns when partial store injection is detected (Finding 2)", async () => {
