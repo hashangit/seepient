@@ -16,8 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   createSeepient,
-  generateText,
-  streamText,
+  askSeepient,
 } from "../index.js";
 import { preparedTool } from "../custom-tools.js";
 import { createMockRuntime } from "../../../domain/__tests__/test-doubles.js";
@@ -171,13 +170,13 @@ describe("preparedTool Dispatch & Parity (QS-1.1 – QS-1.6)", () => {
       { content: "Note written." },
     ]);
 
-    const genRes = await generateText("Write note via generateText", {
+    const genRes = await askSeepient("Write note via generateText", {
       runtime: genRuntime as never,
       tools: [makeTool("gen")],
       cwd: dir,
       commitHelper: diskBackedFakeHelper(),
       approveTool: async () => true,
-    } as never);
+    });
 
     expect(genRes.text).toBe("Note written.");
     expect(readFileSync(join(dir, "note-gen.txt"), "utf8")).toBe("generated text note");
@@ -192,7 +191,7 @@ describe("preparedTool Dispatch & Parity (QS-1.1 – QS-1.6)", () => {
       { content: "Streamed note written." },
     ]);
 
-    const stream = await streamText("Write note via streamText", {
+    const stream = await askSeepient("Write note via streamText", { stream: true,
       runtime: streamRuntime as never,
       tools: [makeTool("stream")],
       cwd: dir,

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Breaking changes:**
+- **SDK session ownership binding (tenant isolation)**: `createSeepient` now stamps the effective `principalId` (default `"sdk-user"`) on every persisted session (`SessionData.principalId`) and fails closed with `SESSION_OWNERSHIP_MISMATCH` when resuming under a different principal — previously a second tenant supplying the same `sessionId` and its own stores could restore and continue the first tenant's conversation. Sessions persisted before this change carry no owner stamp and will not resume (delete the stored session or start a new `sessionId`). Custom `PersistenceBackend` implementations must round-trip the new `principalId` field; the deprecated messages-only `SessionStore` adapter cannot carry ownership and now fails closed when resuming an existing session.
+
 ## [v0.7.0] - 2026-09-06
 
 ### Review remediation: release pipeline, server sessions, transport hardening & docs truth (spec 021-2 / 021-3)

@@ -238,12 +238,13 @@ export class StreamManager {
   }
 
   /** Returns a Web API Response wrapping the SSE stream. */
-  toResponse(): Response {
+  toResponse(options?: { headers?: Record<string, string> }): Response {
     return new Response(this.toSSEStream(), {
       headers: {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
+        ...options?.headers,
       },
     });
   }

@@ -1,20 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createMockRuntime } from "../domain/__tests__/test-doubles.js";
-import { generateText, createSeepient } from "../transport/sdk/index.js";
+import { askSeepient, createSeepient } from "../transport/sdk/index.js";
 
-describe("SDK e2e — generateText with mock runtime", () => {
-  it("runs generateText end-to-end", async () => {
+describe("SDK e2e — askSeepient with mock runtime", () => {
+  it("runs askSeepient end-to-end", async () => {
     const runtime = createMockRuntime([
       {
         text: "Hello from Seepient!",
       },
     ]);
 
-    const result = await generateText("Say hello", {
+    const result = await askSeepient("Say hello", {
       tools: [],
       maxSteps: 1,
       runtime,
-    } as any);
+      stream: false,
+    });
 
     expect(result.text).toBe("Hello from Seepient!");
     expect(result.finishReason).toBe("stop");
@@ -32,12 +33,13 @@ describe("SDK e2e — generateText with mock runtime", () => {
     const onError = vi.fn();
     const onFinish = vi.fn();
 
-    await generateText("Ping", {
+    await askSeepient("Ping", {
       tools: [],
       maxSteps: 1,
       runtime,
       hooks: { onStep, onError, onFinish },
-    } as any);
+      stream: false,
+    });
 
     expect(onStep).toHaveBeenCalled();
     expect(onError).not.toHaveBeenCalled();
@@ -51,12 +53,13 @@ describe("SDK e2e — generateText with mock runtime", () => {
       },
     ]);
 
-    const result = await generateText("Hello", {
+    const result = await askSeepient("Hello", {
       tools: [],
       maxSteps: 1,
       runtime,
       systemPrompt: "You are a test assistant.",
-    } as any);
+      stream: false,
+    });
 
     const systemMsg = result.messages.find((m: any) => m.role === "system");
     expect(systemMsg).toBeDefined();

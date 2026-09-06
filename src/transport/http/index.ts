@@ -28,28 +28,8 @@ import { RateLimiter, globalRateLimiter } from "./rate-limit.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
-export interface ServerOptions {
-  /** Port to listen on (default: SEEPIENT_PORT, PORT, or 7337) */
-  port?: number;
-  /** Host to bind to (default: "0.0.0.0") */
-  host?: string;
-  /** Enable CORS headers (default: true) */
-  cors?: boolean;
-  /** Session TTL in seconds (default: 86400 = 24 hours) */
-  sessionTTL?: number;
-  /** Spec 021 (FR-010): Injected ProviderRuntime */
-  runtime?: import("../../domain/providers/provider-runtime.js").ProviderRuntime | import("../../foundations/contracts/provider-runtime.js").ProviderRuntimeContract;
-  /** Injected session persistence backend (Spec 021) */
-  persist?: import("../../foundations/types.js").PersistenceBackend;
-  /** Spec 021 (FR-010): Injected tenant audit store */
-  auditStore?: import("../../foundations/contracts/execution-brokers.js").AuditStore;
-  /** Spec 021 (FR-010): Injected tenant policy store */
-  policyStore?: import("../../foundations/contracts/execution-brokers.js").PolicyStore;
-  /** Spec 021 (FR-010): Injected tenant capability ledger */
-  capabilityLedger?: import("../../foundations/contracts/capability-ledger.js").CapabilityLedger;
-  /** Injected SettingsManager (Spec 021-3) */
-  settingsManager?: SettingsManager;
-}
+import type { RunSeepientServerOptions } from "../../foundations/types.js";
+export type { RunSeepientServerOptions };
 
 interface ReadPackageJson {
   version: string;
@@ -68,8 +48,8 @@ function resolveVersion(): string {
   }
 }
 
-function resolvePort(options?: ServerOptions): number {
-  if (options?.port) return options.port;
+function resolvePort(options?: RunSeepientServerOptions): number {
+  if (options?.port !== undefined) return options.port;
   const fromEnv = parseInt(process.env.SEEPIENT_PORT ?? process.env.PORT ?? "", 10);
   if (!isNaN(fromEnv) && fromEnv > 0) return fromEnv;
   return 7337;
@@ -189,7 +169,7 @@ function handlePreflight(
  * This sets up REST endpoints, WebSocket upgrade handling,
  * session management, and CORS support.
  */
-export async function createServer(options?: ServerOptions): Promise<http.Server> {
+export async function runSeepientServer(options?: RunSeepientServerOptions): Promise<http.Server> {
   const version = resolveVersion();
   const startTime = Date.now();
 
@@ -477,41 +457,38 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
   // Set up WebSocket (async, but we wait for it)
   await setupWebSocket(server, wsCtx);
 
-  // Graceful shutdown handler
-  const shutdown = () => {
-    console.log("[server] Shutting down...");
+  // Cleanup resources when server closes
+  server.on("close", () => {
     if (outboxFlushTimer) clearInterval(outboxFlushTimer);
     sessionManager.stopCleanup();
     closeWebSocket();
+  });
+
+  // Graceful shutdown handler
+  const shutdown = () => {
+    console.log("[server] Shutting down...");
     server.close(() => {
       console.log("[server] Server closed.");
       process.exit(0);
     });
-    // Force exit after 5 seconds if connections don't close
+    // Force exit after 5 seconds if connections do not close
     setTimeout(() => process.exit(0), 5000);
   };
 
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 
-  return server;
-}
-
-// ── Convenience starter ────────────────────────────────────────────────
-
-/**
- * Create and start listening. Returns the running server.
- */
-export async function startServer(options?: ServerOptions): Promise<http.Server> {
-  const server = await createServer(options);
-
-  const port = resolvePort(options);
-  const host = options?.host ?? "0.0.0.0";
-
-  return new Promise((resolve) => {
-    server.listen(port, host, () => {
-      console.log(`[seepient] Server listening on ${host}:${port}`);
-      resolve(server);
+  // Listen immediately unless listen: false
+  if (options?.listen !== false) {
+    const port = resolvePort(options);
+    const host = options?.host ?? "0.0.0.0";
+    await new Promise<void>((resolve) => {
+      server.listen(port, host, () => {
+        console.log(`[seepient] Server listening on ${host}:${port}`);
+        resolve();
+      });
     });
-  });
+  }
+
+  return server;
 }

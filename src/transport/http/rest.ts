@@ -9,7 +9,7 @@ import * as crypto from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "http";
 import type {
   SkillMetadata,
-  GenerateTextResult,
+  AskSeepientResult,
 } from "../../foundations/types.js";
 import { authMiddleware, hasScope } from "../auth/auth.js";
 import { ServerSessionManager, hashKey } from "./session-store.js";
@@ -41,7 +41,7 @@ export interface RestHandlerContext {
     principalId?: string;
     sessionId?: string;
     history?: import("../../foundations/types.js").Message[];
-  }) => Promise<GenerateTextResult>;
+  }) => Promise<AskSeepientResult>;
   /** List available models grouped by provider */
   listModels: () => Record<string, string[]>;
   /** List available skill metadata */

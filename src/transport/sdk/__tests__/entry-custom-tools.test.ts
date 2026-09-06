@@ -4,7 +4,7 @@
  * Verifies:
  *  1. Custom tool factories and types are exported directly from package entry.
  *  2. Multi-tool per-agent execution through createSeepient().
- *  3. generateText execution with explicit trustedHostTool registrations.
+ *  3. askSeepient execution with explicit trustedHostTool registrations.
  *  4. Seepient.listProviders() derives distinct upstream providers from the catalog.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -12,7 +12,7 @@ import { mkdtempSync, rmSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  generateText,
+  askSeepient,
   createSeepient,
   preparedTool,
   brokerConnector,
@@ -199,8 +199,8 @@ describe("Multi-tool per-agent composition (W1, W2)", () => {
   });
 });
 
-describe("generateText with trustedHostTool registration (W2)", () => {
-  it("executes a registered host tool in one-shot generateText", async () => {
+describe("askSeepient with trustedHostTool registration (W2)", () => {
+  it("executes a registered host tool in one-shot askSeepient", async () => {
     const calls: string[] = [];
 
     const calculateTaxTool = trustedHostTool({
@@ -236,12 +236,12 @@ describe("generateText with trustedHostTool registration (W2)", () => {
       { content: "Calculation finished: Tax is 200" },
     ]);
 
-    const result = await generateText("Calculate tax on 1000", {
-      runtime: runtime as never,
+    const result = await askSeepient("Calculate tax on 1000", {
+      runtime: runtime as any,
       tools: [calculateTaxTool],
       cwd: dir,
       approveTool: async () => true,
-    } as never);
+    });
 
     expect(calls).toEqual(["tax:1000"]);
     expect(result.text).toBe("Calculation finished: Tax is 200");

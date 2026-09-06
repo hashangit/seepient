@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { createServer } from "../index.js";
+import { runSeepientServer } from "../index.js";
 
 /**
  * T109c: the HTTP server MUST run audit outbox recovery on startup so a
@@ -53,7 +53,7 @@ describe("HTTP server audit recovery initialization (T109c)", () => {
       );
 
       // Startup triggers reload + flush + recoverIndeterminateActions.
-      const server = await createServer();
+      const server = await runSeepientServer({ listen: false });
       expect(server).toBeDefined();
       server.close();
 
@@ -101,7 +101,7 @@ describe("HTTP server effect execution is disabled (frozen R9.1 scope)", () => {
       process.env[flag] = value;
       try {
         // Even binding to loopback must not allow in-process effects.
-        await expect(createServer({ host: "127.0.0.1" })).rejects.toThrow(/disabled in this release/);
+        await expect(runSeepientServer({ host: "127.0.0.1", listen: false })).rejects.toThrow(/disabled in this release/);
       } finally {
         process.chdir(originalCwd);
         if (original === undefined) delete process.env[flag];
@@ -116,7 +116,7 @@ describe("HTTP server effect execution is disabled (frozen R9.1 scope)", () => {
     const originalCwd = process.cwd();
     process.chdir(tmpDir);
     try {
-      const server = await createServer();
+      const server = await runSeepientServer({ listen: false });
       expect(server).toBeDefined();
       server.close();
     } finally {

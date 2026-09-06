@@ -161,12 +161,12 @@ export interface Hooks {
   ) => void | Promise<void>;
   onStep?: (step: StepResult) => void | Promise<void>;
   onError?: (error: SeepientErrorType) => void | Promise<void>;
-  onFinish?: (result: GenerateTextResult) => void | Promise<void>;
+  onFinish?: (result: AskSeepientResult) => void | Promise<void>;
 }
 
-// ── generateText ──────────────────────────────────────────────────────
+// ── askSeepient ───────────────────────────────────────────────────────
 
-export interface GenerateTextOptions {
+export interface AskSeepientOptions {
   model?: string;
   provider?: string;
   providerAccount?: string;
@@ -182,11 +182,24 @@ export interface GenerateTextOptions {
   output?: unknown; // ZodSchema
   hooks?: Hooks;
   signal?: AbortSignal;
+  stream?: boolean;
   config?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   middleware?: Middleware[];
   approveTool?: ApproveToolFn;
   approvalBroker?: import("./contracts/permission-policy.js").ApprovalBroker;
+
+  // Streaming & Lifecycle Callbacks
+  onText?: (delta: string) => void;
+  onToolCall?: (
+    tool: { name: string; args: Record<string, unknown>; callId: string },
+  ) => void;
+  onToolResult?: (
+    result: { callId: string; output: string; success: boolean },
+  ) => void;
+  onStep?: (step: StepResult) => void;
+  onError?: (error: SeepientErrorType) => void;
+
   /**
    * Spec 008 / 017 domain policy pipeline options:
    */
@@ -205,7 +218,7 @@ export interface GenerateTextOptions {
   capabilityLedger?: import("./contracts/capability-ledger.js").CapabilityLedger;
 }
 
-export interface GenerateTextResult {
+export interface AskSeepientResult {
   text: string;
   data?: unknown;
   error?: { message: string; issues: unknown };
@@ -216,28 +229,14 @@ export interface GenerateTextResult {
   messages: Message[];
 }
 
-// ── streamText ────────────────────────────────────────────────────────
-
-export interface StreamTextOptions extends GenerateTextOptions {
-  onText?: (delta: string) => void;
-  onToolCall?: (
-    tool: { name: string; args: Record<string, unknown>; callId: string },
-  ) => void;
-  onToolResult?: (
-    result: { callId: string; output: string; success: boolean },
-  ) => void;
-  onStep?: (step: StepResult) => void;
-  onError?: (error: SeepientErrorType) => void;
-}
-
-export interface StreamTextResult {
+export interface AskSeepientStreamResult {
   textStream: AsyncIterable<string>;
   steps: AsyncIterable<StepResult>;
   fullText: Promise<string>;
   usage: Promise<Usage>;
   finishReason: Promise<string>;
   abort: () => void;
-  toResponse: () => Response;
+  toResponse: (options?: { headers?: Record<string, string> }) => Response;
   toSSEStream: () => ReadableStream;
 }
 
@@ -287,7 +286,7 @@ export interface CreateSeepientOptions {
 export interface Seepient {
   readonly sessionId: string;
   chat(message: string): Promise<AgentResponse>;
-  chatStream(message: string, options?: StreamTextOptions): Promise<StreamTextResult>;
+  chatStream(message: string, options?: AskSeepientOptions): Promise<AskSeepientStreamResult>;
   /** Switch the provider account (and optionally model) used for subsequent calls; one argument switches the model only. */
   switchProvider(accountOrModel: string, model?: string): Promise<void>;
   setSystemPrompt(prompt: string): void;
@@ -363,11 +362,46 @@ export interface SessionData {
   provider?: string;
   providerAccount?: string;
   model?: string;
+  /**
+   * Owner identity. A persisted session may only be resumed by the principal
+   * that created it — resumes under a different principalId fail closed.
+   */
+  principalId?: string;
   /** Arbitrary metadata for backends or consumers (e.g., TTL, apiKeyHash). */
   metadata?: Record<string, unknown>;
 }
 
 // ── Skills ────────────────────────────────────────────────────────────
+
+// ── runSeepientServer ─────────────────────────────────────────────────
+
+export interface RunSeepientServerOptions {
+  /** Port to listen on (default: SEEPIENT_PORT, PORT, or 7337) */
+  port?: number;
+  /** Host to bind to (default: "0.0.0.0") */
+  host?: string;
+  /** Enable CORS headers (default: true) */
+  cors?: boolean;
+  /** Session TTL in seconds (default: 86400 = 24 hours) */
+  sessionTTL?: number;
+  /** Injected ProviderRuntime */
+  runtime?: import("./contracts/provider-runtime.js").ProviderRuntimeContract;
+  /** Injected session persistence backend */
+  persist?: PersistenceBackend;
+  /** Injected tenant audit store */
+  auditStore?: import("./contracts/execution-brokers.js").AuditStore;
+  /** Injected tenant policy store */
+  policyStore?: import("./contracts/execution-brokers.js").PolicyStore;
+  /** Injected tenant capability ledger */
+  capabilityLedger?: import("./contracts/capability-ledger.js").CapabilityLedger;
+  /** Injected SettingsManager */
+  settingsManager?: any;
+  /**
+   * Whether to start listening immediately.
+   * Default: true. Set to false to create the configured http.Server without listening.
+   */
+  listen?: boolean;
+}
 
 export interface SkillMetadata {
   name: string;

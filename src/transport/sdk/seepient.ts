@@ -33,8 +33,8 @@ import type {
   CreateSeepientOptions,
   Seepient,
   AgentResponse,
-  StreamTextOptions,
-  StreamTextResult,
+  AskSeepientOptions,
+  AskSeepientStreamResult,
   Message,
   CumulativeUsage,
   PersistenceBackend,
@@ -79,6 +79,7 @@ async function persistSession(
   id: string,
   messages: Message[],
   options: {
+    principalId: string;
     provider?: string;
     providerAccount?: string;
     model?: string;
@@ -92,6 +93,7 @@ async function persistSession(
     messages,
     createdAt: createdAt ?? nowMs,
     updatedAt: nowMs,
+    principalId: options.principalId,
     metadata: options.metadata,
     provider: options.provider,
     providerAccount: options.providerAccount,
@@ -212,6 +214,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
 
   const sessionId = opts.sessionId ?? generateId();
   validateSessionId(sessionId);
+  const principalId = opts.principalId ?? "sdk-user";
 
   let provider = opts.provider;
   let providerAccount = opts.providerAccount ?? opts.override?.providerAccount;
@@ -271,6 +274,18 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     if (backend) {
       const existing = await backend.load(sessionId);
       if (existing) {
+        // Sessions are bound to the principal that created them — a resume
+        // under a different principal (including unstamped legacy sessions)
+        // fails closed to preserve tenant isolation.
+        if (existing.principalId !== principalId) {
+          throw new SeepientError(
+            `Cannot resume session "${sessionId}": it is owned by a different principal ` +
+              `or was persisted before session ownership was recorded. ` +
+              `Resume with the principalId that created it, or use a new sessionId.`,
+            "SESSION_OWNERSHIP_MISMATCH",
+            false,
+          );
+        }
         messages.push(...existing.messages);
         if (existing.createdAt) sessionCreatedAt = existing.createdAt;
         if (!provider && existing.provider) provider = existing.provider;
@@ -360,7 +375,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     : "never";
 
   const wiredPipeline = await buildActionLifecycle({
-    principalId: opts.principalId ?? "sdk-user",
+    principalId,
     runId: sessionId,
     sessionId,
     workspaceRoot: opts.cwd ?? process.cwd(),
@@ -408,6 +423,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
         sessionId,
         messages,
         {
+          principalId,
           provider,
           providerAccount,
           model,
@@ -488,8 +504,8 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
 
   async function chatStream(
     userMessage: string,
-    streamOptions?: StreamTextOptions,
-  ): Promise<StreamTextResult> {
+    streamOptions?: AskSeepientOptions,
+  ): Promise<AskSeepientStreamResult> {
     const release = await acquire();
 
     try {
@@ -618,7 +634,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
         usage: stream.usage,
         finishReason: stream.finishReason,
         abort: () => streamAbort.abort(),
-        toResponse: () => stream.toResponse(),
+        toResponse: (respOpts?: { headers?: Record<string, string> }) => stream.toResponse(respOpts),
         toSSEStream: () => stream.toSSEStream(),
       };
     } catch (_err) {

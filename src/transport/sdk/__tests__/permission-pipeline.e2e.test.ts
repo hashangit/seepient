@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, realpathSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { generateText, createSeepient } from "../index.js";
+import { askSeepient, createSeepient } from "../index.js";
 import { Agent } from "../../cli/agent.js";
 import { createSnapshotStore } from "../../../foundations/hashline/snapshot-store.js";
 import { createMockRuntime } from "../../../domain/__tests__/test-doubles.js";
@@ -76,13 +76,13 @@ describe("E2E: CLI Agent.enablePermissionPipeline", () => {
   });
 });
 
-describe("E2E: generateText with mandatory permission pipeline", () => {
+describe("E2E: askSeepient with mandatory permission pipeline", () => {
   it("constructs the pipeline without throwing", async () => {
     // generateText calls the real provider; we verify the pipeline
     // construction doesn't throw. A full provider mock is beyond scope here
     // — the routing proof is in agent-loop-pipeline.e2e.test.ts.
     try {
-      await generateText("hi", {
+      await askSeepient("hi", {
         model: "gpt-4o",
         cwd: dir,
         maxSteps: 1,

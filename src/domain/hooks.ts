@@ -11,7 +11,7 @@ import type {
   Hooks,
   StepResult,
   SeepientError,
-  GenerateTextResult,
+  AskSeepientResult,
 } from "../foundations/types.js";
 
 // ── HookExecutor interface ───────────────────────────────────────────
@@ -23,7 +23,7 @@ export interface HookExecutor {
   afterToolCall(result: { name: string; output: string; duration: number }): Promise<void>;
   onStep(step: StepResult): Promise<void>;
   onError(error: SeepientError): Promise<void>;
-  onFinish(result: GenerateTextResult): Promise<void>;
+  onFinish(result: AskSeepientResult): Promise<void>;
 }
 
 /**

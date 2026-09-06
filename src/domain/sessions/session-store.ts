@@ -75,6 +75,7 @@ export class FilePersistenceBackend implements PersistenceBackend {
           provider: data.provider ?? existing.provider,
           providerAccount: data.providerAccount ?? existing.providerAccount,
           model: data.model ?? existing.model,
+          principalId: data.principalId ?? existing.principalId,
           metadata: data.metadata ?? existing.metadata,
         }
       : {
@@ -85,6 +86,7 @@ export class FilePersistenceBackend implements PersistenceBackend {
           provider: data.provider,
           providerAccount: data.providerAccount,
           model: data.model,
+          principalId: data.principalId,
           metadata: data.metadata,
         };
 
@@ -155,6 +157,7 @@ export class MemoryPersistenceBackend implements PersistenceBackend {
       provider: data.provider ?? existing?.provider,
       providerAccount: data.providerAccount ?? existing?.providerAccount,
       model: data.model ?? existing?.model,
+      principalId: data.principalId ?? existing?.principalId,
       metadata: data.metadata ?? existing?.metadata,
     });
   }
