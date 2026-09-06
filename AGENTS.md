@@ -114,6 +114,8 @@ Current layout of the Obsidian vault (annotated):
 ~/Documents/Obsidian/Seepient/
 ├── README.md                         # Vault overview / index
 ├── Architecture/                     # Cross-cutting architectural references
+├── Reviews/                          # Product review reports
+│   └── 2026-09-06-product-review-017-to-021-4.md # 360° review of 017→021-4 (v0.5.3–v0.7.1): 7 P1s, no P0
 ├── Implementation-Specs/             # One folder per spec: NNN-kebab-name/
 │   ├── 007-tui-parity-upgrade/       # TUI parity & generative widget upgrade
 │   │   ├── spec.md                   # Problem statement, requirements, scope
