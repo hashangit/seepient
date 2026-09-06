@@ -1,8 +1,9 @@
 /**
- * Seepient Server — WebSocket Protocol Handler
+ * Seepient Server — WebSocket Protocol Handler (W131: per-instance).
  *
- * Re-export hub. Setup and teardown functions live here;
- * types and handlers are split into ws-types.ts and ws-handlers.ts.
+ * `setupWebSocket` creates a per-instance WSS bound to the given HTTP server
+ * and returns a handle with a scoped `close()`. No module-global state: two
+ * servers in one process keep independent connections and upgrade handlers.
  *
  * NOTE: Requires the `ws` npm package for Node.js. Install it via:
  *   npm install ws
@@ -16,26 +17,35 @@ import type { Duplex } from "stream";
 import { authMiddleware } from "../auth/auth.js";
 import type { WS, WSServer, WebSocket, WebSocketHandlerContext } from "./ws-types.js";
 import { handleConnection } from "./ws-handlers.js";
-import { closeAllConnections, getActiveConnectionCount } from "./connection-registry.js";
+import { createConnectionRegistry } from "./connection-registry.js";
 
 // Re-export types and helpers from sub-modules
-export type { WebSocketHandlerContext } from "./ws-types.js";
-export { getActiveConnectionCount } from "./connection-registry.js";
+export type { WebSocketHandlerContext, WsConnectionRegistry } from "./ws-types.js";
+export { createConnectionRegistry, safeSend } from "./connection-registry.js";
+
+// ── Handle returned by setupWebSocket ────────────────────────────────
+
+export interface WsServerHandle {
+  /** The per-instance WebSocketServer (null when the `ws` package is missing). */
+  wss: WSServer | null;
+  /** The per-instance registries used by this server's connections. */
+  registry: WebSocketHandlerContext["registry"];
+  /** Close this server's WebSocket connections and detach its upgrade handler. */
+  close(): void;
+}
 
 // ── Exported setup function ──────────────────────────────────────────
 
-let wss: WSServer | null = null;
-
 /**
- * Initialize the WebSocket server.
+ * Initialize the WebSocket server for one HTTP server instance.
  *
  * Uses a dynamic import for the `ws` package. If it's not installed,
- * logs a warning and returns null.
+ * logs a warning and returns a handle with `wss: null`.
  */
 export async function setupWebSocket(
   server: import("http").Server,
   ctx: WebSocketHandlerContext,
-): Promise<WSServer | null> {
+): Promise<WsServerHandle> {
   let wsModule: WS;
   try {
     // @ts-expect-error — ws is an optional peer dependency
@@ -45,17 +55,17 @@ export async function setupWebSocket(
       "[ws] The 'ws' package is not installed. WebSocket support is disabled.\n" +
         "       Install it with: npm install ws",
     );
-    return null;
+    return { wss: null, registry: ctx.registry, close() {} };
   }
 
-  wss = new wsModule.WebSocketServer({ noServer: true, path: "/ws", maxPayload: 1 << 20 });
+  const wss = new wsModule.WebSocketServer({ noServer: true, path: "/ws", maxPayload: 1 << 20 });
 
   wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     handleConnection(ws, req, ctx);
   });
 
-  // Handle HTTP upgrade requests
-  server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+  // Handle HTTP upgrade requests — bound to THIS instance's wss
+  const upgradeHandler = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     // Only handle /ws upgrades
     const url = req.url?.split("?")[0];
     if (url !== "/ws") {
@@ -70,21 +80,19 @@ export async function setupWebSocket(
       return;
     }
 
-    wss!.handleUpgrade(req, socket, head, (ws: WebSocket) => {
-      wss!.emit("connection", ws, req);
+    wss.handleUpgrade(req, socket, head, (ws: WebSocket) => {
+      wss.emit("connection", ws, req);
     });
-  });
+  };
+  server.on("upgrade", upgradeHandler);
 
-  return wss;
-}
-
-/**
- * Close the WebSocket server and all active connections.
- */
-export function closeWebSocket(): void {
-  if (wss) {
-    closeAllConnections();
-    wss.close();
-    wss = null;
-  }
+  return {
+    wss,
+    registry: ctx.registry,
+    close() {
+      server.removeListener("upgrade", upgradeHandler);
+      ctx.registry.closeAllConnections();
+      wss.close();
+    },
+  };
 }

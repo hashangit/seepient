@@ -4,6 +4,7 @@ import { MemoryPersistenceBackend } from "../../domain/sessions/session-store.js
 import { createRestHandler, type RestHandlerContext } from "../http/rest.js";
 import { handleChat } from "../ws/chat.js";
 import type { ConnectionState, WebSocketHandlerContext, ChatMessage, WebSocket } from "../ws/ws-types.js";
+import { createConnectionRegistry } from "../ws/connection-registry.js";
 import { EventEmitter } from "events";
 import { Readable } from "node:stream";
 import * as os from "node:os";
@@ -71,6 +72,7 @@ describe("Cross-Transport Session Lifecycle (Spec 021-2 / T014, QS-2)", () => {
 
     // Context for WS
     const wsCtx: WebSocketHandlerContext = {
+      registry: createConnectionRegistry(),
       sessionManager,
       streamText: (options) => {
         options.onText("Answer: " + options.message);
@@ -253,6 +255,7 @@ describe("Cross-Transport Session Lifecycle (Spec 021-2 / T014, QS-2)", () => {
     const restHandler = createRestHandler(restCtx);
 
     const wsCtx: WebSocketHandlerContext = {
+      registry: createConnectionRegistry(),
       sessionManager,
       streamText: (options) => {
         options.onText("WS reply: " + options.message);
@@ -379,6 +382,7 @@ describe("Cross-Transport Session Lifecycle (Spec 021-2 / T014, QS-2)", () => {
 
     let finishWsStream!: () => void;
     const wsCtx: WebSocketHandlerContext = {
+      registry: createConnectionRegistry(),
       sessionManager,
       streamText: (options) => {
         finishWsStream = () => {

@@ -105,24 +105,8 @@ async function main(): Promise<void> {
         }\n`,
     );
 
-    // Graceful shutdown
-    const shutdown = (signal: string) => {
-      process.stdout.write(`[seepient] Received ${signal}, shutting down...\n`);
-      server.close(() => {
-        process.stdout.write("[seepient] Server stopped.\n");
-        process.exit(0);
-      });
-      // Force exit after 5 seconds if connections don't drain
-      setTimeout(() => {
-        process.stdout.write(
-          "[seepient] Force exiting after 5s timeout.\n",
-        );
-        process.exit(0);
-      }, 5000);
-    };
-
-    process.on("SIGTERM", () => shutdown("SIGTERM"));
-    process.on("SIGINT", () => shutdown("SIGINT"));
+    // Graceful shutdown: runSeepientServer registers the SIGINT/SIGTERM
+    // handlers for listening servers (W130) — no duplicate registration here.
   } catch (err) {
     const message =
       err instanceof Error ? err.message : String(err);

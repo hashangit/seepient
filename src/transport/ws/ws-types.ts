@@ -319,7 +319,30 @@ export type ServerMessage =
 
 // ── Context ──────────────────────────────────────────────────────────
 
+/**
+ * Per-server-instance WS registries (W131). One instance per
+ * `runSeepientServer` call — never module-global — so multiple servers can
+ * coexist in one process without cross-wiring connections or approvals.
+ */
+export interface WsConnectionRegistry {
+  activeConnections: Map<WebSocket, ConnectionState>;
+  pendingApprovals: Map<string, {
+    continuationId: string;
+    resolve: (approved: boolean) => void;
+    timer: ReturnType<typeof setTimeout>;
+    ws: WebSocket;
+    toolName: string;
+    createdAt: number;
+  }>;
+  durableApprovalStore: import("../../domain/permissions/durable-approval-store.js").DurableApprovalStore;
+  getOtherClients(excludeWs?: WebSocket): Array<{ ws: WebSocket; state: ConnectionState }>;
+  getActiveConnectionCount(): number;
+  closeAllConnections(): void;
+}
+
 export interface WebSocketHandlerContext {
+  /** Per-instance connection/approval registries (see WsConnectionRegistry). */
+  registry: WsConnectionRegistry;
   sessionManager: import("../http/session-store.js").ServerSessionManager;
   streamText: (options: {
     message: string;
