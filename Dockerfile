@@ -42,16 +42,17 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 # Install ALL dependencies (including devDependencies for tsc)
 RUN pnpm install --frozen-lockfile
 
-# Copy TypeScript source and config
+# Copy TypeScript source, config, and build scripts (clean-dist.mjs runs as
+# part of `pnpm run build`)
 COPY tsconfig.json ./
 COPY src/ ./src/
+COPY scripts/ ./scripts/
 
 # Compile TypeScript to JavaScript
 RUN pnpm run build
 
 # Copy native helper source and build for Linux
 COPY native/ ./native/
-COPY scripts/ ./scripts/
 RUN cargo build --manifest-path native/fs-commit/Cargo.toml --release \
     && node scripts/place-native-helper.cjs
 
