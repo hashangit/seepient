@@ -8,6 +8,7 @@
 
 import { describe, it, expect } from "vitest";
 import { createSeepient } from "../seepient.js";
+import { createMockRuntime } from "../../../domain/__tests__/test-doubles.js";
 import { MemoryPersistenceBackend } from "../../../domain/sessions/session-store.js";
 
 function errorThenOkRuntime() {
@@ -48,6 +49,38 @@ function errorThenOkRuntime() {
 }
 
 describe("W151 — chatStream never persists an empty assistant on resolved errors", () => {
+  it("an error after a tool call keeps the assistant tool-call row and its tool result (no orphans)", async () => {
+    // The W151 empty-assistant filter used to drop the assistant message that
+    // carries the tool calls (content is legitimately empty), orphaning the
+    // tool result — every provider then rejects the session forever.
+    const runtime = createMockRuntime([
+      { toolCalls: [{ id: "tc1", name: "get_current_datetime", arguments: {} }] },
+      { error: { code: "PROVIDER_ERROR", message: "call failed after tool" } },
+    ]);
+
+    const backend = new MemoryPersistenceBackend();
+    const agent = await createSeepient({
+      runtime,
+      persist: backend,
+      tools: ["get_current_datetime"],
+      skills: false,
+    });
+
+    await expect(agent.chat("what time is it")).rejects.toThrow(/call failed after tool/);
+    await new Promise((r) => setTimeout(r, 20));
+
+    const stored = await backend.load(agent.sessionId);
+    const roles = stored!.messages.map((m) => m.role);
+    // Assistant (with toolCalls) and its tool result must BOTH survive
+    expect(roles).toContain("tool");
+    const assistantWithTools = stored!.messages.find(
+      (m) => m.role === "assistant" && m.toolCalls?.length,
+    );
+    expect(assistantWithTools).toBeDefined();
+    const toolMsg = stored!.messages.find((m) => m.role === "tool");
+    expect(toolMsg?.toolCallId).toBe("tc1");
+  });
+
   it("a resolved-error stream leaves only the user message persisted", async () => {
     const backend = new MemoryPersistenceBackend();
     const { runtime } = errorThenOkRuntime();

@@ -89,6 +89,7 @@ export async function serverGenerateText(
   // W150 (D3a): a failed turn leaves a dangling persisted user message;
   // collapse it on the model-input copy so retries alternate roles.
   const modelMessages = normalizeHistoryForSend(messages);
+  const inputCount = modelMessages.length;
 
   const snapshot = await runtime.createTurnSnapshot();
 
@@ -106,8 +107,10 @@ export async function serverGenerateText(
     wiredPipeline: options.wiredPipeline,
   });
 
-  // Extract final text from last assistant message
-  const lastAssistant = [...result.messages]
+  // B6: extract the answer from THIS turn's output only — on abort/max_steps
+  // with no output, a history assistant would otherwise be returned (and
+  // persisted by the transport) as this turn's answer.
+  const lastAssistant = [...result.messages.slice(inputCount)]
     .reverse()
     .find((m) => m.role === "assistant" && m.content);
   const text = lastAssistant?.content ?? "";

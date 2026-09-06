@@ -73,7 +73,7 @@ describe("W016: Redirect hygiene in safeSsrfFetch", () => {
     await new Promise<void>((resolve) => targetServer.close(() => resolve()));
   });
 
-  it("strips Authorization, Cookie, api-key, and x-api-key on cross-origin redirects", async () => {
+  it("W182/A6: cross-origin redirects keep only the allowlist — every credential spelling and custom header is dropped", async () => {
     lastTargetRequest = null;
     await safeSsrfFetch(
       `http://127.0.0.1:${originPort}/redirect?type=302&cross=1`,
@@ -83,7 +83,8 @@ describe("W016: Redirect hygiene in safeSsrfFetch", () => {
           Cookie: "session=xyz",
           "api-key": "secret-key",
           "x-api-key": "secret-x-key",
-          "X-Custom-Header": "keep-me",
+          "X-Custom-Header": "must-not-leak",
+          Accept: "text/plain",
         },
       },
       { ssrfAllowPrivate: true },
@@ -95,7 +96,10 @@ describe("W016: Redirect hygiene in safeSsrfFetch", () => {
     expect(req1.headers["cookie"]).toBeUndefined();
     expect(req1.headers["api-key"]).toBeUndefined();
     expect(req1.headers["x-api-key"]).toBeUndefined();
-    expect(req1.headers["x-custom-header"]).toBe("keep-me");
+    // Custom header names cannot be deny-listed exhaustively — allowlist wins
+    expect(req1.headers["x-custom-header"]).toBeUndefined();
+    // Content-negotiation headers survive
+    expect(req1.headers["accept"]).toBe("text/plain");
   });
 
   it("downgrades 301, 302, 303 POST to GET and strips body", async () => {

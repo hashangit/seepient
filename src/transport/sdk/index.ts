@@ -117,7 +117,6 @@ export type {
   AskSeepientResult,
   AskSeepientStreamResult,
   AgentResponse,
-  SessionStore,
   SessionData,
   PersistenceBackend,
   PersistenceConfig,
@@ -139,8 +138,6 @@ function toCapabilitySet(cap: import("../../foundations/contracts/permission-pol
 export {
   createPersistenceBackend,
   registerBackend,
-  createSessionStore,
-  createMemoryStore,
 } from "../../domain/sessions/session-store.js";
 
 
@@ -229,11 +226,19 @@ export async function askSeepient(
   // agent loop AND media vendor operations in both modes, so `stream.abort()`
   // stops every in-flight media fetch (W110).
   const abortController = new AbortController();
+  // B2: the bridge listener is removed when the call completes — a {once}
+  // listener never fired stays attached to the caller's long-lived signal
+  // and accumulates one listener per askSeepient call.
+  let detachSignalBridge: (() => void) | undefined;
   if (opts.signal) {
     if (opts.signal.aborted) {
       abortController.abort(opts.signal.reason);
     } else {
-      opts.signal.addEventListener("abort", () => abortController.abort(opts.signal?.reason), { once: true });
+      const bridgeAbort = () => abortController.abort(opts.signal?.reason);
+      opts.signal.addEventListener("abort", bridgeAbort, { once: true });
+      detachSignalBridge = () => {
+        opts.signal?.removeEventListener("abort", bridgeAbort);
+      };
     }
   }
 
@@ -411,6 +416,7 @@ export async function askSeepient(
         stream.resolveUsage({ promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 });
         stream.resolveFinish("error");
       } finally {
+        detachSignalBridge?.();
         stream.complete();
       }
     })();
@@ -479,6 +485,8 @@ export async function askSeepient(
       }
     } : undefined,
   });
+
+  detachSignalBridge?.();
 
   // W111: onError parity with the streaming branch — report before rejecting.
   const loopError = extractLoopError(result);

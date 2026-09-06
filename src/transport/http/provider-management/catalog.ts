@@ -10,6 +10,7 @@ import { hasScope } from "../../auth/auth.js";
 import { createProviderManagerApi } from "../../cli/provider-manager-api.js";
 import { sendJSON, sendError, parseBody } from "./http-util.js";
 import { logTransportEvent } from "../../logging.js";
+import { PayloadTooLargeError } from "../body.js";
 
 export async function handleGetCatalog(
   req: IncomingMessage,
@@ -41,7 +42,9 @@ export async function handleResolveModel(
   let bodyText: string;
   try {
     bodyText = await parseBody(req);
-  } catch {
+  } catch (err) {
+    if (err instanceof PayloadTooLargeError) throw err;
+    if (err instanceof PayloadTooLargeError) throw err;
     sendError(res, 400, "BAD_REQUEST", "Failed to read request body");
     return;
   }

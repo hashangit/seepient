@@ -331,15 +331,16 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
   });
   // W131: per-instance WS registries — never module-global
   const wsRegistry = createConnectionRegistry();
-  const settingsHandlerContext: SettingsHandlerContext = {
-    settingsManager,
-    getOtherClients: (excludeWs) => wsRegistry.getOtherClients(excludeWs),
-  };
-
   // Wire registered server settings: env override -> settings value -> default
   const corsOriginsSetting = settingsManager.get("server.corsOrigins").value as string | undefined;
   const maxBodyBytesSetting = settingsManager.get("server.maxBodyBytes").value as number | undefined;
   const rateLimitRpmSetting = settingsManager.get("server.rateLimitRpm").value as number | undefined;
+
+  const settingsHandlerContext: SettingsHandlerContext = {
+    settingsManager,
+    getOtherClients: (excludeWs) => wsRegistry.getOtherClients(excludeWs),
+    maxBodyBytes: maxBodyBytesSetting,
+  };
 
   // W161: re-read server.rateLimitRpm per consume — a settings PATCH takes
   // effect on the next request instead of silently requiring a restart.
@@ -375,7 +376,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
       if (gatewayInstance) {
         const { createGatewayRestHandler } = await import("./rest-gateway.js");
         const { importOpenApiSpec } = await import("../../capabilities/gateway/openapi-importer.js");
-        gatewayHandler = createGatewayRestHandler({ gateway: gatewayInstance, settingsAdapter: gwSettingsAdapter, importOpenApiSpec });
+        gatewayHandler = createGatewayRestHandler({ gateway: gatewayInstance, settingsAdapter: gwSettingsAdapter, importOpenApiSpec, maxBodyBytes: maxBodyBytesSetting });
 
         // Wire semantic injection middleware
         const { semanticToolInjectionMiddleware } = await import("../../domain/middleware/semantic-tools.js");
@@ -525,11 +526,13 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     process.on("SIGTERM", shutdownListener);
   }
 
-  // Dispose handle: un-registers this server's signal handlers so repeated
-  // constructions in tests/embedders do not accumulate listeners.
+  // Dispose handle (C5): full teardown — un-registers this server's signal
+  // handlers AND closes the server (which also detaches the WS layer and,
+  // via the close event, re-runs the handler removal idempotently).
   (server as SeepientHttpServer).dispose = () => {
     process.removeListener("SIGINT", shutdownListener);
     process.removeListener("SIGTERM", shutdownListener);
+    server.close();
   };
 
   // Listen immediately unless listen: false

@@ -32,6 +32,7 @@ import { PersistedReplayLedger } from "./persisted-replay-ledger.js";
 import { resolveSecretRef } from "../../foundations/security/credential-resolver.js";
 import { createSetupFailure } from "../../foundations/contracts/setup-failure.js";
 import { isMetadataIp, isPrivateIp } from "../../foundations/network/ip-classifier.js";
+import { safeSsrfFetch } from "../../foundations/network/ssrf-fetch.js";
 import { pinnedFetch } from "../../foundations/network/pinned-fetch.js";
 
 /**
@@ -58,6 +59,13 @@ export interface BrokerNetworkAdapter {
   fetch(
     destination: NetworkDestination,
     init: { method: string; headers: Record<string, string>; body?: Uint8Array; signal?: AbortSignal },
+    /**
+     * A2: the broker-VALIDATED addresses for this destination. The adapter
+     * must connect only to these — re-resolving DNS here reopens the
+     * validate-then-connect rebinding window (request forgery against
+     * internal services even though the post-flight check blocks the reply).
+     */
+    resolvedIps?: string[],
   ): Promise<BrokerNetworkResponse>;
 }
 
@@ -76,6 +84,18 @@ export interface BrokerNetworkResponse {
 }
 
 /** Headers the broker strips unless a connector schema owns them. */
+/**
+ * W182/A6: headers that may survive a CROSS-HOST redirect — content
+ * negotiation and hop-safety only, never identity or credentials.
+ */
+const CROSS_ORIGIN_REDIRECT_KEEP: ReadonlySet<string> = new Set([
+  "accept",
+  "accept-language",
+  "accept-encoding",
+  "user-agent",
+  "range",
+]);
+
 const FORBIDDEN_REQUEST_HEADERS: ReadonlySet<string> = new Set([
   "authorization",
   "cookie",
@@ -317,11 +337,17 @@ export class EffectBroker implements EffectBrokerContract {
         payload = { msgtype: "text", text: { content } };
       }
 
-      const response = await fetch(webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      // W183: webhook destinations are operator-configured but still routed
+      // through the validated, pinned fetch — no deadline-less unbounded reads.
+      const response = await safeSsrfFetch(
+        webhookUrl,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+        { maxResponseBytes: 1024 * 1024 },
+      );
 
       const result: any = await response.json().catch(() => ({}));
       const isSuccess =
@@ -503,6 +529,7 @@ export class EffectBroker implements EffectBrokerContract {
           const response = await this.network.fetch(
             currentDest,
             { method: currentMethod, headers: currentHeaders, body: currentBody, signal: controller.signal },
+            resolvedIps,
           );
           if (timeout) clearTimeout(timeout);
 
@@ -533,20 +560,17 @@ export class EffectBroker implements EffectBrokerContract {
                 if (hasInjectedSecret && (response.status === 307 || response.status === 308)) {
                   return this.denied(request.requestId, `refusing to forward secret-bearing body to cross-host redirect target: ${nextHost}`);
                 }
-                // Strip credentials on cross-host redirects (W143:
-                // case-insensitive — a connector sending "X-Api-Key" must not
-                // leak its credential on redirect).
+                // W182/A6: cross-host redirects rebuild the headers from an
+                // ALLOWLIST (see CROSS_ORIGIN_REDIRECT_KEEP) — a denylist can
+                // never cover credentials injected under arbitrary custom
+                // names (e.g. a target.auth.name header).
+                const kept: Record<string, string> = {};
                 for (const k of Object.keys(currentHeaders)) {
-                  const lower = k.toLowerCase();
-                  if (
-                    lower === "authorization" ||
-                    lower === "api-key" ||
-                    lower === "x-api-key" ||
-                    lower === "cookie"
-                  ) {
-                    delete currentHeaders[k];
+                  if (CROSS_ORIGIN_REDIRECT_KEEP.has(k.toLowerCase())) {
+                    kept[k] = currentHeaders[k];
                   }
                 }
+                currentHeaders = kept;
               }
 
               // Re-validate against envelope, DENIED_HOSTS, and DNS IP ranges
@@ -654,8 +678,13 @@ export class NodeNetworkAdapter implements BrokerNetworkAdapter {
   async fetch(
     destination: NetworkDestination,
     init: { method: string; headers: Record<string, string>; body?: Uint8Array; signal?: AbortSignal },
+    initIps?: string[],
   ): Promise<BrokerNetworkResponse> {
-    const resolvedIps = await this.resolve(destination.host);
+    // A2: pin to the broker-validated list when provided; resolve only as a
+    // fallback for adapters called without one.
+    const resolvedIps = initIps?.length
+      ? initIps
+      : await this.resolve(destination.host);
     if (resolvedIps.length === 0) {
       throw new Error(`DNS resolution failed for ${destination.host}`);
     }

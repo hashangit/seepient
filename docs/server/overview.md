@@ -33,7 +33,7 @@ The server delegates all LLM interaction directly to the core `runAgentLoop`, by
 | Feature | Detail |
 |---|---|
 | **Default port** | `7337` (configurable via `SEEPIENT_PORT` or `PORT` env) |
-| **CORS** | Enabled by default; mirrors request `Origin` |
+| **CORS** | Opt-in: with no `server.corsOrigins` setting / `SEEPIENT_CORS_ORIGINS` env var, no `Access-Control-Allow-Origin` is emitted (set `*` to reflect any origin) |
 | **Graceful shutdown** | SIGINT / SIGTERM with 5-second drain timeout |
 | **Session storage** | File-based in `./.seepient/sessions/` |
 | **Auth** | API keys with scoped permissions |

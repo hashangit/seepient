@@ -40,6 +40,8 @@ export interface WSServer {
 export interface WebSocket {
   send(data: string): void;
   close(code?: number, reason?: string): void;
+  /** Hard-close without a close handshake (dead-peer cleanup). */
+  terminate(): void;
   on(event: "message", cb: (data: Buffer) => void): void;
   on(event: "close", cb: (code: number, reason: Buffer) => void): void;
   on(event: "error", cb: (err: Error) => void): void;

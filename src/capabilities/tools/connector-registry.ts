@@ -9,6 +9,7 @@
  */
 
 import { generateId } from "../../foundations/id.js";
+import { isMetadataIp, isPrivateIp } from "../../foundations/network/ip-classifier.js";
 import type {
   BrokerConnectorRegistration,
   DeclarativeConnectorMapping,
@@ -131,49 +132,21 @@ export const WEB_SEARCH_CONNECTOR: BrokerConnectorDescriptor = {
   },
 };
 
+// W180: the analysis-time host screening uses the SAME byte-level classifier
+// as the execution-time broker (foundations/network/ip-classifier) — the old
+// per-doorway regex lists missed hex-mapped/v4-compatible IPv6 and reserved
+// IPv4 ranges, producing false "allowed" analyses. Hostname-level denials
+// stay here; IP-literal classification delegates to the shared classifier.
 const DENIED_HOSTS_SSRF: ReadonlySet<string> = new Set([
   "localhost",
   "metadata.google.internal",
   "metadata.aws.internal",
-  "169.254.169.254",
-  "fd00:ec2::254",
-  "[::1]",
 ]);
-
-const DENIED_IPV4_SSRF: ReadonlyArray<RegExp> = [
-  /^127\./,
-  /^10\./,
-  /^192\.168\./,
-  /^172\.(1[6-9]|2\d|3[01])\./,
-  /^169\.254\./,
-  /^0\./,
-  /^22[4-5]\./,
-  /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./,
-];
-
-const DENIED_IPV6_SSRF: ReadonlyArray<RegExp> = [
-  /^::1$/,
-  /^fc[0-9a-f][0-9a-f]:/i,
-  /^fd[0-9a-f][0-9a-f]:/i,
-  /^fe80:/i,
-  /^::ffff:127\./i,
-  /^::ffff:10\./i,
-  /^::ffff:192\.168\./i,
-  /^::ffff:172\.(1[6-9]|2\d|3[01])\./i,
-  /^::ffff:169\.254\./i,
-  /^64:ff9b:/i,
-];
 
 function isDeniedAddressSSRF(host: string): boolean {
   const normalized = host.toLowerCase().trim();
   if (DENIED_HOSTS_SSRF.has(normalized)) return true;
-  for (const pattern of DENIED_IPV4_SSRF) {
-    if (pattern.test(normalized)) return true;
-  }
-  for (const pattern of DENIED_IPV6_SSRF) {
-    if (pattern.test(normalized)) return true;
-  }
-  return false;
+  return isPrivateIp(normalized) || isMetadataIp(normalized);
 }
 
 /** Built-in generic HTTP connector descriptor with SSRF protection */

@@ -7,6 +7,7 @@ import type { ProviderRuntime } from "../../../domain/providers/provider-runtime
 import type { ApiKeyEntry } from "../../auth/auth.js";
 import { hasScope } from "../../auth/auth.js";
 import { createProviderManagerApi } from "../../cli/provider-manager-api.js";
+import { PayloadTooLargeError } from "../body.js";
 import {
   sendJSON,
   sendError,
@@ -80,7 +81,9 @@ export async function handlePutAssignment(
   let bodyText: string;
   try {
     bodyText = await parseBody(req);
-  } catch {
+  } catch (err) {
+    if (err instanceof PayloadTooLargeError) throw err;
+    if (err instanceof PayloadTooLargeError) throw err;
     sendError(res, 400, "BAD_REQUEST", "Failed to read request body");
     return;
   }

@@ -435,6 +435,16 @@ export class MCPGateway {
     }
 
     const url = new URL(reqPath, target.baseUrl);
+    // W181: a model-controlled absolute path must not repoint a registered
+    // target at another origin — the target's credential is attached to this
+    // request, so cross-origin resolution would ship it to a third party.
+    if (url.origin !== new URL(target.baseUrl).origin) {
+      throw new GatewayError(
+        `REST target "${targetName}" requests must stay on the registered origin`,
+        targetName,
+        false,
+      );
+    }
     if (query) {
       for (const [k, v] of Object.entries(query)) {
         url.searchParams.set(k, v);

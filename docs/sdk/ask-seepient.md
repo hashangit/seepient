@@ -522,7 +522,7 @@ try {
 ```
 
 ::: tip
-When `finishReason` is `"error"`, a streaming call still completes with the partial result rather than rejecting. Check `finishReason` and `steps` to inspect what happened before the error. Errors are also reported through `onError` in both modes.
+A failed streaming turn is always observable: `fullText` **rejects** with the typed `SeepientError` (parity with the non-streaming throw), `finishReason` resolves `"error"`, and `onError` fires in both modes. `textStream` still completes cleanly for consumers that only iterate deltas.
 :::
 
 ## Related APIs

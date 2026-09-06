@@ -181,6 +181,39 @@ describe("W131 — multiple servers per process", () => {
     expect(textAfter).toBe("hello from mock");
   });
 
+  it("W185: a provider-scoped key upgrades but gets FORBIDDEN on chat over a real socket", async () => {
+    // Composite path: upgrade authenticates any valid key, then the
+    // dispatcher's scope gate rejects the chat — over a REAL socket.
+    const p = path.join(os.tmpdir(), `seepient-ws-scope-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+    tempFiles.push(p);
+    process.env.SEEPIENT_API_KEYS_FILE = p;
+    const providerKey = generateApiKey(["provider:read"], { filePath: p }).rawKey!;
+
+    const server = await runSeepientServer(
+      embeddedServerOptions(createFakeRuntime({ responses: [{ text: "should never run" }] })),
+    );
+    servers.push(server);
+
+    const ws = new WsClient(`ws://127.0.0.1:${listenPort(server)}/ws`, {
+      headers: { authorization: `Bearer ${providerKey}` },
+    });
+    const opened = new Promise<void>((resolve, reject) => {
+      ws.on("open", () => resolve());
+      ws.on("error", reject);
+    });
+    await opened; // upgrade itself succeeds (auth OK, no scope check there)
+
+    const frame = await new Promise<any>((resolve) => {
+      ws.on("message", (data: Buffer) => resolve(JSON.parse(data.toString("utf-8"))));
+      ws.send(JSON.stringify({ type: "chat", id: "m1", message: "hello" }));
+    });
+
+    expect(frame.type).toBe("error");
+    expect(frame.code).toBe("FORBIDDEN");
+    expect(frame.message).toContain("agent:run");
+    ws.terminate();
+  });
+
   it("a second server's close event does not terminate the first server's connections", async () => {
     const rawKey = makeKeysFile();
     const runtime = createFakeRuntime({
