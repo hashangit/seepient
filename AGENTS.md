@@ -238,7 +238,7 @@ Current layout of the Obsidian vault (annotated):
 │           ├── contracts/            # skill-source-contract, sdk-skill-options
 │           ├── quickstart.md         # QS-S0–QS-S4 validation scenarios + budgets
 │           └── tasks.md              # T001–T013 dependency-ordered, US1–US3 story phases, test-first gates
-│       ├── 021-2-review-remediation/ # Sub-spec: consolidated review repairs (021-2 — remediated via 021-3; v0.7.0 tag pending)
+│       ├── 021-2-review-remediation/ # Sub-spec: consolidated review repairs (021-2 — SHIPPED in v0.7.0 via 021-3)
 │           ├── spec.md               # Release safety + server sessions + transport hardening + docs truth; FR-001–FR-019, M1–M12, SC-001–SC-010
 │           ├── plan.md               # US1 release safety → US2 sessions/WS integrity → US3 type truth ∥ US4 hardening/docs (blast-radius table)
 │           ├── research.md           # Four-source consolidation: E1–E24 verified evidence, D1–D15 decisions, S1–S5 scrutiny
@@ -246,7 +246,7 @@ Current layout of the Obsidian vault (annotated):
 │           ├── contracts/            # release-artifact-contract, server-session-surface, transport-hardening, sdk-parity-and-type-truth
 │           ├── quickstart.md         # QS-0–QS-7 validation scenarios + QS-P production budgets
 │           └── tasks.md              # T001–T027 dependency-ordered, US1–US4 stories, test-first gates
-│       └── 021-3-remediation/        # Work order: 021-2 implementation remediation (021-3 — COMPLETE, gates passed; v0.7.0 tag pending)
+│       └── 021-3-remediation/        # Work order: 021-2 implementation remediation (021-3 — SHIPPED in v0.7.0)
 │           └── tasks.md              # W001–W033; owner D1 (sessionless chat = no session) + D2 (fallback: mandatory sessionId)
 ├── 010-provider-management-redesign/ # Provider mgmt redesign: contracts + runtime + purpose/tier routing
 │   ├── spec.md                       # Problem, 5 blockers + 4 gaps, scope decisions, success criteria
@@ -486,7 +486,13 @@ Keep `CONTEXT.md` under 20 lines total. Do NOT summarize the full conversation �
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-- **COMPLETED REMEDIATION (gates passed; v0.7.0 tag pending)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/021-stateless-sdk-workers/021-3-remediation/tasks.md`
+- **ACTIVE PLAN**: `~/Documents/Obsidian/Seepient/Implementation-Specs/021-stateless-sdk-workers/021-1-skill-sources/plan.md`
+  — Injectable `SkillSource`/`SkillStore` + inline-skills tier so skill content
+  joins the store-contract family — serverless light shape gets a working skill
+  system, embedders compose global + tenant-scoped skills from their own DB with
+  last-wins shadowing, and 016's generated-skill writer retargets the store instead
+  of disk (fail-closed without one). tasks.md ready (T001–T013).
+- **SHIPPED (021-3 remediation complete, v0.7.0)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/021-stateless-sdk-workers/021-3-remediation/tasks.md`
   — Work order W001–W033 from the 2026-09-06 architect + second-reviewer
   adjudication: red `pnpm test` gate (12 test-tsconfig errors), Docker
   build failure (missing `pnpm-workspace.yaml` COPY), sessionless-chat
@@ -498,13 +504,7 @@ shell commands, and other important information, read the current plan:
   docs-reorg commit split. Owner decisions D1 (no sessionId = one-shot,
   no session) and D2 (fallback: make sessionId mandatory if session
   tasks can't be made robust). All gates green (`pnpm test`, docs build, pack:verify).
-- **NEXT (unblocked by 021-3 release)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/021-stateless-sdk-workers/021-1-skill-sources/plan.md`
-  — Injectable `SkillSource`/`SkillStore` + inline-skills tier so skill content
-  joins the store-contract family — serverless light shape gets a working skill
-  system, embedders compose global + tenant-scoped skills from their own DB with
-  last-wins shadowing, and 016's generated-skill writer retargets the store instead
-  of disk (fail-closed without one). tasks.md ready (T001–T013).
-- **IMPLEMENTED (remediated via 021-3; tag pending)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/021-stateless-sdk-workers/021-2-review-remediation/plan.md`
+- **SHIPPED (remediated via 021-3; v0.7.0)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/021-stateless-sdk-workers/021-2-review-remediation/plan.md`
   — Review remediation (021-2): consolidation of four review passes (two
   product reviews, ultra-deep repo review, owner SSRF analysis), every
   finding re-verified against the working tree (research.md E1–E24).
