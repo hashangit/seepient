@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.7.2] - 2026-09-06
+
+### Model contract enforcement, resilient JSON parsing & TUI status truth
+
+**Fixed:**
+- **Model output contract enforcement**: Added explicit tool contract rules in system prompts and core tool descriptions (`write_file`, `read_file`, `edit_file`, `execute_shell_command`). Models are instructed to output well-formed JSON conforming to parameter schemas and properly escape quotes (`\"`), backslashes (`\\`), and control characters (`\n`, `\r`, `\t`) in multiline string parameters.
+- **Resilient JSON argument parsing**: Implemented best-effort JSON repair in `agent-loop.ts` that strips accidental markdown code fences (e.g. ```` ```json ... ``` ````) and sanitizes literal unescaped control characters inside string literals without adding external parser dependencies.
+- **Actionable contract violation feedback loop**: Removed the silent `{ raw: tc.arguments }` fallback. Unparseable tool arguments now return an explicit `Error (Model Output Contract Violation): ...` message to the model with schema guidance, prompting the model to re-issue the call adhering to the contract while halting downstream execution.
+- **Parameter validation in analyzers**: Added explicit presence and string-type validation in `canonicalizePath` and `analyzeWriteFile`, throwing descriptive `Model contract violation: ...` errors instead of uncaught Node runtime `TypeError` exceptions on `undefined`.
+- **Status glyph truth in TUI**: Updated `use-agent.ts` to assign `status: 'fail'` (`✗` in red) to failed, errored, or denied tool executions instead of hardcoding `status: 'ok'` (`✓` in green). Applied strict prefix and equality checks (`Error*`, `[model-egress denied]*`, `Tool execution denied*`, `denied`) to prevent false-positive failures on legitimate outputs containing the word "denied".
+- **Documentation site & CI workspace**: Included `docs/` as a pnpm workspace member for automated dependency installation in CI (`d11ed84`) and configured CNAME for `seepient.zyntopia.com` (`28fbbcf`).
+
 ## [v0.7.1] - 2026-09-06
 
 ### Post-release review remediation (021-4 review rounds 2–3)

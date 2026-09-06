@@ -20,7 +20,7 @@ export const EditFileTool: ToolModule = {
     type: 'function',
     function: {
       name: 'edit_file',
-      description: 'Apply a hash-anchored line patch to one or more files. Prefer this over write_file for targeted edits to existing files — smaller payload, fewer reproduction errors. Use write_file only for new files or full rewrites.',
+      description: 'Apply a hash-anchored line patch to one or more files. Prefer this over write_file for targeted edits to existing files — smaller payload, fewer reproduction errors. Use write_file only for new files or full rewrites. The patch argument must be a valid JSON-escaped string.',
       parameters: {
         type: 'object',
         required: ['patch'],
