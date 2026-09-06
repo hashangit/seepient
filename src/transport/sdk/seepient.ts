@@ -504,7 +504,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
 
   async function chatStream(
     userMessage: string,
-    streamOptions?: AskSeepientOptions,
+    streamOptions?: Omit<AskSeepientOptions, "stream" | "signal">,
   ): Promise<AskSeepientStreamResult> {
     const release = await acquire();
 
