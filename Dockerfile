@@ -39,8 +39,9 @@ WORKDIR /build
 # Copy dependency manifests first for layer caching
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 
-# Install ALL dependencies (including devDependencies for tsc)
-RUN pnpm install --frozen-lockfile
+# Install root-package dependencies only (docs is a workspace member but the
+# image does not need VitePress)
+RUN pnpm install --frozen-lockfile --filter seepient
 
 # Copy TypeScript source, config, and build scripts (clean-dist.mjs runs as
 # part of `pnpm run build`)

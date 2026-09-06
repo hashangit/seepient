@@ -1,3 +1,6 @@
+packages:
+  - docs
+
 overrides:
   '@hono/node-server': 2.0.12
   body-parser: 2.3.0
