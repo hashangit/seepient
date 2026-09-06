@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import * as http from "node:http";
 import type { AddressInfo } from "node:net";
-import { pinnedFetch } from "../pinned-fetch.js";
+import { pinnedFetch } from "../../../foundations/network/pinned-fetch.js";
 
 describe("W017: pinnedFetch parity with effect-broker source", () => {
   let server: http.Server;

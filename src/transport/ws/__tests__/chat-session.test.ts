@@ -557,12 +557,6 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
     await sessionManager.createSession("other-key", {
       id: "foreign-session-123",
       apiKeyHash: "other-key-hash",
-      apiKey: {
-        keyHash: "other-key-hash",
-        scopes: ["agent:run", "agent:read"],
-        created: new Date().toISOString(),
-        label: "chat-session-test",
-      },
     });
 
     const state: ConnectionState = {
@@ -613,12 +607,6 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
     await sessionManager.createSession("key-1", {
       id: "target-resume-sess",
       apiKeyHash: "test-hash",
-      apiKey: {
-        keyHash: "test-hash",
-        scopes: ["agent:run", "agent:read"],
-        created: new Date().toISOString(),
-        label: "chat-session-test",
-      },
     });
 
     const state: ConnectionState = {
@@ -756,12 +744,6 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
     await sessionManager.createSession("key-1", {
       id: "shared-sess-ws",
       apiKeyHash: "test-hash",
-      apiKey: {
-        keyHash: "test-hash",
-        scopes: ["agent:run", "agent:read"],
-        created: new Date().toISOString(),
-        label: "chat-session-test",
-      },
     });
 
     const state1: ConnectionState = {

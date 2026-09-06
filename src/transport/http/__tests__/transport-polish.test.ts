@@ -378,6 +378,12 @@ describe("Phase 5: Transport Polish (W024, W025, W026)", () => {
       const state: ConnectionState = {
         activeChats: new Set(),
         apiKeyHash: "hash123",
+        apiKey: {
+          keyHash: "hash123",
+          scopes: ["agent:run"],
+          created: new Date().toISOString(),
+          label: "transport-polish-test",
+        },
       } as any;
 
       const ctx: WebSocketHandlerContext = {

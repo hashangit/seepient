@@ -31,34 +31,17 @@ import { createHash } from "node:crypto";
 import { PersistedReplayLedger } from "./persisted-replay-ledger.js";
 import { resolveSecretRef } from "../../foundations/security/credential-resolver.js";
 import { createSetupFailure } from "../../foundations/contracts/setup-failure.js";
-import { pinnedFetch } from "./pinned-fetch.js";
+import { isMetadataIp, isPrivateIp } from "../../foundations/network/ip-classifier.js";
+import { pinnedFetch } from "../../foundations/network/pinned-fetch.js";
 
-/** Loopback / private / link-local / reserved / cloud-metadata CIDRs (IPv4). */
-const DENIED_IPV4_PATTERNS: ReadonlyArray<RegExp> = [
-  /^127\./, // loopback
-  /^10\./, // private
-  /^192\.168\./, // private
-  /^172\.(1[6-9]|2\d|3[01])\./, // private
-  /^169\.254\./, // link-local
-  /^0\./, // reserved
-  /^22[4-5]\./, // multicast/reserved
-  /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./, // CGNAT (RFC 6598)
-];
-
-/** Denied IPv6 prefixes (T210b: private/metadata ranges). */
-const DENIED_IPV6_PATTERNS: ReadonlyArray<RegExp> = [
-  /^::1$/, // loopback
-  /^fc[0-9a-f][0-9a-f]:/i, // ULA fc00::/7
-  /^fd[0-9a-f][0-9a-f]:/i, // ULA fd00::/7
-  /^fe80:/i, // link-local fe80::/10
-  /^::ffff:127\./i, // IPv4-mapped loopback
-  /^::ffff:10\./i, // IPv4-mapped private
-  /^::ffff:192\.168\./i, // IPv4-mapped private
-  /^::ffff:172\.(1[6-9]|2\d|3[01])\./i, // IPv4-mapped private
-  /^::ffff:169\.254\./i, // IPv4-mapped link-local
-  /^::ffff:169\.254\.169\.254$/i, // cloud metadata literal (IPv4-mapped)
-  /^64:ff9b:/i, // NAT64 (RFC 6052) — treat as potentially private
-];
+/**
+ * Broker address denial (W141): the exact byte-level classification the
+ * transport SSRF validator uses — hex-mapped, v4-compatible, SIIT, NAT64,
+ * and reserved IPv4 spellings included. Exported pure for parity tests.
+ */
+export function isBrokerDeniedAddress(ip: string): boolean {
+  return isPrivateIp(ip) || isMetadataIp(ip);
+}
 
 const DENIED_HOSTS: ReadonlySet<string> = new Set([
   "localhost",
@@ -550,10 +533,20 @@ export class EffectBroker implements EffectBrokerContract {
                 if (hasInjectedSecret && (response.status === 307 || response.status === 308)) {
                   return this.denied(request.requestId, `refusing to forward secret-bearing body to cross-host redirect target: ${nextHost}`);
                 }
-                // Strip credentials on cross-host redirects
-                delete currentHeaders["authorization"];
-                delete currentHeaders["api-key"];
-                delete currentHeaders["cookie"];
+                // Strip credentials on cross-host redirects (W143:
+                // case-insensitive — a connector sending "X-Api-Key" must not
+                // leak its credential on redirect).
+                for (const k of Object.keys(currentHeaders)) {
+                  const lower = k.toLowerCase();
+                  if (
+                    lower === "authorization" ||
+                    lower === "api-key" ||
+                    lower === "x-api-key" ||
+                    lower === "cookie"
+                  ) {
+                    delete currentHeaders[k];
+                  }
+                }
               }
 
               // Re-validate against envelope, DENIED_HOSTS, and DNS IP ranges
@@ -634,11 +627,7 @@ export class EffectBroker implements EffectBrokerContract {
   }
 
   private isDeniedAddress(ip: string): boolean {
-    // IPv4
-    if (DENIED_IPV4_PATTERNS.some((re) => re.test(ip))) return true;
-    // T210b: IPv6 private/metadata/loopback ranges
-    if (DENIED_IPV6_PATTERNS.some((re) => re.test(ip))) return true;
-    return false;
+    return isBrokerDeniedAddress(ip);
   }
 
   private denied(requestId: string, message: string): BrokeredEffectResult {
