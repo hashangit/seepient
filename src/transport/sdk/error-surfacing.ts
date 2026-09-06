@@ -28,7 +28,7 @@ export function extractLoopError(result: AgentLoopResult): SeepientError | null 
 }
 
 /**
- * Surface loop errors for one-shot synchronous/batch operations (chat, generateText).
+ * Surface loop errors for one-shot synchronous/batch operations (chat, askSeepient).
  * Throws typed SeepientError if an error occurred; no-op otherwise.
  */
 export function surfaceLoopError(result: AgentLoopResult): void {

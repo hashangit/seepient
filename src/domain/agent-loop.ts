@@ -19,6 +19,7 @@ import type { PermissionRequest } from "../foundations/contracts/permission-poli
 import { resolveAnalyzerWithFallback } from "./permissions/default-analyzers.js";
 import { makeRegistrationAnalyzer } from "./permissions/registration-dispatch.js";
 import type { ProviderRuntime, TurnSnapshot } from "./providers/provider-runtime.js";
+import type { Purpose, Tier } from "../foundations/contracts/provider-runtime.js";
 
 // ProviderFactory for per-skill model switching
 export interface ProviderFactory {
@@ -42,8 +43,8 @@ export interface AgentLoopOptions {
   providerFactory?: ProviderFactory;
   turnSnapshot?: TurnSnapshot;
   modelOverride?: string | { model?: string; providerAccount?: string };
-  purpose?: string;
-  tier?: string;
+  purpose?: Purpose;
+  tier?: Tier;
   middleware?: Middleware[];
   approveTool?: ApproveToolFn;
   autoConfirm?: boolean;
@@ -338,8 +339,8 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
         : undefined;
       const initialPlan = await runtime.resolvePlan(
         initialSnapshot,
-        (options.purpose ?? "text") as any,
-        (options.tier ?? "standard") as any,
+        options.purpose ?? "text",
+        options.tier ?? "standard",
         initialOverride,
       );
       modelProviderClass = initialPlan.selectedTarget?.providerAccount || "normal";
@@ -441,8 +442,8 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
         try {
           const plan = await runtime.resolvePlan(
             snapshot,
-            (options.purpose ?? "text") as any,
-            (options.tier ?? "standard") as any,
+            options.purpose ?? "text",
+            options.tier ?? "standard",
             stepOverride,
           );
           currentModel = plan.selectedTarget.model;

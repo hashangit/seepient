@@ -25,13 +25,45 @@ export async function handleResume(
   state: ConnectionState,
   ctx: WebSocketHandlerContext,
 ): Promise<void> {
-  const session = await ctx.sessionManager.getSession(msg.sessionId, state.apiKeyHash);
+  // W140: enforce the same scope model REST enforces — session reads require agent:read
+  if (!requireWsScope(state, "agent:read")) {
+    safeSend(ws, {
+      type: "error",
+      code: "FORBIDDEN",
+      retryable: false,
+      message: "Requires agent:read scope",
+    });
+    return;
+  }
+
+  if (state.activeChats && state.activeChats.size > 0) {
+    safeSend(ws, {
+      type: "error",
+      code: "REQUEST_IN_FLIGHT",
+      retryable: true,
+      message: "Cannot resume session while a stream is in flight on this connection",
+    });
+    return;
+  }
+
+  let session;
+  try {
+    session = await ctx.sessionManager.getSession(msg.sessionId, state.apiKeyHash);
+  } catch (_err: unknown) {
+    safeSend(ws, {
+      type: "error",
+      code: "SESSION_NOT_FOUND",
+      retryable: false,
+      message: "Session not found or expired",
+    });
+    return;
+  }
   if (!session) {
     safeSend(ws, {
       type: "error",
       code: "SESSION_NOT_FOUND",
       retryable: false,
-      message: `Session ${msg.sessionId} not found or expired`,
+      message: "Session not found or expired",
     });
     return;
   }
@@ -51,13 +83,45 @@ export async function handleReconnect(
   state: ConnectionState,
   ctx: WebSocketHandlerContext,
 ): Promise<void> {
-  const session = await ctx.sessionManager.getSession(msg.sessionId, state.apiKeyHash);
+  // W140: enforce the same scope model REST enforces — session reads require agent:read
+  if (!requireWsScope(state, "agent:read")) {
+    safeSend(ws, {
+      type: "error",
+      code: "FORBIDDEN",
+      retryable: false,
+      message: "Requires agent:read scope",
+    });
+    return;
+  }
+
+  if (state.activeChats && state.activeChats.size > 0) {
+    safeSend(ws, {
+      type: "error",
+      code: "REQUEST_IN_FLIGHT",
+      retryable: true,
+      message: "Cannot reconnect session while a stream is in flight on this connection",
+    });
+    return;
+  }
+
+  let session;
+  try {
+    session = await ctx.sessionManager.getSession(msg.sessionId, state.apiKeyHash);
+  } catch (_err: unknown) {
+    safeSend(ws, {
+      type: "error",
+      code: "SESSION_NOT_FOUND",
+      retryable: false,
+      message: "Session not found or expired",
+    });
+    return;
+  }
   if (!session) {
     safeSend(ws, {
       type: "error",
       code: "SESSION_NOT_FOUND",
       retryable: false,
-      message: `Session ${msg.sessionId} not found or expired`,
+      message: "Session not found or expired",
     });
     return;
   }

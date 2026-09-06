@@ -70,4 +70,8 @@ export interface ProviderRuntimeContract {
   ): Promise<unknown>;
   getConfigStore?(): unknown;
   getCredentialStore?(): CredentialStore;
+  modelCatalog?: {
+    listAvailableModels(config: ProviderEffectiveConfig): Promise<import("../schemas/inference.js").AvailableModel[]>;
+  };
+  removeAllListeners?(): void;
 }

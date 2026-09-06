@@ -1,4 +1,4 @@
-import type { GenerateTextResult, Usage, Message, ApproveToolFn, StepResult } from "../../foundations/types.js";
+import type { AskSeepientResult, Usage, Message, ApproveToolFn, StepResult } from "../../foundations/types.js";
 import { runAgentLoop } from "../../domain/agent-loop.js";
 import { createHookExecutor } from "../../domain/hooks.js";
 import { resolveTools, getAllToolDefinitions } from "../../domain/tool-executor.js";
@@ -8,6 +8,9 @@ import { getDefaultProviderRuntime, type ProviderRuntime } from "../../domain/pr
 import type { ProviderRuntimeContract } from "../../foundations/contracts/provider-runtime.js";
 import type { Middleware } from "../../foundations/contracts/middleware.js";
 import { extractLoopError } from "../sdk/error-surfacing.js";
+import { normalizeHistoryForSend } from "../../domain/sessions/normalize-history.js";
+import { logTransportEvent } from "../logging.js";
+import * as crypto from "node:crypto";
 import { initializeSkillRegistry } from "../../capabilities/skills/index.js";
 import { buildSkillCatalog } from "../../domain/skills/skill-catalog.js";
 
@@ -31,6 +34,8 @@ async function resolveServerSkills(skills?: string[]): Promise<{ skillCatalog?: 
   }
 }
 
+export const MAX_HISTORY_MESSAGES = 50;
+
 /**
  * Server-side generateText using core agent loop directly.
  */
@@ -42,12 +47,13 @@ export async function serverGenerateText(
     tools?: string[];
     maxSteps?: number;
     skills?: string[];
+    history?: Message[];
     runtime?: ProviderRuntime | ProviderRuntimeContract;
     /** Spec 008 wired pipeline (constructed by createServer). */
     wiredPipeline?: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle;
   },
   middleware?: Middleware[],
-): Promise<GenerateTextResult> {
+): Promise<AskSeepientResult> {
   const runtime = options.runtime ?? getDefaultProviderRuntime();
 
   // Resolve tools
@@ -69,12 +75,21 @@ export async function serverGenerateText(
       timestamp: now(),
     });
   }
+  if (options.history && options.history.length > 0) {
+    const trimmed = options.history.slice(-MAX_HISTORY_MESSAGES);
+    messages.push(...trimmed);
+  }
   messages.push({
     id: generateId(),
     role: "user",
     content: options.message,
     timestamp: now(),
   });
+
+  // W150 (D3a): a failed turn leaves a dangling persisted user message;
+  // collapse it on the model-input copy so retries alternate roles.
+  const modelMessages = normalizeHistoryForSend(messages);
+  const inputCount = modelMessages.length;
 
   const snapshot = await runtime.createTurnSnapshot();
 
@@ -83,7 +98,7 @@ export async function serverGenerateText(
     turnSnapshot: snapshot,
     model: options.model,
     modelOverride: options.model,
-    messages,
+    messages: modelMessages,
     toolDefs,
     maxSteps: options.maxSteps ?? 5,
     hooks,
@@ -92,8 +107,10 @@ export async function serverGenerateText(
     wiredPipeline: options.wiredPipeline,
   });
 
-  // Extract final text from last assistant message
-  const lastAssistant = [...result.messages]
+  // B6: extract the answer from THIS turn's output only — on abort/max_steps
+  // with no output, a history assistant would otherwise be returned (and
+  // persisted by the transport) as this turn's answer.
+  const lastAssistant = [...result.messages.slice(inputCount)]
     .reverse()
     .find((m) => m.role === "assistant" && m.content);
   const text = lastAssistant?.content ?? "";
@@ -103,7 +120,7 @@ export async function serverGenerateText(
     steps: result.steps,
     toolCalls: result.toolCalls,
     usage: result.usage,
-    finishReason: result.finishReason as GenerateTextResult["finishReason"],
+    finishReason: result.finishReason as AskSeepientResult["finishReason"],
     messages: result.messages,
   };
 }
@@ -121,6 +138,7 @@ export async function handleAgentChatStream(
     tools?: string[];
     maxSteps?: number;
     skills?: string[];
+    history?: Message[];
     approveTool?: ApproveToolFn;
     runtime?: ProviderRuntime | ProviderRuntimeContract;
     /** Spec 008 wired pipeline (constructed by createServer). */
@@ -150,12 +168,19 @@ export async function handleAgentChatStream(
       timestamp: now(),
     });
   }
+  if (opts.history && opts.history.length > 0) {
+    const trimmed = opts.history.slice(-MAX_HISTORY_MESSAGES);
+    messages.push(...trimmed);
+  }
   messages.push({
     id: generateId(),
     role: "user",
     content: opts.message,
     timestamp: now(),
   });
+
+  // W150 (D3a): same send-time normalization as the non-streaming path.
+  const modelMessages = normalizeHistoryForSend(messages);
 
   let accumulatedText = "";
 
@@ -167,7 +192,7 @@ export async function handleAgentChatStream(
       turnSnapshot: snapshot,
       model: opts.model,
       modelOverride: opts.model,
-      messages,
+      messages: modelMessages,
       toolDefs,
       maxSteps: opts.maxSteps ?? 5,
       hooks,
@@ -216,9 +241,16 @@ export async function handleAgentChatStream(
       });
     }
   } catch (err) {
+    // W162: raw detail stays in the transport log; the wire gets generic text.
+    logTransportEvent({
+      level: "warn",
+      event: "http_request",
+      requestId: crypto.randomUUID(),
+      error: err instanceof Error ? err.message : "Stream failed",
+    });
     opts.onError({
       code: "STREAM_ERROR",
-      message: err instanceof Error ? err.message : "Stream failed",
+      message: "Stream failed",
     });
     opts.onDone({
       text: "",

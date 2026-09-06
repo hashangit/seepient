@@ -286,5 +286,73 @@ describe("custom-tool registration (T304, QS-3.6)", () => {
     await expect(makeRegistrationAnalyzer(missingClassesReg)({}, mockCtx)).rejects.toThrow(
       'Invalid effect "model-egress" in trustedHostTool declaration: "dataClasses" must be a non-empty array',
     );
+
+    // 6. model-egress with dataClasses fills default providerClass and sources
+    const validModelEgressReg = trustedHostTool({
+      definition: {
+        type: "function",
+        function: { name: "valid_egress_tool", description: "d", parameters: { type: "object", properties: {}, required: [] } },
+      },
+      declaration: {
+        effects: [{ kind: "model-egress", dataClasses: ["normal", "sensitive"] }],
+      },
+      async execute() {
+        return "ok";
+      },
+    });
+    const analyzer = makeRegistrationAnalyzer(validModelEgressReg);
+    const prepared = await analyzer({}, mockCtx);
+    expect(prepared.effects).toEqual([
+      {
+        kind: "model-egress",
+        dataClasses: ["normal", "sensitive"],
+        providerClass: "openai",
+        sources: ["valid_egress_tool"],
+      },
+    ]);
+  });
+
+  it("W021: parses host:port from string destinations in network-egress", async () => {
+    const { makeRegistrationAnalyzer } = await import("../../../domain/permissions/registration-dispatch.js");
+    const mockCtx: any = {
+      principalId: "user-1",
+      runId: "run-1",
+      toolCallId: "call-1",
+      modelProviderClass: "openai",
+    };
+
+    const toolWithPorts = trustedHostTool({
+      definition: {
+        type: "function",
+        function: { name: "port_tool", description: "d", parameters: { type: "object", properties: {}, required: [] } },
+      },
+      declaration: {
+        effects: [
+          {
+            kind: "network-egress",
+            destinations: [
+              "example.com:8080",
+              "http://internal.service:3000",
+              "https://secure.api:9443",
+              "plain-domain.org",
+            ],
+          },
+        ],
+      },
+      async execute() {
+        return "ok";
+      },
+    });
+
+    const analyzer = makeRegistrationAnalyzer(toolWithPorts);
+    const action = await analyzer({}, mockCtx);
+    const egress = action.effects.find((e: any) => e.kind === "network-egress") as any;
+    expect(egress).toBeDefined();
+    expect(egress.destinations).toEqual([
+      { scheme: "https", host: "example.com", port: 8080 },
+      { scheme: "http", host: "internal.service", port: 3000 },
+      { scheme: "https", host: "secure.api", port: 9443 },
+      { scheme: "https", host: "plain-domain.org", port: undefined },
+    ]);
   });
 });

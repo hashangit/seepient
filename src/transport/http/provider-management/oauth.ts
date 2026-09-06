@@ -8,6 +8,7 @@ import type { ApiKeyEntry } from "../../auth/auth.js";
 import { hasScope } from "../../auth/auth.js";
 import { redactString } from "../../../foundations/security/redact.js";
 import { createOAuthInteractionShim, createProviderManagerApi } from "../../cli/provider-manager-api.js";
+import { PayloadTooLargeError } from "../body.js";
 import {
   sendJSON,
   sendError,
@@ -59,6 +60,7 @@ export async function handleOAuthStart(
   cleanExpiredAttempts();
 
   if (pendingOAuthAttempts.size >= MAX_PENDING_OAUTH_ATTEMPTS) {
+    res.setHeader("Retry-After", "30");
     sendError(res, 429, "TOO_MANY_REQUESTS", "Too many concurrent pending OAuth attempts. Please wait or complete existing attempts.");
     return;
   }
@@ -173,7 +175,8 @@ export async function handleOAuthComplete(
   let bodyText: string;
   try {
     bodyText = await parseBody(req);
-  } catch {
+  } catch (err) {
+    if (err instanceof PayloadTooLargeError) throw err;
     sendError(res, 400, "BAD_REQUEST", "Failed to read request body");
     return;
   }

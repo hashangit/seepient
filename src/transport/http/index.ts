@@ -10,46 +10,37 @@
 import * as http from "http";
 import * as fs from "fs";
 import * as path from "path";
+import * as crypto from "node:crypto";
 import { homedir } from "os";
 
 import { getSyncBuiltinCatalog } from "../../domain/providers/model-catalog.js";
 import { getDefaultProviderRuntime } from "../../domain/providers/provider-runtime.js";
 import { serverGenerateText, serverStreamText } from "./server-core.js";
 import { createRestHandler, type RestHandlerContext } from "./rest.js";
-import { setupWebSocket, closeWebSocket, type WebSocketHandlerContext } from "../ws/websocket.js";
-import { getOtherClients } from "../ws/connection-registry.js";
-import { createServerApproveTool } from "../ws/approvals.js";
+import { setupWebSocket, type WebSocketHandlerContext } from "../ws/websocket.js";
+import { createConnectionRegistry } from "../ws/connection-registry.js";
 import { ServerSessionManager } from "./session-store.js";
 import { SettingsManager } from "../../domain/settings/settings-manager.js";
 import type { SettingsHandlerContext } from "./settings-handlers.js";
+import type { WsServerHandle } from "../ws/websocket.js";
 import { loadMergedConfig, getConfigPaths, loadJsonConfig } from "../../foundations/config.js";
+import { RateLimiter, globalRateLimiter } from "./rate-limit.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
-export interface ServerOptions {
-  /** Port to listen on (default: SEEPIENT_PORT, PORT, or 7337) */
-  port?: number;
-  /** Host to bind to (default: "0.0.0.0") */
-  host?: string;
-  /** Enable CORS headers (default: true) */
-  cors?: boolean;
-  /** Session TTL in seconds (default: 86400 = 24 hours) */
-  sessionTTL?: number;
-  /** Spec 021 (FR-010): Injected ProviderRuntime */
-  runtime?: import("../../domain/providers/provider-runtime.js").ProviderRuntime | import("../../foundations/contracts/provider-runtime.js").ProviderRuntimeContract;
-  /** Injected session persistence backend (Spec 021) */
-  persist?: import("../../foundations/types.js").PersistenceBackend;
-  /** Spec 021 (FR-010): Injected tenant audit store */
-  auditStore?: import("../../foundations/contracts/execution-brokers.js").AuditStore;
-  /** Spec 021 (FR-010): Injected tenant policy store */
-  policyStore?: import("../../foundations/contracts/execution-brokers.js").PolicyStore;
-  /** Spec 021 (FR-010): Injected tenant capability ledger */
-  capabilityLedger?: import("../../foundations/contracts/capability-ledger.js").CapabilityLedger;
-}
+import type { RunSeepientServerOptions } from "../../foundations/types.js";
+export type { RunSeepientServerOptions };
 
 interface ReadPackageJson {
   version: string;
 }
+
+/**
+ * The `http.Server` returned by `runSeepientServer`, extended with a
+ * `dispose()` handle that un-registers the server's process signal handlers
+ * (registered only when the server listens) — W130 embedding contract.
+ */
+export type SeepientHttpServer = http.Server & { dispose: () => void };
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -64,8 +55,8 @@ function resolveVersion(): string {
   }
 }
 
-function resolvePort(options?: ServerOptions): number {
-  if (options?.port) return options.port;
+function resolvePort(options?: RunSeepientServerOptions): number {
+  if (options?.port !== undefined) return options.port;
   const fromEnv = parseInt(process.env.SEEPIENT_PORT ?? process.env.PORT ?? "", 10);
   if (!isNaN(fromEnv) && fromEnv > 0) return fromEnv;
   return 7337;
@@ -115,12 +106,52 @@ function listSkills(): { name: string; description: string; tags: string[] }[] {
 
 // ── CORS helper ────────────────────────────────────────────────────────
 
+function appendVaryOrigin(res: http.ServerResponse): void {
+  const current = res.getHeader("Vary");
+  if (!current) {
+    res.setHeader("Vary", "Origin");
+  } else {
+    const parts = String(current).split(",").map((s) => s.trim());
+    if (!parts.includes("Origin")) {
+      res.setHeader("Vary", `${current}, Origin`);
+    }
+  }
+}
+
+function getCorsAllowlist(corsOriginsSetting?: string | null): string[] | null {
+  const envVal = process.env.SEEPIENT_CORS_ORIGINS !== undefined
+    ? process.env.SEEPIENT_CORS_ORIGINS
+    : (corsOriginsSetting ?? null);
+  if (!envVal) return null;
+  return envVal.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+}
+
 function addCORSHeaders(
   req: http.IncomingMessage,
   res: http.ServerResponse,
+  corsOriginsSetting?: string | null,
 ): void {
-  const origin = req.headers.origin ?? "*";
-  res.setHeader("Access-Control-Allow-Origin", origin);
+  const allowlist = getCorsAllowlist(corsOriginsSetting);
+  const origin = req.headers.origin;
+
+  if (allowlist !== null) {
+    if (allowlist.includes("*")) {
+      res.setHeader("Access-Control-Allow-Origin", origin ?? "*");
+      if (origin) {
+        appendVaryOrigin(res);
+      }
+    } else if (origin && allowlist.includes(origin.toLowerCase())) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      appendVaryOrigin(res);
+    }
+  } else {
+    // W145: no allowlist configured — reflect nothing. Cross-origin browser
+    // access must be opted into via `server.corsOrigins` (or
+    // SEEPIENT_CORS_ORIGINS, "*" to reflect any origin). The previous
+    // default silently mirrored any Origin header, making the allowlist
+    // feature moot out of the box.
+  }
+
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Seepient-API-Key");
   res.setHeader("Access-Control-Max-Age", "86400");
@@ -146,7 +177,7 @@ function handlePreflight(
  * This sets up REST endpoints, WebSocket upgrade handling,
  * session management, and CORS support.
  */
-export async function createServer(options?: ServerOptions): Promise<http.Server> {
+export async function runSeepientServer(options?: RunSeepientServerOptions): Promise<SeepientHttpServer> {
   const version = resolveVersion();
   const startTime = Date.now();
 
@@ -167,6 +198,7 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
     modelProviderClass: string;
   }) => Promise<import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle>;
   let outboxFlushTimer: NodeJS.Timeout | undefined;
+  let serverOutboxRef: import("../../domain/permissions/audit-recorder.js").TerminalEventOutbox | undefined;
   let serverPipelineFactory: PipelineFactory | undefined;
   const serverPermissionPipelineEnabled = true;
   // FROZEN SCOPE (R9.1): the server control plane does NOT execute model-
@@ -196,13 +228,15 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
     const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
     const { NoneApprovalBroker } = await import("../approval-brokers.js");
     const { LocalAuditStore, TerminalEventOutbox, recoverIndeterminateActions } = await import("../../domain/permissions/audit-recorder.js");
+    const { isLocalAuditStore } = await import("../../foundations/contracts/execution-brokers.js");
     const rootDir = process.cwd();
     const serverAuditStore = options?.auditStore ?? new LocalAuditStore({ root: rootDir });
-    const isCustomAuditStore = options?.auditStore && (options.auditStore.isLocal === false || (options.auditStore.isLocal === undefined && !(options.auditStore instanceof LocalAuditStore)));
+    const isLocalStore = isLocalAuditStore(serverAuditStore);
     // The outbox MUST be backed by the SAME LocalAuditStore the per-request
     // lifecycles use, otherwise the flush timer + recovery operate on a
     // different pending-event set than the one live requests populate.
-    const serverOutbox = isCustomAuditStore ? undefined : new TerminalEventOutbox(serverAuditStore as import("../../domain/permissions/audit-recorder.js").LocalAuditStore);
+    const serverOutbox = isLocalStore ? new TerminalEventOutbox(serverAuditStore as import("../../domain/permissions/audit-recorder.js").LocalAuditStore) : undefined;
+    serverOutboxRef = serverOutbox;
 
     // The periodic flush timer MUST start regardless of whether the one-time
     // recovery (reload/flush/recover) succeeds — a recovery failure must not
@@ -288,17 +322,33 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
   const mergedConfig = loadMergedConfig();
   const projectConfig = loadJsonConfig(configPaths.local);
   const globalConfig = loadJsonConfig(configPaths.global);
-  const settingsManager = new SettingsManager({
+  const settingsManager = options?.settingsManager ?? new SettingsManager({
     config: mergedConfig as unknown as Record<string, any>,
     projectConfigPath: configPaths.local,
     globalConfigPath: configPaths.global,
     projectConfig: projectConfig.config as Record<string, any>,
     globalConfig: globalConfig.config as Record<string, any>,
   });
+  // W131: per-instance WS registries — never module-global
+  const wsRegistry = createConnectionRegistry();
+  // Wire registered server settings: env override -> settings value -> default
+  const corsOriginsSetting = settingsManager.get("server.corsOrigins").value as string | undefined;
+  const maxBodyBytesSetting = settingsManager.get("server.maxBodyBytes").value as number | undefined;
+  const rateLimitRpmSetting = settingsManager.get("server.rateLimitRpm").value as number | undefined;
+
   const settingsHandlerContext: SettingsHandlerContext = {
     settingsManager,
-    getOtherClients,
+    getOtherClients: (excludeWs) => wsRegistry.getOtherClients(excludeWs),
+    maxBodyBytes: maxBodyBytesSetting,
   };
+
+  // W161: re-read server.rateLimitRpm per consume — a settings PATCH takes
+  // effect on the next request instead of silently requiring a restart.
+  const serverRateLimiter = new RateLimiter(
+    rateLimitRpmSetting ?? 300,
+    () => settingsManager.get("server.rateLimitRpm").value as number | undefined,
+  );
+  globalRateLimiter.setDefaultRpm(rateLimitRpmSetting ?? 300);
 
   // Initialize gateway (if enabled)
   let gatewayHandler: ((req: any, res: any, path: string, method: string) => Promise<void>) | undefined;
@@ -326,7 +376,7 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
       if (gatewayInstance) {
         const { createGatewayRestHandler } = await import("./rest-gateway.js");
         const { importOpenApiSpec } = await import("../../capabilities/gateway/openapi-importer.js");
-        gatewayHandler = createGatewayRestHandler({ gateway: gatewayInstance, settingsAdapter: gwSettingsAdapter, importOpenApiSpec });
+        gatewayHandler = createGatewayRestHandler({ gateway: gatewayInstance, settingsAdapter: gwSettingsAdapter, importOpenApiSpec, maxBodyBytes: maxBodyBytesSetting });
 
         // Wire semantic injection middleware
         const { semanticToolInjectionMiddleware } = await import("../../domain/middleware/semantic-tools.js");
@@ -351,8 +401,8 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
         wiredPipeline = await serverPipelineFactory({
           principalId: opts.principalId ?? opts.apiKeyHash ?? "anonymous",
           tenantId: opts.tenantId ?? "default",
-          sessionId: opts.sessionId ?? `sess-${Date.now()}`,
-          runId: `run-${Date.now()}`,
+          sessionId: opts.sessionId ?? crypto.randomUUID(),
+          runId: crypto.randomUUID(),
           workspaceRoot: process.cwd(),
           modelProviderClass: (opts.provider ?? "openai") as string,
         });
@@ -363,6 +413,8 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
     listSkills,
     settingsHandlerContext,
     gatewayHandler,
+    maxBodyBytes: maxBodyBytesSetting,
+    rateLimiter: serverRateLimiter,
   };
 
   const restHandler = createRestHandler(restCtx);
@@ -373,7 +425,7 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
   const server = http.createServer((req, res) => {
     // CORS
     if (enableCors) {
-      addCORSHeaders(req, res);
+      addCORSHeaders(req, res, corsOriginsSetting);
     }
 
     // Preflight
@@ -388,6 +440,8 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
 
   // Create WebSocket handler context
   const wsCtx: WebSocketHandlerContext = {
+    registry: wsRegistry,
+    rateLimiter: serverRateLimiter,
     sessionManager,
     streamText: async (opts) => {
       // Spec 008: construct a per-request pipeline with the WS client's
@@ -397,16 +451,17 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
         wiredPipeline = await serverPipelineFactory({
           principalId: opts.principalId ?? opts.apiKeyHash ?? "anonymous",
           tenantId: opts.tenantId ?? "default",
-          sessionId: opts.sessionId ?? `sess-${Date.now()}`,
-          runId: `run-${Date.now()}`,
+          sessionId: opts.sessionId ?? crypto.randomUUID(),
+          runId: crypto.randomUUID(),
           workspaceRoot: process.cwd(),
           modelProviderClass: (opts.provider ?? "openai") as string,
         });
       }
       serverStreamText({ ...opts, runtime: getServerRuntime(), wiredPipeline }, gatewayMiddleware).catch((err: any) => {
+        // W162: generic wire text; raw detail in the request log only.
         opts.onError({
           code: "STREAM_ERROR",
-          message: err instanceof Error ? err.message : "Stream failed",
+          message: "Stream failed",
         });
         opts.onDone({
           text: "",
@@ -421,43 +476,78 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
   };
 
   // Set up WebSocket (async, but we wait for it)
-  await setupWebSocket(server, wsCtx);
+  const wsHandle: WsServerHandle = await setupWebSocket(server, wsCtx);
 
-  // Graceful shutdown handler
-  const shutdown = () => {
-    console.log("[server] Shutting down...");
+  // Cleanup resources when server closes
+  server.on("close", () => {
     if (outboxFlushTimer) clearInterval(outboxFlushTimer);
     sessionManager.stopCleanup();
-    closeWebSocket();
+    wsHandle.close();
+    // F4: closing the server fully detaches it from the host process — the
+    // signal handlers registered at listen time are removed here, so an
+    // embedder needs only `server.close()` (dispose() stays as an explicit
+    // no-op-safe alias for teardown before close).
+    process.removeListener("SIGINT", shutdownListener);
+    process.removeListener("SIGTERM", shutdownListener);
+  });
+
+  // Graceful shutdown handler — registered ONLY when this server listens.
+  // An embedder using listen:false owns its process signal handling (W130).
+  const shutdown = async () => {
+    console.log("[server] Shutting down...");
+    // W162: in-flight keep-alive sockets would otherwise hold the close open
+    // and never reach the close-event cleanup. Terminate them up front.
+    server.closeAllConnections?.();
+    // One bounded outbox flush so durable audit events are not lost to the
+    // force-exit timer (W162).
+    try {
+      await Promise.race([
+        serverOutboxRef?.flush() ?? Promise.resolve(),
+        new Promise((resolve) => {
+          const t = setTimeout(resolve, 2000);
+          if (typeof t.unref === "function") t.unref();
+        }),
+      ]);
+    } catch {
+      // durability best-effort — the timer still drains via its interval
+    }
     server.close(() => {
       console.log("[server] Server closed.");
       process.exit(0);
     });
-    // Force exit after 5 seconds if connections don't close
+    // Force exit after 5 seconds if connections do not close
     setTimeout(() => process.exit(0), 5000);
   };
 
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  const willListen = options?.listen !== false;
+  const shutdownListener = () => void shutdown();
+  if (willListen) {
+    process.on("SIGINT", shutdownListener);
+    process.on("SIGTERM", shutdownListener);
+  }
 
-  return server;
-}
+  // Dispose handle (C5): full teardown — un-registers this server's signal
+  // handlers AND closes the server (which also detaches the WS layer and,
+  // via the close event, re-runs the handler removal idempotently).
+  (server as SeepientHttpServer).dispose = () => {
+    process.removeListener("SIGINT", shutdownListener);
+    process.removeListener("SIGTERM", shutdownListener);
+    server.close();
+  };
 
-// ── Convenience starter ────────────────────────────────────────────────
-
-/**
- * Create and start listening. Returns the running server.
- */
-export async function startServer(options?: ServerOptions): Promise<http.Server> {
-  const server = await createServer(options);
-
-  const port = resolvePort(options);
-  const host = options?.host ?? "0.0.0.0";
-
-  return new Promise((resolve) => {
-    server.listen(port, host, () => {
-      console.log(`[seepient] Server listening on ${host}:${port}`);
-      resolve(server);
+  // Listen immediately unless listen: false
+  if (willListen) {
+    const port = resolvePort(options);
+    const host = options?.host ?? "0.0.0.0";
+    await new Promise<void>((resolve) => {
+      server.listen(port, host, () => {
+        // W162: port 0 means an OS-assigned ephemeral port — print the real one.
+        const boundPort = (server.address() as { port?: number } | null)?.port ?? port;
+        console.log(`[seepient] Server listening on ${host}:${boundPort}`);
+        resolve();
+      });
     });
-  });
+  }
+
+  return server as SeepientHttpServer;
 }

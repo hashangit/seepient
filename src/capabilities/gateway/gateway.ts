@@ -8,6 +8,7 @@
 import { Client, StdioClientTransport, SSEClientTransport, CreateMessageRequestSchema } from '../../vendors/mcp.js';
 
 import { GatewayError } from '../../foundations/errors.js';
+import { safeSsrfFetch } from '../../foundations/network/ssrf-fetch.js';
 import type { ToolModule } from '../../foundations/contracts/tool.js';
 import { GatewaySettingsAdapter } from './settings-adapter.js';
 import { scoreRelevance } from './semantic-scorer.js';
@@ -434,6 +435,16 @@ export class MCPGateway {
     }
 
     const url = new URL(reqPath, target.baseUrl);
+    // W181: a model-controlled absolute path must not repoint a registered
+    // target at another origin — the target's credential is attached to this
+    // request, so cross-origin resolution would ship it to a third party.
+    if (url.origin !== new URL(target.baseUrl).origin) {
+      throw new GatewayError(
+        `REST target "${targetName}" requests must stay on the registered origin`,
+        targetName,
+        false,
+      );
+    }
     if (query) {
       for (const [k, v] of Object.entries(query)) {
         url.searchParams.set(k, v);
@@ -465,7 +476,10 @@ export class MCPGateway {
 
     const start = Date.now();
     try {
-      const response = await fetch(url.toString(), {
+      // W142: registered-target REST calls go through the SSRF-validated,
+      // pinned fetch — a REST target must not become a plain-fetch SSRF
+      // primitive against internal services.
+      const response = await safeSsrfFetch(url.toString(), {
         method,
         headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers },
         body: body ? JSON.stringify(body) : undefined,

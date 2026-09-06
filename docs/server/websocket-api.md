@@ -310,7 +310,23 @@ Signals the end of a generation. Always sent as the final message in a chat flow
 | `usage.completionTokens` | `number` | Tokens in the completion |
 | `usage.totalTokens` | `number` | Total tokens consumed |
 | `usage.cost` | `number` | Estimated cost in USD |
-| `finishReason` | `string` | `"stop"`, `"tool_calls"`, `"length"`, or `"error"` |
+| `finishReason` | `string` | `"stop"`, `"max_steps"`, `"error"`, or `"aborted"` |
+
+### `error`
+
+An error occurred. May be sent at any time during a chat flow or connection lifecycle. Error frames carry generic wire text; operators diagnose details from the server's JSON-line log. Codes a client can receive:
+
+| Code | Retryable | When |
+|---|---|---|
+| `FORBIDDEN` | No | The key lacks the scope the message requires (`agent:run` for chat, `agent:read` for resume/reconnect) |
+| `RATE_LIMITED` | Yes | The key exceeded the shared per-key rate limit (WS messages consume the same budget as REST) |
+| `REQUEST_IN_FLIGHT` | Yes | Another chat turn is running on this connection or session |
+| `SESSION_ERROR` | No | Session lookup/persistence failed mid-turn |
+| `SESSION_NOT_FOUND` | No | Session expired, foreign-owned, or missing |
+| `SESSION_LIMIT` | No | Per-key concurrent-session cap reached |
+| `STREAM_ERROR` | No | The model stream failed |
+| `PROVIDER_ERROR` | Yes | LLM provider error (rate limit, auth, outage) |
+| `INTERNAL_ERROR` | No | Unexpected server error |
 
 ### `error`
 

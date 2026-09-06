@@ -5,8 +5,10 @@
  */
 
 import type { IncomingMessage } from "node:http";
+import * as crypto from "node:crypto";
 import { authMiddleware } from "../auth/auth.js";
 import { hashKey } from "../http/session-store.js";
+import { logTransportEvent } from "../logging.js";
 import type {
   WebSocket,
   ClientMessage,
@@ -22,7 +24,7 @@ import {
   handleWsGetSettings,
   handleWsUpdateSettings,
 } from "../http/settings-handlers.js";
-import { activeConnections, safeSend } from "./connection-registry.js";
+import { safeSend } from "./connection-registry.js";
 import { handleChat, handleAbort } from "./chat.js";
 import { handleToolApprovalResponse } from "./approvals.js";
 import {
@@ -62,14 +64,14 @@ export function handleConnection(
 
   const state: ConnectionState = {
     sessionId: null,
-    currentAbortController: null,
+    activeChats: new Set(),
     activeProvider: null,
     activeModel: null,
     apiKeyHash: key.keyHash ?? (key.key ? hashKey(key.key) : ""),
     apiKey: key,
   };
 
-  activeConnections.set(ws, state);
+  ctx.registry.activeConnections.set(ws, state);
 
   // ── Message dispatch ───────────────────────────────────────────────
 
@@ -87,21 +89,91 @@ export function handleConnection(
       return;
     }
 
+    // W146: WS messages consume from the same per-key limiter as REST.
+    if (ctx.rateLimiter && !ctx.rateLimiter.consume(state.apiKeyHash)) {
+      const retryAfter = ctx.rateLimiter.getRetryAfterSeconds(state.apiKeyHash);
+      safeSend(ws, {
+        type: "error",
+        code: "RATE_LIMITED",
+        retryable: true,
+        message: `Rate limit exceeded${retryAfter > 0 ? `, retry after ${retryAfter}s` : ""}`,
+      });
+      return;
+    }
+
+    const requestId = (msg as any).id ?? crypto.randomUUID();
+    logTransportEvent({
+      level: "info",
+      event: "ws_dispatch",
+      requestId,
+      method: msg.type,
+      apiKeyHashPrefix: state.apiKeyHash ? state.apiKeyHash.slice(0, 8) : undefined,
+    });
+
     switch (msg.type) {
       case "chat":
-        handleChat(ws, msg, state, ctx);
+        void handleChat(ws, msg, state, ctx).catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : String(err);
+          logTransportEvent({
+            level: "error",
+            event: "ws_dispatch",
+            requestId,
+            method: msg.type,
+            apiKeyHashPrefix: state.apiKeyHash ? state.apiKeyHash.slice(0, 8) : undefined,
+            error: message,
+          });
+          safeSend(ws, {
+            type: "error",
+            code: "INTERNAL_ERROR",
+            retryable: false,
+            message: "Internal server error",
+          });
+        });
         break;
       case "abort":
         handleAbort(ws, msg, state);
         break;
       case "tool_approval_response":
-        handleToolApprovalResponse(ws, msg);
+        handleToolApprovalResponse(ws, msg, ctx.registry);
         break;
       case "resume":
-        void handleResume(ws, msg, state, ctx);
+        // W154e: unhandled rejections from these paths would crash the process
+        void handleResume(ws, msg, state, ctx).catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : String(err);
+          logTransportEvent({
+            level: "error",
+            event: "ws_dispatch",
+            requestId,
+            method: msg.type,
+            apiKeyHashPrefix: state.apiKeyHash ? state.apiKeyHash.slice(0, 8) : undefined,
+            error: message,
+          });
+          safeSend(ws, {
+            type: "error",
+            code: "INTERNAL_ERROR",
+            retryable: false,
+            message: "Internal server error",
+          });
+        });
         break;
       case "reconnect":
-        void handleReconnect(ws, msg, state, ctx);
+        void handleReconnect(ws, msg, state, ctx).catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : String(err);
+          logTransportEvent({
+            level: "error",
+            event: "ws_dispatch",
+            requestId,
+            method: msg.type,
+            apiKeyHashPrefix: state.apiKeyHash ? state.apiKeyHash.slice(0, 8) : undefined,
+            error: message,
+          });
+          safeSend(ws, {
+            type: "error",
+            code: "INTERNAL_ERROR",
+            retryable: false,
+            message: "Internal server error",
+          });
+        });
         break;
       case "switch_provider":
         handleSwitchProvider(ws, msg, state);
@@ -151,22 +223,28 @@ export function handleConnection(
   // ── Close ──────────────────────────────────────────────────────────
 
   ws.on("close", () => {
-    // Abort any in-flight stream
-    if (state.currentAbortController) {
-      state.currentAbortController.abort();
-      state.currentAbortController = null;
+    // Abort any in-flight streams
+    for (const controller of state.activeChats) {
+      controller.abort();
     }
-    activeConnections.delete(ws);
+    state.activeChats.clear();
+    ctx.registry.activeConnections.delete(ws);
   });
 
   // ── Error ──────────────────────────────────────────────────────────
 
   ws.on("error", (err: Error) => {
-    console.error("[ws] Connection error:", err.message);
-    if (state.currentAbortController) {
-      state.currentAbortController.abort();
-      state.currentAbortController = null;
+    logTransportEvent({
+      level: "error",
+      event: "ws_error",
+      requestId: crypto.randomUUID(),
+      apiKeyHashPrefix: state.apiKeyHash ? state.apiKeyHash.slice(0, 8) : undefined,
+      error: err.message,
+    });
+    for (const controller of state.activeChats) {
+      controller.abort();
     }
-    activeConnections.delete(ws);
+    state.activeChats.clear();
+    ctx.registry.activeConnections.delete(ws);
   });
 }

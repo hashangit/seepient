@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createMockRuntime } from "../../../domain/__tests__/test-doubles.js";
-import { createSeepient, generateText, streamText } from "../index.js";
+import { createSeepient, askSeepient } from "../index.js";
 import { serverStreamText } from "../../http/server-core.js";
 import { SeepientError } from "../../../foundations/errors.js";
 
@@ -27,17 +27,17 @@ describe("Centralized Loop Error Surfacing (Task 1.2)", () => {
     };
   }
 
-  it("generateText throws typed SeepientError on provider failure", async () => {
+  it("askSeepient throws typed SeepientError on provider failure", async () => {
     const runtime = createFailingRuntime("RATE_LIMIT", "Too many requests");
     await expect(
-      generateText("Hello", {
+      askSeepient("Hello", {
         runtime: runtime as any,
         model: "mock-model",
       }),
     ).rejects.toThrowError(SeepientError);
 
     try {
-      await generateText("Hello", {
+      await askSeepient("Hello", {
         runtime: runtime as any,
         model: "mock-model",
       });
@@ -67,11 +67,11 @@ describe("Centralized Loop Error Surfacing (Task 1.2)", () => {
     }
   });
 
-  it("streamText invokes onError and finishes with error on provider failure", async () => {
+  it("askSeepient with stream: true invokes onError and finishes with error on provider failure", async () => {
     const runtime = createFailingRuntime("QUOTA_EXCEEDED", "Account quota depleted");
     const onError = vi.fn();
 
-    const stream = await streamText("Hello", {
+    const stream = await askSeepient("Hello", { stream: true,
       runtime: runtime as any,
       model: "mock-model",
       onError,
@@ -163,7 +163,7 @@ describe("Centralized Loop Error Surfacing (Task 1.2)", () => {
     controller.abort();
 
     const onError = vi.fn();
-    const stream = await streamText("Hello", {
+    const stream = await askSeepient("Hello", { stream: true,
       runtime: runtime as any,
       model: "mock-model",
       signal: controller.signal,

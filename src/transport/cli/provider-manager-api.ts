@@ -19,7 +19,7 @@ import type {
 import type { ThinkingLevel } from "../../foundations/schemas/inference.js";
 import { redactString, redactUrlCredentials, isSensitiveKey } from "../../foundations/security/redact.js";
 import { SeepientError } from "../../foundations/errors.js";
-import { validateEndpointUrl } from "../http/ssrf-validator.js";
+import { validateEndpointUrl } from "../../foundations/network/ssrf-fetch.js";
 import { getCanonicalOAuthFlowId, isOAuthSupported, FLOW_MAP } from "../../domain/providers/oauth-service.js";
 export { isOAuthSupported, getCanonicalOAuthFlowId, FLOW_MAP };
 

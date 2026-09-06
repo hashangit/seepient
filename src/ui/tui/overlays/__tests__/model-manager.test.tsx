@@ -24,6 +24,38 @@ async function type(inst: { stdin: { write(s: string): void } }, s: string): Pro
   await delay();
 }
 
+/**
+ * Send a key and wait for `frameMatch` to appear in the frame. Ink input
+ * handlers subscribe in passive effects — under CI load a keystroke can land
+ * before the target handler is mounted and be dropped, so re-send once after
+ * a short grace period instead of failing the whole flow.
+ */
+async function typeUntil(
+  inst: { stdin: { write(s: string): void }; lastFrame(): string | undefined },
+  key: string,
+  frameMatch: string | RegExp,
+  what: string,
+  timeoutMs = 5000,
+): Promise<void> {
+  const matches = () => {
+    const frame = inst.lastFrame() ?? "";
+    return typeof frameMatch === "string" ? frame.includes(frameMatch) : frameMatch.test(frame);
+  };
+  const start = Date.now();
+  let resent = false;
+  inst.stdin.write(key);
+  while (!matches()) {
+    if (!resent && Date.now() - start > 750) {
+      inst.stdin.write(key);
+      resent = true;
+    }
+    if (Date.now() - start > timeoutMs) {
+      throw new Error(`typeUntil timeout: ${what}`);
+    }
+    await delay(20);
+  }
+}
+
 function model(id: string, provider: string, over: Record<string, unknown> = {}): AvailableModel {
   return {
     id, upstreamProvider: provider, displayName: id, contextWindow: 200_000,
@@ -182,10 +214,10 @@ describe("Jobs board", () => {
     await vi.waitFor(() => {
       expect(inst.lastFrame() ?? "").toContain("Assign text·standard");
     }, { timeout: 3000 });
-    await type(inst, ENTER); // thinking step
-    await vi.waitFor(() => {
-      expect(inst.lastFrame() ?? "").toMatch(/Thinking effort|Assign text·standard/);
-    }, { timeout: 3000 });
+    // Strict wait: the picker must actually be in the thinking phase before
+    // the next Enter — the previous OR-wait could pass while the first Enter
+    // was dropped, leaving the third Enter to hit the wrong state (CI flake).
+    await typeUntil(inst, ENTER, "Thinking effort for", "picker advanced to thinking step");
     await type(inst, ENTER); // accept default level → assign
     await vi.waitFor(() => {
       expect(setAssignment).toHaveBeenCalled();

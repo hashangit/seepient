@@ -87,15 +87,71 @@ export function makeRegistrationAnalyzer(
         args: jsonArgs as any,
       };
 
-      const effects: EffectRequest[] = (decl?.effects as EffectRequest[]) ?? [
-        { kind: "host-callback", toolName },
-        {
-          kind: "model-egress",
-          providerClass: ctx.modelProviderClass,
-          dataClasses: ["normal", "sensitive"],
-          sources: [toolName],
-        },
-      ];
+      const effects: EffectRequest[] = decl?.effects
+        ? decl.effects.map((e): EffectRequest => {
+            if (e.kind === "model-egress") {
+              return {
+                kind: "model-egress",
+                dataClasses: e.dataClasses,
+                providerClass: e.providerClass ?? ctx.modelProviderClass,
+                sources: e.sources ?? [toolName],
+              };
+            }
+            if (e.kind === "network-egress") {
+              return {
+                kind: "network-egress",
+                destinations:
+                  e.destinations === "dynamic"
+                    ? "dynamic"
+                    : e.destinations.map((d) => {
+                        if (typeof d !== "string") return d;
+                        const hasHttp = d.startsWith("http://");
+                        const hasHttps = d.startsWith("https://");
+                        const scheme = hasHttp ? ("http" as const) : ("https" as const);
+                        const urlString = hasHttp || hasHttps ? d : `https://${d}`;
+                        try {
+                          const u = new URL(urlString);
+                          const rawHostname = u.hostname;
+                          const host = rawHostname.startsWith("[") && rawHostname.endsWith("]")
+                            ? rawHostname.slice(1, -1)
+                            : rawHostname;
+                          return {
+                            scheme,
+                            host,
+                            port: u.port ? Number(u.port) : undefined,
+                          };
+                        } catch {
+                          const withoutScheme = d.replace(/^https?:\/\//, "");
+                          const colonIdx = withoutScheme.lastIndexOf(":");
+                          if (colonIdx !== -1) {
+                            const hostPart = withoutScheme.slice(0, colonIdx);
+                            const portPart = Number(withoutScheme.slice(colonIdx + 1));
+                            if (!isNaN(portPart)) {
+                              return { scheme, host: hostPart, port: portPart };
+                            }
+                          }
+                          return { scheme, host: withoutScheme, port: undefined };
+                        }
+                      }),
+              };
+            }
+            if (e.kind === "secret-use") {
+              return {
+                kind: "secret-use",
+                secretRefs: e.secretRefs,
+              };
+            }
+            throw new Error(`Unsupported effect declaration kind: ${(e as any).kind}`);
+          })
+        : [
+            { kind: "host-callback", toolName },
+            {
+              kind: "model-egress",
+              providerClass: ctx.modelProviderClass,
+              dataClasses: ["normal", "sensitive"],
+              sources: [toolName],
+            },
+          ];
 
       const risk: ToolRiskCategory = decl?.risk ?? "destructive";
 

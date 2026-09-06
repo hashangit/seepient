@@ -1,13 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
 import { createHookExecutor } from "../hooks.js";
 import { SeepientError } from "../../foundations/errors.js";
-import type { Hooks, StepResult, GenerateTextResult } from "../../foundations/types.js";
+import type { Hooks, StepResult, AskSeepientResult } from "../../foundations/types.js";
 
 function makeStep(): StepResult {
   return { type: "text", content: "hi", timestamp: Date.now() };
 }
 
-function makeResult(): GenerateTextResult {
+function makeResult(): AskSeepientResult {
   return {
     text: "done",
     steps: [],

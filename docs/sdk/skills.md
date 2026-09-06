@@ -21,12 +21,14 @@ When the application starts, `discoverSkills(cwd)` scans configured skill direct
 
 After discovery, `buildSkillCatalog(metadata)` generates a compact text block listing every skill's name, description, and tags. This catalog is injected into the system prompt via the `skillCatalog` option on `AgentLoopOptions`, so the LLM always knows what skills are available.
 
-```
-discoverSkills(cwd)
-  ├── parseFrontmatter() for each SKILL.md  →  Skill objects (no bodies)
-  ├── buildSkillCatalog(metadata)           →  "- docker-ops: Docker container management [docker, deployment]"
-  └── Catalog appended to system prompt
-```
+<DiagramFlow
+  :steps="[
+    { title: 'discoverSkills(cwd)' },
+    { title: 'parseFrontmatter() for each SKILL.md', desc: 'Yields Skill objects without bodies' },
+    { title: 'buildSkillCatalog(metadata)', desc: 'Produces catalog lines such as \u0022- docker-ops: Docker container management [docker, deployment]\u0022' },
+    { title: 'Catalog appended to the system prompt' }
+  ]"
+/>
 
 ### Phase 2: Activation (when invoked)
 
@@ -44,9 +46,9 @@ See [Two invocation paths](#two-invocation-paths) for a detailed walkthrough of 
 Skills are loaded automatically when you specify skill names:
 
 ```typescript
-import { generateText } from "seepient";
+import { askSeepient } from "seepient";
 
-const result = await generateText("Deploy the staging environment", {
+const result = await askSeepient("Deploy the staging environment", {
   skills: ["docker-ops"],
   tools: ["core"],
 });
@@ -76,7 +78,7 @@ import { initializeSkillRegistry } from "seepient";
 await initializeSkillRegistry(process.cwd());
 ```
 
-Call this at application startup to ensure skills are discovered before the first agent invocation. Seepient Agent calls this automatically when you pass `skills` to `generateText()` or `createSeepient()`, but you may call it explicitly to pre-load skills or inspect the registry.
+Call this at application startup to ensure skills are discovered before the first agent invocation. Seepient Agent calls this automatically when you pass `skills` to `askSeepient()` or `createSeepient()`, but you may call it explicitly to pre-load skills or inspect the registry.
 
 ## Skill search paths
 
@@ -118,10 +120,10 @@ Seepient ships skills in the bundled `skills/` directory. They are discovered au
 Activate any of them by name:
 
 ```typescript
-import { generateText } from "seepient";
+import { askSeepient } from "seepient";
 
 // Route any design request through the OpenDesign catalogue
-await generateText("Design a dark-mode login screen for a fintech app", {
+await askSeepient("Design a dark-mode login screen for a fintech app", {
   skills: ["design"],
   tools: ["core", "comm", "advanced"],
 });
@@ -521,7 +523,7 @@ The `use_skill` tool path does **not** perform provider switching or `@path` res
 
 ## Related APIs
 
-- [generateText()](/sdk/generate-text) -- One-shot execution with skills
+- [askSeepient()](/sdk/ask-seepient) -- One-shot execution with skills
 - [createSeepient()](/sdk/create-seepient) -- Stateful agent with skill support
 - [Custom Tools](/sdk/custom-tools) -- Build custom tools
 - [Types](/sdk/types) -- Full TypeScript type reference

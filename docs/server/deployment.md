@@ -113,15 +113,63 @@ ANTHROPIC_API_KEY=sk-ant-... seepient server
 ### Programmatic
 
 ```typescript
-import { startServer } from "seepient/server";
+import { runSeepientServer } from "seepient/server";
 
-const server = await startServer({
+const server = await runSeepientServer({
   port: 7337,
   host: "0.0.0.0",
   cors: true,
   sessionTTL: 86400,
 });
 ```
+
+### Embedding the server in another process
+
+`runSeepientServer()` is designed to be embedded inside a host application (an
+existing Express/Fastify app's process, a worker, a control plane).
+
+**Return value.** It returns the Node.js `http.Server` (typed as
+`SeepientHttpServer`, i.e. `http.Server & { dispose(): void }`). You may attach
+your own listeners to it, call `server.address()`, close it, etc.
+
+**`listen: false`.** Pass `listen: false` to receive the configured
+`http.Server` *without* it listening — for example to mount the server on your
+own host/port, or behind a router you control:
+
+```typescript
+import { runSeepientServer } from "seepient/server";
+
+const server = await runSeepientServer({ listen: false });
+await new Promise<void>((resolve) => server.listen(8080, "127.0.0.1", resolve));
+```
+
+**Signal handlers.** When the server *listens*, `runSeepientServer` registers
+`SIGINT`/`SIGTERM` handlers that close the server and force-exit after a
+5-second drain. When `listen: false` is used, **no signal handlers are
+registered** — the embedder owns process lifecycle entirely. Repeated
+construction never accumulates listeners.
+
+**Dispose.** The returned server carries a `dispose()` handle for full
+teardown: it un-registers the signal handlers `runSeepientServer` registered
+for that instance AND closes the server (which also detaches its WebSocket
+layer). Note that `server.close()` alone is already enough — the close event
+removes the signal handlers too:
+
+```typescript
+server.dispose();   // un-registers handlers + closes the server
+// or simply:
+server.close();     // close event detaches the signal handlers as well
+```
+
+**Multiple servers per process.** Each `runSeepientServer()` call creates a
+fully independent HTTP + WebSocket stack (per-instance WebSocket server,
+connection registry, approval store). Closing one server never closes another
+server's connections. One caveat: default on-disk state (sessions under
+`./.seepient/sessions`, the local audit store, durable approvals under
+`~/.seepient`) is process-wide by default — when embedding multiple servers,
+inject per-server `persist`, `auditStore`, `policyStore`, and
+`capabilityLedger` contracts to keep their state separated (see
+[Stateless workers](/sdk/stateless-workers)).
 
 ### Process manager (PM2)
 
@@ -151,6 +199,10 @@ pm2 startup
 | `LLM_MODEL` | Default model for OpenAI-compatible provider (default: `gpt-5.4`) | No |
 | `LLM_PROVIDER` | Default provider (auto-detected if not set) | No |
 | `SEEPIENT_SKILLS_PATH` | Colon-separated paths to skill directories | No |
+| `SEEPIENT_MAX_BODY_BYTES` | Request body size cap in bytes across all REST routes — chat, settings, gateway, and provider management (default: 10485760). Set to `0` for an unlimited body size | No |
+| `SEEPIENT_CORS_ORIGINS` | Comma-separated CORS origin allowlist, or `*` to reflect any origin (default: no CORS headers at all) | No |
+| `SEEPIENT_WS_MAX_CONNECTIONS_PER_KEY` | Per-key WebSocket connection cap (default: 50); dead peers are terminated by a 30s heartbeat sweep and release their slot | No |
+| `SEEPIENT_RATE_LIMIT_RPM` | Per-key requests-per-minute cap for REST and WebSocket traffic (default: 300). Set to `0` to disable | No |
 
 ::: tip Provider auto-detection
 If `LLM_PROVIDER` is not set, the server uses the first configured provider. If `OPENAI_API_KEY` is set, OpenAI becomes the default. Otherwise, the first provider with a configured API key is used.
@@ -196,7 +248,9 @@ Attempt 1 ──► wait 1s ──► Attempt 2 ──► wait 2s ──► Atte
 
 ## Graceful shutdown
 
-The server handles `SIGINT` and `SIGTERM` with a 5-second drain timeout:
+When `runSeepientServer()` starts a *listening* server it handles `SIGINT` and
+`SIGTERM` with a 5-second drain timeout (`listen: false` servers register no
+signal handlers — the embedder owns shutdown):
 
 1. Stops accepting new connections
 2. Closes all active WebSocket connections with code `1001`

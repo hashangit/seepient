@@ -112,4 +112,54 @@ describe("SDK Concurrency & Mutex Correctness (Task 1.1, Task 1.2)", () => {
     expect(recordedCalls[1].purpose).toBe("vision");
     expect(recordedCalls[1].tier).toBe("complex");
   });
+
+  it("chatStream() mutex survives persistence backend failure (FR-007, E7)", async () => {
+    let saveCount = 0;
+    const rejectingBackend = {
+      save: async () => {
+        saveCount++;
+        if (saveCount === 1) {
+          throw new Error("Persistence failed intentionally on turn 1");
+        }
+      },
+      load: async () => null,
+      delete: async () => {},
+      list: async () => [],
+    };
+
+    const runtime = createMockRuntime([
+      { content: "Turn 1 content" },
+      { content: "Turn 2 content" },
+    ]);
+
+    const seepient = await createSeepient({
+      runtime,
+      tools: [],
+      persist: {
+        __persistenceBackend: true as const,
+        save: rejectingBackend.save,
+        load: rejectingBackend.load,
+        delete: rejectingBackend.delete,
+        list: rejectingBackend.list,
+      },
+    });
+
+    const stream = await seepient.chatStream("Turn 1 prompt");
+    for await (const _chunk of stream.textStream) {
+      // consume
+    }
+
+    await new Promise((r) => setTimeout(r, 20));
+
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("Timeout: Turn 2 hung waiting for turn 1 mutex")), 2000),
+    );
+
+    const turn2Result = await Promise.race([
+      seepient.chat("Turn 2 prompt"),
+      timeoutPromise,
+    ]);
+
+    expect(turn2Result.text).toBe("Turn 2 content");
+  });
 });

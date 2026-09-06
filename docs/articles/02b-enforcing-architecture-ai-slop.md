@@ -1,3 +1,8 @@
+---
+title: Taming the AI Slop
+description: Automated architectural guardrails and machine-enforced governance for AI-assisted code generation.
+---
+
 # Enforcing Architecture in the Age of AI Code: Taming the Slop
 
 AI code generation tools have dramatically transformed software development. Building software can now happen tenfold faster, prototyping features, writing test suites, and generating boilerplate code in a fraction of the time previously required.

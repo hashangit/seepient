@@ -20,7 +20,7 @@ export {
 } from './agent-loop.js';
 export { createHookExecutor, type HookExecutor } from './hooks.js';
 export { StreamManager } from './streaming/stream-manager.js';
-export { createSessionStore, createMemoryStore, createPersistenceBackend, persistSession, registerBackend, FilePersistenceBackend, MemoryPersistenceBackend } from './sessions/session-store.js';
+export { createPersistenceBackend, persistSession, registerBackend, FilePersistenceBackend, MemoryPersistenceBackend } from './sessions/session-store.js';
 export type { BackendFactory } from './sessions/session-store.js';
 
 // Export error classes (canonical definitions live in ./errors.ts)
@@ -48,18 +48,15 @@ export type {
   ToolResult,
   // Hooks
   Hooks,
-  // generateText
-  GenerateTextOptions,
-  GenerateTextResult,
-  // streamText
-  StreamTextOptions,
-  StreamTextResult,
+  // askSeepient
+  AskSeepientOptions,
+  AskSeepientResult,
+  AskSeepientStreamResult,
   // createSeepient
   CreateSeepientOptions,
   Seepient,
   AgentResponse,
   // Session
-  SessionStore,
   SessionData,
   PersistenceBackend,
   PersistenceConfig,

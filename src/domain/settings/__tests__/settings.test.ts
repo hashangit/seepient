@@ -291,6 +291,18 @@ describe('SettingsManager', () => {
     }
   });
 
+  it('env var value takes precedence over config settings value (W038.7)', () => {
+    process.env.SMTP_HOST = 'env-smtp.example.com';
+    try {
+      const mgr = createTestManager({ smtpHost: 'config-smtp.example.com' });
+      const result = mgr.get('smtp.host');
+      expect(result.value).toBe('env-smtp.example.com');
+      expect(result.origin).toBe('env: SMTP_HOST');
+    } finally {
+      delete process.env.SMTP_HOST;
+    }
+  });
+
   it('origin resolution falls back to default', () => {
     const mgr = createTestManager();
     const result = mgr.get('smtp.host');

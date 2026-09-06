@@ -18,6 +18,7 @@ import {
   recoverIndeterminateActions,
   idempotencyKey,
 } from "../audit-recorder.js";
+import { isLocalAuditStore } from "../../../foundations/contracts/execution-brokers.js";
 
 let dir: string;
 beforeEach(() => {
@@ -28,6 +29,7 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 describe("TerminalEventOutbox (T109 fix)", () => {
   it("enqueue marks the deployment unhealthy", async () => {
     const store = new LocalAuditStore({ root: dir });
+    expect(isLocalAuditStore(store)).toBe(true);
     const outbox = new TerminalEventOutbox(store);
     expect(outbox.isHealthy()).toBe(true);
     await outbox.enqueue(
