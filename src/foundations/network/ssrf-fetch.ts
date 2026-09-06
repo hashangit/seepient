@@ -91,6 +91,19 @@ export async function validateEndpointUrl(
   return { valid: true, resolvedIps: ips };
 }
 
+/**
+ * W182/A6: headers that may survive a CROSS-ORIGIN redirect — content
+ * negotiation and hop-safety only, never identity or credentials. Same-origin
+ * redirects keep the original headers.
+ */
+const CROSS_ORIGIN_REDIRECT_KEEP: ReadonlySet<string> = new Set([
+  "accept",
+  "accept-language",
+  "accept-encoding",
+  "user-agent",
+  "range",
+]);
+
 export interface SafeSsrfFetchOptions {
   ssrfAllowPrivate?: boolean;
   deps?: {
@@ -267,7 +280,7 @@ export async function safeSsrfFetch(
       }
 
       // Clone headers and sanitize
-      const nextHeaders: Record<string, string> = { ...reqHeaders };
+      let nextHeaders: Record<string, string> = { ...reqHeaders };
 
       // Strip Content-Length and Content-Type if body was stripped
       if (nextBody === undefined) {
@@ -279,19 +292,18 @@ export async function safeSsrfFetch(
         }
       }
 
-      // Cross-origin redirects strip Authorization, Cookie, api-key, and x-api-key
+      // W182/A6: on a cross-origin redirect the request is rebuilt from an
+      // ALLOWLIST — a denylist (authorization/cookie/api-key/x-api-key) can
+      // never cover credentials injected under arbitrary custom names
+      // (e.g. a connector's target.auth.name header).
       if (currentParsed.origin !== targetParsed.origin) {
+        const kept: Record<string, string> = {};
         for (const k of Object.keys(nextHeaders)) {
-          const lower = k.toLowerCase();
-          if (
-            lower === "authorization" ||
-            lower === "cookie" ||
-            lower === "api-key" ||
-            lower === "x-api-key"
-          ) {
-            delete nextHeaders[k];
+          if (CROSS_ORIGIN_REDIRECT_KEEP.has(k.toLowerCase())) {
+            kept[k] = nextHeaders[k];
           }
         }
+        nextHeaders = kept;
       }
 
       const nextInit: RequestInit = {

@@ -62,6 +62,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Documentation reorganization**: Removed duplicate `docs/embedding/workers.md` in favor of canonical `docs/sdk/stateless-workers.md`, repointed VitePress sidebar and documentation references, and configured `.gitignore` for `docs/.vitepress/dist`.
 - **Documentation truth**: Corrected docs license to BUSL-1.1; removed phantom `seepient/react` guide; corrected `/sdk/session-persistence` links and server `persist` option.
 
+### Post-release review remediation (021-4 review rounds 2–3)
+
+**Breaking changes:**
+- **Legacy `SessionStore` retired**: the deprecated messages-only `SessionStore` interface, its `createSessionStore`/`createMemoryStore` factories, and the SDK's silent compatibility adapter are removed per the pre-1.0 no-shims policy — sessions saved through it could never be resumed (the adapter dropped the ownership stamp). Use `PersistenceBackend` (`save(id, SessionData)` / `load(id)` returning `SessionData`, branded with `__persistenceBackend`) or `createPersistenceBackend({...})`.
+- **Streaming `fullText` rejects on failed turns** (review F2): `askSeepient({... stream: true })` and `Seepient.chatStream()` now reject `fullText` with the typed `SeepientError` when the turn fails — parity with the non-streaming throw. `textStream` still completes for delta-only consumers; `finishReason` still resolves `"error"`.
+- **`AskSeepientResult.finishReason` type truth**: the never-produced `"length"` member is removed and the actually-produced `"aborted"` is added.
+
+**Fixed:**
+- **Failed turns no longer brick SDK sessions (review #1)**: the empty-assistant persistence filter dropped assistant messages that carry tool calls (their content is legitimately empty), orphaning the tool result — every provider then rejected the session permanently. Tool-call assistants are now preserved with their tool results.
+- **Broker DNS-rebinding window closed (review #2)**: the default network adapter no longer re-resolves DNS inside `fetch()` — the broker passes its validated IP list through and the adapter pins to it, so the request can no longer be delivered to an address the broker never validated.
+- **Failed-turn drafts are resolved at the source (review F1)**: `ServerSessionManager.resolveTrailingDraft` / SDK `resolveTrailingUserDraft` pop an un-answered trailing user prompt at next-turn start (identical retry dedupes, different prompt supersedes) — stored history, REST/WS views, and model input stay in sync; `normalizeHistoryForSend` is now a legacy merge-only fallback.
+- **Gateway REST targets cannot be repointed (W181)**: a model-controlled absolute path no longer replaces the registered origin — the target's credential can no longer be shipped to a third-party host.
+- **Cross-origin redirects use a header ALLOWLIST (W182)**: credentials injected under arbitrary custom header names cannot survive a redirect hop (both the SSRF fetch and the broker adapter).
+- **Broker notification webhooks routed through the validated fetch (W183)**: no more deadline-less, unbounded plain fetches for feishu/dingtalk/wecom.
+- **Custom-tool connector analysis uses the shared IP classifier (W180)**: the stale per-doorway regex list (which missed hex-mapped/v4-compatible IPv6 and reserved ranges) is deleted.
+- **A `createSeepient` abort now reaches media operations** — `agent.abort()` stops in-flight image/media fetches instead of letting them bill.
+- **`askSeepient` no longer leaks a listener per call on the caller's `AbortSignal`**; `agent.abort()` no longer leaves `MaxListeners` growth either.
+- **`server.close()` removes the server's signal handlers** — embedding hosts no longer need `dispose()` to fully detach; `dispose()` itself now also closes the server.
+- **Turn answers are scoped to the current turn**: on abort or `max_steps` with no output, REST/WS/SDK no longer return (and persist) a *previous* turn's answer as this turn's.
+- **413 is no longer masked**: oversized gateway and provider-management bodies reach the shared `PAYLOAD_TOO_LARGE` mapping instead of being swallowed into `400 Invalid JSON`; the operator-configured `server.maxBodyBytes` now applies to settings and gateway routes too.
+- **Raw internal error text removed from the last two wire paths** (WS session catch-all, gateway 500s) — detail stays in the server log.
+- **WebSocket dead-peer heartbeat**: a 30s ping/pong sweep terminates dead peers so they release their per-key connection-cap slot.
+- **`pnpm build` cleans stale `dist/` output** (preserving CI-staged native helpers) so deleted modules can no longer ship in a tarball from a dirty tree.
+- **Docs truth**: CORS default corrected in `docs/server/overview.md`; `SEEPIENT_CORS_ORIGINS` / `SEEPIENT_WS_MAX_CONNECTIONS_PER_KEY` documented; `POST /v1/chat` `sessionId` and `GET /v1/sessions` added to the REST reference; WS error-code table made truthful; streaming error contract updated in the SDK docs.
+- **New gates**: real-socket test for the WS scope model (provider-scoped key → upgrade OK → `FORBIDDEN` frame), SSE outcome tests, adapter IP-pinning tests, and the orphaned-tool-row regression.
+
 ## [v0.6.1] - 2026-09-06
 
 ### Stateless SDK workers and embedder-owned storage (spec 021)

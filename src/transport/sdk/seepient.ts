@@ -39,7 +39,6 @@ import type {
   CumulativeUsage,
   PersistenceBackend,
   PersistenceConfig,
-  SessionStore,
   SessionData,
   Purpose,
   Tier,
@@ -100,30 +99,6 @@ async function persistSession(
     providerAccount: options.providerAccount,
     model: options.model,
   });
-}
-
-function wrapAsPersistenceBackend(store: SessionStore | PersistenceBackend): PersistenceBackend {
-  if ("__persistenceBackend" in store && store.__persistenceBackend) {
-    return store as PersistenceBackend;
-  }
-  const s = store as SessionStore;
-  return {
-    __persistenceBackend: true,
-    async save(id: string, data: SessionData) {
-      await s.save(id, data.messages);
-    },
-    async load(id: string): Promise<SessionData | null> {
-      const messages = await s.load(id);
-      if (!messages) return null;
-      return { id, messages, createdAt: Date.now(), updatedAt: Date.now() };
-    },
-    async delete(id: string) {
-      await s.delete(id);
-    },
-    async list() {
-      return s.list();
-    },
-  };
 }
 
 function toCapabilitySet(
@@ -268,8 +243,8 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
       backend = createPersistenceBackend({ type: "file", path: opts.persist });
     } else if ("type" in opts.persist && typeof opts.persist.type === "string") {
       backend = createPersistenceBackend(opts.persist as PersistenceConfig);
-    } else if ("save" in opts.persist && "load" in opts.persist) {
-      backend = wrapAsPersistenceBackend(opts.persist as SessionStore | PersistenceBackend);
+    } else if ("__persistenceBackend" in opts.persist) {
+      backend = opts.persist as PersistenceBackend;
     }
 
     if (backend) {
@@ -352,10 +327,17 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   );
   const snapshotStore = createSnapshotStore();
   const sharedArtifacts = new InMemoryArtifactStore();
-  const vendorOperationHandler = createMediaVendorOperationHandler({
+  // B1: the handler is re-created per turn so the CURRENT turn's abort
+  // controller reaches media operations — a static handler would leave
+  // generate_image and other media fetches running after agent.abort()
+  // (the same regression W110 fixed for askSeepient).
+  let currentVendorHandler = createMediaVendorOperationHandler({
     runtime,
     artifacts: sharedArtifacts,
   });
+  const vendorOperationHandler = (
+    req: Parameters<typeof currentVendorHandler>[0],
+  ) => currentVendorHandler(req);
   const { boundary } = await buildLocalBoundary({
     artifacts: sharedArtifacts,
     workspaceRoot: opts.cwd ?? process.cwd(),
@@ -462,6 +444,11 @@ async function chat(userMessage: string): Promise<AgentResponse> {
     const release = await acquire();
     try {
       activeAbortController = new AbortController();
+      currentVendorHandler = createMediaVendorOperationHandler({
+        runtime,
+        artifacts: sharedArtifacts,
+        signal: activeAbortController.signal,
+      });
 
       resolveTrailingUserDraft(messages);
       messages.push({
@@ -501,15 +488,28 @@ async function chat(userMessage: string): Promise<AgentResponse> {
         approveTool: opts.approveTool,
         wiredPipeline,
       });
-      // W151: a resolved error must not persist an empty assistant row.
+      // W151/A1: on a resolved error, skip a contentless assistant — but keep
+      // one carrying tool calls (dropping it would orphan its tool result).
+      // B6: the turn's answer is scoped to the adopted messages — on abort or
+      // max_steps with no output, a HISTORY assistant must not be returned
+      // (and persisted) as this turn's answer.
       const turnErrored = extractLoopError(result) !== null;
+      const adopted: Message[] = [];
       for (const appended of result.messages) {
         if (modelInputIds.has(appended.id)) continue;
         // The loop's ephemeral system shim is model-input plumbing, not history.
         if (appended.role === "system") continue;
-        if (turnErrored && appended.role === "assistant" && !appended.content) continue;
-        messages.push(appended);
+        if (
+          turnErrored &&
+          appended.role === "assistant" &&
+          !appended.content &&
+          !appended.toolCalls?.length
+        ) {
+          continue;
+        }
+        adopted.push(appended);
       }
+      messages.push(...adopted);
 
       cumulativeUsage.totalPromptTokens += result.usage.promptTokens;
       cumulativeUsage.totalCompletionTokens += result.usage.completionTokens;
@@ -519,7 +519,7 @@ async function chat(userMessage: string): Promise<AgentResponse> {
       await persistMessages();
       surfaceLoopError(result);
 
-      const lastAssistant = [...messages]
+      const lastAssistant = [...adopted]
         .reverse()
         .find((m) => m.role === "assistant" && m.content);
       const text = lastAssistant?.content ?? "";
@@ -545,6 +545,11 @@ async function chat(userMessage: string): Promise<AgentResponse> {
     try {
       const streamAbort = new AbortController();
       activeAbortController = streamAbort;
+      currentVendorHandler = createMediaVendorOperationHandler({
+        runtime,
+        artifacts: sharedArtifacts,
+        signal: streamAbort.signal,
+      });
       const mergedHooks = {
         ...opts.hooks,
       };
@@ -628,16 +633,25 @@ async function chat(userMessage: string): Promise<AgentResponse> {
           cumulativeUsage.totalCost += result.usage.cost;
           cumulativeUsage.requestCount += 1;
 
-          // W151: a resolved error must not persist an empty assistant row.
+          // W151/A1: same filter as chat(); B6: finalText scoped to adopted.
           const turnErrored = extractLoopError(result) !== null;
+          const adopted: Message[] = [];
           for (const m of result.messages) {
             if (modelInputIds.has(m.id)) continue;
             if (m.role === "system") continue; // loop's ephemeral shim
-            if (turnErrored && m.role === "assistant" && !m.content) continue;
-            messages.push(m);
+            if (
+              turnErrored &&
+              m.role === "assistant" &&
+              !m.content &&
+              !m.toolCalls?.length
+            ) {
+              continue;
+            }
+            adopted.push(m);
           }
+          messages.push(...adopted);
 
-          const lastAssistant = [...messages]
+          const lastAssistant = [...adopted]
             .reverse()
             .find((m) => m.role === "assistant" && m.content);
           const finalText = lastAssistant?.content ?? "";

@@ -60,7 +60,33 @@ export async function setupWebSocket(
 
   const wss = new wsModule.WebSocketServer({ noServer: true, path: "/ws", maxPayload: 1 << 20 });
 
+  // W185: server-side heartbeat — a dead peer (no pong) is terminated so it
+  // releases its per-key connection-cap slot instead of holding it until TCP
+  // times out.
+  const pendingPong = new WeakSet<WebSocket>();
+  const heartbeat = setInterval(() => {
+    for (const [ws] of ctx.registry.activeConnections) {
+      if (pendingPong.has(ws)) {
+        pendingPong.delete(ws);
+        try {
+          ws.terminate();
+        } catch {
+          // already gone
+        }
+        continue;
+      }
+      pendingPong.add(ws);
+      try {
+        ws.ping();
+      } catch {
+        // socket died between iterations
+      }
+    }
+  }, 30_000);
+  if (typeof heartbeat.unref === "function") heartbeat.unref();
+
   wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
+    ws.on("pong", () => pendingPong.delete(ws));
     handleConnection(ws, req, ctx);
   });
 
@@ -108,6 +134,7 @@ export async function setupWebSocket(
     wss,
     registry: ctx.registry,
     close() {
+      clearInterval(heartbeat);
       server.removeListener("upgrade", upgradeHandler);
       ctx.registry.closeAllConnections();
       wss.close();

@@ -8,7 +8,6 @@
  */
 
 import type { IncomingMessage } from "http";
-import type { RestHandlerContext } from "./rest.js";
 
 export class PayloadTooLargeError extends Error {
   constructor(message = "Request payload exceeds maximum allowed size") {
@@ -17,7 +16,7 @@ export class PayloadTooLargeError extends Error {
   }
 }
 
-export function resolveMaxBodyBytes(ctx?: RestHandlerContext): number {
+export function resolveMaxBodyBytes(ctx?: { maxBodyBytes?: number }): number {
   if (process.env.SEEPIENT_MAX_BODY_BYTES !== undefined) {
     // 0 = unlimited (documented in docs/server/deployment.md)
     const parsed = parseInt(process.env.SEEPIENT_MAX_BODY_BYTES, 10);
@@ -26,7 +25,7 @@ export function resolveMaxBodyBytes(ctx?: RestHandlerContext): number {
   return ctx?.maxBodyBytes ?? 10 * 1024 * 1024;
 }
 
-export async function parseBody(req: IncomingMessage, ctx?: RestHandlerContext): Promise<string> {
+export async function parseBody(req: IncomingMessage, ctx?: { maxBodyBytes?: number }): Promise<string> {
   const maxBytes = resolveMaxBodyBytes(ctx);
   const clHeader = req.headers["content-length"];
   if (clHeader !== undefined) {

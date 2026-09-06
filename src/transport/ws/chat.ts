@@ -181,11 +181,19 @@ export async function handleChat(
         ctx.sessionManager.addMessage(acquiredSessionId!, userMsg);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
+        logTransportEvent({
+          level: "warn",
+          event: "ws_dispatch",
+          requestId: serverMsgId,
+          method: msg.type,
+          apiKeyHashPrefix: state.apiKeyHash ? state.apiKeyHash.slice(0, 8) : undefined,
+          error: message,
+        });
         safeSend(ws, {
           type: "error",
           code: "SESSION_ERROR",
           retryable: false,
-          message,
+          message: "Session error",
         });
         return;
       }

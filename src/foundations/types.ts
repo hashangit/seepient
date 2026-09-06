@@ -222,7 +222,7 @@ export interface AskSeepientResult {
   steps: StepResult[];
   toolCalls: ToolCall[];
   usage: Usage;
-  finishReason: "stop" | "length" | "max_steps" | "error";
+  finishReason: "stop" | "max_steps" | "error" | "aborted";
   messages: Message[];
 }
 
@@ -256,7 +256,7 @@ export interface CreateSeepientOptions {
   skills?: string[] | boolean;
   cwd?: string;
   maxSteps?: number;
-  persist?: string | PersistenceBackend | PersistenceConfig | SessionStore;
+  persist?: string | PersistenceBackend | PersistenceConfig;
   hooks?: Hooks;
   config?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
@@ -324,7 +324,7 @@ export interface AgentResponse {
  * apiKeyHash) flows through the `metadata` field on `SessionData`.
  */
 export interface PersistenceBackend {
-  /** Brand discriminator to distinguish from SessionStore */
+  /** Brand discriminator distinguishing PersistenceBackend from older shapes */
   __persistenceBackend: true;
   save(id: string, data: SessionData): Promise<void>;
   load(id: string): Promise<SessionData | null>;
@@ -339,16 +339,6 @@ export interface PersistenceBackend {
 export interface PersistenceConfig {
   type: string;
   [key: string]: unknown;
-}
-
-/**
- * @deprecated Use `PersistenceBackend` instead. Kept for backward compatibility.
- */
-export interface SessionStore {
-  save(sessionId: string, messages: Message[]): Promise<void>;
-  load(sessionId: string): Promise<Message[] | null>;
-  delete(sessionId: string): Promise<void>;
-  list(): Promise<string[]>;
 }
 
 export interface SessionData {

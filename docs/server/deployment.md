@@ -149,13 +149,16 @@ await new Promise<void>((resolve) => server.listen(8080, "127.0.0.1", resolve));
 registered** — the embedder owns process lifecycle entirely. Repeated
 construction never accumulates listeners.
 
-**Dispose.** The returned server carries a `dispose()` handle that un-registers
-the signal handlers `runSeepientServer` registered for that instance. Call it
-when tearing a server down in a long-lived process (tests, dynamic fleets):
+**Dispose.** The returned server carries a `dispose()` handle for full
+teardown: it un-registers the signal handlers `runSeepientServer` registered
+for that instance AND closes the server (which also detaches its WebSocket
+layer). Note that `server.close()` alone is already enough — the close event
+removes the signal handlers too:
 
 ```typescript
-server.dispose();   // un-registers this server's SIGINT/SIGTERM handlers
-server.close();     // stops listening; also closes the server's WS layer
+server.dispose();   // un-registers handlers + closes the server
+// or simply:
+server.close();     // close event detaches the signal handlers as well
 ```
 
 **Multiple servers per process.** Each `runSeepientServer()` call creates a
@@ -196,7 +199,9 @@ pm2 startup
 | `LLM_MODEL` | Default model for OpenAI-compatible provider (default: `gpt-5.4`) | No |
 | `LLM_PROVIDER` | Default provider (auto-detected if not set) | No |
 | `SEEPIENT_SKILLS_PATH` | Colon-separated paths to skill directories | No |
-| `SEEPIENT_MAX_BODY_BYTES` | Request body size cap in bytes across all REST routes (default: 10485760). Set to `0` for an unlimited body size | No |
+| `SEEPIENT_MAX_BODY_BYTES` | Request body size cap in bytes across all REST routes — chat, settings, gateway, and provider management (default: 10485760). Set to `0` for an unlimited body size | No |
+| `SEEPIENT_CORS_ORIGINS` | Comma-separated CORS origin allowlist, or `*` to reflect any origin (default: no CORS headers at all) | No |
+| `SEEPIENT_WS_MAX_CONNECTIONS_PER_KEY` | Per-key WebSocket connection cap (default: 50); dead peers are terminated by a 30s heartbeat sweep and release their slot | No |
 | `SEEPIENT_RATE_LIMIT_RPM` | Per-key requests-per-minute cap for REST and WebSocket traffic (default: 300). Set to `0` to disable | No |
 
 ::: tip Provider auto-detection

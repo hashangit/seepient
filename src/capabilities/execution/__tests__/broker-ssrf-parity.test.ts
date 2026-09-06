@@ -262,11 +262,59 @@ describe("W143 — cross-host redirect strips credentials case-insensitively", (
 
     const redirectHeaders = seenHeaders[1];
     const lowerKeys = Object.keys(redirectHeaders).map((k) => k.toLowerCase());
+    // A6: cross-host redirects rebuild from an ALLOWLIST — nothing that can
+    // carry a credential (under any name) survives, including custom headers.
     expect(lowerKeys).not.toContain("x-api-key");
     expect(lowerKeys).not.toContain("api-key");
     expect(lowerKeys).not.toContain("authorization");
     expect(lowerKeys).not.toContain("cookie");
-    // Non-credential headers still forwarded
-    expect(redirectHeaders["X-Custom-Trace"]).toBe("keep-me");
+    expect(redirectHeaders["X-Custom-Trace"]).toBeUndefined();
+  });
+
+  it("same-host redirects keep the original headers (allowlist applies cross-host only)", async () => {
+    const seenHeaders: Array<Record<string, string>> = [];
+    let calls = 0;
+    const network: BrokerNetworkAdapter = {
+      async resolve() {
+        return ["93.184.216.34"];
+      },
+      async fetch(destination, init): Promise<BrokerNetworkResponse> {
+        calls++;
+        seenHeaders.push({ ...(init.headers as Record<string, string>) });
+        if (calls === 1) {
+          return {
+            status: 302,
+            bytes: new Uint8Array(0),
+            effectiveHost: destination.host,
+            effectiveIp: "93.184.216.34",
+            headers: { location: "https://api.example.com/asset" }, // same host
+          };
+        }
+        return {
+          status: 200,
+          bytes: new Uint8Array([0x6f, 0x6b]),
+          effectiveHost: destination.host,
+          effectiveIp: "93.184.216.34",
+          headers: {},
+        };
+      },
+    };
+
+    const broker = new EffectBroker({ artifacts: new InMemoryArtifactStore(), network });
+    const result = await broker.execute(
+      {
+        kind: "http",
+        requestId: "req-same-host",
+        destination: { scheme: "https", host: "api.example.com" },
+        method: "GET",
+        headers: { "X-Custom-Trace": "keep-me" },
+        secretRefs: [],
+      },
+      envelopeFor("api.example.com"),
+      auth("req-same-host"),
+    );
+
+    expect(result.status).toBe("succeeded");
+    expect(seenHeaders[1]["X-Custom-Trace"]).toBe("keep-me");
   });
 });

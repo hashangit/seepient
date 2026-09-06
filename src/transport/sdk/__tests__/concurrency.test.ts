@@ -135,7 +135,13 @@ describe("SDK Concurrency & Mutex Correctness (Task 1.1, Task 1.2)", () => {
     const seepient = await createSeepient({
       runtime,
       tools: [],
-      persist: rejectingBackend,
+      persist: {
+        __persistenceBackend: true as const,
+        save: rejectingBackend.save,
+        load: rejectingBackend.load,
+        delete: rejectingBackend.delete,
+        list: rejectingBackend.list,
+      },
     });
 
     const stream = await seepient.chatStream("Turn 1 prompt");

@@ -20,7 +20,7 @@
   },
   "scripts": {
     "clean": "rm -rf dist",
-    "build": "tsc",
+    "build": "node scripts/clean-dist.mjs && tsc",
     "typecheck": "tsc --noEmit",
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
     "start": "node dist/ui/cli/index.js",

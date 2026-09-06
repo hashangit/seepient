@@ -17,6 +17,8 @@ import { parseBody } from './body.js';
 
 export interface SettingsHandlerContext {
   settingsManager: SettingsManagerLike;
+  /** B5: the operator-configured body cap (server.maxBodyBytes) for PATCH bodies. */
+  maxBodyBytes?: number;
   /** Get all connected WS clients (excluding sender) */
   getOtherClients: (excludeWs?: WebSocket) => Array<{ ws: WebSocket; state: ConnectionState }>;
 }
@@ -75,9 +77,10 @@ function requireWsScope(state: ConnectionState, scope: KeyScope): boolean {
   return !!apiKey && hasScope(apiKey, scope);
 }
 
-async function readBody(req: IncomingMessage): Promise<any> {
-  // W160: settings PATCH bodies go through the shared capped reader (413).
-  const data = await parseBody(req);
+async function readBody(req: IncomingMessage, maxBodyBytes?: number): Promise<any> {
+  // W160/B5: settings PATCH bodies go through the shared capped reader (413),
+  // honoring the operator-configured cap.
+  const data = await parseBody(req, { maxBodyBytes });
   try {
     return JSON.parse(data);
   } catch {
@@ -151,7 +154,7 @@ export async function handlePatchSettings(
   const apiKey = (req as any).apiKey as ApiKeyEntry | undefined;
   if (!requireScope(res, apiKey, 'admin')) return;
 
-  const body = await readBody(req);
+  const body = await readBody(req, ctx.maxBodyBytes);
   const updates = category ? { [category]: body } : body;
   const applied: Record<string, any> = {};
   const errors: Array<{ field: string; message: string }> = [];
