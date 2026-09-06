@@ -22,6 +22,10 @@ describe("W012: IPv6 classification by bytes & URL bracket stripping", () => {
     expect(isMetadataIp("::a9fe:a9fe")).toBe(true);
     expect(isMetadataIp("::ffff:0:a9fe:a9fe")).toBe(true);
     expect(isMetadataIp("::ffff:a9fe:a9fe")).toBe(true);
+
+    // NAT64 WKP metadata (W036)
+    expect(isMetadataIp("64:ff9b::a9fe:a9fe")).toBe(true);
+    expect(isMetadataIp("64:ff9b::169.254.169.254")).toBe(true);
   });
 
   it("permits public IPv6 unicast addresses", () => {
@@ -75,6 +79,14 @@ describe("W012: IPv6 classification by bytes & URL bracket stripping", () => {
 
   it("permanently blocks http://[fd00:ec2::254]/ even when ssrfAllowPrivate is true", async () => {
     const res = await validateEndpointUrl("http://[fd00:ec2::254]/latest/meta-data", {
+      ssrfAllowPrivate: true,
+    });
+    expect(res.valid).toBe(false);
+    expect(res.error).toContain("cloud metadata");
+  });
+
+  it("permanently blocks NAT64 metadata http://[64:ff9b::a9fe:a9fe]/ even when ssrfAllowPrivate is true (W036)", async () => {
+    const res = await validateEndpointUrl("http://[64:ff9b::a9fe:a9fe]/latest/meta-data", {
       ssrfAllowPrivate: true,
     });
     expect(res.valid).toBe(false);

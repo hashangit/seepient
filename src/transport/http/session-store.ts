@@ -239,7 +239,12 @@ export class ServerSessionManager {
       };
 
       this.sessions.set(finalId, session);
-      await this.persistSessionAsync(session);
+      try {
+        await this.persistSessionAsync(session);
+      } catch (err) {
+        this.sessions.delete(finalId);
+        throw err;
+      }
 
       return {
         id: session.id,
@@ -314,6 +319,7 @@ export class ServerSessionManager {
    */
   deleteSession(id: string): void {
     this.sessions.delete(id);
+    this.inFlightTurns.delete(id);
     this.backend.delete(id).catch(() => {
       // Best-effort — don't crash on delete errors
     });
@@ -346,6 +352,11 @@ export class ServerSessionManager {
     for (const [id, session] of this.sessions) {
       if (this.isExpired(session)) {
         this.deleteSession(id);
+      }
+    }
+    for (const id of this.inFlightTurns) {
+      if (!this.sessions.has(id)) {
+        this.inFlightTurns.delete(id);
       }
     }
   }

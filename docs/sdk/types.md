@@ -418,9 +418,9 @@ interface Seepient {
   /** Remove a configured provider account. */
   removeProvider(id: string, opts?: { force?: boolean }): Promise<DeleteResult>;
   /** Set a purpose-and-tier model assignment. */
-  setAssignment(purpose: any, tier: any, target: AssignmentTarget): Promise<SaveResult>;
+  setAssignment(purpose: Purpose, tier: Tier | undefined, target: AssignmentTarget): Promise<SaveResult>;
   /** Clear a purpose-and-tier model assignment. */
-  clearAssignment(purpose: any, tier: any): Promise<SaveResult>;
+  clearAssignment(purpose: Purpose, tier?: Tier): Promise<SaveResult>;
   /** Return all available models across configured provider accounts. */
   getCatalog(): Promise<readonly AvailableModel[]>;
   /** Return active purpose-and-tier model assignments. */
@@ -430,7 +430,7 @@ interface Seepient {
   /** Force-reload configuration state from the backing store. */
   reload(): Promise<{ revision: number }>;
   /** Preview how an invocation will route without making a model call. */
-  resolve(opts: { purpose: any; tier?: any; override?: any }): Promise<any>;
+  resolve(opts: { purpose: Purpose; tier?: Tier; override?: any }): Promise<any>;
   /** Closes agent, flushes audit logs, and removes all runtime listeners. */
   dispose(): Promise<void>;
 }

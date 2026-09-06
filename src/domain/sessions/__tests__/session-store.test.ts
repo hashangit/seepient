@@ -79,11 +79,14 @@ describe("MemoryPersistenceBackend", () => {
     expect(loaded!.messages).toHaveLength(1);
   });
 
-  it("rejects invalid session IDs", async () => {
+  it("rejects invalid session IDs on save, load, and delete (W038.6)", async () => {
     const store = new MemoryPersistenceBackend();
     await expect(
       store.save("bad!id", { id: "bad!id", messages: [], createdAt: 1, updatedAt: 1 }),
     ).rejects.toThrow("Invalid session ID");
+
+    await expect(store.load("../traversal")).rejects.toThrow("Invalid session ID");
+    await expect(store.delete("../traversal")).rejects.toThrow("Invalid session ID");
   });
 });
 
