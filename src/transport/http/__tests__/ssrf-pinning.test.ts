@@ -1,12 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import * as http from "node:http";
 import type { AddressInfo } from "node:net";
-import {
-  isPrivateIp,
-  validateEndpointUrl,
-  safeSsrfFetch,
-} from "../ssrf-validator.js";
-import { pinnedFetch } from "../../../capabilities/execution/pinned-fetch.js";
+import { validateEndpointUrl, safeSsrfFetch,  } from "../../../foundations/network/ssrf-fetch.js";
+import { isPrivateIp } from "../../../foundations/network/ip-classifier.js";
+import { pinnedFetch } from "../../../foundations/network/pinned-fetch.js";
 
 describe("SSRF Pinning & Hardening (Spec 021-2 / T019, QS-6)", () => {
   let targetServer: http.Server;

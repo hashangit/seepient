@@ -1,9 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import {
-  isPrivateIp,
-  isMetadataIp,
-  validateEndpointUrl,
-} from "../ssrf-validator.js";
+import { validateEndpointUrl,  } from "../../../foundations/network/ssrf-fetch.js";
+import { isPrivateIp, isMetadataIp } from "../../../foundations/network/ip-classifier.js";
 
 describe("W012: IPv6 classification by bytes & URL bracket stripping", () => {
   it("classifies verified-broken IPv6 representations as private", () => {
@@ -96,7 +93,7 @@ describe("W012: IPv6 classification by bytes & URL bracket stripping", () => {
 
 import * as http from "node:http";
 import type { AddressInfo } from "node:net";
-import { pinnedFetch } from "../../../domain/network/pinned-fetch.js";
+import { pinnedFetch } from "../../../foundations/network/pinned-fetch.js";
 
 describe("W012: Loopback-pinned public IPv6 literal connection", () => {
   let server: http.Server;

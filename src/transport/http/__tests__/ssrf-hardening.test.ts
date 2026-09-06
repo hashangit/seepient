@@ -1,10 +1,6 @@
 import { describe, it, expect } from "vitest";
-import {
-  isPrivateIp,
-  isMetadataIp,
-  validateEndpointUrl,
-  normalizeIp,
-} from "../ssrf-validator.js";
+import { validateEndpointUrl,  } from "../../../foundations/network/ssrf-fetch.js";
+import { isPrivateIp, isMetadataIp, normalizeIp } from "../../../foundations/network/ip-classifier.js";
 
 describe("WS8: SSRF Hardening & Security (B-21)", () => {
   it("allows public IPv4 addresses that contain '169.254' as a substring", () => {

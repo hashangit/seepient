@@ -248,10 +248,10 @@ export function createGatewayTools(gateway: MCPGateway): ToolModule[] {
       },
     },
 
-    // 7. gateway_import_openapi
+    // 7. gateway_import_openapi (W142: fetches a model-supplied URL — never 'safe')
     {
       name: 'gateway_import_openapi',
-      risk: 'safe',
+      risk: 'communications',
       definition: {
         type: 'function',
         function: {

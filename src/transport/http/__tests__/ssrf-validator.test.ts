@@ -1,10 +1,6 @@
 import { describe, it, expect } from "vitest";
-import {
-  isPrivateIp,
-  isMetadataIp,
-  normalizeIp,
-  validateEndpointUrl,
-} from "../ssrf-validator.js";
+import { validateEndpointUrl,  } from "../../../foundations/network/ssrf-fetch.js";
+import { isPrivateIp, isMetadataIp, normalizeIp } from "../../../foundations/network/ip-classifier.js";
 
 describe("SSRF Validator Security Verification", () => {
   it("normalizes IPv4-mapped IPv6 formats correctly", () => {

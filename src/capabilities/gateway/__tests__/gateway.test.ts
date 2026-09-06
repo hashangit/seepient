@@ -1,4 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// W142: the gateway now fetches through the SSRF-validated path. These tests
+// exercise auth injection / spec parsing, not fetch mechanics — delegate the
+// validated fetch to global fetch so the existing fetch spies keep working.
+vi.mock("../../../foundations/network/ssrf-fetch.js", () => ({
+  safeSsrfFetch: (url: unknown, init?: RequestInit) => globalThis.fetch(url as string, init),
+}));
 import { MCPGateway } from '../gateway.js';
 import { GatewayError } from '../../../foundations/errors.js';
 import type { GatewaySettingsAdapter } from '../settings-adapter.js';

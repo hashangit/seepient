@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import * as http from "node:http";
 import type { AddressInfo } from "node:net";
-import { safeSsrfFetch } from "../ssrf-validator.js";
+import { safeSsrfFetch } from "../../../foundations/network/ssrf-fetch.js";
 
 describe("W016: Redirect hygiene in safeSsrfFetch", () => {
   let originServer: http.Server;

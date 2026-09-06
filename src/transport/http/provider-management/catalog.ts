@@ -112,7 +112,7 @@ export async function handleProbeProvider(
   }
 
   if (acc.baseUrl) {
-    const { safeSsrfFetch, validateEndpointUrl } = await import("../ssrf-validator.js");
+    const { safeSsrfFetch, validateEndpointUrl } = await import("../../../foundations/network/ssrf-fetch.js");
     const allowPrivate = acc.ssrfAllowPrivate === true || process.env.SEEPIENT_SSRF_ALLOW_PRIVATE === "1";
     if (full) {
       const start = Date.now();

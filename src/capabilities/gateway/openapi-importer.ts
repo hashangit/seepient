@@ -8,6 +8,7 @@
 import * as yaml from 'js-yaml';
 import type { MCPGateway } from './gateway.js';
 import type { RestTarget } from './types.js';
+import { safeSsrfFetch } from '../../foundations/network/ssrf-fetch.js';
 
 export async function importOpenApiSpec(
   gateway: MCPGateway,
@@ -15,7 +16,8 @@ export async function importOpenApiSpec(
   specUrl: string,
   options?: { baseUrl?: string; tagFilter?: string[]; isAdmin?: boolean },
 ): Promise<{ imported: number; operations: string[] }> {
-  const response = await fetch(specUrl);
+  // W142: model-supplied spec URLs go through the SSRF-validated, pinned fetch
+  const response = await safeSsrfFetch(specUrl);
   if (!response.ok) throw new Error(`Failed to fetch spec: HTTP ${response.status}`);
   const raw = await response.text();
   let spec: any;
