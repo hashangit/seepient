@@ -134,7 +134,7 @@ export async function handleProbeProvider(
         logTransportEvent({
           level: "warn",
           event: "probe",
-          requestId: crypto.randomUUID(),
+          requestId: (req as any).requestId ?? crypto.randomUUID(),
           error: err?.message ?? String(err),
         });
       } finally {

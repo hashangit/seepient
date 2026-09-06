@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createRestHandler } from "../rest.js";
-import { ServerSessionManager } from "../session-store.js";
+import { ServerSessionManager, hashKey } from "../session-store.js";
 import { MemoryPersistenceBackend } from "../../../domain/sessions/session-store.js";
 import { generateApiKey } from "../../auth/auth.js";
 import { Readable } from "node:stream";
@@ -152,6 +152,59 @@ describe("REST Sessions & Chat Resume (Spec 021-2 / FR-005, FR-006)", () => {
     expect(updated!.messages[1].content).toBe("Echo: Hello again");
   });
 
+  it("POST /v1/chat passes prior turn history excluding current turn message to generateText (W005)", async () => {
+    let lastGenerateTextOpts: any = null;
+    const ctx = {
+      version: "0.7.0",
+      startTime: Date.now(),
+      sessionManager,
+      generateText: async (opts: any) => {
+        lastGenerateTextOpts = opts;
+        return {
+          text: `Echo: ${opts.message}`,
+          toolCalls: [],
+          usage: { promptTokens: 5, completionTokens: 5, totalTokens: 10, cost: 0 },
+          finishReason: "stop",
+        };
+      },
+      listModels: () => ({}),
+      listSkills: () => [],
+    } as any;
+    const testHandler = createRestHandler(ctx);
+
+    const session = await sessionManager.createSession(key1);
+
+    // Turn 1
+    const { req: req1, res: res1 } = createMockReqRes("POST", "/v1/chat", {
+      authorization: `Bearer ${key1}`,
+      "content-type": "application/json",
+    }, JSON.stringify({ message: "Turn 1 msg", sessionId: session.id }));
+    await new Promise<void>((resolve) => {
+      res1.on("finish", resolve);
+      testHandler(req1, res1);
+    });
+    expect(res1.statusCode).toBe(200);
+    expect(lastGenerateTextOpts.history).toEqual([]);
+
+    // Turn 2
+    const { req: req2, res: res2 } = createMockReqRes("POST", "/v1/chat", {
+      authorization: `Bearer ${key1}`,
+      "content-type": "application/json",
+    }, JSON.stringify({ message: "Turn 2 msg", sessionId: session.id }));
+    await new Promise<void>((resolve) => {
+      res2.on("finish", resolve);
+      testHandler(req2, res2);
+    });
+    expect(res2.statusCode).toBe(200);
+    // History must contain turn 1 user + assistant, and NOT turn 2 user message
+    expect(lastGenerateTextOpts.history.length).toBe(2);
+    expect(lastGenerateTextOpts.history[0].content).toBe("Turn 1 msg");
+    expect(lastGenerateTextOpts.history[0].role).toBe("user");
+    expect(lastGenerateTextOpts.history[1].content).toBe("Echo: Turn 1 msg");
+    expect(lastGenerateTextOpts.history[1].role).toBe("assistant");
+    expect(lastGenerateTextOpts.message).toBe("Turn 2 msg");
+  });
+
   it("POST /v1/chat returns 404 for unknown or foreign sessionId", async () => {
     const body = JSON.stringify({
       message: "Hello",
@@ -169,5 +222,49 @@ describe("REST Sessions & Chat Resume (Spec 021-2 / FR-005, FR-006)", () => {
     });
 
     expect(res.statusCode).toBe(404);
+  });
+
+  it("POST /v1/chat without sessionId is stateless (D1): no session created, no 429, no files saved", async () => {
+    // Set low max sessions per key to ensure sessionless doesn't count against cap
+    process.env.SEEPIENT_MAX_SESSIONS_PER_KEY = "5";
+    const saveSpy = vi.spyOn((sessionManager as any).backend, "save");
+
+    try {
+      for (let i = 0; i < 10; i++) {
+        const body = JSON.stringify({
+          message: `Stateless message ${i}`,
+        });
+
+        const { req, res } = createMockReqRes(
+          "POST",
+          "/v1/chat",
+          {
+            authorization: `Bearer ${key1}`,
+            "content-type": "application/json",
+          },
+          body,
+        );
+
+        await new Promise<void>((resolve) => {
+          res.on("finish", resolve);
+          handler(req, res);
+        });
+
+        expect(res.statusCode).toBe(200);
+        const data = JSON.parse(res.body);
+        expect(data.sessionId).toBeUndefined();
+        expect(data.text).toBe(`Echo: Stateless message ${i}`);
+      }
+
+      // No sessions should be tracked for this key
+      const summaries = sessionManager.getSessionsByKey(hashKey(key1));
+      expect(summaries.length).toBe(0);
+
+      // Backend save must not have been invoked
+      expect(saveSpy).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.SEEPIENT_MAX_SESSIONS_PER_KEY;
+      saveSpy.mockRestore();
+    }
   });
 });

@@ -7,6 +7,7 @@
  */
 import * as http from "node:http";
 import * as https from "node:https";
+import * as net from "node:net";
 
 export interface PinnedFetchRequest {
   url: string; // original URL — source of Host header + TLS SNI
@@ -15,6 +16,9 @@ export interface PinnedFetchRequest {
   headers?: Record<string, string>;
   body?: Uint8Array;
   signal?: AbortSignal;
+  timeoutMs?: number;
+  maxResponseBytes?: number;
+  agent?: http.Agent | https.Agent;
 }
 
 export interface PinnedFetchResponse {
@@ -32,7 +36,10 @@ export async function pinnedFetch(req: PinnedFetchRequest): Promise<PinnedFetchR
   const parsedUrl = new URL(req.url);
   const isHttps = parsedUrl.protocol === "https:";
   const port = parsedUrl.port ? parseInt(parsedUrl.port, 10) : (isHttps ? 443 : 80);
-  const hostname = parsedUrl.hostname;
+  const rawHostname = parsedUrl.hostname;
+  const hostname = rawHostname.startsWith("[") && rawHostname.endsWith("]")
+    ? rawHostname.slice(1, -1)
+    : rawHostname;
   const path = (parsedUrl.pathname || "/") + (parsedUrl.search || "");
 
   const pinnedIp = req.ips[0];
@@ -45,19 +52,52 @@ export async function pinnedFetch(req: PinnedFetchRequest): Promise<PinnedFetchR
 
   const httpModule = isHttps ? https : http;
 
+  const isHostnameIp = net.isIP(hostname) !== 0;
+
   return new Promise((resolvePromise, rejectPromise) => {
-    const headers: Record<string, string> = {
-      host: hostname,
-      ...(req.headers ?? {}),
+    // URL hostname wins over caller header — callers cannot pivot vhosts
+    const headers: Record<string, string> = {};
+    if (req.headers) {
+      for (const [k, v] of Object.entries(req.headers)) {
+        if (k.toLowerCase() !== "host") {
+          headers[k] = v;
+        }
+      }
+    }
+    headers["host"] = parsedUrl.hostname;
+
+    let timer: NodeJS.Timeout | undefined;
+    let settled = false;
+
+    const cleanup = () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    };
+
+    const reject = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      rejectPromise(err);
+    };
+
+    const resolve = (val: PinnedFetchResponse) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolvePromise(val);
     };
 
     const reqOpts: https.RequestOptions = {
       method: (req.method ?? "GET").toUpperCase(),
-      hostname,
+      hostname: isHostnameIp ? pinnedIp : hostname,
       port,
       path,
       headers,
-      servername: isHttps ? hostname : undefined,
+      servername: isHttps ? (isHostnameIp ? undefined : hostname) : undefined,
+      agent: req.agent,
       lookup: (
         _h: string,
         opts: { all?: boolean },
@@ -74,36 +114,69 @@ export async function pinnedFetch(req: PinnedFetchRequest): Promise<PinnedFetchR
 
     const clientReq = httpModule.request(reqOpts, (res) => {
       const socketIp = res.socket?.remoteAddress || pinnedIp;
+
+      // Post-flight effectiveIp ∈ resolvedIps rebinding re-check
+      const normalizedSocketIp = socketIp.startsWith("::ffff:") ? socketIp.slice(7) : socketIp;
+      if (!req.ips.includes(socketIp) && !req.ips.includes(normalizedSocketIp)) {
+        clientReq.destroy();
+        reject(new Error(`DNS rebinding detected: connection made to ${socketIp} not in validated IPs`));
+        return;
+      }
+
       const resHeaders: Record<string, string> = {};
       for (const [k, v] of Object.entries(res.headers ?? {})) {
         if (typeof v === "string") resHeaders[k.toLowerCase()] = v;
         else if (Array.isArray(v)) resHeaders[k.toLowerCase()] = v.join(", ");
       }
+
       const chunks: Buffer[] = [];
-      res.on("data", (chunk: Buffer) => chunks.push(chunk));
+      let receivedBytes = 0;
+
+      res.on("data", (chunk: Buffer) => {
+        receivedBytes += chunk.length;
+        if (req.maxResponseBytes !== undefined && req.maxResponseBytes > 0 && receivedBytes > req.maxResponseBytes) {
+          clientReq.destroy();
+          reject(new Error(`Response size exceeded maximum limit of ${req.maxResponseBytes} bytes`));
+          return;
+        }
+        chunks.push(chunk);
+      });
+
       res.on("end", () => {
         const bytes = new Uint8Array(Buffer.concat(chunks));
-        resolvePromise({
+        resolve({
           status: res.statusCode ?? 200,
           bytes,
           effectiveIp: socketIp,
           headers: resHeaders,
         });
       });
-      res.on("error", rejectPromise);
+
+      res.on("error", (err) => {
+        reject(err);
+      });
     });
 
-    clientReq.on("error", rejectPromise);
+    if (req.timeoutMs !== undefined && req.timeoutMs > 0) {
+      timer = setTimeout(() => {
+        clientReq.destroy();
+        reject(new Error(`Request timed out after ${req.timeoutMs}ms`));
+      }, req.timeoutMs);
+    }
+
+    clientReq.on("error", (err) => {
+      reject(err);
+    });
 
     if (req.signal) {
       if (req.signal.aborted) {
-        clientReq.destroy(new Error("aborted"));
-        rejectPromise(new Error("aborted"));
+        clientReq.destroy();
+        reject(new Error("aborted"));
         return;
       }
       req.signal.addEventListener("abort", () => {
-        clientReq.destroy(new Error("aborted"));
-        rejectPromise(new Error("aborted"));
+        clientReq.destroy();
+        reject(new Error("aborted"));
       });
     }
 

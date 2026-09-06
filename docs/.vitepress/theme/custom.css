@@ -141,9 +141,10 @@ body {
   padding-top: 40px;
 }
 
+/* Clear the floating bar (top 12px + 56px tall) on mobile doc pages */
 @media (max-width: 960px) {
-  .VPDoc {
-    padding-top: 76px;
+  .VPContent:not(:has(.landing)) {
+    padding-top: 96px !important;
   }
 }
 

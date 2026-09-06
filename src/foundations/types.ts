@@ -304,13 +304,13 @@ export interface Seepient {
   // ── Provider management parity methods (Spec 013 / Spec 021) ───────────
   addProvider(input: import("./contracts/provider-manager-api.js").AccountInput): Promise<import("./contracts/provider-manager-api.js").SaveResult>;
   removeProvider(id: string, opts?: { force?: boolean }): Promise<import("./contracts/provider-manager-api.js").DeleteResult>;
-  setAssignment(purpose: any, tier: any, target: import("./contracts/provider-manager-api.js").AssignmentTarget): Promise<import("./contracts/provider-manager-api.js").SaveResult>;
-  clearAssignment(purpose: any, tier: any): Promise<import("./contracts/provider-manager-api.js").SaveResult>;
+  setAssignment(purpose: Purpose, tier: Tier | undefined, target: import("./contracts/provider-manager-api.js").AssignmentTarget): Promise<import("./contracts/provider-manager-api.js").SaveResult>;
+  clearAssignment(purpose: Purpose, tier?: Tier): Promise<import("./contracts/provider-manager-api.js").SaveResult>;
   getCatalog(): Promise<readonly import("./schemas/inference.js").AvailableModel[]>;
   getAssignments(): import("./schemas/provider-config.js").PurposeModelMap;
   listProviders(): Promise<string[]>;
   reload(): Promise<{ revision: number }>;
-  resolve(opts: { purpose: any; tier?: any; override?: any }): Promise<any>;
+  resolve(opts: { purpose: Purpose; tier?: Tier; override?: any }): Promise<any>;
   dispose(): Promise<void>;
 }
 

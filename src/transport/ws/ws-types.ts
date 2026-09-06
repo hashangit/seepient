@@ -333,6 +333,7 @@ export interface WebSocketHandlerContext {
     tenantId?: string;
     principalId?: string;
     approveTool?: import("../../foundations/types.js").ApproveToolFn;
+    history?: import("../../foundations/types.js").Message[];
     onText: (delta: string) => void;
     onToolCall: (info: { name: string; args: Record<string, unknown>; callId: string }) => void;
     onToolResult: (info: { callId: string; output: string; success: boolean }) => void;
@@ -340,7 +341,7 @@ export interface WebSocketHandlerContext {
     onError: (error: { code: string; message: string; provider?: string; tool?: string }) => void;
     onDone: (result: { text: string; usage: Usage; finishReason: string }) => void;
     signal?: AbortSignal;
-  }) => void;
+  }) => void | Promise<void>;
   listModels: () => Record<string, string[]>;
   listSkills: () => { name: string; description: string; tags: string[] }[];
   settingsHandlerContext?: import("../http/settings-handlers.js").SettingsHandlerContext;

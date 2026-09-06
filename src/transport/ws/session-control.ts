@@ -25,7 +25,19 @@ export async function handleResume(
   state: ConnectionState,
   ctx: WebSocketHandlerContext,
 ): Promise<void> {
-  const session = await ctx.sessionManager.getSession(msg.sessionId, state.apiKeyHash);
+  let session;
+  try {
+    session = await ctx.sessionManager.getSession(msg.sessionId, state.apiKeyHash);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    safeSend(ws, {
+      type: "error",
+      code: "SESSION_NOT_FOUND",
+      retryable: false,
+      message,
+    });
+    return;
+  }
   if (!session) {
     safeSend(ws, {
       type: "error",
@@ -51,7 +63,19 @@ export async function handleReconnect(
   state: ConnectionState,
   ctx: WebSocketHandlerContext,
 ): Promise<void> {
-  const session = await ctx.sessionManager.getSession(msg.sessionId, state.apiKeyHash);
+  let session;
+  try {
+    session = await ctx.sessionManager.getSession(msg.sessionId, state.apiKeyHash);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    safeSend(ws, {
+      type: "error",
+      code: "SESSION_NOT_FOUND",
+      retryable: false,
+      message,
+    });
+    return;
+  }
   if (!session) {
     safeSend(ws, {
       type: "error",

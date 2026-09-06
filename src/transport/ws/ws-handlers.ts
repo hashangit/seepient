@@ -100,7 +100,15 @@ export function handleConnection(
 
     switch (msg.type) {
       case "chat":
-        handleChat(ws, msg, state, ctx);
+        void handleChat(ws, msg, state, ctx).catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : String(err);
+          safeSend(ws, {
+            type: "error",
+            code: "INTERNAL_ERROR",
+            retryable: false,
+            message,
+          });
+        });
         break;
       case "abort":
         handleAbort(ws, msg, state);
@@ -180,7 +188,6 @@ export function handleConnection(
       apiKeyHashPrefix: state.apiKeyHash ? state.apiKeyHash.slice(0, 8) : undefined,
       error: err.message,
     });
-    console.error("[ws] Connection error:", err.message);
     for (const controller of state.activeChats) {
       controller.abort();
     }

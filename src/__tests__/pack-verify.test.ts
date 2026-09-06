@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   assertNoCleanInPublishHooks,
   assertPackFiles,
+  assertNotPlaceholder,
   verifyPack,
   REQUIRED_PACK_FILES,
 } from "../../scripts/pack-verify.mjs";
@@ -38,6 +39,26 @@ describe("Pack Verification Gate (Spec 021-2 / FR-001)", () => {
       }).toThrow(/Static hook assertion failed.*prepack/);
     });
 
+    it("throws when prepare contains 'clean'", () => {
+      expect(() => {
+        assertNoCleanInPublishHooks({
+          scripts: {
+            prepare: "npm run clean",
+          },
+        });
+      }).toThrow(/Static hook assertion failed.*prepare/);
+    });
+
+    it("throws when prepare contains 'rm -rf dist'", () => {
+      expect(() => {
+        assertNoCleanInPublishHooks({
+          scripts: {
+            prepare: "rm -rf dist",
+          },
+        });
+      }).toThrow(/Static hook assertion failed.*prepare/);
+    });
+
     it("passes when prepublishOnly is safe (e.g. 'pnpm run build')", () => {
       expect(() => {
         assertNoCleanInPublishHooks({
@@ -47,6 +68,23 @@ describe("Pack Verification Gate (Spec 021-2 / FR-001)", () => {
             prepublishOnly: "pnpm run build",
           },
         });
+      }).not.toThrow();
+    });
+  });
+
+  describe("assertNotPlaceholder (W018: Placeholder Honesty)", () => {
+    it("throws when manifest has placeholder: true", () => {
+      expect(() => {
+        assertNotPlaceholder({ placeholder: true });
+      }).toThrow(/Refusing to publish package containing placeholder native binaries/);
+    });
+
+    it("passes when manifest does not carry placeholder marker", () => {
+      expect(() => {
+        assertNotPlaceholder({ placeholder: false });
+      }).not.toThrow();
+      expect(() => {
+        assertNotPlaceholder({});
       }).not.toThrow();
     });
   });
