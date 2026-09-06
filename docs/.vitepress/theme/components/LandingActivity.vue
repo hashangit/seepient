@@ -21,7 +21,9 @@
 .activity {
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.4);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
 }
 
 .activity-inner {

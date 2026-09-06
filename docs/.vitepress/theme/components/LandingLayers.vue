@@ -1,56 +1,26 @@
-<script setup lang="ts">
-import { ref } from 'vue'
-
-const surfaces = [
-  { name: 'Terminal UI', hint: 'chat, diffs, approvals' },
-  { name: 'CLI & REPL', hint: 'one-shot & piped runs' },
-  { name: 'TypeScript SDK', hint: 'brings its own storage' },
-  { name: 'Server API', hint: 'HTTP + WebSocket' },
-]
+<script setup>
+const surfaces = ['Terminal UI (TUI)', 'CLI & REPL', 'Server API', 'Worker SDK']
 
 const lanes = [
   {
     id: 'brain',
-    kicker: 'The brain',
-    tagline: 'decides what happens',
-    items: [
-      { name: 'Agent loop', desc: 'plans, acts, streams', featured: true },
-      { name: 'Permission engine', desc: 'three consent modes' },
-      { name: 'Model router', desc: 'right model per job' },
-      { name: 'Hooks & middleware', desc: 'your code at safe points' },
-      { name: 'Secret shield', desc: 'secrets stay redacted' },
-    ],
+    title: 'The Brain',
+    tagline: 'Decides what happens',
+    items: ['Agent Loop', 'Model Router', 'Permission Engine', 'Approval Inbox', 'Skills', 'Secret Shield & Egress Gate'],
   },
   {
     id: 'hands',
-    kicker: 'The hands',
-    tagline: 'acts on the world',
-    items: [
-      { name: 'Sandboxed execution', desc: 'OS jail + atomic commits', featured: true },
-      { name: 'Built-in tools', desc: 'shell, files, web, email' },
-      { name: 'MCP & OpenAPI gateway', desc: 'borrows outside tools' },
-      { name: 'Media generators', desc: 'fal, Google, OpenAI' },
-    ],
+    title: 'The Hands',
+    tagline: 'Acts on the world',
+    items: ['Sandboxed Execution (Seatbelt / Bubblewrap)', 'Rust Exact-Commit Broker', 'Built-in Tools', 'MCP Gateway'],
   },
   {
     id: 'memory',
-    kicker: 'Memory',
-    tagline: 'what it keeps',
-    items: [
-      { name: 'Session history', desc: 'every chat, resumable' },
-      { name: 'Audit log', desc: 'one record per action', featured: true },
-      { name: 'Credential vault', desc: 'OS keychain & OAuth' },
-      { name: 'Skills', desc: 'playbooks on demand' },
-      { name: 'Settings', desc: 'merged config layers' },
-    ],
+    title: 'Memory',
+    tagline: 'What it keeps',
+    items: ['Session History', '0600 Audit Log', 'Settings', 'Credential Vault'],
   },
 ]
-
-const hovered = ref('')
-
-function setHover(id: string) {
-  hovered.value = id
-}
 
 const notes = [
   {
@@ -83,63 +53,65 @@ const notes = [
       </p>
     </header>
 
-    <!-- Surfaces -->
-    <div class="surface-row" v-reveal>
-      <div v-for="s in surfaces" :key="s.name" class="surface-chip">
-        <span class="chip-name">{{ s.name }}</span>
-        <span class="chip-hint">{{ s.hint }}</span>
+    <div class="arch" v-reveal>
+      <span class="arch-badge">SEPIENT CORE · RUNTIME MAP</span>
+
+      <!-- Surfaces -->
+      <div class="arch-region arch-region--surfaces">
+        <p class="arch-region-title"><span class="tick" aria-hidden="true"></span>Surfaces</p>
+        <p class="arch-region-tagline">Talk to it</p>
+        <div class="arch-chips">
+          <span v-for="s in surfaces" :key="s" class="arch-chip">{{ s }}</span>
+        </div>
       </div>
-    </div>
 
-    <!-- Animated flow connectors -->
-    <div class="flow-zone" aria-hidden="true" v-reveal>
-      <svg class="flow-svg" viewBox="0 0 1120 150" fill="none" preserveAspectRatio="none">
-        <!-- drops from the four surfaces into the rail -->
-        <path class="flow" d="M140 0 V52" />
-        <path class="flow" d="M427 0 V52" />
-        <path class="flow" d="M713 0 V52" />
-        <path class="flow" d="M1000 0 V52" />
-        <!-- rail -->
-        <path class="flow flow--rail" d="M140 52 H1000" />
-        <!-- drops from the rail into the three lanes -->
-        <path class="flow" :class="{ 'flow--hot': hovered === 'brain' }" d="M186 52 V150" />
-        <path class="flow" :class="{ 'flow--hot': hovered === 'hands' }" d="M560 52 V150" />
-        <path class="flow" :class="{ 'flow--hot': hovered === 'memory' }" d="M934 52 V150" />
-        <!-- arrowheads -->
-        <path class="flow-head" d="M181 142 L186 150 L191 142" />
-        <path class="flow-head" d="M555 142 L560 150 L565 142" />
-        <path class="flow-head" d="M929 142 L934 150 L939 142" />
-      </svg>
-    </div>
+      <div class="arch-link" aria-hidden="true">
+        <span class="arch-link-line"></span>
+        <span class="arch-link-head"></span>
+      </div>
 
-    <!-- Lanes -->
-    <div class="lane-row">
-      <article
-        v-for="lane in lanes"
-        :key="lane.id"
-        class="lane"
-        :class="[`lane--${lane.id}`, { 'is-hovered': hovered === lane.id }]"
-        v-reveal
-        @mouseenter="setHover(lane.id)"
-        @mouseleave="setHover('')"
-      >
-        <header class="lane-head">
-          <p class="lane-kicker">{{ lane.kicker }}</p>
-          <p class="lane-tagline">{{ lane.tagline }}</p>
-        </header>
-        <ul class="lane-items">
-          <li v-for="item in lane.items" :key="item.name" class="lane-item" :class="{ 'is-featured': item.featured }">
-            <span class="item-name">{{ item.name }}</span>
-            <span class="item-desc">{{ item.desc }}</span>
-          </li>
-        </ul>
-      </article>
-    </div>
+      <!-- The Brain -->
+      <div class="arch-region arch-region--brain">
+        <p class="arch-region-title"><span class="tick" aria-hidden="true"></span>The Brain</p>
+        <p class="arch-region-tagline">Decides what happens</p>
+        <div class="arch-chips">
+          <span v-for="c in lanes[0].items" :key="c" class="arch-chip">{{ c }}</span>
+        </div>
+      </div>
 
-    <!-- Foundations substrate -->
-    <div class="substrate" v-reveal>
-      <span class="substrate-label">Foundations</span>
-      <span class="substrate-desc">shared types · errors · contracts · settings schema — imported by every layer, importing no one</span>
+      <div class="arch-link" aria-hidden="true">
+        <span class="arch-link-line"></span>
+        <span class="arch-link-head"></span>
+      </div>
+
+      <!-- The Hands -->
+      <div class="arch-region arch-region--hands">
+        <p class="arch-region-title"><span class="tick" aria-hidden="true"></span>The Hands</p>
+        <p class="arch-region-tagline">Acts on the world</p>
+        <div class="arch-chips">
+          <span v-for="c in lanes[1].items" :key="c" class="arch-chip">{{ c }}</span>
+        </div>
+      </div>
+
+      <div class="arch-link" aria-hidden="true">
+        <span class="arch-link-line"></span>
+        <span class="arch-link-head"></span>
+      </div>
+
+      <!-- Memory -->
+      <div class="arch-region arch-region--memory">
+        <p class="arch-region-title"><span class="tick" aria-hidden="true"></span>Memory</p>
+        <p class="arch-region-tagline">What it keeps</p>
+        <div class="arch-chips">
+          <span v-for="c in lanes[2].items" :key="c" class="arch-chip">{{ c }}</span>
+        </div>
+      </div>
+
+      <!-- Foundations substrate -->
+      <div class="arch-foundations">
+        <span class="arch-foundations-label">FOUNDATIONS</span>
+        <span class="arch-foundations-desc">shared types · errors · contracts · settings — imported by every layer, importing no one</span>
+      </div>
     </div>
 
     <div class="layers-notes">
@@ -168,222 +140,186 @@ const notes = [
   margin-top: 2px;
 }
 
-/* Surfaces row */
-.surface-row {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 14px;
-  margin-top: 56px;
+/* ------------------------------------------------------------------
+ * Instrument panel — archify dark mode: slate canvas, faint grid,
+ * kind-coded strokes, mono labels, dashed flow.
+ * ------------------------------------------------------------------ */
+
+.arch {
+  position: relative;
+  margin-top: 48px;
+  background:
+    linear-gradient(rgba(30, 41, 59, 0.33) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(30, 41, 59, 0.33) 1px, transparent 1px),
+    linear-gradient(160deg, #0d1526, #070c18 65%);
+  background-size: 28px 28px, 28px 28px, cover;
+  border: 1px solid #1e293b;
+  border-radius: 16px;
+  padding: 34px 34px 30px;
+  box-shadow: 0 40px 90px -40px rgba(7, 12, 24, 0.75);
 }
 
-.surface-chip {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  background: rgba(255, 255, 255, 0.6);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 13px 16px;
-  transition: transform 0.25s ease, border-color 0.25s ease;
-}
-
-.surface-chip:hover {
-  transform: translateY(-2px);
-  border-color: rgba(19, 19, 17, 0.28);
-}
-
-.chip-name {
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--ink);
-}
-
-.chip-hint {
+.arch-badge {
+  position: absolute;
+  top: 14px;
+  right: 16px;
   font-family: var(--vp-font-family-mono);
-  font-size: 10.5px;
-  color: var(--ink-3);
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  color: #475569;
 }
 
-/* Connector zone */
-.flow-zone {
-  height: 132px;
-  margin: 0 -32px;
+.arch-region {
+  border: 1px solid;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.55);
+  padding: 18px 22px 20px;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
 }
 
-.flow-svg {
-  width: 100%;
-  height: 100%;
-  display: block;
+.arch-region:hover {
+  transform: translateY(-2px);
 }
 
-.flow {
-  stroke: rgba(19, 19, 17, 0.22);
-  stroke-width: 1.25;
-  stroke-dasharray: 4 6;
+.arch-region--surfaces { border-color: rgba(34, 211, 238, 0.38); }
+.arch-region--surfaces:hover { border-color: #22d3ee; box-shadow: 0 0 32px -10px rgba(34, 211, 238, 0.45); }
+
+.arch-region--brain { border-color: rgba(52, 211, 153, 0.38); }
+.arch-region--brain:hover { border-color: #34d399; box-shadow: 0 0 32px -10px rgba(52, 211, 153, 0.45); }
+
+.arch-region--hands { border-color: rgba(251, 191, 36, 0.38); }
+.arch-region--hands:hover { border-color: #fbbf24; box-shadow: 0 0 32px -10px rgba(251, 191, 36, 0.4); }
+
+.arch-region--memory { border-color: rgba(167, 139, 250, 0.4); }
+.arch-region--memory:hover { border-color: #a78bfa; box-shadow: 0 0 32px -10px rgba(167, 139, 250, 0.45); }
+
+.arch-region-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-family: var(--vp-font-family-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #e2e8f0;
 }
 
-.flow--rail {
-  stroke: rgba(95, 122, 61, 0.5);
-  stroke-dasharray: 5 5;
+.tick {
+  width: 8px;
+  height: 8px;
+  border-left: 2px solid currentColor;
+  border-top: 2px solid currentColor;
+  opacity: 0.7;
 }
 
-.flow--hot {
-  stroke: var(--moss);
-  stroke-width: 1.75;
-  stroke-dasharray: none;
+.arch-region--surfaces .tick { color: #22d3ee; }
+.arch-region--brain .tick { color: #34d399; }
+.arch-region--hands .tick { color: #fbbf24; }
+.arch-region--memory .tick { color: #a78bfa; }
+
+.arch-region-tagline {
+  margin: 6px 0 0 18px;
+  font-size: 13px;
+  color: #94a3b8;
 }
 
-.flow-head {
-  stroke: rgba(19, 19, 17, 0.32);
-  stroke-width: 1.25;
-  fill: none;
+.arch-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin: 14px 0 0 18px;
+}
+
+.arch-chip {
+  font-family: var(--vp-font-family-mono);
+  font-size: 11.5px;
+  color: #cbd5e1;
+  background: rgba(2, 6, 23, 0.5);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 7px;
+  padding: 5px 12px;
+  transition: border-color 0.2s ease, color 0.2s ease;
+}
+
+.arch-region:hover .arch-chip {
+  border-color: rgba(148, 163, 184, 0.5);
+  color: #e2e8f0;
+}
+
+.arch-region--surfaces:hover .arch-chip { border-color: rgba(34, 211, 238, 0.5); }
+.arch-region--brain:hover .arch-chip { border-color: rgba(52, 211, 153, 0.5); }
+.arch-region--hands:hover .arch-chip { border-color: rgba(251, 191, 36, 0.5); }
+.arch-region--memory:hover .arch-chip { border-color: rgba(167, 139, 250, 0.5); }
+
+/* Dashed flow connectors with triangle heads */
+.arch-link {
+  position: relative;
+  height: 42px;
+  width: 2px;
+  margin: 4px auto;
+  display: flex;
+  justify-content: center;
+}
+
+.arch-link-line {
+  position: absolute;
+  inset: 2px 0 8px;
+  background-image: linear-gradient(#64748b 45%, transparent 0);
+  background-size: 2px 9px;
+  background-repeat: repeat-y;
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .flow {
-    animation: flow 1.6s linear infinite;
+  .arch-link-line {
+    animation: arch-flow 0.9s linear infinite;
   }
 
-  .flow--hot,
-  .flow--rail {
-    animation-duration: 1.1s;
-  }
-
-  @keyframes flow {
+  @keyframes arch-flow {
     to {
-      stroke-dashoffset: -20;
+      background-position: 0 9px;
     }
   }
 }
 
-/* Lanes */
-.lane-row {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 18px;
-  margin-top: 8px;
-}
-
-.lane {
-  background: rgba(255, 255, 255, 0.55);
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  padding: 20px;
-  transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
-}
-
-.lane.is-hovered {
-  border-color: rgba(95, 122, 61, 0.55);
-  box-shadow: 0 20px 44px -26px rgba(19, 19, 17, 0.3);
-  transform: translateY(-2px);
-}
-
-.lane--brain.is-hovered {
-  border-color: rgba(95, 122, 61, 0.7);
-}
-
-.lane-head {
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--line);
-}
-
-.lane-kicker {
-  margin: 0;
-  font-family: var(--vp-font-family-mono);
-  font-size: 11px;
-  font-weight: 550;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--moss-deep);
-}
-
-.lane--memory .lane-kicker {
-  color: var(--ink-2);
-}
-
-.lane-tagline {
-  margin: 4px 0 0;
-  font-size: 12.5px;
-  color: var(--ink-3);
-}
-
-.lane-items {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.lane-item {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: 9px 0;
-  border-bottom: 1px solid rgba(19, 19, 17, 0.07);
-}
-
-.lane-item:last-child {
-  border-bottom: none;
-  padding-bottom: 0;
-}
-
-.item-name {
-  font-size: 13.5px;
-  font-weight: 580;
-  color: var(--ink);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.item-name::before {
-  content: '';
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: rgba(19, 19, 17, 0.25);
-  flex-shrink: 0;
-}
-
-.lane-item.is-featured .item-name::before {
-  background: var(--moss);
-}
-
-.item-desc {
-  font-family: var(--vp-font-family-mono);
-  font-size: 10.5px;
-  color: var(--ink-3);
-  padding-left: 12px;
+.arch-link-head {
+  position: absolute;
+  bottom: 0;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 7px solid #64748b;
 }
 
 /* Foundations substrate */
-.substrate {
+.arch-foundations {
+  margin-top: 26px;
+  border: 1px dashed rgba(148, 163, 184, 0.4);
+  border-radius: 10px;
+  padding: 14px 20px;
   display: flex;
   align-items: baseline;
-  gap: 18px;
+  gap: 16px;
   flex-wrap: wrap;
-  margin-top: 18px;
-  border: 1px dashed var(--line);
-  border-radius: 12px;
-  padding: 15px 20px;
-  background: rgba(255, 255, 255, 0.35);
 }
 
-.substrate-label {
-  font-family: var(--vp-font-family-mono);
-  font-size: 11px;
-  font-weight: 550;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--ink-2);
-}
-
-.substrate-desc {
+.arch-foundations-label {
   font-family: var(--vp-font-family-mono);
   font-size: 10.5px;
-  color: var(--ink-3);
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  color: #94a3b8;
 }
 
-/* Notes */
+.arch-foundations-desc {
+  font-family: var(--vp-font-family-mono);
+  font-size: 10.5px;
+  color: #64748b;
+}
+
+/* Notes below the panel */
 .layers-notes {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -411,17 +347,8 @@ const notes = [
 }
 
 @media (max-width: 960px) {
-  .surface-row {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  .flow-zone {
-    display: none;
-  }
-
-  .lane-row {
-    grid-template-columns: 1fr;
-    margin-top: 28px;
+  .arch {
+    padding: 24px 18px 22px;
   }
 
   .layers-notes {

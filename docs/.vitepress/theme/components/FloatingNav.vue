@@ -197,15 +197,11 @@ const path = computed(() => '/' + route.data.relativePath)
   gap: 10px;
   padding: 0 10px 0 22px;
   border-radius: 18px;
-  background: linear-gradient(115deg, rgba(255, 255, 255, 0.52), rgba(255, 255, 255, 0.22) 60%, rgba(255, 255, 255, 0.38));
-  backdrop-filter: saturate(1.8) blur(2px);
-  -webkit-backdrop-filter: saturate(1.8) blur(2px);
-  border: 1px solid rgba(255, 255, 255, 0.55);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.85),
-    inset 0 -1px 1px rgba(19, 19, 17, 0.06),
-    0 1px 2px rgba(19, 19, 17, 0.08),
-    0 16px 40px -16px rgba(19, 19, 17, 0.35);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
 }
 
 .fnav-left,
@@ -345,13 +341,11 @@ const path = computed(() => '/' + route.data.relativePath)
   left: 0;
   min-width: 230px;
   background: linear-gradient(150deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.66));
-  backdrop-filter: saturate(1.6) blur(4px);
-  -webkit-backdrop-filter: saturate(1.6) blur(4px);
-  border: 1px solid rgba(255, 255, 255, 0.7);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--glass-border);
   border-radius: 14px;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.9),
-    0 20px 48px -20px rgba(19, 19, 17, 0.4);
+  box-shadow: var(--glass-shadow);
   padding: 8px;
   z-index: 70;
 }
@@ -458,10 +452,10 @@ const path = computed(() => '/' + route.data.relativePath)
   overflow-y: auto;
   border-radius: 18px;
   background: linear-gradient(160deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.78));
-  backdrop-filter: saturate(1.6) blur(4px);
-  -webkit-backdrop-filter: saturate(1.6) blur(4px);
-  border: 1px solid rgba(255, 255, 255, 0.7);
-  box-shadow: 0 24px 56px -20px rgba(19, 19, 17, 0.4);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
   padding: 18px 20px;
   pointer-events: auto;
 }

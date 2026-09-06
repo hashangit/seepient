@@ -64,27 +64,28 @@ async function copyMarkdown() {
   align-items: center;
   gap: 6px;
   padding: 8px 16px;
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 8px;
-  background: var(--vp-c-bg-elv);
-  color: var(--vp-c-text-2);
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+  background: var(--glass-bg);
+  color: var(--ink-2);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-  backdrop-filter: blur(8px);
+  box-shadow: var(--glass-shadow-sm);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
 }
 
 .copy-md-btn:hover {
-  color: var(--vp-c-brand-1);
-  border-color: var(--vp-c-brand-1);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  color: var(--moss-deep);
+  border-color: rgba(255, 255, 255, 0.9);
+  box-shadow: var(--glass-shadow);
   transform: translateY(-1px);
 }
 
 .copy-md-btn.copied {
-  color: #10b981;
-  border-color: #10b981;
+  color: var(--moss-deep);
+  border-color: rgba(255, 255, 255, 0.9);
 }
 </style>

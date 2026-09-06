@@ -98,13 +98,13 @@ const branch = `${withBase('/textures/branch.jpg')}`
 .band-panel {
   justify-self: end;
   width: min(360px, 100%);
-  background: rgba(255, 255, 255, 0.72);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.8);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--glass-border);
   border-radius: 16px;
   padding: 20px 22px;
-  box-shadow: 0 40px 80px -36px rgba(19, 19, 17, 0.45);
+  box-shadow: var(--glass-shadow);
 }
 
 .panel-kicker {
