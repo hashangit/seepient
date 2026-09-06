@@ -13,8 +13,6 @@
  * exactly like the CLI does. Your existing seepient setup just works.
  */
 import { askSeepient } from "../src/transport/sdk/index.js";
-import { configureProviders } from "../src/core/provider-resolver.js";
-import { loadMergedConfig, applyEnvOverrides } from "../src/core/config.js";
 import { execSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -96,27 +94,13 @@ Write release notes in **Keep a Changelog** format. Rules:
 8. Output ONLY the markdown release notes — no preamble, no explanation, no code fences.`;
 
 // --- call the SDK ---------------------------------------------------------
-// askSeepient() resolves the provider via configureProviders() singleton or env
-// vars — it does NOT read opts.config.provider. So we mirror what the CLI does:
-// load merged config and register it globally before the call.
-const config = applyEnvOverrides(loadMergedConfig());
-const providerType = config.provider || "openai";
-const providerModel =
-  config.models?.[providerType]?.model || config.model || undefined;
-
-if (config.models) {
-  configureProviders({ default: providerType, ...config.models } as any);
-}
-
+// askSeepient() resolves providers through the default ProviderRuntime
+// (v2 config store + env vars), exactly like the CLI does.
 console.error(`Generating release notes for v${VERSION} (since ${prevTag})...`);
-console.error(`Provider: ${providerType} | Model: ${providerModel || "default"}`);
 
 let result;
 try {
   result = await askSeepient(prompt, {
-    provider: providerType,
-    model: providerModel,
-    config,
     maxSteps: 3,
   });
 } catch (e) {

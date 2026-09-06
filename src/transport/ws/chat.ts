@@ -145,11 +145,20 @@ export async function handleChat(
           });
           return;
         }
+        // W162: generic wire text; raw detail in the ws_dispatch log only.
+        logTransportEvent({
+          level: "warn",
+          event: "ws_dispatch",
+          requestId: serverMsgId,
+          method: msg.type,
+          apiKeyHashPrefix: state.apiKeyHash ? state.apiKeyHash.slice(0, 8) : undefined,
+          error: message,
+        });
         safeSend(ws, {
           type: "error",
           code: "SESSION_ERROR",
           retryable: false,
-          message,
+          message: "Session error",
         });
         return;
       }
@@ -204,11 +213,19 @@ export async function handleChat(
         });
         if (!terminalFired) {
           terminalFired = true;
+          logTransportEvent({
+            level: "warn",
+            event: "ws_dispatch",
+            requestId: msg.id || serverMsgId,
+            method: msg.type,
+            apiKeyHashPrefix: state.apiKeyHash ? state.apiKeyHash.slice(0, 8) : undefined,
+            error: message,
+          });
           safeSend(ws, {
             type: "error",
             code: "STREAM_ERROR",
             retryable: false,
-            message,
+            message: "Stream failed",
           });
         }
         resolve();
@@ -268,11 +285,19 @@ export async function handleChat(
             if (terminalFired) return;
             terminalFired = true;
 
+            logTransportEvent({
+              level: "warn",
+              event: "ws_dispatch",
+              requestId: msg.id || serverMsgId,
+              method: msg.type,
+              apiKeyHashPrefix: state.apiKeyHash ? state.apiKeyHash.slice(0, 8) : undefined,
+              error: error.message,
+            });
             safeSend(ws, {
               type: "error",
               code: error.code || "STREAM_ERROR",
               retryable: error.code === "PROVIDER_ERROR",
-              message: error.message,
+              message: "Stream failed",
               provider: error.provider,
               tool: error.tool,
             });
@@ -302,11 +327,19 @@ export async function handleChat(
                   ctx.sessionManager.addMessage(acquiredSessionId, assistantMsg);
                 } catch (err: unknown) {
                   const message = err instanceof Error ? err.message : String(err);
+                  logTransportEvent({
+                    level: "warn",
+                    event: "ws_dispatch",
+                    requestId: serverMsgId,
+                    method: msg.type,
+                    apiKeyHashPrefix: state.apiKeyHash ? state.apiKeyHash.slice(0, 8) : undefined,
+                    error: message,
+                  });
                   safeSend(ws, {
                     type: "error",
                     code: "SESSION_ERROR",
                     retryable: false,
-                    message,
+                    message: "Session error",
                   });
                 }
               }
@@ -334,7 +367,7 @@ export async function handleChat(
       type: "error",
       code: "STREAM_ERROR",
       retryable: false,
-      message,
+      message: "Stream failed",
     });
   } finally {
     releaseSessionTurn();

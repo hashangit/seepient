@@ -114,11 +114,19 @@ export function handleConnection(
       case "chat":
         void handleChat(ws, msg, state, ctx).catch((err: unknown) => {
           const message = err instanceof Error ? err.message : String(err);
+          logTransportEvent({
+            level: "error",
+            event: "ws_dispatch",
+            requestId,
+            method: msg.type,
+            apiKeyHashPrefix: state.apiKeyHash ? state.apiKeyHash.slice(0, 8) : undefined,
+            error: message,
+          });
           safeSend(ws, {
             type: "error",
             code: "INTERNAL_ERROR",
             retryable: false,
-            message,
+            message: "Internal server error",
           });
         });
         break;
@@ -132,22 +140,38 @@ export function handleConnection(
         // W154e: unhandled rejections from these paths would crash the process
         void handleResume(ws, msg, state, ctx).catch((err: unknown) => {
           const message = err instanceof Error ? err.message : String(err);
+          logTransportEvent({
+            level: "error",
+            event: "ws_dispatch",
+            requestId,
+            method: msg.type,
+            apiKeyHashPrefix: state.apiKeyHash ? state.apiKeyHash.slice(0, 8) : undefined,
+            error: message,
+          });
           safeSend(ws, {
             type: "error",
             code: "INTERNAL_ERROR",
             retryable: false,
-            message,
+            message: "Internal server error",
           });
         });
         break;
       case "reconnect":
         void handleReconnect(ws, msg, state, ctx).catch((err: unknown) => {
           const message = err instanceof Error ? err.message : String(err);
+          logTransportEvent({
+            level: "error",
+            event: "ws_dispatch",
+            requestId,
+            method: msg.type,
+            apiKeyHashPrefix: state.apiKeyHash ? state.apiKeyHash.slice(0, 8) : undefined,
+            error: message,
+          });
           safeSend(ws, {
             type: "error",
             code: "INTERNAL_ERROR",
             retryable: false,
-            message,
+            message: "Internal server error",
           });
         });
         break;

@@ -9,6 +9,8 @@ import type { ProviderRuntimeContract } from "../../foundations/contracts/provid
 import type { Middleware } from "../../foundations/contracts/middleware.js";
 import { extractLoopError } from "../sdk/error-surfacing.js";
 import { normalizeHistoryForSend } from "../../domain/sessions/normalize-history.js";
+import { logTransportEvent } from "../logging.js";
+import * as crypto from "node:crypto";
 import { initializeSkillRegistry } from "../../capabilities/skills/index.js";
 import { buildSkillCatalog } from "../../domain/skills/skill-catalog.js";
 
@@ -236,9 +238,16 @@ export async function handleAgentChatStream(
       });
     }
   } catch (err) {
+    // W162: raw detail stays in the transport log; the wire gets generic text.
+    logTransportEvent({
+      level: "warn",
+      event: "http_request",
+      requestId: crypto.randomUUID(),
+      error: err instanceof Error ? err.message : "Stream failed",
+    });
     opts.onError({
       code: "STREAM_ERROR",
-      message: err instanceof Error ? err.message : "Stream failed",
+      message: "Stream failed",
     });
     opts.onDone({
       text: "",

@@ -121,7 +121,8 @@ describe("W154e — resume/reconnect dispatch carries a .catch mirror", () => {
       const err = sent.find((f) => f.type === "error");
       expect(err).toBeDefined();
       expect(err.code).toBe("INTERNAL_ERROR");
-      expect(err.message).toContain("resume exploded");
+      // W162: the frame carries generic text; the raw detail is logged only.
+      expect(err.message).toBe("Internal server error");
     } finally {
       if (fs.existsSync(rawKeyPath)) fs.unlinkSync(rawKeyPath);
     }

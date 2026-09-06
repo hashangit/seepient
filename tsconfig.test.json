@@ -5,6 +5,6 @@
     "rootDir": ".",
     "declaration": false
   },
-  "include": ["src/**/*", "examples/**/*", "scripts/pack-verify.d.mts"],
+  "include": ["src/**/*", "examples/**/*", "scripts/**/*", "scripts/pack-verify.d.mts"],
   "exclude": ["node_modules"]
 }

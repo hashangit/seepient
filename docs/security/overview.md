@@ -20,6 +20,28 @@ Seepient treats security as a core architectural constraint rather than an optio
 
 ---
 
+## Network egress boundaries (021-4 W164)
+
+All model- or config-supplied HTTP traffic is funnelled through a shared
+validated fetch path (`foundations/network/`): fail-closed DNS resolution,
+byte-level private/reserved/metadata IP classification, pinned sockets, a
+redirect hop cap, and an overall deadline. This covers gateway REST/OpenAPI
+calls, webhook notifications, image downloads, and the transport SSRF
+validator.
+
+**Provider inference traffic is a documented boundary**: the provider
+`baseUrl` is validated once at configuration time (fail-closed DNS + IP
+classification), but inference requests themselves are issued by the vendor
+SDKs' own HTTP stacks, which resolve DNS independently at request time. A
+DNS-rebinding rotation of a provider host after configuration is therefore
+NOT re-validated per request. Mitigations: provider endpoints are
+operator-configured (not model-supplied), and defense-in-depth (egress
+firewalls, IMDSv2 with hop limits, private DNS zones) is embedder
+infrastructure responsibility. Re-validating provider DNS at request time
+would require pinning the vendor SDKs' sockets and is deferred.
+
+---
+
 ## Core security invariants
 
 1. **Monotonic capability intersection**: Permissions only narrow as they flow inward. No inner component, tool module, or model instruction can expand an outer ceiling set by configuration or policy.
