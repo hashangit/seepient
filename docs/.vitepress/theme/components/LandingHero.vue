@@ -1,13 +1,32 @@
 <script setup lang="ts">
-import { withBase } from 'vitepress'
+import { computed } from 'vue'
+import { useData, withBase } from 'vitepress'
 
+const { theme } = useData()
 const shore = `${withBase('/textures/shore.jpg')}`
+
+const rawVersion = computed(() => theme.value.seepientVersion || '0.7.2')
+const displayVersion = computed(() => `v${rawVersion.value.replace(/^v/, '')}`)
+const releaseUrl = computed(() => `https://github.com/hashangit/seepient/releases/tag/${displayVersion.value}`)
 </script>
 
 <template>
   <section class="hero">
     <div class="hero-inner">
-      <p class="pixel-banner" v-reveal>SEEPIENT AGENT</p>
+      <div class="pixel-banner-wrap" v-reveal>
+        <span class="pixel-banner">SEEPIENT AGENT</span>
+        <a
+          class="version-badge"
+          :href="releaseUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+          :aria-label="`Current release ${displayVersion}`"
+          :title="`View Seepient ${displayVersion} release on GitHub`"
+        >
+          <span class="version-dot" aria-hidden="true"></span>
+          <span class="version-text">{{ displayVersion }}</span>
+        </a>
+      </div>
       <h1 class="hero-title" v-reveal>
         <span class="soft">The complete runtime for</span><br />
         <span>an autonomous agent species.</span>
@@ -109,9 +128,18 @@ const shore = `${withBase('/textures/shore.jpg')}`
   align-items: center;
 }
 
-/* Pixel logotype — the TUI banner, recreated for the web */
-.pixel-banner {
+/* Pixel logotype & version badge */
+.pixel-banner-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
   margin: 0 0 30px;
+  flex-wrap: wrap;
+}
+
+.pixel-banner {
+  margin: 0;
   font-family: 'Silkscreen', var(--vp-font-family-mono);
   font-weight: 400;
   font-size: clamp(21px, 3vw, 33px);
@@ -134,6 +162,47 @@ const shore = `${withBase('/textures/shore.jpg')}`
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+}
+
+.version-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px 3px 8px;
+  border-radius: 999px;
+  font-family: var(--vp-font-family-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  color: var(--ink-2);
+  background: rgba(255, 255, 255, 0.65);
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 2px rgba(19, 19, 17, 0.04);
+  text-decoration: none;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.version-badge:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(95, 122, 61, 0.45);
+  box-shadow: 0 2px 8px -2px rgba(95, 122, 61, 0.25);
+  transform: translateY(-1px);
+}
+
+.version-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--moss);
+  box-shadow: 0 0 0 2px rgba(95, 122, 61, 0.2);
+  flex-shrink: 0;
+}
+
+.version-text {
+  font-variant-numeric: tabular-nums;
 }
 
 .hero-title {
@@ -388,6 +457,18 @@ const shore = `${withBase('/textures/shore.jpg')}`
 
   .terminal-body {
     font-size: 11.5px;
+  }
+}
+
+@media (max-width: 480px) {
+  .pixel-banner-wrap {
+    gap: 8px;
+    margin-bottom: 24px;
+  }
+
+  .version-badge {
+    padding: 2.5px 8px;
+    font-size: 10px;
   }
 }
 </style>

@@ -1,4 +1,19 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitepress'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+let seepientVersion = '0.7.2'
+try {
+  const pkgPath = path.resolve(__dirname, '../../package.json')
+  if (fs.existsSync(pkgPath)) {
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'))
+    if (pkg.version) seepientVersion = pkg.version
+  }
+} catch {
+  // fallback if package.json cannot be read
+}
 
 export default defineConfig({
   title: 'Seepient',
@@ -14,6 +29,7 @@ export default defineConfig({
   },
 
   themeConfig: {
+    seepientVersion,
     nav: [
       { text: 'Guides', link: '/guides/introduction', activeMatch: '^/guides/' },
       {
