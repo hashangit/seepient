@@ -23,7 +23,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# Pin pnpm to the version the lockfile/CI use — `pnpm@latest` makes corepack
+# resolve a moving target and the container cache can miss the shim's module.
+RUN corepack enable && corepack prepare pnpm@11.25.0 --activate
 
 WORKDIR /build
 
