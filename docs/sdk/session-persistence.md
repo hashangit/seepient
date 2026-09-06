@@ -132,7 +132,7 @@ interface SessionData {
 ```
 
 ::: info
-Session IDs must contain only alphanumeric characters and dashes (`[a-zA-Z0-9-]+`). Invalid IDs throw an error on save.
+Session IDs must contain only alphanumeric characters, dashes, and underscores (`^[a-zA-Z0-9_-]+$`). Invalid IDs throw an error on save.
 :::
 
 ### MemoryPersistenceBackend

@@ -48,6 +48,7 @@ npm-debug.log*
 # Coverage
 coverage/
 docs/.vitepress/cache/
+docs/.vitepress/dist/
 
 # zFlow agent
 .zflow/

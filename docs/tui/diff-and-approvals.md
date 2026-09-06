@@ -29,6 +29,7 @@ When a model calls `edit_file` or `write_file`, the TUI presents a color-coded d
     'Pre-image hash: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
   ]"
 />
+
 ### Navigating long diffs
 For multi-line refactors that exceed the terminal viewport:
 - Press `d` to expand the diff into full-screen scroll mode.

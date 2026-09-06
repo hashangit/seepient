@@ -16,6 +16,7 @@ Rather than executing shell commands or file modifications within the same proce
     { title: 'Isolated Worker Container', desc: 'Secret-free: runs the command inside the sandbox jail with zero provider credentials', edge: 'Spawns an ephemeral container' }
   ]"
 />
+
 ---
 
 ## Security invariants

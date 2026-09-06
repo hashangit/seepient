@@ -46,20 +46,32 @@ console.log(`\nDone. ${(await stream.usage).totalTokens} tokens used.`);
 | Name            | Type                                     | Default | Description |
 |-----------------|------------------------------------------|---------|-------------|
 | `model`         | `string`                                 | Provider default | Model identifier |
-| `provider`      | `ProviderType`                           | Config default   | Provider to use |
-| `runtime`       | `ProviderRuntime`                        | `getDefaultProviderRuntime()` | Provider runtime instance managing credentials, configurations, and inference adapters |
-| `principalId`   | `string`                                 | `"sdk-user"`     | Identity of the calling principal/user, threaded into audit events and capability grants |
+| `provider`      | `string`                                 | Config default   | Provider name for audit labeling |
+| `purpose`       | `Purpose`                                | `"text"`         | Purpose routing hint (see [Purpose reference](/sdk/types#purpose) for all 15 supported values) |
+| `tier`          | `"efficient" \| "standard" \| "complex"` | *(none)*         | Model capability tier hint |
+| `providerAccount` | `string`                               | *(none)*         | Target provider account name |
+| `runtime`       | `ProviderRuntime`                        | `getDefaultProviderRuntime()` | Provider runtime instance managing credentials and inference adapters |
+| `principalId`   | `string`                                 | `"sdk-user"`     | Identity of calling principal, threaded into audit events and capability grants |
 | `auditStore`    | `AuditStore`                             | Local file audit store | Injected audit store for recording action lifecycle events |
 | `policyStore`   | `PolicyStore`                            | Local file policy store | Injected policy store for grant snapshots and mutations |
 | `capabilityLedger` | `CapabilityLedger`                    | Local file capability ledger | Injected ledger for capability lease consumption and revocations |
 | `systemPrompt`  | `string`                                 | *(none)*         | System message prepended to the conversation |
-| `tools`         | `(string \| UserToolDefinition \| AnyToolRegistration)[]` | All built-in     | Built-in tool names, group names (`"core"`, `"all"`), or custom tool registrations (`trustedHostTool`) |
-| `skills`        | `string[]`                               | *(none)*         | Skills to activate |
+| `tools`         | `(string \| UserToolDefinition \| AnyToolRegistration)[]` | All built-in     | Built-in tool names, group names (`"core"`, `"all"`), or custom registrations (`trustedHostTool`, `preparedTool`, `brokerConnector`) |
+| `consentMode`   | `ConsentMode`                            | `"edit-enabled"` | Permission consent mode (`"ask-everything"`, `"edit-enabled"`, `"autonomous"`) |
+| `deploymentCeiling` | `CapabilitySet \| Capability[]`      | *(none)*         | Maximum capability lease permitted for any execution |
+| `principalPolicy` | `CapabilitySet \| Capability[]`        | *(none)*         | Pre-granted capabilities for the calling principal |
+| `approveTool`   | `ApproveToolFn`                          | *(none)*         | Interactive tool approval callback |
+| `approvalBroker`| `ApprovalBroker`                         | *(none)*         | Custom approval broker for permission escalation |
+| `commitHelper`  | `CommitHelper`                           | Native helper    | Custom or mock exact-commit verifier helper |
+| `network`       | `BrokerNetworkAdapter`                   | Standard adapter | Custom broker network adapter with SSRF / IP pinning rules |
+| `cwd`           | `string`                                 | `process.cwd()`  | Workspace directory for file tools and skill discovery |
+| `skills`        | `string[] \| boolean`                    | `true`           | Skill names to activate, `true` for all discovered, or `false` to opt out of skill injection |
 | `maxSteps`      | `number`                                 | `10`             | Maximum agent loop iterations |
 | `temperature`   | `number`                                 | Provider default | Sampling temperature |
 | `maxTokens`     | `number`                                 | Provider default | Maximum completion tokens |
-| `output`        | `unknown`                                | *(none)*         | Zod schema for structured output |
 | `hooks`         | `Hooks`                                  | *(none)*         | Lifecycle callbacks |
+| `middleware`    | `Middleware[]`                            | *(none)*         | Request/response pipeline functions |
+| `metadata`      | `Record<string, unknown>`                 | `{}`             | Adapter-specific metadata passed to middleware |
 | `signal`        | `AbortSignal`                            | *(none)*         | Abort signal |
 | `config`        | `Record<string, unknown>`                | `{}`             | Extra config for tool handlers |
 

@@ -17,6 +17,7 @@ Language models should not directly perform destructive side effects. When a mod
     { title: 'Audit Recorder logs the outcome' }
   ]"
 />
+
 ## Prepared actions
 
 Built-in tools that cause external side effects do not execute actions immediately. Instead, they produce a `PreparedActionDraft` structure containing:
@@ -46,9 +47,12 @@ Seepient ships with 15 built-in tools organized by capability:
 | `send_notification` | Communication | Effectful | Sends webhook alerts to Feishu, DingTalk, Slack, or Discord |
 | `generate_image` | Media | Effectful | Generates images via Fal, Google, or OpenAI backends |
 | `render_widget` | UI | Presentation | Renders interactive tables, charts, or forms in the TUI |
-| `todos` | Planning | Local state | Manages the agent's internal task tracking list |
-| `prompt_optimizer` | Analysis | Read-only | Analyzes and refines prompts for upstream models |
+| `manage_todos` | Planning | Local state | Manages the agent's internal task tracking list |
+| `optimize_prompt` | Analysis | Read-only | Analyzes and refines prompts for upstream models |
 | `use_skill` | Orchestration | Context | Loads and activates an external skill folder |
+
+> [!TIP]
+> For complete parameter schemas, configuration requirements, and code examples for all 15 tools, see the [Built-in Tools Reference](/tools/reference).
 
 ## Read vs effectful tools
 
@@ -62,3 +66,12 @@ You can run commands with the `--dry-run` flag. In dry-run mode:
 1. The model plans and reasons normally.
 2. Tools generate prepared action drafts.
 3. The execution boundary logs the action to stdout or the TUI without applying mutations to the filesystem or spawning shell processes.
+
+---
+
+## Next steps
+
+- [Built-in Tools Reference](/tools/reference) -- Complete parameters and examples for all 15 tools
+- [Custom Tools in SDK](/sdk/custom-tools) -- Define custom application-specific tools
+- [MCP Gateway](/sdk/mcp-gateway) -- Expose remote MCP servers and REST APIs as tools
+- [Permissions and Consent](/security/permissions) -- Control tool authorization policies

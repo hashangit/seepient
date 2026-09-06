@@ -17,6 +17,7 @@ Seepient treats security as a core architectural constraint rather than an optio
     { title: 'Audit Recorder', note: 'Appends an fsync record to the 0600 ledger' }
   ]"
 />
+
 ---
 
 ## Core security invariants

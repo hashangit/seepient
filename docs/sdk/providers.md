@@ -205,7 +205,8 @@ The `OPENAI_COMPAT_BASE_URL` is required for the `openai-compatible` provider.
 
 ## Related APIs
 
-- [generateText()](/sdk/generate-text) -- Stateless text generation
+- [Provider Management API](/sdk/provider-management) -- Complete programmatic accounts, assignments, and runtime management
 - [createSeepient()](/sdk/create-seepient) -- Stateful agent with provider switching
+- [generateText()](/sdk/generate-text) -- Stateless text generation
 - [Custom Tools](/sdk/custom-tools) -- Register custom tools and trust boundaries
-- [Types](/sdk/types) -- Full TypeScript type reference
+- [Types Reference](/sdk/types) -- Full TypeScript type reference

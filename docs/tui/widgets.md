@@ -40,12 +40,14 @@ When an operation requires user choices, the TUI displays keyboard-navigable sel
 
 During multi-step background actions, the TUI shows a collapsible task tree:
 
-```text
-⠿ Running test suite (vitest run)
-  ✔ src/domain/agent-loop.test.ts (14 tests passed, 180ms)
-  ✔ src/capabilities/tools/shell.test.ts (8 tests passed, 92ms)
-  ⠋ src/capabilities/execution/fs-commit.test.ts (running...)
-```
+<TermCard
+  :lines="[
+    '⠿ Running test suite (vitest run)',
+    '  ✔ src/domain/agent-loop.test.ts (14 tests passed, 180ms)',
+    '  ✔ src/capabilities/tools/shell.test.ts (8 tests passed, 92ms)',
+    '  ⠋ src/capabilities/execution/fs-commit.test.ts (running...)'
+  ]"
+/>
 
 Completed steps collapse to green checkmarks, keeping terminal screen space clear for active output.
 

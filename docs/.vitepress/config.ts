@@ -15,14 +15,58 @@ export default defineConfig({
 
   themeConfig: {
     nav: [
-      { text: 'Guides', link: '/guides/introduction' },
-      { text: 'Architecture', link: '/architecture/how-seepient-works' },
-      { text: 'TUI', link: '/tui/overview' },
-      { text: 'CLI', link: '/cli/overview' },
-      { text: 'SDK', link: '/sdk/overview' },
-      { text: 'Server', link: '/server/overview' },
-      { text: 'Security', link: '/security/overview' },
-      { text: 'Cookbook', link: '/cookbook/overview' }
+      { text: 'Guides', link: '/guides/introduction', activeMatch: '^/guides/' },
+      {
+        text: 'Surfaces',
+        items: [
+          { text: 'Terminal UI (TUI)', link: '/tui/overview' },
+          { text: 'Command Line (CLI)', link: '/cli/overview' },
+          { text: 'TypeScript SDK', link: '/sdk/overview' },
+          { text: 'Server & Protocol', link: '/server/overview' }
+        ]
+      },
+      {
+        text: 'Tools',
+        items: [
+          { text: 'Built-in Tools Reference', link: '/tools/reference' },
+          { text: 'Tools and Effects Guide', link: '/guides/tools-and-effects' },
+          { text: 'Custom Tools (SDK)', link: '/sdk/custom-tools' },
+          { text: 'MCP Gateway', link: '/sdk/mcp-gateway' },
+          { text: 'Interactive TUI Widgets', link: '/tui/widgets' }
+        ]
+      },
+      {
+        text: 'Reference',
+        items: [
+          {
+            text: 'Tools & APIs',
+            items: [
+              { text: 'Built-in Tools Reference', link: '/tools/reference' },
+              { text: 'SDK Types & Contracts', link: '/sdk/types' },
+              { text: 'CLI Command Reference', link: '/cli/reference' },
+              { text: 'REST API Reference', link: '/server/rest-api' },
+              { text: 'WebSocket Protocol', link: '/server/websocket-api' }
+            ]
+          },
+          {
+            text: 'Security & Governance',
+            items: [
+              { text: 'Security Review Package (008)', link: '/security-review-008' },
+              { text: 'Audit Trail Contract', link: '/security/audit' }
+            ]
+          }
+        ]
+      },
+      {
+        text: 'Architecture',
+        items: [
+          { text: 'System Architecture', link: '/architecture/how-seepient-works' },
+          { text: 'Execution Lifecycle', link: '/architecture/execution-lifecycle' },
+          { text: 'Security & Sandbox', link: '/security/overview' }
+        ]
+      },
+      { text: 'Cookbook', link: '/cookbook/overview', activeMatch: '^/cookbook/' },
+      { text: 'Articles', link: '/articles/01-engineering-an-ai-person', activeMatch: '^/articles/' }
     ],
 
     sidebar: {
@@ -42,7 +86,8 @@ export default defineConfig({
             { text: 'Model routing', link: '/guides/model-routing' },
             { text: 'Skills system', link: '/guides/skills' },
             { text: 'Tools and effects', link: '/guides/tools-and-effects' },
-            { text: 'Sessions and state', link: '/guides/sessions-and-state' }
+            { text: 'Sessions and state', link: '/guides/sessions-and-state' },
+            { text: 'Built-in tools reference', link: '/tools/reference' }
           ]
         }
       ],
@@ -52,7 +97,8 @@ export default defineConfig({
           text: 'System architecture',
           items: [
             { text: 'How Seepient works', link: '/architecture/how-seepient-works' },
-            { text: 'Execution lifecycle', link: '/architecture/execution-lifecycle' }
+            { text: 'Execution lifecycle', link: '/architecture/execution-lifecycle' },
+            { text: 'Security review package (008)', link: '/security-review-008' }
           ]
         }
       ],
@@ -89,8 +135,11 @@ export default defineConfig({
             { text: 'createSeepient', link: '/sdk/create-seepient' },
             { text: 'generateText', link: '/sdk/generate-text' },
             { text: 'streamText', link: '/sdk/stream-text' },
-            { text: 'Structured output', link: '/sdk/structured-output' },
+            { text: 'Settings', link: '/sdk/settings' },
+            { text: 'Provider management', link: '/sdk/provider-management' },
             { text: 'Custom tools', link: '/sdk/custom-tools' },
+            { text: 'MCP Gateway', link: '/sdk/mcp-gateway' },
+            { text: 'Built-in tools reference', link: '/tools/reference' },
             { text: 'Providers', link: '/sdk/providers' },
             { text: 'Skills', link: '/sdk/skills' },
             { text: 'Hooks and middleware', link: '/sdk/hooks' },
@@ -116,6 +165,27 @@ export default defineConfig({
         }
       ],
 
+      '/tools/': [
+        {
+          text: 'Tools and capabilities',
+          items: [
+            { text: 'Built-in tools reference', link: '/tools/reference' },
+            { text: 'Tools and effects guide', link: '/guides/tools-and-effects' },
+            { text: 'Custom tools (SDK)', link: '/sdk/custom-tools' },
+            { text: 'MCP Gateway', link: '/sdk/mcp-gateway' },
+            { text: 'Interactive TUI widgets', link: '/tui/widgets' }
+          ]
+        },
+        {
+          text: 'Reference links',
+          items: [
+            { text: 'SDK types and contracts', link: '/sdk/types' },
+            { text: 'CLI command reference', link: '/cli/reference' },
+            { text: 'Server REST API', link: '/server/rest-api' }
+          ]
+        }
+      ],
+
       '/security/': [
         {
           text: 'Security and sandbox',
@@ -124,7 +194,8 @@ export default defineConfig({
             { text: 'Permissions and consent', link: '/security/permissions' },
             { text: 'Process sandboxing', link: '/security/sandboxing' },
             { text: 'Exact commit protection', link: '/security/exact-commit' },
-            { text: 'Audit trail', link: '/security/audit' }
+            { text: 'Audit trail', link: '/security/audit' },
+            { text: 'Security review package (008)', link: '/security-review-008' }
           ]
         }
       ],
@@ -138,6 +209,28 @@ export default defineConfig({
             { text: 'React chat UI', link: '/cookbook/react-chat' },
             { text: 'Local LLMs with Ollama', link: '/cookbook/local-llm' },
             { text: 'Production checklist', link: '/cookbook/production-checklist' }
+          ]
+        }
+      ],
+
+      '/articles/': [
+        {
+          text: 'Engineering Deep Dives',
+          items: [
+            { text: 'Engineering an AI person', link: '/articles/01-engineering-an-ai-person' },
+            { text: 'Foundational architecture', link: '/articles/02a-foundational-architecture' },
+            { text: 'Enforcing architecture vs AI slop', link: '/articles/02b-enforcing-architecture-ai-slop' },
+            { text: 'Permission system deep dive', link: '/articles/03-permission-system-deep-dive' }
+          ]
+        }
+      ],
+
+      '/embedding/': [
+        {
+          text: 'Stateless embedding',
+          items: [
+            { text: 'Stateless workers', link: '/sdk/stateless-workers' },
+            { text: 'Session persistence', link: '/sdk/session-persistence' }
           ]
         }
       ]
@@ -157,5 +250,5 @@ export default defineConfig({
     }
   },
 
-  srcExclude: ['superpowers/**', 'articles/**']
+  srcExclude: ['superpowers/**']
 })
