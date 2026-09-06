@@ -16,7 +16,7 @@ const WORDMARK = 'Seepient Agent';
 // ~102 cols wide). figlet has no scale option, so the font IS the size.
 const FONT = 'ANSI Compact';
 
-let VERSION = '0.6.1';
+let VERSION = '0.7.2';
 try {
   const dir = path.dirname(fileURLToPath(import.meta.url));
   const pkgPath = path.join(dir, '..', '..', '..', '..', 'package.json');

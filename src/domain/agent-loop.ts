@@ -140,6 +140,118 @@ function classifyOutputSensitivity(toolName: string, args: Record<string, unknow
 }
 
 /**
+ * Best-effort sanitizer for unescaped literal control characters inside JSON string literals.
+ * Models often emit multiline file content or code containing literal newlines (0x0A) or tabs (0x09)
+ * within quotes, violating RFC 8259 JSON syntax.
+ */
+export function sanitizeJsonControlChars(str: string): string {
+  let result = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (escaped) {
+      result += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      result += ch;
+      escaped = true;
+      continue;
+    }
+    if (ch === "\"") {
+      inString = !inString;
+      result += ch;
+      continue;
+    }
+    if (inString) {
+      if (ch === "\n") {
+        result += "\\n";
+        continue;
+      }
+      if (ch === "\r") {
+        result += "\\r";
+        continue;
+      }
+      if (ch === "\t") {
+        result += "\\t";
+        continue;
+      }
+    }
+    result += ch;
+  }
+  return result;
+}
+
+export interface ToolArgParseResult {
+  success: boolean;
+  args: Record<string, unknown>;
+  error?: string;
+}
+
+/**
+ * Resilient, best-effort parser for tool call arguments.
+ * Attempts standard parsing first, then lightweight repair (stripping markdown fences,
+ * escaping raw control characters in string literals).
+ * If all parsing attempts fail, returns success: false with the syntax error.
+ */
+export function parseToolArguments(rawArgs: unknown): ToolArgParseResult {
+  if (rawArgs == null) {
+    return { success: true, args: {} };
+  }
+  if (typeof rawArgs === "object" && !Array.isArray(rawArgs)) {
+    return { success: true, args: rawArgs as Record<string, unknown> };
+  }
+  if (typeof rawArgs !== "string") {
+    return { success: false, args: {}, error: `Expected JSON string or object, received ${typeof rawArgs}` };
+  }
+
+  let str = rawArgs.trim();
+  if (str === "" || str === "{}") {
+    return { success: true, args: {} };
+  }
+
+  // Fast path: standard JSON.parse
+  try {
+    const parsed = JSON.parse(str);
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return { success: true, args: parsed };
+    }
+    return { success: false, args: {}, error: "Tool arguments JSON must be an object" };
+  } catch (initialErr: any) {
+    // Best effort 1: Strip surrounding markdown code fences if present
+    if (str.startsWith("```")) {
+      const fenceMatch = /^```(?:tool_call|json)?\s*([\s\S]*?)```$/i.exec(str);
+      if (fenceMatch) {
+        str = fenceMatch[1].trim();
+        try {
+          const parsed = JSON.parse(str);
+          if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+            return { success: true, args: parsed };
+          }
+        } catch {}
+      }
+    }
+
+    // Best effort 2: Sanitize raw control characters in string literals
+    try {
+      const sanitized = sanitizeJsonControlChars(str);
+      const parsed = JSON.parse(sanitized);
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+        return { success: true, args: parsed };
+      }
+    } catch {}
+
+    return {
+      success: false,
+      args: {},
+      error: initialErr instanceof Error ? initialErr.message : String(initialErr),
+    };
+  }
+}
+
+/**
  * Run the agent loop with optional middleware wrapping.
  */
 export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoopResult> {
@@ -555,16 +667,11 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     // Tool calls
     if (response.tool_calls && response.tool_calls.length > 0) {
       const assistantToolCalls: ToolCall[] = response.tool_calls.map((tc) => {
-        let args: Record<string, unknown>;
-        try {
-          args = JSON.parse(tc.arguments);
-        } catch {
-          args = { raw: tc.arguments };
-        }
+        const parseRes = parseToolArguments(tc.arguments);
         return {
           id: tc.id,
           name: tc.name,
-          arguments: args,
+          arguments: parseRes.success ? parseRes.args : { _raw: tc.arguments },
         };
       });
       allToolCalls.push(...assistantToolCalls);
@@ -592,13 +699,31 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
           break;
         }
 
-        let parsedArgs: Record<string, unknown>;
-        try {
-          parsedArgs = JSON.parse(tc.arguments);
-        } catch {
-          parsedArgs = { raw: tc.arguments };
+        const start = now();
+        const parseRes = parseToolArguments(tc.arguments);
+        if (!parseRes.success) {
+          const errorOutput = `Error (Model Output Contract Violation): Failed to parse arguments for tool "${tc.name}" as valid JSON (${parseRes.error}). Tool calls must strictly follow the JSON parameter schema contract. Ensure all strings are properly escaped (e.g. quotes as \\" and newlines as \\n). Please re-issue the tool call with valid JSON arguments adhering to the schema.`;
+          const duration = now() - start;
+          messages.push({
+            id: generateId(),
+            role: "tool",
+            content: errorOutput,
+            toolCallId: tc.id,
+            timestamp: now(),
+          });
+          const failStep: StepResult = {
+            type: "tool_call",
+            toolCall: { id: tc.id, name: tc.name, args: { _raw: tc.arguments }, result: errorOutput, duration },
+            metadata: { errorKind: "contract_violation", parseError: parseRes.error },
+            timestamp: now(),
+          };
+          steps.push(failStep);
+          await hooks.onStep(failStep);
+          if (onStep) onStep(failStep);
+          continue;
         }
 
+        const parsedArgs = parseRes.args;
         await hooks.beforeToolCall({ name: tc.name, args: parsedArgs });
 
         // Forward a tool's live progress (e.g. streaming shell stdout) to the
@@ -622,7 +747,6 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
         const injectedTools = config?.injectedTools;
         const injectedModule = injectedTools instanceof Map ? injectedTools.get(tc.name) : undefined;
 
-        const start = now();
         let output: string;
         let metadata: Record<string, unknown> | undefined;
 
@@ -761,6 +885,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
           const failStep: StepResult = {
             type: "tool_call",
             toolCall: { id: tc.id, name: tc.name, args: parsedArgs, result: output, duration },
+            metadata: { errorKind: "unsupported_tool" },
             timestamp: now(),
           };
           steps.push(failStep);

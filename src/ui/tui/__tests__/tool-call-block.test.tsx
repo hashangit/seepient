@@ -72,4 +72,33 @@ describe("ToolCallBlock — write_file diff wiring", () => {
     expect(out).toContain("Successfully wrote to /a.txt");
     expect(out).not.toContain("-1 ");
   });
+
+  it("renders ✓ glyph when status is ok", () => {
+    const entry: ToolCallEntry = {
+      id: "t4",
+      kind: "tool",
+      name: "write_file",
+      args: { path: "/a.txt" },
+      status: "ok",
+      output: "Successfully wrote to /a.txt",
+    };
+    const out = render(<ToolCallBlock entry={entry} expanded={false} />).lastFrame() ?? "";
+    expect(out).toContain("✓");
+    expect(out).not.toContain("✗");
+  });
+
+  it("renders ✗ glyph when status is fail", () => {
+    const entry: ToolCallEntry = {
+      id: "t5",
+      kind: "tool",
+      name: "write_file",
+      args: { raw: '{"path": ...}' },
+      status: "fail",
+      output: 'Error: The "path" argument must be of type string.',
+    };
+    const out = render(<ToolCallBlock entry={entry} expanded={false} />).lastFrame() ?? "";
+    expect(out).toContain("✗");
+    expect(out).not.toContain("✓");
+  });
 });
+
