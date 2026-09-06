@@ -1,3 +1,8 @@
+---
+title: Security Review Package (008)
+description: Structured review package for independent security review of Seepient permission system 008.
+---
+
 # Seepient Permission System 008 — Security Review Package
 
 **Purpose**: This is the **review package for an independent security reviewer**.

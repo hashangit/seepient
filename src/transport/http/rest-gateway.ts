@@ -35,24 +35,29 @@ function sendError(
   sendJSON(res, statusCode, { error: { code, message } });
 }
 
-function parseBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
-    req.on("error", reject);
-  });
-}
+// W160: gateway bodies go through the shared capped reader (413).
+import { parseBody as parseCappedBody, PayloadTooLargeError } from "./body.js";
 
-async function parseJsonBody<T>(req: IncomingMessage, res: ServerResponse): Promise<T | null> {
-  let body: T;
+const parseBody = (req: IncomingMessage, maxBodyBytes?: number): Promise<string> =>
+  parseCappedBody(req, { maxBodyBytes });
+
+async function parseJsonBody<T>(req: IncomingMessage, res: ServerResponse, maxBodyBytes?: number): Promise<T | null> {
+  let raw: string;
   try {
-    body = JSON.parse(await parseBody(req));
+    raw = await parseBody(req, maxBodyBytes);
+  } catch (err) {
+    // B4: an oversized body must reach rest.ts's 413 mapping, not be
+    // swallowed into a 400 "Invalid JSON".
+    if (err instanceof PayloadTooLargeError) throw err;
+    sendError(res, 400, "BAD_REQUEST", "Invalid JSON in request body");
+    return null;
+  }
+  try {
+    return JSON.parse(raw) as T;
   } catch {
     sendError(res, 400, "BAD_REQUEST", "Invalid JSON in request body");
     return null;
   }
-  return body;
 }
 
 function requireAuth(
@@ -134,8 +139,11 @@ export function createGatewayRestHandler(ctx: {
   settingsAdapter: GatewaySettingsAdapter;
   /** Injected by the composition root — the handler never imports the capability runtime. */
   importOpenApiSpec: ImportOpenApiSpec;
+  /** B5: the operator-configured body cap (server.maxBodyBytes). */
+  maxBodyBytes?: number;
 }): (req: IncomingMessage, res: ServerResponse, path: string, method: string) => Promise<void> {
   const { gateway, settingsAdapter, importOpenApiSpec } = ctx;
+  const maxBodyBytes = ctx.maxBodyBytes;
 
   return async function handleGatewayRoute(
     req: IncomingMessage,
@@ -169,7 +177,7 @@ export function createGatewayRestHandler(ctx: {
         }
         case "register_target": {
           if (!requireAuth(req, res, "admin")) return;
-          const body = await parseJsonBody<{ name: string; target: import("../../capabilities/gateway/types.js").Target }>(req, res);
+          const body = await parseJsonBody<{ name: string; target: import("../../capabilities/gateway/types.js").Target }>(req, res, maxBodyBytes);
           if (!body) return;
           if (!body.name || !body.target) {
             sendError(res, 400, "BAD_REQUEST", "Fields 'name' and 'target' are required");
@@ -181,7 +189,7 @@ export function createGatewayRestHandler(ctx: {
         }
         case "toggle_target": {
           if (!requireAuth(req, res, "admin")) return;
-          const body = await parseJsonBody<{ enabled: boolean }>(req, res);
+          const body = await parseJsonBody<{ enabled: boolean }>(req, res, maxBodyBytes);
           if (!body) return;
           if (typeof body.enabled !== "boolean") {
             sendError(res, 400, "BAD_REQUEST", "Field 'enabled' must be a boolean");
@@ -212,7 +220,7 @@ export function createGatewayRestHandler(ctx: {
         }
         case "put_credential": {
           if (!requireAuth(req, res, "admin")) return;
-          const body = await parseJsonBody<{ value: string }>(req, res);
+          const body = await parseJsonBody<{ value: string }>(req, res, maxBodyBytes);
           if (!body) return;
           if (!body.value) {
             sendError(res, 400, "BAD_REQUEST", "Field 'value' is required");
@@ -224,7 +232,7 @@ export function createGatewayRestHandler(ctx: {
         }
         case "add_route": {
           if (!requireAuth(req, res, "admin")) return;
-          const body = await parseJsonBody<{ pattern: string; target: string; priority?: number }>(req, res);
+          const body = await parseJsonBody<{ pattern: string; target: string; priority?: number }>(req, res, maxBodyBytes);
           if (!body) return;
           if (!body.pattern || !body.target) {
             sendError(res, 400, "BAD_REQUEST", "Fields 'pattern' and 'target' are required");
@@ -236,7 +244,7 @@ export function createGatewayRestHandler(ctx: {
         }
         case "import_openapi": {
           if (!requireAuth(req, res, "admin")) return;
-          const body = await parseJsonBody<{ name: string; specUrl: string; baseUrl?: string }>(req, res);
+          const body = await parseJsonBody<{ name: string; specUrl: string; baseUrl?: string }>(req, res, maxBodyBytes);
           if (!body) return;
           if (!body.name || !body.specUrl) {
             sendError(res, 400, "BAD_REQUEST", "Fields 'name' and 'specUrl' are required");
@@ -258,7 +266,8 @@ export function createGatewayRestHandler(ctx: {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Gateway request failed";
       console.error("[rest-gateway] Error:", message);
-      sendError(res, 500, "INTERNAL_ERROR", message);
+      // B3: generic wire text — the raw detail is in the server log above.
+      sendError(res, 500, "INTERNAL_ERROR", "Gateway request failed");
     }
   };
 }

@@ -132,6 +132,28 @@ curl http://localhost:7337/v1/skills \
 
 ---
 
+## List Sessions
+
+### `GET /v1/sessions`
+
+Returns session metadata (no message bodies) for the caller's API key.
+
+#### Example
+
+```bash
+curl -H "Authorization: Bearer YOUR_KEY" http://localhost:7337/v1/sessions
+```
+
+#### Response
+
+```json
+{
+  "sessions": [
+    { "id": "abc123", "createdAt": 1700000000000, "updatedAt": 1700000600000, "messageCount": 6 }
+  ]
+}
+```
+
 ## Chat
 
 ### `POST /v1/chat`

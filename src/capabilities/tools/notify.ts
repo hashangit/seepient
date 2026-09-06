@@ -1,4 +1,5 @@
 import { ToolModule } from '../../foundations/contracts/tool.js';
+import { safeSsrfFetch } from '../../foundations/network/ssrf-fetch.js';
 
 export const NotifyTool: ToolModule = {
   name: "Group Bot Notification",
@@ -81,11 +82,12 @@ export const NotifyTool: ToolModule = {
 
     // 2. Send Request
     try {
-      const response = await fetch(webhookUrl, {
+      // W164: webhook destinations go through the SSRF-validated fetch.
+      const response = await safeSsrfFetch(webhookUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
-      });
+      }, { maxResponseBytes: 1024 * 1024 });
 
       const result: any = await response.json();
 

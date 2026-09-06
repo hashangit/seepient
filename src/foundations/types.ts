@@ -7,6 +7,9 @@
 
 import type { SeepientError as SeepientErrorType } from "./errors.js";
 import type { Middleware } from "./contracts/middleware.js";
+import type { Purpose, Tier } from "./contracts/provider-runtime.js";
+
+export type { Purpose, Tier };
 
 // ── Permissions ────────────────────────────────────────────────────────
 
@@ -158,15 +161,17 @@ export interface Hooks {
   ) => void | Promise<void>;
   onStep?: (step: StepResult) => void | Promise<void>;
   onError?: (error: SeepientErrorType) => void | Promise<void>;
-  onFinish?: (result: GenerateTextResult) => void | Promise<void>;
+  onFinish?: (result: AskSeepientResult) => void | Promise<void>;
 }
 
-// ── generateText ──────────────────────────────────────────────────────
+// ── askSeepient ───────────────────────────────────────────────────────
 
-export interface GenerateTextOptions {
+export interface AskSeepientOptions {
   model?: string;
   provider?: string;
   providerAccount?: string;
+  purpose?: Purpose;
+  tier?: Tier;
   systemPrompt?: string;
   tools?: (string | UserToolDefinition | import("./contracts/custom-tools.js").AnyToolRegistration)[];
   skills?: string[] | boolean;
@@ -174,14 +179,26 @@ export interface GenerateTextOptions {
   maxSteps?: number;
   temperature?: number;
   maxTokens?: number;
-  output?: unknown; // ZodSchema
   hooks?: Hooks;
   signal?: AbortSignal;
+  stream?: boolean;
   config?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   middleware?: Middleware[];
   approveTool?: ApproveToolFn;
   approvalBroker?: import("./contracts/permission-policy.js").ApprovalBroker;
+
+  // Streaming & Lifecycle Callbacks
+  onText?: (delta: string) => void;
+  onToolCall?: (
+    tool: { name: string; args: Record<string, unknown>; callId: string },
+  ) => void;
+  onToolResult?: (
+    result: { callId: string; output: string; success: boolean },
+  ) => void;
+  onStep?: (step: StepResult) => void;
+  onError?: (error: SeepientErrorType) => void;
+
   /**
    * Spec 008 / 017 domain policy pipeline options:
    */
@@ -200,39 +217,23 @@ export interface GenerateTextOptions {
   capabilityLedger?: import("./contracts/capability-ledger.js").CapabilityLedger;
 }
 
-export interface GenerateTextResult {
+export interface AskSeepientResult {
   text: string;
-  data?: unknown;
-  error?: { message: string; issues: unknown };
   steps: StepResult[];
   toolCalls: ToolCall[];
   usage: Usage;
-  finishReason: "stop" | "length" | "max_steps" | "error";
+  finishReason: "stop" | "max_steps" | "error" | "aborted";
   messages: Message[];
 }
 
-// ── streamText ────────────────────────────────────────────────────────
-
-export interface StreamTextOptions extends GenerateTextOptions {
-  onText?: (delta: string) => void;
-  onToolCall?: (
-    tool: { name: string; args: Record<string, unknown>; callId: string },
-  ) => void;
-  onToolResult?: (
-    result: { callId: string; output: string; success: boolean },
-  ) => void;
-  onStep?: (step: StepResult) => void;
-  onError?: (error: SeepientErrorType) => void;
-}
-
-export interface StreamTextResult {
+export interface AskSeepientStreamResult {
   textStream: AsyncIterable<string>;
   steps: AsyncIterable<StepResult>;
   fullText: Promise<string>;
   usage: Promise<Usage>;
   finishReason: Promise<string>;
   abort: () => void;
-  toResponse: () => Response;
+  toResponse: (options?: { headers?: Record<string, string> }) => Response;
   toSSEStream: () => ReadableStream;
 }
 
@@ -242,8 +243,8 @@ export interface CreateSeepientOptions {
   model?: string;
   provider?: string;
   providerAccount?: string;
-  purpose?: string;
-  tier?: string;
+  purpose?: Purpose;
+  tier?: Tier;
   providers?: Record<string, any>;
   modelAssignments?: import("./schemas/provider-config.js").PurposeModelMap;
   credentials?: import("./contracts/credential-store.js").CredentialStore;
@@ -255,7 +256,7 @@ export interface CreateSeepientOptions {
   skills?: string[] | boolean;
   cwd?: string;
   maxSteps?: number;
-  persist?: string | PersistenceBackend | PersistenceConfig | SessionStore;
+  persist?: string | PersistenceBackend | PersistenceConfig;
   hooks?: Hooks;
   config?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
@@ -282,7 +283,7 @@ export interface CreateSeepientOptions {
 export interface Seepient {
   readonly sessionId: string;
   chat(message: string): Promise<AgentResponse>;
-  chatStream(message: string, options?: StreamTextOptions): Promise<StreamTextResult>;
+  chatStream(message: string, options?: Omit<AskSeepientOptions, "stream" | "signal">): Promise<AskSeepientStreamResult>;
   /** Switch the provider account (and optionally model) used for subsequent calls; one argument switches the model only. */
   switchProvider(accountOrModel: string, model?: string): Promise<void>;
   setSystemPrompt(prompt: string): void;
@@ -299,13 +300,13 @@ export interface Seepient {
   // ── Provider management parity methods (Spec 013 / Spec 021) ───────────
   addProvider(input: import("./contracts/provider-manager-api.js").AccountInput): Promise<import("./contracts/provider-manager-api.js").SaveResult>;
   removeProvider(id: string, opts?: { force?: boolean }): Promise<import("./contracts/provider-manager-api.js").DeleteResult>;
-  setAssignment(purpose: any, tier: any, target: import("./contracts/provider-manager-api.js").AssignmentTarget): Promise<import("./contracts/provider-manager-api.js").SaveResult>;
-  clearAssignment(purpose: any, tier: any): Promise<import("./contracts/provider-manager-api.js").SaveResult>;
+  setAssignment(purpose: Purpose, tier: Tier | undefined, target: import("./contracts/provider-manager-api.js").AssignmentTarget): Promise<import("./contracts/provider-manager-api.js").SaveResult>;
+  clearAssignment(purpose: Purpose, tier?: Tier): Promise<import("./contracts/provider-manager-api.js").SaveResult>;
   getCatalog(): Promise<readonly import("./schemas/inference.js").AvailableModel[]>;
   getAssignments(): import("./schemas/provider-config.js").PurposeModelMap;
   listProviders(): Promise<string[]>;
   reload(): Promise<{ revision: number }>;
-  resolve(opts: { purpose: any; tier?: any; override?: any }): Promise<any>;
+  resolve(opts: { purpose: Purpose; tier?: Tier; override?: any }): Promise<any>;
   dispose(): Promise<void>;
 }
 
@@ -323,7 +324,7 @@ export interface AgentResponse {
  * apiKeyHash) flows through the `metadata` field on `SessionData`.
  */
 export interface PersistenceBackend {
-  /** Brand discriminator to distinguish from SessionStore */
+  /** Brand discriminator distinguishing PersistenceBackend from older shapes */
   __persistenceBackend: true;
   save(id: string, data: SessionData): Promise<void>;
   load(id: string): Promise<SessionData | null>;
@@ -340,16 +341,6 @@ export interface PersistenceConfig {
   [key: string]: unknown;
 }
 
-/**
- * @deprecated Use `PersistenceBackend` instead. Kept for backward compatibility.
- */
-export interface SessionStore {
-  save(sessionId: string, messages: Message[]): Promise<void>;
-  load(sessionId: string): Promise<Message[] | null>;
-  delete(sessionId: string): Promise<void>;
-  list(): Promise<string[]>;
-}
-
 export interface SessionData {
   id: string;
   messages: Message[];
@@ -358,11 +349,46 @@ export interface SessionData {
   provider?: string;
   providerAccount?: string;
   model?: string;
+  /**
+   * Owner identity. A persisted session may only be resumed by the principal
+   * that created it — resumes under a different principalId fail closed.
+   */
+  principalId?: string;
   /** Arbitrary metadata for backends or consumers (e.g., TTL, apiKeyHash). */
   metadata?: Record<string, unknown>;
 }
 
 // ── Skills ────────────────────────────────────────────────────────────
+
+// ── runSeepientServer ─────────────────────────────────────────────────
+
+export interface RunSeepientServerOptions {
+  /** Port to listen on (default: SEEPIENT_PORT, PORT, or 7337) */
+  port?: number;
+  /** Host to bind to (default: "0.0.0.0") */
+  host?: string;
+  /** Enable CORS headers (default: true) */
+  cors?: boolean;
+  /** Session TTL in seconds (default: 86400 = 24 hours) */
+  sessionTTL?: number;
+  /** Injected ProviderRuntime */
+  runtime?: import("./contracts/provider-runtime.js").ProviderRuntimeContract;
+  /** Injected session persistence backend */
+  persist?: PersistenceBackend;
+  /** Injected tenant audit store */
+  auditStore?: import("./contracts/execution-brokers.js").AuditStore;
+  /** Injected tenant policy store */
+  policyStore?: import("./contracts/execution-brokers.js").PolicyStore;
+  /** Injected tenant capability ledger */
+  capabilityLedger?: import("./contracts/capability-ledger.js").CapabilityLedger;
+  /** Injected settings manager (structural contract; the concrete SettingsManager satisfies it) */
+  settingsManager?: import("./contracts/settings-manager-like.js").SettingsManagerLike;
+  /**
+   * Whether to start listening immediately.
+   * Default: true. Set to false to create the configured http.Server without listening.
+   */
+  listen?: boolean;
+}
 
 export interface SkillMetadata {
   name: string;

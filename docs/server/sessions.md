@@ -9,29 +9,20 @@ Sessions enable multi-turn conversations by persisting message history between r
 
 ## Overview
 
-```
-┌─────────────────────────────────────────────┐
-│            Session Lifecycle                 │
-│                                              │
-│  Create ──► Active ──► Inactive ──► Expired  │
-│              │           │          │         │
-│              │     30 min idle    24 hr TTL  │
-│              │           │          │         │
-│              └───────────┴──────────┘         │
-│                     Cleanup (every 5 min)     │
-└─────────────────────────────────────────────┘
-```
+<DiagramStates
+  :states="['Create', 'Active', 'Inactive', 'Expired']"
+  :transitions="['on first request', '30 min idle', '24 hr TTL']"
+  loop="Cleanup sweep runs every 5 minutes"
+/>
 
 ## Storage
 
 Sessions are stored as individual JSON files on disk:
 
-```
-./.seepient/sessions/
-  ├── 550e8400-e29b-41d4-a716-446655440000.json
-  ├── 660f9511-f3ac-52e5-b827-557766551111.json
-  └── ...
-```
+- 📁 `.seepient/sessions/`
+  - 📄 `550e8400-e29b-41d4-a716-446655440000.json`
+  - 📄 `660f9511-f3ac-52e5-b827-557766551111.json`
+  - 📄 `...`
 
 The session directory defaults to `./.seepient/sessions/` relative to the working directory, and can be overridden with the `SEEPIENT_SESSION_DIR` environment variable.
 
@@ -90,9 +81,9 @@ A session is considered expired when **either** condition is met. Expired sessio
 ### Configuring TTL
 
 ```typescript
-import { createServer } from "seepient/server";
+import { runSeepientServer } from "seepient/server";
 
-await createServer({
+await runSeepientServer({
   sessionTTL: 7200, // 2 hours in seconds
 });
 ```
@@ -123,26 +114,42 @@ The server runs a cleanup sweep every **5 minutes** that:
 
 The cleanup timer uses `.unref()` so it does not prevent graceful process shutdown.
 
-## Session creation
+## Session creation & attachment
 
-Sessions are created implicitly when a WebSocket `chat` message includes a `sessionId`, or explicitly by the server when no session ID is provided.
+Sessions are created and attached explicitly by specifying a `sessionId` string. Omission of `sessionId` (or `sessionId: null`/`undefined`) executes a **stateless one-shot turn** per Decision D1: no session is created in memory or on disk, and message history is neither loaded nor persisted.
 
 ### Via WebSocket
+
+To execute a session-backed turn, provide a client-generated or known `sessionId`:
 
 ```json
 {
   "type": "chat",
   "id": "msg-001",
   "message": "Hello!",
-  "sessionId": null
+  "sessionId": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
 
-The server creates a new session and subsequent messages with the same `sessionId` will append to it.
+If the session does not exist, the server creates it under the authenticated API key; subsequent messages referencing that `sessionId` append to its history.
+
+If `sessionId` is omitted or null, the WebSocket executes a stateless one-shot turn without attaching to or creating a session.
 
 ### Via REST
 
-The REST `/v1/chat` endpoint is stateless and does not create sessions. Use the WebSocket API for session-based conversations.
+The REST `/v1/chat` endpoint supports both stateless turns and session-backed turns:
+
+```bash
+curl -X POST http://localhost:7337/v1/chat \
+  -H "Authorization: Bearer seepient_live_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Hello!",
+    "sessionId": "550e8400-e29b-41d4-a716-446655440000"
+  }'
+```
+
+When `sessionId` is provided in the request body, the server loads the session history, acquires an in-flight turn lock, persists the user message before generation, and persists the assistant response on completion. If `sessionId` is omitted, the turn executes statelessly without persistence.
 
 ## Reconnection protocol
 

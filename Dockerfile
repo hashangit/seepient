@@ -7,7 +7,7 @@
 #
 # Usage:
 #   Server mode (default):  docker run -p 7337:7337 seepient
-#   CLI mode:               docker run seepient seepient chat "hello" --docker
+#   CLI mode:               docker run --entrypoint node seepient dist/ui/cli/index.js chat "hello"
 #   With env file:          docker run -p 7337:7337 --env-file .env seepient
 # ============================================================================
 
@@ -16,33 +16,43 @@
 # ---------------------------------------------------------------------------
 FROM node:22.19-slim AS builder
 
-# Install build dependencies: pnpm + Rust/Cargo for native commit helper
+# Install build dependencies: pnpm + a current Rust toolchain for the native
+# commit helper (Cargo.lock v4 needs cargo >= 1.78; the apt cargo is older).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    cargo \
+    ca-certificates \
+    curl \
     gcc \
     libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh \
+    && sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain stable \
+    && rm /tmp/rustup-init.sh
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Pin pnpm to the version the lockfile/CI use — `pnpm@latest` makes corepack
+# resolve a moving target and the container cache can miss the shim's module.
+RUN corepack enable && corepack prepare pnpm@11.25.0 --activate
 
 WORKDIR /build
 
 # Copy dependency manifests first for layer caching
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 
 # Install ALL dependencies (including devDependencies for tsc)
 RUN pnpm install --frozen-lockfile
 
-# Copy TypeScript source and config
+# Copy TypeScript source, config, and build scripts (clean-dist.mjs runs as
+# part of `pnpm run build`)
 COPY tsconfig.json ./
 COPY src/ ./src/
+COPY scripts/ ./scripts/
 
 # Compile TypeScript to JavaScript
 RUN pnpm run build
 
 # Copy native helper source and build for Linux
 COPY native/ ./native/
-COPY scripts/ ./scripts/
 RUN cargo build --manifest-path native/fs-commit/Cargo.toml --release \
     && node scripts/place-native-helper.cjs
 

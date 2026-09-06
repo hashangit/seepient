@@ -2,7 +2,7 @@
  * Generate release notes for a seepient release using seepient itself (dogfooding).
  *
  * Gathers commits + merged PRs since the last tag, feeds them to the SDK's
- * generateText(), and formats output per Keep a Changelog.
+ * askSeepient(), and formats output per Keep a Changelog.
  *
  * Usage:
  *   npx tsx scripts/generate-release-notes.ts <version>
@@ -12,9 +12,7 @@
  * Reads provider config from ~/.seepient/setting.json + .seepient/setting.json + env,
  * exactly like the CLI does. Your existing seepient setup just works.
  */
-import { generateText } from "../src/adapters/sdk/index.js";
-import { configureProviders } from "../src/core/provider-resolver.js";
-import { loadMergedConfig, applyEnvOverrides } from "../src/core/config.js";
+import { askSeepient } from "../src/transport/sdk/index.js";
 import { execSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -96,27 +94,13 @@ Write release notes in **Keep a Changelog** format. Rules:
 8. Output ONLY the markdown release notes — no preamble, no explanation, no code fences.`;
 
 // --- call the SDK ---------------------------------------------------------
-// generateText() resolves the provider via configureProviders() singleton or env
-// vars — it does NOT read opts.config.provider. So we mirror what the CLI does:
-// load merged config and register it globally before the call.
-const config = applyEnvOverrides(loadMergedConfig());
-const providerType = config.provider || "openai";
-const providerModel =
-  config.models?.[providerType]?.model || config.model || undefined;
-
-if (config.models) {
-  configureProviders({ default: providerType, ...config.models } as any);
-}
-
+// askSeepient() resolves providers through the default ProviderRuntime
+// (v2 config store + env vars), exactly like the CLI does.
 console.error(`Generating release notes for v${VERSION} (since ${prevTag})...`);
-console.error(`Provider: ${providerType} | Model: ${providerModel || "default"}`);
 
 let result;
 try {
-  result = await generateText(prompt, {
-    provider: providerType,
-    model: providerModel,
-    config,
+  result = await askSeepient(prompt, {
     maxSteps: 3,
   });
 } catch (e) {

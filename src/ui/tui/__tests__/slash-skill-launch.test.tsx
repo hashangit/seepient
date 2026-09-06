@@ -19,6 +19,42 @@ async function waitFor(cond: () => boolean, what: string): Promise<void> {
   }
 }
 
+/**
+ * Wait until Ink has actually SUBSCRIBED to stdin ("data" listener attached
+ * in a passive effect). Writing before that loses the keystrokes entirely —
+ * a frame-based readiness check cannot prove this, the listener count can.
+ */
+async function waitForStdinSubscription(stdin: unknown, what: string): Promise<void> {
+  await waitFor(() => {
+    const src = stdin as { listenerCount?: (e: string) => number };
+    const count = (src.listenerCount?.("data") ?? 0) + (src.listenerCount?.("readable") ?? 0);
+    return count > 0;
+  }, what);
+}
+
+/**
+ * Type text into the prompt and wait until it is ECHOED in the frame before
+ * returning. Call only after waitForStdinSubscription — the write is then
+ * guaranteed received; the echo may still lag under load, which the wait
+ * absorbs. Never re-sends (a resend would corrupt the input when the first
+ * write's echo was merely delayed).
+ */
+async function typeUntilEchoed(
+  stdin: { write(s: string): void },
+  lastFrame: () => string | undefined,
+  text: string,
+  what: string,
+): Promise<void> {
+  const start = Date.now();
+  stdin.write(text);
+  while (!(lastFrame() ?? "").includes(text)) {
+    if (Date.now() - start > 8000) {
+      throw new Error(`waitFor timeout: ${what}`);
+    }
+    await tick();
+  }
+}
+
 describe("TUI slash-command skill launch & REPL parity", () => {
   it("launches an installed skill when slash command matches skill in registry", async () => {
     const mockSkill = {
@@ -80,11 +116,10 @@ describe("TUI slash-command skill launch & REPL parity", () => {
       />,
     );
 
-    await tick();
-
-    // Type "/sample-skill" then Enter
-    stdin.write("/sample-skill");
-    await tick();
+    // Wait for Ink to subscribe to stdin, then for the command to be echoed
+    // before pressing Enter (blind ticks lose keystrokes under CI load).
+    await waitForStdinSubscription(stdin, "ink stdin subscribed");
+    await typeUntilEchoed(stdin, lastFrame, "/sample-skill", "command echoed in prompt");
     stdin.write("\r");
 
     await waitFor(() => chatCalls.length > 0, "agent.chat to be called with skill prompt");
@@ -144,11 +179,8 @@ describe("TUI slash-command skill launch & REPL parity", () => {
       />,
     );
 
-    await tick();
-
-    // Type "/nonexistent-cmd" then Enter
-    stdin.write("/nonexistent-cmd");
-    await tick();
+    await waitForStdinSubscription(stdin, "ink stdin subscribed");
+    await typeUntilEchoed(stdin, lastFrame, "/nonexistent-cmd", "command echoed in prompt");
     stdin.write("\r");
 
     await waitFor(

@@ -8,6 +8,7 @@ import type { ApiKeyEntry } from "../../auth/auth.js";
 import { hasScope } from "../../auth/auth.js";
 import { redactUrlCredentials } from "../../../foundations/security/redact.js";
 import { createProviderManagerApi, sanitizeBaseUrl } from "../../cli/provider-manager-api.js";
+import { PayloadTooLargeError } from "../body.js";
 import {
   sendJSON,
   sendError,
@@ -115,7 +116,9 @@ export async function handlePutProvider(
   let bodyText = "";
   try {
     bodyText = await parseBody(req);
-  } catch {
+  } catch (err) {
+    if (err instanceof PayloadTooLargeError) throw err;
+    if (err instanceof PayloadTooLargeError) throw err;
     sendError(res, 400, "BAD_REQUEST", "Failed to read request body");
     return;
   }

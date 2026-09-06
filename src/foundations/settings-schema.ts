@@ -13,7 +13,8 @@ export type SettingsCategory =
   | 'notifications'
   | 'skills'
   | 'gateway'
-  | 'sessions';
+  | 'sessions'
+  | 'server';
 
 export interface SettingsMapEntry {
   dotKey: string;
@@ -72,6 +73,11 @@ export const SETTINGS_CATEGORIES: {
     label: 'Sessions',
     description: 'Session persistence and cleanup settings',
   },
+  {
+    key: 'server',
+    label: 'Server & Transport',
+    description: 'HTTP body limits, rate limiting, and CORS allowlist',
+  },
 ];
 
 // ── Settings Map ───────────────────────────────────────────────────────
@@ -110,6 +116,11 @@ const entries: [string, SettingsMapEntry][] = [
 
   // Sessions
   ['sessions.maxAgeDays', { dotKey: 'sessions.maxAgeDays', configPath: ['sessions', 'maxAgeDays'], category: 'sessions', label: 'Max Session Age (days)' }],
+
+  // Server
+  ['server.maxBodyBytes', { dotKey: 'server.maxBodyBytes', configPath: ['server', 'maxBodyBytes'], category: 'server', label: 'Maximum Request Body Size (bytes)' }],
+  ['server.rateLimitRpm', { dotKey: 'server.rateLimitRpm', configPath: ['server', 'rateLimitRpm'], category: 'server', label: 'Rate Limit (requests/min per key)' }],
+  ['server.corsOrigins', { dotKey: 'server.corsOrigins', configPath: ['server', 'corsOrigins'], category: 'server', label: 'Allowed CORS Origins' }],
 ];
 
 export const SETTINGS_MAP: Map<string, SettingsMapEntry> = new Map(entries);
@@ -173,6 +184,11 @@ const schemaEntries: [string, SettingsSchemaEntry][] = [
 
   // Sessions
   ['sessions.maxAgeDays', { type: 'number', secret: false, default: 30, min: 0, restartRequired: false }],
+
+  // Server
+  ['server.maxBodyBytes', { type: 'number', secret: false, default: 10485760, min: 0, restartRequired: true, envVar: 'SEEPIENT_MAX_BODY_BYTES' }],
+  ['server.rateLimitRpm', { type: 'number', secret: false, default: 300, min: 0, restartRequired: false, envVar: 'SEEPIENT_RATE_LIMIT_RPM' }],
+  ['server.corsOrigins', { type: 'string', secret: false, restartRequired: true, envVar: 'SEEPIENT_CORS_ORIGINS' }],
 ];
 
 export const SETTINGS_SCHEMA: Map<string, SettingsSchemaEntry> = new Map(schemaEntries);

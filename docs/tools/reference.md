@@ -1,11 +1,11 @@
 ---
 title: Built-in Tools Reference
-description: Complete reference for all 12 built-in tools in Seepient Agent with parameters, examples, and notes.
+description: Complete reference for all 15 built-in tools in Seepient Agent with parameters, examples, and notes.
 ---
 
 # Built-in Tools Reference
 
-Seepient Agent includes 12 built-in tools organized into four groups. Every tool works identically across `generateText`, `streamText`, `createSeepient`, the CLI, and the server REST API.
+Seepient Agent includes 15 built-in tools organized into three functional groups (`CORE_TOOLS`, `COMM_TOOLS`, and `ADVANCED_TOOLS`). Every tool works identically across `askSeepient`, `createSeepient`, the CLI, and the server REST API.
 
 ## Quick Import
 
@@ -18,25 +18,25 @@ import {
 } from "seepient";
 ```
 
-| Group Constant | Tools |
-|---|---|
-| `CORE_TOOLS` | `execute_shell_command`, `read_file`, `write_file`, `get_current_datetime` |
-| `COMM_TOOLS` | `send_email`, `web_search`, `send_notification` |
-| `ADVANCED_TOOLS` | `read_website`, `take_screenshot`, `generate_image`, `optimize_prompt`, `use_skill` |
-| `ALL_TOOLS` | All 12 tools |
+| Group Constant | Count | Tools |
+|---|---|---|
+| `CORE_TOOLS` | 7 | `execute_shell_command`, `read_file`, `write_file`, `edit_file`, `get_current_datetime`, `manage_todos`, `render_widget` |
+| `COMM_TOOLS` | 3 | `send_email`, `web_search`, `send_notification` |
+| `ADVANCED_TOOLS` | 5 | `read_website`, `take_screenshot`, `generate_image`, `optimize_prompt`, `use_skill` |
+| `ALL_TOOLS` | 15 | All 15 built-in tools |
 
 ### Using Group Names in Options
 
 ```typescript
-const result = await generateText("Search for recent AI news", {
+const result = await askSeepient("Search for recent AI news", {
   tools: ["web_search"],    // single tool by name
 });
 
-const result2 = await generateText("Analyze the codebase", {
+const result2 = await askSeepient("Analyze the codebase", {
   tools: ["core", "comm"],  // all core + all communication tools
 });
 
-const result3 = await generateText("Full analysis", {
+const result3 = await askSeepient("Full analysis", {
   tools: ["all"],           // every built-in tool
 });
 ```
@@ -59,7 +59,7 @@ Run shell commands on the host machine.
 **Example:**
 
 ```typescript
-const result = await generateText("List all TypeScript files in the src directory", {
+const result = await askSeepient("List all TypeScript files in the src directory", {
   tools: ["execute_shell_command"],
 });
 ```
@@ -84,7 +84,7 @@ Read the contents of a file.
 **Example:**
 
 ```typescript
-const result = await generateText("What does the main entry point do?", {
+const result = await askSeepient("What does the main entry point do?", {
   tools: ["read_file"],
 });
 ```
@@ -109,7 +109,7 @@ Write content to a file. Creates parent directories if needed. Overwrites existi
 **Example:**
 
 ```typescript
-const result = await generateText("Create a package.json for a React project", {
+const result = await askSeepient("Create a package.json for a React project", {
   tools: ["write_file"],
 });
 ```
@@ -133,7 +133,7 @@ Get the current system date and time. Returns ISO timestamp, local time, timezon
 **Example:**
 
 ```typescript
-const result = await generateText("What day is it today?", {
+const result = await askSeepient("What day is it today?", {
   tools: ["get_current_datetime"],
 });
 ```
@@ -152,6 +152,90 @@ const result = await generateText("What day is it today?", {
 **Notes:**
 - Useful when the user references relative dates like "today", "next week", or "this March".
 - No parameters required.
+
+---
+
+### edit_file
+
+Apply a hash-anchored line patch to targeted sections of an existing file. Prefer this over `write_file` for targeted edits to avoid reproducing entire files and reduce token costs.
+
+**Category:** Core (Filesystem)
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `patch` | `string` | Yes | Hashline patch formatted with section headers `[/path#TAG]` and line operations |
+
+**Example:**
+
+```typescript
+const result = await askSeepient("Fix the timeout value in src/config.ts", {
+  tools: ["read_file", "edit_file"],
+});
+```
+
+**Patch Format:**
+
+```
+[/src/config.ts#a1f2]
+SWAP 25.=25:
++export const TIMEOUT_MS = 5000;
+```
+
+**Notes:**
+- Requires first reading the target file with `read_file`, which produces a content tag anchored at `[content-tag:XXXX]`.
+- Operations supported: `SWAP A.=B:`, `SWAP.BLK A:`, `DEL A.=B`, `DEL.BLK A`, `INS.PRE A:`, `INS.POST A:`, `INS.HEAD:`, `INS.TAIL:`.
+- Order operations bottom-to-top when stacking edits in a single file to keep line numbers stable.
+
+---
+
+### manage_todos
+
+Maintain a structured, visible task checklist rendered directly in the TUI progress panel.
+
+**Category:** Core (Planning / Presentation)
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `todos` | `Array<{ description: string, status: string }>` | Yes | Array of task items with statuses (`pending`, `in_progress`, `completed`, `blocked`) |
+
+**Example:**
+
+```typescript
+const result = await askSeepient("Plan and migrate our database schemas", {
+  tools: ["manage_todos", "read_file", "execute_shell_command"],
+});
+```
+
+**Notes:**
+- Safe presentation tool with zero external side effects.
+- The model replaces the entire list on each update (not append).
+- The TUI renders task items with live status glyphs and progress counters.
+
+---
+
+### render_widget
+
+Render rich, interactive widgets (data tables, charts, forms, diffs, status grids) directly in the Terminal UI.
+
+**Category:** Core (Presentation / UI)
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `kind` | `string` | Yes | Widget kind: `table`, `keyvalue`, `chart`, `tree`, `panel`, `diff`, `form`, `product_card`, `status_grid` |
+| `props` | `Record<string, unknown>` | Yes | Kind-specific rendering properties (e.g. `columns` and `rows` for `table`) |
+| `actions` | `Array<WidgetAction>` | No | Optional interactive buttons or actions the user can trigger |
+
+**Example:**
+
+```typescript
+const result = await askSeepient("Show me the server performance metrics as a chart", {
+  tools: ["render_widget"],
+});
+```
+
+**Notes:**
+- Supported chart variants: `bar`, `line`, and `sparkline`.
+- In headless/CLI/REST mode, widgets gracefully degrade to structured JSON or clean terminal ASCII tables.
 
 ---
 
@@ -177,7 +261,7 @@ TAVILY_API_KEY=tvly-...   # Get a free key at https://tavily.com
 **Example:**
 
 ```typescript
-const result = await generateText("What are the latest developments in quantum computing?", {
+const result = await askSeepient("What are the latest developments in quantum computing?", {
   tools: ["web_search"],
 });
 ```
@@ -215,7 +299,7 @@ SMTP_FROM=your@email.com     # optional, defaults to SMTP_USER
 **Example:**
 
 ```typescript
-const result = await generateText(
+const result = await askSeepient(
   "Send an email to team@company.com summarizing the project status",
   { tools: ["send_email"] }
 );
@@ -251,7 +335,7 @@ WECOM_WEBHOOK=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...
 **Example:**
 
 ```typescript
-const result = await generateText(
+const result = await askSeepient(
   "Notify the team on Feishu that the deployment is complete",
   { tools: ["send_notification"] }
 );
@@ -278,7 +362,7 @@ Fetch and extract the main content from a web page. Uses Playwright + Mozilla Re
 **Example:**
 
 ```typescript
-const result = await generateText("Summarize this article: https://example.com/article", {
+const result = await askSeepient("Summarize this article: https://example.com/article", {
   tools: ["read_website"],
 });
 ```
@@ -307,7 +391,7 @@ Capture a screenshot of a web page and save it as an image file.
 **Example:**
 
 ```typescript
-const result = await generateText("Take a screenshot of google.com", {
+const result = await askSeepient("Take a screenshot of google.com", {
   tools: ["take_screenshot"],
 });
 ```
@@ -347,7 +431,7 @@ Configure an image model in `/models` under the `image-generation` purpose slot 
 **Example:**
 
 ```typescript
-const result = await generateText(
+const result = await askSeepient(
   "Generate a logo for a coffee shop called 'Bean & Brew'",
   { tools: ["generate_image"] }
 );
@@ -373,7 +457,7 @@ Optimize a user's raw prompt to be more structured and effective for LLMs.
 **Example:**
 
 ```typescript
-const result = await generateText(
+const result = await askSeepient(
   "Optimize this prompt before generating an image: a cat sitting on a tree",
   { tools: ["optimize_prompt", "generate_image"] }
 );
@@ -400,7 +484,7 @@ Activate a skill by name. Injects the skill's content into the agent's context.
 **Example:**
 
 ```typescript
-const result = await generateText(
+const result = await askSeepient(
   "Review my authentication code for security vulnerabilities",
   { tools: ["use_skill", "read_file", "execute_shell_command"] }
 );
@@ -410,23 +494,26 @@ const result = await generateText(
 - Returns an error if the skill name is not found in the registry.
 - Lists available skills in the error message if the requested skill is not found.
 - Arguments support template substitution (`$1`, `$2`, `$ALL`, etc.) in the skill body.
-- See [Custom Skills Guide](/guides/custom-skills-guide) for creating custom skills.
+- See [Skills System Guide](/guides/skills) for creating custom skills.
 
 ---
 
 ## Tool Groups Summary
 
-| Tool | Name | Category | Key Config |
-|---|---|---|---|
-| Shell execution | `execute_shell_command` | Core | -- |
-| File read | `read_file` | Core | -- |
-| File write | `write_file` | Core | -- |
-| Date/time | `get_current_datetime` | Core | -- |
-| Web search | `web_search` | Search | `TAVILY_API_KEY` |
-| Browser reader | `read_website` | Browser | Playwright |
-| Screenshots | `take_screenshot` | Browser | Playwright |
-| Email | `send_email` | Communication | SMTP credentials |
-| Notifications | `send_notification` | Communication | Webhook URLs |
-| Image generation | `generate_image` | Media | `OPENAI_API_KEY` |
-| Prompt optimizer | `optimize_prompt` | Utility | `OPENAI_API_KEY` |
-| Skill invocation | `use_skill` | Skills | -- |
+| Tool | Name | Group | Category | Side-effect Risk | Key Config |
+|---|---|---|---|---|---|
+| Shell execution | `execute_shell_command` | Core | System | High (sandbox execution) | OS Sandbox |
+| File read | `read_file` | Core | Filesystem | Read-only | -- |
+| File write | `write_file` | Core | Filesystem | Medium (full write) | FileCommitBroker |
+| File edit | `edit_file` | Core | Filesystem | Medium (targeted patch) | SnapshotStore |
+| Date/time | `get_current_datetime` | Core | System | Read-only | -- |
+| Task tracking | `manage_todos` | Core | Planning | Read-only / UI | -- |
+| Widget display | `render_widget` | Core | UI | Presentation | -- |
+| Web search | `web_search` | Comm | Network | Read-only | `TAVILY_API_KEY` |
+| Email sending | `send_email` | Comm | Communication | Medium (SMTP dispatch) | SMTP credentials |
+| Notification | `send_notification` | Comm | Communication | Low (webhook post) | Webhook URLs |
+| Web reader | `read_website` | Advanced | Browser | Read-only | Playwright |
+| Screenshot | `take_screenshot` | Advanced | Browser | Read-only | Playwright |
+| Image generation | `generate_image` | Advanced | Media | Medium (asset write) | Image model / provider |
+| Prompt optimizer | `optimize_prompt` | Advanced | Utility | Read-only | LLM provider |
+| Skill activation | `use_skill` | Advanced | Orchestration | Context injection | Skill registry |

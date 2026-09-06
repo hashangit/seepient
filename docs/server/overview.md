@@ -13,24 +13,19 @@ The HTTP server runs in inference and planning mode this release; effectful tool
 
 ## Architecture
 
-```
-                 ┌─────────────────────────────────────┐
-                 │           Seepient Agent Server               │
-   REST ────────│  /v1/health   /v1/chat   /v1/models  │
-   (HTTP)       │  /v1/skills   /v1/sessions/:id       │
-                 │                                       │
-   WebSocket ───│  /ws   (auth via ?token=)             │
-                 │                                       │
-                 │  ┌──────────┐  ┌───────────────────┐ │
-                 │  │ Auth     │  │ Session Manager   │ │
-                 │  │ (API key)│  │ (file-based TTL)  │ │
-                 │  └──────────┘  └───────────────────┘ │
-                 │           ┌─────────────┐            │
-                 │           │ Core Engine │            │
-                 │           └─────────────┘            │
-                 └─────────────────────────────────────┘
-```
-
+<DiagramMap
+  title="Seepient Agent Server"
+  subtitle="Delegates every request to the core agent loop"
+  :endpoints="[
+    { label: 'REST', sub: '(HTTP)', paths: ['/v1/health', '/v1/chat', '/v1/models', '/v1/skills', '/v1/sessions/:id'] },
+    { label: 'WebSocket', sub: '(auth via ?token=)', paths: ['/ws'] }
+  ]"
+  :modules="[
+    { name: 'Auth', desc: 'API-key authentication' },
+    { name: 'Session Manager', desc: 'file-based TTL sessions' },
+    { name: 'Core Engine', desc: 'runAgentLoop' }
+  ]"
+/>
 The server delegates all LLM interaction directly to the core `runAgentLoop`, bypassing the SDK layer. Every request flows through the same core agent loop, so tool execution, hooks, abort handling, and usage tracking behave identically to direct SDK usage.
 
 ### Key characteristics
@@ -38,7 +33,7 @@ The server delegates all LLM interaction directly to the core `runAgentLoop`, by
 | Feature | Detail |
 |---|---|
 | **Default port** | `7337` (configurable via `SEEPIENT_PORT` or `PORT` env) |
-| **CORS** | Enabled by default; mirrors request `Origin` |
+| **CORS** | Opt-in: with no `server.corsOrigins` setting / `SEEPIENT_CORS_ORIGINS` env var, no `Access-Control-Allow-Origin` is emitted (set `*` to reflect any origin) |
 | **Graceful shutdown** | SIGINT / SIGTERM with 5-second drain timeout |
 | **Session storage** | File-based in `./.seepient/sessions/` |
 | **Auth** | API keys with scoped permissions |
@@ -71,30 +66,30 @@ seepient server
 ```
 
 ```bash [Node.js]
-import { createServer } from "seepient/server";
+import { runSeepientServer } from "seepient/server";
 
-const server = await createServer({ port: 7337 });
+const server = await runSeepientServer({ port: 7337 });
 ```
 
 :::
 
 ## Programmatic Server Creation & Stateless Workers
 
-For distributed worker fleets or custom orchestration, `createServer()` accepts injected contracts for provider runtimes, session stores, and audit loggers:
+For distributed worker fleets or custom orchestration, `runSeepientServer()` accepts injected contracts for provider runtimes, session stores, and audit loggers:
 
 ```typescript
-import { createServer } from "seepient/server";
+import { runSeepientServer } from "seepient/server";
 
-const server = await createServer({
+const server = await runSeepientServer({
   port: 7337,
   runtime: myCustomProviderRuntime,
-  sessionStore: myDistributedSessionStore,
+  persist: myDistributedPersistenceBackend,
   auditStore: myRemoteAuditStore,
 });
 ```
 
-::: note Standalone Binary vs Programmatic createServer
-The `seepient server` CLI and `seepient-server` binary are configured via environment variables (`PORT`, `HOST`, `SEEPIENT_API_KEYS_FILE`, `SEEPIENT_SECURITY_DIR`) and CLI flags. To inject custom in-memory or database-backed store contracts (`runtime`, `sessionStore`, `auditStore`, `policyStore`, `capabilityLedger`), use the programmatic `createServer()` API from `seepient/server`.
+::: note Standalone Binary vs Programmatic runSeepientServer
+The `seepient server` CLI and `seepient-server` binary are configured via environment variables (`PORT`, `HOST`, `SEEPIENT_API_KEYS_FILE`, `SEEPIENT_SECURITY_DIR`) and CLI flags. To inject custom in-memory or database-backed store contracts (`runtime`, `persist`, `auditStore`, `policyStore`, `capabilityLedger`), use the programmatic `runSeepientServer()` API from `seepient/server`.
 :::
 
 ### Stateless Worker Mutation Guard

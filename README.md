@@ -43,7 +43,7 @@ Unlike "screen-seeing" agents (such as OpenClaw) that rely on visual interpretat
 - 🌐 **Web Search**: Integrated with Tavily for real-time information retrieval.
 - 🕒 **Time Accuracy**: Built-in tool to get precise system date and time for correct temporal context.
 - 📧 **Communication**: Send emails and push notifications to chat groups automatically.
-- 📦 **TypeScript SDK**: Programmatic access via `createSeepient`, `streamText`, `generateText`.
+- 📦 **TypeScript SDK**: Programmatic access via 3 statefulness tiers: `askSeepient` (one-shot), `createSeepient` (stateful multi-turn), and `runSeepientServer` (remote server).
 - 🖥 **Server Mode**: Standalone HTTP/WebSocket server with REST v2 management API (`/v1/providers`, `/v1/models` with ETag/If-Match), API key auth, and session management.
 - 🛠 **Skills System**: Loadable skill packs from directories with `@path` file references, turn-scoped skill switching, and custom tool creation.
 - 🛡️ **Security & Permission Pipeline**: Single Domain-owned enforcement pipeline (`PolicyEngine` → `ApprovalBroker` → `ExecutionBoundary` → `AuditRecorder`) default-on across CLI, TUI, SDK, and HTTP/WebSocket server.
@@ -94,10 +94,10 @@ Import the SDK in your TypeScript/JavaScript project:
 npm install seepient
 ```
 ```ts
-// Main exports
-import { createSeepient, streamText, generateText } from 'seepient';
-// Server utilities
-import { createServer } from 'seepient/server';
+// Main SDK exports
+import { askSeepient, createSeepient } from 'seepient';
+// Server exports
+import { runSeepientServer } from 'seepient/server';
 ```
 
 ### Development Installation
@@ -227,12 +227,13 @@ const result = await seepient.chat('List all running Docker containers');
 console.log(result.text);
 ```
 
-#### Streaming
+#### One-Shot Streaming
 ```ts
-import { streamText } from 'seepient';
+import { askSeepient } from 'seepient';
 
-const stream = await streamText('Analyze the logs for errors', {
+const stream = await askSeepient('Analyze the logs for errors', {
   provider: 'openai',
+  stream: true,
 });
 
 for await (const chunk of stream.textStream) {
@@ -240,11 +241,11 @@ for await (const chunk of stream.textStream) {
 }
 ```
 
-#### Structured Output
+#### One-Shot Non-Streaming
 ```ts
-import { generateText } from 'seepient';
+import { askSeepient } from 'seepient';
 
-const result = await generateText('Extract the top 3 issues from these logs', {
+const result = await askSeepient('Extract the top 3 issues from these logs', {
   provider: 'anthropic',
 });
 console.log(result.text);
@@ -352,10 +353,10 @@ const seepient = await createSeepient({
 
 #### Programmatic Server Creation & Custom Store Injection
 ```ts
-import { createServer } from "seepient/server";
+import { runSeepientServer } from "seepient/server";
 
 // Stateless worker mode with custom runtime and in-memory stores
-const server = await createServer({
+const server = await runSeepientServer({
   port: 7337,
   runtime: myCustomRuntime,
   persist: myRedisBackend,
@@ -518,10 +519,10 @@ ws.onmessage = (event) => {
 
 #### Programmatic Server Creation & Custom Store Injection
 ```ts
-import { createServer } from "seepient/server";
+import { runSeepientServer } from "seepient/server";
 
 // Stateless worker mode with custom runtime and in-memory stores
-const server = await createServer({
+const server = await runSeepientServer({
   port: 7337,
   runtime: myCustomRuntime,
   persist: myRedisBackend,

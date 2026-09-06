@@ -6,6 +6,7 @@
  */
 
 import * as fs from 'fs';
+import { safeSsrfFetch } from '../../foundations/network/ssrf-fetch.js';
 import * as path from 'path';
 import type { FileCommitBroker } from '../../foundations/contracts/execution-brokers.js';
 import type { CapabilityEnvelope } from '../../foundations/contracts/permission-policy.js';
@@ -139,10 +140,11 @@ export async function generateImageRuntime(
     if (rawBase64) {
       rawBytes = typeof rawBase64 === "string" ? Buffer.from(rawBase64, "base64") : rawBase64;
     } else if (img.url) {
-      const response = await fetch(img.url, { signal });
+      // W164: image downloads go through the SSRF-validated, pinned fetch
+      // with a response-size cap instead of an unbounded arrayBuffer().
+      const response = await safeSsrfFetch(img.url, { signal }, { maxResponseBytes: 50 * 1024 * 1024 });
       if (!response.ok) throw new Error(`Failed to download image from URL: ${response.statusText}`);
-      const ab = await response.arrayBuffer();
-      rawBytes = new Uint8Array(ab);
+      rawBytes = response.bytes;
     } else {
       throw new Error("Provider returned image without bytes, base64, or url.");
     }

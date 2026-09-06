@@ -14,7 +14,7 @@ import * as http from "node:http";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { createServer } from "../index.js";
+import { runSeepientServer } from "../index.js";
 import { generateApiKey } from "../../auth/auth.js";
 import {
   FakeAuditStore,
@@ -75,11 +75,12 @@ describe("QS-3: Server Store Injection (FR-010)", () => {
       ],
     });
 
-    const server = await createServer({
+    const server = await runSeepientServer({
       runtime,
       auditStore,
       policyStore,
       capabilityLedger,
+      listen: false,
     });
     activeServers.push(server);
 
@@ -159,7 +160,7 @@ describe("QS-3: Server Store Injection (FR-010)", () => {
   });
 
   it("default server startup without injected stores retains default behavior", async () => {
-    const server = await createServer();
+    const server = await runSeepientServer({ listen: false });
     activeServers.push(server);
     expect(server).toBeDefined();
   });

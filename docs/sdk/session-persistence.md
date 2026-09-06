@@ -31,6 +31,7 @@ await agent1.chat("Remember my project context");
 // In a subsequent worker/request:
 const agent2 = await createSeepient({
   sessionId: "user-alice-session",
+  principalId: "user-alice", // Must match the principal that created the session
   persist: myCustomBackend,
 });
 // Full conversation history and providerAccount are loaded automatically from myCustomBackend
@@ -62,6 +63,37 @@ interface PersistenceBackend {
 
 ::: warning Breaking change in v0.2.2
 Third-party `PersistenceBackend` implementations must now include `readonly __persistenceBackend = true as const`. This brand field prevents the SDK from accidentally wrapping a `PersistenceBackend` and stripping metadata (`createdAt`, `provider`, `model`, custom `metadata`).
+:::
+
+## Persistence Fidelity Tiers
+
+Seepient supports two tiers of session persistence contracts with distinct fidelity guarantees:
+
+| Contract | Structure | Metadata Support | Tradeoff |
+|---|---|---|---|
+| `PersistenceBackend` | Full `SessionData` object (`messages`, `createdAt`, `updatedAt`, `provider`, `model`, `providerAccount`, `metadata`) | Full fidelity. Preserves exact creation times, model configurations, and custom application metadata across process restarts. | **Recommended for production.** Requires implementing `save`, `load`, `delete`, and `list` with the brand discriminator `readonly __persistenceBackend = true as const`. |
+| `SessionStore` (Adapter) | Array of `Message[]` (`get`, `set`) | Messages only. Automatically wrapped via `wrapAsPersistenceBackend`. | Discards provider, model, and custom metadata. Generates synthetic timestamps (`createdAt`/`updatedAt` set to load time). Best for simple or legacy backends. |
+
+### When to choose which contract
+
+- **Choose `PersistenceBackend`** when building production multi-tenant backends, worker fleets, or when you need audit logs and conversation resumption to accurately reflect the originating provider and model parameters.
+- **Choose `SessionStore`** only when adapting legacy key-value stores that store exclusively raw message arrays and do not need session-level metadata.
+
+## Asymmetric Storage Keying
+
+When injecting storage contracts into `createSeepient` or `runSeepientServer` in distributed or multi-tenant architectures, understand that Seepient partitions state across different scoping keys along distinct fault and security boundaries:
+
+| Store Contract | Scoping Key | Scope Boundary | Purpose |
+|---|---|---|---|
+| `AuditStore` | `principalId` | Actor / Identity | Durably attributes every tool execution and security decision to the authenticated user, API key, or system principal. |
+| `CapabilityLedger` | `principalId` | Actor / Identity | Tracks granted capabilities, active approvals, and one-shot authorizations per actor. |
+| `PersistenceBackend` | `sessionId` | Conversation | Isolates chat turns, message histories, and session resumes to a single conversational thread. |
+| `PolicyStore` | `workspace` | Directory / Filesystem | Governs filesystem paths, tool consent modes, and sandbox boundaries for the specific project workspace. |
+
+This asymmetric design guarantees that actor accountability (`principalId`) is never conflated with workspace filesystem policies or conversation threads (`sessionId`).
+
+::: warning Session ownership — resume is principal-bound
+Persisted sessions carry the `principalId` that created them (default `"sdk-user"`). Resuming a session under a different `principalId` fails closed with a `SESSION_OWNERSHIP_MISMATCH` error — the conversation history is never restored or continued across principals, even when tenants share one `PersistenceBackend`. Sessions persisted before ownership tracking (and sessions stored through the metadata-less `SessionStore` adapter) carry no owner stamp and are likewise not resumable. Custom `PersistenceBackend` implementations must round-trip the `principalId` field of `SessionData` to preserve this guarantee.
 :::
 
 ## Built-in stores
@@ -105,7 +137,7 @@ interface SessionData {
 ```
 
 ::: info
-Session IDs must contain only alphanumeric characters and dashes (`[a-zA-Z0-9-]+`). Invalid IDs throw an error on save.
+Session IDs must contain only alphanumeric characters, dashes, and underscores (`^[a-zA-Z0-9_-]+$`). Invalid IDs throw an error on save.
 :::
 
 ### MemoryPersistenceBackend

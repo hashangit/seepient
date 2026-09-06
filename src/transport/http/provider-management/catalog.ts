@@ -3,11 +3,14 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+import * as crypto from "node:crypto";
 import type { ProviderRuntime } from "../../../domain/providers/provider-runtime.js";
 import type { ApiKeyEntry } from "../../auth/auth.js";
 import { hasScope } from "../../auth/auth.js";
 import { createProviderManagerApi } from "../../cli/provider-manager-api.js";
 import { sendJSON, sendError, parseBody } from "./http-util.js";
+import { logTransportEvent } from "../../logging.js";
+import { PayloadTooLargeError } from "../body.js";
 
 export async function handleGetCatalog(
   req: IncomingMessage,
@@ -39,7 +42,9 @@ export async function handleResolveModel(
   let bodyText: string;
   try {
     bodyText = await parseBody(req);
-  } catch {
+  } catch (err) {
+    if (err instanceof PayloadTooLargeError) throw err;
+    if (err instanceof PayloadTooLargeError) throw err;
     sendError(res, 400, "BAD_REQUEST", "Failed to read request body");
     return;
   }
@@ -110,7 +115,7 @@ export async function handleProbeProvider(
   }
 
   if (acc.baseUrl) {
-    const { safeSsrfFetch, validateEndpointUrl } = await import("../ssrf-validator.js");
+    const { safeSsrfFetch, validateEndpointUrl } = await import("../../../foundations/network/ssrf-fetch.js");
     const allowPrivate = acc.ssrfAllowPrivate === true || process.env.SEEPIENT_SSRF_ALLOW_PRIVATE === "1";
     if (full) {
       const start = Date.now();
@@ -129,6 +134,12 @@ export async function handleProbeProvider(
         if (err?.message?.includes("SSRF Blocked")) {
           ssrfBlocked = true;
         }
+        logTransportEvent({
+          level: "warn",
+          event: "probe",
+          requestId: (req as any).requestId ?? crypto.randomUUID(),
+          error: err?.message ?? String(err),
+        });
       } finally {
         clearTimeout(timeout);
       }

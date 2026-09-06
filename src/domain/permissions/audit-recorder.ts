@@ -324,7 +324,7 @@ export interface OutboxEntry {
  */
 export class TerminalEventOutbox {
   private pending = new Map<string, OutboxEntry>();
-  private readonly store: LocalAuditStore;
+  private readonly store: AuditStoreContract;
   private readonly outboxFile: string;
   private unhealthy = false;
   /**
@@ -338,7 +338,7 @@ export class TerminalEventOutbox {
   private tail: Promise<unknown> = Promise.resolve();
 
   constructor(
-    store: LocalAuditStore,
+    store: AuditStoreContract,
     opts?: { outboxDir?: string },
   ) {
     this.store = store;

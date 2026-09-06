@@ -4,6 +4,7 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderRuntime } from "../../../domain/providers/provider-runtime.js";
+import { PayloadTooLargeError } from "../body.js";
 
 export function sendJSON(res: ServerResponse, status: number, body: unknown, revision?: number): void {
   res.statusCode = status;
@@ -26,7 +27,7 @@ export async function parseBody(req: IncomingMessage, maxBytes = 1024 * 1024): P
       bytes += chunk.length;
       if (bytes > maxBytes) {
         req.destroy();
-        reject(new Error("PAYLOAD_TOO_LARGE"));
+        reject(new PayloadTooLargeError("Request body exceeded maximum limit of 1048576 bytes"));
         return;
       }
       data += chunk;

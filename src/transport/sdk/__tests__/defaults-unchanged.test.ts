@@ -1,10 +1,10 @@
 /**
  * QS-0 — defaults unchanged (Spec 021 P0 gate).
  *
- * Verifies that running createSeepient, generateText, and streamText without
- * any store/runtime injection options preserves default behavior, defaults
- * to "sdk-user" principal identity, writes to ~/.seepient/security, and
- * memoizes getDefaultProviderRuntime().
+ * Verifies that running createSeepient, askSeepient (non-streaming and
+ * streaming) without any store/runtime injection options preserves default
+ * behavior, defaults to "sdk-user" principal identity, writes to
+ * ~/.seepient/security, and memoizes getDefaultProviderRuntime().
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   createSeepient,
-  generateText,
+  askSeepient,
   getDefaultProviderRuntime,
 } from "../index.js";
 import { createMockRuntime } from "../../../domain/__tests__/test-doubles.js";

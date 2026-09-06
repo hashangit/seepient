@@ -22,6 +22,7 @@ import {
   extractHostCallbacks,
   extractRegistrations,
 } from "./tools.js";
+import { isLocalAuditStore } from "../../foundations/contracts/execution-brokers.js";
 import { initializeSkillRegistry } from "../../capabilities/skills/index.js";
 import { buildSkillCatalog } from "../../domain/skills/skill-catalog.js";
 import { StreamManager } from "../../domain/streaming/stream-manager.js";
@@ -32,14 +33,15 @@ import type {
   CreateSeepientOptions,
   Seepient,
   AgentResponse,
-  StreamTextOptions,
-  StreamTextResult,
+  AskSeepientOptions,
+  AskSeepientStreamResult,
   Message,
   CumulativeUsage,
   PersistenceBackend,
   PersistenceConfig,
-  SessionStore,
   SessionData,
+  Purpose,
+  Tier,
 } from "../../foundations/types.js";
 import type {
   AccountInput,
@@ -47,7 +49,6 @@ import type {
   DeleteResult,
   AssignmentTarget,
   PurposeId,
-  Tier,
   ResolutionPreview,
 } from "../../foundations/contracts/provider-manager-api.js";
 import type { AvailableModel } from "../../foundations/schemas/inference.js";
@@ -56,6 +57,7 @@ import {
   now,
   toSeepientError,
 } from "../../domain/context/message-convert.js";
+import { normalizeHistoryForSend } from "../../domain/sessions/normalize-history.js";
 import { generateId } from "../../foundations/id.js";
 import { surfaceLoopError, extractLoopError } from "./error-surfacing.js";
 import { SeepientError } from "../../foundations/errors.js";
@@ -77,6 +79,7 @@ async function persistSession(
   id: string,
   messages: Message[],
   options: {
+    principalId: string;
     provider?: string;
     providerAccount?: string;
     model?: string;
@@ -90,35 +93,12 @@ async function persistSession(
     messages,
     createdAt: createdAt ?? nowMs,
     updatedAt: nowMs,
+    principalId: options.principalId,
     metadata: options.metadata,
     provider: options.provider,
     providerAccount: options.providerAccount,
     model: options.model,
   });
-}
-
-function wrapAsPersistenceBackend(store: SessionStore | PersistenceBackend): PersistenceBackend {
-  if ("__persistenceBackend" in store && store.__persistenceBackend) {
-    return store as PersistenceBackend;
-  }
-  const s = store as SessionStore;
-  return {
-    __persistenceBackend: true,
-    async save(id: string, data: SessionData) {
-      await s.save(id, data.messages);
-    },
-    async load(id: string): Promise<SessionData | null> {
-      const messages = await s.load(id);
-      if (!messages) return null;
-      return { id, messages, createdAt: Date.now(), updatedAt: Date.now() };
-    },
-    async delete(id: string) {
-      await s.delete(id);
-    },
-    async list() {
-      return s.list();
-    },
-  };
 }
 
 function toCapabilitySet(
@@ -210,6 +190,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
 
   const sessionId = opts.sessionId ?? generateId();
   validateSessionId(sessionId);
+  const principalId = opts.principalId ?? "sdk-user";
 
   let provider = opts.provider;
   let providerAccount = opts.providerAccount ?? opts.override?.providerAccount;
@@ -262,13 +243,25 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
       backend = createPersistenceBackend({ type: "file", path: opts.persist });
     } else if ("type" in opts.persist && typeof opts.persist.type === "string") {
       backend = createPersistenceBackend(opts.persist as PersistenceConfig);
-    } else if ("save" in opts.persist && "load" in opts.persist) {
-      backend = wrapAsPersistenceBackend(opts.persist as SessionStore | PersistenceBackend);
+    } else if ("__persistenceBackend" in opts.persist) {
+      backend = opts.persist as PersistenceBackend;
     }
 
     if (backend) {
       const existing = await backend.load(sessionId);
       if (existing) {
+        // Sessions are bound to the principal that created them — a resume
+        // under a different principal (including unstamped legacy sessions)
+        // fails closed to preserve tenant isolation.
+        if (existing.principalId !== principalId) {
+          throw new SeepientError(
+            `Cannot resume session "${sessionId}": it is owned by a different principal ` +
+              `or was persisted before session ownership was recorded. ` +
+              `Resume with the principalId that created it, or use a new sessionId.`,
+            "SESSION_OWNERSHIP_MISMATCH",
+            false,
+          );
+        }
         messages.push(...existing.messages);
         if (existing.createdAt) sessionCreatedAt = existing.createdAt;
         if (!provider && existing.provider) provider = existing.provider;
@@ -307,11 +300,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   let auditOutbox:
     | import("../../domain/permissions/audit-recorder.js").TerminalEventOutbox
     | undefined;
-  const isLocalStore =
-    !opts.auditStore ||
-    opts.auditStore.isLocal === true ||
-    (opts.auditStore.isLocal === undefined &&
-      opts.auditStore instanceof LocalAuditStore);
+  const isLocalStore = !opts.auditStore || isLocalAuditStore(opts.auditStore);
   const auditStore = opts.auditStore ?? new LocalAuditStore();
   if (isLocalStore) {
     auditOutbox = new TerminalEventOutbox(
@@ -338,10 +327,17 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   );
   const snapshotStore = createSnapshotStore();
   const sharedArtifacts = new InMemoryArtifactStore();
-  const vendorOperationHandler = createMediaVendorOperationHandler({
+  // B1: the handler is re-created per turn so the CURRENT turn's abort
+  // controller reaches media operations — a static handler would leave
+  // generate_image and other media fetches running after agent.abort()
+  // (the same regression W110 fixed for askSeepient).
+  let currentVendorHandler = createMediaVendorOperationHandler({
     runtime,
     artifacts: sharedArtifacts,
   });
+  const vendorOperationHandler = (
+    req: Parameters<typeof currentVendorHandler>[0],
+  ) => currentVendorHandler(req);
   const { boundary } = await buildLocalBoundary({
     artifacts: sharedArtifacts,
     workspaceRoot: opts.cwd ?? process.cwd(),
@@ -362,7 +358,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     : "never";
 
   const wiredPipeline = await buildActionLifecycle({
-    principalId: opts.principalId ?? "sdk-user",
+    principalId,
     runId: sessionId,
     sessionId,
     workspaceRoot: opts.cwd ?? process.cwd(),
@@ -410,6 +406,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
         sessionId,
         messages,
         {
+          principalId,
           provider,
           providerAccount,
           model,
@@ -428,11 +425,32 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
 
   // ── chat() ──────────────────────────────────────────────────────────────
 
-  async function chat(userMessage: string): Promise<AgentResponse> {
+  
+/**
+ * F1: resolve a dangling failed-turn draft in the in-memory history before a
+ * new user turn is appended — same semantics as the server store's
+ * resolveTrailingDraft: the new prompt dedupes (identical text) or supersedes
+ * (different text) the un-answered draft, keeping the persisted history and
+ * the model input in sync.
+ */
+function resolveTrailingUserDraft(history: Message[]): void {
+  const last = history[history.length - 1];
+  if (last && last.role === "user") {
+    history.pop();
+  }
+}
+
+async function chat(userMessage: string): Promise<AgentResponse> {
     const release = await acquire();
     try {
       activeAbortController = new AbortController();
+      currentVendorHandler = createMediaVendorOperationHandler({
+        runtime,
+        artifacts: sharedArtifacts,
+        signal: activeAbortController.signal,
+      });
 
+      resolveTrailingUserDraft(messages);
       messages.push({
         id: generateId(),
         role: "user",
@@ -443,6 +461,14 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
       const maxSteps = opts.maxSteps ?? 10;
       const snapshot = await runtime.createTurnSnapshot();
 
+      // F1/W150: send the normalized history to the model but keep the
+      // stored copy intact on failure (crash recovery). On success, adopt
+      // the messages the loop APPENDED (assistant/tool) into the store —
+      // matched by id, so the loop's own system-shim unshift cannot skew
+      // the merge-back.
+      const modelMessages = normalizeHistoryForSend(messages);
+      const modelInputIds = new Set(modelMessages.map((m) => m.id));
+
       const result = await runAgentLoop({
         runtime,
         turnSnapshot: snapshot,
@@ -450,7 +476,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
         modelOverride: currentModelOverride(),
         purpose,
         tier,
-        messages,
+        messages: modelMessages,
         toolDefs,
         systemPrompt: systemPrompt,
         maxSteps,
@@ -462,6 +488,28 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
         approveTool: opts.approveTool,
         wiredPipeline,
       });
+      // W151/A1: on a resolved error, skip a contentless assistant — but keep
+      // one carrying tool calls (dropping it would orphan its tool result).
+      // B6: the turn's answer is scoped to the adopted messages — on abort or
+      // max_steps with no output, a HISTORY assistant must not be returned
+      // (and persisted) as this turn's answer.
+      const turnErrored = extractLoopError(result) !== null;
+      const adopted: Message[] = [];
+      for (const appended of result.messages) {
+        if (modelInputIds.has(appended.id)) continue;
+        // The loop's ephemeral system shim is model-input plumbing, not history.
+        if (appended.role === "system") continue;
+        if (
+          turnErrored &&
+          appended.role === "assistant" &&
+          !appended.content &&
+          !appended.toolCalls?.length
+        ) {
+          continue;
+        }
+        adopted.push(appended);
+      }
+      messages.push(...adopted);
 
       cumulativeUsage.totalPromptTokens += result.usage.promptTokens;
       cumulativeUsage.totalCompletionTokens += result.usage.completionTokens;
@@ -471,7 +519,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
       await persistMessages();
       surfaceLoopError(result);
 
-      const lastAssistant = [...messages]
+      const lastAssistant = [...adopted]
         .reverse()
         .find((m) => m.role === "assistant" && m.content);
       const text = lastAssistant?.content ?? "";
@@ -490,18 +538,24 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
 
   async function chatStream(
     userMessage: string,
-    streamOptions?: StreamTextOptions,
-  ): Promise<StreamTextResult> {
+    streamOptions?: Omit<AskSeepientOptions, "stream" | "signal">,
+  ): Promise<AskSeepientStreamResult> {
     const release = await acquire();
 
     try {
       const streamAbort = new AbortController();
       activeAbortController = streamAbort;
+      currentVendorHandler = createMediaVendorOperationHandler({
+        runtime,
+        artifacts: sharedArtifacts,
+        signal: streamAbort.signal,
+      });
       const mergedHooks = {
         ...opts.hooks,
       };
       const streamHookExecutor = createHookExecutor(mergedHooks);
 
+      resolveTrailingUserDraft(messages);
       messages.push({
         id: generateId(),
         role: "user",
@@ -513,6 +567,12 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
       const stream = new StreamManager();
 
       (async () => {
+        // F1/W150: normalized model input; the stored copy stays intact
+        // until the loop succeeds and its additions are merged back below
+        // (id-matched, so the loop's system-shim unshift cannot skew it).
+        const modelMessages = normalizeHistoryForSend(messages);
+        const modelInputIds = new Set(modelMessages.map((m) => m.id));
+
         try {
           const snapshot = await runtime.createTurnSnapshot();
 
@@ -521,9 +581,9 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
             turnSnapshot: snapshot,
             model,
             modelOverride: currentModelOverride(),
-            purpose,
-            tier,
-            messages,
+            purpose: streamOptions?.purpose ?? purpose,
+            tier: streamOptions?.tier ?? tier,
+            messages: modelMessages,
             toolDefs,
             systemPrompt: systemPrompt,
             maxSteps,
@@ -573,24 +633,45 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
           cumulativeUsage.totalCost += result.usage.cost;
           cumulativeUsage.requestCount += 1;
 
-          const lastAssistant = [...messages]
+          // W151/A1: same filter as chat(); B6: finalText scoped to adopted.
+          const turnErrored = extractLoopError(result) !== null;
+          const adopted: Message[] = [];
+          for (const m of result.messages) {
+            if (modelInputIds.has(m.id)) continue;
+            if (m.role === "system") continue; // loop's ephemeral shim
+            if (
+              turnErrored &&
+              m.role === "assistant" &&
+              !m.content &&
+              !m.toolCalls?.length
+            ) {
+              continue;
+            }
+            adopted.push(m);
+          }
+          messages.push(...adopted);
+
+          const lastAssistant = [...adopted]
             .reverse()
             .find((m) => m.role === "assistant" && m.content);
           const finalText = lastAssistant?.content ?? "";
 
-          stream.resolveText(finalText);
-          stream.resolveUsage(result.usage);
           const loopErr = extractLoopError(result);
+          stream.resolveUsage(result.usage);
           if (loopErr) {
             if (streamOptions?.onError) streamOptions.onError(loopErr);
             stream.resolveFinish("error");
+            // F2: parity with askSeepient — failed turns reject fullText.
+            stream.rejectText(loopErr);
           } else {
+            stream.resolveText(finalText);
             stream.resolveFinish(result.finishReason);
           }
         } catch (err) {
           const seepientErr = toSeepientError(err, "PROVIDER_ERROR");
           if (streamOptions?.onError) streamOptions.onError(seepientErr);
-          stream.resolveText("");
+          // F2: reject fullText instead of resolving "".
+          stream.rejectText(seepientErr);
           stream.resolveUsage({
             promptTokens: 0,
             completionTokens: 0,
@@ -600,8 +681,16 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
           stream.resolveFinish("error");
         } finally {
           stream.complete();
-          await persistMessages();
-          release();
+          try {
+            await persistMessages();
+          } catch (persistErr) {
+            console.error("[seepient] chatStream persistence failed:", persistErr);
+            const seepientErr = toSeepientError(persistErr, "PERSISTENCE_ERROR");
+            if (streamOptions?.onError) streamOptions.onError(seepientErr);
+            stream.resolveFinish("error");
+          } finally {
+            release();
+          }
         }
       })();
 
@@ -612,7 +701,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
         usage: stream.usage,
         finishReason: stream.finishReason,
         abort: () => streamAbort.abort(),
-        toResponse: () => stream.toResponse(),
+        toResponse: (respOpts?: { headers?: Record<string, string> }) => stream.toResponse(respOpts),
         toSSEStream: () => stream.toSSEStream(),
       };
     } catch (_err) {
@@ -698,8 +787,8 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   // ── Provider Management Methods ─────────────────────────────────────────
 
   const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
-  const managerApi = typeof (runtime as any).getConfigStore === "function"
-    ? createProviderManagerApi(runtime as any)
+  const managerApi = typeof runtime.getConfigStore === "function"
+    ? createProviderManagerApi(runtime as ProviderRuntime)
     : null;
   let latestState = managerApi ? await managerApi.getState() : { revision: 0, assignments: {} as PurposeModelMap };
 
@@ -721,30 +810,30 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     return res;
   }
 
-  async function setAssignment(purpose: any, tier: any, target: AssignmentTarget): Promise<SaveResult> {
+  async function setAssignment(purpose: Purpose, tier: Tier | undefined, target: AssignmentTarget): Promise<SaveResult> {
     if (!managerApi) {
       throw new SeepientError("Injected provider runtime does not support configuration mutations", "NOT_IMPLEMENTED", false);
     }
-    const res = await managerApi.setAssignment(purpose, tier, target);
+    const res = await managerApi.setAssignment(purpose as PurposeId, tier ?? null, target);
     if (res.ok) latestState = await managerApi.getState();
     return res;
   }
 
-  async function clearAssignment(purpose: any, tier: any): Promise<SaveResult> {
+  async function clearAssignment(purpose: Purpose, tier?: Tier): Promise<SaveResult> {
     if (!managerApi) {
       throw new SeepientError("Injected provider runtime does not support configuration mutations", "NOT_IMPLEMENTED", false);
     }
-    const res = await managerApi.clearAssignment(purpose, tier);
+    const res = await managerApi.clearAssignment(purpose as PurposeId, tier ?? null);
     if (res.ok) latestState = await managerApi.getState();
     return res;
   }
 
   async function getCatalog(): Promise<readonly AvailableModel[]> {
     const snapshot = await runtime.createTurnSnapshot();
-    if ((runtime as any).modelCatalog) {
-      return (runtime as any).modelCatalog.listAvailableModels(snapshot.config);
+    if (runtime.modelCatalog) {
+      return await runtime.modelCatalog.listAvailableModels(snapshot.config);
     }
-    return (snapshot.catalog as any) ?? [];
+    return (snapshot.catalog as unknown as readonly AvailableModel[]) ?? [];
   }
 
   function getAssignments(): PurposeModelMap {
@@ -765,7 +854,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     return { revision: snap.revision };
   }
 
-  async function resolve(resolveOpts: { purpose: any; tier?: any; override?: any }): Promise<any> {
+  async function resolve(resolveOpts: { purpose: Purpose; tier?: Tier; override?: any }): Promise<any> {
     if (managerApi) {
       const res = await managerApi.resolvePreview(resolveOpts.purpose as PurposeId, resolveOpts.tier, resolveOpts.override);
       if ("ok" in res && res.ok === false) {
@@ -836,8 +925,8 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
 
   async function dispose(): Promise<void> {
     await close();
-    if (typeof (runtime as any).removeAllListeners === "function") {
-      (runtime as any).removeAllListeners();
+    if (typeof runtime.removeAllListeners === "function") {
+      runtime.removeAllListeners();
     }
   }
 

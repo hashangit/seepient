@@ -5,7 +5,7 @@ description: Stateful multi-turn agent with session persistence, provider switch
 
 # createSeepient()
 
-Create a persistent agent with session memory, provider switching, and abort support. Unlike `generateText()` which is stateless, an agent maintains conversation history across calls.
+Create a persistent agent with session memory, provider switching, and abort support. Unlike `askSeepient()` which is stateless, an agent maintains conversation history across calls.
 
 ## Signature
 
@@ -41,7 +41,7 @@ console.log(agent.getUsage());
 ## Parameters
 
 ::: tip Stateless Embedding
-For multi-tenant workers and cloud functions requiring full state injection (audit, policy, capability ledger, sessions), use `createSeepient`, `generateText`, or `streamText`. See [Embedding in Stateless Workers](/embedding/workers) for full architecture details.
+For multi-tenant workers and cloud functions requiring full state injection (audit, policy, capability ledger, sessions), use `createSeepient` or `askSeepient`. See [Stateless Workers](/sdk/stateless-workers) for full architecture details.
 :::
 
 ### `options` (optional)
@@ -49,20 +49,33 @@ For multi-tenant workers and cloud functions requiring full state injection (aud
 | Name            | Type                                     | Default                    | Description |
 |-----------------|------------------------------------------|----------------------------|-------------|
 | `model`         | `string`                                 | Provider default           | Model identifier, e.g. `"gpt-5.4"`, `"claude-sonnet-4-6-20260320"` |
-| `provider`      | `string`                                 | `"openai"`                 | Feeds the permission pipeline's `modelProviderClass` audit label (does not select inference provider; selection occurs via model/runtime) |
-| `purpose`       | `"text" \| "plan" \| "vision" \| "commit"` | `"text"`                 | Purpose routing hint for provider runtime model resolution |
+| `provider`      | `string`                                 | `"openai"`                 | Feeds the permission pipeline's `modelProviderClass` audit label |
+| `purpose`       | `Purpose`                                | `"text"`                   | Purpose routing hint (see [Purpose reference](/sdk/types#purpose) for all 15 supported values) |
 | `tier`          | `"efficient" \| "standard" \| "complex"` | *(none)*                   | Model capability tier hint |
+| `providerAccount` | `string`                               | *(none)*                   | Active provider account name (persisted and restored with session state) |
+| `providers`     | `Record<string, any>`                    | *(none)*                   | Programmatic provider account definitions for isolated or in-memory runtimes |
+| `modelAssignments` | `PurposeModelMap`                     | *(none)*                   | Custom purpose-and-tier model routing assignments |
+| `credentials`   | `CredentialStore`                        | Local/env store            | Injected credential store (e.g. `MemoryCredentialStore` for isolated runtimes) |
+| `overlayFile`   | `string`                                 | *(none)*                   | Config overlay file path, or `":memory:"` for zero-disk ephemeral agents |
+| `adapter`       | `InferenceAdapter`                       | `AggregateInferenceAdapter`| Custom inference adapter or test double |
+| `override`      | `{ providerAccount?, model?, thinkingLevel? }` | *(none)*             | Per-instance model and account override |
 | `runtime`       | `ProviderRuntime`                        | `getDefaultProviderRuntime()` | Provider runtime instance managing credentials, configurations, and inference adapters |
 | `principalId`   | `string`                                 | `"sdk-user"`               | Identity of the calling principal/user, threaded into audit events and capability grants |
-| `sessionId`     | `string`                                 | Auto-generated UUID        | Explicit session ID for tracking and persistence |
-| `providerAccount` | `string`                               | *(none)*                   | Active provider account name (persisted and restored with session state) |
+| `sessionId`     | `string`                                 | Auto-generated UUID        | Explicit session ID (`^[a-zA-Z0-9_-]+$`) for tracking and persistence |
 | `auditStore`    | `AuditStore`                             | Local file audit store     | Injected audit store for recording action lifecycle events |
 | `policyStore`   | `PolicyStore`                            | Local file policy store    | Injected policy store for grant snapshots and mutations |
 | `capabilityLedger` | `CapabilityLedger`                    | Local file capability ledger | Injected ledger for capability lease consumption and revocations |
 | `systemPrompt`  | `string`                                 | `"You are a helpful assistant."` | System prompt prepended to every conversation |
 | `tools`         | `(string \| UserToolDefinition \| AnyToolRegistration)[]` | All built-in               | Tool names, group constants, or custom tool registrations (`trustedHostTool`, `preparedTool`, `brokerConnector`) |
 | `consentMode`   | `ConsentMode`                            | `"edit-enabled"`           | Permission consent mode (`"ask-everything"`, `"edit-enabled"`, `"autonomous"`) |
-| `skills`        | `string[]`                               | *(none)*                   | Skill names to activate |
+| `deploymentCeiling` | `CapabilitySet \| Capability[]`      | *(none)*                   | Maximum capability lease permitted for any execution |
+| `principalPolicy` | `CapabilitySet \| Capability[]`        | *(none)*                   | Pre-granted capabilities for the calling principal |
+| `approveTool`   | `ApproveToolFn`                          | *(none)*                   | Interactive tool approval callback |
+| `approvalBroker`| `ApprovalBroker`                         | *(none)*                   | Custom approval broker for permission escalation |
+| `commitHelper`  | `CommitHelper`                           | Native helper              | Custom or mock exact-commit verifier helper |
+| `network`       | `BrokerNetworkAdapter`                   | Standard adapter           | Custom broker network adapter with SSRF / IP pinning rules |
+| `cwd`           | `string`                                 | `process.cwd()`            | Workspace directory for file operations and skill discovery |
+| `skills`        | `string[] \| boolean`                    | `true`                     | Specific skill names, `true` for all, or `false` to disable skill scanning and catalog injection |
 | `maxSteps`      | `number`                                 | `10`                       | Maximum agent loop iterations per call |
 | `persist`       | `string \| PersistenceBackend \| PersistenceConfig` | *(none)*          | Directory path, backend instance, or config object (e.g. `{ type: "memory" }`). File persistence writes are **atomic** (tmp + rename). |
 | `hooks`         | `Hooks`                                  | *(none)*                   | Lifecycle callbacks |
@@ -70,8 +83,12 @@ For multi-tenant workers and cloud functions requiring full state injection (aud
 | `metadata`     | `Record<string, unknown>`                 | `{}`                       | Adapter-specific metadata passed to middleware via `PipelineContext` |
 | `config`        | `Record<string, unknown>`                | `{}`                       | Extra config passed to tool handlers |
 
+::: warning Partial State Store Injection Warning
+For fully stateless zero-disk execution, all three permission contracts (`auditStore`, `policyStore`, and `capabilityLedger`) must be injected together along with `persist`. If 1 or 2 permission stores are injected, the SDK logs a warning (`[seepient] WARNING: Partial state store injection detected...`) and falls back missing stores to the local filesystem (`~/.seepient` or `./.seepient`).
+:::
+
 ::: info Permission Pipeline Always Active
-The permission pipeline is always active across all SDK entry points (`createSeepient`, `generateText`, `streamText`). Every tool execution is evaluated by policy and recorded in the audit trail.
+The permission pipeline is always active across all SDK entry points (`createSeepient`, `askSeepient`). Every tool execution is evaluated by policy and recorded in the audit trail.
 :::
 
 ::: note Tool Registration and Declaration Validation
@@ -88,19 +105,36 @@ When declaring `trustedHostTool`, declarations fail closed with descriptive erro
 
 The object returned by `createSeepient()`:
 
-### Methods
+### Conversation & Lifecycle Methods
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
 | `chat` | `(message: string) => Promise<AgentResponse>` | Send a message and get the full response. Context is preserved. |
-| `chatStream` | `(message: string, options?: StreamTextOptions) => Promise<StreamTextResult>` | Send a message with streaming output. Returns async iterables and SSE helpers. |
+| `chatStream` | `(message: string, options?: Omit<AskSeepientOptions, "stream" \| "signal">) => Promise<AskSeepientStreamResult>` | Send a message with streaming output. Returns async iterables and SSE helpers. |
 | `switchProvider` | `(accountOrModel: string, model?: string) => Promise<void>` | Switch the provider account (and optionally model) used for subsequent calls. One argument switches the model only. |
 | `setSystemPrompt` | `(prompt: string) => void` | Update the system prompt. Replaces the existing system message in history. |
 | `setTools` | `(tools: string[]) => void` | Update active tools by name. Custom tool registrations cannot be added dynamically via `setTools`. |
-| `abort` | `() => void` | Abort the currently running `chat()` or `chatStream()` call. Works correctly during streaming. |
+| `abort` | `() => void` | Abort the currently running `chat()` or `chatStream()` call. |
 | `clear` | `() => void` | Clear conversation history. Keeps the system prompt. |
 | `getHistory` | `() => Message[]` | Return a copy of the full conversation history. |
 | `getUsage` | `() => CumulativeUsage` | Return cumulative token usage across all calls. |
+| `flushAudit` | `() => Promise<number>` | Flush pending terminal audit events (returns flushed count). |
+| `close` | `() => Promise<void>` | Abort any running calls and flush buffered audit events. |
+| `dispose` | `() => Promise<void>` | Closes agent, flushes audit logs, and removes all runtime listeners. |
+
+### Provider Management Methods (Spec 013 / Spec 021)
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `listProviders` | `() => Promise<string[]>` | List distinct upstream provider names (e.g. `["anthropic", "openai"]`). |
+| `getCatalog` | `() => Promise<readonly AvailableModel[]>` | Return all discovered and declared models across all configured accounts. |
+| `getAssignments` | `() => PurposeModelMap` | Return current purpose-and-tier routing assignments. |
+| `addProvider` | `(input: AccountInput) => Promise<SaveResult>` | Add or update a provider account with credentials. |
+| `removeProvider` | `(id: string, opts?: { force?: boolean }) => Promise<DeleteResult>` | Delete a configured provider account. |
+| `setAssignment` | `(purpose, tier, target) => Promise<SaveResult>` | Assign a model to a purpose and tier. |
+| `clearAssignment` | `(purpose, tier) => Promise<SaveResult>` | Remove an assignment for a purpose and tier. |
+| `resolve` | `(opts: { purpose, tier?, override? }) => Promise<ResolutionResult>` | Preview how a turn will route without invoking the model. |
+| `reload` | `() => Promise<{ revision: number }>` | Force-reload provider configuration from the backing store. |
 
 ### AgentResponse
 
@@ -418,6 +452,5 @@ const agent = await createSeepient({ middleware: [auditLog] });
 
 ## Related APIs
 
-- [generateText()](/sdk/generate-text) -- Stateless one-shot execution
-- [streamText()](/sdk/stream-text) -- Stateless streaming execution
+- [askSeepient()](/sdk/ask-seepient) -- Stateless one-shot execution (streaming via `stream: true`)
 - [Tools](/tools/reference) -- Built-in and custom tool reference

@@ -5,10 +5,11 @@
  * handler. All responses are JSON with proper Content-Type headers.
  */
 
+import * as crypto from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "http";
 import type {
   SkillMetadata,
-  GenerateTextResult,
+  AskSeepientResult,
 } from "../../foundations/types.js";
 import { authMiddleware, hasScope } from "../auth/auth.js";
 import { ServerSessionManager, hashKey } from "./session-store.js";
@@ -18,6 +19,10 @@ import {
   handleGetSettingsSchema,
   type SettingsHandlerContext,
 } from "./settings-handlers.js";
+import { globalRateLimiter, RateLimiter } from "./rate-limit.js";
+import { logTransportEvent } from "../logging.js";
+import { parseBody, PayloadTooLargeError } from "./body.js";
+import { extractLoopError } from "../sdk/error-surfacing.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -37,7 +42,8 @@ export interface RestHandlerContext {
     tenantId?: string;
     principalId?: string;
     sessionId?: string;
-  }) => Promise<GenerateTextResult>;
+    history?: import("../../foundations/types.js").Message[];
+  }) => Promise<AskSeepientResult>;
   /** List available models grouped by provider */
   listModels: () => Record<string, string[]>;
   /** List available skill metadata */
@@ -48,6 +54,10 @@ export interface RestHandlerContext {
   gatewayHandler?: (req: IncomingMessage, res: ServerResponse, path: string, method: string) => Promise<void>;
   /** Provider runtime instance */
   runtime?: import("../../foundations/contracts/provider-runtime.js").ProviderRuntimeContract;
+  /** Maximum request body size in bytes */
+  maxBodyBytes?: number;
+  /** Rate limiter instance */
+  rateLimiter?: RateLimiter;
 }
 
 interface ChatRequest {
@@ -57,6 +67,7 @@ interface ChatRequest {
   tools?: string[];
   maxSteps?: number;
   skills?: string[];
+  sessionId?: string;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -67,10 +78,19 @@ function sendJSON(
   data: unknown,
 ): void {
   const body = JSON.stringify(data);
-  res.writeHead(statusCode, {
+  const headers: Record<string, string | number> = {
     "Content-Type": "application/json",
     "Content-Length": Buffer.byteLength(body),
-  });
+  };
+  if (statusCode === 413) {
+    headers["Connection"] = "close";
+    res.on("finish", () => {
+      if (res.socket && !res.socket.destroyed) {
+        res.socket.destroy();
+      }
+    });
+  }
+  res.writeHead(statusCode, headers);
   res.end(body);
 }
 
@@ -87,15 +107,6 @@ function isMutableRuntime(rt: unknown): boolean {
   if (!rt || typeof (rt as any).getConfigStore !== "function") return false;
   const store = (rt as any).getConfigStore();
   return store != null && typeof store.updateOverlay === "function";
-}
-
-function parseBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
-    req.on("error", reject);
-  });
 }
 
 function matchRoute(
@@ -184,8 +195,13 @@ function matchRoute(
     return { handler: "provider_refresh_models", params: { providerId: refreshMatch[1] } };
   }
 
+  // GET /v1/sessions
+  if (method === "GET" && path === "/v1/sessions") {
+    return { handler: "sessions_list", params: {} };
+  }
+
   // GET /v1/sessions/:id
-  const sessionMatch = path.match(/^\/v1\/sessions\/([a-f0-9-]+)$/);
+  const sessionMatch = path.match(/^\/v1\/sessions\/([a-zA-Z0-9_-]+)$/);
   if (method === "GET" && sessionMatch) {
     return { handler: "session", params: { id: sessionMatch[1] } };
   }
@@ -209,6 +225,36 @@ export function createRestHandler(ctx: RestHandlerContext) {
     req: IncomingMessage,
     res: ServerResponse,
   ): Promise<void> {
+    const startMs = Date.now();
+    const requestId = crypto.randomUUID();
+    (req as any).requestId = requestId;
+
+    res.on("finish", () => {
+      const durationMs = Date.now() - startMs;
+      const authKey = (req as any).apiKey;
+      let apiKeyHashPrefix: string | undefined;
+      if (authKey) {
+        const h = authKey.keyHash || (authKey.key ? hashKey(authKey.key) : "");
+        if (h) apiKeyHashPrefix = h.slice(0, 8);
+      } else {
+        const rawToken = req.headers.authorization?.replace(/^Bearer\s+/i, "");
+        if (rawToken) {
+          apiKeyHashPrefix = hashKey(rawToken).slice(0, 8);
+        }
+      }
+      logTransportEvent({
+        level: res.statusCode >= 500 ? "error" : "info",
+        event: "http_request",
+        requestId,
+        method: req.method ?? "GET",
+        path: (req.url ?? "/").split("?")[0],
+        status: res.statusCode,
+        durationMs,
+        apiKeyHashPrefix,
+        error: (res as any).__internalErrorMessage,
+      });
+    });
+
     const route = matchRoute(req.url ?? "/", req.method ?? "GET");
 
     if (!route) {
@@ -218,6 +264,28 @@ export function createRestHandler(ctx: RestHandlerContext) {
     }
 
     try {
+      if (route.handler === "health") {
+        await handleHealth(req, res, ctx);
+        return;
+      }
+
+      // Authenticated routes: enforce auth and rate limiting
+      const key = authMiddleware(req);
+      if (!key) {
+        sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key");
+        return;
+      }
+      (req as any).apiKey = key;
+
+      const keyHash = key.keyHash || (key.key ? hashKey(key.key) : "anonymous");
+      const limiter = ctx.rateLimiter ?? globalRateLimiter;
+      if (!limiter.consume(keyHash)) {
+        const retryAfter = limiter.getRetryAfterSeconds(keyHash);
+        res.setHeader("Retry-After", String(retryAfter > 0 ? retryAfter : 60));
+        sendError(res, 429, "RATE_LIMITED", "Rate limit exceeded. Please try again later.");
+        return;
+      }
+
       const getRuntime = async () => {
         if (ctx.runtime) return ctx.runtime;
         const { getDefaultProviderRuntime } = await import("../../domain/providers/provider-runtime.js");
@@ -225,9 +293,7 @@ export function createRestHandler(ctx: RestHandlerContext) {
       };
 
       switch (route.handler) {
-        case "health":
-          await handleHealth(req, res, ctx);
-          break;
+        // "health" is handled before the authenticated section — unreachable here
         case "models":
           await handleModels(req, res, ctx);
           break;
@@ -236,6 +302,9 @@ export function createRestHandler(ctx: RestHandlerContext) {
           break;
         case "chat":
           await handleChat(req, res, ctx);
+          break;
+        case "sessions_list":
+          await handleListSessions(req, res, ctx);
           break;
         case "session":
           await handleGetSession(req, res, ctx, route.params.id);
@@ -395,9 +464,17 @@ export function createRestHandler(ctx: RestHandlerContext) {
           sendError(res, 404, "NOT_FOUND", "Unknown endpoint");
       }
     } catch (err: unknown) {
+      if (err instanceof PayloadTooLargeError || (err as any)?.name === "PayloadTooLargeError") {
+        sendError(res, 413, "PAYLOAD_TOO_LARGE", (err as Error).message);
+        return;
+      }
+      if ((err as any)?.code === "NOT_FOUND" || (err as any)?.statusCode === 404) {
+        sendError(res, 404, "NOT_FOUND", (err as Error).message);
+        return;
+      }
       const message = err instanceof Error ? err.message : "Internal server error";
-      console.error("[rest] Unhandled error:", message);
-      sendError(res, 500, "INTERNAL_ERROR", message);
+      (res as any).__internalErrorMessage = message;
+      sendError(res, 500, "INTERNAL_ERROR", "Internal server error");
     }
   };
 }
@@ -464,8 +541,12 @@ async function handleChat(
   // Parse body
   let body: string;
   try {
-    body = await parseBody(req);
-  } catch {
+    body = await parseBody(req, ctx);
+  } catch (err: unknown) {
+    if (err instanceof PayloadTooLargeError || (err as any)?.name === "PayloadTooLargeError") {
+      sendError(res, 413, "PAYLOAD_TOO_LARGE", (err as Error).message);
+      return;
+    }
     sendError(res, 400, "BAD_REQUEST", "Failed to read request body");
     return;
   }
@@ -484,8 +565,65 @@ async function handleChat(
     return;
   }
 
+  const keyHash = key.keyHash ?? (key.key ? hashKey(key.key) : "");
+
+  // If sessionId is provided, verify it exists and belongs to caller.
+  // W154c: an empty/whitespace sessionId means "no session", not an id of "".
+  const sessionId = parsed.sessionId?.trim() || undefined;
+  let history: import("../../foundations/types.js").Message[] | undefined;
+  let turnAcquired = false;
+
+  if (sessionId) {
+    let session: import("../../foundations/types.js").SessionData | null;
+    try {
+      session = await ctx.sessionManager.getSession(sessionId, keyHash);
+    } catch (err: any) {
+      if (err?.code === "NOT_FOUND" || err?.statusCode === 404 || err?.message?.includes("server owner")) {
+        // W154f: operators must be able to diagnose legacy-session refusals —
+        // log the teaching error before sending the sanitized wire response.
+        logTransportEvent({
+          level: "warn",
+          event: "session_resume_refused",
+          requestId: crypto.randomUUID(),
+          apiKeyHashPrefix: keyHash ? keyHash.slice(0, 8) : undefined,
+          error: err?.message ?? String(err),
+        });
+        sendError(res, 404, "NOT_FOUND", `Session "${sessionId}" not found`);
+        return;
+      }
+      throw err;
+    }
+    if (!session) {
+      sendError(res, 404, "NOT_FOUND", `Session "${sessionId}" not found`);
+      return;
+    }
+
+    if (!ctx.sessionManager.acquireTurn(sessionId)) {
+      sendError(res, 409, "REQUEST_IN_FLIGHT", `Session "${sessionId}" has a request already in flight`);
+      return;
+    }
+    turnAcquired = true;
+
+    // F1: resolve a dangling failed-turn draft before history is captured —
+    // the new prompt dedupes/supersedes it on disk, so the assembled model
+    // input and the stored history stay alternating.
+    ctx.sessionManager.resolveTrailingDraft(sessionId);
+
+    history = [...session.messages];
+  }
+
   // Execute
   try {
+    // Persist user message if session exists
+    if (sessionId) {
+      ctx.sessionManager.addMessage(sessionId, {
+        id: crypto.randomUUID(),
+        role: "user",
+        content: parsed.message,
+        timestamp: Date.now(),
+      });
+    }
+
     const result = await ctx.generateText({
       message: parsed.message,
       model: parsed.model,
@@ -495,27 +633,89 @@ async function handleChat(
       skills: parsed.skills,
       // Spec 008: pass authenticated principal identity (hashed API key) so
       // the per-request pipeline constructor derives `principalId` from it.
-      apiKeyHash: key.keyHash ?? (key.key ? hashKey(key.key) : ""),
+      apiKeyHash: keyHash,
+      sessionId,
+      history,
     } as any);
+
+    // W151: a resolved `finishReason:"error"` carries no assistant content —
+    // persist nothing and tell the client the turn failed instead of
+    // returning 200 with an empty assistant row.
+    if (result.finishReason === "error") {
+      logTransportEvent({
+        level: "warn",
+        event: "generation_error",
+        requestId: crypto.randomUUID(),
+        apiKeyHashPrefix: keyHash ? keyHash.slice(0, 8) : undefined,
+        error: extractLoopError(result as never)?.message ?? "loop resolved with finishReason error",
+      });
+      (res as any).__internalErrorMessage = "Agent loop finished with an error";
+      sendJSON(res, 502, {
+        error: {
+          code: "PROVIDER_ERROR",
+          message: "Generation failed",
+        },
+      });
+      return;
+    }
+
+    // Persist assistant message if session exists
+    if (sessionId) {
+      ctx.sessionManager.addMessage(sessionId, {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: result.text,
+        timestamp: Date.now(),
+      });
+    }
 
     sendJSON(res, 200, {
       text: result.text,
       toolCalls: result.toolCalls,
       usage: result.usage,
       finishReason: result.finishReason,
+      ...(sessionId ? { sessionId } : {}),
     });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Generation failed";
+    const rawMessage = err instanceof Error ? err.message : "Generation failed";
     const isProviderError =
-      message.includes("not configured") || message.includes("API key");
+      rawMessage.includes("not configured") || rawMessage.includes("API key");
+
+    // W162: bodies carry generic text; raw detail goes to the request log.
+    (res as any).__internalErrorMessage = rawMessage;
 
     sendJSON(res, isProviderError ? 502 : 500, {
       error: {
         code: isProviderError ? "PROVIDER_ERROR" : "GENERATION_ERROR",
-        message,
+        message: isProviderError ? "Generation failed" : "Internal server error during generation",
       },
     });
+  } finally {
+    if (turnAcquired && sessionId) {
+      ctx.sessionManager.releaseTurn(sessionId);
+    }
   }
+}
+
+async function handleListSessions(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: RestHandlerContext,
+): Promise<void> {
+  const key = authMiddleware(req);
+  if (!key) {
+    sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key");
+    return;
+  }
+
+  if (!hasScope(key, "agent:read") && !hasScope(key, "agent:run")) {
+    sendError(res, 403, "FORBIDDEN", "API key lacks 'agent:read' scope");
+    return;
+  }
+
+  const keyHash = key.keyHash ?? (key.key ? hashKey(key.key) : "");
+  const summaries = ctx.sessionManager.getSessionsByKey(keyHash);
+  sendJSON(res, 200, summaries);
 }
 
 async function handleGetSession(
@@ -535,9 +735,18 @@ async function handleGetSession(
     return;
   }
 
-  const session = await ctx.sessionManager.getSession(sessionId, key.keyHash ?? (key.key ? hashKey(key.key) : ""));
+  let session: import("../../foundations/types.js").SessionData | null;
+  try {
+    session = await ctx.sessionManager.getSession(sessionId, key.keyHash ?? (key.key ? hashKey(key.key) : ""));
+  } catch (err: any) {
+    if (err?.code === "NOT_FOUND" || err?.statusCode === 404 || err?.message?.includes("server owner")) {
+      sendError(res, 404, "NOT_FOUND", `Session "${sessionId}" not found`);
+      return;
+    }
+    throw err;
+  }
   if (!session) {
-    sendError(res, 404, "NOT_FOUND", `Session ${sessionId} not found`);
+    sendError(res, 404, "NOT_FOUND", `Session "${sessionId}" not found`);
     return;
   }
 

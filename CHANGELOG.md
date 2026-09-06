@@ -5,13 +5,97 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [v0.7.1] - 2026-09-06
+
+### Post-release review remediation (021-4 review rounds 2–3)
+
+**Breaking changes:**
+- **Legacy `SessionStore` retired**: the deprecated messages-only `SessionStore` interface, its `createSessionStore`/`createMemoryStore` factories, and the SDK's silent compatibility adapter are removed per the pre-1.0 no-shims policy — sessions saved through it could never be resumed (the adapter dropped the ownership stamp). Use `PersistenceBackend` (`save(id, SessionData)` / `load(id)` returning `SessionData`, branded with `__persistenceBackend`) or `createPersistenceBackend({...})`.
+- **Streaming `fullText` rejects on failed turns** (review F2): `askSeepient({... stream: true })` and `Seepient.chatStream()` now reject `fullText` with the typed `SeepientError` when the turn fails — parity with the non-streaming throw. `textStream` still completes for delta-only consumers; `finishReason` still resolves `"error"`.
+- **`AskSeepientResult.finishReason` type truth**: the never-produced `"length"` member is removed and the actually-produced `"aborted"` is added.
+
+**Fixed:**
+- **Failed turns no longer brick SDK sessions (review #1)**: the empty-assistant persistence filter dropped assistant messages that carry tool calls (their content is legitimately empty), orphaning the tool result — every provider then rejected the session permanently. Tool-call assistants are now preserved with their tool results.
+- **Broker DNS-rebinding window closed (review #2)**: the default network adapter no longer re-resolves DNS inside `fetch()` — the broker passes its validated IP list through and the adapter pins to it, so the request can no longer be delivered to an address the broker never validated.
+- **Failed-turn drafts are resolved at the source (review F1)**: `ServerSessionManager.resolveTrailingDraft` / SDK `resolveTrailingUserDraft` pop an un-answered trailing user prompt at next-turn start (identical retry dedupes, different prompt supersedes) — stored history, REST/WS views, and model input stay in sync; `normalizeHistoryForSend` is now a legacy merge-only fallback.
+- **Gateway REST targets cannot be repointed (W181)**: a model-controlled absolute path no longer replaces the registered origin — the target's credential can no longer be shipped to a third-party host.
+- **Cross-origin redirects use a header ALLOWLIST (W182)**: credentials injected under arbitrary custom header names cannot survive a redirect hop (both the SSRF fetch and the broker adapter).
+- **Broker notification webhooks routed through the validated fetch (W183)**: no more deadline-less, unbounded plain fetches for feishu/dingtalk/wecom.
+- **Custom-tool connector analysis uses the shared IP classifier (W180)**: the stale per-doorway regex list (which missed hex-mapped/v4-compatible IPv6 and reserved ranges) is deleted.
+- **A `createSeepient` abort now reaches media operations** — `agent.abort()` stops in-flight image/media fetches instead of letting them bill.
+- **`askSeepient` no longer leaks a listener per call on the caller's `AbortSignal`**; `agent.abort()` no longer leaves `MaxListeners` growth either.
+- **`server.close()` removes the server's signal handlers** — embedding hosts no longer need `dispose()` to fully detach; `dispose()` itself now also closes the server.
+- **Turn answers are scoped to the current turn**: on abort or `max_steps` with no output, REST/WS/SDK no longer return (and persist) a *previous* turn's answer as this turn's.
+- **413 is no longer masked**: oversized gateway and provider-management bodies reach the shared `PAYLOAD_TOO_LARGE` mapping instead of being swallowed into `400 Invalid JSON`; the operator-configured `server.maxBodyBytes` now applies to settings and gateway routes too.
+- **Raw internal error text removed from the last two wire paths** (WS session catch-all, gateway 500s) — detail stays in the server log.
+- **WebSocket dead-peer heartbeat**: a 30s ping/pong sweep terminates dead peers so they release their per-key connection-cap slot.
+- **`pnpm build` cleans stale `dist/` output** (preserving CI-staged native helpers) so deleted modules can no longer ship in a tarball from a dirty tree.
+- **Docs truth**: CORS default corrected in `docs/server/overview.md`; `SEEPIENT_CORS_ORIGINS` / `SEEPIENT_WS_MAX_CONNECTIONS_PER_KEY` documented; `POST /v1/chat` `sessionId` and `GET /v1/sessions` added to the REST reference; WS error-code table made truthful; streaming error contract updated in the SDK docs.
+- **New gates**: real-socket test for the WS scope model (provider-scoped key → upgrade OK → `FORBIDDEN` frame), SSE outcome tests, adapter IP-pinning tests, and the orphaned-tool-row regression.
+
+## [v0.7.0] - 2026-09-06
+
+### Review remediation: release pipeline, server sessions, transport hardening & docs truth (spec 021-2 / 021-3)
+
+*Includes 021-3 remediation work orders W001–W041 resolving server session concurrency and turn locking, NAT64 metadata defense-in-depth, transport lifecycle safety, and docs truth.*
+
+**Breaking changes:**
+- **SDK API rename — `askSeepient` / `runSeepientServer`**: The one-shot entry points `generateText`/`streamText` are replaced by a single unified `askSeepient(prompt, options)`; the server factory `createServer`/`startServer` is renamed `runSeepientServer`. Migration (pre-1.0, no shims):
+
+  | Old (≤ v0.6.x) | New (v0.7.0) |
+  |---|---|
+  | `generateText(prompt, options?)` | `askSeepient(prompt, options?)` |
+  | `streamText(prompt, options?)` | `askSeepient(prompt, { ...options, stream: true })` |
+  | `createServer(options?)` / `startServer(options?)` | `runSeepientServer(options?)` (use `listen: false` for an unattached `http.Server`) |
+  | `GenerateTextOptions` / `StreamTextOptions` | `AskSeepientOptions` |
+  | `GenerateTextResult` | `AskSeepientResult` |
+  | `StreamTextResult` | `AskSeepientStreamResult` |
+  | `ServerOptions` | `RunSeepientServerOptions` (now exported only from `seepient/server`, next to `runSeepientServer`) |
+
+  Additional surface changes in the rename: `toResponse()` now accepts optional `{ headers }`; phantom structured-output fields were removed (`AskSeepientOptions.output`, `AskSeepientResult.data`/`error` — structured output remains deferred); `Seepient.chatStream()` options no longer accept `stream`/`signal` (it is always streaming and owns its abort handle via the returned result); `RunSeepientServerOptions.settingsManager` is typed by the `SettingsManagerLike` contract instead of `any`. Update all imports and call sites accordingly — no compatibility aliases are provided in the pre-1.0 phase.
+- **SDK session ownership binding (tenant isolation)**: `createSeepient` now stamps the effective `principalId` (default `"sdk-user"`) on every persisted session (`SessionData.principalId`) and fails closed with `SESSION_OWNERSHIP_MISMATCH` when resuming under a different principal — previously a second tenant supplying the same `sessionId` and its own stores could restore and continue the first tenant's conversation. Sessions persisted before this change carry no owner stamp and will not resume (delete the stored session or start a new `sessionId`). Custom `PersistenceBackend` implementations must round-trip the new `principalId` field; the deprecated messages-only `SessionStore` adapter cannot carry ownership and now fails closed when resuming an existing session. Expanded API key hash digests from 16 to 64 hex characters (full SHA-256). Pre-0.7.0 session files created under 16-hex key ownership will not resume and fail closed with a descriptive error. Server sessions are ephemeral runtime state.
+
+**Release pipeline & packaging safety (US1):**
+- **Static publish hook safety**: Restored `prepublishOnly` to `pnpm run build` (HEAD semantics); added `pnpm run pack:verify` static hook assertion preventing clean/delete scripts in publish hooks and verifying native exact-commit helper staging.
+- **Release workflow gate**: Added `pack:verify` gate to `.github/workflows/release.yml` between staging and npm publish.
+- **Docker CI health & documentation**: Added CI container image build & health check job to release pipeline; updated Dockerfile and standalone usage documentation comments; removed deprecated `SEEPIENT_SHELL_APPROVE`.
+- **Artifact hygiene**: Removed uncommitted temporary visual check artifacts and stale architecture dumps.
+
+**Server sessions & WebSocket integrity (US2):**
+- **Stateless one-shot chat & session adoption (D1)**: `POST /v1/chat` and WebSocket chat requests sent without a `sessionId` operate statelessly as one-shot turns — no session files are created on disk, no session capacity limits are consumed, and no `sessionId` is returned. Requests providing an explicit `sessionId` adopt or create the session and persist full turn history.
+- **Id-preserving session lifecycle**: `createSession` adopts client-supplied IDs across memory and persistence backends with strict charset validation and collision refusal. `addMessage` fails loudly on missing sessions.
+- **`GET /v1/sessions` endpoint**: Added authenticated collection listing returning `SessionSummary` metadata for the caller's key only (no message bodies).
+- **REST session resumption**: `POST /v1/chat` accepts optional `sessionId`, resumes conversation history, persists turn messages, and echoes session identity.
+- **WebSocket concurrency guard & lifecycle**: Single in-flight chat per connection with `REQUEST_IN_FLIGHT` error frame; abort signals reach active streaming controllers; pipeline identities use UUIDs.
+- **SDK turn mutex durability**: `chatStream` `finally` block guarantees mutex `release()` executes even if session persistence fails.
+
+**SDK parity & type truth (US3):**
+- **One-shot option parity**: Added `purpose` and `tier` options to `GenerateTextOptions` and `StreamTextOptions`, threaded to agent loop resolution.
+- **Declaration type narrowing**: Narrowed `TrustedHostToolEffectDeclaration` to supported effect kinds (`network-egress`, `secret-use`, `model-egress`), injecting boundary defaults and eliminating untyped casts.
+- **Unified local store predicate**: Added `isLocalAuditStore` helper unifying local filesystem store detection across SDK, HTTP server, and lifecycle factory.
+- **Runtime contract extension**: Extended `ProviderRuntimeContract` with optional inspection and listener cleanup methods, eliminating `(runtime as any)` probes.
+
+**021-4 remediation work order (W100–W164):**
+- **API rename landed (D1 adopt)**: `askSeepient` / `runSeepientServer` are the public API; abort reaches media operations again; `onError` parity in non-streaming mode; `hooks.onFinish` fires in streaming mode; phantom structured-output fields removed; `chatStream` options narrowed; `SettingsManagerLike` contract replaces `settingsManager?: any`.
+- **Embedding safety (W130/W131)**: `runSeepientServer` registers signal handlers only when listening and returns a `dispose()` handle; the WebSocket layer is per-instance (independent WSS + registries), so multiple servers can live in one process.
+- **Security parity (W140–W146)**: WS handlers enforce the REST scope model (`agent:run`/`agent:read`); the effect broker and the transport validator now share byte-level IP classification (hex-mapped, v4-compatible, NAT64, and reserved IPv4 spellings denied); gateway OpenAPI import and REST calls route through the SSRF-validated pinned fetch (`gateway_import_openapi` re-classified `communications`); cross-host redirect credential stripping is case-insensitive incl. `X-Api-Key`; `safeSsrfFetch` gained a cross-hop deadline; default CORS no longer reflects arbitrary origins; WS messages consume the shared rate limiter, per-key connection caps enforced (`SEEPIENT_WS_MAX_CONNECTIONS_PER_KEY`), and non-`/ws` upgrades are 404'd.
+- **Session integrity (W150–W154, D3 option a)**: send-time history normalization collapses dangling failed-turn user messages on the model-input copy (stored crash-recovery data intact); resolved-error turns persist no empty assistant row and answer 502; the absolute session TTL defers to in-flight turns and `deleteSession` refuses while a turn is live; denied cross-key probes no longer cache the victim's session; sessionId charset/length aligned (128-char cap).
+- **Transport polish (W160–W164)**: unified capped body reader (413 on settings/gateway/provider routes); `server.rateLimitRpm` re-read per request; shutdown closes keep-alive sockets and flushes the audit outbox before force-exit; sanitized error envelopes with raw detail only in logs; `scripts/` now typechecked in the test gate with a docs-sync test denying deleted API symbols; strict IPv6 hex validation; media and webhook fetches routed through the validated fetch.
+
+**Transport hardening & documentation truth (US4):**
+- **Default CORS no longer reflects arbitrary origins (021-4 W145)**: with no `server.corsOrigins` setting and no `SEEPIENT_CORS_ORIGINS` env var, responses carry no `Access-Control-Allow-Origin` header — browser cross-origin access is now opt-in. Set the setting or env var to an origin allowlist, or `*` to reflect any origin. Combined with the default `0.0.0.0` bind, the previous default made the allowlist feature moot out of the box.
+- **SSRF socket IP pinning**: Reused socket lookup override primitive via `pinnedFetch` to connect strictly to pre-validated IP addresses, eliminating DNS rebinding TOCTOU windows. Added 5-hop redirect limit and extended private/reserved CIDR blocks.
+- **Transport DoS caps**: Enforced 10 MB default body limit on REST requests (`413 PAYLOAD_TOO_LARGE`), 1 MiB WebSocket frame size (`maxPayload`), 300 rpm per-key token bucket rate limiter (`429 RATE_LIMITED`), and configurable CORS allowlist (`SEEPIENT_CORS_ORIGINS`).
+- **Structured request logging**: Added JSON-line logger with `requestId` correlation at transport seams; sanitized 500 error responses to prevent internal detail leaks.
+- **Documentation reorganization**: Removed duplicate `docs/embedding/workers.md` in favor of canonical `docs/sdk/stateless-workers.md`, repointed VitePress sidebar and documentation references, and configured `.gitignore` for `docs/.vitepress/dist`.
+- **Documentation truth**: Corrected docs license to BUSL-1.1; removed phantom `seepient/react` guide; corrected `/sdk/session-persistence` links and server `persist` option.
 
 ## [v0.6.1] - 2026-09-06
 
 ### Stateless SDK workers and embedder-owned storage (spec 021)
 
 **Stateless multi-tenant embedding & state injection:**
+- **Docker standalone server entrypoint**: Aligned `Dockerfile` to launch `dist/transport/http/standalone.js` behind `dumb-init` by default.
 - **Store contract injection**: Extended `createSeepient`, `generateText`, `streamText`, and `createServer` with typed options accepting external `runtime`, `principalId`, `sessionId`, `auditStore`, `policyStore`, and `capabilityLedger`.
 - **Zero local disk writes**: When all state stores are injected (`auditStore`, `policyStore`, `capabilityLedger`, along with `runtime` and `sessionStore`), the SDK runs completely statelessly with zero directory creation or persistent state writes to the host filesystem outside the active workspace. Emits a construction warning if partial store injection is detected.
 - **Attributed WebSocket approval records**: Threaded caller identity (`apiKeyHash`, session, tenant) into server-side durable approval request records, ensuring approval audits accurately reflect the authenticated caller rather than a static placeholder.
@@ -19,7 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Auditing and durability**: Injected audit stores receive full action lifecycle events with caller `principalId` pass-through; custom stores enforce pre-dispatch durability.
 - **Execution error contracts & abort semantics**: `agent.chat()` now rejects with `SeepientError` preserving `code` and `retryable` on loop execution errors (with failed turn user messages guaranteed persisted to the session store before throw), while user-initiated aborts (`agent.abort()`) resolve cleanly with partial assistant text and token usage.
 - **First-class provider account session routing**: Added first-class `providerAccount` field to `SessionData` and `persistSession()`, ensuring session resumes and provider switches maintain clean channel separation from embedder `metadata`.
-- **Reference worker & documentation**: Added reference worker example (`examples/worker/`) demonstrating remote store adapters, permission-gated execution, and interactive approval relay; added deployment guide (`docs/embedding/workers.md`).
+- **Reference worker & documentation**: Added reference worker example (`examples/worker/`) demonstrating remote store adapters, permission-gated execution, and interactive approval relay; added deployment guide (`docs/sdk/stateless-workers.md`).
 - **Cleaned up legacy shims**: Replaced untyped `providerRuntime` casts across HTTP server and transport adapters with typed `runtime` options (pre-1.0 in-place upgrade).
 
 ### Unified SDK consolidation and release hardening (spec 021 hardening)
@@ -73,10 +157,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Restored surface & explicit trust models:**
 - Restored `preparedTool` and `brokerConnector` factories and types from the package entry (`src/transport/sdk/index.ts`).
-- Exposed explicit trust models (`preparedTool`, `brokerConnector`, `trustedHostTool`), custom tool registration support, and typed `commitHelper` on `createAgent`, `generateText`, and `streamText`.
+- Exposed explicit trust models (`preparedTool`, `brokerConnector`, `trustedHostTool`), custom tool registration support, and typed `commitHelper` on `createSeepient`, `generateText`, and `streamText`.
 - **`preparedTool` execution pipeline**: Custom analyzers return an untrusted `PreparedActionDraft` (`operation`, `effects`, `risk`, `display`); platform stamps identity fields and computes digests fail-closed via `buildPreparedAction`, executing through the policy engine, approval broker, and execution boundary with exact-commit guarantees.
 - **`brokerConnector` data-only execution**: Declarative argument-to-request mappings using JSON Pointers (RFC 6901) execute directly against backend brokers (e.g. `web-search`) with zero embedder code execution and construction-guaranteed secret isolation.
 - Fixed deny-messaging for custom tools (FR-009): registration-present analyzer failures surface exact validator/analyzer remediation, never the misleading `trustedHostAllowlist` hint.
+
+### Permission tool baseline & consent modes (spec 017)
+- **Consent modes & wildcard capabilities**: Added three consent modes (`ask-everything`, `edit-enabled`, `autonomous`) and three wildcard capability kinds (`tools:*`, `network:*`, `secrets:*`). Brokered-tool lockout repair and config-derived grants.
 
 ### CLI image saves exact commit verification
 - Replaced direct `fs.writeFileSync` saves in CLI image generation (`generate image`) with exact-commit execution via `FileCommitBroker` with action-scoped capability envelopes, ensuring all model-authored image file outputs are audited and exact-commit checked.

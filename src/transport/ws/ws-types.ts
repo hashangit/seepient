@@ -19,6 +19,7 @@ export interface WS {
   WebSocketServer: new (options: {
     noServer?: boolean;
     path?: string;
+    maxPayload?: number;
   }) => WSServer;
 }
 
@@ -39,6 +40,8 @@ export interface WSServer {
 export interface WebSocket {
   send(data: string): void;
   close(code?: number, reason?: string): void;
+  /** Hard-close without a close handshake (dead-peer cleanup). */
+  terminate(): void;
   on(event: "message", cb: (data: Buffer) => void): void;
   on(event: "close", cb: (code: number, reason: Buffer) => void): void;
   on(event: "error", cb: (err: Error) => void): void;
@@ -318,7 +321,39 @@ export type ServerMessage =
 
 // ── Context ──────────────────────────────────────────────────────────
 
+/**
+ * Per-server-instance WS registries (W131). One instance per
+ * `runSeepientServer` call — never module-global — so multiple servers can
+ * coexist in one process without cross-wiring connections or approvals.
+ */
+export interface WsConnectionRegistry {
+  activeConnections: Map<WebSocket, ConnectionState>;
+  pendingApprovals: Map<string, {
+    continuationId: string;
+    resolve: (approved: boolean) => void;
+    timer: ReturnType<typeof setTimeout>;
+    ws: WebSocket;
+    toolName: string;
+    createdAt: number;
+  }>;
+  durableApprovalStore: import("../../domain/permissions/durable-approval-store.js").DurableApprovalStore;
+  getOtherClients(excludeWs?: WebSocket): Array<{ ws: WebSocket; state: ConnectionState }>;
+  getActiveConnectionCount(): number;
+  closeAllConnections(): void;
+}
+
 export interface WebSocketHandlerContext {
+  /** Per-instance connection/approval registries (see WsConnectionRegistry). */
+  registry: WsConnectionRegistry;
+  /**
+   * Optional per-key token-bucket limiter (W146). When present, every WS
+   * message consumes one token for the connection's keyHash — the same
+   * limiter and key space the REST surface uses.
+   */
+  rateLimiter?: {
+    consume(key: string): boolean;
+    getRetryAfterSeconds(key: string): number;
+  };
   sessionManager: import("../http/session-store.js").ServerSessionManager;
   streamText: (options: {
     message: string;
@@ -332,6 +367,7 @@ export interface WebSocketHandlerContext {
     tenantId?: string;
     principalId?: string;
     approveTool?: import("../../foundations/types.js").ApproveToolFn;
+    history?: import("../../foundations/types.js").Message[];
     onText: (delta: string) => void;
     onToolCall: (info: { name: string; args: Record<string, unknown>; callId: string }) => void;
     onToolResult: (info: { callId: string; output: string; success: boolean }) => void;
@@ -339,7 +375,7 @@ export interface WebSocketHandlerContext {
     onError: (error: { code: string; message: string; provider?: string; tool?: string }) => void;
     onDone: (result: { text: string; usage: Usage; finishReason: string }) => void;
     signal?: AbortSignal;
-  }) => void;
+  }) => void | Promise<void>;
   listModels: () => Record<string, string[]>;
   listSkills: () => { name: string; description: string; tags: string[] }[];
   settingsHandlerContext?: import("../http/settings-handlers.js").SettingsHandlerContext;
@@ -349,7 +385,7 @@ export interface WebSocketHandlerContext {
 
 export interface ConnectionState {
   sessionId: string | null;
-  currentAbortController: AbortController | null;
+  activeChats: Set<AbortController>;
   activeProvider: string | null;
   activeModel: string | null;
   apiKeyHash: string;

@@ -12,7 +12,7 @@ Seepient Agent is a headless AI agent framework for building LLM-powered applica
 Seepient Agent is organized in three layers of increasing statefulness:
 
 ```
-generateText()   -- One-shot. Stateless. No memory between calls.
+askSeepient()    -- One-shot. Stateless. No memory between calls.
 createSeepient() -- Stateful. Multi-turn with session persistence.
 Server           -- Remote. REST + WebSocket for distributed deployments.
 ```
@@ -23,8 +23,7 @@ Every layer delegates to the same core agent loop, so tool execution, hook lifec
 
 The SDK is built around plain functions and plain objects, not class instances:
 
-- **`generateText(prompt, options?)`** -- returns a `Promise<GenerateTextResult>`
-- **`streamText(prompt, options?)`** -- returns a `Promise<StreamTextResult>` with async iterables
+- **`askSeepient(prompt, options?)`** -- returns a `Promise<AskSeepientResult>`, or a `Promise<AskSeepientStreamResult>` with async iterables when `{ stream: true }`
 - **`createSeepient(options?)`** -- returns a `Promise<Seepient>` with `.chat()`, `.chatStream()`, and lifecycle methods
 
 Configuration is passed as options objects. Return types are plain interfaces. There are no base classes to extend.
@@ -56,28 +55,28 @@ yarn add seepient
 ::: code-group
 
 ```typescript [ESM -- recommended]
-import { generateText, streamText, createSeepient } from "seepient";
+import { askSeepient, createSeepient } from "seepient";
 ```
 
 ```typescript [SDK types only]
 import type {
-  GenerateTextOptions,
-  GenerateTextResult,
-  StreamTextResult,
+  AskSeepientOptions,
+  AskSeepientResult,
+  AskSeepientStreamResult,
   Seepient,
 } from "seepient";
 ```
 
 ```typescript [Tools and factories]
-import { trustedHostTool, CORE_TOOLS, COMM_TOOLS, ADVANCED_TOOLS, ALL_TOOLS } from "seepient";
+import { trustedHostTool, preparedTool, brokerConnector, CORE_TOOLS, COMM_TOOLS, ADVANCED_TOOLS, ALL_TOOLS } from "seepient";
 ```
 
-```typescript [React integration]
-import { createUseChat } from "seepient/react";
+```typescript [Settings and Gateway]
+import { settings, gateway, createProviderManagerApi } from "seepient";
 ```
 
 ```typescript [Server]
-import { createServer } from "seepient/server";
+import { runSeepientServer } from "seepient/server";
 ```
 
 :::
@@ -87,9 +86,9 @@ import { createServer } from "seepient/server";
 ### One-shot text generation
 
 ```typescript
-import { generateText } from "seepient";
+import { askSeepient } from "seepient";
 
-const result = await generateText("Explain recursion in one paragraph");
+const result = await askSeepient("Explain recursion in one paragraph");
 console.log(result.text);
 console.log(result.usage.totalTokens);
 ```
@@ -97,9 +96,10 @@ console.log(result.usage.totalTokens);
 ### Streaming
 
 ```typescript
-import { streamText } from "seepient";
+import { askSeepient } from "seepient";
 
-const stream = await streamText("Write a haiku about programming", {
+const stream = await askSeepient("Write a haiku about programming", {
+  stream: true,
   onText: (delta) => process.stdout.write(delta),
 });
 
@@ -127,7 +127,7 @@ console.log(followUp.text);
 ### Custom tools
 
 ```typescript
-import { generateText, trustedHostTool } from "seepient";
+import { askSeepient, trustedHostTool } from "seepient";
 
 const weatherTool = trustedHostTool({
   definition: {
@@ -147,24 +147,27 @@ const weatherTool = trustedHostTool({
   execute: async (args) => {
     const { city } = (args ?? {}) as { city: string };
     return `Weather in ${city}: 72F, sunny`;
-const result = await generateText("What is the weather in Tokyo?", {
+  },
+});
+
+const result = await askSeepient("What is the weather in Tokyo?", {
   tools: [weatherTool],
 });
 ```
 
 ### Migration Note: Permission Pipeline & Pre-Grants
 
-Starting in v0.6.1, the permission pipeline is mandatory and active by default across all SDK entry points (`createSeepient`, `generateText`, `streamText`).
+Starting in v0.6.1, the permission pipeline is mandatory and active by default across all SDK entry points (`createSeepient`, `askSeepient`).
 - The legacy `permissionPipeline` flag has been removed.
 - The legacy `grants` option has been removed. Instead, use `consentMode: "autonomous"` to permit safe unattended execution within policy boundaries, or define explicit scoped capability sets via `principalPolicy` or `deploymentCeiling`.
 
 ### HTTP SSE endpoint
 
 ```typescript
-import { streamText } from "seepient";
+import { askSeepient } from "seepient";
 
 app.get("/chat", async (req, res) => {
-  const stream = await streamText(req.query.prompt as string);
+  const stream = await askSeepient(req.query.prompt as string, { stream: true });
   return stream.toResponse();
 });
 ```
@@ -188,7 +191,7 @@ Seepient Agent ships with a set of built-in tools organized into groups:
 
 | Group      | Tools                                                       |
 | ---------- | ----------------------------------------------------------- |
-| **Core**   | `execute_shell_command`, `read_file`, `write_file`, `get_current_datetime` |
+| **Core**   | `execute_shell_command`, `read_file`, `write_file`, `edit_file`, `get_current_datetime`, `manage_todos`, `render_widget` |
 | **Comm**   | `send_email`, `web_search`, `send_notification`             |
 | **Advanced**| `read_website`, `take_screenshot`, `generate_image`, `optimize_prompt`, `use_skill` |
 
@@ -198,6 +201,15 @@ Pass tool names as strings, or use group names (`"core"`, `"comm"`, `"advanced"`
 
 | Page | Description |
 |------|-------------|
-| [generateText()](/sdk/generate-text) | One-shot agent execution with tools, hooks, and structured output |
-| [streamText()](/sdk/stream-text) | Streaming execution with async iterables and SSE helpers |
-| [createSeepient()](/sdk/create-seepient) | Stateful multi-turn agent with session persistence |
+| [createSeepient()](/sdk/create-seepient) | Stateful multi-turn agent with session persistence and provider management |
+| [askSeepient()](/sdk/ask-seepient) | One-shot agent execution (streaming via `stream: true`) with automatic tool loops and security boundaries |
+| [Settings API](/sdk/settings) | Programmatic configuration facade for reading, updating, and watching settings |
+| [Provider Management](/sdk/provider-management) | Catalog querying, accounts, assignments, and resolution preview |
+| [Custom Tools](/sdk/custom-tools) | Explicit trust models: `preparedTool`, `brokerConnector`, `trustedHostTool` |
+| [MCP Gateway](/sdk/mcp-gateway) | Connect Model Context Protocol servers and REST endpoints |
+| [Providers](/sdk/providers) | Multi-provider LLM support and model routing |
+| [Skills](/sdk/skills) | Reusable skill packages with automatic catalog injection |
+| [Hooks and Middleware](/sdk/hooks) | Lifecycle callbacks and request/response pipelines |
+| [Session Persistence](/sdk/session-persistence) | Built-in atomic files, in-memory, and custom storage backends |
+| [Stateless Workers](/sdk/stateless-workers) | Zero-disk multi-tenant embedding and storage contracts |
+| [Types Reference](/sdk/types) | Complete TypeScript types reference |

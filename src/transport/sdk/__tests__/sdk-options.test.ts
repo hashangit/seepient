@@ -44,31 +44,31 @@ function mockEntryPoints(resolvedModel: string) {
 }
 
 describe('SDK opts.model override', () => {
-  it('generateText uses opts.model over the resolved default', async () => {
+  it('askSeepient uses opts.model over the resolved default', async () => {
     const { runAgentLoopMock } = mockEntryPoints('resolved-default-model');
-    const { generateText } = await import('../index.js');
+    const { askSeepient } = await import('../index.js');
 
-    await generateText('hi', { tools: [], model: 'override-model' });
+    await askSeepient('hi', { tools: [], model: 'override-model' });
 
     expect(runAgentLoopMock).toHaveBeenCalledTimes(1);
     const passedModel = runAgentLoopMock.mock.calls[0][0].modelOverride;
     expect(passedModel).toEqual({ model: 'override-model', providerAccount: undefined });
   });
 
-  it('generateText passes undefined when opts.model omitted', async () => {
+  it('askSeepient passes undefined when opts.model omitted', async () => {
     const { runAgentLoopMock } = mockEntryPoints('resolved-default-model');
-    const { generateText } = await import('../index.js');
+    const { askSeepient } = await import('../index.js');
 
-    await generateText('hi', { tools: [] });
+    await askSeepient('hi', { tools: [] });
 
     expect(runAgentLoopMock.mock.calls[0][0].modelOverride).toBeUndefined();
   });
 
   it('streamText uses opts.model over the resolved default', async () => {
     const { runAgentLoopMock } = mockEntryPoints('resolved-default-model');
-    const { streamText } = await import('../index.js');
+    const { askSeepient } = await import('../index.js');
 
-    const res = await streamText('hi', { tools: [], model: 'override-stream' });
+    const res = await askSeepient('hi', { tools: [], model: 'override-stream', stream: true });
     await res.fullText;
 
     expect(runAgentLoopMock.mock.calls[0][0].modelOverride).toEqual({ model: 'override-stream', providerAccount: undefined });
@@ -93,5 +93,28 @@ describe('SDK opts.model override', () => {
     await agent.chat('hi');
 
     expect(runAgentLoopMock.mock.calls[0][0].modelOverride).toEqual({ model: 'switched-model', providerAccount: 'main' });
+  });
+
+  it('askSeepient passes purpose and tier to runAgentLoop', async () => {
+    const { runAgentLoopMock } = mockEntryPoints('resolved-default-model');
+    const { askSeepient } = await import('../index.js');
+
+    await askSeepient('hi', { tools: [], purpose: 'coding', tier: 'complex' } as any);
+
+    expect(runAgentLoopMock).toHaveBeenCalledTimes(1);
+    expect(runAgentLoopMock.mock.calls[0][0].purpose).toBe('coding');
+    expect(runAgentLoopMock.mock.calls[0][0].tier).toBe('complex');
+  });
+
+  it('streamText passes purpose and tier to runAgentLoop', async () => {
+    const { runAgentLoopMock } = mockEntryPoints('resolved-default-model');
+    const { askSeepient } = await import('../index.js');
+
+    const res = await askSeepient('hi', { tools: [], purpose: 'plan', tier: 'efficient', stream: true } as any);
+    await res.fullText;
+
+    expect(runAgentLoopMock).toHaveBeenCalledTimes(1);
+    expect(runAgentLoopMock.mock.calls[0][0].purpose).toBe('plan');
+    expect(runAgentLoopMock.mock.calls[0][0].tier).toBe('efficient');
   });
 });

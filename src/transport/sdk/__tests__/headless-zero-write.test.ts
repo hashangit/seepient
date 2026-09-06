@@ -26,8 +26,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   createSeepient,
-  generateText,
-  streamText,
+  askSeepient,
 } from "../index.js";
 import {
   FakeAuditStore,
@@ -226,7 +225,7 @@ Instructions.
       ],
     });
 
-    const genRes = await generateText("What time is it?", {
+    const genRes = await askSeepient("What time is it?", {
       principalId: "worker-principal",
       cwd: workspaceDir,
       runtime,
@@ -237,7 +236,7 @@ Instructions.
     });
     expect(genRes.text).toContain("Current time fetched");
 
-    const streamRes = await streamText("Stream time", {
+    const streamRes = await askSeepient("Stream time", { stream: true,
       principalId: "worker-principal",
       cwd: workspaceDir,
       runtime,

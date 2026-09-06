@@ -31,33 +31,18 @@ import { createHash } from "node:crypto";
 import { PersistedReplayLedger } from "./persisted-replay-ledger.js";
 import { resolveSecretRef } from "../../foundations/security/credential-resolver.js";
 import { createSetupFailure } from "../../foundations/contracts/setup-failure.js";
+import { isMetadataIp, isPrivateIp } from "../../foundations/network/ip-classifier.js";
+import { safeSsrfFetch } from "../../foundations/network/ssrf-fetch.js";
+import { pinnedFetch } from "../../foundations/network/pinned-fetch.js";
 
-/** Loopback / private / link-local / reserved / cloud-metadata CIDRs (IPv4). */
-const DENIED_IPV4_PATTERNS: ReadonlyArray<RegExp> = [
-  /^127\./, // loopback
-  /^10\./, // private
-  /^192\.168\./, // private
-  /^172\.(1[6-9]|2\d|3[01])\./, // private
-  /^169\.254\./, // link-local
-  /^0\./, // reserved
-  /^22[4-5]\./, // multicast/reserved
-  /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./, // CGNAT (RFC 6598)
-];
-
-/** Denied IPv6 prefixes (T210b: private/metadata ranges). */
-const DENIED_IPV6_PATTERNS: ReadonlyArray<RegExp> = [
-  /^::1$/, // loopback
-  /^fc[0-9a-f][0-9a-f]:/i, // ULA fc00::/7
-  /^fd[0-9a-f][0-9a-f]:/i, // ULA fd00::/7
-  /^fe80:/i, // link-local fe80::/10
-  /^::ffff:127\./i, // IPv4-mapped loopback
-  /^::ffff:10\./i, // IPv4-mapped private
-  /^::ffff:192\.168\./i, // IPv4-mapped private
-  /^::ffff:172\.(1[6-9]|2\d|3[01])\./i, // IPv4-mapped private
-  /^::ffff:169\.254\./i, // IPv4-mapped link-local
-  /^::ffff:169\.254\.169\.254$/i, // cloud metadata literal (IPv4-mapped)
-  /^64:ff9b:/i, // NAT64 (RFC 6052) — treat as potentially private
-];
+/**
+ * Broker address denial (W141): the exact byte-level classification the
+ * transport SSRF validator uses — hex-mapped, v4-compatible, SIIT, NAT64,
+ * and reserved IPv4 spellings included. Exported pure for parity tests.
+ */
+export function isBrokerDeniedAddress(ip: string): boolean {
+  return isPrivateIp(ip) || isMetadataIp(ip);
+}
 
 const DENIED_HOSTS: ReadonlySet<string> = new Set([
   "localhost",
@@ -74,6 +59,13 @@ export interface BrokerNetworkAdapter {
   fetch(
     destination: NetworkDestination,
     init: { method: string; headers: Record<string, string>; body?: Uint8Array; signal?: AbortSignal },
+    /**
+     * A2: the broker-VALIDATED addresses for this destination. The adapter
+     * must connect only to these — re-resolving DNS here reopens the
+     * validate-then-connect rebinding window (request forgery against
+     * internal services even though the post-flight check blocks the reply).
+     */
+    resolvedIps?: string[],
   ): Promise<BrokerNetworkResponse>;
 }
 
@@ -92,6 +84,18 @@ export interface BrokerNetworkResponse {
 }
 
 /** Headers the broker strips unless a connector schema owns them. */
+/**
+ * W182/A6: headers that may survive a CROSS-HOST redirect — content
+ * negotiation and hop-safety only, never identity or credentials.
+ */
+const CROSS_ORIGIN_REDIRECT_KEEP: ReadonlySet<string> = new Set([
+  "accept",
+  "accept-language",
+  "accept-encoding",
+  "user-agent",
+  "range",
+]);
+
 const FORBIDDEN_REQUEST_HEADERS: ReadonlySet<string> = new Set([
   "authorization",
   "cookie",
@@ -333,11 +337,17 @@ export class EffectBroker implements EffectBrokerContract {
         payload = { msgtype: "text", text: { content } };
       }
 
-      const response = await fetch(webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      // W183: webhook destinations are operator-configured but still routed
+      // through the validated, pinned fetch — no deadline-less unbounded reads.
+      const response = await safeSsrfFetch(
+        webhookUrl,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+        { maxResponseBytes: 1024 * 1024 },
+      );
 
       const result: any = await response.json().catch(() => ({}));
       const isSuccess =
@@ -519,6 +529,7 @@ export class EffectBroker implements EffectBrokerContract {
           const response = await this.network.fetch(
             currentDest,
             { method: currentMethod, headers: currentHeaders, body: currentBody, signal: controller.signal },
+            resolvedIps,
           );
           if (timeout) clearTimeout(timeout);
 
@@ -549,10 +560,17 @@ export class EffectBroker implements EffectBrokerContract {
                 if (hasInjectedSecret && (response.status === 307 || response.status === 308)) {
                   return this.denied(request.requestId, `refusing to forward secret-bearing body to cross-host redirect target: ${nextHost}`);
                 }
-                // Strip credentials on cross-host redirects
-                delete currentHeaders["authorization"];
-                delete currentHeaders["api-key"];
-                delete currentHeaders["cookie"];
+                // W182/A6: cross-host redirects rebuild the headers from an
+                // ALLOWLIST (see CROSS_ORIGIN_REDIRECT_KEEP) — a denylist can
+                // never cover credentials injected under arbitrary custom
+                // names (e.g. a target.auth.name header).
+                const kept: Record<string, string> = {};
+                for (const k of Object.keys(currentHeaders)) {
+                  if (CROSS_ORIGIN_REDIRECT_KEEP.has(k.toLowerCase())) {
+                    kept[k] = currentHeaders[k];
+                  }
+                }
+                currentHeaders = kept;
               }
 
               // Re-validate against envelope, DENIED_HOSTS, and DNS IP ranges
@@ -633,11 +651,7 @@ export class EffectBroker implements EffectBrokerContract {
   }
 
   private isDeniedAddress(ip: string): boolean {
-    // IPv4
-    if (DENIED_IPV4_PATTERNS.some((re) => re.test(ip))) return true;
-    // T210b: IPv6 private/metadata/loopback ranges
-    if (DENIED_IPV6_PATTERNS.some((re) => re.test(ip))) return true;
-    return false;
+    return isBrokerDeniedAddress(ip);
   }
 
   private denied(requestId: string, message: string): BrokeredEffectResult {
@@ -664,98 +678,36 @@ export class NodeNetworkAdapter implements BrokerNetworkAdapter {
   async fetch(
     destination: NetworkDestination,
     init: { method: string; headers: Record<string, string>; body?: Uint8Array; signal?: AbortSignal },
+    initIps?: string[],
   ): Promise<BrokerNetworkResponse> {
-    // T210c: Resolve IPs BEFORE opening the connection. Pin the resolved IP and
-    // force the socket lookup callback to connect to THAT IP.
-    const resolvedIps = await this.resolve(destination.host);
+    // A2: pin to the broker-validated list when provided; resolve only as a
+    // fallback for adapters called without one.
+    const resolvedIps = initIps?.length
+      ? initIps
+      : await this.resolve(destination.host);
     if (resolvedIps.length === 0) {
       throw new Error(`DNS resolution failed for ${destination.host}`);
     }
-    const pinnedIp = resolvedIps[0];
     const isHttps = destination.scheme === "https";
     const port = destination.port ?? (isHttps ? 443 : 80);
+    const url = `${destination.scheme}://${destination.host}${port ? `:${port}` : ""}${destination.pathPrefix || "/"}`;
 
-    const httpModule = isHttps ? await import("node:https") : await import("node:http");
-
-    return new Promise((resolvePromise, rejectPromise) => {
-      const isV6 = pinnedIp.includes(":");
-      const family = isV6 ? 6 : 4;
-      const allAddresses = resolvedIps.map((ip) => ({
-        address: ip,
-        family: ip.includes(":") ? 6 : 4,
-      }));
-
-      const reqOpts = {
-        method: init.method,
-        hostname: destination.host,
-        port,
-        path: destination.pathPrefix || "/",
-        headers: {
-          ...init.headers,
-          host: destination.host,
-        },
-        servername: isHttps ? destination.host : undefined,
-        // Force net/tls connect to the pre-resolved IPs (true DNS rebinding
-        // protection). Node >= 20 with autoSelectFamily requests the `all`
-        // form and expects [{address, family}]; answering that request with
-        // the legacy single-address form makes net throw
-        // ERR_INVALID_IP_ADDRESS ("Invalid IP address: undefined").
-        lookup: (
-          _h: string,
-          opts: { all?: boolean },
-          cb: (
-            err: Error | null,
-            result: string | Array<{ address: string; family: number }>,
-            family?: number,
-          ) => void,
-        ) => {
-          if (opts?.all) cb(null, allAddresses);
-          else cb(null, pinnedIp, family);
-        },
-      };
-
-      const req = httpModule.request(reqOpts, (res) => {
-        const socketIp = res.socket.remoteAddress || pinnedIp;
-        // Lower-case header keys so the broker can read `location` uniformly.
-        const headers: Record<string, string> = {};
-        for (const [k, v] of Object.entries(res.headers ?? {})) {
-          if (typeof v === "string") headers[k.toLowerCase()] = v;
-          else if (Array.isArray(v)) headers[k.toLowerCase()] = v.join(", ");
-        }
-        const chunks: Buffer[] = [];
-        res.on("data", (chunk: Buffer) => chunks.push(chunk));
-        res.on("end", () => {
-          const bytes = new Uint8Array(Buffer.concat(chunks));
-          resolvePromise({
-            status: res.statusCode ?? 200,
-            bytes,
-            effectiveHost: destination.host,
-            effectiveIp: socketIp,
-            headers,
-          });
-        });
-        res.on("error", rejectPromise);
-      });
-
-      req.on("error", rejectPromise);
-
-      if (init.signal) {
-        if (init.signal.aborted) {
-          req.destroy(new Error("aborted"));
-          rejectPromise(new Error("aborted"));
-          return;
-        }
-        init.signal.addEventListener("abort", () => {
-          req.destroy(new Error("aborted"));
-          rejectPromise(new Error("aborted"));
-        });
-      }
-
-      if (init.body && init.body.length > 0) {
-        req.write(Buffer.from(init.body));
-      }
-      req.end();
+    const res = await pinnedFetch({
+      url,
+      ips: resolvedIps,
+      method: init.method,
+      headers: init.headers,
+      body: init.body,
+      signal: init.signal,
     });
+
+    return {
+      status: res.status,
+      bytes: res.bytes,
+      effectiveHost: destination.host,
+      effectiveIp: res.effectiveIp,
+      headers: res.headers,
+    };
   }
 }
 

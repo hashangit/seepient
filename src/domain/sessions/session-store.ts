@@ -5,7 +5,6 @@
  * Built-in "file" and "memory" backends are registered by default. Custom
  * backends (Redis, SQLite, etc.) can be registered via `registerBackend()`.
  *
- * Legacy `SessionStore`-based API is preserved for backward compatibility.
  */
 
 import { promises as fs } from "node:fs";
@@ -16,17 +15,19 @@ import type {
   PersistenceBackend,
   PersistenceConfig,
   SessionData,
-  SessionStore,
 } from "../../foundations/types.js";
 
 // ── Session ID validation ───────────────────────────────────────────────
 
-const SESSION_ID_RE = /^[a-zA-Z0-9-]+$/;
+// W154a: `_` is allowed everywhere (transport + SDK already permitted it).
+// W154b: length is capped so bounded bodies cannot inflate Maps and fs names.
+const SESSION_ID_RE = /^[a-zA-Z0-9_-]+$/;
+export const MAX_SESSION_ID_LENGTH = 128;
 
 function validateSessionId(sessionId: string): void {
-  if (!SESSION_ID_RE.test(sessionId)) {
+  if (!SESSION_ID_RE.test(sessionId) || sessionId.length > MAX_SESSION_ID_LENGTH) {
     throw new Error(
-      `Invalid session ID "${sessionId}". Only alphanumeric characters and dashes are allowed.`,
+      `Invalid session ID "${sessionId}". Only alphanumeric characters, dashes, and underscores are allowed (max ${MAX_SESSION_ID_LENGTH} characters).`,
     );
   }
 }
@@ -75,6 +76,7 @@ export class FilePersistenceBackend implements PersistenceBackend {
           provider: data.provider ?? existing.provider,
           providerAccount: data.providerAccount ?? existing.providerAccount,
           model: data.model ?? existing.model,
+          principalId: data.principalId ?? existing.principalId,
           metadata: data.metadata ?? existing.metadata,
         }
       : {
@@ -85,6 +87,7 @@ export class FilePersistenceBackend implements PersistenceBackend {
           provider: data.provider,
           providerAccount: data.providerAccount,
           model: data.model,
+          principalId: data.principalId,
           metadata: data.metadata,
         };
 
@@ -102,6 +105,7 @@ export class FilePersistenceBackend implements PersistenceBackend {
   }
 
   async load(id: string): Promise<SessionData | null> {
+    validateSessionId(id);
     return this.loadFromDisk(id);
   }
 
@@ -154,15 +158,18 @@ export class MemoryPersistenceBackend implements PersistenceBackend {
       provider: data.provider ?? existing?.provider,
       providerAccount: data.providerAccount ?? existing?.providerAccount,
       model: data.model ?? existing?.model,
+      principalId: data.principalId ?? existing?.principalId,
       metadata: data.metadata ?? existing?.metadata,
     });
   }
 
   async load(id: string): Promise<SessionData | null> {
+    validateSessionId(id);
     return this.store.get(id) ?? null;
   }
 
   async delete(id: string): Promise<void> {
+    validateSessionId(id);
     this.store.delete(id);
   }
 
@@ -238,74 +245,4 @@ export async function persistSession(
   } as SessionData);
 }
 
-// ── Deprecated legacy API ───────────────────────────────────────────────
 
-/**
- * @deprecated Use `FilePersistenceBackend` or `createPersistenceBackend({ type: "file", path })` instead.
- */
-class FileSessionStore implements SessionStore {
-  private backend: FilePersistenceBackend;
-
-  constructor(basePath: string) {
-    this.backend = new FilePersistenceBackend(basePath);
-  }
-
-  async save(sessionId: string, messages: import("../../foundations/types.js").Message[]): Promise<void> {
-    await this.backend.save(sessionId, { id: sessionId, messages, createdAt: Date.now(), updatedAt: Date.now() });
-  }
-
-  async load(sessionId: string): Promise<import("../../foundations/types.js").Message[] | null> {
-    const data = await this.backend.load(sessionId);
-    return data?.messages ?? null;
-  }
-
-  async delete(sessionId: string): Promise<void> {
-    await this.backend.delete(sessionId);
-  }
-
-  async list(): Promise<string[]> {
-    return this.backend.list();
-  }
-}
-
-/**
- * @deprecated Use `MemoryPersistenceBackend` or `createPersistenceBackend({ type: "memory" })` instead.
- */
-class MemorySessionStore implements SessionStore {
-  private backend: MemoryPersistenceBackend;
-
-  constructor() {
-    this.backend = new MemoryPersistenceBackend();
-  }
-
-  async save(sessionId: string, messages: import("../../foundations/types.js").Message[]): Promise<void> {
-    await this.backend.save(sessionId, { id: sessionId, messages, createdAt: Date.now(), updatedAt: Date.now() });
-  }
-
-  async load(sessionId: string): Promise<import("../../foundations/types.js").Message[] | null> {
-    const data = await this.backend.load(sessionId);
-    return data?.messages ?? null;
-  }
-
-  async delete(sessionId: string): Promise<void> {
-    await this.backend.delete(sessionId);
-  }
-
-  async list(): Promise<string[]> {
-    return this.backend.list();
-  }
-}
-
-/**
- * @deprecated Use `createPersistenceBackend({ type: "file", path })` instead.
- */
-export function createSessionStore(path?: string): SessionStore {
-  return new FileSessionStore(path ?? defaultSessionPath());
-}
-
-/**
- * @deprecated Use `createPersistenceBackend({ type: "memory" })` instead.
- */
-export function createMemoryStore(): SessionStore {
-  return new MemorySessionStore();
-}

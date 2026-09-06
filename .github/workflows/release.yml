@@ -136,6 +136,25 @@ jobs:
           console.log("manifest:", JSON.stringify(manifest.binaries, null, 2));
           '
 
+      - name: Verify pack contents
+        run: pnpm run pack:verify
+
+      - name: Refuse placeholder publish
+        run: |
+          node -e '
+          const fs = require("fs");
+          const manifestPath = "dist/native-fs-commit/manifest.json";
+          if (!fs.existsSync(manifestPath)) {
+            console.error("FATAL: Missing " + manifestPath);
+            process.exit(1);
+          }
+          const m = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+          if (m.placeholder === true) {
+            console.error("FATAL: " + manifestPath + " is marked placeholder: true. Refusing to publish fake binaries.");
+            process.exit(1);
+          }
+          '
+
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
