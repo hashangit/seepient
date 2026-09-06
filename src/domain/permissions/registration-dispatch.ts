@@ -105,23 +105,33 @@ export function makeRegistrationAnalyzer(
                     ? "dynamic"
                     : e.destinations.map((d) => {
                         if (typeof d !== "string") return d;
-                        if (d.startsWith("http://")) {
-                          try {
-                            const u = new URL(d);
-                            return { scheme: "http" as const, host: u.hostname, port: u.port ? Number(u.port) : undefined };
-                          } catch {
-                            return { scheme: "http" as const, host: d.replace(/^http:\/\//, "") };
+                        const hasHttp = d.startsWith("http://");
+                        const hasHttps = d.startsWith("https://");
+                        const scheme = hasHttp ? ("http" as const) : ("https" as const);
+                        const urlString = hasHttp || hasHttps ? d : `https://${d}`;
+                        try {
+                          const u = new URL(urlString);
+                          const rawHostname = u.hostname;
+                          const host = rawHostname.startsWith("[") && rawHostname.endsWith("]")
+                            ? rawHostname.slice(1, -1)
+                            : rawHostname;
+                          return {
+                            scheme,
+                            host,
+                            port: u.port ? Number(u.port) : undefined,
+                          };
+                        } catch {
+                          const withoutScheme = d.replace(/^https?:\/\//, "");
+                          const colonIdx = withoutScheme.lastIndexOf(":");
+                          if (colonIdx !== -1) {
+                            const hostPart = withoutScheme.slice(0, colonIdx);
+                            const portPart = Number(withoutScheme.slice(colonIdx + 1));
+                            if (!isNaN(portPart)) {
+                              return { scheme, host: hostPart, port: portPart };
+                            }
                           }
+                          return { scheme, host: withoutScheme, port: undefined };
                         }
-                        if (d.startsWith("https://")) {
-                          try {
-                            const u = new URL(d);
-                            return { scheme: "https" as const, host: u.hostname, port: u.port ? Number(u.port) : undefined };
-                          } catch {
-                            return { scheme: "https" as const, host: d.replace(/^https:\/\//, "") };
-                          }
-                        }
-                        return { scheme: "https" as const, host: d };
                       }),
               };
             }

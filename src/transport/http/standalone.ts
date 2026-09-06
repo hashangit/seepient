@@ -6,8 +6,8 @@
  * Suitable as a Docker CMD/ENTRYPOINT or direct CLI invocation.
  *
  * Usage:
- *   node dist/adapters/server/standalone.js
- *   node dist/adapters/server/standalone.js --generate-api-key
+ *   node dist/transport/http/standalone.js
+ *   node dist/transport/http/standalone.js --generate-api-key
  *
  * Environment variables:
  *   SEEPIENT_PORT / PORT     — Port to listen on (default: 7337)

@@ -41,6 +41,8 @@ import type {
   PersistenceConfig,
   SessionStore,
   SessionData,
+  Purpose,
+  Tier,
 } from "../../foundations/types.js";
 import type {
   AccountInput,
@@ -48,7 +50,6 @@ import type {
   DeleteResult,
   AssignmentTarget,
   PurposeId,
-  Tier,
   ResolutionPreview,
 } from "../../foundations/contracts/provider-manager-api.js";
 import type { AvailableModel } from "../../foundations/schemas/inference.js";
@@ -518,8 +519,8 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
             turnSnapshot: snapshot,
             model,
             modelOverride: currentModelOverride(),
-            purpose,
-            tier,
+            purpose: streamOptions?.purpose ?? purpose,
+            tier: streamOptions?.tier ?? tier,
             messages,
             toolDefs,
             systemPrompt: systemPrompt,
@@ -726,20 +727,20 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     return res;
   }
 
-  async function setAssignment(purpose: any, tier: any, target: AssignmentTarget): Promise<SaveResult> {
+  async function setAssignment(purpose: Purpose, tier: Tier | undefined, target: AssignmentTarget): Promise<SaveResult> {
     if (!managerApi) {
       throw new SeepientError("Injected provider runtime does not support configuration mutations", "NOT_IMPLEMENTED", false);
     }
-    const res = await managerApi.setAssignment(purpose, tier, target);
+    const res = await managerApi.setAssignment(purpose as PurposeId, tier ?? null, target);
     if (res.ok) latestState = await managerApi.getState();
     return res;
   }
 
-  async function clearAssignment(purpose: any, tier: any): Promise<SaveResult> {
+  async function clearAssignment(purpose: Purpose, tier?: Tier): Promise<SaveResult> {
     if (!managerApi) {
       throw new SeepientError("Injected provider runtime does not support configuration mutations", "NOT_IMPLEMENTED", false);
     }
-    const res = await managerApi.clearAssignment(purpose, tier);
+    const res = await managerApi.clearAssignment(purpose as PurposeId, tier ?? null);
     if (res.ok) latestState = await managerApi.getState();
     return res;
   }
@@ -770,7 +771,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     return { revision: snap.revision };
   }
 
-  async function resolve(resolveOpts: { purpose: any; tier?: any; override?: any }): Promise<any> {
+  async function resolve(resolveOpts: { purpose: Purpose; tier?: Tier; override?: any }): Promise<any> {
     if (managerApi) {
       const res = await managerApi.resolvePreview(resolveOpts.purpose as PurposeId, resolveOpts.tier, resolveOpts.override);
       if ("ok" in res && res.ok === false) {

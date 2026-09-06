@@ -11,13 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Review remediation: release pipeline, server sessions, transport hardening & docs truth (spec 021-2)
 
+**Breaking changes:**
+- **Key hashing SHA-256 expansion (`hashKey` 16→64)**: Expanded API key hash digests from 16 to 64 hex characters (full SHA-256). Pre-0.7.0 session files created under 16-hex key ownership will not resume and fail closed with a descriptive error. Server sessions are ephemeral runtime state.
+
 **Release pipeline & packaging safety (US1):**
 - **Static publish hook safety**: Restored `prepublishOnly` to `pnpm run build` (HEAD semantics); added `pnpm run pack:verify` static hook assertion preventing clean/delete scripts in publish hooks and verifying native exact-commit helper staging.
 - **Release workflow gate**: Added `pack:verify` gate to `.github/workflows/release.yml` between staging and npm publish.
-- **Docker standalone server entrypoint**: Aligned `Dockerfile` to launch `dist/transport/http/standalone.js` behind `dumb-init` by default; updated usage documentation; removed deprecated `SEEPIENT_SHELL_APPROVE`. Added CI container image build & health check.
-- **Artifact hygiene**: Removed untracked visual check artifacts and stale architecture dumps.
+- **Docker CI health & documentation**: Added CI container image build & health check job to release pipeline; updated Dockerfile and standalone usage documentation comments; removed deprecated `SEEPIENT_SHELL_APPROVE`.
+- **Artifact hygiene**: Removed uncommitted temporary visual check artifacts and stale architecture dumps.
 
 **Server sessions & WebSocket integrity (US2):**
+- **Stateless one-shot chat & session adoption (D1)**: `POST /v1/chat` and WebSocket chat requests sent without a `sessionId` operate statelessly as one-shot turns — no session files are created on disk, no session capacity limits are consumed, and no `sessionId` is returned. Requests providing an explicit `sessionId` adopt or create the session and persist full turn history.
 - **Id-preserving session lifecycle**: `createSession` adopts client-supplied IDs across memory and persistence backends with strict charset validation and collision refusal. `addMessage` fails loudly on missing sessions.
 - **`GET /v1/sessions` endpoint**: Added authenticated collection listing returning `SessionSummary` metadata for the caller's key only (no message bodies).
 - **REST session resumption**: `POST /v1/chat` accepts optional `sessionId`, resumes conversation history, persists turn messages, and echoes session identity.
@@ -34,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SSRF socket IP pinning**: Reused socket lookup override primitive via `pinnedFetch` to connect strictly to pre-validated IP addresses, eliminating DNS rebinding TOCTOU windows. Added 5-hop redirect limit and extended private/reserved CIDR blocks.
 - **Transport DoS caps**: Enforced 10 MB default body limit on REST requests (`413 PAYLOAD_TOO_LARGE`), 1 MiB WebSocket frame size (`maxPayload`), 300 rpm per-key token bucket rate limiter (`429 RATE_LIMITED`), and configurable CORS allowlist (`SEEPIENT_CORS_ORIGINS`).
 - **Structured request logging**: Added JSON-line logger with `requestId` correlation at transport seams; sanitized 500 error responses to prevent internal detail leaks.
+- **Documentation reorganization**: Removed duplicate `docs/embedding/workers.md` in favor of canonical `docs/sdk/stateless-workers.md`, repointed VitePress sidebar and documentation references, and configured `.gitignore` for `docs/.vitepress/dist`.
 - **Documentation truth**: Corrected docs license to BUSL-1.1; removed phantom `seepient/react` guide; corrected `/sdk/session-persistence` links and server `persist` option.
 
 ## [v0.6.1] - 2026-09-06
@@ -41,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Stateless SDK workers and embedder-owned storage (spec 021)
 
 **Stateless multi-tenant embedding & state injection:**
+- **Docker standalone server entrypoint**: Aligned `Dockerfile` to launch `dist/transport/http/standalone.js` behind `dumb-init` by default.
 - **Store contract injection**: Extended `createSeepient`, `generateText`, `streamText`, and `createServer` with typed options accepting external `runtime`, `principalId`, `sessionId`, `auditStore`, `policyStore`, and `capabilityLedger`.
 - **Zero local disk writes**: When all state stores are injected (`auditStore`, `policyStore`, `capabilityLedger`, along with `runtime` and `sessionStore`), the SDK runs completely statelessly with zero directory creation or persistent state writes to the host filesystem outside the active workspace. Emits a construction warning if partial store injection is detected.
 - **Attributed WebSocket approval records**: Threaded caller identity (`apiKeyHash`, session, tenant) into server-side durable approval request records, ensuring approval audits accurately reflect the authenticated caller rather than a static placeholder.
@@ -48,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Auditing and durability**: Injected audit stores receive full action lifecycle events with caller `principalId` pass-through; custom stores enforce pre-dispatch durability.
 - **Execution error contracts & abort semantics**: `agent.chat()` now rejects with `SeepientError` preserving `code` and `retryable` on loop execution errors (with failed turn user messages guaranteed persisted to the session store before throw), while user-initiated aborts (`agent.abort()`) resolve cleanly with partial assistant text and token usage.
 - **First-class provider account session routing**: Added first-class `providerAccount` field to `SessionData` and `persistSession()`, ensuring session resumes and provider switches maintain clean channel separation from embedder `metadata`.
-- **Reference worker & documentation**: Added reference worker example (`examples/worker/`) demonstrating remote store adapters, permission-gated execution, and interactive approval relay; added deployment guide (`docs/embedding/workers.md`).
+- **Reference worker & documentation**: Added reference worker example (`examples/worker/`) demonstrating remote store adapters, permission-gated execution, and interactive approval relay; added deployment guide (`docs/sdk/stateless-workers.md`).
 - **Cleaned up legacy shims**: Replaced untyped `providerRuntime` casts across HTTP server and transport adapters with typed `runtime` options (pre-1.0 in-place upgrade).
 
 ### Unified SDK consolidation and release hardening (spec 021 hardening)

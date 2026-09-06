@@ -11,6 +11,8 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import type { AddressInfo } from "node:net";
 import { setupWebSocket, closeWebSocket } from "../../ws/websocket.js";
+// @ts-expect-error — ws is an optional peer dependency without bundled types
+import { WebSocket as WsClient } from "ws";
 
 function createMockReq(
   method: string,
@@ -243,6 +245,60 @@ describe("Transport Limits (Spec 021-2 / T019, T022, QS-7)", () => {
 
       closeWebSocket();
       await new Promise<void>((resolve) => server.close(() => resolve()));
+    });
+
+    it("closes real WebSocket connection with code 1009 when client sends frame > 1 MiB", async () => {
+      const tempKeyPath = path.join(
+        os.tmpdir(),
+        `seepient-test-ws-limit-${Date.now()}-${Math.random().toString(36).slice(2)}.json`,
+      );
+      process.env.SEEPIENT_API_KEYS_FILE = tempKeyPath;
+      const apiKey = generateApiKey(["agent:run"], { filePath: tempKeyPath });
+
+      const server = http.createServer();
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+      const port = (server.address() as AddressInfo).port;
+
+      await setupWebSocket(server, {
+        sessionManager: new ServerSessionManager({ backend: new MemoryPersistenceBackend() }),
+        streamText: vi.fn(),
+        listModels: vi.fn().mockReturnValue({}),
+        listSkills: vi.fn().mockReturnValue([]),
+      });
+
+      const client = new WsClient(`ws://127.0.0.1:${port}/ws`, {
+        headers: {
+          authorization: `Bearer ${apiKey.rawKey}`,
+        },
+      });
+
+      await new Promise<void>((resolve, reject) => {
+        client.on("open", () => resolve());
+        client.on("error", reject);
+      });
+
+      // Avoid unhandled error if client emits error on protocol close
+      client.on("error", () => {});
+
+      const closePromise = new Promise<{ code: number; reason: string }>((resolve) => {
+        client.on("close", (code: number, reason: Buffer) => {
+          resolve({ code, reason: reason.toString() });
+        });
+      });
+
+      // Send payload exceeding 1 MiB (1 << 20 = 1048576)
+      const oversizedPayload = Buffer.alloc((1 << 20) + 1024, "x");
+      client.send(oversizedPayload);
+
+      const closeEvent = await closePromise;
+      expect(closeEvent.code).toBe(1009);
+
+      closeWebSocket();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+
+      try {
+        fs.unlinkSync(tempKeyPath);
+      } catch {}
     });
   });
 });

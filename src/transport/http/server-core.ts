@@ -31,6 +31,8 @@ async function resolveServerSkills(skills?: string[]): Promise<{ skillCatalog?: 
   }
 }
 
+export const MAX_HISTORY_MESSAGES = 50;
+
 /**
  * Server-side generateText using core agent loop directly.
  */
@@ -42,6 +44,7 @@ export async function serverGenerateText(
     tools?: string[];
     maxSteps?: number;
     skills?: string[];
+    history?: Message[];
     runtime?: ProviderRuntime | ProviderRuntimeContract;
     /** Spec 008 wired pipeline (constructed by createServer). */
     wiredPipeline?: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle;
@@ -68,6 +71,10 @@ export async function serverGenerateText(
       content: skillCatalog,
       timestamp: now(),
     });
+  }
+  if (options.history && options.history.length > 0) {
+    const trimmed = options.history.slice(-MAX_HISTORY_MESSAGES);
+    messages.push(...trimmed);
   }
   messages.push({
     id: generateId(),
@@ -121,6 +128,7 @@ export async function handleAgentChatStream(
     tools?: string[];
     maxSteps?: number;
     skills?: string[];
+    history?: Message[];
     approveTool?: ApproveToolFn;
     runtime?: ProviderRuntime | ProviderRuntimeContract;
     /** Spec 008 wired pipeline (constructed by createServer). */
@@ -149,6 +157,10 @@ export async function handleAgentChatStream(
       content: skillCatalog,
       timestamp: now(),
     });
+  }
+  if (opts.history && opts.history.length > 0) {
+    const trimmed = opts.history.slice(-MAX_HISTORY_MESSAGES);
+    messages.push(...trimmed);
   }
   messages.push({
     id: generateId(),

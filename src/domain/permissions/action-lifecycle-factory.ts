@@ -402,7 +402,7 @@ export async function buildActionLifecycle(
   // caller outbox cannot apply and is ignored.
   let terminalOutbox: import("./audit-recorder.js").TerminalEventOutbox | undefined;
   if (isLocalAuditStore(auditStore)) {
-    terminalOutbox = inputs.terminalOutbox ?? new (await import("./audit-recorder.js")).TerminalEventOutbox(auditStore as any);
+    terminalOutbox = inputs.terminalOutbox ?? new (await import("./audit-recorder.js")).TerminalEventOutbox(auditStore);
   }
 
   const lifecycle = new ActionLifecycle({
@@ -509,6 +509,7 @@ async function reconcilePolicyGrantIntents(
   auditStore: AuditStore,
   policyStore: PolicyStore,
 ): Promise<void> {
+  // Gate: only concrete LocalAuditStore provides listEvents(); reconciliation requires concrete listEvents()
   if (!(auditStore instanceof LocalAuditStore)) return;
   const events = await auditStore.listEvents();
   const committedByAction = new Set(

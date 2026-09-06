@@ -19,12 +19,32 @@ export class RateLimiter {
     this.defaultRpm = defaultRpm;
   }
 
+  setDefaultRpm(rpm: number): void {
+    this.defaultRpm = rpm;
+  }
+
+  getDefaultRpm(): number {
+    return this.defaultRpm;
+  }
+
   getRpm(): number {
     if (process.env.SEEPIENT_RATE_LIMIT_RPM !== undefined) {
       const parsed = parseInt(process.env.SEEPIENT_RATE_LIMIT_RPM, 10);
       return isNaN(parsed) ? this.defaultRpm : parsed;
     }
     return this.defaultRpm;
+  }
+
+  /**
+   * Returns how many seconds until at least 1 token is available for this key.
+   */
+  getRetryAfterSeconds(key: string): number {
+    const rpm = this.getRpm();
+    if (rpm <= 0) return 0;
+    const bucket = this.buckets.get(key);
+    if (!bucket) return 0;
+    const needed = Math.max(0, 1 - bucket.tokens);
+    return Math.max(1, Math.ceil((needed * 60) / rpm));
   }
 
   /**

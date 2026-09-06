@@ -67,9 +67,6 @@ const DEFAULT_CLEANUP_INTERVAL = 5 * 60 * 1000;         // 5 minutes
 import * as crypto from "crypto";
 
 export function hashKey(key: string): string {
-  if (key.length === 64 && /^[0-9a-f]{64}$/.test(key)) {
-    return key;
-  }
   return crypto.createHash("sha256").update(key).digest("hex");
 }
 
@@ -83,6 +80,42 @@ export class ServerSessionManager {
   private cleanupInterval: number;
   private backend: PersistenceBackend;
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
+  private inFlightTurns: Set<string> = new Set();
+  private inFlightCreations: Set<string> = new Set();
+
+  /**
+   * Attempt to acquire an in-flight turn lock for a session ID.
+   * Returns true if lock was acquired, false if a turn is already in-flight.
+   */
+  acquireTurn(sessionId: string): boolean {
+    if (this.inFlightTurns.has(sessionId)) {
+      return false;
+    }
+    this.inFlightTurns.add(sessionId);
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.lastActivityAt = Date.now();
+    }
+    return true;
+  }
+
+  /**
+   * Release the in-flight turn lock for a session ID.
+   */
+  releaseTurn(sessionId: string): void {
+    this.inFlightTurns.delete(sessionId);
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.lastActivityAt = Date.now();
+    }
+  }
+
+  /**
+   * Check if a turn is currently in flight for this session ID.
+   */
+  isTurnInFlight(sessionId: string): boolean {
+    return this.inFlightTurns.has(sessionId);
+  }
 
   constructor(options?: ServerSessionManagerOptions) {
     this.sessionTTL = options?.sessionTTL ?? DEFAULT_SESSION_TTL;
@@ -148,7 +181,7 @@ export class ServerSessionManager {
     const keyHash =
       typeof optsOrProvider === "object" && optsOrProvider?.apiKeyHash
         ? optsOrProvider.apiKeyHash
-        : (apiKey.includes("hash") ? apiKey : hashKey(apiKey));
+        : hashKey(apiKey);
 
     // Enforce per-key limit
     const existing = this.getSessionsByKey(keyHash);
@@ -171,41 +204,56 @@ export class ServerSessionManager {
       model = modelArg;
     }
 
-    if (id !== undefined) {
-      if (!SESSION_ID_RE.test(id)) {
+    const finalId = id ?? crypto.randomUUID();
+    const explicitId = id;
+    if (explicitId !== undefined) {
+      if (!SESSION_ID_RE.test(finalId)) {
         throw new Error(`Invalid session ID format: must match ${SESSION_ID_RE}`);
       }
-      if (this.sessions.has(id) || (await this.loadSessionFromBackend(id)) !== null) {
-        throw new Error(`Session "${id}" already exists`);
+      if (this.sessions.has(finalId) || this.inFlightCreations.has(finalId)) {
+        const err = new Error(`SESSION_ALREADY_EXISTS: Session "${finalId}" already exists`);
+        (err as any).code = "SESSION_ALREADY_EXISTS";
+        throw err;
       }
-    } else {
-      id = crypto.randomUUID();
+      this.inFlightCreations.add(finalId);
     }
 
-    const now = Date.now();
+    try {
+      if (explicitId !== undefined && (await this.loadSessionFromBackend(finalId)) !== null) {
+        const err = new Error(`SESSION_ALREADY_EXISTS: Session "${finalId}" already exists`);
+        (err as any).code = "SESSION_ALREADY_EXISTS";
+        throw err;
+      }
 
-    const session: TrackedSession = {
-      id,
-      messages: [],
-      createdAt: now,
-      updatedAt: now,
-      lastActivityAt: now,
-      apiKeyHash: keyHash,
-      provider,
-      model,
-    };
+      const now = Date.now();
 
-    this.sessions.set(id, session);
-    await this.persistSessionAsync(session);
+      const session: TrackedSession = {
+        id: finalId,
+        messages: [],
+        createdAt: now,
+        updatedAt: now,
+        lastActivityAt: now,
+        apiKeyHash: keyHash,
+        provider,
+        model,
+      };
 
-    return {
-      id: session.id,
-      messages: session.messages,
-      createdAt: session.createdAt,
-      updatedAt: session.updatedAt,
-      provider: session.provider,
-      model: session.model,
-    };
+      this.sessions.set(finalId, session);
+      await this.persistSessionAsync(session);
+
+      return {
+        id: session.id,
+        messages: session.messages,
+        createdAt: session.createdAt,
+        updatedAt: session.updatedAt,
+        provider: session.provider,
+        model: session.model,
+      };
+    } finally {
+      if (explicitId !== undefined) {
+        this.inFlightCreations.delete(finalId);
+      }
+    }
   }
 
   /**
@@ -334,6 +382,9 @@ export class ServerSessionManager {
 
     // Inactivity timeout
     if (now - session.lastActivityAt > this.inactivityTimeout) {
+      if (this.isTurnInFlight(session.id)) {
+        return false;
+      }
       return true;
     }
 
@@ -404,10 +455,13 @@ export class ServerSessionManager {
   }
 
   private verifyOwnership(session: TrackedSession, apiKeyHash: string): boolean {
-    if (!session.apiKeyHash) {
-      session.apiKeyHash = apiKeyHash;
-      this.persistSession(session);
-      return true;
+    if (!session.apiKeyHash || session.apiKeyHash.length === 16) {
+      const err = new Error(
+        "session has no server owner; SDK-persisted sessions are not server-resumable",
+      );
+      (err as any).code = "NOT_FOUND";
+      (err as any).statusCode = 404;
+      throw err;
     }
     const a = Buffer.from(session.apiKeyHash, "utf-8");
     const b = Buffer.from(apiKeyHash, "utf-8");

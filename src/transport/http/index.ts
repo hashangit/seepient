@@ -24,6 +24,7 @@ import { ServerSessionManager } from "./session-store.js";
 import { SettingsManager } from "../../domain/settings/settings-manager.js";
 import type { SettingsHandlerContext } from "./settings-handlers.js";
 import { loadMergedConfig, getConfigPaths, loadJsonConfig } from "../../foundations/config.js";
+import { RateLimiter, globalRateLimiter } from "./rate-limit.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -46,6 +47,8 @@ export interface ServerOptions {
   policyStore?: import("../../foundations/contracts/execution-brokers.js").PolicyStore;
   /** Spec 021 (FR-010): Injected tenant capability ledger */
   capabilityLedger?: import("../../foundations/contracts/capability-ledger.js").CapabilityLedger;
+  /** Injected SettingsManager (Spec 021-3) */
+  settingsManager?: SettingsManager;
 }
 
 interface ReadPackageJson {
@@ -116,8 +119,22 @@ function listSkills(): { name: string; description: string; tags: string[] }[] {
 
 // ── CORS helper ────────────────────────────────────────────────────────
 
-function getCorsAllowlist(): string[] | null {
-  const envVal = process.env.SEEPIENT_CORS_ORIGINS;
+function appendVaryOrigin(res: http.ServerResponse): void {
+  const current = res.getHeader("Vary");
+  if (!current) {
+    res.setHeader("Vary", "Origin");
+  } else {
+    const parts = String(current).split(",").map((s) => s.trim());
+    if (!parts.includes("Origin")) {
+      res.setHeader("Vary", `${current}, Origin`);
+    }
+  }
+}
+
+function getCorsAllowlist(corsOriginsSetting?: string | null): string[] | null {
+  const envVal = process.env.SEEPIENT_CORS_ORIGINS !== undefined
+    ? process.env.SEEPIENT_CORS_ORIGINS
+    : (corsOriginsSetting ?? null);
   if (!envVal) return null;
   return envVal.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
 }
@@ -125,16 +142,26 @@ function getCorsAllowlist(): string[] | null {
 function addCORSHeaders(
   req: http.IncomingMessage,
   res: http.ServerResponse,
+  corsOriginsSetting?: string | null,
 ): void {
-  const allowlist = getCorsAllowlist();
+  const allowlist = getCorsAllowlist(corsOriginsSetting);
   const origin = req.headers.origin;
 
   if (allowlist !== null) {
-    if (origin && allowlist.includes(origin.toLowerCase())) {
+    if (allowlist.includes("*")) {
+      res.setHeader("Access-Control-Allow-Origin", origin ?? "*");
+      if (origin) {
+        appendVaryOrigin(res);
+      }
+    } else if (origin && allowlist.includes(origin.toLowerCase())) {
       res.setHeader("Access-Control-Allow-Origin", origin);
+      appendVaryOrigin(res);
     }
   } else {
     res.setHeader("Access-Control-Allow-Origin", origin ?? "*");
+    if (origin) {
+      appendVaryOrigin(res);
+    }
   }
 
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
@@ -305,7 +332,7 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
   const mergedConfig = loadMergedConfig();
   const projectConfig = loadJsonConfig(configPaths.local);
   const globalConfig = loadJsonConfig(configPaths.global);
-  const settingsManager = new SettingsManager({
+  const settingsManager = options?.settingsManager ?? new SettingsManager({
     config: mergedConfig as unknown as Record<string, any>,
     projectConfigPath: configPaths.local,
     globalConfigPath: configPaths.global,
@@ -316,6 +343,14 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
     settingsManager,
     getOtherClients,
   };
+
+  // Wire registered server settings: settings value -> env override -> default
+  const corsOriginsSetting = settingsManager.get("server.corsOrigins").value as string | undefined;
+  const maxBodyBytesSetting = settingsManager.get("server.maxBodyBytes").value as number | undefined;
+  const rateLimitRpmSetting = settingsManager.get("server.rateLimitRpm").value as number | undefined;
+
+  const serverRateLimiter = new RateLimiter(rateLimitRpmSetting ?? 300);
+  globalRateLimiter.setDefaultRpm(rateLimitRpmSetting ?? 300);
 
   // Initialize gateway (if enabled)
   let gatewayHandler: ((req: any, res: any, path: string, method: string) => Promise<void>) | undefined;
@@ -380,6 +415,8 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
     listSkills,
     settingsHandlerContext,
     gatewayHandler,
+    maxBodyBytes: maxBodyBytesSetting,
+    rateLimiter: serverRateLimiter,
   };
 
   const restHandler = createRestHandler(restCtx);
@@ -390,7 +427,7 @@ export async function createServer(options?: ServerOptions): Promise<http.Server
   const server = http.createServer((req, res) => {
     // CORS
     if (enableCors) {
-      addCORSHeaders(req, res);
+      addCORSHeaders(req, res, corsOriginsSetting);
     }
 
     // Preflight

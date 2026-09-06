@@ -29,7 +29,7 @@ export const REQUIRED_PACK_FILES = [
  */
 export function assertNoCleanInPublishHooks(packageJson) {
   const scripts = packageJson.scripts || {};
-  const dangerousHooks = ["prepublishOnly", "prepack"];
+  const dangerousHooks = ["prepublishOnly", "prepack", "prepare"];
 
   for (const hook of dangerousHooks) {
     const script = scripts[hook];
@@ -44,6 +44,16 @@ export function assertNoCleanInPublishHooks(packageJson) {
 }
 
 /**
+ * Asserts that the manifest does not carry the placeholder: true marker.
+ * Throws if the package contains placeholder binaries.
+ */
+export function assertNotPlaceholder(manifest) {
+  if (manifest && manifest.placeholder === true) {
+    throw new Error("Refusing to publish package containing placeholder native binaries!");
+  }
+}
+
+/**
  * Stages placeholder native helper binaries and manifest.json if any are missing.
  * Mirrors release.yml:103-134.
  */
@@ -51,6 +61,7 @@ export function stagePlaceholderHelpers(projectRoot) {
   const root = path.join(projectRoot, "dist/native-fs-commit");
   fs.mkdirSync(root, { recursive: true });
 
+  let anyPlaceholderCreated = false;
   const binaries = {};
   for (const platform of PLATFORMS) {
     const platformDir = path.join(root, platform);
@@ -58,6 +69,7 @@ export function stagePlaceholderHelpers(projectRoot) {
     const binPath = path.join(platformDir, "seepient-fs-commit");
 
     if (!fs.existsSync(binPath) || fs.statSync(binPath).size === 0) {
+      anyPlaceholderCreated = true;
       // Create a dummy executable placeholder for pack verification
       fs.writeFileSync(binPath, "#!/bin/sh\necho seepient-fs-commit-placeholder\n", {
         mode: 0o755,
@@ -65,6 +77,9 @@ export function stagePlaceholderHelpers(projectRoot) {
     }
 
     const bytes = fs.readFileSync(binPath);
+    if (bytes.toString("utf8").includes("seepient-fs-commit-placeholder")) {
+      anyPlaceholderCreated = true;
+    }
     binaries[platform] = {
       path: `${platform}/seepient-fs-commit`,
       sha256: crypto.createHash("sha256").update(bytes).digest("hex"),
@@ -73,14 +88,20 @@ export function stagePlaceholderHelpers(projectRoot) {
   }
 
   const manifestPath = path.join(root, "manifest.json");
-  if (!fs.existsSync(manifestPath)) {
+  if (!fs.existsSync(manifestPath) || anyPlaceholderCreated) {
     const manifest = {
       version: 1,
       generatedAt: new Date().toISOString(),
+      ...(anyPlaceholderCreated ? { placeholder: true } : {}),
       binaries,
     };
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
   }
+
+  return {
+    staged: anyPlaceholderCreated,
+    manifestPath,
+  };
 }
 
 /**

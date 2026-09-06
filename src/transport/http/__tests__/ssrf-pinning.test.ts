@@ -6,6 +6,7 @@ import {
   validateEndpointUrl,
   safeSsrfFetch,
 } from "../ssrf-validator.js";
+import { pinnedFetch } from "../../../capabilities/execution/pinned-fetch.js";
 
 describe("SSRF Pinning & Hardening (Spec 021-2 / T019, QS-6)", () => {
   let targetServer: http.Server;
@@ -87,31 +88,51 @@ describe("SSRF Pinning & Hardening (Spec 021-2 / T019, QS-6)", () => {
   describe("3. DNS Rebinding Protection via Injected Resolver & Pinning", () => {
     it("pins the socket to validated IP and prevents connecting to rebind address", async () => {
       targetHits = 0;
+      let resolveCalls = 0;
       // Injected resolver simulates DNS rebinding:
       // Validation lookup returns a public address, but if connection re-resolved,
       // attacker would return 127.0.0.1:targetPort.
-      const injectedResolve = vi.fn().mockResolvedValue(["93.184.216.34"]);
+      const injectedResolve = vi.fn().mockImplementation(async () => {
+        resolveCalls++;
+        if (resolveCalls === 1) {
+          return ["93.184.216.34"];
+        }
+        return ["127.0.0.1"];
+      });
 
+      let caughtErr: any = null;
       try {
         await safeSsrfFetch(
           `http://rebind-test.example:${targetPort}/secret`,
           { signal: AbortSignal.timeout(300) },
           { deps: { resolve: injectedResolve } },
         );
-      } catch {
-        // May fail network connection or timeout connecting to 93.184.216.34
+      } catch (err: any) {
+        caughtErr = err;
       }
 
+      // Loopback server was never contacted because connection was pinned to 93.184.216.34
       expect(targetHits).toBe(0);
       expect(injectedResolve).toHaveBeenCalledWith("rebind-test.example");
+      expect(resolveCalls).toBe(1);
+      if (caughtErr?.address) {
+        expect(caughtErr.address).toBe("93.184.216.34");
+      }
     });
 
     it("ssrfAllowPrivate still pins connection to pre-resolved IP", async () => {
-      const injectedResolve = vi.fn().mockResolvedValue(["127.0.0.1"]);
+      let resolveCalls = 0;
+      const injectedResolve = vi.fn().mockImplementation(async () => {
+        resolveCalls++;
+        if (resolveCalls === 1) {
+          return ["127.0.0.1"];
+        }
+        return ["10.0.0.1"];
+      });
       targetHits = 0;
 
       const res = await safeSsrfFetch(
-        `http://localhost:${targetPort}/test`,
+        `http://rebind-private.example:${targetPort}/test`,
         {},
         {
           ssrfAllowPrivate: true,
@@ -122,6 +143,28 @@ describe("SSRF Pinning & Hardening (Spec 021-2 / T019, QS-6)", () => {
       expect(res.status).toBe(200);
       expect(targetHits).toBe(1);
       expect((res as any).effectiveIp).toBe("127.0.0.1");
+      expect(resolveCalls).toBe(1);
+    });
+
+    it("post-flight rebinding check rejects if socket IP does not match validated IPs", async () => {
+      const agent = new http.Agent();
+      const origCreateConnection = agent.createConnection;
+      agent.createConnection = function (options: any, cb: any) {
+        const sock = origCreateConnection.call(this, options, cb);
+        Object.defineProperty(sock, "remoteAddress", {
+          value: "198.51.100.99",
+          configurable: true,
+        });
+        return sock;
+      };
+
+      await expect(
+        pinnedFetch({
+          url: `http://127.0.0.1:${targetPort}/test`,
+          ips: ["127.0.0.1"],
+          agent,
+        }),
+      ).rejects.toThrow(/DNS rebinding detected: connection made to 198.51.100.99 not in validated IPs/i);
     });
   });
 });

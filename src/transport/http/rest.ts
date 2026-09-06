@@ -19,7 +19,7 @@ import {
   handleGetSettingsSchema,
   type SettingsHandlerContext,
 } from "./settings-handlers.js";
-import { globalRateLimiter } from "./rate-limit.js";
+import { globalRateLimiter, RateLimiter } from "./rate-limit.js";
 import { logTransportEvent } from "../logging.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -40,6 +40,7 @@ export interface RestHandlerContext {
     tenantId?: string;
     principalId?: string;
     sessionId?: string;
+    history?: import("../../foundations/types.js").Message[];
   }) => Promise<GenerateTextResult>;
   /** List available models grouped by provider */
   listModels: () => Record<string, string[]>;
@@ -51,6 +52,10 @@ export interface RestHandlerContext {
   gatewayHandler?: (req: IncomingMessage, res: ServerResponse, path: string, method: string) => Promise<void>;
   /** Provider runtime instance */
   runtime?: import("../../foundations/contracts/provider-runtime.js").ProviderRuntimeContract;
+  /** Maximum request body size in bytes */
+  maxBodyBytes?: number;
+  /** Rate limiter instance */
+  rateLimiter?: RateLimiter;
 }
 
 interface ChatRequest {
@@ -71,10 +76,19 @@ function sendJSON(
   data: unknown,
 ): void {
   const body = JSON.stringify(data);
-  res.writeHead(statusCode, {
+  const headers: Record<string, string | number> = {
     "Content-Type": "application/json",
     "Content-Length": Buffer.byteLength(body),
-  });
+  };
+  if (statusCode === 413) {
+    headers["Connection"] = "close";
+    res.on("finish", () => {
+      if (res.socket && !res.socket.destroyed) {
+        res.socket.destroy();
+      }
+    });
+  }
+  res.writeHead(statusCode, headers);
   res.end(body);
 }
 
@@ -100,24 +114,37 @@ export class PayloadTooLargeError extends Error {
   }
 }
 
-function getMaxBodyBytes(): number {
+function getMaxBodyBytes(ctx?: RestHandlerContext): number {
   if (process.env.SEEPIENT_MAX_BODY_BYTES !== undefined) {
     const parsed = parseInt(process.env.SEEPIENT_MAX_BODY_BYTES, 10);
-    return isNaN(parsed) ? 10 * 1024 * 1024 : parsed;
+    return isNaN(parsed) ? (ctx?.maxBodyBytes ?? 10 * 1024 * 1024) : parsed;
   }
-  return 10 * 1024 * 1024;
+  return ctx?.maxBodyBytes ?? 10 * 1024 * 1024;
 }
 
-function parseBody(req: IncomingMessage): Promise<string> {
-  const maxBytes = getMaxBodyBytes();
+function parseBody(req: IncomingMessage, ctx?: RestHandlerContext): Promise<string> {
+  const maxBytes = getMaxBodyBytes(ctx);
+  const clHeader = req.headers["content-length"];
+  if (clHeader !== undefined) {
+    const contentLength = parseInt(clHeader, 10);
+    if (!isNaN(contentLength) && maxBytes > 0 && contentLength > maxBytes) {
+      if (typeof req.pause === "function") {
+        req.pause();
+      }
+      return Promise.reject(
+        new PayloadTooLargeError(`Request body exceeded maximum limit of ${maxBytes} bytes`),
+      );
+    }
+  }
+
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let received = 0;
     req.on("data", (chunk: Buffer) => {
       received += chunk.length;
       if (maxBytes > 0 && received > maxBytes) {
-        if (typeof req.destroy === "function") {
-          req.destroy();
+        if (typeof req.pause === "function") {
+          req.pause();
         }
         reject(new PayloadTooLargeError(`Request body exceeded maximum limit of ${maxBytes} bytes`));
         return;
@@ -298,7 +325,10 @@ export function createRestHandler(ctx: RestHandlerContext) {
       (req as any).apiKey = key;
 
       const keyHash = key.keyHash || (key.key ? hashKey(key.key) : "anonymous");
-      if (!globalRateLimiter.consume(keyHash)) {
+      const limiter = ctx.rateLimiter ?? globalRateLimiter;
+      if (!limiter.consume(keyHash)) {
+        const retryAfter = limiter.getRetryAfterSeconds(keyHash);
+        res.setHeader("Retry-After", String(retryAfter > 0 ? retryAfter : 60));
         sendError(res, 429, "RATE_LIMITED", "Rate limit exceeded. Please try again later.");
         return;
       }
@@ -487,9 +517,12 @@ export function createRestHandler(ctx: RestHandlerContext) {
         sendError(res, 413, "PAYLOAD_TOO_LARGE", (err as Error).message);
         return;
       }
+      if ((err as any)?.code === "NOT_FOUND" || (err as any)?.statusCode === 404) {
+        sendError(res, 404, "NOT_FOUND", (err as Error).message);
+        return;
+      }
       const message = err instanceof Error ? err.message : "Internal server error";
       (res as any).__internalErrorMessage = message;
-      console.error("[rest] Unhandled error:", message);
       sendError(res, 500, "INTERNAL_ERROR", "Internal server error");
     }
   };
@@ -557,7 +590,7 @@ async function handleChat(
   // Parse body
   let body: string;
   try {
-    body = await parseBody(req);
+    body = await parseBody(req, ctx);
   } catch (err: unknown) {
     if (err instanceof PayloadTooLargeError || (err as any)?.name === "PayloadTooLargeError") {
       sendError(res, 413, "PAYLOAD_TOO_LARGE", (err as Error).message);
@@ -584,31 +617,39 @@ async function handleChat(
   const keyHash = key.keyHash ?? (key.key ? hashKey(key.key) : "");
 
   // If sessionId is provided, verify it exists and belongs to caller
-  let sessionId = parsed.sessionId;
+  const sessionId = parsed.sessionId;
+  let history: import("../../foundations/types.js").Message[] | undefined;
   if (sessionId) {
-    const session = await ctx.sessionManager.getSession(sessionId, keyHash);
+    let session: import("../../foundations/types.js").SessionData | null;
+    try {
+      session = await ctx.sessionManager.getSession(sessionId, keyHash);
+    } catch (err: any) {
+      if (err?.code === "NOT_FOUND" || err?.statusCode === 404 || err?.message?.includes("server owner")) {
+        sendError(res, 404, "NOT_FOUND", err.message);
+        return;
+      }
+      throw err;
+    }
     if (!session) {
       sendError(res, 404, "NOT_FOUND", `Session "${sessionId}" not found`);
       return;
     }
-  } else {
-    try {
-      const created = await ctx.sessionManager.createSession(key.key ?? keyHash, { apiKeyHash: keyHash });
-      sessionId = created.id;
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      sendError(res, 429, "SESSION_LIMIT", msg);
+
+    if (!ctx.sessionManager.acquireTurn(sessionId)) {
+      sendError(res, 409, "REQUEST_IN_FLIGHT", `Session "${sessionId}" has a request already in flight`);
       return;
     }
-  }
 
-  // Persist user message
-  ctx.sessionManager.addMessage(sessionId, {
-    id: crypto.randomUUID(),
-    role: "user",
-    content: parsed.message,
-    timestamp: Date.now(),
-  });
+    history = [...session.messages];
+
+    // Persist user message if session exists
+    ctx.sessionManager.addMessage(sessionId, {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: parsed.message,
+      timestamp: Date.now(),
+    });
+  }
 
   // Execute
   try {
@@ -623,22 +664,25 @@ async function handleChat(
       // the per-request pipeline constructor derives `principalId` from it.
       apiKeyHash: keyHash,
       sessionId,
+      history,
     } as any);
 
-    // Persist assistant message
-    ctx.sessionManager.addMessage(sessionId, {
-      id: crypto.randomUUID(),
-      role: "assistant",
-      content: result.text,
-      timestamp: Date.now(),
-    });
+    // Persist assistant message if session exists
+    if (sessionId) {
+      ctx.sessionManager.addMessage(sessionId, {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: result.text,
+        timestamp: Date.now(),
+      });
+    }
 
     sendJSON(res, 200, {
       text: result.text,
       toolCalls: result.toolCalls,
       usage: result.usage,
       finishReason: result.finishReason,
-      sessionId,
+      ...(sessionId ? { sessionId } : {}),
     });
   } catch (err: unknown) {
     const rawMessage = err instanceof Error ? err.message : "Generation failed";
@@ -653,6 +697,10 @@ async function handleChat(
         message: isProviderError ? rawMessage : "Internal server error during generation",
       },
     });
+  } finally {
+    if (sessionId) {
+      ctx.sessionManager.releaseTurn(sessionId);
+    }
   }
 }
 
@@ -694,7 +742,16 @@ async function handleGetSession(
     return;
   }
 
-  const session = await ctx.sessionManager.getSession(sessionId, key.keyHash ?? (key.key ? hashKey(key.key) : ""));
+  let session: import("../../foundations/types.js").SessionData | null;
+  try {
+    session = await ctx.sessionManager.getSession(sessionId, key.keyHash ?? (key.key ? hashKey(key.key) : ""));
+  } catch (err: any) {
+    if (err?.code === "NOT_FOUND" || err?.statusCode === 404 || err?.message?.includes("server owner")) {
+      sendError(res, 404, "NOT_FOUND", err.message);
+      return;
+    }
+    throw err;
+  }
   if (!session) {
     sendError(res, 404, "NOT_FOUND", `Session ${sessionId} not found`);
     return;

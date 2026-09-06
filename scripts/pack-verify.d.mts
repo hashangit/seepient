@@ -5,6 +5,10 @@ export function assertNoCleanInPublishHooks(packageJson: {
   scripts?: Record<string, string>;
 }): void;
 
+export function assertNotPlaceholder(manifest: {
+  placeholder?: boolean;
+}): void;
+
 export function stagePlaceholderHelpers(projectRoot: string): {
   staged: boolean;
   manifestPath: string;
