@@ -343,6 +343,15 @@ export interface WsConnectionRegistry {
 export interface WebSocketHandlerContext {
   /** Per-instance connection/approval registries (see WsConnectionRegistry). */
   registry: WsConnectionRegistry;
+  /**
+   * Optional per-key token-bucket limiter (W146). When present, every WS
+   * message consumes one token for the connection's keyHash — the same
+   * limiter and key space the REST surface uses.
+   */
+  rateLimiter?: {
+    consume(key: string): boolean;
+    getRetryAfterSeconds(key: string): number;
+  };
   sessionManager: import("../http/session-store.js").ServerSessionManager;
   streamText: (options: {
     message: string;

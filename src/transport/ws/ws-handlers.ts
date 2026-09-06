@@ -89,6 +89,18 @@ export function handleConnection(
       return;
     }
 
+    // W146: WS messages consume from the same per-key limiter as REST.
+    if (ctx.rateLimiter && !ctx.rateLimiter.consume(state.apiKeyHash)) {
+      const retryAfter = ctx.rateLimiter.getRetryAfterSeconds(state.apiKeyHash);
+      safeSend(ws, {
+        type: "error",
+        code: "RATE_LIMITED",
+        retryable: true,
+        message: `Rate limit exceeded${retryAfter > 0 ? `, retry after ${retryAfter}s` : ""}`,
+      });
+      return;
+    }
+
     const requestId = (msg as any).id ?? crypto.randomUUID();
     logTransportEvent({
       level: "info",
