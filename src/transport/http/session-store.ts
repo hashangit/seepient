@@ -333,6 +333,29 @@ export class ServerSessionManager {
   }
 
   /**
+   * Resolve a dangling failed-turn draft before a new user turn is appended
+   * (021-4 review F1). If the session's last message is an un-answered user
+   * prompt — a draft left by a failed turn (0.6.1 crash-recovery design) —
+   * it is popped from the session and the new user message supersedes it:
+   * identical text dedupes to one fresh copy, different text replaces the
+   * stale question. Keeps the stored history, the REST/WS API views, and the
+   * model input in sync instead of filtering prompts at send time.
+   *
+   * Callers must hold the session's turn lock. No-op when the last message
+   * was answered (assistant) or the session is empty.
+   */
+  resolveTrailingDraft(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    const last = session.messages[session.messages.length - 1];
+    if (!last || last.role !== "user") return;
+    session.messages.pop();
+    session.updatedAt = Date.now();
+    session.lastActivityAt = Date.now();
+    this.persistSession(session);
+  }
+
+  /**
    * Add a message to an existing session.
    * Updates the last-activity timestamp.
    */

@@ -131,6 +131,25 @@ describe("W130 — runSeepientServer signal-handler hygiene", () => {
     expect(process.listenerCount("SIGINT")).toBe(beforeSigint);
     expect(process.listenerCount("SIGTERM")).toBe(beforeSigterm);
   });
+
+  it("closing a listening server removes its signal handlers without dispose (F4)", async () => {
+    makeKeysFile();
+    const beforeSigint = process.listenerCount("SIGINT");
+    const beforeSigterm = process.listenerCount("SIGTERM");
+
+    const server = await runSeepientServer(
+      embeddedServerOptions(createFakeRuntime({ responses: [{ text: "unused" }] })),
+    );
+    expect(process.listenerCount("SIGINT")).toBe(beforeSigint + 1);
+
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    const idx = servers.indexOf(server);
+    if (idx >= 0) servers.splice(idx, 1);
+
+    // server.close() alone must fully detach the server from the process
+    expect(process.listenerCount("SIGINT")).toBe(beforeSigint);
+    expect(process.listenerCount("SIGTERM")).toBe(beforeSigterm);
+  });
 });
 
 describe("W131 — multiple servers per process", () => {

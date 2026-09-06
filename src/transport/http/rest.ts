@@ -604,6 +604,11 @@ async function handleChat(
     }
     turnAcquired = true;
 
+    // F1: resolve a dangling failed-turn draft before history is captured —
+    // the new prompt dedupes/supersedes it on disk, so the assembled model
+    // input and the stored history stay alternating.
+    ctx.sessionManager.resolveTrailingDraft(sessionId);
+
     history = [...session.messages];
   }
 

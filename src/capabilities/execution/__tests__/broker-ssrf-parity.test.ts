@@ -51,6 +51,7 @@ const MUST_DENY = [
   "169.254.169.254",
   "169.254.10.10",
   "fd00:ec2::254", // AWS IMDSv2 IPv6
+  "100.100.100.200", // F5: Alibaba Cloud instance metadata
   "64:ff9b::7f00:1", // NAT64-mapped loopback
   // Reserved / multicast ranges missed by the old regexes (W141 evidence)
   "239.255.255.250", // SSDP multicast — old regex covered only 224/5
@@ -155,6 +156,26 @@ describe("W141 — broker denial equals the foundations byte classifier", () => 
         auth(requestId),
       );
       expect(result.status, `broker(${ip})`).toBe("succeeded");
+    }
+  });
+
+  it("metadata endpoints stay blocked even when private addresses are allowed (F5)", async () => {
+    for (const ip of ["169.254.169.254", "100.100.100.200"]) {
+      const check = await validateEndpointUrl(`http://${ip}/latest/meta-data`, {
+        ssrfAllowPrivate: true,
+        deps: { resolve: async () => [ip] },
+      });
+      expect(check.valid, `allowPrivate still blocks metadata: ${ip}`).toBe(false);
+      expect(check.error).toMatch(/metadata/i);
+    }
+    // Embedded spellings of the Alibaba metadata address are blocked too
+    for (const spelling of ["::ffff:100.100.100.200", "::6464:64c8"]) {
+      const check = await validateEndpointUrl(`http://[${spelling}]/latest/meta-data`, {
+        ssrfAllowPrivate: true,
+        deps: { resolve: async () => [spelling] },
+      });
+      expect(check.valid, `allowPrivate still blocks metadata: ${spelling}`).toBe(false);
+      expect(check.error).toMatch(/metadata/i);
     }
   });
 

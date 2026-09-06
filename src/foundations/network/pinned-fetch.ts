@@ -68,11 +68,19 @@ export async function pinnedFetch(req: PinnedFetchRequest): Promise<PinnedFetchR
 
     let timer: NodeJS.Timeout | undefined;
     let settled = false;
+    // F6: the abort listener is named and removed by cleanup() — a long-lived
+    // shared signal (agent loops reuse one AbortController across requests)
+    // would otherwise accumulate a listener per request.
+    let abortHandler: (() => void) | undefined;
 
     const cleanup = () => {
       if (timer) {
         clearTimeout(timer);
         timer = undefined;
+      }
+      if (abortHandler && req.signal) {
+        req.signal.removeEventListener("abort", abortHandler);
+        abortHandler = undefined;
       }
     };
 
@@ -174,10 +182,11 @@ export async function pinnedFetch(req: PinnedFetchRequest): Promise<PinnedFetchR
         reject(new Error("aborted"));
         return;
       }
-      req.signal.addEventListener("abort", () => {
+      abortHandler = () => {
         clientReq.destroy();
         reject(new Error("aborted"));
-      });
+      };
+      req.signal.addEventListener("abort", abortHandler);
     }
 
     if (req.body && req.body.length > 0) {

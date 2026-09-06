@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import * as http from "node:http";
+import { getEventListeners } from "node:events";
 import type { AddressInfo } from "node:net";
 import { pinnedFetch } from "../../../foundations/network/pinned-fetch.js";
 
@@ -97,4 +98,20 @@ describe("W017: pinnedFetch parity with effect-broker source", () => {
       }),
     ).rejects.toThrow(/DNS rebinding detected: connection made to 198.51.100.99 not in validated IPs/i);
   });
+
+  it("F6: a shared signal does not accumulate abort listeners across requests", async () => {
+    const controller = new AbortController();
+    const before = getEventListeners(controller.signal, "abort").length;
+
+    for (let i = 0; i < 5; i++) {
+      await pinnedFetch({
+        url: `http://127.0.0.1:${serverPort}/rebind-check`,
+        ips: ["127.0.0.1"],
+        signal: controller.signal,
+      });
+    }
+
+    expect(getEventListeners(controller.signal, "abort").length).toBe(before);
+  });
 });
+

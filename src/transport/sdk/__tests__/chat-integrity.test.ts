@@ -94,9 +94,11 @@ describe("W151 — chatStream never persists an empty assistant on resolved erro
 
     const stored = await backend.load(agent.sessionId);
     const roles = stored!.messages.map((m) => m.role);
-    // user, user (dangling, kept for crash recovery), assistant — no empty rows
+    // F1: the next turn RESOLVED the dangling draft — the failed prompt was
+    // superseded, so the store shows a clean alternating sequence with no
+    // empty assistant rows.
     expect(roles.filter((r) => r === "assistant")).toHaveLength(1);
-    expect(roles).toEqual(["system", "user", "user", "assistant"]);
+    expect(roles).toEqual(["system", "user", "assistant"]);
     const assistant = stored!.messages.find((m) => m.role === "assistant");
     expect(assistant?.content).toBe("recovered");
   });

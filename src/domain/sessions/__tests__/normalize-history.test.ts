@@ -1,9 +1,11 @@
 /**
- * Send-time history normalization (021-4 W150, D3 option a).
+ * Send-time history normalization (021-4 W150, revised by review F1).
  *
- * A failed turn leaves its persisted user message dangling; on retry the
- * model input must alternate roles with each user text appearing exactly
- * once — without destroying the stored crash-recovery copy.
+ * Dangling failed-turn drafts are resolved at their source (store-level
+ * `resolveTrailingDraft` / SDK `resolveTrailingUserDraft`), so the send-time
+ * normalizer is a LEGACY FALLBACK only: it merges consecutive same-role user
+ * messages from pre-021-4 stored sessions so strict providers still accept
+ * the model input.
  */
 
 import { describe, it, expect } from "vitest";
@@ -14,34 +16,7 @@ function msg(role: "user" | "assistant" | "system", content: string): Message {
   return { id: `${role}-${content}`, role, content, timestamp: 0 };
 }
 
-function canonicalText(m: any): string {
-  if (typeof m.content === "string") return m.content;
-  if (Array.isArray(m.content)) {
-    return m.content.map((c: any) => c.text ?? "").join("");
-  }
-  return m.text ?? "";
-}
-
-describe("normalizeHistoryForSend (W150)", () => {
-  it("drops a trailing un-answered user orphan before the new prompt", () => {
-    const input = [msg("user", "q"), msg("user", "q")];
-    const out = normalizeHistoryForSend(input);
-    expect(out).toHaveLength(1);
-    expect(out[0].content).toBe("q");
-  });
-
-  it("keeps roles alternating when a dangling orphan precedes the retry", () => {
-    const input = [
-      msg("user", "first"),
-      msg("assistant", "answer"),
-      msg("user", "dangling"),
-      msg("user", "retry"),
-    ];
-    const out = normalizeHistoryForSend(input);
-    expect(out.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
-    expect(out[2].content).toBe("retry");
-  });
-
+describe("normalizeHistoryForSend (legacy fallback)", () => {
   it("merges mid-history consecutive user messages, keeping each text once", () => {
     const input = [
       msg("user", "a"),
@@ -55,14 +30,21 @@ describe("normalizeHistoryForSend (W150)", () => {
     expect(out[2].content).toBe("c");
   });
 
+  it("merges a legacy trailing user pair as the last resort", () => {
+    // Only reachable when the draft was not resolved at the source
+    const out = normalizeHistoryForSend([msg("user", "a"), msg("user", "b")]);
+    expect(out).toHaveLength(1);
+    expect(out[0].content).toBe("a\n\nb");
+  });
+
   it("leaves empty and well-formed histories unchanged", () => {
     expect(normalizeHistoryForSend([])).toEqual([]);
     const wellFormed = [msg("user", "hi"), msg("assistant", "hello"), msg("user", "bye")];
     expect(normalizeHistoryForSend(wellFormed)).toEqual(wellFormed);
   });
 
-  it("does not mutate the input array (stored crash-recovery copy stays intact)", () => {
-    const input = [msg("user", "q"), msg("user", "q")];
+  it("does not mutate the input array", () => {
+    const input = [msg("user", "a"), msg("user", "b")];
     const snapshot = [...input];
     normalizeHistoryForSend(input);
     expect(input).toEqual(snapshot);
