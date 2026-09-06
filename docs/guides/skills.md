@@ -11,14 +11,12 @@ Skills are self-contained folders that teach Seepient how to complete specific t
 
 A skill lives in a directory containing at minimum a `SKILL.md` file:
 
-```text
-skills/my-code-reviewer/
-├── SKILL.md
-├── references/
-│   └── style-guide.md
-└── scripts/
-    └── check-syntax.sh
-```
+- 📁 `skills/my-code-reviewer/`
+  - 📄 `SKILL.md`
+  - 📁 `references/`
+    - 📄 `style-guide.md`
+  - 📁 `scripts/`
+    - 📄 `check-syntax.sh`
 
 ### The `SKILL.md` file
 

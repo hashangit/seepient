@@ -25,6 +25,7 @@ When an agent proposes editing a file:
     { title: 'Atomic mutation', desc: 'Writes updated content to a temporary file, syncs to disk, and atomically renames it over the target' }
   ]"
 />
+
 ---
 
 ## The three safety checks

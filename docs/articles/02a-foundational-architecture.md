@@ -1,3 +1,8 @@
+---
+title: Foundational Architecture
+description: The six-layer modular architecture designed for rapid AI evolution, scale, and zero redundancy.
+---
+
 # Foundational Architecture: Designing for Evolution, Scale, and Zero Redundancy
 
 Most AI software projects built under tight deadlines suffer from a common fate: within six months, they become bogged down by technical debt. Adding a new user interface, modifying an integration, or updating an underlying AI model breaks core security policies or causes unexpected system failures.

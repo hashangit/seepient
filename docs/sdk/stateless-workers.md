@@ -38,33 +38,36 @@ To run statelessly, inject custom store implementations when creating the agent:
 ```typescript
 import { createSeepient } from 'seepient'
 import type {
-  SessionStore,
+  PersistenceBackend,
   AuditStore,
   PolicyStore,
   CapabilityLedger
 } from 'seepient'
 
-const agent = createSeepient({
+const agent = await createSeepient({
   // Injected tenant storage adapters
-  sessionStore: myDatabaseSessionStore,
+  persist: myDatabaseBackend, // PersistenceBackend or SessionStore adapter
   auditStore: myPostgresAuditStore,
   policyStore: myRedisPolicyStore,
   capabilityLedger: myLedgerStore,
 
   // Tenant configuration
-  tenantId: 'tenant_abc123',
+  principalId: 'tenant_abc123',
   sessionId: 'sess_task_987',
 
   // Provider configuration
   provider: 'anthropic',
-  model: 'claude-3-7-sonnet'
+  model: 'claude-sonnet-4-6-20260320',
 })
 
-const result = await agent.run('Process incoming customer request')
+const result = await agent.chat('Process incoming customer request')
+console.log(result.text)
 ```
 
 ::: warning Store injection completeness
-Stateless operation requires injecting all four permission and persistence contracts (`sessionStore`, `auditStore`, `policyStore`, and `capabilityLedger`). If any store is omitted, the missing store falls back to writing to `~/.seepient` on the local filesystem.
+Stateless operation requires injecting all three permission contracts (`auditStore`, `policyStore`, and `capabilityLedger`) along with `persist`. If 1 or 2 permission stores are injected, the SDK logs a warning (`[seepient] WARNING: Partial state store injection detected...`) and falls back missing stores to writing to `~/.seepient` or `./.seepient` on the local filesystem.
+
+For one-shot execution, `generateText()` and `streamText()` also accept `auditStore`, `policyStore`, `capabilityLedger`, `principalId`, and `runtime` to run without disk access.
 :::
 
 ---

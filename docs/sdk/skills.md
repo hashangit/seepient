@@ -21,12 +21,14 @@ When the application starts, `discoverSkills(cwd)` scans configured skill direct
 
 After discovery, `buildSkillCatalog(metadata)` generates a compact text block listing every skill's name, description, and tags. This catalog is injected into the system prompt via the `skillCatalog` option on `AgentLoopOptions`, so the LLM always knows what skills are available.
 
-```
-discoverSkills(cwd)
-  ├── parseFrontmatter() for each SKILL.md  →  Skill objects (no bodies)
-  ├── buildSkillCatalog(metadata)           →  "- docker-ops: Docker container management [docker, deployment]"
-  └── Catalog appended to system prompt
-```
+<DiagramFlow
+  :steps="[
+    { title: 'discoverSkills(cwd)' },
+    { title: 'parseFrontmatter() for each SKILL.md', desc: 'Yields Skill objects without bodies' },
+    { title: 'buildSkillCatalog(metadata)', desc: 'Produces catalog lines such as \u0022- docker-ops: Docker container management [docker, deployment]\u0022' },
+    { title: 'Catalog appended to the system prompt' }
+  ]"
+/>
 
 ### Phase 2: Activation (when invoked)
 

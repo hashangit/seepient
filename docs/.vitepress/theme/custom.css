@@ -77,145 +77,16 @@ body {
 }
 
 /* ---------------------------------------------------------------------------
- * Navigation — the black instrument bar
+ * Navigation — replaced by the floating liquid-glass bar (FloatingNav.vue).
+ * VPNav stays mounted solely as the host the floating bar adopts its search
+ * control from (VitePress offers no slot to omit it); it renders nothing.
+ * VitePress's local "Menu / On this page" bar is fully removed — mobile
+ * navigation goes through the floating bar's menu sheet.
  * ------------------------------------------------------------------------- */
 
-.VPNavBar {
-  background: var(--ink) !important;
-  border: none;
-}
-
-.VPNavBar .wrapper {
-  position: relative;
-}
-
-/* Search sits right after the logotype on every page, independent of sidebar offsets */
-@media (min-width: 960px) {
-  /* VitePress positions .content-body to paint the scrolled nav fill; our bar
-     paints its own background, so let the search anchor to the wrapper. */
-  .VPNavBar .content-body {
-    position: static !important;
-    background: transparent !important;
-  }
-
-  .VPNavBar .VPNavBarSearch {
-    position: absolute;
-    left: 132px;
-    top: 50%;
-    transform: translateY(-50%);
-  }
-}
-
-.VPNavBar .wrapper,
-.VPNavBar .content,
-.VPNavBar .content-body {
-  background: transparent;
-  border: none !important;
-}
-
-.VPNavBar .divider-line {
-  display: none;
-}
-
-.VPNavBar.scrolled {
-  background: var(--ink) !important;
-  border: none;
-  box-shadow: none;
-}
-
-.VPNavBarTitle .title {
-  color: var(--paper);
-  font-family: var(--vp-font-family-heading);
-  font-size: 19px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  border: none !important;
-}
-
-.VPNavBarMenuLink {
-  color: rgba(243, 243, 240, 0.72) !important;
-  font-size: 11.5px;
-  font-weight: 560;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  transition: color 0.2s ease;
-}
-
-.VPNavBarMenuLink:hover,
-.VPNavBarMenuLink.active {
-  color: #ffffff !important;
-}
-
-.VPNavBarSocialLink {
-  color: rgba(243, 243, 240, 0.72) !important;
-}
-
-.VPNavBarSocialLink:hover {
-  color: #ffffff !important;
-}
-
-.VPNavBarHamburger,
-.VPNavBarExtra {
-  color: rgba(243, 243, 240, 0.8);
-}
-
-.VPNavBarHamburger .container {
-  filter: invert(1);
-}
-
-/* Search trigger on the black bar */
-.VPNavBarSearch .DocSearch-Button {
-  background: rgba(243, 243, 240, 0.1);
-  border: 1px solid rgba(243, 243, 240, 0.16);
-  border-radius: 999px;
-  color: rgba(243, 243, 240, 0.72);
-  transition: background 0.2s ease;
-}
-
-.VPNavBarSearch .DocSearch-Button:hover {
-  background: rgba(243, 243, 240, 0.16);
-  border-color: rgba(243, 243, 240, 0.28);
-}
-
-.VPNavBarSearch .DocSearch-Button .DocSearch-Button-Key {
-  background: rgba(243, 243, 240, 0.12);
-  border-color: rgba(243, 243, 240, 0.2);
-  color: rgba(243, 243, 240, 0.72);
-}
-
-/* Compact ghost icon on small screens */
-@media (max-width: 960px) {
-  .VPNavBarSearch .DocSearch-Button {
-    width: 38px;
-    height: 38px;
-    min-height: 0;
-    padding: 0;
-    justify-content: center;
-    border: 1px solid rgba(243, 243, 240, 0.18);
-    border-radius: 10px;
-    background: transparent;
-  }
-
-  .VPNavBarSearch .DocSearch-Button-Placeholder,
-  .VPNavBarSearch .DocSearch-Button-Keys {
-    display: none;
-  }
-
-  .VPNavBarSearch .DocSearch-Search-Icon {
-    width: 17px;
-    height: 17px;
-    color: rgba(243, 243, 240, 0.85);
-  }
-}
-
-/* Mobile menu sheet */
-.VPNavBarScreen {
-  background: var(--paper);
-}
-
-.VPNavBarScreen .menu-link,
-.VPNavBarScreen .menu + .item {
-  color: var(--ink);
+.VPNav,
+.VPLocalNav {
+  display: none !important;
 }
 
 /* ---------------------------------------------------------------------------
@@ -268,6 +139,12 @@ body {
 
 .VPDoc {
   padding-top: 40px;
+}
+
+@media (max-width: 960px) {
+  .VPDoc {
+    padding-top: 76px;
+  }
 }
 
 .vp-doc {
@@ -541,10 +418,6 @@ body:has(.landing) .VPFooter {
   display: none;
 }
 
-body:has(.landing) .VPLocalNav {
-  display: none;
-}
-
 /* ---------------------------------------------------------------------------
  * Landing shared vocabulary
  * ------------------------------------------------------------------------- */
@@ -761,7 +634,7 @@ body:not(:has(.landing))::before {
  * ------------------------------------------------------------------------- */
 
 @media print {
-  .VPNavBar,
+  .fnav-wrap,
   .VPSidebar,
   .VPFooter,
   .copy-md-btn {

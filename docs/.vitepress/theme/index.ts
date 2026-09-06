@@ -1,6 +1,7 @@
 import { h } from 'vue'
 import DefaultTheme from 'vitepress/theme'
 import CopyMarkdownButton from './CopyMarkdownButton.vue'
+import FloatingNav from './components/FloatingNav.vue'
 import DiagramFlow from './components/diagrams/DiagramFlow.vue'
 import DiagramMap from './components/diagrams/DiagramMap.vue'
 import DiagramStates from './components/diagrams/DiagramStates.vue'
@@ -8,6 +9,7 @@ import TermAnatomy from './components/diagrams/TermAnatomy.vue'
 import TermMenu from './components/diagrams/TermMenu.vue'
 import TermTable from './components/diagrams/TermTable.vue'
 import TermDiff from './components/diagrams/TermDiff.vue'
+import TermCard from './components/diagrams/TermCard.vue'
 import '@fontsource-variable/inter'
 import '@fontsource-variable/inter-tight'
 import '@fontsource-variable/jetbrains-mono'
@@ -41,7 +43,7 @@ const reveal = {
 export default {
   extends: DefaultTheme,
   Layout: () => h(DefaultTheme.Layout, null, {
-    'layout-top': () => h(CopyMarkdownButton),
+    'layout-top': () => [h(FloatingNav), h(CopyMarkdownButton)],
   }),
   enhanceApp({ app }) {
     app.directive('reveal', reveal)
@@ -53,5 +55,6 @@ export default {
     app.component('TermMenu', TermMenu)
     app.component('TermTable', TermTable)
     app.component('TermDiff', TermDiff)
+    app.component('TermCard', TermCard)
   },
 }

@@ -5,7 +5,7 @@ description: Complete reference for all 15 built-in tools in Seepient Agent with
 
 # Built-in Tools Reference
 
-Seepient Agent includes 15 built-in tools organized into four groups. Every tool works identically across `generateText`, `streamText`, `createSeepient`, the CLI, and the server REST API.
+Seepient Agent includes 15 built-in tools organized into three functional groups (`CORE_TOOLS`, `COMM_TOOLS`, and `ADVANCED_TOOLS`). Every tool works identically across `generateText`, `streamText`, `createSeepient`, the CLI, and the server REST API.
 
 ## Quick Import
 
@@ -18,12 +18,12 @@ import {
 } from "seepient";
 ```
 
-| Group Constant | Tools |
-|---|---|
-| `CORE_TOOLS` | `execute_shell_command`, `read_file`, `write_file`, `get_current_datetime` |
-| `COMM_TOOLS` | `send_email`, `web_search`, `send_notification` |
-| `ADVANCED_TOOLS` | `read_website`, `take_screenshot`, `generate_image`, `optimize_prompt`, `use_skill` |
-| `ALL_TOOLS` | All 12 tools |
+| Group Constant | Count | Tools |
+|---|---|---|
+| `CORE_TOOLS` | 7 | `execute_shell_command`, `read_file`, `write_file`, `edit_file`, `get_current_datetime`, `manage_todos`, `render_widget` |
+| `COMM_TOOLS` | 3 | `send_email`, `web_search`, `send_notification` |
+| `ADVANCED_TOOLS` | 5 | `read_website`, `take_screenshot`, `generate_image`, `optimize_prompt`, `use_skill` |
+| `ALL_TOOLS` | 15 | All 15 built-in tools |
 
 ### Using Group Names in Options
 
@@ -152,6 +152,90 @@ const result = await generateText("What day is it today?", {
 **Notes:**
 - Useful when the user references relative dates like "today", "next week", or "this March".
 - No parameters required.
+
+---
+
+### edit_file
+
+Apply a hash-anchored line patch to targeted sections of an existing file. Prefer this over `write_file` for targeted edits to avoid reproducing entire files and reduce token costs.
+
+**Category:** Core (Filesystem)
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `patch` | `string` | Yes | Hashline patch formatted with section headers `[/path#TAG]` and line operations |
+
+**Example:**
+
+```typescript
+const result = await generateText("Fix the timeout value in src/config.ts", {
+  tools: ["read_file", "edit_file"],
+});
+```
+
+**Patch Format:**
+
+```
+[/src/config.ts#a1f2]
+SWAP 25.=25:
++export const TIMEOUT_MS = 5000;
+```
+
+**Notes:**
+- Requires first reading the target file with `read_file`, which produces a content tag anchored at `[content-tag:XXXX]`.
+- Operations supported: `SWAP A.=B:`, `SWAP.BLK A:`, `DEL A.=B`, `DEL.BLK A`, `INS.PRE A:`, `INS.POST A:`, `INS.HEAD:`, `INS.TAIL:`.
+- Order operations bottom-to-top when stacking edits in a single file to keep line numbers stable.
+
+---
+
+### manage_todos
+
+Maintain a structured, visible task checklist rendered directly in the TUI progress panel.
+
+**Category:** Core (Planning / Presentation)
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `todos` | `Array<{ description: string, status: string }>` | Yes | Array of task items with statuses (`pending`, `in_progress`, `completed`, `blocked`) |
+
+**Example:**
+
+```typescript
+const result = await generateText("Plan and migrate our database schemas", {
+  tools: ["manage_todos", "read_file", "execute_shell_command"],
+});
+```
+
+**Notes:**
+- Safe presentation tool with zero external side effects.
+- The model replaces the entire list on each update (not append).
+- The TUI renders task items with live status glyphs and progress counters.
+
+---
+
+### render_widget
+
+Render rich, interactive widgets (data tables, charts, forms, diffs, status grids) directly in the Terminal UI.
+
+**Category:** Core (Presentation / UI)
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `kind` | `string` | Yes | Widget kind: `table`, `keyvalue`, `chart`, `tree`, `panel`, `diff`, `form`, `product_card`, `status_grid` |
+| `props` | `Record<string, unknown>` | Yes | Kind-specific rendering properties (e.g. `columns` and `rows` for `table`) |
+| `actions` | `Array<WidgetAction>` | No | Optional interactive buttons or actions the user can trigger |
+
+**Example:**
+
+```typescript
+const result = await generateText("Show me the server performance metrics as a chart", {
+  tools: ["render_widget"],
+});
+```
+
+**Notes:**
+- Supported chart variants: `bar`, `line`, and `sparkline`.
+- In headless/CLI/REST mode, widgets gracefully degrade to structured JSON or clean terminal ASCII tables.
 
 ---
 
@@ -416,17 +500,20 @@ const result = await generateText(
 
 ## Tool Groups Summary
 
-| Tool | Name | Category | Key Config |
-|---|---|---|---|
-| Shell execution | `execute_shell_command` | Core | -- |
-| File read | `read_file` | Core | -- |
-| File write | `write_file` | Core | -- |
-| Date/time | `get_current_datetime` | Core | -- |
-| Web search | `web_search` | Search | `TAVILY_API_KEY` |
-| Browser reader | `read_website` | Browser | Playwright |
-| Screenshots | `take_screenshot` | Browser | Playwright |
-| Email | `send_email` | Communication | SMTP credentials |
-| Notifications | `send_notification` | Communication | Webhook URLs |
-| Image generation | `generate_image` | Media | `OPENAI_API_KEY` |
-| Prompt optimizer | `optimize_prompt` | Utility | `OPENAI_API_KEY` |
-| Skill invocation | `use_skill` | Skills | -- |
+| Tool | Name | Group | Category | Side-effect Risk | Key Config |
+|---|---|---|---|---|---|
+| Shell execution | `execute_shell_command` | Core | System | High (sandbox execution) | OS Sandbox |
+| File read | `read_file` | Core | Filesystem | Read-only | -- |
+| File write | `write_file` | Core | Filesystem | Medium (full write) | FileCommitBroker |
+| File edit | `edit_file` | Core | Filesystem | Medium (targeted patch) | SnapshotStore |
+| Date/time | `get_current_datetime` | Core | System | Read-only | -- |
+| Task tracking | `manage_todos` | Core | Planning | Read-only / UI | -- |
+| Widget display | `render_widget` | Core | UI | Presentation | -- |
+| Web search | `web_search` | Comm | Network | Read-only | `TAVILY_API_KEY` |
+| Email sending | `send_email` | Comm | Communication | Medium (SMTP dispatch) | SMTP credentials |
+| Notification | `send_notification` | Comm | Communication | Low (webhook post) | Webhook URLs |
+| Web reader | `read_website` | Advanced | Browser | Read-only | Playwright |
+| Screenshot | `take_screenshot` | Advanced | Browser | Read-only | Playwright |
+| Image generation | `generate_image` | Advanced | Media | Medium (asset write) | Image model / provider |
+| Prompt optimizer | `optimize_prompt` | Advanced | Utility | Read-only | LLM provider |
+| Skill activation | `use_skill` | Advanced | Orchestration | Context injection | Skill registry |

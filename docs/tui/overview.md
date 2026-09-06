@@ -42,6 +42,7 @@ The TUI splits the screen into four regions:
     { label: 'Bordered input', kind: 'input', lines: ['> Ask a question or type / for commands...'] }
   ]"
 />
+
 ### 1. Header bar
 Displays the active session identifier, current provider, primary model name, and accumulated token expenditure for the session.
 

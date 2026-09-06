@@ -51,20 +51,32 @@ console.log(result.usage);
 | Name            | Type                                     | Default | Description |
 |-----------------|------------------------------------------|---------|-------------|
 | `model`         | `string`                                 | Provider default | Model identifier, e.g. `"gpt-5.4"`, `"claude-sonnet-4-6-20260320"` |
-| `provider`      | `ProviderType`                           | Config default   | `"openai"` \| `"anthropic"` \| `"glm"` \| `"openai-compatible"` |
-| `runtime`       | `ProviderRuntime`                        | `getDefaultProviderRuntime()` | Provider runtime instance managing credentials, configurations, and inference adapters |
-| `principalId`   | `string`                                 | `"sdk-user"` | Identity of the calling principal/user, threaded into audit events and capability grants |
+| `provider`      | `string`                                 | Config default   | Provider name for audit labeling |
+| `purpose`       | `Purpose`                                | `"text"`         | Purpose routing hint (see [Purpose reference](/sdk/types#purpose) for all 15 supported values) |
+| `tier`          | `"efficient" \| "standard" \| "complex"` | *(none)*         | Model capability tier hint |
+| `providerAccount` | `string`                               | *(none)*         | Target provider account name |
+| `runtime`       | `ProviderRuntime`                        | `getDefaultProviderRuntime()` | Provider runtime instance managing credentials and inference adapters |
+| `principalId`   | `string`                                 | `"sdk-user"`     | Identity of calling principal, threaded into audit events and capability grants |
 | `auditStore`    | `AuditStore`                             | Local file audit store | Injected audit store for recording action lifecycle events |
 | `policyStore`   | `PolicyStore`                            | Local file policy store | Injected policy store for grant snapshots and mutations |
 | `capabilityLedger` | `CapabilityLedger`                    | Local file capability ledger | Injected ledger for capability lease consumption and revocations |
 | `systemPrompt`  | `string`                                 | *(none)*         | Prepended as a system message before the user prompt |
-| `tools`         | `(string \| UserToolDefinition \| AnyToolRegistration)[]` | All built-in     | Built-in tool names, group names (`"core"`, `"all"`), or custom tool registrations (`trustedHostTool`) |
-| `skills`        | `string[]`                               | *(none)*         | Skill names to activate for this invocation |
+| `tools`         | `(string \| UserToolDefinition \| AnyToolRegistration)[]` | All built-in     | Built-in tool names, group names (`"core"`, `"all"`), or custom registrations (`trustedHostTool`, `preparedTool`, `brokerConnector`) |
+| `consentMode`   | `ConsentMode`                            | `"edit-enabled"` | Permission consent mode (`"ask-everything"`, `"edit-enabled"`, `"autonomous"`) |
+| `deploymentCeiling` | `CapabilitySet \| Capability[]`      | *(none)*         | Maximum capability lease permitted for any execution |
+| `principalPolicy` | `CapabilitySet \| Capability[]`        | *(none)*         | Pre-granted capabilities for the calling principal |
+| `approveTool`   | `ApproveToolFn`                          | *(none)*         | Interactive tool approval callback |
+| `approvalBroker`| `ApprovalBroker`                         | *(none)*         | Custom approval broker for permission escalation |
+| `commitHelper`  | `CommitHelper`                           | Native helper    | Custom or mock exact-commit verifier helper |
+| `network`       | `BrokerNetworkAdapter`                   | Standard adapter | Custom broker network adapter with SSRF / IP pinning rules |
+| `cwd`           | `string`                                 | `process.cwd()`  | Workspace directory for file tools and skill discovery |
+| `skills`        | `string[] \| boolean`                    | `true`           | Skill names to activate, `true` for all discovered, or `false` to opt out of skill injection |
 | `maxSteps`      | `number`                                 | `10`             | Maximum agent loop iterations (tool call rounds) |
 | `temperature`   | `number`                                 | Provider default | Sampling temperature (0.0 -- 2.0) |
 | `maxTokens`     | `number`                                 | Provider default | Maximum tokens in the completion |
-| `output`        | `unknown`                                | *(none)*         | Zod schema for structured/typed response |
 | `hooks`         | `Hooks`                                  | *(none)*         | Lifecycle callbacks (beforeToolCall, afterToolCall, onStep, onError, onFinish) |
+| `middleware`    | `Middleware[]`                            | *(none)*         | Request/response pipeline functions |
+| `metadata`      | `Record<string, unknown>`                 | `{}`             | Adapter-specific metadata passed to middleware |
 | `signal`        | `AbortSignal`                            | *(none)*         | Abort controller signal for cancellation |
 | `config`        | `Record<string, unknown>`                | `{}`             | Extra config passed to tool handlers |
 
@@ -75,12 +87,10 @@ console.log(result.usage);
 | Field          | Type                                         | Description |
 |----------------|----------------------------------------------|-------------|
 | `text`         | `string`                                     | The final assistant response text |
-| `data`         | `unknown`                                    | Structured data when `output` schema is provided |
-| `error`        | `{ message: string; issues: unknown }`       | Present if structured output parsing failed |
 | `steps`        | `StepResult[]`                               | Ordered list of all loop iterations (text + tool calls) |
 | `toolCalls`    | `ToolCall[]`                                 | All tool calls made during execution |
 | `usage`        | `Usage`                                      | Token usage and cost: `{ promptTokens, completionTokens, totalTokens, cost }` |
-| `finishReason` | `"stop" \| "max_steps" \| "error" \| "aborted"` | Why the loop terminated. Note: `"length"` is in the type but never produced at runtime |
+| `finishReason` | `"stop" \| "max_steps" \| "error" \| "aborted"` | Why the loop terminated |
 | `messages`     | `Message[]`                                  | Full conversation history for this invocation |
 
 ### StepResult
@@ -183,28 +193,6 @@ const dbQuery = trustedHostTool({
 const result = await generateText("How many users signed up last week?", {
   tools: [dbQuery],
 });
-```
-
-### Structured output
-
-Pass a Zod schema to `output` for typed responses:
-
-```typescript
-import { z } from "zod";
-
-const Sentiment = z.object({
-  label: z.enum(["positive", "negative", "neutral"]),
-  confidence: z.number().min(0).max(1),
-});
-
-const result = await generateText("Analyze: 'This product is amazing!'", {
-  output: Sentiment,
-});
-
-if (result.data) {
-  console.log(result.data.label);      // "positive"
-  console.log(result.data.confidence);  // 0.95
-}
 ```
 
 ### Multi-step agent loop

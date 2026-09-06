@@ -108,12 +108,12 @@ Create a file named `agent.ts`:
 ```typescript
 import { createSeepient } from 'seepient'
 
-const agent = createSeepient({
+const agent = await createSeepient({
   provider: 'anthropic',
-  model: 'claude-3-7-sonnet'
+  model: 'claude-sonnet-4-6-20260320',
 })
 
-const response = await agent.run('Explain what this repository does based on its README.md')
+const response = await agent.chat('Explain what this repository does based on its README.md')
 console.log(response.text)
 ```
 

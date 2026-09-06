@@ -1,3 +1,8 @@
+---
+title: Engineering an AI Person
+description: Architectural build log on designing a persistent digital colleague with durable memory and policy governance.
+---
+
 # Seepient: Engineering an AI Person, Not Just Another Chatbot
 
 Most AI software deployed today is designed around a short-lived chatbot model. An employee types a prompt, the AI generates a single response, and the session ends. The next time someone opens the tool, the AI has forgotten the project context, business rules, and previous work.

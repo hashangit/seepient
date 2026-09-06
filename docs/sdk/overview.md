@@ -69,7 +69,11 @@ import type {
 ```
 
 ```typescript [Tools and factories]
-import { trustedHostTool, CORE_TOOLS, COMM_TOOLS, ADVANCED_TOOLS, ALL_TOOLS } from "seepient";
+import { trustedHostTool, preparedTool, brokerConnector, CORE_TOOLS, COMM_TOOLS, ADVANCED_TOOLS, ALL_TOOLS } from "seepient";
+```
+
+```typescript [Settings and Gateway]
+import { settings, gateway, createProviderManagerApi } from "seepient";
 ```
 
 ```typescript [Server]
@@ -184,7 +188,7 @@ Seepient Agent ships with a set of built-in tools organized into groups:
 
 | Group      | Tools                                                       |
 | ---------- | ----------------------------------------------------------- |
-| **Core**   | `execute_shell_command`, `read_file`, `write_file`, `get_current_datetime` |
+| **Core**   | `execute_shell_command`, `read_file`, `write_file`, `edit_file`, `get_current_datetime`, `manage_todos`, `render_widget` |
 | **Comm**   | `send_email`, `web_search`, `send_notification`             |
 | **Advanced**| `read_website`, `take_screenshot`, `generate_image`, `optimize_prompt`, `use_skill` |
 
@@ -194,6 +198,16 @@ Pass tool names as strings, or use group names (`"core"`, `"comm"`, `"advanced"`
 
 | Page | Description |
 |------|-------------|
-| [generateText()](/sdk/generate-text) | One-shot agent execution with tools, hooks, and structured output |
+| [createSeepient()](/sdk/create-seepient) | Stateful multi-turn agent with session persistence and provider management |
+| [generateText()](/sdk/generate-text) | One-shot agent execution with automatic tool loops and security boundaries |
 | [streamText()](/sdk/stream-text) | Streaming execution with async iterables and SSE helpers |
-| [createSeepient()](/sdk/create-seepient) | Stateful multi-turn agent with session persistence |
+| [Settings API](/sdk/settings) | Programmatic configuration facade for reading, updating, and watching settings |
+| [Provider Management](/sdk/provider-management) | Catalog querying, accounts, assignments, and resolution preview |
+| [Custom Tools](/sdk/custom-tools) | Explicit trust models: `preparedTool`, `brokerConnector`, `trustedHostTool` |
+| [MCP Gateway](/sdk/mcp-gateway) | Connect Model Context Protocol servers and REST endpoints |
+| [Providers](/sdk/providers) | Multi-provider LLM support and model routing |
+| [Skills](/sdk/skills) | Reusable skill packages with automatic catalog injection |
+| [Hooks and Middleware](/sdk/hooks) | Lifecycle callbacks and request/response pipelines |
+| [Session Persistence](/sdk/session-persistence) | Built-in atomic files, in-memory, and custom storage backends |
+| [Stateless Workers](/sdk/stateless-workers) | Zero-disk multi-tenant embedding and storage contracts |
+| [Types Reference](/sdk/types) | Complete TypeScript types reference |

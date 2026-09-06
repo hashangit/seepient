@@ -19,6 +19,7 @@ Every request processed by Seepient moves through an eight-step pipeline. This l
     { title: 'Output delivery & tamper-evident audit commit' }
   ]"
 />
+
 ---
 
 ## Step 1: Surface ingestion
@@ -27,7 +28,7 @@ A prompt enters through one of the supported interfaces:
 - An interactive prompt in the full-screen terminal UI.
 - A command argument or stdin pipe in the CLI.
 - An HTTP `POST /v1/sessions/:id/messages` call or incoming WebSocket payload.
-- A programmatic call to `agent.run(prompt)` in the TypeScript SDK.
+- A programmatic call to `agent.chat(prompt)` in the TypeScript SDK.
 
 The surface validates the payload, checks authentication if running over HTTP/WS, and attaches or creates a session context.
 

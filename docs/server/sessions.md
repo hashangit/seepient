@@ -14,16 +14,15 @@ Sessions enable multi-turn conversations by persisting message history between r
   :transitions="['on first request', '30 min idle', '24 hr TTL']"
   loop="Cleanup sweep runs every 5 minutes"
 />
+
 ## Storage
 
 Sessions are stored as individual JSON files on disk:
 
-```
-./.seepient/sessions/
-  ├── 550e8400-e29b-41d4-a716-446655440000.json
-  ├── 660f9511-f3ac-52e5-b827-557766551111.json
-  └── ...
-```
+- 📁 `.seepient/sessions/`
+  - 📄 `550e8400-e29b-41d4-a716-446655440000.json`
+  - 📄 `660f9511-f3ac-52e5-b827-557766551111.json`
+  - 📄 `...`
 
 The session directory defaults to `./.seepient/sessions/` relative to the working directory, and can be overridden with the `SEEPIENT_SESSION_DIR` environment variable.
 

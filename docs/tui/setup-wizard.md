@@ -24,6 +24,7 @@ seepient setup
   ]"
   :selected="0"
 />
+
 ---
 
 ## 1. Provider configuration

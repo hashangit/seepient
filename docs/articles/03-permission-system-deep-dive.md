@@ -1,3 +1,8 @@
+---
+title: Permission System Deep Dive
+description: "Inside Seepient's four-stage security pipeline: Policy, Approval, Execution, and Durability Audit."
+---
+
 # Inside Seepient's Permission System: Policy, Approval, Execution, Audit
 
 The single largest barrier to adopting autonomous AI systems in business operations is **trust**.

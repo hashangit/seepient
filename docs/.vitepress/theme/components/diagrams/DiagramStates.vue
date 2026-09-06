@@ -1,19 +1,25 @@
 <script setup>
-defineProps({
+import { computed } from 'vue'
+
+const props = defineProps({
   states: { type: Array, required: true },
   transitions: { type: Array, default: () => [] },
   loop: { type: String, default: '' },
 })
+
+const normalized = computed(() =>
+  props.states.map((s) => (typeof s === 'string' ? { name: s } : s)),
+)
 </script>
 
 <template>
   <div class="dstates">
     <div class="dstates-rail">
-      <template v-for="(s, i) in states" :key="s.name">
+      <template v-for="(s, i) in normalized" :key="s.name">
         <div class="dstate">
           <span class="dstate-name">{{ s.name }}</span>
         </div>
-        <div v-if="i < states.length - 1" class="dstate-link" aria-hidden="true">
+        <div v-if="i < normalized.length - 1" class="dstate-link" aria-hidden="true">
           <span class="dstate-arrow"></span>
           <span v-if="transitions[i]" class="dstate-note">{{ transitions[i] }}</span>
         </div>
