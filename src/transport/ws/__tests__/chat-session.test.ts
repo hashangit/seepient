@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { handleChat, handleAbort } from "../chat.js";
+import { handleResume, handleReconnect } from "../session-control.js";
 import { ServerSessionManager } from "../../http/session-store.js";
 import { MemoryPersistenceBackend } from "../../../domain/sessions/session-store.js";
 import type { ConnectionState, WebSocketHandlerContext, ChatMessage, WebSocket } from "../ws-types.js";
@@ -517,4 +518,264 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
     expect(JSON.stringify(sent)).not.toMatch(/already exists/i);
     expect(state.activeChats.size).toBe(0);
   });
+
+  it("rejects resume and reconnect during in-flight turn with REQUEST_IN_FLIGHT, releasing acquired lock on completion (W034)", async () => {
+    const backend = new MemoryPersistenceBackend();
+    const sessionManager = new ServerSessionManager({ backend });
+    const { ws: ws1 } = createMockWs();
+    const { ws: ws2, sent: sent2 } = createMockWs();
+
+    // Pre-create target session for resume
+    await sessionManager.createSession("key-1", {
+      id: "target-resume-sess",
+      apiKeyHash: "test-hash",
+    });
+
+    const state: ConnectionState = {
+      sessionId: null,
+      activeChats: new Set(),
+      currentAbortController: null,
+      activeProvider: null,
+      activeModel: null,
+      apiKeyHash: "test-hash",
+    } as any;
+
+    let finishStream: (() => void) | null = null;
+    const ctx: WebSocketHandlerContext = {
+      sessionManager,
+      streamText: (options) => {
+        return new Promise<void>((resolve) => {
+          finishStream = () => {
+            options.onDone({
+              text: "Done",
+              usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0 },
+              finishReason: "stop",
+            });
+            resolve();
+          };
+        });
+      },
+      listModels: () => ({}),
+      listSkills: () => [],
+    };
+
+    // Start chat turn on sess-1
+    const chatPromise = handleChat(
+      ws1,
+      { type: "chat", id: "msg-w034", message: "Start streaming", sessionId: "sess-1" },
+      state,
+      ctx,
+    );
+
+    // Wait until stream has acquired turn and registered active chat
+    await new Promise((r) => setTimeout(r, 10));
+    expect(state.activeChats.size).toBe(1);
+
+    // Attempt resume while turn is active on this connection
+    await handleResume(
+      ws2,
+      { type: "resume", sessionId: "target-resume-sess" },
+      state,
+      ctx,
+    );
+    const resumeErr = sent2.find((m) => m.type === "error" && m.code === "REQUEST_IN_FLIGHT");
+    expect(resumeErr).toBeDefined();
+    expect(resumeErr.message).toMatch(/in flight/i);
+
+    // Attempt reconnect while turn is active on this connection
+    await handleReconnect(
+      ws2,
+      { type: "reconnect", sessionId: "target-resume-sess" },
+      state,
+      ctx,
+    );
+    const reconnectErr = sent2.filter((m) => m.type === "error" && m.code === "REQUEST_IN_FLIGHT");
+    expect(reconnectErr.length).toBe(2);
+
+    // Finish the streaming turn
+    finishStream!();
+    await chatPromise;
+
+    // Both connection active chats and session turn lock are now clear
+    expect(state.activeChats.size).toBe(0);
+    expect(sessionManager.acquireTurn("sess-1")).toBe(true);
+    sessionManager.releaseTurn("sess-1");
+  });
+
+  it("normalizes empty string or whitespace sessionId in chat message as stateless (W038.1)", async () => {
+    const backend = new MemoryPersistenceBackend();
+    const sessionManager = new ServerSessionManager({ backend });
+    const { ws } = createMockWs();
+
+    const state: ConnectionState = {
+      sessionId: null,
+      activeChats: new Set(),
+      currentAbortController: null,
+      activeProvider: null,
+      activeModel: null,
+      apiKeyHash: "test-hash",
+    } as any;
+
+    let capturedSessionId: string | undefined = "NOT_SET";
+    const ctx: WebSocketHandlerContext = {
+      sessionManager,
+      streamText: (options) => {
+        capturedSessionId = options.sessionId;
+        options.onDone({
+          text: "Stateless reply",
+          usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0 },
+          finishReason: "stop",
+        });
+      },
+      listModels: () => ({}),
+      listSkills: () => [],
+    };
+
+    await handleChat(
+      ws,
+      { type: "chat", id: "msg-empty-sess", message: "Hi", sessionId: "   " },
+      state,
+      ctx,
+    );
+
+    expect(capturedSessionId).toBeUndefined();
+    expect(state.sessionId).toBeNull();
+  });
+
+  it("rejects cross-connection turn contention on same session with REQUEST_IN_FLIGHT (W038.8)", async () => {
+    const backend = new MemoryPersistenceBackend();
+    const sessionManager = new ServerSessionManager({ backend });
+    const { ws: ws1 } = createMockWs();
+    const { ws: ws2, sent: sent2 } = createMockWs();
+
+    // Pre-create shared session
+    await sessionManager.createSession("key-1", {
+      id: "shared-sess-ws",
+      apiKeyHash: "test-hash",
+    });
+
+    const state1: ConnectionState = {
+      sessionId: null,
+      activeChats: new Set(),
+      currentAbortController: null,
+      activeProvider: null,
+      activeModel: null,
+      apiKeyHash: "test-hash",
+    } as any;
+
+    const state2: ConnectionState = {
+      sessionId: null,
+      activeChats: new Set(),
+      currentAbortController: null,
+      activeProvider: null,
+      activeModel: null,
+      apiKeyHash: "test-hash",
+    } as any;
+
+    let finishConn1: (() => void) | null = null;
+    const ctx1: WebSocketHandlerContext = {
+      sessionManager,
+      streamText: (options) => {
+        return new Promise<void>((resolve) => {
+          finishConn1 = () => {
+            options.onDone({
+              text: "Done 1",
+              usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0 },
+              finishReason: "stop",
+            });
+            resolve();
+          };
+        });
+      },
+      listModels: () => ({}),
+      listSkills: () => [],
+    };
+
+    const ctx2: WebSocketHandlerContext = {
+      sessionManager,
+      streamText: vi.fn(),
+      listModels: () => ({}),
+      listSkills: () => [],
+    };
+
+    // Connection 1 begins turn on shared-sess-ws
+    const chatPromise1 = handleChat(
+      ws1,
+      { type: "chat", id: "msg-c1", message: "Turn from conn 1", sessionId: "shared-sess-ws" },
+      state1,
+      ctx1,
+    );
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Connection 2 attempts turn on same shared-sess-ws
+    await handleChat(
+      ws2,
+      { type: "chat", id: "msg-c2", message: "Turn from conn 2", sessionId: "shared-sess-ws" },
+      state2,
+      ctx2,
+    );
+
+    const busyErr = sent2.find((m) => m.type === "error" && m.code === "REQUEST_IN_FLIGHT");
+    expect(busyErr).toBeDefined();
+    expect(busyErr.retryable).toBe(true);
+
+    // Finish connection 1 turn
+    finishConn1!();
+    await chatPromise1;
+
+    // After completion, lock is released
+    expect(sessionManager.acquireTurn("shared-sess-ws")).toBe(true);
+    sessionManager.releaseTurn("shared-sess-ws");
+  });
+
+  it("releases session turn lock immediately when aborted via handleAbort (W038.9)", async () => {
+    const backend = new MemoryPersistenceBackend();
+    const sessionManager = new ServerSessionManager({ backend });
+    const { ws, sent } = createMockWs();
+
+    const state: ConnectionState = {
+      sessionId: null,
+      activeChats: new Set(),
+      currentAbortController: null,
+      activeProvider: null,
+      activeModel: null,
+      apiKeyHash: "test-hash",
+    } as any;
+
+    const ctx: WebSocketHandlerContext = {
+      sessionManager,
+      streamText: () => {
+        // Stream hangs until aborted
+        return new Promise<void>(() => {});
+      },
+      listModels: () => ({}),
+      listSkills: () => [],
+    };
+
+    const chatPromise = handleChat(
+      ws,
+      { type: "chat", id: "msg-abort", message: "To be aborted", sessionId: "abort-sess" },
+      state,
+      ctx,
+    );
+
+    await new Promise((r) => setTimeout(r, 10));
+    expect(state.activeChats.size).toBe(1);
+
+    // Trigger handleAbort
+    handleAbort(ws, { type: "abort" }, state);
+
+    // Chat should resolve immediately because abort event listener resolved the promise
+    await chatPromise;
+
+    expect(state.activeChats.size).toBe(0);
+    const abortMsg = sent.find((m) => m.type === "error" && m.code === "ABORTED");
+    expect(abortMsg).toBeDefined();
+
+    // Lock must be released
+    expect(sessionManager.acquireTurn("abort-sess")).toBe(true);
+    sessionManager.releaseTurn("abort-sess");
+  });
 });
+

@@ -25,16 +25,25 @@ export async function handleResume(
   state: ConnectionState,
   ctx: WebSocketHandlerContext,
 ): Promise<void> {
+  if (state.activeChats && state.activeChats.size > 0) {
+    safeSend(ws, {
+      type: "error",
+      code: "REQUEST_IN_FLIGHT",
+      retryable: true,
+      message: "Cannot resume session while a stream is in flight on this connection",
+    });
+    return;
+  }
+
   let session;
   try {
     session = await ctx.sessionManager.getSession(msg.sessionId, state.apiKeyHash);
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
+  } catch (_err: unknown) {
     safeSend(ws, {
       type: "error",
       code: "SESSION_NOT_FOUND",
       retryable: false,
-      message,
+      message: "Session not found or expired",
     });
     return;
   }
@@ -43,7 +52,7 @@ export async function handleResume(
       type: "error",
       code: "SESSION_NOT_FOUND",
       retryable: false,
-      message: `Session ${msg.sessionId} not found or expired`,
+      message: "Session not found or expired",
     });
     return;
   }
@@ -63,16 +72,25 @@ export async function handleReconnect(
   state: ConnectionState,
   ctx: WebSocketHandlerContext,
 ): Promise<void> {
+  if (state.activeChats && state.activeChats.size > 0) {
+    safeSend(ws, {
+      type: "error",
+      code: "REQUEST_IN_FLIGHT",
+      retryable: true,
+      message: "Cannot reconnect session while a stream is in flight on this connection",
+    });
+    return;
+  }
+
   let session;
   try {
     session = await ctx.sessionManager.getSession(msg.sessionId, state.apiKeyHash);
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
+  } catch (_err: unknown) {
     safeSend(ws, {
       type: "error",
       code: "SESSION_NOT_FOUND",
       retryable: false,
-      message,
+      message: "Session not found or expired",
     });
     return;
   }
@@ -81,7 +99,7 @@ export async function handleReconnect(
       type: "error",
       code: "SESSION_NOT_FOUND",
       retryable: false,
-      message: `Session ${msg.sessionId} not found or expired`,
+      message: "Session not found or expired",
     });
     return;
   }

@@ -280,7 +280,7 @@ export function isMetadataIp(ip: string): boolean {
     return true;
   }
 
-  // Embedded IPv4 check in v4-mapped (::ffff:0:0/96), SIIT (::ffff:0:0:0/96), or v4-compat (::/96)
+  // Embedded IPv4 check in v4-mapped (::ffff:0:0/96), SIIT (::ffff:0:0:0/96), v4-compat (::/96), or NAT64 WKP (64:ff9b::/96)
   const isV4Mapped =
     b.slice(0, 10).every((v) => v === 0) && b[10] === 0xff && b[11] === 0xff;
   const isSiit =
@@ -290,8 +290,14 @@ export function isMetadataIp(ip: string): boolean {
     b[10] === 0 &&
     b[11] === 0;
   const isV4Compat = b.slice(0, 12).every((v) => v === 0);
+  const isNat64Wkp =
+    b[0] === 0x00 &&
+    b[1] === 0x64 &&
+    b[2] === 0xff &&
+    b[3] === 0x9b &&
+    b.slice(4, 12).every((v) => v === 0);
 
-  if (isV4Mapped || isSiit || isV4Compat) {
+  if (isV4Mapped || isSiit || isV4Compat || isNat64Wkp) {
     return b[12] === 169 && b[13] === 254;
   }
 
@@ -533,11 +539,16 @@ export async function safeSsrfFetch(
         }
       }
 
-      // Cross-origin redirects strip Authorization, Cookie, and api-key
+      // Cross-origin redirects strip Authorization, Cookie, api-key, and x-api-key
       if (currentParsed.origin !== targetParsed.origin) {
         for (const k of Object.keys(nextHeaders)) {
           const lower = k.toLowerCase();
-          if (lower === "authorization" || lower === "cookie" || lower === "api-key") {
+          if (
+            lower === "authorization" ||
+            lower === "cookie" ||
+            lower === "api-key" ||
+            lower === "x-api-key"
+          ) {
             delete nextHeaders[k];
           }
         }

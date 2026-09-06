@@ -619,13 +619,15 @@ async function handleChat(
   // If sessionId is provided, verify it exists and belongs to caller
   const sessionId = parsed.sessionId;
   let history: import("../../foundations/types.js").Message[] | undefined;
+  let turnAcquired = false;
+
   if (sessionId) {
     let session: import("../../foundations/types.js").SessionData | null;
     try {
       session = await ctx.sessionManager.getSession(sessionId, keyHash);
     } catch (err: any) {
       if (err?.code === "NOT_FOUND" || err?.statusCode === 404 || err?.message?.includes("server owner")) {
-        sendError(res, 404, "NOT_FOUND", err.message);
+        sendError(res, 404, "NOT_FOUND", `Session "${sessionId}" not found`);
         return;
       }
       throw err;
@@ -639,20 +641,23 @@ async function handleChat(
       sendError(res, 409, "REQUEST_IN_FLIGHT", `Session "${sessionId}" has a request already in flight`);
       return;
     }
+    turnAcquired = true;
 
     history = [...session.messages];
-
-    // Persist user message if session exists
-    ctx.sessionManager.addMessage(sessionId, {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: parsed.message,
-      timestamp: Date.now(),
-    });
   }
 
   // Execute
   try {
+    // Persist user message if session exists
+    if (sessionId) {
+      ctx.sessionManager.addMessage(sessionId, {
+        id: crypto.randomUUID(),
+        role: "user",
+        content: parsed.message,
+        timestamp: Date.now(),
+      });
+    }
+
     const result = await ctx.generateText({
       message: parsed.message,
       model: parsed.model,
@@ -698,7 +703,7 @@ async function handleChat(
       },
     });
   } finally {
-    if (sessionId) {
+    if (turnAcquired && sessionId) {
       ctx.sessionManager.releaseTurn(sessionId);
     }
   }
@@ -747,13 +752,13 @@ async function handleGetSession(
     session = await ctx.sessionManager.getSession(sessionId, key.keyHash ?? (key.key ? hashKey(key.key) : ""));
   } catch (err: any) {
     if (err?.code === "NOT_FOUND" || err?.statusCode === 404 || err?.message?.includes("server owner")) {
-      sendError(res, 404, "NOT_FOUND", err.message);
+      sendError(res, 404, "NOT_FOUND", `Session "${sessionId}" not found`);
       return;
     }
     throw err;
   }
   if (!session) {
-    sendError(res, 404, "NOT_FOUND", `Session ${sessionId} not found`);
+    sendError(res, 404, "NOT_FOUND", `Session "${sessionId}" not found`);
     return;
   }
 

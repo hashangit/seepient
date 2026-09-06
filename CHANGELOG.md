@@ -9,7 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [v0.7.0] - 2026-09-06
 
-### Review remediation: release pipeline, server sessions, transport hardening & docs truth (spec 021-2)
+### Review remediation: release pipeline, server sessions, transport hardening & docs truth (spec 021-2 / 021-3)
+
+*Includes 021-3 remediation work orders W001–W041 resolving server session concurrency and turn locking, NAT64 metadata defense-in-depth, transport lifecycle safety, and docs truth.*
 
 **Breaking changes:**
 - **Key hashing SHA-256 expansion (`hashKey` 16→64)**: Expanded API key hash digests from 16 to 64 hex characters (full SHA-256). Pre-0.7.0 session files created under 16-hex key ownership will not resume and fail closed with a descriptive error. Server sessions are ephemeral runtime state.

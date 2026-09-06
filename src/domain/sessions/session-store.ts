@@ -102,6 +102,7 @@ export class FilePersistenceBackend implements PersistenceBackend {
   }
 
   async load(id: string): Promise<SessionData | null> {
+    validateSessionId(id);
     return this.loadFromDisk(id);
   }
 
@@ -159,10 +160,12 @@ export class MemoryPersistenceBackend implements PersistenceBackend {
   }
 
   async load(id: string): Promise<SessionData | null> {
+    validateSessionId(id);
     return this.store.get(id) ?? null;
   }
 
   async delete(id: string): Promise<void> {
+    validateSessionId(id);
     this.store.delete(id);
   }
 

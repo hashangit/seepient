@@ -103,6 +103,33 @@ describe("ServerSessionManager (Spec 021-2 / FR-004)", () => {
     (manager as any).sessions.get(session1.id)!.createdAt = Date.now() - 25 * 60 * 60 * 1000;
     manager.cleanup();
     expect((manager as any).sessions.has(session1.id)).toBe(false);
+    expect((manager as any).inFlightTurns.has(session1.id)).toBe(false);
+  });
+
+  it("deleteSession clears in-flight turn lock (W035)", async () => {
+    const manager = new ServerSessionManager({ backend: new MemoryPersistenceBackend() });
+    const session = await manager.createSession("test-key", { id: "turn-lock-sess" });
+    expect(manager.acquireTurn(session.id)).toBe(true);
+    expect(manager.isTurnInFlight(session.id)).toBe(true);
+
+    manager.deleteSession(session.id);
+    expect(manager.isTurnInFlight(session.id)).toBe(false);
+    expect((manager as any).inFlightTurns.has(session.id)).toBe(false);
+  });
+
+  it("rolls back in-memory session if backend persistence throws on createSession (W038.3)", async () => {
+    const backend = new MemoryPersistenceBackend();
+    backend.save = async () => {
+      throw new Error("Disk full simulation");
+    };
+
+    const manager = new ServerSessionManager({ backend });
+    await expect(
+      manager.createSession("test-key", { id: "fail-persist-sess" }),
+    ).rejects.toThrow("Disk full simulation");
+
+    // Must be deleted from in-memory sessions
+    expect((manager as any).sessions.has("fail-persist-sess")).toBe(false);
   });
 
   it("atomically guards concurrent createSession with same ID (W010)", async () => {

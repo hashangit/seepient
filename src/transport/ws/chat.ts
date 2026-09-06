@@ -37,12 +37,12 @@ export async function handleChat(
   state.activeChats.add(abortController);
 
   const serverMsgId = crypto.randomUUID();
-  let turnAcquired = false;
+  let acquiredSessionId: string | null = null;
 
   const releaseSessionTurn = () => {
-    if (turnAcquired && state.sessionId) {
-      ctx.sessionManager.releaseTurn(state.sessionId);
-      turnAcquired = false;
+    if (acquiredSessionId) {
+      ctx.sessionManager.releaseTurn(acquiredSessionId);
+      acquiredSessionId = null;
     }
   };
 
@@ -60,7 +60,11 @@ export async function handleChat(
     const model = msg.options?.model ?? state.activeModel ?? undefined;
 
     // Session attachment
-    const targetSessionId = msg.sessionId ?? state.sessionId ?? undefined;
+    const requestedSessionId =
+      typeof msg.sessionId === "string" && msg.sessionId.trim().length > 0
+        ? msg.sessionId.trim()
+        : undefined;
+    const targetSessionId = requestedSessionId ?? state.sessionId ?? undefined;
     let history: Message[] | undefined;
 
     if (targetSessionId) {
@@ -79,16 +83,16 @@ export async function handleChat(
         }
         state.sessionId = session.id;
 
-        if (!ctx.sessionManager.acquireTurn(state.sessionId)) {
+        if (!ctx.sessionManager.acquireTurn(session.id)) {
           safeSend(ws, {
             type: "error",
             code: "REQUEST_IN_FLIGHT",
             retryable: true,
-            message: `Session "${state.sessionId}" has a request already in flight`,
+            message: `Session "${session.id}" has a request already in flight`,
           });
           return;
         }
-        turnAcquired = true;
+        acquiredSessionId = session.id;
 
         history = [...session.messages];
       } catch (err: unknown) {
@@ -107,7 +111,7 @@ export async function handleChat(
             type: "error",
             code: "SESSION_NOT_FOUND",
             retryable: false,
-            message: `Session ${targetSessionId} not found or expired`,
+            message: "Session not found or expired",
           });
           return;
         }
@@ -116,7 +120,7 @@ export async function handleChat(
             type: "error",
             code: "SESSION_NOT_FOUND",
             retryable: false,
-            message,
+            message: "Session not found or expired",
           });
           return;
         }
@@ -141,7 +145,7 @@ export async function handleChat(
           content: msg.message,
           timestamp: Date.now(),
         };
-        ctx.sessionManager.addMessage(state.sessionId, userMsg);
+        ctx.sessionManager.addMessage(acquiredSessionId!, userMsg);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         safeSend(ws, {
@@ -157,6 +161,17 @@ export async function handleChat(
     // Stream text and await completion
     let terminalFired = false;
     await new Promise<void>((resolve) => {
+      abortController.signal.addEventListener(
+        "abort",
+        () => {
+          if (!terminalFired) {
+            terminalFired = true;
+            resolve();
+          }
+        },
+        { once: true },
+      );
+
       const handleStreamError = (err: unknown) => {
         const message = err instanceof Error ? err.message : "Stream failed";
         logTransportEvent({
@@ -186,13 +201,13 @@ export async function handleChat(
           tools: msg.options?.tools,
           maxSteps: msg.options?.maxSteps ?? 10,
           skills: msg.options?.skills,
-          sessionId: state.sessionId ?? undefined,
+          sessionId: acquiredSessionId ?? undefined,
           history,
           // Spec 008 / Spec 021 review: pass authenticated identity to approval records
           ...(state.apiKeyHash ? { apiKeyHash: state.apiKeyHash } : {}),
           approveTool: createServerApproveTool(ws, {
             principalId: state.apiKeyHash,
-            sessionId: state.sessionId ?? undefined,
+            sessionId: acquiredSessionId ?? undefined,
           }),
           signal: abortController.signal,
           onText: (delta) => {
@@ -255,7 +270,7 @@ export async function handleChat(
               });
 
               // Add assistant message to session only on non-error finish
-              if (state.sessionId) {
+              if (acquiredSessionId) {
                 try {
                   const assistantMsg: Message = {
                     id: serverMsgId,
@@ -263,7 +278,7 @@ export async function handleChat(
                     content: result.text,
                     timestamp: Date.now(),
                   };
-                  ctx.sessionManager.addMessage(state.sessionId, assistantMsg);
+                  ctx.sessionManager.addMessage(acquiredSessionId, assistantMsg);
                 } catch (err: unknown) {
                   const message = err instanceof Error ? err.message : String(err);
                   safeSend(ws, {

@@ -73,7 +73,7 @@ describe("W016: Redirect hygiene in safeSsrfFetch", () => {
     await new Promise<void>((resolve) => targetServer.close(() => resolve()));
   });
 
-  it("strips Authorization, Cookie, and api-key on cross-origin redirects", async () => {
+  it("strips Authorization, Cookie, api-key, and x-api-key on cross-origin redirects", async () => {
     lastTargetRequest = null;
     await safeSsrfFetch(
       `http://127.0.0.1:${originPort}/redirect?type=302&cross=1`,
@@ -82,6 +82,7 @@ describe("W016: Redirect hygiene in safeSsrfFetch", () => {
           Authorization: "Bearer secret-token",
           Cookie: "session=xyz",
           "api-key": "secret-key",
+          "x-api-key": "secret-x-key",
           "X-Custom-Header": "keep-me",
         },
       },
@@ -93,6 +94,7 @@ describe("W016: Redirect hygiene in safeSsrfFetch", () => {
     expect(req1.headers["authorization"]).toBeUndefined();
     expect(req1.headers["cookie"]).toBeUndefined();
     expect(req1.headers["api-key"]).toBeUndefined();
+    expect(req1.headers["x-api-key"]).toBeUndefined();
     expect(req1.headers["x-custom-header"]).toBe("keep-me");
   });
 
