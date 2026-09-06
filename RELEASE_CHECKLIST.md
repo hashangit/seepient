@@ -62,6 +62,7 @@ Update all version strings and documentation artifacts in lockstep:
   - **Unslop Skill (Mandatory)**: The **`unslop`** skill MUST be used to eliminate AI writing tells, marketing fluff, decorative emojis in prose/headers, em dash overuse, and boilerplate clichés. Ensure crisp, human, opinionated engineering prose.
 - [ ] **Logo & Version Fallbacks**:
   - `src/ui/tui/components/logo-banner.tsx`: Resolves dynamically from `package.json` with fallback.
+  - `docs/.vitepress/config.ts` & `docs/.vitepress/theme/components/LandingHero.vue`: Documentation homepage version badge resolves dynamically from root `package.json` with fallback (`seepientVersion`); verify the badge displays `vX.Y.Z` next to the Seepient Agent pixel logo and links to the release tag. If building in an environment without root `package.json`, update the fallback version string.
 - [ ] **`README.md` (MANDATORY)**: Update feature highlights, SDK examples, API changes, version references, and command flags to reflect the new release. Never release without verifying `README.md` accuracy.
 - [ ] **`ARCHITECTURE.md` & Source Layout Sync**:
   - Update `ARCHITECTURE.md` in repository root and `Architecture/ARCHITECTURE.md` in the Obsidian vault.
