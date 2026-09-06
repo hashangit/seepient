@@ -157,6 +157,43 @@ describe("askSeepient — Unified One-Shot Entry Point", () => {
     expect(reported.code).toBe("RATE_LIMIT");
   });
 
+  // F2: a failed streaming turn must be observable — fullText rejects (the
+  // non-streaming path throws), even when the caller has no onError callback.
+  it("streaming fullText rejects on provider error instead of resolving empty", async () => {
+    const runtime = {
+      createTurnSnapshot: async () => ({
+        revision: 1,
+        createdAt: new Date().toISOString(),
+        catalog: [],
+        config: {} as any,
+        assignments: {} as any,
+      }),
+      resolvePlan: async () => ({
+        selectedTarget: { providerAccount: "mock", model: "mock-model" } as any,
+        failureTargets: [],
+      }),
+      executeLanguage: async function* (): AsyncGenerator<import("../../../foundations/schemas/inference.js").StreamEvent> {
+        throw new Error("invalid api key");
+      },
+    };
+
+    const onError = vi.fn();
+    const stream = await askSeepient("Hello", {
+      runtime,
+      model: "mock-model",
+      stream: true,
+      onError,
+    });
+
+    await expect(stream.fullText).rejects.toThrow(/invalid api key/);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(await stream.finishReason).toBe("error");
+    // textStream completes without throwing for delta-only consumers
+    const chunks: string[] = [];
+    for await (const chunk of stream.textStream) chunks.push(chunk);
+    expect(chunks).toEqual([]);
+  });
+
   // W112: hooks.onFinish parity — streaming callers get it too.
   it("fires hooks.onFinish with the assembled result in streaming mode", async () => {
     const runtime = createMockRuntime([

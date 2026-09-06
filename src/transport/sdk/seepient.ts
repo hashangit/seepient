@@ -443,11 +443,27 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
 
   // ── chat() ──────────────────────────────────────────────────────────────
 
-  async function chat(userMessage: string): Promise<AgentResponse> {
+  
+/**
+ * F1: resolve a dangling failed-turn draft in the in-memory history before a
+ * new user turn is appended — same semantics as the server store's
+ * resolveTrailingDraft: the new prompt dedupes (identical text) or supersedes
+ * (different text) the un-answered draft, keeping the persisted history and
+ * the model input in sync.
+ */
+function resolveTrailingUserDraft(history: Message[]): void {
+  const last = history[history.length - 1];
+  if (last && last.role === "user") {
+    history.pop();
+  }
+}
+
+async function chat(userMessage: string): Promise<AgentResponse> {
     const release = await acquire();
     try {
       activeAbortController = new AbortController();
 
+      resolveTrailingUserDraft(messages);
       messages.push({
         id: generateId(),
         role: "user",
@@ -458,11 +474,13 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
       const maxSteps = opts.maxSteps ?? 10;
       const snapshot = await runtime.createTurnSnapshot();
 
-      // W150 (D3a): send the normalized history to the model but keep the
+      // F1/W150: send the normalized history to the model but keep the
       // stored copy intact on failure (crash recovery). On success, adopt
-      // the messages the loop appended (assistant/tool) into the store.
+      // the messages the loop APPENDED (assistant/tool) into the store —
+      // matched by id, so the loop's own system-shim unshift cannot skew
+      // the merge-back.
       const modelMessages = normalizeHistoryForSend(messages);
-      const modelInputCount = modelMessages.length;
+      const modelInputIds = new Set(modelMessages.map((m) => m.id));
 
       const result = await runAgentLoop({
         runtime,
@@ -485,8 +503,10 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
       });
       // W151: a resolved error must not persist an empty assistant row.
       const turnErrored = extractLoopError(result) !== null;
-      for (let i = modelInputCount; i < result.messages.length; i++) {
-        const appended = result.messages[i];
+      for (const appended of result.messages) {
+        if (modelInputIds.has(appended.id)) continue;
+        // The loop's ephemeral system shim is model-input plumbing, not history.
+        if (appended.role === "system") continue;
         if (turnErrored && appended.role === "assistant" && !appended.content) continue;
         messages.push(appended);
       }
@@ -530,6 +550,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
       };
       const streamHookExecutor = createHookExecutor(mergedHooks);
 
+      resolveTrailingUserDraft(messages);
       messages.push({
         id: generateId(),
         role: "user",
@@ -541,10 +562,11 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
       const stream = new StreamManager();
 
       (async () => {
-        // W150 (D3a): normalized model input; the stored copy stays intact
-        // until the loop succeeds and its additions are merged back below.
+        // F1/W150: normalized model input; the stored copy stays intact
+        // until the loop succeeds and its additions are merged back below
+        // (id-matched, so the loop's system-shim unshift cannot skew it).
         const modelMessages = normalizeHistoryForSend(messages);
-        const modelInputCount = modelMessages.length;
+        const modelInputIds = new Set(modelMessages.map((m) => m.id));
 
         try {
           const snapshot = await runtime.createTurnSnapshot();
@@ -608,8 +630,9 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
 
           // W151: a resolved error must not persist an empty assistant row.
           const turnErrored = extractLoopError(result) !== null;
-          const appended = result.messages.slice(modelInputCount);
-          for (const m of appended) {
+          for (const m of result.messages) {
+            if (modelInputIds.has(m.id)) continue;
+            if (m.role === "system") continue; // loop's ephemeral shim
             if (turnErrored && m.role === "assistant" && !m.content) continue;
             messages.push(m);
           }
@@ -619,19 +642,22 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
             .find((m) => m.role === "assistant" && m.content);
           const finalText = lastAssistant?.content ?? "";
 
-          stream.resolveText(finalText);
-          stream.resolveUsage(result.usage);
           const loopErr = extractLoopError(result);
+          stream.resolveUsage(result.usage);
           if (loopErr) {
             if (streamOptions?.onError) streamOptions.onError(loopErr);
             stream.resolveFinish("error");
+            // F2: parity with askSeepient — failed turns reject fullText.
+            stream.rejectText(loopErr);
           } else {
+            stream.resolveText(finalText);
             stream.resolveFinish(result.finishReason);
           }
         } catch (err) {
           const seepientErr = toSeepientError(err, "PROVIDER_ERROR");
           if (streamOptions?.onError) streamOptions.onError(seepientErr);
-          stream.resolveText("");
+          // F2: reject fullText instead of resolving "".
+          stream.rejectText(seepientErr);
           stream.resolveUsage({
             promptTokens: 0,
             completionTokens: 0,

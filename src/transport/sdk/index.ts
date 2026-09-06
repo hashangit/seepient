@@ -379,13 +379,16 @@ export async function askSeepient(
           .join("");
         const allText = textFromSteps || (lastAssistant?.content ?? "");
 
-        stream.resolveText(allText);
-        stream.resolveUsage(result.usage);
         const loopErr = extractLoopError(result);
+        stream.resolveUsage(result.usage);
         if (loopErr) {
           if (opts.onError) opts.onError(loopErr);
           stream.resolveFinish("error");
+          // F2: a failed turn must be observable — fullText rejects, in
+          // parity with the non-streaming throw.
+          stream.rejectText(loopErr);
         } else {
+          stream.resolveText(allText);
           stream.resolveFinish(result.finishReason);
           // W112: fire hooks.onFinish in streaming mode too, with the same
           // assembled result the non-streaming path would have returned.
@@ -402,7 +405,9 @@ export async function askSeepient(
       } catch (err) {
         const seepientErr = toSeepientError(err, "PROVIDER_ERROR");
         if (opts.onError) opts.onError(seepientErr);
-        stream.resolveText("");
+        // F2: reject fullText instead of resolving "" — silent empty
+        // responses hid provider failures from callers without onError.
+        stream.rejectText(seepientErr);
         stream.resolveUsage({ promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 });
         stream.resolveFinish("error");
       } finally {

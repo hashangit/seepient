@@ -260,7 +260,9 @@ export function isMetadataIp(ip: string): boolean {
   }
 
   if (parsed.family === 4) {
-    return parsed.bytes[0] === 169 && parsed.bytes[1] === 254;
+    // F5: Alibaba Cloud instance metadata (also reached via embedded IPv4
+    // spellings below) — permanently blocked regardless of private allowance.
+    return isMetadataIpv4Bytes(parsed.bytes, 0);
   }
 
   const b = parsed.bytes;
@@ -296,8 +298,24 @@ export function isMetadataIp(ip: string): boolean {
     b.slice(4, 12).every((v) => v === 0);
 
   if (isV4Mapped || isSiit || isV4Compat || isNat64Wkp) {
-    return b[12] === 169 && b[13] === 254;
+    return isMetadataIpv4Bytes(b, 12);
   }
 
+  return false;
+}
+
+/** F5: metadata endpoints blocked in every network mode, incl. Alibaba Cloud. */
+function isMetadataIpv4Bytes(b: Uint8Array, offset: number): boolean {
+  // AWS/OpenStack/GCP link-local metadata: 169.254.0.0/16 metadata hosts
+  if (b[offset] === 169 && b[offset + 1] === 254) return true;
+  // Alibaba Cloud ECS instance metadata: 100.100.100.200
+  if (
+    b[offset] === 100 &&
+    b[offset + 1] === 100 &&
+    b[offset + 2] === 100 &&
+    b[offset + 3] === 200
+  ) {
+    return true;
+  }
   return false;
 }

@@ -107,6 +107,9 @@ export async function handleChat(
         state.sessionId = session.id;
         acquiredSessionId = session.id;
 
+        // F1: resolve a dangling failed-turn draft before history is captured.
+        ctx.sessionManager.resolveTrailingDraft(session.id);
+
         history = [...session.messages];
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);

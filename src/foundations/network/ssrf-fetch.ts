@@ -44,6 +44,7 @@ export async function validateEndpointUrl(
   // Explicit check for cloud metadata hostnames
   if (
     hostname === "169.254.169.254" ||
+    hostname === "100.100.100.200" ||
     hostname === "fd00:ec2::254" ||
     hostname === "metadata.google.internal" ||
     hostname.endsWith(".metadata.google.internal") ||
@@ -147,6 +148,7 @@ export async function safeSsrfFetch(
 
   if (
     hostname === "169.254.169.254" ||
+    hostname === "100.100.100.200" ||
     hostname === "fd00:ec2::254" ||
     hostname === "metadata.google.internal" ||
     hostname.endsWith(".metadata.google.internal") ||

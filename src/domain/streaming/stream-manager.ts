@@ -42,6 +42,7 @@ export class StreamManager {
 
   // Result promises
   private textResolve!: (text: string) => void;
+  private textReject!: (err: unknown) => void;
   private usageResolve!: (usage: Usage) => void;
   private finishResolve!: (reason: string) => void;
 
@@ -50,9 +51,12 @@ export class StreamManager {
   readonly finishReason: Promise<string>;
 
   constructor() {
-    this.fullText = new Promise<string>((r) => { this.textResolve = r; });
+    this.fullText = new Promise<string>((r, rej) => { this.textResolve = r; this.textReject = rej; });
     this.usage = new Promise<Usage>((r) => { this.usageResolve = r; });
     this.finishReason = new Promise<string>((r) => { this.finishResolve = r; });
+    // F2: fullText rejects on failed turns. Consumers that only iterate
+    // textStream must not trip Node's unhandled-rejection crash path.
+    this.fullText.catch(() => {});
   }
 
   // ── Producer API ──────────────────────────────────────────────────────
@@ -88,6 +92,14 @@ export class StreamManager {
   /** Resolve the fullText promise. */
   resolveText(text: string): void {
     this.textResolve(text);
+  }
+
+  /**
+   * F2: reject the fullText promise — a failed turn must be observable by
+   * callers that await it, in parity with the non-streaming throw.
+   */
+  rejectText(err: unknown): void {
+    this.textReject(err);
   }
 
   /** Resolve the usage promise. */
@@ -197,12 +209,17 @@ export class StreamManager {
                   }),
                 ),
               );
+              // F3: report the actual execution outcome — the same heuristic
+              // the SDK callbacks use — instead of a hardcoded success.
+              const output = event.step.toolCall.result;
+              const success =
+                typeof output === "string" ? !output.startsWith("Error:") : true;
               controller.enqueue(
                 encoder.encode(
                   sseLine("tool_result", {
                     callId: event.step.toolCall.id,
-                    output: event.step.toolCall.result,
-                    success: true,
+                    output,
+                    success,
                   }),
                 ),
               );

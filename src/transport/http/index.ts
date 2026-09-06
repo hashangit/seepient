@@ -482,6 +482,12 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     if (outboxFlushTimer) clearInterval(outboxFlushTimer);
     sessionManager.stopCleanup();
     wsHandle.close();
+    // F4: closing the server fully detaches it from the host process — the
+    // signal handlers registered at listen time are removed here, so an
+    // embedder needs only `server.close()` (dispose() stays as an explicit
+    // no-op-safe alias for teardown before close).
+    process.removeListener("SIGINT", shutdownListener);
+    process.removeListener("SIGTERM", shutdownListener);
   });
 
   // Graceful shutdown handler — registered ONLY when this server listens.
