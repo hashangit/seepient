@@ -29,9 +29,8 @@ jobs:
         with:
           node-version: '22.19'
 
-      - name: Install docs dependencies
+      - name: Install dependencies (docs is a workspace member)
         run: pnpm install --frozen-lockfile
-        working-directory: docs
 
       - name: Build docs
         run: pnpm run build
