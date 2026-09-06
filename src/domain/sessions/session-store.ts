@@ -21,12 +21,15 @@ import type {
 
 // ── Session ID validation ───────────────────────────────────────────────
 
-const SESSION_ID_RE = /^[a-zA-Z0-9-]+$/;
+// W154a: `_` is allowed everywhere (transport + SDK already permitted it).
+// W154b: length is capped so bounded bodies cannot inflate Maps and fs names.
+const SESSION_ID_RE = /^[a-zA-Z0-9_-]+$/;
+export const MAX_SESSION_ID_LENGTH = 128;
 
 function validateSessionId(sessionId: string): void {
-  if (!SESSION_ID_RE.test(sessionId)) {
+  if (!SESSION_ID_RE.test(sessionId) || sessionId.length > MAX_SESSION_ID_LENGTH) {
     throw new Error(
-      `Invalid session ID "${sessionId}". Only alphanumeric characters and dashes are allowed.`,
+      `Invalid session ID "${sessionId}". Only alphanumeric characters, dashes, and underscores are allowed (max ${MAX_SESSION_ID_LENGTH} characters).`,
     );
   }
 }

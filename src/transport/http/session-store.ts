@@ -49,6 +49,8 @@ export interface CreateSessionOptions {
 }
 
 const SESSION_ID_RE = /^[a-zA-Z0-9_-]+$/;
+// W154a/b: aligned with the domain backends (charset incl. `_`) and capped.
+const MAX_SESSION_ID_LENGTH = 128;
 
 interface TrackedSession extends SessionData {
   apiKeyHash: string;
@@ -82,6 +84,8 @@ export class ServerSessionManager {
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
   private inFlightTurns: Set<string> = new Set();
   private inFlightCreations: Set<string> = new Set();
+  /** W154g: per-key in-flight createSession count (closes the cap race). */
+  private inFlightCreatesPerKey: Map<string, number> = new Map();
 
   /**
    * Attempt to acquire an in-flight turn lock for a session ID.
@@ -183,13 +187,36 @@ export class ServerSessionManager {
         ? optsOrProvider.apiKeyHash
         : hashKey(apiKey);
 
-    // Enforce per-key limit
+    // Enforce per-key limit. W154g: concurrent createSession calls on one
+    // key both counted against the cap only after their sessions landed in
+    // the map — hold a per-key in-flight counter for the whole call.
     const existing = this.getSessionsByKey(keyHash);
-    if (existing.length >= this.maxSessionsPerKey) {
+    const inFlightCreates = this.inFlightCreatesPerKey.get(keyHash) ?? 0;
+    if (existing.length + inFlightCreates >= this.maxSessionsPerKey) {
       throw new Error(
         `Maximum concurrent sessions (${this.maxSessionsPerKey}) reached for this API key.`,
       );
     }
+    this.inFlightCreatesPerKey.set(keyHash, inFlightCreates + 1);
+
+    try {
+      return await this.createSessionInner(apiKey, optsOrProvider, modelArg, keyHash);
+    } finally {
+      const current = this.inFlightCreatesPerKey.get(keyHash) ?? 1;
+      if (current <= 1) this.inFlightCreatesPerKey.delete(keyHash);
+      else this.inFlightCreatesPerKey.set(keyHash, current - 1);
+    }
+  }
+
+  private async createSessionInner(
+    apiKey: string,
+    optsOrProvider?: string | CreateSessionOptions,
+    modelArg?: string,
+    keyHashOverride?: string,
+  ): Promise<SessionData> {
+    const keyHash = keyHashOverride ?? (typeof optsOrProvider === "object" && optsOrProvider?.apiKeyHash
+      ? optsOrProvider.apiKeyHash
+      : hashKey(apiKey));
 
     let id: string | undefined;
     let provider: string | undefined;
@@ -207,8 +234,10 @@ export class ServerSessionManager {
     const finalId = id ?? crypto.randomUUID();
     const explicitId = id;
     if (explicitId !== undefined) {
-      if (!SESSION_ID_RE.test(finalId)) {
-        throw new Error(`Invalid session ID format: must match ${SESSION_ID_RE}`);
+      if (!SESSION_ID_RE.test(finalId) || finalId.length > MAX_SESSION_ID_LENGTH) {
+        throw new Error(
+          `Invalid session ID format: must match ${SESSION_ID_RE} (max ${MAX_SESSION_ID_LENGTH} characters)`,
+        );
       }
       if (this.sessions.has(finalId) || this.inFlightCreations.has(finalId)) {
         const err = new Error(`SESSION_ALREADY_EXISTS: Session "${finalId}" already exists`);
@@ -270,22 +299,28 @@ export class ServerSessionManager {
     let session: TrackedSession | null | undefined = this.sessions.get(id);
 
     if (!session) {
-      // Try loading from persistence backend
+      // Try loading from persistence backend. W153: do NOT cache into the
+      // resident map yet — a denied probe must not pin the victim's session
+      // in memory until TTL.
       session = await this.loadSessionFromBackend(id);
       if (!session) return null;
-      this.sessions.set(id, session);
     }
 
-    // Check expiration
+    // W152/W153: ownership is verified BEFORE expiry handling so a foreign
+    // probe can never trigger (or observe) deletion of a session it does
+    // not own, and only an owned session is cached.
+    // Ownership verification — constant-time comparison to prevent timing attacks
+    if (!this.verifyOwnership(session, apiKeyHash)) {
+      return null;
+    }
+
+    // Check expiration (W152: an in-flight turn defers the absolute TTL)
     if (this.isExpired(session)) {
       this.deleteSession(id);
       return null;
     }
 
-    // Ownership verification — constant-time comparison to prevent timing attacks
-    if (!this.verifyOwnership(session, apiKeyHash)) {
-      return null;
-    }
+    this.sessions.set(id, session);
 
     return {
       id: session.id,
@@ -316,8 +351,13 @@ export class ServerSessionManager {
 
   /**
    * Delete a session by ID.
+   * W152: refuses while a turn is in flight — deleting a live session would
+   * clear its writer lock and let a second writer start mid-stream.
    */
   deleteSession(id: string): void {
+    if (this.inFlightTurns.has(id)) {
+      return;
+    }
     this.sessions.delete(id);
     this.inFlightTurns.delete(id);
     this.backend.delete(id).catch(() => {
@@ -386,8 +426,12 @@ export class ServerSessionManager {
   private isExpired(session: TrackedSession): boolean {
     const now = Date.now();
 
-    // Absolute TTL
+    // Absolute TTL — W152: an in-flight turn defers expiry, otherwise any
+    // cleanup pass (or getSession probe) could evict a session mid-stream.
     if (now - session.createdAt > this.sessionTTL) {
+      if (this.isTurnInFlight(session.id)) {
+        return false;
+      }
       return true;
     }
 

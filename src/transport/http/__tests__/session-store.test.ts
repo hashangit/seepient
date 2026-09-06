@@ -99,22 +99,36 @@ describe("ServerSessionManager (Spec 021-2 / FR-004)", () => {
     // session2 was idle, so it MUST be reaped!
     expect((manager as any).sessions.has(session2.id)).toBe(false);
 
-    // But absolute TTL ceiling (24h) still reaps even in-flight sessions
+    // W152: the absolute TTL ceiling ALSO defers to an in-flight turn —
+    // expiry must never clear a live writer lock.
     (manager as any).sessions.get(session1.id)!.createdAt = Date.now() - 25 * 60 * 60 * 1000;
     manager.cleanup();
+    expect((manager as any).sessions.has(session1.id)).toBe(true);
+    expect((manager as any).inFlightTurns.has(session1.id)).toBe(true);
+
+    // Once the turn completes, the expired session is collected normally.
+    manager.releaseTurn(session1.id);
+    manager.cleanup();
     expect((manager as any).sessions.has(session1.id)).toBe(false);
-    expect((manager as any).inFlightTurns.has(session1.id)).toBe(false);
   });
 
-  it("deleteSession clears in-flight turn lock (W035)", async () => {
+  it("deleteSession refuses while a turn is in flight, then clears the lock (W035 as amended by 021-4 W152)", async () => {
     const manager = new ServerSessionManager({ backend: new MemoryPersistenceBackend() });
     const session = await manager.createSession("test-key", { id: "turn-lock-sess" });
     expect(manager.acquireTurn(session.id)).toBe(true);
     expect(manager.isTurnInFlight(session.id)).toBe(true);
 
+    // W152: deleting a live session would clear its writer lock and let a
+    // second writer start mid-stream — refused while the turn is in flight.
     manager.deleteSession(session.id);
-    expect(manager.isTurnInFlight(session.id)).toBe(false);
+    expect(manager.isTurnInFlight(session.id)).toBe(true);
+    expect((manager as any).sessions.has(session.id)).toBe(true);
+
+    // After the turn completes, deletion works and clears any residual lock.
+    manager.releaseTurn(session.id);
+    manager.deleteSession(session.id);
     expect((manager as any).inFlightTurns.has(session.id)).toBe(false);
+    expect((manager as any).sessions.has(session.id)).toBe(false);
   });
 
   it("rolls back in-memory session if backend persistence throws on createSession (W038.3)", async () => {

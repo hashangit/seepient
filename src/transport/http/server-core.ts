@@ -8,6 +8,7 @@ import { getDefaultProviderRuntime, type ProviderRuntime } from "../../domain/pr
 import type { ProviderRuntimeContract } from "../../foundations/contracts/provider-runtime.js";
 import type { Middleware } from "../../foundations/contracts/middleware.js";
 import { extractLoopError } from "../sdk/error-surfacing.js";
+import { normalizeHistoryForSend } from "../../domain/sessions/normalize-history.js";
 import { initializeSkillRegistry } from "../../capabilities/skills/index.js";
 import { buildSkillCatalog } from "../../domain/skills/skill-catalog.js";
 
@@ -83,6 +84,10 @@ export async function serverGenerateText(
     timestamp: now(),
   });
 
+  // W150 (D3a): a failed turn leaves a dangling persisted user message;
+  // collapse it on the model-input copy so retries alternate roles.
+  const modelMessages = normalizeHistoryForSend(messages);
+
   const snapshot = await runtime.createTurnSnapshot();
 
   const result = await runAgentLoop({
@@ -90,7 +95,7 @@ export async function serverGenerateText(
     turnSnapshot: snapshot,
     model: options.model,
     modelOverride: options.model,
-    messages,
+    messages: modelMessages,
     toolDefs,
     maxSteps: options.maxSteps ?? 5,
     hooks,
@@ -169,6 +174,9 @@ export async function handleAgentChatStream(
     timestamp: now(),
   });
 
+  // W150 (D3a): same send-time normalization as the non-streaming path.
+  const modelMessages = normalizeHistoryForSend(messages);
+
   let accumulatedText = "";
 
   try {
@@ -179,7 +187,7 @@ export async function handleAgentChatStream(
       turnSnapshot: snapshot,
       model: opts.model,
       modelOverride: opts.model,
-      messages,
+      messages: modelMessages,
       toolDefs,
       maxSteps: opts.maxSteps ?? 5,
       hooks,
