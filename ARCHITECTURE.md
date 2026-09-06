@@ -24,7 +24,7 @@ across layers, but contain wiring only.
 | Domain | `src/domain/` | Agent loop, permission decisions, approval lifecycle, sessions, hooks, middleware, settings, and product policy |
 | Capabilities | `src/capabilities/` | Stable implementations for LLMs, tools, skills, execution boundaries, filesystem commits, effect brokers, worker scheduling, gateway, and tokenization |
 | Vendors | `src/vendors/` | Third-party SDK wrappers and platform-specific vendor integrations |
-| Foundations | `src/foundations/` | Shared types, errors, contracts, schemas, persistence vocabulary, hashline, and IDs |
+| Foundations | `src/foundations/` | Shared types, errors, contracts, schemas, persistence vocabulary, hashline, IDs, and the shared network guard (`network/`: IP classifier, pinned fetch, SSRF-validated fetch) |
 
 ## Hard rules
 
