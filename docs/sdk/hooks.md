@@ -28,16 +28,16 @@ interface Hooks {
   onError?: (error: SeepientError) => void | Promise<void>;
 
   /** Called when the agent loop finishes. */
-  onFinish?: (result: GenerateTextResult) => void | Promise<void>;
+  onFinish?: (result: AskSeepientResult) => void | Promise<void>;
 }
 ```
 
 ## Quick example
 
 ```typescript
-import { generateText } from "seepient";
+import { askSeepient } from "seepient";
 
-const result = await generateText("Deploy the staging environment", {
+const result = await askSeepient("Deploy the staging environment", {
   tools: ["execute_shell_command"],
   hooks: {
     beforeToolCall: ({ name, args }) => {
@@ -97,7 +97,7 @@ const agent = await createSeepient({
 ### Logging hooks
 
 ```typescript
-const result = await generateText("Analyze the codebase", {
+const result = await askSeepient("Analyze the codebase", {
   tools: ["core"],
   hooks: {
     beforeToolCall: ({ name, args }) => {
@@ -137,10 +137,10 @@ const result = await generateText("Analyze the codebase", {
 ### Analytics tracking
 
 ```typescript
-import { generateText } from "seepient";
+import { askSeepient } from "seepient";
 import { analytics } from "./analytics.js";
 
-const result = await generateText("Search for AI news", {
+const result = await askSeepient("Search for AI news", {
   tools: ["web_search"],
   hooks: {
     beforeToolCall: ({ name }) => {
@@ -167,11 +167,11 @@ const result = await generateText("Search for AI news", {
 ### Cost tracking
 
 ```typescript
-import { generateText } from "seepient";
+import { askSeepient } from "seepient";
 
 const costs: { prompt: number; completion: number; total: number }[] = [];
 
-const result = await generateText("Complex analysis task", {
+const result = await askSeepient("Complex analysis task", {
   tools: ["all"],
   hooks: {
     onFinish: (result) => {
@@ -191,10 +191,10 @@ console.log(`Total tokens used: ${totalTokens}`);
 ### Error alerting
 
 ```typescript
-import { generateText, ProviderError, ToolError } from "seepient";
+import { askSeepient, ProviderError, ToolError } from "seepient";
 import { sendAlert } from "./ops.js";
 
-const result = await generateText("Run the migration", {
+const result = await askSeepient("Run the migration", {
   tools: ["execute_shell_command"],
   hooks: {
     onError: (error) => {
@@ -231,7 +231,7 @@ const result = await generateText("Run the migration", {
 Stream agent events to connected WebSocket clients in real time:
 
 ```typescript
-import { generateText } from "seepient";
+import { askSeepient } from "seepient";
 import type { WebSocket } from "ws";
 
 function relayToClient(ws: WebSocket) {
@@ -245,7 +245,7 @@ function relayToClient(ws: WebSocket) {
     onStep: (step: StepResult) => {
       ws.send(JSON.stringify({ event: "step", step }));
     },
-    onFinish: (result: GenerateTextResult) => {
+    onFinish: (result: AskSeepientResult) => {
       ws.send(JSON.stringify({
         event: "done",
         tokens: result.usage.totalTokens,
@@ -259,7 +259,7 @@ function relayToClient(ws: WebSocket) {
 ws.on("connection", (socket) => {
   socket.on("message", async (data) => {
     const prompt = data.toString();
-    await generateText(prompt, {
+    await askSeepient(prompt, {
       tools: ["core"],
       hooks: relayToClient(socket),
     });
@@ -269,7 +269,6 @@ ws.on("connection", (socket) => {
 
 ## Related APIs
 
-- [generateText()](/sdk/generate-text) -- One-shot execution with hooks
-- [streamText()](/sdk/stream-text) -- Streaming with `onText`, `onToolCall`, `onToolResult` callbacks
+- [askSeepient()](/sdk/ask-seepient) -- One-shot execution with hooks (streaming via `stream: true`)
 - [createSeepient()](/sdk/create-seepient) -- Stateful agent with persistent hooks
 - [Types](/sdk/types) -- Full TypeScript type reference

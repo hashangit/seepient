@@ -5,7 +5,7 @@ description: Complete reference for all 15 built-in tools in Seepient Agent with
 
 # Built-in Tools Reference
 
-Seepient Agent includes 15 built-in tools organized into three functional groups (`CORE_TOOLS`, `COMM_TOOLS`, and `ADVANCED_TOOLS`). Every tool works identically across `generateText`, `streamText`, `createSeepient`, the CLI, and the server REST API.
+Seepient Agent includes 15 built-in tools organized into three functional groups (`CORE_TOOLS`, `COMM_TOOLS`, and `ADVANCED_TOOLS`). Every tool works identically across `askSeepient`, `createSeepient`, the CLI, and the server REST API.
 
 ## Quick Import
 
@@ -28,15 +28,15 @@ import {
 ### Using Group Names in Options
 
 ```typescript
-const result = await generateText("Search for recent AI news", {
+const result = await askSeepient("Search for recent AI news", {
   tools: ["web_search"],    // single tool by name
 });
 
-const result2 = await generateText("Analyze the codebase", {
+const result2 = await askSeepient("Analyze the codebase", {
   tools: ["core", "comm"],  // all core + all communication tools
 });
 
-const result3 = await generateText("Full analysis", {
+const result3 = await askSeepient("Full analysis", {
   tools: ["all"],           // every built-in tool
 });
 ```
@@ -59,7 +59,7 @@ Run shell commands on the host machine.
 **Example:**
 
 ```typescript
-const result = await generateText("List all TypeScript files in the src directory", {
+const result = await askSeepient("List all TypeScript files in the src directory", {
   tools: ["execute_shell_command"],
 });
 ```
@@ -84,7 +84,7 @@ Read the contents of a file.
 **Example:**
 
 ```typescript
-const result = await generateText("What does the main entry point do?", {
+const result = await askSeepient("What does the main entry point do?", {
   tools: ["read_file"],
 });
 ```
@@ -109,7 +109,7 @@ Write content to a file. Creates parent directories if needed. Overwrites existi
 **Example:**
 
 ```typescript
-const result = await generateText("Create a package.json for a React project", {
+const result = await askSeepient("Create a package.json for a React project", {
   tools: ["write_file"],
 });
 ```
@@ -133,7 +133,7 @@ Get the current system date and time. Returns ISO timestamp, local time, timezon
 **Example:**
 
 ```typescript
-const result = await generateText("What day is it today?", {
+const result = await askSeepient("What day is it today?", {
   tools: ["get_current_datetime"],
 });
 ```
@@ -168,7 +168,7 @@ Apply a hash-anchored line patch to targeted sections of an existing file. Prefe
 **Example:**
 
 ```typescript
-const result = await generateText("Fix the timeout value in src/config.ts", {
+const result = await askSeepient("Fix the timeout value in src/config.ts", {
   tools: ["read_file", "edit_file"],
 });
 ```
@@ -201,7 +201,7 @@ Maintain a structured, visible task checklist rendered directly in the TUI progr
 **Example:**
 
 ```typescript
-const result = await generateText("Plan and migrate our database schemas", {
+const result = await askSeepient("Plan and migrate our database schemas", {
   tools: ["manage_todos", "read_file", "execute_shell_command"],
 });
 ```
@@ -228,7 +228,7 @@ Render rich, interactive widgets (data tables, charts, forms, diffs, status grid
 **Example:**
 
 ```typescript
-const result = await generateText("Show me the server performance metrics as a chart", {
+const result = await askSeepient("Show me the server performance metrics as a chart", {
   tools: ["render_widget"],
 });
 ```
@@ -261,7 +261,7 @@ TAVILY_API_KEY=tvly-...   # Get a free key at https://tavily.com
 **Example:**
 
 ```typescript
-const result = await generateText("What are the latest developments in quantum computing?", {
+const result = await askSeepient("What are the latest developments in quantum computing?", {
   tools: ["web_search"],
 });
 ```
@@ -299,7 +299,7 @@ SMTP_FROM=your@email.com     # optional, defaults to SMTP_USER
 **Example:**
 
 ```typescript
-const result = await generateText(
+const result = await askSeepient(
   "Send an email to team@company.com summarizing the project status",
   { tools: ["send_email"] }
 );
@@ -335,7 +335,7 @@ WECOM_WEBHOOK=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...
 **Example:**
 
 ```typescript
-const result = await generateText(
+const result = await askSeepient(
   "Notify the team on Feishu that the deployment is complete",
   { tools: ["send_notification"] }
 );
@@ -362,7 +362,7 @@ Fetch and extract the main content from a web page. Uses Playwright + Mozilla Re
 **Example:**
 
 ```typescript
-const result = await generateText("Summarize this article: https://example.com/article", {
+const result = await askSeepient("Summarize this article: https://example.com/article", {
   tools: ["read_website"],
 });
 ```
@@ -391,7 +391,7 @@ Capture a screenshot of a web page and save it as an image file.
 **Example:**
 
 ```typescript
-const result = await generateText("Take a screenshot of google.com", {
+const result = await askSeepient("Take a screenshot of google.com", {
   tools: ["take_screenshot"],
 });
 ```
@@ -431,7 +431,7 @@ Configure an image model in `/models` under the `image-generation` purpose slot 
 **Example:**
 
 ```typescript
-const result = await generateText(
+const result = await askSeepient(
   "Generate a logo for a coffee shop called 'Bean & Brew'",
   { tools: ["generate_image"] }
 );
@@ -457,7 +457,7 @@ Optimize a user's raw prompt to be more structured and effective for LLMs.
 **Example:**
 
 ```typescript
-const result = await generateText(
+const result = await askSeepient(
   "Optimize this prompt before generating an image: a cat sitting on a tree",
   { tools: ["optimize_prompt", "generate_image"] }
 );
@@ -484,7 +484,7 @@ Activate a skill by name. Injects the skill's content into the agent's context.
 **Example:**
 
 ```typescript
-const result = await generateText(
+const result = await askSeepient(
   "Review my authentication code for security vulnerabilities",
   { tools: ["use_skill", "read_file", "execute_shell_command"] }
 );

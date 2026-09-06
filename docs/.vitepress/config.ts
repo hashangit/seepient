@@ -133,8 +133,7 @@ export default defineConfig({
           items: [
             { text: 'Overview', link: '/sdk/overview' },
             { text: 'createSeepient', link: '/sdk/create-seepient' },
-            { text: 'generateText', link: '/sdk/generate-text' },
-            { text: 'streamText', link: '/sdk/stream-text' },
+            { text: 'askSeepient', link: '/sdk/ask-seepient' },
             { text: 'Settings', link: '/sdk/settings' },
             { text: 'Provider management', link: '/sdk/provider-management' },
             { text: 'Custom tools', link: '/sdk/custom-tools' },

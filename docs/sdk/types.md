@@ -10,10 +10,9 @@ Complete TypeScript type definitions for the Seepient Agent SDK. All types, inte
 ```typescript
 import type {
   Message,
-  GenerateTextOptions,
-  GenerateTextResult,
-  StreamTextOptions,
-  StreamTextResult,
+  AskSeepientOptions,
+  AskSeepientResult,
+  AskSeepientStreamResult,
   CreateSeepientOptions,
   Seepient,
   PersistenceBackend,
@@ -168,12 +167,12 @@ interface CumulativeUsage {
 
 ---
 
-## generateText & streamText Types
+## askSeepient Types
 
-### GenerateTextOptions
+### AskSeepientOptions
 
 ```typescript
-interface GenerateTextOptions {
+interface AskSeepientOptions {
   /** Model identifier, e.g. "gpt-5.4", "claude-sonnet-4-6-20260320". */
   model?: string;
   /** Feeds the permission pipeline's modelProviderClass audit label. */
@@ -230,36 +229,10 @@ interface GenerateTextOptions {
   metadata?: Record<string, unknown>;
   /** Extra config passed to tool handlers. */
   config?: Record<string, unknown>;
-  /** Abort controller signal for cancellation. */
+  /** Abort controller signal for cancellation (bridged to the agent loop and all media operations). */
   signal?: AbortSignal;
-}
-```
-
-### GenerateTextResult
-
-```typescript
-interface GenerateTextResult {
-  /** The final assistant response text. */
-  text: string;
-  /** Ordered list of all loop iterations. */
-  steps: StepResult[];
-  /** All tool calls made during execution. */
-  toolCalls: ToolCall[];
-  /** Token usage and cost. */
-  usage: Usage;
-  /** Why the loop terminated. */
-  finishReason: "stop" | "max_steps" | "error" | "aborted";
-  /** Full conversation history for this invocation. */
-  messages: Message[];
-}
-```
-
-### StreamTextOptions
-
-Extends `GenerateTextOptions` with real-time streaming callbacks:
-
-```typescript
-interface StreamTextOptions extends GenerateTextOptions {
+  /** Return an AskSeepientStreamResult instead of AskSeepientResult. */
+  stream?: boolean;
   /** Called with each text chunk as it arrives. */
   onText?: (delta: string) => void;
   /** Called when the agent invokes a tool. */
@@ -276,15 +249,34 @@ interface StreamTextOptions extends GenerateTextOptions {
   }) => void;
   /** Called for every agent loop step. */
   onStep?: (step: StepResult) => void;
-  /** Called if an error occurs during execution. */
+  /** Called if an error occurs during execution (both modes). */
   onError?: (error: SeepientError) => void;
 }
 ```
 
-### StreamTextResult
+### AskSeepientResult
 
 ```typescript
-interface StreamTextResult {
+interface AskSeepientResult {
+  /** The final assistant response text. */
+  text: string;
+  /** Ordered list of all loop iterations. */
+  steps: StepResult[];
+  /** All tool calls made during execution. */
+  toolCalls: ToolCall[];
+  /** Token usage and cost. */
+  usage: Usage;
+  /** Why the loop terminated. */
+  finishReason: "stop" | "max_steps" | "error" | "aborted";
+  /** Full conversation history for this invocation. */
+  messages: Message[];
+}
+```
+
+### AskSeepientStreamResult
+
+```typescript
+interface AskSeepientStreamResult {
   /** Async iterator yielding text deltas as they arrive. */
   textStream: AsyncIterable<string>;
   /** Async iterator yielding each agent loop step in actual execution order. */
@@ -298,7 +290,7 @@ interface StreamTextResult {
   /** Call to cancel the running loop. */
   abort: () => void;
   /** Returns a Web API Response with SSE body. */
-  toResponse: () => Response;
+  toResponse: (options?: { headers?: Record<string, string> }) => Response;
   /** Returns a ReadableStream in SSE wire format. */
   toSSEStream: () => ReadableStream;
 }
@@ -392,7 +384,10 @@ interface Seepient {
   /** Send a message and get the full response. Context is preserved. */
   chat(message: string): Promise<AgentResponse>;
   /** Send a message with streaming output. */
-  chatStream(message: string, options?: StreamTextOptions): Promise<StreamTextResult>;
+  chatStream(
+    message: string,
+    options?: Omit<AskSeepientOptions, "stream" | "signal">,
+  ): Promise<AskSeepientStreamResult>;
   /** Switch the provider account (and optionally model) used for subsequent calls. */
   switchProvider(accountOrModel: string, model?: string): Promise<void>;
   /** Update the system prompt. Replaces the existing system message in history. */
@@ -768,7 +763,7 @@ interface Hooks {
   afterToolCall?: (result: { name: string; output: string; duration: number }) => void | Promise<void>;
   onStep?: (step: StepResult) => void | Promise<void>;
   onError?: (error: SeepientError) => void | Promise<void>;
-  onFinish?: (result: GenerateTextResult) => void | Promise<void>;
+  onFinish?: (result: AskSeepientResult) => void | Promise<void>;
 }
 ```
 

@@ -67,7 +67,7 @@ console.log(result.text)
 ::: warning Store injection completeness
 Stateless operation requires injecting all three permission contracts (`auditStore`, `policyStore`, and `capabilityLedger`) along with `persist`. If 1 or 2 permission stores are injected, the SDK logs a warning (`[seepient] WARNING: Partial state store injection detected...`) and falls back missing stores to writing to `~/.seepient` or `./.seepient` on the local filesystem.
 
-For one-shot execution, `generateText()` and `streamText()` also accept `auditStore`, `policyStore`, `capabilityLedger`, `principalId`, and `runtime` to run without disk access.
+For one-shot execution, `askSeepient()` also accepts `auditStore`, `policyStore`, `capabilityLedger`, `principalId`, and `runtime` to run without disk access.
 :::
 
 ---

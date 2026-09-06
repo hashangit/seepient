@@ -81,7 +81,7 @@ Seepient supports two tiers of session persistence contracts with distinct fidel
 
 ## Asymmetric Storage Keying
 
-When injecting storage contracts into `createSeepient` or `createServer` in distributed or multi-tenant architectures, understand that Seepient partitions state across different scoping keys along distinct fault and security boundaries:
+When injecting storage contracts into `createSeepient` or `runSeepientServer` in distributed or multi-tenant architectures, understand that Seepient partitions state across different scoping keys along distinct fault and security boundaries:
 
 | Store Contract | Scoping Key | Scope Boundary | Purpose |
 |---|---|---|---|

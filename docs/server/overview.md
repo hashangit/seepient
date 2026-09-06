@@ -66,21 +66,21 @@ seepient server
 ```
 
 ```bash [Node.js]
-import { createServer } from "seepient/server";
+import { runSeepientServer } from "seepient/server";
 
-const server = await createServer({ port: 7337 });
+const server = await runSeepientServer({ port: 7337 });
 ```
 
 :::
 
 ## Programmatic Server Creation & Stateless Workers
 
-For distributed worker fleets or custom orchestration, `createServer()` accepts injected contracts for provider runtimes, session stores, and audit loggers:
+For distributed worker fleets or custom orchestration, `runSeepientServer()` accepts injected contracts for provider runtimes, session stores, and audit loggers:
 
 ```typescript
-import { createServer } from "seepient/server";
+import { runSeepientServer } from "seepient/server";
 
-const server = await createServer({
+const server = await runSeepientServer({
   port: 7337,
   runtime: myCustomProviderRuntime,
   persist: myDistributedPersistenceBackend,
@@ -88,8 +88,8 @@ const server = await createServer({
 });
 ```
 
-::: note Standalone Binary vs Programmatic createServer
-The `seepient server` CLI and `seepient-server` binary are configured via environment variables (`PORT`, `HOST`, `SEEPIENT_API_KEYS_FILE`, `SEEPIENT_SECURITY_DIR`) and CLI flags. To inject custom in-memory or database-backed store contracts (`runtime`, `persist`, `auditStore`, `policyStore`, `capabilityLedger`), use the programmatic `createServer()` API from `seepient/server`.
+::: note Standalone Binary vs Programmatic runSeepientServer
+The `seepient server` CLI and `seepient-server` binary are configured via environment variables (`PORT`, `HOST`, `SEEPIENT_API_KEYS_FILE`, `SEEPIENT_SECURITY_DIR`) and CLI flags. To inject custom in-memory or database-backed store contracts (`runtime`, `persist`, `auditStore`, `policyStore`, `capabilityLedger`), use the programmatic `runSeepientServer()` API from `seepient/server`.
 :::
 
 ### Stateless Worker Mutation Guard

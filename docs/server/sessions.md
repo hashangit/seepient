@@ -81,9 +81,9 @@ A session is considered expired when **either** condition is met. Expired sessio
 ### Configuring TTL
 
 ```typescript
-import { createServer } from "seepient/server";
+import { runSeepientServer } from "seepient/server";
 
-await createServer({
+await runSeepientServer({
   sessionTTL: 7200, // 2 hours in seconds
 });
 ```

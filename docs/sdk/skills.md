@@ -46,9 +46,9 @@ See [Two invocation paths](#two-invocation-paths) for a detailed walkthrough of 
 Skills are loaded automatically when you specify skill names:
 
 ```typescript
-import { generateText } from "seepient";
+import { askSeepient } from "seepient";
 
-const result = await generateText("Deploy the staging environment", {
+const result = await askSeepient("Deploy the staging environment", {
   skills: ["docker-ops"],
   tools: ["core"],
 });
@@ -78,7 +78,7 @@ import { initializeSkillRegistry } from "seepient";
 await initializeSkillRegistry(process.cwd());
 ```
 
-Call this at application startup to ensure skills are discovered before the first agent invocation. Seepient Agent calls this automatically when you pass `skills` to `generateText()` or `createSeepient()`, but you may call it explicitly to pre-load skills or inspect the registry.
+Call this at application startup to ensure skills are discovered before the first agent invocation. Seepient Agent calls this automatically when you pass `skills` to `askSeepient()` or `createSeepient()`, but you may call it explicitly to pre-load skills or inspect the registry.
 
 ## Skill search paths
 
@@ -120,10 +120,10 @@ Seepient ships skills in the bundled `skills/` directory. They are discovered au
 Activate any of them by name:
 
 ```typescript
-import { generateText } from "seepient";
+import { askSeepient } from "seepient";
 
 // Route any design request through the OpenDesign catalogue
-await generateText("Design a dark-mode login screen for a fintech app", {
+await askSeepient("Design a dark-mode login screen for a fintech app", {
   skills: ["design"],
   tools: ["core", "comm", "advanced"],
 });
@@ -523,7 +523,7 @@ The `use_skill` tool path does **not** perform provider switching or `@path` res
 
 ## Related APIs
 
-- [generateText()](/sdk/generate-text) -- One-shot execution with skills
+- [askSeepient()](/sdk/ask-seepient) -- One-shot execution with skills
 - [createSeepient()](/sdk/create-seepient) -- Stateful agent with skill support
 - [Custom Tools](/sdk/custom-tools) -- Build custom tools
 - [Types](/sdk/types) -- Full TypeScript type reference

@@ -221,6 +221,5 @@ const agent = await createSeepient({
 ## Related APIs
 
 - [createSeepient()](/sdk/create-seepient) -- Stateful agent with custom tool composition
-- [generateText()](/sdk/generate-text) -- One-shot execution with tool support
-- [streamText()](/sdk/stream-text) -- Streaming execution with tool callbacks
+- [askSeepient()](/sdk/ask-seepient) -- One-shot execution with tool support (streaming via `stream: true`)
 - [Types](/sdk/types) -- Full TypeScript type reference

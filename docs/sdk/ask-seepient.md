@@ -1,27 +1,37 @@
 ---
-title: generateText()
-description: One-shot agent execution -- send a prompt, get a structured result with automatic tool calls, hooks, and structured output.
+title: askSeepient()
+description: One-shot agent execution -- send a prompt, get a structured result, with optional streaming via async iterables and HTTP SSE helpers.
 ---
 
-# generateText()
+# askSeepient()
 
-Run a one-shot agent loop and return the structured result. Creates fresh state for each call (stateless). Handles tool calls automatically until the provider returns no more tool calls or `maxSteps` is reached.
+Run a one-shot agent loop. Creates fresh state for each call (stateless). Handles tool calls automatically until the provider returns no more tool calls or `maxSteps` is reached.
+
+By default it returns a structured `AskSeepientResult`. Pass `stream: true` to get an `AskSeepientStreamResult` with async iterables (`textStream`, `steps`) and Web API SSE helpers (`toResponse()`, `toSSEStream()`).
 
 ## Signature
 
 ```typescript
-function generateText(
+// Non-streaming (default)
+function askSeepient(
   prompt: string,
-  options?: GenerateTextOptions,
-): Promise<GenerateTextResult>
+  options?: AskSeepientOptions & { stream?: false },
+): Promise<AskSeepientResult>
+
+// Streaming
+function askSeepient(
+  prompt: string,
+  options: AskSeepientOptions & { stream: true },
+): Promise<AskSeepientStreamResult>
 ```
 
 ## Quick example
 
 ```typescript
-import { generateText } from "seepient";
+import { askSeepient } from "seepient";
 
-const result = await generateText("What is the weather in San Francisco?", {
+// Non-streaming one-shot
+const result = await askSeepient("What is the weather in San Francisco?", {
   tools: ["web_search"],
   maxSteps: 5,
 });
@@ -34,6 +44,14 @@ console.log(result.toolCalls.length);
 
 console.log(result.usage);
 // => { promptTokens: 342, completionTokens: 128, totalTokens: 470, cost: 0 }
+
+// Streaming one-shot
+const stream = await askSeepient("Explain quantum computing simply", {
+  stream: true,
+  onText: (delta) => process.stdout.write(delta),
+});
+
+const finalText = await stream.fullText;
 ```
 
 ## Parameters
@@ -46,16 +64,17 @@ console.log(result.usage);
 
 ### `options` (optional)
 
-`GenerateTextOptions` -- all fields optional:
+`AskSeepientOptions` -- all fields optional:
 
 | Name            | Type                                     | Default | Description |
 |-----------------|------------------------------------------|---------|-------------|
+| `stream`        | `boolean`                                | `false` | Return an `AskSeepientStreamResult` instead of `AskSeepientResult` |
 | `model`         | `string`                                 | Provider default | Model identifier, e.g. `"gpt-5.4"`, `"claude-sonnet-4-6-20260320"` |
 | `provider`      | `string`                                 | Config default   | Provider name for audit labeling |
 | `purpose`       | `Purpose`                                | `"text"`         | Purpose routing hint (see [Purpose reference](/sdk/types#purpose) for all 15 supported values) |
 | `tier`          | `"efficient" \| "standard" \| "complex"` | *(none)*         | Model capability tier hint |
 | `providerAccount` | `string`                               | *(none)*         | Target provider account name |
-| `runtime`       | `ProviderRuntime`                        | `getDefaultProviderRuntime()` | Provider runtime instance managing credentials and inference adapters |
+| `runtime`       | `ProviderRuntimeContract`                | `getDefaultProviderRuntime()` | Provider runtime instance managing credentials and inference adapters |
 | `principalId`   | `string`                                 | `"sdk-user"`     | Identity of calling principal, threaded into audit events and capability grants |
 | `auditStore`    | `AuditStore`                             | Local file audit store | Injected audit store for recording action lifecycle events |
 | `policyStore`   | `PolicyStore`                            | Local file policy store | Injected policy store for grant snapshots and mutations |
@@ -77,12 +96,22 @@ console.log(result.usage);
 | `hooks`         | `Hooks`                                  | *(none)*         | Lifecycle callbacks (beforeToolCall, afterToolCall, onStep, onError, onFinish) |
 | `middleware`    | `Middleware[]`                            | *(none)*         | Request/response pipeline functions |
 | `metadata`      | `Record<string, unknown>`                 | `{}`             | Adapter-specific metadata passed to middleware |
-| `signal`        | `AbortSignal`                            | *(none)*         | Abort controller signal for cancellation |
+| `signal`        | `AbortSignal`                            | *(none)*         | Abort controller signal for cancellation (bridged to the agent loop and all media operations in both modes) |
 | `config`        | `Record<string, unknown>`                | `{}`             | Extra config passed to tool handlers |
 
-## Return type
+#### Callbacks (both modes)
 
-`Promise<GenerateTextResult>`:
+| Name            | Type         | Description |
+|-----------------|--------------|-------------|
+| `onText`        | `(delta: string) => void` | Called with each text chunk as it is produced |
+| `onToolCall`    | `(tool: { name: string; args: Record<string, unknown>; callId: string }) => void` | Called when the agent invokes a tool |
+| `onToolResult`  | `(result: { callId: string; output: string; success: boolean }) => void` | Called when a tool finishes execution |
+| `onStep`        | `(step: StepResult) => void` | Called for every agent loop step (text or tool_call) |
+| `onError`       | `(error: SeepientError) => void` | Called if an error occurs. Fired in both modes: streaming reports via the callback, non-streaming also rejects with the same typed error |
+
+## Return type (non-streaming)
+
+`Promise<AskSeepientResult>`:
 
 | Field          | Type                                         | Description |
 |----------------|----------------------------------------------|-------------|
@@ -92,6 +121,21 @@ console.log(result.usage);
 | `usage`        | `Usage`                                      | Token usage and cost: `{ promptTokens, completionTokens, totalTokens, cost }` |
 | `finishReason` | `"stop" \| "max_steps" \| "error" \| "aborted"` | Why the loop terminated |
 | `messages`     | `Message[]`                                  | Full conversation history for this invocation |
+
+## Return type (streaming)
+
+`Promise<AskSeepientStreamResult>`:
+
+| Field          | Type                        | Description |
+|----------------|-----------------------------|-------------|
+| `textStream`   | `AsyncIterable<string>`     | Async iterator yielding text deltas as they arrive |
+| `steps`        | `AsyncIterable<StepResult>` | Async iterator yielding each agent loop step |
+| `fullText`     | `Promise<string>`           | Resolves with the complete text when the loop finishes |
+| `usage`        | `Promise<Usage>`            | Resolves with token usage and cost when the loop finishes |
+| `finishReason` | `Promise<string>`           | Resolves with the finish reason (`"stop"`, `"max_steps"`, `"error"`, `"aborted"`) |
+| `abort`        | `() => void`                | Call to cancel the running loop (stops the agent loop and any in-flight media operations) |
+| `toResponse`   | `(options?: { headers?: Record<string, string> }) => Response` | Returns a Web API `Response` with SSE body, ready for HTTP frameworks |
+| `toSSEStream`  | `() => ReadableStream`      | Returns a `ReadableStream` in SSE wire format |
 
 ### StepResult
 
@@ -142,7 +186,7 @@ interface Usage {
 ### Basic usage
 
 ```typescript
-const result = await generateText("Explain closures in JavaScript");
+const result = await askSeepient("Explain closures in JavaScript");
 console.log(result.text);
 console.log(`Used ${result.usage.totalTokens} tokens`);
 ```
@@ -153,12 +197,12 @@ Use built-in tools by name, or pass group names to include entire categories:
 
 ```typescript
 // Named tools
-const result = await generateText("Search for recent news about AI agents", {
+const result = await askSeepient("Search for recent news about AI agents", {
   tools: ["web_search"],
 });
 
 // Tool groups
-const result2 = await generateText("Read ./config.json and summarize it", {
+const result2 = await askSeepient("Read ./config.json and summarize it", {
   tools: ["core"],  // execute_shell_command, read_file, write_file, get_current_datetime
 });
 ```
@@ -166,7 +210,7 @@ const result2 = await generateText("Read ./config.json and summarize it", {
 ### Custom tools
 
 ```typescript
-import { generateText, trustedHostTool } from "seepient";
+import { askSeepient, trustedHostTool } from "seepient";
 
 const dbQuery = trustedHostTool({
   definition: {
@@ -190,7 +234,7 @@ const dbQuery = trustedHostTool({
   },
 });
 
-const result = await generateText("How many users signed up last week?", {
+const result = await askSeepient("How many users signed up last week?", {
   tools: [dbQuery],
 });
 ```
@@ -200,7 +244,7 @@ const result = await generateText("How many users signed up last week?", {
 The agent automatically chains tool calls across multiple steps:
 
 ```typescript
-const result = await generateText(
+const result = await askSeepient(
   "Find the latest Node.js LTS version and create a file called .nvmrc with just the version number",
   {
     tools: ["web_search", "write_file"],
@@ -216,7 +260,155 @@ for (const step of result.steps) {
 }
 ```
 
+### CLI streaming
+
+Pipe agent output to the terminal in real time:
+
+```typescript
+const stream = await askSeepient("Explain monads step by step", {
+  stream: true,
+  provider: "anthropic",
+  onText: (delta) => process.stdout.write(delta),
+});
+
+const finishReason = await stream.finishReason;
+console.log(`\nFinished: ${finishReason}`);
+```
+
+### Async iteration
+
+Use `for await...of` to consume the text stream:
+
+```typescript
+const stream = await askSeepient("Write a poem about the sea", { stream: true });
+
+for await (const chunk of stream.textStream) {
+  process.stdout.write(chunk);
+}
+
+const text = await stream.fullText;
+```
+
+### Step-by-step observability
+
+Iterate over steps to observe both text generation and tool calls:
+
+```typescript
+const stream = await askSeepient("Search for Node.js 22 release notes", {
+  stream: true,
+  tools: ["web_search"],
+});
+
+for await (const step of stream.steps) {
+  if (step.type === "text") {
+    console.log("[Text]", step.content);
+  } else if (step.type === "tool_call") {
+    console.log(`[Tool] ${step.toolCall.name}(${JSON.stringify(step.toolCall.args)})`);
+    console.log(`  -> ${step.toolCall.result.slice(0, 80)}...`);
+  }
+}
+```
+
+### HTTP SSE with Express
+
+One-liner for server-sent events in any framework that supports the Web API `Response`:
+
+```typescript
+import express from "express";
+import { askSeepient } from "seepient";
+
+const app = express();
+
+app.get("/stream", async (req, res) => {
+  const prompt = req.query.prompt as string;
+  const stream = await askSeepient(prompt, { stream: true });
+  return stream.toResponse();
+});
+
+app.listen(3000);
+```
+
+### HTTP SSE with Hono
+
+```typescript
+import { Hono } from "hono";
+import { askSeepient } from "seepient";
+
+const app = new Hono();
+
+app.get("/stream", async (c) => {
+  const prompt = c.req.query("prompt") ?? "Hello";
+  const stream = await askSeepient(prompt, { stream: true });
+  return stream.toResponse();
+});
+
+export default app;
+```
+
+::: info
+`toResponse()` sets the standard SSE headers (`Content-Type: text/event-stream`, `Cache-Control: no-cache`, `Connection: keep-alive`) automatically. Pass `{ headers }` to add custom headers on top.
+:::
+
+### Raw SSE stream
+
+Use `toSSEStream()` when you need the `ReadableStream` directly instead of a full `Response`:
+
+```typescript
+const stream = await askSeepient("Generate a story", { stream: true });
+const readable = stream.toSSEStream();
+
+// Pipe to a custom WritableStream, transform, etc.
+const reader = readable.getReader();
+const decoder = new TextDecoder();
+
+while (true) {
+  const { value, done } = await reader.read();
+  if (done) break;
+  console.log(decoder.decode(value));
+}
+```
+
+The SSE stream emits events in this format:
+
+```
+event: text
+data: {"delta":"Hello"}
+
+event: tool_call
+data: {"callId":"web_search","name":"web_search","args":{"query":"..."}}
+
+event: tool_result
+data: {"callId":"web_search","output":"...","success":true}
+
+event: text
+data: {"delta":"Here are the results..."}
+
+event: done
+data: {"usage":{"totalTokens":470,"cost":0},"finishReason":"stop"}
+```
+
+::: info Interleaved ordering (v0.2.2+)
+Text deltas and tool events are emitted in their **actual execution order**. Previously, `toSSEStream()` drained all text deltas first, then all tool events — even when tools ran between text chunks. As of v0.2.2, the event queue preserves the real interleaved order, so consumers see text and tool events in the sequence they actually occurred.
+:::
+
 ### Abort mid-execution
+
+Cancel a running stream from the caller side:
+
+```typescript
+const stream = await askSeepient("Analyze this huge document...", {
+  stream: true,
+  tools: ["read_file"],
+});
+
+// Abort after 3 seconds
+setTimeout(() => stream.abort(), 3000);
+
+const finishReason = await stream.finishReason;
+console.log(`Ended: ${finishReason}`); // "aborted"
+```
+
+Or cancel via `AbortSignal` (works in both modes):
 
 ```typescript
 const controller = new AbortController();
@@ -224,19 +416,44 @@ const controller = new AbortController();
 // Abort after 5 seconds
 setTimeout(() => controller.abort(), 5000);
 
-const result = await generateText("Analyze this large dataset...", {
+const result = await askSeepient("Analyze this large dataset...", {
   signal: controller.signal,
 });
 
-// result.finishReason will be "error" if aborted
+// result.finishReason will be "aborted"
+```
+
+::: info
+The abort signal propagates to the underlying provider SDK (OpenAI, Anthropic, etc.), cancelling the in-flight HTTP request at the network level rather than only checking between agent loop steps. It also reaches media operations (`generate_image` and other vendor media fetches), so aborted calls stop consuming network and billing resources.
+:::
+
+### Combined callbacks and async iteration
+
+Use both callbacks for immediate side effects and async iteration for downstream processing:
+
+```typescript
+const stream = await askSeepient("Research AI agent frameworks", {
+  stream: true,
+  tools: ["web_search"],
+  onToolCall: ({ name }) => console.log(`[Calling ${name}]`),
+  onToolResult: ({ output, success }) => {
+    if (!success) console.error("Tool failed:", output);
+  },
+});
+
+// Still consume the text stream for downstream use
+const chunks: string[] = [];
+for await (const chunk of stream.textStream) {
+  chunks.push(chunk);
+}
 ```
 
 ### Hooks
 
-Lifecycle callbacks for observability and side effects:
+Lifecycle callbacks for observability and side effects (fire in both modes; `onFinish` receives the assembled result in streaming mode too):
 
 ```typescript
-const result = await generateText("Deploy the staging environment", {
+const result = await askSeepient("Deploy the staging environment", {
   tools: ["execute_shell_command"],
   hooks: {
     beforeToolCall: ({ name, args }) => {
@@ -277,7 +494,7 @@ interface Hooks {
 
   onError?: (error: SeepientError) => void | Promise<void>;
 
-  onFinish?: (result: GenerateTextResult) => void | Promise<void>;
+  onFinish?: (result: AskSeepientResult) => void | Promise<void>;
 }
 ```
 
@@ -296,7 +513,7 @@ Seepient Agent throws typed errors that all extend `SeepientError`:
 import { ProviderError, AbortedError } from "seepient";
 
 try {
-  const result = await generateText("Hello", { provider: "anthropic" });
+  const result = await askSeepient("Hello", { provider: "anthropic" });
 } catch (err) {
   if (err instanceof ProviderError) {
     console.log(`Provider failed: ${err.message} (retryable: ${err.retryable})`);
@@ -305,11 +522,10 @@ try {
 ```
 
 ::: tip
-When `finishReason` is `"error"`, the loop still returns a partial result rather than throwing. Check `result.finishReason` and `result.steps` to inspect what happened before the error.
+When `finishReason` is `"error"`, a streaming call still completes with the partial result rather than rejecting. Check `finishReason` and `steps` to inspect what happened before the error. Errors are also reported through `onError` in both modes.
 :::
 
 ## Related APIs
 
-- [streamText()](/sdk/stream-text) -- Streaming variant with async iterables
 - [createSeepient()](/sdk/create-seepient) -- Stateful multi-turn agent
 - [Tools](/tools/reference) -- Built-in and custom tool reference
