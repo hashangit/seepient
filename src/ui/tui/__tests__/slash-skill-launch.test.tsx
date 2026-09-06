@@ -19,6 +19,34 @@ async function waitFor(cond: () => boolean, what: string): Promise<void> {
   }
 }
 
+/**
+ * Type text into the prompt and wait until it is ECHOED in the frame before
+ * returning. Ink subscribes stdin in a passive effect — under CI load a write
+ * can land before the subscription exists and be lost entirely (a blind tick
+ * is not enough). If nothing echoes within 750ms the write was dropped, so
+ * re-send once.
+ */
+async function typeUntilEchoed(
+  stdin: { write(s: string): void },
+  lastFrame: () => string | undefined,
+  text: string,
+  what: string,
+): Promise<void> {
+  const start = Date.now();
+  let resent = false;
+  stdin.write(text);
+  while (!(lastFrame() ?? "").includes(text)) {
+    if (!resent && Date.now() - start > 750) {
+      stdin.write(text);
+      resent = true;
+    }
+    if (Date.now() - start > 8000) {
+      throw new Error(`waitFor timeout: ${what}`);
+    }
+    await tick();
+  }
+}
+
 describe("TUI slash-command skill launch & REPL parity", () => {
   it("launches an installed skill when slash command matches skill in registry", async () => {
     const mockSkill = {
@@ -80,11 +108,10 @@ describe("TUI slash-command skill launch & REPL parity", () => {
       />,
     );
 
-    await tick();
-
-    // Type "/sample-skill" then Enter
-    stdin.write("/sample-skill");
-    await tick();
+    // Wait for the prompt to exist, then for the command to be echoed before
+    // pressing Enter (see typeUntilEchoed — blind ticks lose keystrokes under load).
+    await waitFor(() => (lastFrame() ?? "").includes("› "), "prompt mounted");
+    await typeUntilEchoed(stdin, lastFrame, "/sample-skill", "command echoed in prompt");
     stdin.write("\r");
 
     await waitFor(() => chatCalls.length > 0, "agent.chat to be called with skill prompt");
@@ -144,11 +171,8 @@ describe("TUI slash-command skill launch & REPL parity", () => {
       />,
     );
 
-    await tick();
-
-    // Type "/nonexistent-cmd" then Enter
-    stdin.write("/nonexistent-cmd");
-    await tick();
+    await waitFor(() => (lastFrame() ?? "").includes("› "), "prompt mounted");
+    await typeUntilEchoed(stdin, lastFrame, "/nonexistent-cmd", "command echoed in prompt");
     stdin.write("\r");
 
     await waitFor(
