@@ -179,7 +179,6 @@ export interface AskSeepientOptions {
   maxSteps?: number;
   temperature?: number;
   maxTokens?: number;
-  output?: unknown; // ZodSchema
   hooks?: Hooks;
   signal?: AbortSignal;
   stream?: boolean;
@@ -220,8 +219,6 @@ export interface AskSeepientOptions {
 
 export interface AskSeepientResult {
   text: string;
-  data?: unknown;
-  error?: { message: string; issues: unknown };
   steps: StepResult[];
   toolCalls: ToolCall[];
   usage: Usage;
@@ -286,7 +283,7 @@ export interface CreateSeepientOptions {
 export interface Seepient {
   readonly sessionId: string;
   chat(message: string): Promise<AgentResponse>;
-  chatStream(message: string, options?: AskSeepientOptions): Promise<AskSeepientStreamResult>;
+  chatStream(message: string, options?: Omit<AskSeepientOptions, "stream" | "signal">): Promise<AskSeepientStreamResult>;
   /** Switch the provider account (and optionally model) used for subsequent calls; one argument switches the model only. */
   switchProvider(accountOrModel: string, model?: string): Promise<void>;
   setSystemPrompt(prompt: string): void;
@@ -394,8 +391,8 @@ export interface RunSeepientServerOptions {
   policyStore?: import("./contracts/execution-brokers.js").PolicyStore;
   /** Injected tenant capability ledger */
   capabilityLedger?: import("./contracts/capability-ledger.js").CapabilityLedger;
-  /** Injected SettingsManager */
-  settingsManager?: any;
+  /** Injected settings manager (structural contract; the concrete SettingsManager satisfies it) */
+  settingsManager?: import("./contracts/settings-manager-like.js").SettingsManagerLike;
   /**
    * Whether to start listening immediately.
    * Default: true. Set to false to create the configured http.Server without listening.

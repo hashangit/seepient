@@ -52,8 +52,6 @@ export type {
   AskSeepientOptions,
   AskSeepientResult,
   AskSeepientStreamResult,
-  // runSeepientServer
-  RunSeepientServerOptions,
   // createSeepient
   CreateSeepientOptions,
   Seepient,

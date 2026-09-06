@@ -5,8 +5,9 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'http';
-import { SettingsManager, SettingsError } from '../../domain/settings/settings-manager.js';
+import { SettingsError } from '../../domain/settings/settings-manager.js';
 import { SETTINGS_MAP, SETTINGS_SCHEMA, SETTINGS_CATEGORIES } from '../../foundations/settings-schema.js';
+import type { SettingsManagerLike } from '../../foundations/contracts/settings-manager-like.js';
 import type { WebSocket, ConnectionState } from '../ws/ws-types.js';
 import type { ApiKeyEntry, KeyScope } from '../auth/auth.js';
 import { hasScope } from '../auth/auth.js';
@@ -14,7 +15,7 @@ import { hasScope } from '../auth/auth.js';
 // ── Types ─────────────────────────────────────────────────────────────────
 
 export interface SettingsHandlerContext {
-  settingsManager: SettingsManager;
+  settingsManager: SettingsManagerLike;
   /** Get all connected WS clients (excluding sender) */
   getOtherClients: (excludeWs?: WebSocket) => Array<{ ws: WebSocket; state: ConnectionState }>;
 }

@@ -9,7 +9,6 @@ import type {
   AskSeepientOptions,
   AskSeepientResult,
   AskSeepientStreamResult,
-  RunSeepientServerOptions,
   Message,
   StepResult,
   ToolCall,
@@ -28,7 +27,7 @@ import {
   toSeepientError,
 } from "../../domain/context/message-convert.js";
 import { generateId } from "../../foundations/id.js";
-import { surfaceLoopError, extractLoopError } from "./error-surfacing.js";
+import { extractLoopError } from "./error-surfacing.js";
 import type { Middleware } from "../../foundations/contracts/middleware.js";
 import { homedir } from 'os';
 import * as path from 'path';
@@ -117,7 +116,6 @@ export type {
   AskSeepientOptions,
   AskSeepientResult,
   AskSeepientStreamResult,
-  RunSeepientServerOptions,
   AgentResponse,
   SessionStore,
   SessionData,
@@ -227,6 +225,18 @@ export async function askSeepient(
   const maxSteps = opts.maxSteps ?? 10;
   const runtime = opts.runtime ?? getDefaultProviderRuntime();
 
+  // One abort controller per call: bridges the caller's signal and drives the
+  // agent loop AND media vendor operations in both modes, so `stream.abort()`
+  // stops every in-flight media fetch (W110).
+  const abortController = new AbortController();
+  if (opts.signal) {
+    if (opts.signal.aborted) {
+      abortController.abort(opts.signal.reason);
+    } else {
+      opts.signal.addEventListener("abort", () => abortController.abort(opts.signal?.reason), { once: true });
+    }
+  }
+
   // Resolve skill catalog and append to the system prompt
   const { systemPrompt, skillRegistry } = await resolveSkills(opts.systemPrompt, opts.skills, opts.cwd);
 
@@ -258,7 +268,7 @@ export async function askSeepient(
   const vendorOperationHandler = createMediaVendorOperationHandler({
     runtime,
     artifacts: sharedArtifacts,
-    signal: (opts as any).signal,
+    signal: abortController.signal,
   });
   const { boundary } = await buildLocalBoundary({
     artifacts: sharedArtifacts,
@@ -298,16 +308,6 @@ export async function askSeepient(
     // Hooks — merge stream-level callbacks with any base hooks
     const mergedHooks = { ...opts.hooks };
     const hooks = createHookExecutor(mergedHooks);
-
-    // Abort controller
-    const abortController = new AbortController();
-    if (opts.signal) {
-      if (opts.signal.aborted) {
-        abortController.abort(opts.signal.reason);
-      } else {
-        opts.signal.addEventListener("abort", () => abortController.abort(opts.signal?.reason), { once: true });
-      }
-    }
 
     // Stream manager handles queues, async iterables, and SSE
     const stream = new StreamManager();
@@ -387,6 +387,17 @@ export async function askSeepient(
           stream.resolveFinish("error");
         } else {
           stream.resolveFinish(result.finishReason);
+          // W112: fire hooks.onFinish in streaming mode too, with the same
+          // assembled result the non-streaming path would have returned.
+          const streamedResult: AskSeepientResult = {
+            text: allText,
+            steps: result.steps,
+            toolCalls: result.toolCalls,
+            usage: result.usage,
+            finishReason: result.finishReason as AskSeepientResult["finishReason"],
+            messages: result.messages,
+          };
+          await hooks.onFinish(streamedResult);
         }
       } catch (err) {
         const seepientErr = toSeepientError(err, "PROVIDER_ERROR");
@@ -429,7 +440,7 @@ export async function askSeepient(
     systemPrompt,
     maxSteps,
     hooks,
-    signal: opts.signal,
+    signal: abortController.signal,
     config: { ...opts.config, runtime, skills: skillRegistry },
     metadata: opts.metadata,
     middleware: opts.middleware,
@@ -464,7 +475,12 @@ export async function askSeepient(
     } : undefined,
   });
 
-  surfaceLoopError(result);
+  // W111: onError parity with the streaming branch — report before rejecting.
+  const loopError = extractLoopError(result);
+  if (loopError) {
+    if (opts.onError) opts.onError(loopError);
+    throw loopError;
+  }
 
   const lastAssistant = [...result.messages]
     .reverse()

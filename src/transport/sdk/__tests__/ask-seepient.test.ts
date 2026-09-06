@@ -2,6 +2,59 @@ import { describe, it, expect, vi } from "vitest";
 import { askSeepient } from "../index.js";
 import { createMockRuntime } from "../../../domain/__tests__/test-doubles.js";
 import { SeepientError } from "../../../foundations/errors.js";
+import type { ProviderRuntimeContract } from "../../../foundations/contracts/provider-runtime.js";
+
+// W110: capture every AbortSignal handed to media vendor operation handlers
+// (both the SDK-boundary handler and the agent-loop handler) so tests can
+// assert that abort actually reaches media operations.
+const mediaHandlerState = vi.hoisted(() => ({
+  signals: [] as (AbortSignal | undefined)[],
+}));
+
+vi.mock("../../../domain/media/vendor-operation-handler.js", () => ({
+  createMediaVendorOperationHandler: (opts: { signal?: AbortSignal }) => {
+    mediaHandlerState.signals.push(opts.signal);
+    return async (req: { requestId: string }) => ({
+      requestId: req.requestId,
+      status: "failed" as const,
+      error: { code: "SETUP_REQUIRED", message: "mock media handler", retryable: false },
+    });
+  },
+}));
+
+/**
+ * A runtime whose model stream starts and then hangs until the loop's abort
+ * signal fires — makes streaming-abort outcomes deterministic ("aborted",
+ * never a race against a completing mock).
+ */
+function createHangingRuntime(): ProviderRuntimeContract {
+  return {
+    createTurnSnapshot: async () => ({
+      revision: 1,
+      createdAt: new Date().toISOString(),
+      catalog: [],
+      config: {} as any,
+      assignments: {} as any,
+    }),
+    resolvePlan: async () => ({
+      selectedTarget: {
+        providerAccount: "mock-account",
+        upstreamProvider: "mock",
+        model: "mock-model",
+        credential: { id: "mock" } as any,
+      },
+      failureTargets: [],
+    }),
+    executeLanguage: async function* (_plan, _payload, opts) {
+      yield { type: "start", resolvedModel: { providerAccount: "mock-account", modelId: "mock-model" } };
+      await new Promise<void>((resolve) => {
+        if (opts?.signal?.aborted) resolve();
+        else opts?.signal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+      yield { type: "abort", reason: "user" };
+    },
+  };
+}
 
 describe("askSeepient — Unified One-Shot Entry Point", () => {
   it("defaults to non-streaming and returns AskSeepientResult", async () => {
@@ -10,7 +63,7 @@ describe("askSeepient — Unified One-Shot Entry Point", () => {
     ]);
 
     const result = await askSeepient("What is the capital of France?", {
-      runtime: runtime as any,
+      runtime,
       tools: [],
       maxSteps: 1,
     });
@@ -28,7 +81,7 @@ describe("askSeepient — Unified One-Shot Entry Point", () => {
     const onFinish = vi.fn();
 
     const result = await askSeepient("Do work", {
-      runtime: runtime as any,
+      runtime,
       tools: [],
       maxSteps: 1,
       hooks: { onFinish },
@@ -49,10 +102,10 @@ describe("askSeepient — Unified One-Shot Entry Point", () => {
         assignments: {} as any,
       }),
       resolvePlan: async () => ({
-        selectedTarget: { providerAccount: "mock", model: "mock-model" },
+        selectedTarget: { providerAccount: "mock", model: "mock-model" } as any,
         failureTargets: [],
       }),
-      executeLanguage: async function* () {
+      executeLanguage: async function* (): AsyncGenerator<import("../../../foundations/schemas/inference.js").StreamEvent> {
         yield {
           type: "error",
           error: { code: "RATE_LIMIT", message: "Rate limit reached", retryable: true },
@@ -62,10 +115,77 @@ describe("askSeepient — Unified One-Shot Entry Point", () => {
 
     await expect(
       askSeepient("Hello", {
-        runtime: runtime as any,
+        runtime,
         model: "mock-model",
       }),
     ).rejects.toThrow(SeepientError);
+  });
+
+  // W111: onError parity between streaming and non-streaming modes.
+  it("invokes opts.onError AND rejects in non-streaming mode on provider error", async () => {
+    const runtime = {
+      createTurnSnapshot: async () => ({
+        revision: 1,
+        createdAt: new Date().toISOString(),
+        catalog: [],
+        config: {} as any,
+        assignments: {} as any,
+      }),
+      resolvePlan: async () => ({
+        selectedTarget: { providerAccount: "mock", model: "mock-model" } as any,
+        failureTargets: [],
+      }),
+      executeLanguage: async function* (): AsyncGenerator<import("../../../foundations/schemas/inference.js").StreamEvent> {
+        yield {
+          type: "error",
+          error: { code: "RATE_LIMIT", message: "Rate limit reached", retryable: true },
+        };
+      },
+    };
+    const onError = vi.fn();
+
+    const promise = askSeepient("Hello", {
+      runtime,
+      model: "mock-model",
+      onError,
+    });
+
+    await expect(promise).rejects.toThrow(SeepientError);
+    expect(onError).toHaveBeenCalledTimes(1);
+    const reported = onError.mock.calls[0][0];
+    expect(reported).toBeInstanceOf(SeepientError);
+    expect(reported.code).toBe("RATE_LIMIT");
+  });
+
+  // W112: hooks.onFinish parity — streaming callers get it too.
+  it("fires hooks.onFinish with the assembled result in streaming mode", async () => {
+    const runtime = createMockRuntime([
+      {
+        text: "Streamed finish",
+        usage: { promptTokens: 3, completionTokens: 3, totalTokens: 6, cost: 0 },
+      },
+    ]);
+    const onFinish = vi.fn();
+
+    const stream = await askSeepient("Stream with hooks", {
+      runtime,
+      tools: [],
+      maxSteps: 1,
+      stream: true,
+      hooks: { onFinish },
+    });
+
+    for await (const _chunk of stream.textStream) {
+      // drain
+    }
+    expect(await stream.finishReason).toBe("stop");
+    await vi.waitFor(() => expect(onFinish).toHaveBeenCalledTimes(1));
+
+    const assembled = onFinish.mock.calls[0][0];
+    expect(assembled.text).toBe("Streamed finish");
+    expect(assembled.finishReason).toBe("stop");
+    expect(assembled.usage.totalTokens).toBe(6);
+    expect(Array.isArray(assembled.messages)).toBe(true);
   });
 
   it("returns AskSeepientStreamResult when stream: true", async () => {
@@ -78,7 +198,7 @@ describe("askSeepient — Unified One-Shot Entry Point", () => {
 
     const onText = vi.fn();
     const stream = await askSeepient("Tell me a story", {
-      runtime: runtime as any,
+      runtime,
       tools: [],
       maxSteps: 1,
       stream: true,
@@ -105,7 +225,7 @@ describe("askSeepient — Unified One-Shot Entry Point", () => {
     const runtime = createMockRuntime([{ text: "SSE payload" }]);
 
     const stream = await askSeepient("SSE test", {
-      runtime: runtime as any,
+      runtime,
       tools: [],
       maxSteps: 1,
       stream: true,
@@ -133,7 +253,7 @@ describe("askSeepient — Unified One-Shot Entry Point", () => {
     const runtime = createMockRuntime([{ text: "Streamed via SSE" }]);
 
     const stream = await askSeepient("SSE stream test", {
-      runtime: runtime as any,
+      runtime,
       tools: [],
       maxSteps: 1,
       stream: true,
@@ -157,18 +277,51 @@ describe("askSeepient — Unified One-Shot Entry Point", () => {
     expect(accumulated).toContain("event: done");
   });
 
-  it("handles streaming abort via stream.abort()", async () => {
-    const runtime = createMockRuntime([{ text: "Will be aborted" }]);
+  // W110/W117: deterministic streaming abort — the loop hangs until aborted,
+  // so "aborted" is the only possible finish, and the abort must reach the
+  // media vendor operation handlers (which used to keep running while the
+  // loop stopped).
+  it("stream.abort() stops the loop and aborts media operation handlers", async () => {
+    mediaHandlerState.signals.length = 0;
 
     const stream = await askSeepient("Abort test", {
-      runtime: runtime as any,
+      runtime: createHangingRuntime(),
       tools: [],
       maxSteps: 1,
       stream: true,
     });
 
     stream.abort();
-    const finish = await stream.finishReason;
-    expect(["stop", "aborted"]).toContain(finish);
+    expect(await stream.finishReason).toBe("aborted");
+
+    expect(mediaHandlerState.signals.length).toBeGreaterThan(0);
+    for (const signal of mediaHandlerState.signals) {
+      expect(signal?.aborted).toBe(true);
+    }
+  });
+
+  // W110: a caller-supplied opts.signal must still reach BOTH the loop and
+  // the media vendor operation handlers through the bridged controller.
+  it("bridges opts.signal to the agent loop and media handlers (non-streaming)", async () => {
+    mediaHandlerState.signals.length = 0;
+    const external = new AbortController();
+    const runtime = createHangingRuntime();
+
+    const resultPromise = askSeepient("External abort", {
+      runtime,
+      tools: [],
+      maxSteps: 1,
+      signal: external.signal,
+    });
+
+    // The handlers are wired asynchronously before askSeepient resolves.
+    await vi.waitFor(() => expect(mediaHandlerState.signals.length).toBeGreaterThan(0));
+
+    external.abort();
+    const result = await resultPromise;
+    expect(result.finishReason).toBe("aborted");
+    for (const signal of mediaHandlerState.signals) {
+      expect(signal?.aborted).toBe(true);
+    }
   });
 });
