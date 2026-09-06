@@ -113,9 +113,9 @@ ANTHROPIC_API_KEY=sk-ant-... seepient server
 ### Programmatic
 
 ```typescript
-import { startServer } from "seepient/server";
+import { runSeepientServer } from "seepient/server";
 
-const server = await startServer({
+const server = await runSeepientServer({
   port: 7337,
   host: "0.0.0.0",
   cors: true,

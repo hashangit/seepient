@@ -5,7 +5,7 @@ description: Stateful multi-turn agent with session persistence, provider switch
 
 # createSeepient()
 
-Create a persistent agent with session memory, provider switching, and abort support. Unlike `generateText()` which is stateless, an agent maintains conversation history across calls.
+Create a persistent agent with session memory, provider switching, and abort support. Unlike `askSeepient()` which is stateless, an agent maintains conversation history across calls.
 
 ## Signature
 
@@ -41,7 +41,7 @@ console.log(agent.getUsage());
 ## Parameters
 
 ::: tip Stateless Embedding
-For multi-tenant workers and cloud functions requiring full state injection (audit, policy, capability ledger, sessions), use `createSeepient`, `generateText`, or `streamText`. See [Stateless Workers](/sdk/stateless-workers) for full architecture details.
+For multi-tenant workers and cloud functions requiring full state injection (audit, policy, capability ledger, sessions), use `createSeepient` or `askSeepient`. See [Stateless Workers](/sdk/stateless-workers) for full architecture details.
 :::
 
 ### `options` (optional)
@@ -88,7 +88,7 @@ For fully stateless zero-disk execution, all three permission contracts (`auditS
 :::
 
 ::: info Permission Pipeline Always Active
-The permission pipeline is always active across all SDK entry points (`createSeepient`, `generateText`, `streamText`). Every tool execution is evaluated by policy and recorded in the audit trail.
+The permission pipeline is always active across all SDK entry points (`createSeepient`, `askSeepient`). Every tool execution is evaluated by policy and recorded in the audit trail.
 :::
 
 ::: note Tool Registration and Declaration Validation
@@ -110,7 +110,7 @@ The object returned by `createSeepient()`:
 | Method | Signature | Description |
 |--------|-----------|-------------|
 | `chat` | `(message: string) => Promise<AgentResponse>` | Send a message and get the full response. Context is preserved. |
-| `chatStream` | `(message: string, options?: StreamTextOptions) => Promise<StreamTextResult>` | Send a message with streaming output. Returns async iterables and SSE helpers. |
+| `chatStream` | `(message: string, options?: Omit<AskSeepientOptions, "stream" \| "signal">) => Promise<AskSeepientStreamResult>` | Send a message with streaming output. Returns async iterables and SSE helpers. |
 | `switchProvider` | `(accountOrModel: string, model?: string) => Promise<void>` | Switch the provider account (and optionally model) used for subsequent calls. One argument switches the model only. |
 | `setSystemPrompt` | `(prompt: string) => void` | Update the system prompt. Replaces the existing system message in history. |
 | `setTools` | `(tools: string[]) => void` | Update active tools by name. Custom tool registrations cannot be added dynamically via `setTools`. |
@@ -452,6 +452,5 @@ const agent = await createSeepient({ middleware: [auditLog] });
 
 ## Related APIs
 
-- [generateText()](/sdk/generate-text) -- Stateless one-shot execution
-- [streamText()](/sdk/stream-text) -- Stateless streaming execution
+- [askSeepient()](/sdk/ask-seepient) -- Stateless one-shot execution (streaming via `stream: true`)
 - [Tools](/tools/reference) -- Built-in and custom tool reference

@@ -22,7 +22,7 @@ Create `server.ts`:
 ```typescript
 import express from 'express'
 import cors from 'cors'
-import { streamText } from 'seepient'
+import { askSeepient } from 'seepient'
 
 const app = express()
 app.use(cors())
@@ -38,7 +38,8 @@ app.post('/api/chat', async (req, res) => {
   res.setHeader('Cache-Control', 'no-cache')
   res.setHeader('Connection', 'keep-alive')
 
-  const stream = await streamText(message, {
+  const stream = await askSeepient(message, {
+    stream: true,
     provider: 'anthropic',
     model: 'claude-3-7-sonnet'
   })

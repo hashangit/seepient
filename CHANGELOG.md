@@ -5,11 +5,6 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-**Breaking changes:**
-- **SDK session ownership binding (tenant isolation)**: `createSeepient` now stamps the effective `principalId` (default `"sdk-user"`) on every persisted session (`SessionData.principalId`) and fails closed with `SESSION_OWNERSHIP_MISMATCH` when resuming under a different principal — previously a second tenant supplying the same `sessionId` and its own stores could restore and continue the first tenant's conversation. Sessions persisted before this change carry no owner stamp and will not resume (delete the stored session or start a new `sessionId`). Custom `PersistenceBackend` implementations must round-trip the new `principalId` field; the deprecated messages-only `SessionStore` adapter cannot carry ownership and now fails closed when resuming an existing session.
-
 ## [v0.7.0] - 2026-09-06
 
 ### Review remediation: release pipeline, server sessions, transport hardening & docs truth (spec 021-2 / 021-3)
@@ -17,7 +12,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 *Includes 021-3 remediation work orders W001–W041 resolving server session concurrency and turn locking, NAT64 metadata defense-in-depth, transport lifecycle safety, and docs truth.*
 
 **Breaking changes:**
-- **Key hashing SHA-256 expansion (`hashKey` 16→64)**: Expanded API key hash digests from 16 to 64 hex characters (full SHA-256). Pre-0.7.0 session files created under 16-hex key ownership will not resume and fail closed with a descriptive error. Server sessions are ephemeral runtime state.
+- **SDK API rename — `askSeepient` / `runSeepientServer`**: The one-shot entry points `generateText`/`streamText` are replaced by a single unified `askSeepient(prompt, options)`; the server factory `createServer`/`startServer` is renamed `runSeepientServer`. Migration (pre-1.0, no shims):
+
+  | Old (≤ v0.6.x) | New (v0.7.0) |
+  |---|---|
+  | `generateText(prompt, options?)` | `askSeepient(prompt, options?)` |
+  | `streamText(prompt, options?)` | `askSeepient(prompt, { ...options, stream: true })` |
+  | `createServer(options?)` / `startServer(options?)` | `runSeepientServer(options?)` (use `listen: false` for an unattached `http.Server`) |
+  | `GenerateTextOptions` / `StreamTextOptions` | `AskSeepientOptions` |
+  | `GenerateTextResult` | `AskSeepientResult` |
+  | `StreamTextResult` | `AskSeepientStreamResult` |
+  | `ServerOptions` | `RunSeepientServerOptions` (now exported only from `seepient/server`, next to `runSeepientServer`) |
+
+  Additional surface changes in the rename: `toResponse()` now accepts optional `{ headers }`; phantom structured-output fields were removed (`AskSeepientOptions.output`, `AskSeepientResult.data`/`error` — structured output remains deferred); `Seepient.chatStream()` options no longer accept `stream`/`signal` (it is always streaming and owns its abort handle via the returned result); `RunSeepientServerOptions.settingsManager` is typed by the `SettingsManagerLike` contract instead of `any`. Update all imports and call sites accordingly — no compatibility aliases are provided in the pre-1.0 phase.
+- **SDK session ownership binding (tenant isolation)**: `createSeepient` now stamps the effective `principalId` (default `"sdk-user"`) on every persisted session (`SessionData.principalId`) and fails closed with `SESSION_OWNERSHIP_MISMATCH` when resuming under a different principal — previously a second tenant supplying the same `sessionId` and its own stores could restore and continue the first tenant's conversation. Sessions persisted before this change carry no owner stamp and will not resume (delete the stored session or start a new `sessionId`). Custom `PersistenceBackend` implementations must round-trip the new `principalId` field; the deprecated messages-only `SessionStore` adapter cannot carry ownership and now fails closed when resuming an existing session. Expanded API key hash digests from 16 to 64 hex characters (full SHA-256). Pre-0.7.0 session files created under 16-hex key ownership will not resume and fail closed with a descriptive error. Server sessions are ephemeral runtime state.
 
 **Release pipeline & packaging safety (US1):**
 - **Static publish hook safety**: Restored `prepublishOnly` to `pnpm run build` (HEAD semantics); added `pnpm run pack:verify` static hook assertion preventing clean/delete scripts in publish hooks and verifying native exact-commit helper staging.

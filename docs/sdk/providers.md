@@ -60,9 +60,9 @@ GLM accepts both the alias (`"haiku"`, `"sonnet"`, `"opus"`) and the full model 
 Pass `model` as an option:
 
 ```typescript
-import { generateText } from "seepient";
+import { askSeepient } from "seepient";
 
-const result = await generateText("Explain recursion", {
+const result = await askSeepient("Explain recursion", {
   model: "claude-sonnet-4-6-20260320",
 });
 ```
@@ -186,9 +186,9 @@ console.log(r3.text);
 Connect to any LLM API that exposes an OpenAI-compatible endpoint (Ollama, vLLM, Together AI, local models, self-hosted LLMs, third-party proxies):
 
 ```typescript
-import { generateText } from "seepient";
+import { askSeepient } from "seepient";
 
-const result = await generateText("Hello from local model", {
+const result = await askSeepient("Hello from local model", {
   model: "llama-3.3-70b",
   config: {
     openaiCompatBaseUrl: process.env.OPENAI_COMPAT_BASE_URL,
@@ -207,6 +207,6 @@ The `OPENAI_COMPAT_BASE_URL` is required for the `openai-compatible` provider.
 
 - [Provider Management API](/sdk/provider-management) -- Complete programmatic accounts, assignments, and runtime management
 - [createSeepient()](/sdk/create-seepient) -- Stateful agent with provider switching
-- [generateText()](/sdk/generate-text) -- Stateless text generation
+- [askSeepient()](/sdk/ask-seepient) -- Stateless one-shot execution (streaming via `stream: true`)
 - [Custom Tools](/sdk/custom-tools) -- Register custom tools and trust boundaries
 - [Types Reference](/sdk/types) -- Full TypeScript type reference
