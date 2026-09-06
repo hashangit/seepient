@@ -205,7 +205,7 @@ export async function handleChat(
           history,
           // Spec 008 / Spec 021 review: pass authenticated identity to approval records
           ...(state.apiKeyHash ? { apiKeyHash: state.apiKeyHash } : {}),
-          approveTool: createServerApproveTool(ws, {
+          approveTool: createServerApproveTool(ws, ctx.registry, {
             principalId: state.apiKeyHash,
             sessionId: acquiredSessionId ?? undefined,
           }),

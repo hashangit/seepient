@@ -14,6 +14,7 @@ import { generateApiKey } from "../../auth/auth.js";
 import { handleProbeProvider } from "../provider-management/catalog.js";
 import { handleChat } from "../../ws/chat.js";
 import type { ChatMessage, ConnectionState, WebSocketHandlerContext } from "../../ws/ws-types.js";
+import { createConnectionRegistry } from "../../ws/connection-registry.js";
 
 function createMockReq(
   method: string,
@@ -380,6 +381,7 @@ describe("Phase 5: Transport Polish (W024, W025, W026)", () => {
       } as any;
 
       const ctx: WebSocketHandlerContext = {
+        registry: createConnectionRegistry(),
         sessionManager: new ServerSessionManager({ backend: new MemoryPersistenceBackend() }),
         streamText: vi.fn().mockRejectedValue(new Error("Simulated stream crash")),
         listModels: vi.fn().mockReturnValue({}),

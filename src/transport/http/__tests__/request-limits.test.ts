@@ -10,7 +10,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import type { AddressInfo } from "node:net";
-import { setupWebSocket, closeWebSocket } from "../../ws/websocket.js";
+import { setupWebSocket } from "../../ws/websocket.js";
+import { createConnectionRegistry } from "../../../transport/ws/connection-registry.js";
 // @ts-expect-error — ws is an optional peer dependency without bundled types
 import { WebSocket as WsClient } from "ws";
 
@@ -233,17 +234,18 @@ describe("Transport Limits (Spec 021-2 / T019, T022, QS-7)", () => {
       await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
       const port = (server.address() as AddressInfo).port;
 
-      const wsServer = await setupWebSocket(server, {
+      const wsHandle = await setupWebSocket(server, {
+        registry: createConnectionRegistry(),
         sessionManager: new ServerSessionManager({ backend: new MemoryPersistenceBackend() }),
         streamText: vi.fn(),
         listModels: vi.fn().mockReturnValue({}),
         listSkills: vi.fn().mockReturnValue([]),
       });
 
-      expect(wsServer).not.toBeNull();
-      expect((wsServer as any).options.maxPayload).toBe(1 << 20);
+      expect(wsHandle.wss).not.toBeNull();
+      expect((wsHandle.wss as any).options.maxPayload).toBe(1 << 20);
 
-      closeWebSocket();
+      wsHandle.close();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     });
 
@@ -259,7 +261,8 @@ describe("Transport Limits (Spec 021-2 / T019, T022, QS-7)", () => {
       await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
       const port = (server.address() as AddressInfo).port;
 
-      await setupWebSocket(server, {
+      const wsHandle = await setupWebSocket(server, {
+        registry: createConnectionRegistry(),
         sessionManager: new ServerSessionManager({ backend: new MemoryPersistenceBackend() }),
         streamText: vi.fn(),
         listModels: vi.fn().mockReturnValue({}),
@@ -293,7 +296,7 @@ describe("Transport Limits (Spec 021-2 / T019, T022, QS-7)", () => {
       const closeEvent = await closePromise;
       expect(closeEvent.code).toBe(1009);
 
-      closeWebSocket();
+      wsHandle.close();
       await new Promise<void>((resolve) => server.close(() => resolve()));
 
       try {

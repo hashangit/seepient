@@ -24,7 +24,7 @@ import {
   handleWsGetSettings,
   handleWsUpdateSettings,
 } from "../http/settings-handlers.js";
-import { activeConnections, safeSend } from "./connection-registry.js";
+import { safeSend } from "./connection-registry.js";
 import { handleChat, handleAbort } from "./chat.js";
 import { handleToolApprovalResponse } from "./approvals.js";
 import {
@@ -71,7 +71,7 @@ export function handleConnection(
     apiKey: key,
   };
 
-  activeConnections.set(ws, state);
+  ctx.registry.activeConnections.set(ws, state);
 
   // ── Message dispatch ───────────────────────────────────────────────
 
@@ -114,7 +114,7 @@ export function handleConnection(
         handleAbort(ws, msg, state);
         break;
       case "tool_approval_response":
-        handleToolApprovalResponse(ws, msg);
+        handleToolApprovalResponse(ws, msg, ctx.registry);
         break;
       case "resume":
         void handleResume(ws, msg, state, ctx);
@@ -175,7 +175,7 @@ export function handleConnection(
       controller.abort();
     }
     state.activeChats.clear();
-    activeConnections.delete(ws);
+    ctx.registry.activeConnections.delete(ws);
   });
 
   // ── Error ──────────────────────────────────────────────────────────
@@ -192,6 +192,6 @@ export function handleConnection(
       controller.abort();
     }
     state.activeChats.clear();
-    activeConnections.delete(ws);
+    ctx.registry.activeConnections.delete(ws);
   });
 }

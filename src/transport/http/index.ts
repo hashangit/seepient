@@ -17,12 +17,12 @@ import { getSyncBuiltinCatalog } from "../../domain/providers/model-catalog.js";
 import { getDefaultProviderRuntime } from "../../domain/providers/provider-runtime.js";
 import { serverGenerateText, serverStreamText } from "./server-core.js";
 import { createRestHandler, type RestHandlerContext } from "./rest.js";
-import { setupWebSocket, closeWebSocket, type WebSocketHandlerContext } from "../ws/websocket.js";
-import { getOtherClients } from "../ws/connection-registry.js";
-import { createServerApproveTool } from "../ws/approvals.js";
+import { setupWebSocket, type WebSocketHandlerContext } from "../ws/websocket.js";
+import { createConnectionRegistry } from "../ws/connection-registry.js";
 import { ServerSessionManager } from "./session-store.js";
 import { SettingsManager } from "../../domain/settings/settings-manager.js";
 import type { SettingsHandlerContext } from "./settings-handlers.js";
+import type { WsServerHandle } from "../ws/websocket.js";
 import { loadMergedConfig, getConfigPaths, loadJsonConfig } from "../../foundations/config.js";
 import { RateLimiter, globalRateLimiter } from "./rate-limit.js";
 
@@ -34,6 +34,13 @@ export type { RunSeepientServerOptions };
 interface ReadPackageJson {
   version: string;
 }
+
+/**
+ * The `http.Server` returned by `runSeepientServer`, extended with a
+ * `dispose()` handle that un-registers the server's process signal handlers
+ * (registered only when the server listens) — W130 embedding contract.
+ */
+export type SeepientHttpServer = http.Server & { dispose: () => void };
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -169,7 +176,7 @@ function handlePreflight(
  * This sets up REST endpoints, WebSocket upgrade handling,
  * session management, and CORS support.
  */
-export async function runSeepientServer(options?: RunSeepientServerOptions): Promise<http.Server> {
+export async function runSeepientServer(options?: RunSeepientServerOptions): Promise<SeepientHttpServer> {
   const version = resolveVersion();
   const startTime = Date.now();
 
@@ -319,9 +326,11 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     projectConfig: projectConfig.config as Record<string, any>,
     globalConfig: globalConfig.config as Record<string, any>,
   });
+  // W131: per-instance WS registries — never module-global
+  const wsRegistry = createConnectionRegistry();
   const settingsHandlerContext: SettingsHandlerContext = {
     settingsManager,
-    getOtherClients,
+    getOtherClients: (excludeWs) => wsRegistry.getOtherClients(excludeWs),
   };
 
   // Wire registered server settings: settings value -> env override -> default
@@ -422,6 +431,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
 
   // Create WebSocket handler context
   const wsCtx: WebSocketHandlerContext = {
+    registry: wsRegistry,
     sessionManager,
     streamText: async (opts) => {
       // Spec 008: construct a per-request pipeline with the WS client's
@@ -455,16 +465,17 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
   };
 
   // Set up WebSocket (async, but we wait for it)
-  await setupWebSocket(server, wsCtx);
+  const wsHandle: WsServerHandle = await setupWebSocket(server, wsCtx);
 
   // Cleanup resources when server closes
   server.on("close", () => {
     if (outboxFlushTimer) clearInterval(outboxFlushTimer);
     sessionManager.stopCleanup();
-    closeWebSocket();
+    wsHandle.close();
   });
 
-  // Graceful shutdown handler
+  // Graceful shutdown handler — registered ONLY when this server listens.
+  // An embedder using listen:false owns its process signal handling (W130).
   const shutdown = () => {
     console.log("[server] Shutting down...");
     server.close(() => {
@@ -475,11 +486,21 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     setTimeout(() => process.exit(0), 5000);
   };
 
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  const willListen = options?.listen !== false;
+  if (willListen) {
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
+  }
+
+  // Dispose handle: un-registers this server's signal handlers so repeated
+  // constructions in tests/embedders do not accumulate listeners.
+  (server as SeepientHttpServer).dispose = () => {
+    process.removeListener("SIGINT", shutdown);
+    process.removeListener("SIGTERM", shutdown);
+  };
 
   // Listen immediately unless listen: false
-  if (options?.listen !== false) {
+  if (willListen) {
     const port = resolvePort(options);
     const host = options?.host ?? "0.0.0.0";
     await new Promise<void>((resolve) => {
@@ -490,5 +511,5 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     });
   }
 
-  return server;
+  return server as SeepientHttpServer;
 }

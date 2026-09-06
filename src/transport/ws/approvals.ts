@@ -9,7 +9,8 @@ import type {
   PermissionRequest,
 } from "../../foundations/contracts/permission-policy.js";
 import type { ApproveToolFn } from "../../foundations/types.js";
-import { safeSend, pendingApprovals, durableApprovalStore } from "./connection-registry.js";
+import { safeSend } from "./connection-registry.js";
+import type { WsConnectionRegistry } from "./ws-types.js";
 
 export const APPROVAL_TIMEOUT_MS = 30_000; // 30 seconds
 
@@ -82,6 +83,7 @@ export function wsLegacyApprovalRequest(
  */
 export function createServerApproveTool(
   ws: WebSocket,
+  registry: WsConnectionRegistry,
   context?: WsApprovalContext,
 ): ApproveToolFn {
   return async (call) => {
@@ -92,7 +94,7 @@ export function createServerApproveTool(
     const sessionId = context?.sessionId ?? "ws-session";
     const runId = context?.runId ?? "ws-run";
 
-    durableApprovalStore.create({
+    registry.durableApprovalStore.create({
       request: wsLegacyApprovalRequest(callId, call.name, { principalId, tenantId, sessionId, runId }),
       tenantId,
       sessionId,
@@ -108,12 +110,12 @@ export function createServerApproveTool(
 
     return new Promise<boolean>((resolve) => {
       const timer = setTimeout(() => {
-        durableApprovalStore.cancel(continuationId);
-        pendingApprovals.delete(callId);
+        registry.durableApprovalStore.cancel(continuationId);
+        registry.pendingApprovals.delete(callId);
         resolve(false); // Timeout → deny
       }, APPROVAL_TIMEOUT_MS);
 
-      pendingApprovals.set(callId, { continuationId, resolve, timer, ws, toolName: call.name, createdAt: Date.now() });
+      registry.pendingApprovals.set(callId, { continuationId, resolve, timer, ws, toolName: call.name, createdAt: Date.now() });
     });
   };
 }
@@ -121,8 +123,9 @@ export function createServerApproveTool(
 export async function handleToolApprovalResponse(
   ws: WebSocket,
   msg: ToolApprovalResponse,
+  registry: WsConnectionRegistry,
 ): Promise<void> {
-  const pending = pendingApprovals.get(msg.callId);
+  const pending = registry.pendingApprovals.get(msg.callId);
   if (!pending) return;
 
   // QA-001: Only the originating connection may resolve the approval
@@ -134,8 +137,8 @@ export async function handleToolApprovalResponse(
   // Reject expired approvals (defense-in-depth, timer should have fired)
   if (Date.now() - pending.createdAt > APPROVAL_TIMEOUT_MS) {
     clearTimeout(pending.timer);
-    pendingApprovals.delete(msg.callId);
-    durableApprovalStore.cancel(pending.continuationId);
+    registry.pendingApprovals.delete(msg.callId);
+    registry.durableApprovalStore.cancel(pending.continuationId);
     pending.resolve(false);
     return;
   }
@@ -143,12 +146,12 @@ export async function handleToolApprovalResponse(
   // Spec 011 (T022): an approved legacy response must bind to the request's
   // narrowest policy-issued option; with no options the approval cannot be
   // represented and is denied as unavailable.
-  const rec = durableApprovalStore.get(pending.continuationId);
+  const rec = registry.durableApprovalStore.get(pending.continuationId);
   const decision = wsApprovalDecision(msg, rec?.request);
 
-  const result = await durableApprovalStore.cas(pending.continuationId, 1, decision);
+  const result = await registry.durableApprovalStore.cas(pending.continuationId, 1, decision);
   clearTimeout(pending.timer);
-  pendingApprovals.delete(msg.callId);
+  registry.pendingApprovals.delete(msg.callId);
 
   // Execution MUST follow the validated typed decision: when the request had
   // no representable policy option, the approval was persisted as denied and

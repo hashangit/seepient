@@ -4,6 +4,7 @@ import { handleResume, handleReconnect } from "../session-control.js";
 import { ServerSessionManager } from "../../http/session-store.js";
 import { MemoryPersistenceBackend } from "../../../domain/sessions/session-store.js";
 import type { ConnectionState, WebSocketHandlerContext, ChatMessage, WebSocket } from "../ws-types.js";
+import { createConnectionRegistry } from "../connection-registry.js";
 
 function createMockWs() {
   const sent: any[] = [];
@@ -34,6 +35,7 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
 
     let streamOptionsCaptured: any = null;
     const ctx: WebSocketHandlerContext = {
+        registry: createConnectionRegistry(),
       sessionManager,
       streamText: async (options) => {
         streamOptionsCaptured = options;
@@ -107,6 +109,7 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
     } as any;
 
     const ctx: WebSocketHandlerContext = {
+        registry: createConnectionRegistry(),
       sessionManager,
       streamText: (options) => {
         options.onDone({
@@ -145,6 +148,7 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
 
     let finishStream: (() => void) | null = null;
     const ctx: WebSocketHandlerContext = {
+        registry: createConnectionRegistry(),
       sessionManager,
       streamText: (options) => {
         finishStream = () => {
@@ -189,6 +193,7 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
 
     let aborted = false;
     const ctx: WebSocketHandlerContext = {
+        registry: createConnectionRegistry(),
       sessionManager,
       streamText: (options) => {
         options.signal?.addEventListener("abort", () => {
@@ -221,6 +226,7 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
 
     let capturedStreamOptions: any = null;
     const ctx: WebSocketHandlerContext = {
+        registry: createConnectionRegistry(),
       sessionManager,
       streamText: (options) => {
         capturedStreamOptions = options;
@@ -268,6 +274,7 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
 
     let streamCaptured: any = null;
     const ctx: WebSocketHandlerContext = {
+        registry: createConnectionRegistry(),
       sessionManager,
       streamText: (options) => {
         streamCaptured = options;
@@ -329,6 +336,7 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
     });
 
     const ctx: WebSocketHandlerContext = {
+        registry: createConnectionRegistry(),
       sessionManager,
       streamText: vi.fn(),
       listModels: () => ({}),
@@ -351,6 +359,7 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
 
     // Subsequent chat on this connection must succeed without error
     const subsequentCtx: WebSocketHandlerContext = {
+        registry: createConnectionRegistry(),
       sessionManager,
       streamText: (options) => {
         options.onDone({
@@ -389,6 +398,7 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
     } as any;
 
     const ctx: WebSocketHandlerContext = {
+        registry: createConnectionRegistry(),
       sessionManager,
       streamText: (options) => {
         // Simulate server-core calling onError AND onDone
@@ -447,6 +457,7 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
     } as any;
 
     const ctx: WebSocketHandlerContext = {
+        registry: createConnectionRegistry(),
       sessionManager,
       streamText: (options) => {
         // Evict session while stream is in flight
@@ -498,6 +509,7 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
     } as any;
 
     const ctx: WebSocketHandlerContext = {
+        registry: createConnectionRegistry(),
       sessionManager,
       streamText: vi.fn(),
       listModels: () => ({}),
@@ -542,6 +554,7 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
 
     let finishStream: (() => void) | null = null;
     const ctx: WebSocketHandlerContext = {
+        registry: createConnectionRegistry(),
       sessionManager,
       streamText: (options) => {
         return new Promise<void>((resolve) => {
@@ -618,6 +631,7 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
 
     let capturedSessionId: string | undefined = "NOT_SET";
     const ctx: WebSocketHandlerContext = {
+        registry: createConnectionRegistry(),
       sessionManager,
       streamText: (options) => {
         capturedSessionId = options.sessionId;
@@ -674,6 +688,7 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
 
     let finishConn1: (() => void) | null = null;
     const ctx1: WebSocketHandlerContext = {
+      registry: createConnectionRegistry(),
       sessionManager,
       streamText: (options) => {
         return new Promise<void>((resolve) => {
@@ -692,6 +707,7 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
     };
 
     const ctx2: WebSocketHandlerContext = {
+      registry: createConnectionRegistry(),
       sessionManager,
       streamText: vi.fn(),
       listModels: () => ({}),
@@ -744,6 +760,7 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
     } as any;
 
     const ctx: WebSocketHandlerContext = {
+        registry: createConnectionRegistry(),
       sessionManager,
       streamText: () => {
         // Stream hangs until aborted
