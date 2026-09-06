@@ -78,6 +78,11 @@ export async function canonicalizePath(
   rawPath: string,
   cwd: string,
 ): Promise<CanonicalPathTarget> {
+  if (typeof rawPath !== "string" || rawPath.trim().length === 0) {
+    throw new Error(
+      `Model contract violation: "path" argument must be a non-empty string (received ${rawPath === undefined ? "undefined" : typeof rawPath === "string" ? "empty string" : typeof rawPath}). Please provide a valid file path according to the tool contract.`
+    );
+  }
   const abs = path.isAbsolute(rawPath) ? rawPath : path.resolve(cwd, rawPath);
   const parent = path.dirname(abs);
   const basename = path.basename(abs);
@@ -243,7 +248,12 @@ export async function analyzeWriteFile(
   ctx: ToolAnalysisContext,
 ): Promise<PreparedToolAction> {
   const cwd = ctx.workspace.canonicalRoot;
-  const target = await canonicalizePath(args.path, cwd);
+  const target = await canonicalizePath(args?.path, cwd);
+  if (typeof args?.content !== "string") {
+    throw new Error(
+      `Model contract violation: Missing or invalid required parameter "content" for write_file (expected string, received ${typeof args?.content}). Please provide the file content as a string.`
+    );
+  }
   const bytes = Buffer.from(args.content, "utf8");
   const artifact = await ctx.artifacts.put(bytes, "text/plain");
   const expected = snapshotPath(target);
