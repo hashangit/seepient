@@ -20,11 +20,24 @@ async function waitFor(cond: () => boolean, what: string): Promise<void> {
 }
 
 /**
+ * Wait until Ink has actually SUBSCRIBED to stdin ("data" listener attached
+ * in a passive effect). Writing before that loses the keystrokes entirely —
+ * a frame-based readiness check cannot prove this, the listener count can.
+ */
+async function waitForStdinSubscription(stdin: unknown, what: string): Promise<void> {
+  await waitFor(() => {
+    const src = stdin as { listenerCount?: (e: string) => number };
+    const count = (src.listenerCount?.("data") ?? 0) + (src.listenerCount?.("readable") ?? 0);
+    return count > 0;
+  }, what);
+}
+
+/**
  * Type text into the prompt and wait until it is ECHOED in the frame before
- * returning. Ink subscribes stdin in a passive effect — under CI load a write
- * can land before the subscription exists and be lost entirely (a blind tick
- * is not enough). If nothing echoes within 750ms the write was dropped, so
- * re-send once.
+ * returning. Call only after waitForStdinSubscription — the write is then
+ * guaranteed received; the echo may still lag under load, which the wait
+ * absorbs. Never re-sends (a resend would corrupt the input when the first
+ * write's echo was merely delayed).
  */
 async function typeUntilEchoed(
   stdin: { write(s: string): void },
@@ -33,13 +46,8 @@ async function typeUntilEchoed(
   what: string,
 ): Promise<void> {
   const start = Date.now();
-  let resent = false;
   stdin.write(text);
   while (!(lastFrame() ?? "").includes(text)) {
-    if (!resent && Date.now() - start > 750) {
-      stdin.write(text);
-      resent = true;
-    }
     if (Date.now() - start > 8000) {
       throw new Error(`waitFor timeout: ${what}`);
     }
@@ -108,9 +116,9 @@ describe("TUI slash-command skill launch & REPL parity", () => {
       />,
     );
 
-    // Wait for the prompt to exist, then for the command to be echoed before
-    // pressing Enter (see typeUntilEchoed — blind ticks lose keystrokes under load).
-    await waitFor(() => (lastFrame() ?? "").includes("› "), "prompt mounted");
+    // Wait for Ink to subscribe to stdin, then for the command to be echoed
+    // before pressing Enter (blind ticks lose keystrokes under CI load).
+    await waitForStdinSubscription(stdin, "ink stdin subscribed");
     await typeUntilEchoed(stdin, lastFrame, "/sample-skill", "command echoed in prompt");
     stdin.write("\r");
 
@@ -171,7 +179,7 @@ describe("TUI slash-command skill launch & REPL parity", () => {
       />,
     );
 
-    await waitFor(() => (lastFrame() ?? "").includes("› "), "prompt mounted");
+    await waitForStdinSubscription(stdin, "ink stdin subscribed");
     await typeUntilEchoed(stdin, lastFrame, "/nonexistent-cmd", "command echoed in prompt");
     stdin.write("\r");
 
