@@ -13,6 +13,7 @@ import type {
 import type { Message } from "../../foundations/types.js";
 import { safeSend } from "./connection-registry.js";
 import { createServerApproveTool } from "./approvals.js";
+import { requireWsScope } from "./session-control.js";
 import { logTransportEvent } from "../logging.js";
 
 export async function handleChat(
@@ -21,6 +22,17 @@ export async function handleChat(
   state: ConnectionState,
   ctx: WebSocketHandlerContext,
 ): Promise<void> {
+  // W140: enforce the same scope model REST enforces — chat requires agent:run
+  if (!requireWsScope(state, "agent:run")) {
+    safeSend(ws, {
+      type: "error",
+      code: "FORBIDDEN",
+      retryable: false,
+      message: "Requires agent:run scope",
+    });
+    return;
+  }
+
   // Busy guard: only one active chat turn per connection
   if (state.activeChats.size > 0) {
     safeSend(ws, {

@@ -25,6 +25,17 @@ export async function handleResume(
   state: ConnectionState,
   ctx: WebSocketHandlerContext,
 ): Promise<void> {
+  // W140: enforce the same scope model REST enforces — session reads require agent:read
+  if (!requireWsScope(state, "agent:read")) {
+    safeSend(ws, {
+      type: "error",
+      code: "FORBIDDEN",
+      retryable: false,
+      message: "Requires agent:read scope",
+    });
+    return;
+  }
+
   if (state.activeChats && state.activeChats.size > 0) {
     safeSend(ws, {
       type: "error",
@@ -72,6 +83,17 @@ export async function handleReconnect(
   state: ConnectionState,
   ctx: WebSocketHandlerContext,
 ): Promise<void> {
+  // W140: enforce the same scope model REST enforces — session reads require agent:read
+  if (!requireWsScope(state, "agent:read")) {
+    safeSend(ws, {
+      type: "error",
+      code: "FORBIDDEN",
+      retryable: false,
+      message: "Requires agent:read scope",
+    });
+    return;
+  }
+
   if (state.activeChats && state.activeChats.size > 0) {
     safeSend(ws, {
       type: "error",

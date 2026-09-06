@@ -31,6 +31,12 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
       activeProvider: null,
       activeModel: null,
       apiKeyHash: "test-key-hash",
+      apiKey: {
+        keyHash: "test-key-hash",
+        scopes: ["agent:run", "agent:read"],
+        created: new Date().toISOString(),
+        label: "chat-session-test",
+      },
     } as any;
 
     let streamOptionsCaptured: any = null;
@@ -93,6 +99,12 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
       model: "gpt-4o",
       metadata: {
         apiKeyHash: "test-key-hash",
+        apiKey: {
+          keyHash: "test-key-hash",
+          scopes: ["agent:run", "agent:read"],
+          created: new Date().toISOString(),
+          label: "chat-session-test",
+        },
       },
     });
 
@@ -106,6 +118,12 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
       activeProvider: null,
       activeModel: null,
       apiKeyHash: "test-key-hash",
+      apiKey: {
+        keyHash: "test-key-hash",
+        scopes: ["agent:run", "agent:read"],
+        created: new Date().toISOString(),
+        label: "chat-session-test",
+      },
     } as any;
 
     const ctx: WebSocketHandlerContext = {
@@ -144,6 +162,12 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
       activeProvider: null,
       activeModel: null,
       apiKeyHash: "test-key-hash",
+      apiKey: {
+        keyHash: "test-key-hash",
+        scopes: ["agent:run", "agent:read"],
+        created: new Date().toISOString(),
+        label: "chat-session-test",
+      },
     } as any;
 
     let finishStream: (() => void) | null = null;
@@ -189,6 +213,12 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
       activeProvider: null,
       activeModel: null,
       apiKeyHash: "test-key-hash",
+      apiKey: {
+        keyHash: "test-key-hash",
+        scopes: ["agent:run", "agent:read"],
+        created: new Date().toISOString(),
+        label: "chat-session-test",
+      },
     } as any;
 
     let aborted = false;
@@ -222,6 +252,12 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
       activeProvider: null,
       activeModel: null,
       apiKeyHash: "test-key-hash",
+      apiKey: {
+        keyHash: "test-key-hash",
+        scopes: ["agent:run", "agent:read"],
+        created: new Date().toISOString(),
+        label: "chat-session-test",
+      },
     } as any;
 
     let capturedStreamOptions: any = null;
@@ -270,6 +306,12 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
       activeProvider: null,
       activeModel: null,
       apiKeyHash: "test-key-hash",
+      apiKey: {
+        keyHash: "test-key-hash",
+        scopes: ["agent:run", "agent:read"],
+        created: new Date().toISOString(),
+        label: "chat-session-test",
+      },
     } as any;
 
     let streamCaptured: any = null;
@@ -328,6 +370,12 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
       activeProvider: null,
       activeModel: null,
       apiKeyHash: "test-key-hash",
+      apiKey: {
+        keyHash: "test-key-hash",
+        scopes: ["agent:run", "agent:read"],
+        created: new Date().toISOString(),
+        label: "chat-session-test",
+      },
     } as any;
 
     // Spy on addMessage to throw
@@ -395,6 +443,12 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
       activeProvider: null,
       activeModel: null,
       apiKeyHash: "test-key-hash",
+      apiKey: {
+        keyHash: "test-key-hash",
+        scopes: ["agent:run", "agent:read"],
+        created: new Date().toISOString(),
+        label: "chat-session-test",
+      },
     } as any;
 
     const ctx: WebSocketHandlerContext = {
@@ -454,6 +508,12 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
       activeProvider: null,
       activeModel: null,
       apiKeyHash: "test-key-hash",
+      apiKey: {
+        keyHash: "test-key-hash",
+        scopes: ["agent:run", "agent:read"],
+        created: new Date().toISOString(),
+        label: "chat-session-test",
+      },
     } as any;
 
     const ctx: WebSocketHandlerContext = {
@@ -497,6 +557,12 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
     await sessionManager.createSession("other-key", {
       id: "foreign-session-123",
       apiKeyHash: "other-key-hash",
+      apiKey: {
+        keyHash: "other-key-hash",
+        scopes: ["agent:run", "agent:read"],
+        created: new Date().toISOString(),
+        label: "chat-session-test",
+      },
     });
 
     const state: ConnectionState = {
@@ -506,6 +572,12 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
       activeProvider: null,
       activeModel: null,
       apiKeyHash: "attacker-key-hash",
+      apiKey: {
+        keyHash: "attacker-key-hash",
+        scopes: ["agent:run", "agent:read"],
+        created: new Date().toISOString(),
+        label: "chat-session-test",
+      },
     } as any;
 
     const ctx: WebSocketHandlerContext = {
@@ -541,6 +613,12 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
     await sessionManager.createSession("key-1", {
       id: "target-resume-sess",
       apiKeyHash: "test-hash",
+      apiKey: {
+        keyHash: "test-hash",
+        scopes: ["agent:run", "agent:read"],
+        created: new Date().toISOString(),
+        label: "chat-session-test",
+      },
     });
 
     const state: ConnectionState = {
@@ -550,6 +628,12 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
       activeProvider: null,
       activeModel: null,
       apiKeyHash: "test-hash",
+      apiKey: {
+        keyHash: "test-hash",
+        scopes: ["agent:run", "agent:read"],
+        created: new Date().toISOString(),
+        label: "chat-session-test",
+      },
     } as any;
 
     let finishStream: (() => void) | null = null;
@@ -627,6 +711,12 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
       activeProvider: null,
       activeModel: null,
       apiKeyHash: "test-hash",
+      apiKey: {
+        keyHash: "test-hash",
+        scopes: ["agent:run", "agent:read"],
+        created: new Date().toISOString(),
+        label: "chat-session-test",
+      },
     } as any;
 
     let capturedSessionId: string | undefined = "NOT_SET";
@@ -666,6 +756,12 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
     await sessionManager.createSession("key-1", {
       id: "shared-sess-ws",
       apiKeyHash: "test-hash",
+      apiKey: {
+        keyHash: "test-hash",
+        scopes: ["agent:run", "agent:read"],
+        created: new Date().toISOString(),
+        label: "chat-session-test",
+      },
     });
 
     const state1: ConnectionState = {
@@ -675,6 +771,12 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
       activeProvider: null,
       activeModel: null,
       apiKeyHash: "test-hash",
+      apiKey: {
+        keyHash: "test-hash",
+        scopes: ["agent:run", "agent:read"],
+        created: new Date().toISOString(),
+        label: "chat-session-test",
+      },
     } as any;
 
     const state2: ConnectionState = {
@@ -684,6 +786,12 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
       activeProvider: null,
       activeModel: null,
       apiKeyHash: "test-hash",
+      apiKey: {
+        keyHash: "test-hash",
+        scopes: ["agent:run", "agent:read"],
+        created: new Date().toISOString(),
+        label: "chat-session-test",
+      },
     } as any;
 
     let finishConn1: (() => void) | null = null;
@@ -757,6 +865,12 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
       activeProvider: null,
       activeModel: null,
       apiKeyHash: "test-hash",
+      apiKey: {
+        keyHash: "test-hash",
+        scopes: ["agent:run", "agent:read"],
+        created: new Date().toISOString(),
+        label: "chat-session-test",
+      },
     } as any;
 
     const ctx: WebSocketHandlerContext = {
