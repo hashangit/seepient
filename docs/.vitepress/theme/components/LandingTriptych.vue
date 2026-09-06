@@ -176,21 +176,21 @@ const pillars = [
   bottom: 18px;
   border-radius: 13px;
   padding: 16px 18px;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
 }
 
 .tcard-panel--light {
-  background: rgba(255, 255, 255, 0.68);
-  border: 1px solid rgba(255, 255, 255, 0.75);
-  box-shadow: 0 24px 48px -24px rgba(19, 19, 17, 0.35);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
   color: var(--ink);
 }
 
 .tcard-panel--dark {
-  background: rgba(15, 18, 10, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow: 0 24px 48px -24px rgba(0, 0, 0, 0.5);
+  background: linear-gradient(115deg, rgba(15, 18, 10, 0.66), rgba(15, 18, 10, 0.45) 60%, rgba(15, 18, 10, 0.58));
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 24px 48px -24px rgba(0, 0, 0, 0.5);
   color: rgba(243, 243, 240, 0.92);
 }
 

@@ -47,6 +47,15 @@
   --line: rgba(19, 19, 17, 0.12);
   --code-bg: #1a1a1a;
   --code-ink: #e2e2dc;
+
+  /* Liquid glass (lens, not frost): diagonal translucency, low blur,
+     saturation boost, white rim, inner top highlight, layered shadow. */
+  --glass-bg: linear-gradient(115deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.24) 60%, rgba(255, 255, 255, 0.4));
+  --glass-dark-bg: linear-gradient(115deg, rgba(20, 20, 18, 0.88), rgba(20, 20, 18, 0.72));
+  --glass-border: rgba(255, 255, 255, 0.55);
+  --glass-filter: saturate(1.8) blur(2.5px);
+  --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), inset 0 -1px 1px rgba(19, 19, 17, 0.06), 0 1px 2px rgba(19, 19, 17, 0.08), 0 16px 40px -16px rgba(19, 19, 17, 0.3);
+  --glass-shadow-sm: inset 0 1px 0 rgba(255, 255, 255, 0.85), inset 0 -1px 1px rgba(19, 19, 17, 0.05), 0 1px 2px rgba(19, 19, 17, 0.06), 0 10px 28px -14px rgba(19, 19, 17, 0.25);
 }
 
 * {
@@ -483,13 +492,18 @@ body:has(.landing) .VPFooter {
 }
 
 .lp-btn--ink {
-  background: var(--ink);
+  background: var(--glass-dark-bg);
   color: var(--paper);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 16px 40px -16px rgba(19, 19, 17, 0.55);
 }
 
 .lp-btn--ink:hover {
   transform: translateY(-1px);
-  box-shadow: 0 10px 24px -12px rgba(19, 19, 17, 0.5);
+  border-color: rgba(255, 255, 255, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 20px 44px -16px rgba(19, 19, 17, 0.6);
 }
 
 .lp-btn--ink::before {
@@ -501,14 +515,16 @@ body:has(.landing) .VPFooter {
 }
 
 .lp-btn--ghost {
-  background: rgba(255, 255, 255, 0.55);
+  background: var(--glass-bg);
   color: var(--ink);
-  border: 1px solid var(--line);
-  backdrop-filter: blur(6px);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  box-shadow: var(--glass-shadow-sm);
 }
 
 .lp-btn--ghost:hover {
-  border-color: rgba(19, 19, 17, 0.32);
+  border-color: rgba(255, 255, 255, 0.9);
   transform: translateY(-1px);
 }
 

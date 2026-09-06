@@ -70,9 +70,13 @@ const rows = [
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  border: 1px solid var(--line);
+  border: 1px solid var(--glass-border);
   border-radius: 14px;
   overflow: hidden;
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  box-shadow: var(--glass-shadow-sm);
 }
 
 .compare-table th {
@@ -84,8 +88,8 @@ const rows = [
   color: var(--ink-3);
   text-align: left;
   padding: 14px 18px;
-  background: var(--paper-2);
-  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.42);
+  border-bottom: 1px solid rgba(19, 19, 17, 0.1);
 }
 
 .compare-table td {
@@ -110,7 +114,7 @@ const rows = [
 }
 
 .col-seepient {
-  background: var(--moss-tint);
+  background: rgba(237, 239, 220, 0.62);
   border-left: 1px solid var(--line);
   border-right: 1px solid var(--line);
 }

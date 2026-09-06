@@ -304,13 +304,13 @@ const shore = `${withBase('/textures/shore.jpg')}`
   right: max(24px, calc(50% - 700px));
   bottom: 118px;
   width: 296px;
-  background: rgba(255, 255, 255, 0.78);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, 0.8);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--glass-border);
   border-radius: 14px;
   padding: 16px 18px;
-  box-shadow: 0 32px 64px -28px rgba(19, 19, 17, 0.4);
+  box-shadow: var(--glass-shadow);
 }
 
 .approval-kicker {
@@ -348,14 +348,16 @@ const shore = `${withBase('/textures/shore.jpg')}`
 }
 
 .approval-btn--ink {
-  background: var(--ink);
+  background: var(--glass-dark-bg);
   color: var(--paper);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 
 .approval-btn--ghost {
-  border: 1px solid var(--line);
+  border: 1px solid var(--glass-border);
   color: var(--ink-2);
-  background: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.35);
 }
 
 .approval-meta {

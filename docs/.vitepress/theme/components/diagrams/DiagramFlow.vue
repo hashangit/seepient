@@ -36,13 +36,24 @@ const hasNotes = computed(() => props.steps.some((s) => s.note))
 </template>
 
 <style scoped>
+/* archify instrument panel: slate canvas, faint grid, mono steps,
+   dashed flow with triangle heads. */
 .dflow {
   margin: 1.75rem 0;
+  background:
+    linear-gradient(rgba(30, 41, 59, 0.33) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(30, 41, 59, 0.33) 1px, transparent 1px),
+    linear-gradient(160deg, #0d1526, #070c18 65%);
+  background-size: 28px 28px, 28px 28px, cover;
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  padding: 24px 24px 18px;
+  box-shadow: 0 32px 70px -38px rgba(7, 12, 24, 0.7);
 }
 
 .dstep-main {
   display: grid;
-  gap: 12px 24px;
+  gap: 10px 24px;
 }
 
 .dflow.has-notes .dstep-main {
@@ -54,23 +65,24 @@ const hasNotes = computed(() => props.steps.some((s) => s.note))
   display: flex;
   align-items: flex-start;
   gap: 14px;
-  background: rgba(255, 255, 255, 0.6);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 14px 18px;
-  transition: border-color 0.25s ease;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(52, 211, 153, 0.32);
+  border-radius: 9px;
+  padding: 13px 17px;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
 }
 
 .dstep-card:hover {
-  border-color: rgba(95, 122, 61, 0.5);
+  border-color: #34d399;
+  box-shadow: 0 0 28px -10px rgba(52, 211, 153, 0.45);
 }
 
 .dstep-num {
   font-family: var(--vp-font-family-mono);
   font-size: 11px;
   font-weight: 550;
-  color: var(--moss-deep);
-  border: 1px solid rgba(95, 122, 61, 0.4);
+  color: #34d399;
+  border: 1px solid rgba(52, 211, 153, 0.45);
   border-radius: 999px;
   padding: 3px 9px;
   margin-top: 1px;
@@ -79,24 +91,24 @@ const hasNotes = computed(() => props.steps.some((s) => s.note))
 
 .dstep-title {
   margin: 0;
-  font-family: var(--vp-font-family-heading);
-  font-size: 15.5px;
-  font-weight: 620;
-  letter-spacing: -0.01em;
-  color: var(--ink);
+  font-family: var(--vp-font-family-mono);
+  font-size: 12.5px;
+  font-weight: 550;
+  letter-spacing: 0.04em;
+  color: #e2e8f0;
 }
 
 .dstep-tagline {
   margin: 3px 0 0;
   font-size: 12.5px;
-  color: var(--ink-3);
+  color: #94a3b8;
 }
 
 .dstep-desc {
   margin: 4px 0 0;
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--ink-2);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #94a3b8;
 }
 
 .dstep-chips {
@@ -109,28 +121,28 @@ const hasNotes = computed(() => props.steps.some((s) => s.note))
 .dstep-chip {
   font-family: var(--vp-font-family-mono);
   font-size: 11px;
-  color: var(--ink-2);
-  background: var(--paper-2);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 3px 10px;
+  color: #cbd5e1;
+  background: rgba(2, 6, 23, 0.5);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 7px;
+  padding: 4px 11px;
 }
 
 .dstep-note {
   margin: 0;
-  font-size: 13.5px;
+  font-size: 13px;
   line-height: 1.6;
-  color: var(--ink-2);
+  color: #94a3b8;
 }
 
-/* Connector between steps: animated dashed rail with arrowhead */
+/* Connector: dashed rail + triangle head + optional edge label */
 .dstep-connector {
   position: relative;
-  height: 40px;
+  height: 38px;
   display: flex;
   align-items: center;
   gap: 12px;
-  padding-left: 34px;
+  padding-left: 40px;
 }
 
 .dflow.has-notes .dstep-connector {
@@ -140,11 +152,11 @@ const hasNotes = computed(() => props.steps.some((s) => s.note))
 
 .dstep-line {
   position: absolute;
-  left: 33px;
-  top: 4px;
-  bottom: 6px;
+  left: 39px;
+  top: 3px;
+  bottom: 7px;
   width: 2px;
-  background-image: linear-gradient(rgba(95, 122, 61, 0.55) 45%, transparent 0);
+  background-image: linear-gradient(#64748b 45%, transparent 0);
   background-size: 2px 9px;
   background-repeat: repeat-y;
 }
@@ -163,28 +175,33 @@ const hasNotes = computed(() => props.steps.some((s) => s.note))
 
 .dstep-arrow {
   position: absolute;
-  left: 30px;
+  left: 36px;
   bottom: -1px;
   width: 0;
   height: 0;
   border-left: 5px solid transparent;
   border-right: 5px solid transparent;
-  border-top: 6px solid rgba(95, 122, 61, 0.6);
+  border-top: 6px solid #64748b;
 }
 
 .dstep-edge {
   font-family: var(--vp-font-family-mono);
   font-size: 10.5px;
   letter-spacing: 0.05em;
-  color: var(--ink-3);
-  padding: 3px 10px;
-  background: var(--paper-2);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 999px;
+  padding: 3px 11px;
+  background: rgba(2, 6, 23, 0.5);
 }
 
 @media (max-width: 960px) {
   .dflow.has-notes .dstep-main {
     grid-template-columns: 1fr;
+  }
+
+  .dflow {
+    padding: 18px 16px 14px;
   }
 }
 </style>

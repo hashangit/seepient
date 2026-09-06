@@ -36,9 +36,14 @@ defineProps({
 <style scoped>
 .dmap {
   margin: 1.75rem 0;
-  border: 1px solid var(--line);
+    border: 1px solid #1e293b;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.55);
+  background:
+    linear-gradient(rgba(30, 41, 59, 0.33) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(30, 41, 59, 0.33) 1px, transparent 1px),
+    linear-gradient(160deg, #0d1526, #070c18 65%);
+  background-size: 28px 28px, 28px 28px, cover;
+  box-shadow: 0 32px 70px -38px rgba(7, 12, 24, 0.7);
   padding: 22px 24px;
 }
 
@@ -58,7 +63,7 @@ defineProps({
   display: block;
   font-size: 13.5px;
   font-weight: 600;
-  color: var(--ink);
+  color: #e2e8f0;
 }
 
 .dmap-edge-sub {
@@ -70,7 +75,7 @@ defineProps({
 
 .dmap-edge-line {
   height: 1px;
-  background: rgba(19, 19, 17, 0.3);
+  background: rgba(148, 163, 184, 0.5);
   position: relative;
 }
 
@@ -81,7 +86,7 @@ defineProps({
   top: -3px;
   border-top: 3.5px solid transparent;
   border-bottom: 3.5px solid transparent;
-  border-left: 5px solid rgba(19, 19, 17, 0.4);
+  border-left: 5px solid rgba(148, 163, 184, 0.7);
 }
 
 .dmap-paths {
@@ -94,15 +99,15 @@ defineProps({
   font-family: var(--vp-font-family-mono);
   font-size: 11.5px;
   color: var(--ink);
-  background: var(--paper-2);
-  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--glass-border);
   border-radius: 6px;
   padding: 4px 10px;
 }
 
 .dmap-panel {
   margin-top: 16px;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
   padding-top: 18px;
 }
 
@@ -113,13 +118,13 @@ defineProps({
   font-weight: 550;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--moss-deep);
+  color: #34d399;
 }
 
 .dmap-subtitle {
   margin: 6px 0 0;
   font-size: 12px;
-  color: var(--ink-3);
+  color: #64748b;
 }
 
 .dmap-modules {
@@ -130,8 +135,8 @@ defineProps({
 }
 
 .dmap-module {
-  background: var(--paper);
-  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.45);
+  border: 1px solid var(--glass-border);
   border-radius: 10px;
   padding: 12px 14px;
 }
@@ -140,7 +145,7 @@ defineProps({
   margin: 0;
   font-size: 13px;
   font-weight: 600;
-  color: var(--ink);
+  color: #e2e8f0;
 }
 
 .dmap-module-desc {
@@ -148,6 +153,6 @@ defineProps({
   font-family: var(--vp-font-family-mono);
   font-size: 10.5px;
   line-height: 1.5;
-  color: var(--ink-3);
+  color: #94a3b8;
 }
 </style>

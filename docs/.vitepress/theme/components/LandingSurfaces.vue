@@ -87,18 +87,21 @@ const surfaces = [
   flex-direction: column;
   align-items: flex-start;
   gap: 0;
-  background: rgba(255, 255, 255, 0.55);
-  border: 1px solid var(--line);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--glass-border);
   border-radius: 16px;
   padding: 22px;
+  box-shadow: var(--glass-shadow-sm);
   text-decoration: none !important;
   transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
 }
 
 .scard:hover {
   transform: translateY(-3px);
-  border-color: rgba(19, 19, 17, 0.26);
-  box-shadow: 0 24px 48px -28px rgba(19, 19, 17, 0.28);
+  border-color: rgba(255, 255, 255, 0.9);
+  box-shadow: var(--glass-shadow);
 }
 
 .scard-name {
