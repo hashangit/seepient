@@ -608,7 +608,7 @@ body:not(:has(.landing))::before {
   left: 0;
   right: 0;
   height: 260px;
-  background-image: url('/seepient/textures/stone.jpg');
+  background-image: url('/textures/stone.jpg');
   background-size: cover;
   background-position: center 30%;
   opacity: 0.14;
@@ -633,7 +633,7 @@ body:not(:has(.landing))::before {
   content: '';
   position: absolute;
   inset: 0;
-  background-image: url('/seepient/textures/shore.jpg');
+  background-image: url('/textures/shore.jpg');
   background-size: cover;
   background-position: center 70%;
   opacity: 0.28;

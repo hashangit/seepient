@@ -8,37 +8,37 @@ const columns = [
   {
     title: 'Getting started',
     links: [
-      { text: 'Introduction', href: '/seepient/guides/introduction' },
-      { text: 'Quick start', href: '/seepient/guides/quick-start' },
-      { text: 'Installation', href: '/seepient/guides/installation' },
-      { text: 'Configuration', href: '/seepient/guides/configuration' },
+      { text: 'Introduction', href: '/guides/introduction' },
+      { text: 'Quick start', href: '/guides/quick-start' },
+      { text: 'Installation', href: '/guides/installation' },
+      { text: 'Configuration', href: '/guides/configuration' },
     ],
   },
   {
     title: 'Surfaces',
     links: [
-      { text: 'Terminal UI', href: '/seepient/tui/overview' },
-      { text: 'CLI', href: '/seepient/cli/overview' },
-      { text: 'TypeScript SDK', href: '/seepient/sdk/overview' },
-      { text: 'Server', href: '/seepient/server/overview' },
+      { text: 'Terminal UI', href: '/tui/overview' },
+      { text: 'CLI', href: '/cli/overview' },
+      { text: 'TypeScript SDK', href: '/sdk/overview' },
+      { text: 'Server', href: '/server/overview' },
     ],
   },
   {
     title: 'Security',
     links: [
-      { text: 'Permissions & consent', href: '/seepient/security/permissions' },
-      { text: 'Sandboxing', href: '/seepient/security/sandboxing' },
-      { text: 'Exact commits', href: '/seepient/security/exact-commit' },
-      { text: 'Audit trail', href: '/seepient/security/audit' },
+      { text: 'Permissions & consent', href: '/security/permissions' },
+      { text: 'Sandboxing', href: '/security/sandboxing' },
+      { text: 'Exact commits', href: '/security/exact-commit' },
+      { text: 'Audit trail', href: '/security/audit' },
     ],
   },
   {
     title: 'Cookbook',
     links: [
-      { text: 'GitHub Action reviewer', href: '/seepient/cookbook/github-action' },
-      { text: 'React chat UI', href: '/seepient/cookbook/react-chat' },
-      { text: 'Local LLMs with Ollama', href: '/seepient/cookbook/local-llm' },
-      { text: 'Production checklist', href: '/seepient/cookbook/production-checklist' },
+      { text: 'GitHub Action reviewer', href: '/cookbook/github-action' },
+      { text: 'React chat UI', href: '/cookbook/react-chat' },
+      { text: 'Local LLMs with Ollama', href: '/cookbook/local-llm' },
+      { text: 'Production checklist', href: '/cookbook/production-checklist' },
     ],
   },
 ]
@@ -56,8 +56,8 @@ const columns = [
         <span class="cta-pill" :style="{ backgroundImage: `url(${shorePill})` }" aria-hidden="true"></span>
       </h2>
       <div class="cta-actions" v-reveal>
-        <a class="lp-btn lp-btn--ink" href="/seepient/guides/quick-start">Quick start</a>
-        <a class="lp-btn lp-btn--ghost" href="/seepient/cookbook/overview">Browse the cookbook</a>
+        <a class="lp-btn lp-btn--ink" href="/guides/quick-start">Quick start</a>
+        <a class="lp-btn lp-btn--ghost" href="/cookbook/overview">Browse the cookbook</a>
       </div>
     </div>
 
