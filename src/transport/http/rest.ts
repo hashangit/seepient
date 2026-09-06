@@ -21,6 +21,7 @@ import {
 } from "./settings-handlers.js";
 import { globalRateLimiter, RateLimiter } from "./rate-limit.js";
 import { logTransportEvent } from "../logging.js";
+import { extractLoopError } from "../sdk/error-surfacing.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -616,8 +617,9 @@ async function handleChat(
 
   const keyHash = key.keyHash ?? (key.key ? hashKey(key.key) : "");
 
-  // If sessionId is provided, verify it exists and belongs to caller
-  const sessionId = parsed.sessionId;
+  // If sessionId is provided, verify it exists and belongs to caller.
+  // W154c: an empty/whitespace sessionId means "no session", not an id of "".
+  const sessionId = parsed.sessionId?.trim() || undefined;
   let history: import("../../foundations/types.js").Message[] | undefined;
   let turnAcquired = false;
 
@@ -627,6 +629,15 @@ async function handleChat(
       session = await ctx.sessionManager.getSession(sessionId, keyHash);
     } catch (err: any) {
       if (err?.code === "NOT_FOUND" || err?.statusCode === 404 || err?.message?.includes("server owner")) {
+        // W154f: operators must be able to diagnose legacy-session refusals —
+        // log the teaching error before sending the sanitized wire response.
+        logTransportEvent({
+          level: "warn",
+          event: "session_resume_refused",
+          requestId: crypto.randomUUID(),
+          apiKeyHashPrefix: keyHash ? keyHash.slice(0, 8) : undefined,
+          error: err?.message ?? String(err),
+        });
         sendError(res, 404, "NOT_FOUND", `Session "${sessionId}" not found`);
         return;
       }
@@ -671,6 +682,27 @@ async function handleChat(
       sessionId,
       history,
     } as any);
+
+    // W151: a resolved `finishReason:"error"` carries no assistant content —
+    // persist nothing and tell the client the turn failed instead of
+    // returning 200 with an empty assistant row.
+    if (result.finishReason === "error") {
+      logTransportEvent({
+        level: "warn",
+        event: "generation_error",
+        requestId: crypto.randomUUID(),
+        apiKeyHashPrefix: keyHash ? keyHash.slice(0, 8) : undefined,
+        error: extractLoopError(result as never)?.message ?? "loop resolved with finishReason error",
+      });
+      (res as any).__internalErrorMessage = "Agent loop finished with an error";
+      sendJSON(res, 502, {
+        error: {
+          code: "PROVIDER_ERROR",
+          message: "Generation failed",
+        },
+      });
+      return;
+    }
 
     // Persist assistant message if session exists
     if (sessionId) {

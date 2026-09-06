@@ -93,8 +93,8 @@ export async function handleChat(
             },
           );
         }
-        state.sessionId = session.id;
-
+        // W154d: pin the connection to the session only after the turn lock
+        // is acquired — a busy-reject must not re-pin the connection.
         if (!ctx.sessionManager.acquireTurn(session.id)) {
           safeSend(ws, {
             type: "error",
@@ -104,6 +104,7 @@ export async function handleChat(
           });
           return;
         }
+        state.sessionId = session.id;
         acquiredSessionId = session.id;
 
         history = [...session.messages];
@@ -128,6 +129,14 @@ export async function handleChat(
           return;
         }
         if (/server owner/i.test(message) || (err as any)?.code === "NOT_FOUND") {
+          // W154f: keep the teaching error diagnosable by operators.
+          logTransportEvent({
+            level: "warn",
+            event: "session_resume_refused",
+            requestId: serverMsgId,
+            apiKeyHashPrefix: state.apiKeyHash ? state.apiKeyHash.slice(0, 8) : undefined,
+            error: message,
+          });
           safeSend(ws, {
             type: "error",
             code: "SESSION_NOT_FOUND",

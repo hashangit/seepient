@@ -58,6 +58,7 @@ import {
   now,
   toSeepientError,
 } from "../../domain/context/message-convert.js";
+import { normalizeHistoryForSend } from "../../domain/sessions/normalize-history.js";
 import { generateId } from "../../foundations/id.js";
 import { surfaceLoopError, extractLoopError } from "./error-surfacing.js";
 import { SeepientError } from "../../foundations/errors.js";
@@ -457,6 +458,12 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
       const maxSteps = opts.maxSteps ?? 10;
       const snapshot = await runtime.createTurnSnapshot();
 
+      // W150 (D3a): send the normalized history to the model but keep the
+      // stored copy intact on failure (crash recovery). On success, adopt
+      // the messages the loop appended (assistant/tool) into the store.
+      const modelMessages = normalizeHistoryForSend(messages);
+      const modelInputCount = modelMessages.length;
+
       const result = await runAgentLoop({
         runtime,
         turnSnapshot: snapshot,
@@ -464,7 +471,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
         modelOverride: currentModelOverride(),
         purpose,
         tier,
-        messages,
+        messages: modelMessages,
         toolDefs,
         systemPrompt: systemPrompt,
         maxSteps,
@@ -476,6 +483,13 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
         approveTool: opts.approveTool,
         wiredPipeline,
       });
+      // W151: a resolved error must not persist an empty assistant row.
+      const turnErrored = extractLoopError(result) !== null;
+      for (let i = modelInputCount; i < result.messages.length; i++) {
+        const appended = result.messages[i];
+        if (turnErrored && appended.role === "assistant" && !appended.content) continue;
+        messages.push(appended);
+      }
 
       cumulativeUsage.totalPromptTokens += result.usage.promptTokens;
       cumulativeUsage.totalCompletionTokens += result.usage.completionTokens;
@@ -527,6 +541,11 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
       const stream = new StreamManager();
 
       (async () => {
+        // W150 (D3a): normalized model input; the stored copy stays intact
+        // until the loop succeeds and its additions are merged back below.
+        const modelMessages = normalizeHistoryForSend(messages);
+        const modelInputCount = modelMessages.length;
+
         try {
           const snapshot = await runtime.createTurnSnapshot();
 
@@ -537,7 +556,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
             modelOverride: currentModelOverride(),
             purpose: streamOptions?.purpose ?? purpose,
             tier: streamOptions?.tier ?? tier,
-            messages,
+            messages: modelMessages,
             toolDefs,
             systemPrompt: systemPrompt,
             maxSteps,
@@ -586,6 +605,14 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
           cumulativeUsage.totalCompletionTokens += result.usage.completionTokens;
           cumulativeUsage.totalCost += result.usage.cost;
           cumulativeUsage.requestCount += 1;
+
+          // W151: a resolved error must not persist an empty assistant row.
+          const turnErrored = extractLoopError(result) !== null;
+          const appended = result.messages.slice(modelInputCount);
+          for (const m of appended) {
+            if (turnErrored && m.role === "assistant" && !m.content) continue;
+            messages.push(m);
+          }
 
           const lastAssistant = [...messages]
             .reverse()

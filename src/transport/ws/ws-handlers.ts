@@ -129,10 +129,27 @@ export function handleConnection(
         handleToolApprovalResponse(ws, msg, ctx.registry);
         break;
       case "resume":
-        void handleResume(ws, msg, state, ctx);
+        // W154e: unhandled rejections from these paths would crash the process
+        void handleResume(ws, msg, state, ctx).catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : String(err);
+          safeSend(ws, {
+            type: "error",
+            code: "INTERNAL_ERROR",
+            retryable: false,
+            message,
+          });
+        });
         break;
       case "reconnect":
-        void handleReconnect(ws, msg, state, ctx);
+        void handleReconnect(ws, msg, state, ctx).catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : String(err);
+          safeSend(ws, {
+            type: "error",
+            code: "INTERNAL_ERROR",
+            retryable: false,
+            message,
+          });
+        });
         break;
       case "switch_provider":
         handleSwitchProvider(ws, msg, state);

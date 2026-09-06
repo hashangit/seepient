@@ -520,9 +520,11 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
         registry: createConnectionRegistry(),
       sessionManager,
       streamText: (options) => {
-        // Evict session while stream is in flight
-        sessionManager.deleteSession("evicted-sess");
-        // Then finish stream -> addMessage for assistant will throw because session is gone!
+        // W152: deleteSession now REFUSES while the turn is in flight — the
+        // session must survive the mid-stream eviction attempt. Simulate the
+        // legacy loss directly (backend-driven eviction) so the error-frame
+        // contract of this test is still exercised.
+        (sessionManager as any).sessions.delete("evicted-sess");
         options.onDone({
           text: "Stream completed after eviction",
           usage: { promptTokens: 5, completionTokens: 5, totalTokens: 10, cost: 0 },
