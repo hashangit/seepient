@@ -151,6 +151,25 @@ describe("Phase 5: Transport Polish (W024, W025, W026)", () => {
       expect(res.headers["vary"]).toContain("Origin");
     });
 
+    it("W145: default config reflects NO origin (no ACAO) until an allowlist or '*' is set", async () => {
+      delete process.env.SEEPIENT_CORS_ORIGINS;
+
+      const server = await runSeepientServer({ listen: false,
+        persist: new MemoryPersistenceBackend(),
+      });
+
+      const req = createMockReq("GET", "/v1/health", { origin: "https://unlisted.example.net" });
+      const res = createMockRes();
+
+      await new Promise<void>((resolve) => {
+        res.on("finish", resolve);
+        server.emit("request", req, res);
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+    });
+
     it("specific origin allowlist allows matching origin and rejects non-matching", async () => {
       process.env.SEEPIENT_CORS_ORIGINS = "https://trusted.com, https://app.internal";
 

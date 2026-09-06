@@ -145,10 +145,11 @@ function addCORSHeaders(
       appendVaryOrigin(res);
     }
   } else {
-    res.setHeader("Access-Control-Allow-Origin", origin ?? "*");
-    if (origin) {
-      appendVaryOrigin(res);
-    }
+    // W145: no allowlist configured — reflect nothing. Cross-origin browser
+    // access must be opted into via `server.corsOrigins` (or
+    // SEEPIENT_CORS_ORIGINS, "*" to reflect any origin). The previous
+    // default silently mirrored any Origin header, making the allowlist
+    // feature moot out of the box.
   }
 
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
@@ -432,6 +433,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
   // Create WebSocket handler context
   const wsCtx: WebSocketHandlerContext = {
     registry: wsRegistry,
+    rateLimiter: serverRateLimiter,
     sessionManager,
     streamText: async (opts) => {
       // Spec 008: construct a per-request pipeline with the WS client's

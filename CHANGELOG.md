@@ -48,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Runtime contract extension**: Extended `ProviderRuntimeContract` with optional inspection and listener cleanup methods, eliminating `(runtime as any)` probes.
 
 **Transport hardening & documentation truth (US4):**
+- **Default CORS no longer reflects arbitrary origins (021-4 W145)**: with no `server.corsOrigins` setting and no `SEEPIENT_CORS_ORIGINS` env var, responses carry no `Access-Control-Allow-Origin` header — browser cross-origin access is now opt-in. Set the setting or env var to an origin allowlist, or `*` to reflect any origin. Combined with the default `0.0.0.0` bind, the previous default made the allowlist feature moot out of the box.
 - **SSRF socket IP pinning**: Reused socket lookup override primitive via `pinnedFetch` to connect strictly to pre-validated IP addresses, eliminating DNS rebinding TOCTOU windows. Added 5-hop redirect limit and extended private/reserved CIDR blocks.
 - **Transport DoS caps**: Enforced 10 MB default body limit on REST requests (`413 PAYLOAD_TOO_LARGE`), 1 MiB WebSocket frame size (`maxPayload`), 300 rpm per-key token bucket rate limiter (`429 RATE_LIMITED`), and configurable CORS allowlist (`SEEPIENT_CORS_ORIGINS`).
 - **Structured request logging**: Added JSON-line logger with `requestId` correlation at transport seams; sanitized 500 error responses to prevent internal detail leaks.

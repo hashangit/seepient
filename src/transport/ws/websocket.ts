@@ -66,9 +66,12 @@ export async function setupWebSocket(
 
   // Handle HTTP upgrade requests — bound to THIS instance's wss
   const upgradeHandler = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-    // Only handle /ws upgrades
+    // W146: non-/ws upgrades get an answer and a destroyed socket instead of
+    // dangling forever.
     const url = req.url?.split("?")[0];
     if (url !== "/ws") {
+      socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+      socket.destroy();
       return;
     }
 
@@ -78,6 +81,21 @@ export async function setupWebSocket(
       socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
       socket.destroy();
       return;
+    }
+
+    // W146: per-key connection cap (env-tunable, default 50).
+    const keyHash = key.keyHash ?? "";
+    const cap = parseInt(process.env.SEEPIENT_WS_MAX_CONNECTIONS_PER_KEY ?? "50", 10);
+    if (!isNaN(cap) && cap > 0) {
+      let current = 0;
+      for (const state of ctx.registry.activeConnections.values()) {
+        if (state.apiKeyHash === keyHash) current++;
+      }
+      if (current >= cap) {
+        socket.write("HTTP/1.1 429 Too Many Requests\r\nConnection: close\r\n\r\n");
+        socket.destroy();
+        return;
+      }
     }
 
     wss.handleUpgrade(req, socket, head, (ws: WebSocket) => {
