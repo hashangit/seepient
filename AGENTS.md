@@ -248,7 +248,7 @@ Current layout of the Obsidian vault (annotated):
 │           └── tasks.md              # T001–T027 dependency-ordered, US1–US4 stories, test-first gates
 │       ├── 021-3-remediation/        # Work order: 021-2 implementation remediation (021-3 — SHIPPED in v0.7.0)
 │       │   └── tasks.md              # W001–W041; owner D1 (sessionless chat = no session) + D2 (fallback: mandatory sessionId)
-│       └── 021-4-remediation/        # Work order: rename completion + embedding/security/session repairs (021-4 — PLANNED; D1–D3 owner decisions pending)
+│       └── 021-4-remediation/        # Work order: rename completion + embedding/security/session repairs (021-4 — W100–W164 implemented, D1 adopt / D2 fold / D3 send-time normalization recorded)
 │           └── tasks.md              # W100–W172; askSeepient/runSeepientServer truth, WS scopes, broker byte-classifier, D3 send-time history normalization
 ├── 010-provider-management-redesign/ # Provider mgmt redesign: contracts + runtime + purpose/tier routing
 │   ├── spec.md                       # Problem, 5 blockers + 4 gaps, scope decisions, success criteria
@@ -353,10 +353,10 @@ UI → Transport → Domain → Capabilities → Vendors
 | TUI | `src/ui/tui/` | Ink/React: components, widgets, diff, overlays, logo |
 | REPL | `src/ui/repl/repl.ts` | Readline fallback, non-interactive / piped |
 | CLI transport | `src/transport/cli/` | Bootstrap, setup, agent, config-loader, commands |
-| HTTP transport | `src/transport/http/` | REST handlers, `provider-management/` routes (accounts, assignments, oauth, catalog), server core, standalone |
+| HTTP transport | `src/transport/http/` | REST handlers, `provider-management/` routes (accounts, assignments, oauth, catalog), `runSeepientServer` server core, standalone |
 | WebSocket | `src/transport/ws/` | Dispatcher (`ws-handlers.ts`), `connection-registry.ts`, message handlers (`chat`, `approvals`, `provider-mutations`, `session-control`) |
 | Auth | `src/transport/auth/` | API keys + scopes |
-| SDK transport | `src/transport/sdk/` | `createSeepient`, `createAgent`, `generateText`, `streamText`, option resolution |
+| SDK transport | `src/transport/sdk/` | `createSeepient`, `askSeepient` (one-shot, streaming via `stream: true`), option resolution |
 
 Unified provider architecture behind `ProviderRuntime` (`src/domain/providers/provider-runtime.ts`) and `AggregateInferenceAdapter` (`src/capabilities/inference/aggregate-adapter.ts`):
 
