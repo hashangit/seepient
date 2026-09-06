@@ -248,7 +248,7 @@ Current layout of the Obsidian vault (annotated):
 │           └── tasks.md              # T001–T027 dependency-ordered, US1–US4 stories, test-first gates
 │       ├── 021-3-remediation/        # Work order: 021-2 implementation remediation (021-3 — SHIPPED in v0.7.0)
 │       │   └── tasks.md              # W001–W041; owner D1 (sessionless chat = no session) + D2 (fallback: mandatory sessionId)
-│       └── 021-4-remediation/        # Work order: rename completion + embedding/security/session repairs (021-4 — W100–W164 implemented, D1 adopt / D2 fold / D3 send-time normalization recorded)
+│       └── 021-4-remediation/        # Work order: rename completion + embedding/security/session repairs (021-4 — SHIPPED in v0.7.0; D1 adopt / D2 fold / D3 send-time normalization)
 │           └── tasks.md              # W100–W172; askSeepient/runSeepientServer truth, WS scopes, broker byte-classifier, D3 send-time history normalization
 ├── 010-provider-management-redesign/ # Provider mgmt redesign: contracts + runtime + purpose/tier routing
 │   ├── spec.md                       # Problem, 5 blockers + 4 gaps, scope decisions, success criteria
