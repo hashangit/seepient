@@ -173,8 +173,9 @@ export interface AskSeepientOptions {
   purpose?: Purpose;
   tier?: Tier;
   systemPrompt?: string;
-  tools?: (string | UserToolDefinition | import("./contracts/custom-tools.js").AnyToolRegistration)[];
+  tools?: (string | UserToolDefinition | import("./contracts/custom-tools.js").AnyToolRegistration | import("./contracts/tool.js").ToolModule)[];
   skills?: string[] | boolean;
+  sources?: import("../capabilities/skills/types.js").SkillSource[];
   cwd?: string;
   maxSteps?: number;
   temperature?: number;
@@ -215,6 +216,11 @@ export interface AskSeepientOptions {
   auditStore?: import("./contracts/execution-brokers.js").AuditStore;
   policyStore?: import("./contracts/execution-brokers.js").PolicyStore;
   capabilityLedger?: import("./contracts/capability-ledger.js").CapabilityLedger;
+  /** Spec 022 Operator baseline applied unstamped to all principals */
+  operatorBaseline?: import("./contracts/permission-policy.js").CapabilitySet | import("./contracts/permission-policy.js").Capability[];
+  /** Spec 022 Tenancy mode ("single" | "multi") and stateless declaration */
+  tenancy?: "single" | "multi";
+  stateless?: boolean;
 }
 
 export interface AskSeepientResult {
@@ -252,8 +258,9 @@ export interface CreateSeepientOptions {
   adapter?: import("./contracts/backend-ports.js").InferenceAdapter;
   override?: { providerAccount?: string; model?: string; thinkingLevel?: any };
   systemPrompt?: string;
-  tools?: (string | UserToolDefinition | import("./contracts/custom-tools.js").AnyToolRegistration)[];
+  tools?: (string | UserToolDefinition | import("./contracts/custom-tools.js").AnyToolRegistration | import("./contracts/tool.js").ToolModule)[];
   skills?: string[] | boolean;
+  sources?: import("../capabilities/skills/types.js").SkillSource[];
   cwd?: string;
   maxSteps?: number;
   persist?: string | PersistenceBackend | PersistenceConfig;
@@ -278,6 +285,11 @@ export interface CreateSeepientOptions {
   auditStore?: import("./contracts/execution-brokers.js").AuditStore;
   policyStore?: import("./contracts/execution-brokers.js").PolicyStore;
   capabilityLedger?: import("./contracts/capability-ledger.js").CapabilityLedger;
+  /** Spec 022 Operator baseline applied unstamped to all principals */
+  operatorBaseline?: import("./contracts/permission-policy.js").CapabilitySet | import("./contracts/permission-policy.js").Capability[];
+  /** Spec 022 Tenancy mode ("single" | "multi") and stateless declaration */
+  tenancy?: "single" | "multi";
+  stateless?: boolean;
 }
 
 export interface Seepient {
@@ -288,6 +300,8 @@ export interface Seepient {
   switchProvider(accountOrModel: string, model?: string): Promise<void>;
   setSystemPrompt(prompt: string): void;
   setTools(tools: string[]): void;
+  getToolDefinitions(): import("./contracts/tool.js").ToolDefinition[];
+  getToolRegistry(): import("./contracts/tool.js").ToolRegistryContract;
   abort(): void;
   clear(): void;
   getHistory(): Message[];
@@ -383,6 +397,8 @@ export interface RunSeepientServerOptions {
   capabilityLedger?: import("./contracts/capability-ledger.js").CapabilityLedger;
   /** Injected settings manager (structural contract; the concrete SettingsManager satisfies it) */
   settingsManager?: import("./contracts/settings-manager-like.js").SettingsManagerLike;
+  /** Injected per-server or per-agent ToolRegistry (Spec 022) */
+  toolRegistry?: import("./contracts/tool.js").ToolRegistryContract;
   /**
    * Whether to start listening immediately.
    * Default: true. Set to false to create the configured http.Server without listening.

@@ -33,7 +33,7 @@ import type { ToolEffectKind } from "./tool-effects.js";
  * lifetime are independent: a longer lifetime never widens an exact target
  * into a root or glob.
  */
-export type Capability =
+export type Capability = (
   | { kind: "read-root"; root: string }
   | { kind: "read-file"; path: string }
   | { kind: "write-root"; root: string }
@@ -60,7 +60,11 @@ export type Capability =
   | { kind: "secret-ref"; ref: string }
   | { kind: "model-egress"; providerClass: string; dataClasses: string[] }
   | { kind: "activate-change-class"; changeClass: import("./self-evolution.js").SelfEvolutionChangeClass }
-  | { kind: "trusted-host"; registrationId?: string };
+  | { kind: "trusted-host"; registrationId?: string }
+) & {
+  /** Spec 022: Principal ownership stamp (absent = legacy single-user entry). */
+  principalId?: string;
+};
 /** When a capability is valid. Action-scoped caps are never persisted. */
 export type CapabilityLifetime =
   | { kind: "action"; actionDigest: string; consumeOnce: true }

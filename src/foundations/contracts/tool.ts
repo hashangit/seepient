@@ -27,6 +27,14 @@ export interface ToolModule {
   handler?: (args: any, config?: any, extra?: ToolExecExtra) => Promise<string | ToolResult>;
 }
 
+export interface ToolRegistryContract {
+  register(module: ToolModule): void;
+  registerMany(modules: ToolModule[]): void;
+  modules(): readonly ToolModule[];
+  definitions(): ToolDefinition[];
+  find(name: string): ToolModule | undefined;
+}
+
 /**
  * Reusable JSON-Schema fragment for the LLM-authored human-in-the-loop gate
  * context. Add as an OPTIONAL `approval` property on risky tools' parameters.
