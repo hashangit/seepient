@@ -40,14 +40,15 @@ console.log(agent.getUsage());
 
 ## Parameters
 
-::: tip Stateless Embedding
-For multi-tenant workers and cloud functions requiring full state injection (audit, policy, capability ledger, sessions), use `createSeepient` or `askSeepient`. See [Stateless Workers](/sdk/stateless-workers) for full architecture details.
+::: tip Stateless Embedding & Multi-Tenancy
+For multi-tenant workers and cloud functions requiring full state injection (audit, policy, capability ledger, sessions), use `createSeepient` or `askSeepient`. See [Stateless Workers](/sdk/stateless-workers) and [Multi-Tenant Isolation](/sdk/multi-tenant) for architecture, tenancy modes, and fail-closed rules.
 :::
 
 ### `options` (optional)
 
 | Name            | Type                                     | Default                    | Description |
 |-----------------|------------------------------------------|----------------------------|-------------|
+| `tenancy`       | `"single" \| "multi"`                    | `"single"` (auto-upgraded to `"multi"` if tenant signals detected) | Tenancy mode. `"multi"` enforces fail-closed storage and runtime injection |
 | `model`         | `string`                                 | Provider default           | Model identifier, e.g. `"gpt-5.4"`, `"claude-sonnet-4-6-20260320"` |
 | `provider`      | `string`                                 | `"openai"`                 | Feeds the permission pipeline's `modelProviderClass` audit label |
 | `purpose`       | `Purpose`                                | `"text"`                   | Purpose routing hint (see [Purpose reference](/sdk/types#purpose) for all 15 supported values) |
@@ -76,6 +77,7 @@ For multi-tenant workers and cloud functions requiring full state injection (aud
 | `network`       | `BrokerNetworkAdapter`                   | Standard adapter           | Custom broker network adapter with SSRF / IP pinning rules |
 | `cwd`           | `string`                                 | `process.cwd()`            | Workspace directory for file operations and skill discovery |
 | `skills`        | `string[] \| boolean`                    | `true`                     | Specific skill names, `true` for all, or `false` to disable skill scanning and catalog injection |
+| `skillSources`  | `SkillSource[]`                          | *(none)*                   | Injected skill sources for multi-tenant skill scoping. Disables ambient skill discovery in `multi` mode |
 | `maxSteps`      | `number`                                 | `10`                       | Maximum agent loop iterations per call |
 | `persist`       | `string \| PersistenceBackend \| PersistenceConfig` | *(none)*          | Directory path, backend instance, or config object (e.g. `{ type: "memory" }`). File persistence writes are **atomic** (tmp + rename). |
 | `hooks`         | `Hooks`                                  | *(none)*                   | Lifecycle callbacks |

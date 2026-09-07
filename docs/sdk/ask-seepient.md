@@ -175,6 +175,7 @@ The `skills` option controls skill injection:
 
 | Name | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
+| `tenancy` | `"single" \| "multi"` | `"single"` (auto-upgraded to `"multi"` if tenant signals detected) | Tenancy mode. `"multi"` enforces fail-closed storage and runtime injection |
 | `stream` | `boolean` | `false` | When `true`, returns an `AskSeepientStreamResult` with async iterables and SSE helpers |
 | `model` | `string` | Standard model for provider | Model identifier (e.g. `"gpt-5.4"`, `"claude-sonnet-4-6-20260320"`) |
 | `provider` | `string` | Auto-detected provider | Provider name (e.g. `"anthropic"`, `"openai"`, `"glm"`, `"openai-compatible"`) |
@@ -187,6 +188,7 @@ The `skills` option controls skill injection:
 | `consentMode` | `ConsentMode` | `"edit-enabled"` | Permission mode: `"edit-enabled"`, `"autonomous"`, or `"ask-everything"` |
 | `cwd` | `string` | `process.cwd()` | Workspace root directory for file tools, boundaries, and skill discovery |
 | `skills` | `string[] \| boolean` | `true` | `true` loads all discovered skills, `false` disables skill discovery, string array loads specific skills |
+| `skillSources` | `SkillSource[]` | *(none)* | Injected skill sources for multi-tenant skill scoping. Disables ambient skill discovery in `multi` mode |
 | `signal` | `AbortSignal` | *(none)* | Signal to cancel execution, propagated to LLM network requests and media operations |
 | `temperature` | `number` | Provider default | Sampling temperature (0.0 to 2.0) |
 | `maxTokens` | `number` | Provider default | Maximum tokens in the model completion |
@@ -559,6 +561,27 @@ const result = await askSeepient("Inspect server metrics", {
 });
 ```
 
+### Multi-tenant worker execution
+
+When running `askSeepient` in multi-tenant environments (such as shared worker fleets or cloud functions), declare `tenancy: "multi"`. Multi-tenant mode requires an isolated runtime and storage backends, and guarantees zero ambient file writes or credential leakage across tenants:
+
+```typescript
+import { askSeepient } from "seepient";
+
+const result = await askSeepient("Summarize today's invoice", {
+  tenancy: "multi",
+  principalId: "tenant-acme",
+  runtime: tenantRuntime,
+  auditStore: tenantAuditStore,
+  policyStore: tenantPolicyStore,
+  capabilityLedger: tenantLedger,
+  stateless: true,
+  tools: ["web_search"],
+});
+```
+
+See [Multi-Tenant Isolation](/sdk/multi-tenant) for architecture details, store requirements, and fail-closed rules.
+
 ## Error handling
 
 All SDK errors extend `SeepientError`:
@@ -569,6 +592,9 @@ All SDK errors extend `SeepientError`:
 | `ToolError` | `TOOL_FAILED` | `true` | A tool execution threw an unhandled exception |
 | `MaxStepsError` | `MAX_STEPS` | `false` | Loop reached `maxSteps` without the model finishing |
 | `AbortedError` | `ABORTED` | `false` | Execution cancelled via `AbortSignal` or `abort()` |
+| `TenancyRuntimeRequiredError` | `TENANCY_RUNTIME_REQUIRED` | `false` | Missing `runtime` when running in `multi` mode |
+| `TenancyStoreIncompleteError` | `TENANCY_STORE_INCOMPLETE` | `false` | Incomplete store injection in `multi` mode |
+| `TenancyAmbientIoError` | `TENANCY_AMBIENT_IO` | `false` | Attempted file write outside injected stores in `multi` mode |
 
 ```typescript
 import { askSeepient, ProviderError, AbortedError } from "seepient";
