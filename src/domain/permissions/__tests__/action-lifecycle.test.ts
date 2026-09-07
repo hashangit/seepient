@@ -640,7 +640,7 @@ describe("ActionLifecycle (T110)", () => {
   it("revoked session denies a session approval with capability-revoked", async () => {
     const ledger = new PersistedCapabilityLedger({ root: dir });
     await ledger.load();
-    await ledger.revoke({ sessionId: "sess-revoked" });
+    await ledger.revoke({ sessionId: "sess-revoked" }, { principalId: "user" });
     const audit = new LocalAuditStore({ root: dir });
     const broker: ApprovalBroker = {
       mode: "inline",
@@ -816,7 +816,7 @@ describe("ActionLifecycle (T110)", () => {
     expect(first.outcome.state).toBe("succeeded");
     expect(requestCount).toBe(1);
 
-    await ledger.revoke({ sessionId: "sess-rev-1" });
+    await ledger.revoke({ sessionId: "sess-rev-1" }, { principalId: "user" });
 
     // A matching later action must fail closed: no repeat prompt, no dispatch.
     const second = await lifecycle.run(writeAction());
@@ -1160,6 +1160,7 @@ describe("persistent approval choices (spec 011 project/global)", () => {
     expect((await store.read(workspaceId)).policy.capabilities).toContainEqual({
       kind: "read-root",
       root: workspace,
+      principalId: "user",
     });
   });
 
@@ -1311,7 +1312,7 @@ describe("persistent approval choices (spec 011 project/global)", () => {
     // The capability landed in the PROJECT protected policy, outside
     // executor roots, via the same CAS flow /permissions approve uses.
     const snap = await store.read("ws-1");
-    expect(snap.policy.capabilities).toEqual([{ kind: "commit-file", path: "/p/a.txt" }]);
+    expect(snap.policy.capabilities).toEqual([{ kind: "commit-file", path: "/p/a.txt", principalId: "user" }]);
     // Retained in the long-lived active set for the rest of the session.
     expect(lifecycle.getActiveCapabilities()).toEqual([{ kind: "commit-file", path: "/p/a.txt" }]);
   });
@@ -1335,7 +1336,7 @@ describe("persistent approval choices (spec 011 project/global)", () => {
     const result = await lifecycle.run(writeAction());
     expect(result.outcome.state).toBe("succeeded");
     const snap = await store.read(GLOBAL_WORKSPACE_ID);
-    expect(snap.policy.capabilities).toEqual([{ kind: "commit-file", path: "/p/a.txt" }]);
+    expect(snap.policy.capabilities).toEqual([{ kind: "commit-file", path: "/p/a.txt", principalId: "user" }]);
     // The project store stays untouched.
     const projectSnap = await store.read("ws-1");
     expect(projectSnap.policy.capabilities).toEqual([]);
@@ -1627,7 +1628,7 @@ describe("persistent grant WAL (round 4 P0 review fix)", () => {
     expect(enqueued).toBe(1);
     expect(result.outcome.state).toBe("succeeded");
     const snap = await store.read("ws-1");
-    expect(snap.policy.capabilities).toEqual([{ kind: "commit-file", path: "/p/a.txt" }]);
+    expect(snap.policy.capabilities).toEqual([{ kind: "commit-file", path: "/p/a.txt", principalId: "user" }]);
   });
 });
 
@@ -1687,7 +1688,7 @@ describe("persistent grant WAL — concurrent flush, CAS failure, recovery (roun
     expect(committed).toHaveLength(1);
     expect(committed[0].policyAfterVersion).toBe(1);
     const snap = await store.read("ws-1");
-    expect(snap.policy.capabilities).toEqual([{ kind: "commit-file", path: "/p/a.txt" }]);
+    expect(snap.policy.capabilities).toEqual([{ kind: "commit-file", path: "/p/a.txt", principalId: "user" }]);
   });
 
   it("a CAS failure leaves a provisional intent and denies with nothing installed", async () => {
@@ -1748,8 +1749,8 @@ describe("persistent grant WAL — concurrent flush, CAS failure, recovery (roun
     expect(result.outcome.state).toBe("succeeded");
     const snap = await store.read("ws-1");
     // The retry must re-add the baseline seed its own grant depends on.
-    expect(snap.policy.capabilities).toContainEqual(baseline);
-    expect(snap.policy.capabilities).toContainEqual({ kind: "commit-file", path: "/p/a.txt" });
+    expect(snap.policy.capabilities).toContainEqual({ ...baseline, principalId: "user" });
+    expect(snap.policy.capabilities).toContainEqual({ kind: "commit-file", path: "/p/a.txt", principalId: "user" });
     // The audit trail matches the full mutation: baseline + grant.
     await outbox.flush();
     const events = await audit.listEvents();

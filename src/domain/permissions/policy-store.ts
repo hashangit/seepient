@@ -207,7 +207,10 @@ export class LocalPolicyStore implements PolicyStoreContract {
     }
   }
 
-  async read(workspaceId: string): Promise<PolicySnapshot> {
+  async read(
+    workspaceId: string,
+    opts?: { principalId?: string; tenancyMode?: "single" | "multi" },
+  ): Promise<PolicySnapshot> {
     const file = this.fileFor(workspaceId);
     try {
       const raw = await fs.readFile(file, "utf8");
@@ -244,6 +247,23 @@ export class LocalPolicyStore implements PolicyStoreContract {
           (legacy.mutationId
             ? [{ mutationId: legacy.mutationId, version: parsed.version }]
             : undefined);
+      }
+      if (opts?.principalId) {
+        const isMulti = opts.tenancyMode === "multi";
+        const isDefaultSingleUser = !isMulti;
+        const filtered = parsed.policy.capabilities.filter((cap) => {
+          if (cap.principalId) {
+            return cap.principalId === opts.principalId;
+          }
+          return isDefaultSingleUser;
+        });
+        return {
+          ...parsed,
+          policy: {
+            ...parsed.policy,
+            capabilities: filtered,
+          },
+        };
       }
       return parsed;
     } catch (err) {

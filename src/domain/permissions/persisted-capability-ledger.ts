@@ -23,10 +23,11 @@ import * as os from "node:os";
 import { createHash } from "node:crypto";
 import type {
   CapabilityLedger,
+  CapabilityLedgerScope,
   RevokeFilter,
 } from "../../foundations/contracts/capability-ledger.js";
 
-export type { RevokeFilter, CapabilityLedger };
+export type { RevokeFilter, CapabilityLedger, CapabilityLedgerScope };
 
 /** A ledger entry — either a consumed action or a revoked run/session. */
 type LedgerEntry =
@@ -56,73 +57,130 @@ type LedgerEntry =
  */
 export class PersistedCapabilityLedger implements CapabilityLedger {
   private readonly dir: string;
-  private readonly file: string;
-  /** Consumed actionDigests (action-scoped). */
-  private consumedDigests = new Set<string>();
-  /** Consumed envelopeIds (action-scoped dedup). */
-  private consumedEnvelopes = new Set<string>();
-  /** Revoked runIds. */
-  private revokedRuns = new Set<string>();
-  /** Revoked sessionIds. */
-  private revokedSessions = new Set<string>();
+  private readonly consumedDigestsByPrincipal = new Map<string, Set<string>>();
+  private readonly consumedEnvelopesByPrincipal = new Map<string, Set<string>>();
+  private readonly revokedRunsByPrincipal = new Map<string, Set<string>>();
+  private readonly revokedSessionsByPrincipal = new Map<string, Set<string>>();
+  private readonly defaultPrincipalId: string;
 
-  constructor(opts?: { root?: string }) {
+  constructor(opts?: { root?: string; defaultPrincipalId?: string }) {
     this.dir =
       opts?.root ??
       (process.env.SEEPIENT_SECURITY_DIR
         ? path.join(process.env.SEEPIENT_SECURITY_DIR, "caps")
         : path.join(os.homedir(), ".seepient", "security", "caps"));
-    this.file = path.join(this.dir, "ledger.ndjson");
+    this.defaultPrincipalId = opts?.defaultPrincipalId ?? "default";
   }
 
-  /** Load existing ledger from disk. Safe to call multiple times. */
-  async load(): Promise<void> {
-    await this.ensureDir();
+  private getPrincipal(scope?: CapabilityLedgerScope): string {
+    return scope?.principalId ?? this.defaultPrincipalId;
+  }
+
+  private getPrincipalDir(principalId: string): string {
+    return path.join(this.dir, principalId);
+  }
+
+  /** Path builder for caps/<principalId>/ledger.ndjson (Spec 022 T026) */
+  private getFileForPrincipal(principalId: string): string {
+    return path.join(this.dir, principalId, "ledger.ndjson");
+  }
+
+  private getLockForPrincipal(principalId: string): string {
+    return path.join(this.dir, principalId, "ledger.ndjson.lock");
+  }
+
+  private getPrincipalSets(principalId: string) {
+    let digests = this.consumedDigestsByPrincipal.get(principalId);
+    if (!digests) {
+      digests = new Set<string>();
+      this.consumedDigestsByPrincipal.set(principalId, digests);
+    }
+    let envelopes = this.consumedEnvelopesByPrincipal.get(principalId);
+    if (!envelopes) {
+      envelopes = new Set<string>();
+      this.consumedEnvelopesByPrincipal.set(principalId, envelopes);
+    }
+    let runs = this.revokedRunsByPrincipal.get(principalId);
+    if (!runs) {
+      runs = new Set<string>();
+      this.revokedRunsByPrincipal.set(principalId, runs);
+    }
+    let sessions = this.revokedSessionsByPrincipal.get(principalId);
+    if (!sessions) {
+      sessions = new Set<string>();
+      this.revokedSessionsByPrincipal.set(principalId, sessions);
+    }
+    return { digests, envelopes, runs, sessions };
+  }
+
+  private async ensureDir(principalId: string): Promise<void> {
+    const pDir = this.getPrincipalDir(principalId);
+    await fs.mkdir(pDir, { recursive: true, mode: 0o700 });
+    try {
+      await fs.chmod(pDir, 0o700);
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  /** Load existing ledger from disk for a given principal. Safe to call multiple times. */
+  async load(scope?: CapabilityLedgerScope): Promise<void> {
+    const principalId = this.getPrincipal(scope);
+    await this.ensureDir(principalId);
+    const file = this.getFileForPrincipal(principalId);
     let raw: string;
     try {
-      raw = await fs.readFile(this.file, "utf8");
+      raw = await fs.readFile(file, "utf8");
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
       throw err;
     }
-    this.consumedDigests = new Set();
-    this.consumedEnvelopes = new Set();
-    this.revokedRuns = new Set();
-    this.revokedSessions = new Set();
+    const sets = this.getPrincipalSets(principalId);
+    sets.digests.clear();
+    sets.envelopes.clear();
+    sets.runs.clear();
+    sets.sessions.clear();
     for (const line of raw.split("\n")) {
       if (!line.trim()) continue;
       try {
         const entry = JSON.parse(line) as LedgerEntry;
-        this.applyEntry(entry);
+        this.applyEntry(entry, principalId);
       } catch {
         /* skip malformed lines */
       }
     }
   }
 
-  private applyEntry(entry: LedgerEntry): void {
+  private applyEntry(entry: LedgerEntry, principalId: string): void {
+    const sets = this.getPrincipalSets(principalId);
     switch (entry.kind) {
       case "consumed-action":
-        this.consumedDigests.add(entry.actionDigest);
-        this.consumedEnvelopes.add(entry.envelopeId);
+        sets.digests.add(entry.actionDigest);
+        sets.envelopes.add(entry.envelopeId);
         break;
       case "revoked-run":
-        this.revokedRuns.add(entry.runId);
+        sets.runs.add(entry.runId);
         break;
       case "revoked-session":
-        this.revokedSessions.add(entry.sessionId);
+        sets.sessions.add(entry.sessionId);
         break;
     }
   }
 
   /**
-   * Atomically consume an action-scoped envelope. If the actionDigest has
-   * already been consumed, returns false (replay → capability-expired).
+   * Atomically consume an action-scoped envelope for a principal. If the actionDigest has
+   * already been consumed by this principal, returns false (replay → capability-expired).
    * Otherwise records the consumption durably and returns true.
    */
-  async consume(envelopeId: string, actionDigest: string): Promise<boolean> {
-    await this.ensureDir();
-    const lockFile = this.file + ".lock";
+  async consume(
+    envelopeId: string,
+    actionDigest: string,
+    scope?: CapabilityLedgerScope,
+  ): Promise<boolean> {
+    const principalId = this.getPrincipal(scope);
+    await this.ensureDir(principalId);
+    const file = this.getFileForPrincipal(principalId);
+    const lockFile = this.getLockForPrincipal(principalId);
     let lockHandle: fs.FileHandle | undefined;
     for (let attempt = 0; attempt < 20; attempt++) {
       try {
@@ -136,8 +194,9 @@ export class PersistedCapabilityLedger implements CapabilityLedger {
       return false; // Fail closed if lock acquisition fails
     }
     try {
-      await this.load();
-      if (this.consumedDigests.has(actionDigest)) return false;
+      await this.load({ principalId });
+      const sets = this.getPrincipalSets(principalId);
+      if (sets.digests.has(actionDigest)) return false;
       const entry: LedgerEntry = {
         kind: "consumed-action",
         envelopeId,
@@ -145,75 +204,84 @@ export class PersistedCapabilityLedger implements CapabilityLedger {
         consumedAt: Date.now(),
       };
       const line = JSON.stringify(entry) + "\n";
-      const handle = await fs.open(this.file, "a", 0o600);
+      const handle = await fs.open(file, "a", 0o600);
       try {
         await handle.appendFile(line, "utf8");
         await handle.sync();
       } finally {
         await handle.close();
       }
-      this.consumedDigests.add(actionDigest);
-      this.consumedEnvelopes.add(envelopeId);
+      sets.digests.add(actionDigest);
+      sets.envelopes.add(envelopeId);
       return true;
     } finally {
-      await lockHandle.close().catch(() => {});
-      await fs.unlink(lockFile).catch(() => {});
+      if (lockHandle) {
+        await lockHandle.close().catch(() => {});
+        await fs.unlink(lockFile).catch(() => {});
+      }
     }
   }
 
   /**
-   * Revoke a run-scoped or session-scoped grant. Subsequent isConsumed checks
-   * for that runId/sessionId return true (fail closed with capability-revoked).
+   * Revoke a run-scoped or session-scoped grant for a principal.
    */
-  async revoke(filter: RevokeFilter): Promise<void> {
+  async revoke(filter: RevokeFilter, scope?: CapabilityLedgerScope): Promise<void> {
+    const principalId = this.getPrincipal(scope);
+    const sets = this.getPrincipalSets(principalId);
     if (filter.runId) {
-      if (this.revokedRuns.has(filter.runId)) return;
+      if (sets.runs.has(filter.runId)) return;
       const entry: LedgerEntry = {
         kind: "revoked-run",
         runId: filter.runId,
         revokedAt: Date.now(),
       };
-      await this.appendEntry(entry);
-      this.revokedRuns.add(filter.runId);
+      await this.appendEntry(entry, principalId);
+      sets.runs.add(filter.runId);
     }
     if (filter.sessionId) {
-      if (this.revokedSessions.has(filter.sessionId)) return;
+      if (sets.sessions.has(filter.sessionId)) return;
       const entry: LedgerEntry = {
         kind: "revoked-session",
         sessionId: filter.sessionId,
         revokedAt: Date.now(),
       };
-      await this.appendEntry(entry);
-      this.revokedSessions.add(filter.sessionId);
+      await this.appendEntry(entry, principalId);
+      sets.sessions.add(filter.sessionId);
     }
   }
 
-  /** True if the actionDigest was already consumed. */
-  isConsumedDigest(actionDigest: string): boolean {
-    return this.consumedDigests.has(actionDigest);
+  async verify(
+    envelopeId: string,
+    actionDigest: string,
+    scope?: CapabilityLedgerScope,
+  ): Promise<boolean> {
+    const principalId = this.getPrincipal(scope);
+    return this.isConsumedDigest(actionDigest, { principalId });
   }
 
-  /** True if the run was revoked. */
-  isRunRevoked(runId: string): boolean {
-    return this.revokedRuns.has(runId);
+  /** True if the actionDigest was already consumed by this principal. */
+  isConsumedDigest(actionDigest: string, scope?: CapabilityLedgerScope): boolean {
+    const principalId = this.getPrincipal(scope);
+    return this.consumedDigestsByPrincipal.get(principalId)?.has(actionDigest) ?? false;
   }
 
-  /** True if the session was revoked. */
-  isSessionRevoked(sessionId: string): boolean {
-    return this.revokedSessions.has(sessionId);
+  /** True if the run was revoked for this principal. */
+  isRunRevoked(runId: string, scope?: CapabilityLedgerScope): boolean {
+    const principalId = this.getPrincipal(scope);
+    return this.revokedRunsByPrincipal.get(principalId)?.has(runId) ?? false;
   }
 
-  private async ensureDir(): Promise<void> {
-    await fs.mkdir(this.dir, { recursive: true, mode: 0o700 });
-    try {
-      await fs.chmod(this.dir, 0o700);
-    } catch { /* non-fatal */ }
+  /** True if the session was revoked for this principal. */
+  isSessionRevoked(sessionId: string, scope?: CapabilityLedgerScope): boolean {
+    const principalId = this.getPrincipal(scope);
+    return this.revokedSessionsByPrincipal.get(principalId)?.has(sessionId) ?? false;
   }
 
   /** Append one entry atomically: write to tmp → fsync → rename. */
-  private async appendEntry(entry: LedgerEntry): Promise<void> {
-    await this.ensureDir();
-    const lockFile = this.file + ".lock";
+  private async appendEntry(entry: LedgerEntry, principalId: string): Promise<void> {
+    await this.ensureDir(principalId);
+    const file = this.getFileForPrincipal(principalId);
+    const lockFile = this.getLockForPrincipal(principalId);
     let lockHandle: fs.FileHandle | undefined;
     for (let attempt = 0; attempt < 20; attempt++) {
       try {
@@ -225,7 +293,7 @@ export class PersistedCapabilityLedger implements CapabilityLedger {
     }
     try {
       const line = JSON.stringify(entry) + "\n";
-      const handle = await fs.open(this.file, "a", 0o600);
+      const handle = await fs.open(file, "a", 0o600);
       try {
         await handle.appendFile(line, "utf8");
         await handle.sync();
@@ -250,8 +318,9 @@ export function checkRunLifetime(
   expiresAt: number,
   ledger: CapabilityLedger,
   now: number,
+  scope?: CapabilityLedgerScope,
 ): "ok" | "expired" | "revoked" {
-  if (ledger.isRunRevoked(runId)) return "revoked";
+  if (ledger.isRunRevoked(runId, scope)) return "revoked";
   if (expiresAt <= now) return "expired";
   return "ok";
 }
@@ -265,8 +334,9 @@ export function checkSessionLifetime(
   expiresAt: number | undefined,
   ledger: CapabilityLedger,
   now: number,
+  scope?: CapabilityLedgerScope,
 ): "ok" | "expired" | "revoked" {
-  if (ledger.isSessionRevoked(sessionId)) return "revoked";
+  if (ledger.isSessionRevoked(sessionId, scope)) return "revoked";
   if (expiresAt !== undefined && expiresAt <= now) return "expired";
   return "ok";
 }

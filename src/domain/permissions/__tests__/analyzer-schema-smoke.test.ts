@@ -4,7 +4,7 @@ import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import { DEFAULT_ANALYZERS } from "../../../capabilities/tools/analyzers.js";
 import { COMM_ANALYZERS } from "../../../capabilities/tools/comm-analyzers.js";
-import { getAllToolModules } from "../../../domain/tool-executor.js";
+import { BUILT_IN_TOOL_MODULES } from "../../../domain/tool-executor.js";
 import { InMemoryArtifactStore } from "../../../capabilities/execution/in-memory-artifact-store.js";
 import type { ToolAnalysisContext } from "../../../foundations/contracts/custom-tools.js";
 import { createSnapshotStore, tagFor } from "../../../foundations/hashline/snapshot-store.js";
@@ -86,7 +86,7 @@ describe("analyzer schema conformance smoke test", () => {
   });
 
   it("evaluates all DEFAULT_ANALYZERS with schema-derived minimal args without throwing", async () => {
-    const modules = getAllToolModules();
+    const modules = BUILT_IN_TOOL_MODULES;
     const modulesByName = new Map(modules.map((m) => [m.definition.function.name, m]));
 
     for (const [toolName, analyzer] of Object.entries(DEFAULT_ANALYZERS)) {
@@ -113,7 +113,7 @@ describe("analyzer schema conformance smoke test", () => {
   });
 
   it("evaluates all COMM_ANALYZERS with schema-derived minimal args without throwing", async () => {
-    const modules = getAllToolModules();
+    const modules = BUILT_IN_TOOL_MODULES;
     const modulesByName = new Map(modules.map((m) => [m.definition.function.name, m]));
 
     for (const [toolName, analyzer] of Object.entries(COMM_ANALYZERS)) {
