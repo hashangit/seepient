@@ -188,7 +188,7 @@ The `skills` option controls skill injection:
 | `consentMode` | `ConsentMode` | `"edit-enabled"` | Permission mode: `"edit-enabled"`, `"autonomous"`, or `"ask-everything"` |
 | `cwd` | `string` | `process.cwd()` | Workspace root directory for file tools, boundaries, and skill discovery |
 | `skills` | `string[] \| boolean` | `true` | `true` loads all discovered skills, `false` disables skill discovery, string array loads specific skills |
-| `skillSources` | `SkillSource[]` | *(none)* | Injected skill sources for multi-tenant skill scoping. Disables ambient skill discovery in `multi` mode |
+| `sources` | `SkillSource[]` | *(none)* | Injected skill sources for multi-tenant skill scoping. Disables ambient skill discovery in `multi` mode |
 | `signal` | `AbortSignal` | *(none)* | Signal to cancel execution, propagated to LLM network requests and media operations |
 | `temperature` | `number` | Provider default | Sampling temperature (0.0 to 2.0) |
 | `maxTokens` | `number` | Provider default | Maximum tokens in the model completion |
