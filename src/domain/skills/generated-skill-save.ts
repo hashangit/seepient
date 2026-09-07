@@ -6,6 +6,7 @@
  *  - kind: "generated" stamp
  *  - collision refusal with guidance (unless replace: true)
  *  - version and changelog increments on replacement
+ *  - tags and allowedTools preservation or update
  *  - save destination = last SkillStore in the effective source list (D13)
  *  - fail-closed with SKILL_STORE_UNAVAILABLE when no store is wired
  */
@@ -24,6 +25,8 @@ export interface SaveGeneratedSkillParams {
   replace?: boolean;
   changelogEntry?: string;
   origin?: string;
+  tags?: string[];
+  allowedTools?: string[];
 }
 
 export interface SaveGeneratedSkillResult {
@@ -48,25 +51,53 @@ function extractYamlAndBody(raw: string): { yaml: string; body: string } {
   };
 }
 
-function parseChangelog(yaml: string): string[] {
+function parseYamlList(yaml: string, fieldName: string): string[] {
+  const inlineMatch = yaml.match(new RegExp(`^${fieldName}:\\s*\\[(.*)\\]`, "m"));
+  if (inlineMatch) {
+    return inlineMatch[1]
+      .split(",")
+      .map((s) => s.trim().replace(/^['"]|['"]$/g, ""))
+      .filter(Boolean);
+  }
   const lines = yaml.split("\n");
-  const changelog: string[] = [];
-  let inChangelog = false;
+  const items: string[] = [];
+  let inList = false;
   for (const line of lines) {
-    if (/^changelog:\s*$/.test(line)) {
-      inChangelog = true;
+    if (new RegExp(`^${fieldName}:\\s*$`).test(line)) {
+      inList = true;
       continue;
     }
-    if (inChangelog) {
+    if (inList) {
       const match = line.match(/^\s*-\s*(.*)$/);
       if (match) {
-        changelog.push(match[1].trim().replace(/^['"]|['"]$/g, ""));
+        items.push(match[1].trim().replace(/^['"]|['"]$/g, ""));
       } else if (/^\w+:/.test(line)) {
-        inChangelog = false;
+        inList = false;
       }
     }
   }
-  return changelog;
+  return items;
+}
+
+function formatYamlScalar(key: string, value: string): string {
+  if (value.includes("\n")) {
+    const indented = value
+      .split("\n")
+      .map((l) => (l ? `  ${l}` : ""))
+      .join("\n");
+    return `${key}: |\n${indented}`;
+  }
+  if (/[:#\[\]{},"'\r]/.test(value) || /^\s|\s$/.test(value) || value === "") {
+    return `${key}: ${JSON.stringify(value)}`;
+  }
+  return `${key}: ${value}`;
+}
+
+function formatYamlListItem(item: string): string {
+  if (/[:#\[\]{},"'\n\r]/.test(item) || /^\s|\s$/.test(item) || item === "") {
+    return `  - ${JSON.stringify(item)}`;
+  }
+  return `  - ${item}`;
 }
 
 /**
@@ -107,6 +138,8 @@ export async function saveGeneratedSkill(
   let createdAt = new Date().toISOString();
   let changelog: string[] = [params.changelogEntry ?? "Initial creation"];
   let origin = params.origin ?? "standalone";
+  let prevTags: string[] | undefined;
+  let prevAllowedTools: string[] | undefined;
 
   if (existingRecord) {
     if (!params.replace) {
@@ -140,30 +173,53 @@ export async function saveGeneratedSkill(
       origin = params.origin ?? originMatch[1].trim().replace(/^['"]|['"]$/g, "");
     }
 
+    // Parse existing tags and allowedTools
+    prevTags = parseYamlList(yaml, "tags");
+    prevAllowedTools = parseYamlList(yaml, "allowedTools");
+
     // Parse existing changelog
-    const prevChangelog = parseChangelog(yaml);
+    const prevChangelog = parseYamlList(yaml, "changelog");
     changelog = [
       ...prevChangelog,
       params.changelogEntry ?? `Version ${version}`,
     ];
   }
 
+  const tags = params.tags ?? prevTags;
+  const allowedTools = params.allowedTools ?? prevAllowedTools;
   const body = params.body ?? (params.content ? extractYamlAndBody(params.content).body : "");
 
-  const changelogBlock = changelog.map((c) => `  - ${c}`).join("\n");
-  const content = [
+  const frontmatterLines: string[] = [
     "---",
-    `name: ${params.name}`,
-    `description: ${params.description}`,
+    formatYamlScalar("name", params.name),
+    formatYamlScalar("description", params.description),
     "kind: generated",
     `version: ${version}`,
-    `origin: ${origin}`,
+    formatYamlScalar("origin", origin),
     `created_at: ${createdAt}`,
-    "changelog:",
-    changelogBlock,
-    "---",
-    body,
-  ].join("\n");
+  ];
+
+  if (tags && tags.length > 0) {
+    frontmatterLines.push("tags:");
+    for (const t of tags) {
+      frontmatterLines.push(formatYamlListItem(t));
+    }
+  }
+
+  if (allowedTools && allowedTools.length > 0) {
+    frontmatterLines.push("allowedTools:");
+    for (const tool of allowedTools) {
+      frontmatterLines.push(formatYamlListItem(tool));
+    }
+  }
+
+  frontmatterLines.push("changelog:");
+  for (const c of changelog) {
+    frontmatterLines.push(formatYamlListItem(c));
+  }
+  frontmatterLines.push("---");
+
+  const content = `${frontmatterLines.join("\n")}\n${body}`;
 
   const record: SkillRecord = {
     name: params.name,

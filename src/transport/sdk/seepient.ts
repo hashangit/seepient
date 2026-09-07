@@ -131,30 +131,7 @@ import {
  * Supports single-turn chat, multi-turn conversations, streaming responses,
  * model switching, tool execution, session persistence, and provider management.
  */
-function computeEffectiveSkillSources(
-  sources?: import("../../foundations/contracts/skill-source.js").SkillSource[],
-  skills?: string[] | boolean | import("../../foundations/contracts/skill-source.js").SkillLiteral[],
-): import("../../foundations/contracts/skill-source.js").SkillSource[] {
-  const effective: import("../../foundations/contracts/skill-source.js").SkillSource[] = sources ? [...sources] : [];
-  if (
-    Array.isArray(skills) &&
-    skills.length > 0 &&
-    typeof skills[0] === "object" &&
-    skills[0] !== null &&
-    "content" in skills[0]
-  ) {
-    const literals = skills as import("../../foundations/contracts/skill-source.js").SkillLiteral[];
-    effective.push({
-      list: () =>
-        literals.map((l) => ({
-          name: l.name,
-          content: l.content,
-          source: "inline",
-        })),
-    });
-  }
-  return effective;
-}
+import { computeEffectiveSkillSources } from "./skill-sources-helper.js";
 
 export async function createSeepient(options?: CreateSeepientOptions): Promise<Seepient> {
   const opts = options ?? {};
@@ -235,8 +212,13 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
       try {
         skillRegistry = await initializeSkillRegistry(opts.cwd ?? process.cwd(), { sources: effectiveSources, tenancyMode });
         let meta = skillRegistry.getMetadata();
-        if (Array.isArray(opts.skills) && typeof opts.skills[0] === "string") {
-          const wanted = new Set(opts.skills as string[]);
+        const isLiteralList =
+          Array.isArray(opts.skills) &&
+          opts.skills.some(
+            (s) => typeof s === "object" && s !== null && "content" in s,
+          );
+        if (Array.isArray(opts.skills) && !isLiteralList) {
+          const wanted = new Set(opts.skills.filter((s): s is string => typeof s === "string"));
           meta = meta.filter((s) => wanted.has(s.name));
         }
         if (meta.length > 0) {
