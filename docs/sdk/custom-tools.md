@@ -38,6 +38,10 @@ Naming a tool `prepared` does not make it safe; the label declares what the plat
 The legacy `tool({ execute })` factory is deprecated and fails closed at runtime. Migrate existing tools to an explicit trust model (`trustedHostTool`, `preparedTool`, or `brokerConnector`).
 :::
 
+::: tip Per-Agent Tool Isolation
+All custom tools are scoped to the agent instance where they are supplied via `tools: [...]`. Global mutable tool registries and legacy global mutators have been deleted. For multi-tenant environments and migration details, see the [Multi-Tenant Isolation Guide](./multi-tenant.md).
+:::
+
 ---
 
 ## 1. `brokerConnector` (Data-Only Mapping)
@@ -220,6 +224,7 @@ const agent = await createSeepient({
 
 ## Related APIs
 
+- [Multi-Tenant Isolation](/sdk/multi-tenant) -- Multi-tenant isolation architecture and migration guide
 - [createSeepient()](/sdk/create-seepient) -- Stateful agent with custom tool composition
 - [askSeepient()](/sdk/ask-seepient) -- One-shot execution with tool support (streaming via `stream: true`)
 - [Types](/sdk/types) -- Full TypeScript type reference

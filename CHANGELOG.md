@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.8.0] - 2026-09-07
+
+### Multi-tenant isolation hardening (Spec 022)
+
+**Breaking changes:**
+- **Migration from Deleted Exports**:
+  The following legacy global exports have been removed:
+  - Legacy global tool registration: **Deleted**. Pass `tools: [tool]` into `createSeepient` or `askSeepient`.
+  - Legacy global tool execution: **Deleted**. Tool execution is now private to the agent loop and governed execution boundary.
+  - Connector catalog mutators (`unregisterConnector`, `getRegisteredConnectors`, `resetConnectors`): **Deleted**. Connector registries are now instanced per agent via `createConnectorRegistry()`.
+- **`gateway.createGateway` signature inversion**: `createGateway(config, adapter)` now returns `{ gateway, tools }` instead of implicitly registering tools into a shared global registry. Pass returned `tools` explicitly into `createSeepient({ tools: gwResult.tools })` or `askSeepient({ tools: gwResult.tools })`.
+- **`CapabilityLedger` contract scoping**: `CapabilityLedger` methods (`load`, `consume`, `revoke`) now accept a `scope: { principalId: string }` parameter. Local storage layout is namespaced under `caps/<principalId>/ledger.ndjson` with principal-scoped locks and consumed-digest tracking.
+- **Fail-closed multi-tenancy validation**:
+  - Omitting `runtime` in multi-tenant mode throws `TENANCY_RUNTIME_REQUIRED`.
+  - Missing any required storage backends (`auditStore`, `policyStore`, `capabilityLedger`, or `persist`) without `stateless: true` throws `TENANCY_STORE_INCOMPLETE`.
+  - Writing outside injected stores in multi-tenant mode throws `TENANCY_AMBIENT_IO`.
+
+**Added:**
+- **Per-agent `ToolRegistry`**: Instanced tool registry providing private tool resolution, registration, and duplicate-name conflict prevention (`TOOL_NAME_CONFLICT`).
+- **Tenancy mode resolution & inference**: Explicit `tenancy: "single" | "multi"` option on `createSeepient` and `askSeepient`, with automatic upgrade to `multi` upon detection of multi-tenant injection signals (stores, runtime, principalId, skill sources, persist). Emits a one-time upgrade notice per process.
+- **Principal-scoped permission state**: All persisted capabilities stamped with `principalId` on write; `PolicyStore.read` filters by `principalId` in multi mode. Added `operatorBaseline` lifecycle input for unprompted foundational permissions across all tenants.
+- **Skills scoping on 021-1 seam**: In multi-tenant mode, ambient skill discovery under `$HOME/.seepient/skills` is disabled; agents load strictly injected `SkillSource`s.
+- **Regression fences**: FR-017 process-state invariant gate (`src/foundations/__tests__/process-state-invariant.test.ts`) with bidirectional drift detection, and the multi-tenant isolation matrix (`src/domain/permissions/__tests__/multi-tenant-isolation.test.ts`) covering all 8 isolation dimensions.
+
 ## [v0.7.2] - 2026-09-06
 
 ### Model contract enforcement, resilient JSON parsing & TUI status truth

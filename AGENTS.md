@@ -252,6 +252,54 @@ Current layout of the Obsidian vault (annotated):
 │       │   └── tasks.md              # W001–W041; owner D1 (sessionless chat = no session) + D2 (fallback: mandatory sessionId)
 │       └── 021-4-remediation/        # Work order: rename completion + embedding/security/session repairs (021-4 — SHIPPED in v0.7.0; D1 adopt / D2 fold / D3 send-time normalization)
 │           └── tasks.md              # W100–W172; askSeepient/runSeepientServer truth, WS scopes, broker byte-classifier, D3 send-time history normalization
+├── 022-multi-tenant-isolation/       # Multi-tenant isolation hardening (022 — planned, branch 022-multi-tenant-isolation)
+│   ├── spec.md                       # FR-001–FR-018, M1–M12, SC-001–SC-005; per-agent registries, tenancy mode, principal-scoped state, regression fence
+│   ├── plan.md                       # P0 registry+contracts → P1 tool-path retarget → P2 tenancy+scoped state → P3 skills/invariant/docs → P4 matrix+re-audit+release
+│   ├── research.md                   # 2026-09-07 full-boundary audit: E1–E20 evidence (2-class findings), D1–D14 decisions
+│   ├── data-model.md                 # ToolRegistry, tenancy decision matrix, stamped Capability, scoped ledger, state classification v2
+│   ├── quickstart.md                 # QS-1–QS-8 validation scenarios (isolation matrix, mutation check, re-audit) + QS-P budgets
+│   ├── tasks.md                      # T001–T035, US1–US5 story phases, test-first gates, per-task runnable self-checks
+│   └── contracts/                    # tool-registry, tenancy-mode, principal-scoped-state, isolation-harness
+├── 023-seepient-sage/                # Seepient Sage: unified telemetry tracing + full auditing (023 — planned, branch 023-seepient-sage)
+│   ├── spec.md                       # US1–US6, FR-001–FR-023, M1–M13, SC-001–SC-007; two-plane (audit+telemetry) system
+│   ├── plan.md                       # P0 correlation spine → P1 audit enrichment → P2 telemetry plane → P3 gap closure → P4 surfaces → P5 self-consumption
+│   ├── research.md                   # Evidence E1–E19 + decision ledger D1–D13 (architecture options A–D scored/ranked; baselines on 022)
+│   ├── data-model.md                 # SageContext, SpanRecord, RunRecord, AuditQuery/SecurityNotice, RedactionFilter, storage layout
+│   ├── quickstart.md                 # QS-1–QS-8 validation scenarios + QS-P production budgets
+│   ├── tasks.md                      # T001–T049, US1–US6 story phases, test-first gates, per-task self-checks (protocol: grep proofs, micro-probes, UX substring asserts, round-trip probes, byte-fixtures, determinism + negative probes, fail-open/closed drills); five-lens review remediated 2026-09-07 (M13 helper slice, createAgent dropped, filter foundational)
+│   └── contracts/                    # sage-correlation, telemetry-plane, audit-enrichment-and-query, sage-surfaces, self-consumption
+├── 024-security-remediation/         # Security remediation with product-weighted defaults (024 — planned, branch 024-security-remediation)
+│   ├── spec.md                       # US1–US5, FR-001–FR-015, M1–M12, SC-001–SC-008; seven audit findings closed with UX-deliberated fixes
+│   ├── plan.md                       # P0 integrity fixes → P1 shell tiers → P2 git fence → P3 secret minimization → P4 WS origin → P5 skills gate + release
+│   ├── research.md                   # Evidence E1–E14, audit corrections S1–S5, decisions D1–D14 (product-lens deliberation), owner questions Q1–Q3
+│   ├── data-model.md                 # ShellRiskTier/classification, credential filetable, balanced gate matrix, ceiling migration, skill trust record
+│   ├── quickstart.md                 # QS-1–QS-8 validation scenarios + production budgets
+│   ├── tasks.md                      # T001–T028, US1–US5 story phases, test-first gates, per-task self-checks (protocol: gate-matrix/prompt-count/UX-substring/parity/mode-invariance/migration/negative probes)
+│   ├── contracts/                    # shell-risk-classifier, secret-ref-authority, workspace-skill-trust, transport-origin
+│   ├── 024-1-native-approval-parity/ # Sub-spec: native approval parity — REPL/headless/SDK/WS off the legacy bridge (024-1 — planned, after 022/023/024)
+│   │   ├── spec.md                   # US1–US4, FR-001–FR-015, M1–M8, SC-001–SC-006; readline presenter, headless truth, bridge + legacy-type demolition
+│   │   ├── plan.md                   # P0 red gates → P1 readline surface → P2 headless truth + knob demolition → P3 SDK/HTTP/WS retarget + bridge deletion → P4 loop fail-closed + type truth + docs
+│   │   ├── research.md               # Evidence E1–E15 (verified v0.7.2 @ 3595047) + cross-spec coordination (022/023/024/025: zero overlap) + decisions D1–D10
+│   │   ├── data-model.md             # Deleted-type table, ApprovalSelection, presenter model, interaction-mode matrix, seam/option/settings deltas
+│   │   ├── quickstart.md             # QS-1–QS-5 validation scenarios + QS-P production budgets
+│   │   ├── tasks.md                  # T001–T046, US1–US4 story phases, test-first gates, per-task runnable self-checks
+│   │   └── contracts/                # readline-approval-presenter, approval-injection-surface
+│   └── 024-2-product-review-remediation/ # Sub-spec: 2026-09-06 product-review remediation (024-2 — planned, after 022/023/024/024-1)
+│       ├── spec.md                   # US1–US6, FR-001–FR-031, M1–M7, SC-001–SC-007; owns the review remainder after predecessor subtraction
+│       ├── plan.md                   # P0 re-baseline ledger → P1 write integrity → P2 inference pinning → P3 SDK/docs truth → P4 release gates → P5 store hygiene → P6 transport residuals → P7 review re-run
+│       ├── research.md               # Subtraction ledger vs 022/023/024/024-1/025 (finding×spec matrix), E1–E22, D1–D15; owner decisions Q-A–Q-D resolved 2026-09-07
+│       ├── data-model.md             # FileSnapshot sha256, gate condition, error-export table, docs-sync v2, docs-sweep annex (page:line), finding→FR matrix
+│       ├── quickstart.md             # QS-P0 re-baseline + QS-1–QS-7 validation scenarios
+│       └── contracts/                # write-integrity-gating, sdk-surface-and-docs-truth, inference-egress-pinning, release-gates, store-and-transport-hygiene
+├── 025-agent-instance-state/         # Agent-instance state & process-global elimination (025 — planned, branch 025-agent-instance-state)
+│   ├── spec.md                       # US1–US5, FR-001–FR-011, M1–M8, SC-001–SC-005; shrinks 022's FR-017 accepted list
+│   ├── plan.md                       # P0 audit+invariant v3 → P1 SDK surface → P2 cache ownership → P3 server objectification → P4 fence green+docs
+│   ├── research.md                   # Evidence E1–E15 (E1–E4/E12 tagged 022-owned to prevent duplication), consequences C1–C3, decisions D1–D9
+│   ├── data-model.md                 # Disposition table (022 §6 → 025), AgentSettings, ServerState, invariant classification v3
+│   ├── quickstart.md                 # QS-0–QS-7 validation scenarios + QS-P production budgets
+│   ├── tasks.md                      # T001–T024, US1–US5 story phases, test-first gates, self-check protocol (GP/TS/MP/XP/TP/CP/DP/PP; [MANUAL]=0)
+│   ├── checklists/requirements.md    # Specification quality checklist (validated 2026-09-07; 30/30 post-review)
+│   └── contracts/                    # process-state-invariant, sdk-surface-migration, server-state
 ├── 010-provider-management-redesign/ # Provider mgmt redesign: contracts + runtime + purpose/tier routing
 │   ├── spec.md                       # Problem, 5 blockers + 4 gaps, scope decisions, success criteria
 │   ├── plan.md                       # P0-P7 phased plan (contracts → Pi adapter → runtime → resolution → surfaces → reliability)
@@ -490,12 +538,214 @@ Keep `CONTEXT.md` under 20 lines total. Do NOT summarize the full conversation �
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-- **ACTIVE PLAN**: `~/Documents/Obsidian/Seepient/Implementation-Specs/021-stateless-sdk-workers/021-1-skill-sources/plan.md`
+- **UPCOMING (plan complete — sequenced after 022/023/024/024-1; sub-spec of 024)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/024-security-remediation/024-2-product-review-remediation/plan.md`
+  — Product-review remediation (024-2): owns the remainder of the 2026-09-06
+  product review (`Reviews/2026-09-06-product-review-017-to-021-4.md`, 🔴
+  verdict, 7 P1s) after verified subtraction of everything 022/023/024/024-1
+  absorb (ledger in research.md — 4 findings fully absorbed, 4 cores closed,
+  the rest is here). Six families, 31 FRs, every one traced to a numbered
+  finding or verified residual: write integrity (sha256-bind write_file
+  replace-mode commits so the helper's snapshot-changed guard finally fires;
+  extend the exact-commit pre-prompt gate to broker ops carrying
+  `outputCommit` so generate_image is refused BEFORE approval/billing on
+  helper-less machines; create-semantics for image destinations; snapshot
+  re-record fixes write-then-edit), inference-egress pinning (pi-ai
+  `ProviderRequestOptions.fetch` injection seam wraps foundations
+  resolve→classify→pinnedFetch per request, honoring per-account
+  ssrfAllowPrivate; ssrf-fetch.ts header stops over-claiming), SDK/docs
+  truth (value-export the 15-class error hierarchy; docs-sync deny-list v2 +
+  README example collision check; purge retired SessionStore from 3 pages;
+  consentMode default truth; allowFallback fiction removed from the security
+  review doc; docs-sweep annex at page:line), release gates
+  (`verifyPack()` actually calls `assertNotPlaceholder` and stops staging
+  placeholders to satisfy itself; release order build→stage→verify→publish;
+  checklist 5-job truth; homebrew propagation retry), store hygiene
+  (stale-lock recovery for LocalPolicyStore; `policy-store-corrupt` notice
+  riding 023's machinery; `PRINCIPAL_REQUIRED` in multi mode closing the
+  sdk-user collapse; approval persist failures surfaced, zero unhandled
+  rejections; dead `PendingApprovalStore`/raw `WriteFileTool` exports
+  demolished; broker-draft destination cross-check; `artifacts.has`
+  implemented), transport residuals + test pins (loopback default bind,
+  adopted; provider-mgmt body cap env-governed; session adopt-or-create
+  unified to the documented D1 on BOTH surfaces — REST's 404 was the
+  divergence; WS client-id validation before spanId use; gateway
+  usage/audit scope = own-principal at agent:read, admin for
+  cross-principal, adopted; sessionId 128-cap + typed persist-shape
+  error; amnesiac resume pinned by a full-history fake; worker
+  load-failure no longer overwrites history; HostToolContext populated so
+  abort reaches host tools). Owner questions resolved up front (Q-A
+  loopback, Q-B gateway scope — adopted 2026-09-07; Q-C stays with 024;
+  vehicle pins at branch cut). P0 re-verifies the whole subtraction ledger
+  against the landed
+  predecessor tree (findings come back if a spec dropped them; 025-aware
+  without depending on it); SC-007 re-runs the review's finding list — zero
+  open P1s is the bar. tasks.md via /speckit-tasks (follow-up).
+- **UPCOMING (plan complete — sequenced after 022/023/024; sub-spec of 024)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/024-security-remediation/024-1-native-approval-parity/plan.md`
+  — Native approval parity (024-1): finishes the native-broker migration on
+  every surface the 008/011/017 upgrades left on `legacy-adapter.ts` —
+  REPL/headless (the primary `seepient -n`/`--docker` path via `runChat`)
+  gets `InlineApprovalBroker` + a readline presenter (exact command + 024
+  FR-004 classification reasons + lifetime choices that persist like the
+  TUI); WS approval wire upgraded both directions (typed request +
+  choices out, `optionId`+`lifetime` back; the synthetic-request
+  duplicate-decision path is deleted — one decision construction);
+  headless stops silently auto-approving (`--headless`/`--docker` no
+  longer set `autoConfirm`; typed `approval-unavailable` denial with
+  remediation; unattended = explicit `--mode autonomous`/`--yes`); SDK/HTTP/
+  WS drop the `approveTool` option for `approvalBroker`-only (WS decision
+  message carries optionId+lifetime — no scope demotion); `legacy-adapter.ts`,
+  `setPipelineApproveTool`, `LegacyPermissionPrompt`, `/permissions` legacy
+  grant subcommands, `agent.autoConfirm`, `SEEPIENT_SHELL_APPROVE`, and the
+  `GrantScope`/`ApprovalScope`/`ApprovalDecision`/`ApprovalContext`/
+  `ApproveToolFn` types are deleted; `runAgentLoop` requires `wiredPipeline`
+  (typed error), killing the Domain→Transport dynamic import; vocabulary +
+  architecture gates make regression visible. Zero overlap with 022/023/025
+  (rebase rules M6/M8); consumes 024's classification vocabulary (M7).
+- **UPCOMING (plan complete — independent of 022/023; recommended vehicle v0.7.3)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/024-security-remediation/plan.md`
+  — Security remediation with product-weighted defaults (024): closes the
+  seven unfixed findings of the 2026-09-07 audit with UX-deliberated fixes
+  rather than maximal-strictness gates. Four-tier shell classifier
+  (`known-safe`/`ordinary`/`workspace-destructive`/`untrusted-code`, new
+  `ToolRiskCategory` member) where `untrusted-code` prompts in balanced mode
+  ONLY when process containment is absent (sandbox already denies network,
+  sanitizes env, protects home paths — prompts land only where the sandbox
+  isn't already holding the risk; research D1/D2); sandbox deny-write on
+  `${workspaceRoot}/.git/hooks` + `.git/config` (the one true escape-to-host
+  path — invisible to normal git, mode-invariant, no new escape);
+  `{kind:"secret-ref", ref:"*"}` removed from the local ceiling + a
+  one-time stored-policy migration strips 017's seeded wildcard, with 017's
+  config-derived grants carrying the out-of-box brokered-tools promise and
+  unknown refs getting one informed "Use the stored secret `ref`?" prompt
+  (the four retained ceiling wildcards — network/recipient/process/
+  model-egress — recorded as accepted risk in M6);
+  WS upgrade origin check (same-host default, corsOrigins allowlist,
+  no-Origin non-browser clients untouched); one shared credential-filename
+  table (.npmrc, .netrc, .git-credentials, .docker/config.json, .kube/config,
+  id_rsa-family, .pfx/.p12) powering both read sensitivity and a conservative
+  shell-operand secret scan (stamps the existing filesystem-read secret
+  effect); VS Code-style one-time per-workspace trust prompt for
+  `<cwd>/.seepient/skills` (headless skips + notices; rides the 021-1
+  SkillSource seam; 018 stays authoritative for injection-time contracts);
+  mechanical fixes: `native/` + `scripts/place-native-helper` join
+  security-kernel in self-evolution classification, scheduler
+  `"default-secret"` replaced by a per-process random signing key.
+  Audit corrections recorded in research S1–S5 (quoted P0-2 pattern wasn't
+  the code — actual set is broader but still binary; WS is token-gated so
+  origin is defense-in-depth; P0-2 severity splits by containment). Owner
+  questions open: contained-network product story for package managers (Q1),
+  network-wildcard accepted-risk confirmation (Q2), v0.7.3 vehicle (Q3).
+  Baseline v0.7.2 @ 3595047; tasks.md ready (T001–T028, US1–US5 story
+  phases, test-first — Phase 1 pins SC-001 prompt-parity green on the
+  untouched tree and lands the classifier/gate-matrix suites red-by-design;
+  every task carries runnable self-checks per the self-check protocol:
+  gate-matrix probes over the full tier × containment × mode table,
+  prompt-count probes (SC-001 = ordinary corpus yields exactly 0 prompts
+  pre/post), UX substring asserts on every user-visible string, parity
+  replays (read_file ≡ cat for the same path), mode-invariance drills
+  (enforcement must not vary across manual/balanced/autonomous/headless),
+  migration probes (strip once, idempotent, byte-stable), negative probes
+  (every detector must be provable to fail), platform-skip discipline,
+  [MANUAL] count = 0). MVP = T001–T014 (US1 shell consent + US2 git fence).
+- **UPCOMING (plan complete — strictly post-022; shrinks 022's process-state fence)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/025-agent-instance-state/plan.md`
+  — Agent-instance state & process-global elimination (025): the completion of
+  "fully scope tool registries to the agent instance, eliminating process-level
+  mutable state" — the registry half is 022 US1 (already baselined; deliberately
+  NOT duplicated here); 025 owns the residual that 022 pinned without
+  disposition in FR-017's accepted list (022 data-model §6) and shrinks it from
+  ~10 undocumented pins to 5 classed entries (1 single-mode-default, 3
+  frozen-memo, 1 ui-runtime). Deletes the public
+  process-mutation surface: the `registerBackend` module registry
+  (session-store.ts:185, re-exported through the domain barrel and the SDK;
+  custom backends become `persist` instances — the option already accepts them,
+  seepient.ts:246) and the `settings()` singleton facade (sdk/settings.ts:25 →
+  per-agent `agent.settings`; two agents no longer observe each other's
+  set/reset writes). Caches gain owners: `baseConfigCache`
+  (provider-config-store.ts:410 — cwd-keyed, unbounded, survives
+  resetDefaultProviderRuntime) becomes a per-store-instance memo. Server
+  lifetime is objectified: one ServerState per runSeepientServer absorbs
+  cachedSkillList, the auth key cache, pendingOAuthAttempts, audit/outbox +
+  approval wiring, the gateway instance + middleware closures, and the WS
+  connection registry — two servers in one process (the natural
+  integration-test shape) get fully independent in-memory state (cwd-derived
+  default paths stay process-shared unless stores are injected). The invariant gains hazard
+  classes (single-mode-default | frozen-memo | ui-runtime) with a same-change
+  amendment rule and extends to src/ui and src/vendors (a frozen-memo pin
+  lives in vendors today, outside 022's scan); `defaultRuntimeInstance` stays (022 M4
+  re-affirmed — de-singletoning rejected as purity theater, D6/D7). Sequencing:
+  implements on the 022-landed tree (it edits 022's T033-pinned list, so it
+  cannot ride the same release); ServerState is the designated absorption seam
+  if 023 lands first (Sage server sinks) — coordinate, don't conflict. Breaking
+  (pre-1.0, documented migrations): deleted SDK exports + `agent.settings`;
+  one-shot config flows through env/setting.json (M9 — no askSeepient override
+  option, owner-confirmed). Review-hardened 2026-09-07 (five-lens pass: 11
+  findings fixed — FR-004 story placement, pin-count drift, src/vendors scan
+  gap, parallel-server overclaim, task completeness; spec quality checklist
+  validated 30/30). READY FOR IMPLEMENTATION.
+  tasks.md ready (T001–T024, US1–US5 story phases, test-first — gates land
+  red first to prove their detectors; every task carries runnable self-checks
+  per the self-check protocol: grep proofs, targeted suites, tsx micro-probes
+  (two-agent settings isolation, reset+rebuild cache freshness), packed-tarball
+  export probes, type-truth probes, error-message/doc substring asserts,
+  drift/mutation probes (8 recorded red runs on the invariant; per-story
+  revert-to-red mutation checks), parity/golden checks; [MANUAL] count = 0).
+  MVP = T001–T010 (foundational gate + US1 SDK surface).
+- **UPCOMING (plan complete — sequenced after 022 lands)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/023-seepient-sage/plan.md`
+  — Seepient Sage (023): unified telemetry tracing + full auditing, one
+  system serving LangSmith-class developer observability and Seepient's
+  security auditing. Two-plane architecture (research D1, options A–D
+  ranked): the 008 fail-closed audit kernel is enriched in place with
+  forensic metadata (`toolName`, `operationKind`, `displaySummary`,
+  `targets`, `sessionId`, `tenantId`, `durationMs`, error) + gains
+  `AuditStore.query()` and fail-open `SecurityNotice`s (model-egress
+  denials, auth key lifecycle, 401s, policy mutations — today silent);
+  a new fire-and-forget telemetry plane records a correlated span tree
+  (turn → llm → tool → broker → skill; StepResult data already exists
+  in memory and is dropped today) with redacted payload summaries
+  (capture levels off/redacted/full, deny-by-default secret masking,
+  process-global in v1 — per-tenant policy is an embedder-sink concern),
+  16 MiB-rotated NDJSON + 7-day sweep on both streams via the shared
+  atomic-write helper (023 lands 016's foundational slice itself — M13,
+  since 016 is unimplemented; ships v0.9.0 with four documented breaking
+  changes); one
+  `SageContext` correlation tuple per turn (W3C traceparent extract,
+  requestId fold-in); one `SageReader` reader behind SDK query methods
+  + injectable live sink (embedders build in-app UIs), REST
+  (`/v1/audit/events`, `/v1/traces/:id`, `/v1/sessions/:id/trace`,
+  `/v1/runs`), CLI (`seepient audit` / `seepient trace` waterfall),
+  OTel adapter (vendor-quarantined, optional dep); gateway in-memory
+  audit ring buffer deleted, `/gateway audit` rerouted; stdout JSON
+  lines byte-stable (021-2 scraper contract); deterministic per-turn
+  `RunRecord` (latency split, tokens, catalog-priced cost, denial/
+  egress/error counts) is the substrate for future self-evaluation/
+  self-healing/self-improvement specs — the intelligence itself and
+  model-facing trace access are explicitly out of scope (M3/D3).
+  Baselines on 022 (tenancy context, principal-stamped stores);
+  server audit root leaves `process.cwd()` for the Seepient home.
+  Phases P0–P5 in plan.md; gates QS-1–QS-8 (SC-001–SC-007).
+- **ACTIVE PLAN**: `~/Documents/Obsidian/Seepient/Implementation-Specs/022-multi-tenant-isolation/plan.md`
+  — Multi-tenant isolation hardening (022): closes the 2026-09-07 audit
+  findings that undermine 021's multi-tenant story — per-agent ToolRegistry +
+  connector registries replace the process-global registry (cross-tenant tool
+  visibility, execution wiring, and host-authority pre-approval via the
+  agent-loop.ts:487 allowlist union); `tenancy: "single"|"multi"` mode makes
+  every ambient fallback fail closed in multi mode (shared default
+  runtime/credentials, principal-blind stored grants incl. global.json
+  merges, flat content-keyed capability ledger, ambient skills discovery);
+  grants become principal-stamped/read-filtered, ledger principal-scoped.
+  Acceptance = 8-dimension isolation matrix + FR-017 process-state invariant
+  gate + adversarial re-audit returning zero new findings (owner bar: no more
+  multi-tenant surprises). Baseline v0.7.2 @ 3595047; ships v0.8.0 (breaking
+  SDK surface, pre-1.0 in-place). tasks.md ready (T001–T035; every task carries
+  a runnable self-check — grep proofs, targeted suites, micro-probes, UX-copy
+  assertions; gates land red first to prove their detectors).
+- **SAME-WINDOW DEPENDENCY (baseline per owner; seam verified on main @ 0.7.2)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/021-stateless-sdk-workers/021-1-skill-sources/plan.md`
   — Injectable `SkillSource`/`SkillStore` + inline-skills tier so skill content
   joins the store-contract family — serverless light shape gets a working skill
   system, embedders compose global + tenant-scoped skills from their own DB with
   last-wins shadowing, and 016's generated-skill writer retargets the store instead
-  of disk (fail-closed without one). tasks.md ready (T001–T013).
+  of disk (fail-closed without one). tasks.md ready (T001–T013). 022 FR-014
+  depends on this contract surface; if it slips, FR-014 degrades to
+  discovery-off-in-multi-mode only.
 - **SHIPPED (021-3 remediation complete, v0.7.0)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/021-stateless-sdk-workers/021-3-remediation/tasks.md`
   — Work order W001–W033 from the 2026-09-06 architect + second-reviewer
   adjudication: red `pnpm test` gate (12 test-tsconfig errors), Docker
