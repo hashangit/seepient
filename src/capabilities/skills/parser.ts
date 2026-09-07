@@ -1,62 +1,24 @@
-import { readFile } from 'fs/promises';
-import { Skill, SkillFrontmatter, getSkillBodyLimits } from './types.js';
-
-export async function parseSkillFile(filePath: string): Promise<Skill> {
-  const content = await readFile(filePath, 'utf-8');
-  const { frontmatter, body } = extractFrontmatter(content);
-
-  if (!frontmatter.name) throw new Error(`Skill missing 'name' field: ${filePath}`);
-  if (!frontmatter.description) throw new Error(`Skill missing 'description' field: ${filePath}`);
-
-  // Warn at load time if body exceeds the soft warning threshold
-  const { warnChars } = getSkillBodyLimits();
-  if (body.length > warnChars) {
-    console.warn(
-      `[SKILLS] Warning: Skill "${frontmatter.name}" body is ${body.length} chars ` +
-      `(~${Math.ceil(body.length / 4)} tokens). Consider trimming below ${warnChars} chars ` +
-      `for optimal context usage.`
-    );
-  }
-
-  return {
-    name: frontmatter.name,
-    description: frontmatter.description,
-    version: frontmatter.version || '1.0.0',
-    author: frontmatter.author,
-    tags: frontmatter.tags || [],
-    allowedTools: frontmatter.allowedTools,
-    priority: frontmatter.priority || 0,
-    basePath: '',
-    source: '',
-    frontmatter,
-    filePath,
-  };
-}
+import { Skill, SkillFrontmatter } from './types.js';
 
 /**
- * Parse only the YAML frontmatter from a skill file.
- * Discards the body text immediately — body is loaded lazily via getBody().
+ * Split a raw skill content string into YAML frontmatter and body.
+ * Returns empty yaml and original content if frontmatter delimiters are absent or unclosed.
  */
-export async function parseFrontmatter(filePath: string): Promise<Skill> {
-  const content = await readFile(filePath, 'utf-8');
-  const frontmatter = extractFrontmatterOnly(content);
+export function splitFrontmatter(content: string): { yaml: string; body: string } {
+  const trimmed = content.trimStart();
+  if (!trimmed.startsWith('---')) {
+    return { yaml: '', body: content };
+  }
 
-  if (!frontmatter.name) throw new Error(`Skill missing 'name' field: ${filePath}`);
-  if (!frontmatter.description) throw new Error(`Skill missing 'description' field: ${filePath}`);
+  const endIdx = trimmed.indexOf('---', 3);
+  if (endIdx === -1) {
+    return { yaml: '', body: content };
+  }
 
-  return {
-    name: frontmatter.name,
-    description: frontmatter.description,
-    version: frontmatter.version || '1.0.0',
-    author: frontmatter.author,
-    tags: frontmatter.tags || [],
-    allowedTools: frontmatter.allowedTools,
-    priority: frontmatter.priority || 0,
-    basePath: '',
-    source: '',
-    frontmatter,
-    filePath,
-  };
+  const yaml = trimmed.slice(3, endIdx).trim();
+  const body = trimmed.slice(endIdx + 3).trimStart();
+
+  return { yaml, body };
 }
 
 /**
@@ -69,8 +31,8 @@ export function parseSkillContent(
 ): Skill {
   const { frontmatter } = extractFrontmatter(content);
 
-  if (!frontmatter.name) throw new Error(`Skill missing 'name' field in content`);
-  if (!frontmatter.description) throw new Error(`Skill missing 'description' field in content`);
+  if (!frontmatter.name) throw new Error(`Skill missing 'name' field`);
+  if (!frontmatter.description) throw new Error(`Skill missing 'description' field`);
 
   return {
     name: frontmatter.name,
@@ -88,39 +50,8 @@ export function parseSkillContent(
 }
 
 function extractFrontmatter(content: string): { frontmatter: SkillFrontmatter; body: string } {
-  const trimmed = content.trimStart();
-  if (!trimmed.startsWith('---')) {
-    return { frontmatter: {} as SkillFrontmatter, body: content };
-  }
-
-  const endIdx = trimmed.indexOf('---', 3);
-  if (endIdx === -1) {
-    return { frontmatter: {} as SkillFrontmatter, body: content };
-  }
-
-  const yaml = trimmed.slice(3, endIdx);
-  const body = trimmed.slice(endIdx + 3).trimStart();
-
-  return { frontmatter: parseYaml(yaml), body };
-}
-
-/**
- * Extract only the frontmatter from a skill file.
- * The body text is not returned — used during discovery to avoid holding bodies in memory.
- */
-function extractFrontmatterOnly(content: string): SkillFrontmatter {
-  const trimmed = content.trimStart();
-  if (!trimmed.startsWith('---')) {
-    return {} as SkillFrontmatter;
-  }
-
-  const endIdx = trimmed.indexOf('---', 3);
-  if (endIdx === -1) {
-    return {} as SkillFrontmatter;
-  }
-
-  const yaml = trimmed.slice(3, endIdx);
-  return parseYaml(yaml);
+  const { yaml, body } = splitFrontmatter(content);
+  return { frontmatter: yaml ? parseYaml(yaml) : ({} as SkillFrontmatter), body };
 }
 
 function parseYaml(yaml: string): SkillFrontmatter {

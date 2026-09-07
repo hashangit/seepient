@@ -13,6 +13,7 @@
 
 import type { SkillRecord, SkillSource, SkillStore } from "../../foundations/contracts/skill-source.js";
 import { SkillStoreUnavailableError, SkillCollisionError } from "../../foundations/errors.js";
+import { splitFrontmatter } from "../../capabilities/skills/parser.js";
 
 export { SkillStoreUnavailableError, SkillCollisionError };
 
@@ -36,20 +37,6 @@ export interface SaveGeneratedSkillResult {
   version: number;
 }
 
-function extractYamlAndBody(raw: string): { yaml: string; body: string } {
-  const trimmed = raw.trimStart();
-  if (!trimmed.startsWith("---")) {
-    return { yaml: "", body: raw };
-  }
-  const endIdx = trimmed.indexOf("---", 3);
-  if (endIdx === -1) {
-    return { yaml: "", body: raw };
-  }
-  return {
-    yaml: trimmed.slice(3, endIdx).trim(),
-    body: trimmed.slice(endIdx + 3).trimStart(),
-  };
-}
 
 function parseYamlList(yaml: string, fieldName: string): string[] {
   const inlineMatch = yaml.match(new RegExp(`^${fieldName}:\\s*\\[(.*)\\]`, "m"));
@@ -146,7 +133,7 @@ export async function saveGeneratedSkill(
       throw new SkillCollisionError(params.name, existingSourceLabel);
     }
 
-    const { yaml } = extractYamlAndBody(existingRecord.content);
+    const { yaml } = splitFrontmatter(existingRecord.content);
 
     // Parse existing version
     const vMatch = yaml.match(/^version:\s*(.+)$/m);
@@ -187,7 +174,7 @@ export async function saveGeneratedSkill(
 
   const tags = params.tags ?? prevTags;
   const allowedTools = params.allowedTools ?? prevAllowedTools;
-  const body = params.body ?? (params.content ? extractYamlAndBody(params.content).body : "");
+  const body = params.body ?? (params.content ? splitFrontmatter(params.content).body : "");
 
   const frontmatterLines: string[] = [
     "---",

@@ -1,8 +1,7 @@
 export type { Skill, SkillFrontmatter, SkillMetadata, SkillRegistry, SkillModelConfig, TruncationResult } from './types.js';
 export type { SkillRecord, SkillSource, SkillStore, SkillLiteral } from '../../foundations/contracts/skill-source.js';
 export { FsSkillSources } from './fs-skill-sources.js';
-export { parseSkillFile, parseFrontmatter, parseSkillContent } from './parser.js';
-export { discoverSkills, getSkillPaths } from './loader.js';
+export { parseSkillContent, splitFrontmatter } from './parser.js';
 export { DefaultSkillRegistry } from './registry.js';
 export { parseInvocation, substituteArgs } from './args.js';
 export type { ParsedArgs } from './args.js';
@@ -16,7 +15,6 @@ import type { Skill, SkillRegistry } from './types.js';
 import type { SkillSource } from '../../foundations/contracts/skill-source.js';
 
 async function loadSkillsFromSources(
-  cwd: string,
   sources: SkillSource[],
 ): Promise<{ skills: Skill[]; rawContentMap: Map<string, string> }> {
   const map = new Map<string, Skill>();
@@ -25,9 +23,11 @@ async function loadSkillsFromSources(
     const records = await src.list();
     for (const rec of records) {
       try {
-        const parsed = parseSkillContent(rec.content, rec.source ?? "injected");
+        const parsed = parseSkillContent(rec.content, rec.source ?? "injected", rec.filePath ?? "");
         map.set(parsed.name, parsed);
-        rawContentMap.set(parsed.name, rec.content);
+        if (!rec.filePath) {
+          rawContentMap.set(parsed.name, rec.content);
+        }
       } catch (err: any) {
         console.warn(
           `[SKILLS] Warning: Failed to parse skill record "${rec.name ?? "unnamed"}": ${err?.message ?? err}`,
@@ -58,7 +58,7 @@ export async function initializeSkillRegistry(
     ? (options?.sources ?? [])
     : [new FsSkillSources(cwd), ...(options?.sources ?? [])];
 
-  const { skills, rawContentMap } = await loadSkillsFromSources(cwd, effectiveSources);
+  const { skills, rawContentMap } = await loadSkillsFromSources(effectiveSources);
   const registry = new DefaultSkillRegistry(skills, rawContentMap);
 
   if (process.env.SEEPIENT_SKILLS_DEBUG) {

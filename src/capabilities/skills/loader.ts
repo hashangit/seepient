@@ -4,7 +4,6 @@ import { existsSync } from 'fs';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 import { parseSkillContent } from './parser.js';
-import { Skill } from './types.js';
 import type { SkillRecord } from '../../foundations/contracts/skill-source.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -41,10 +40,6 @@ export function getSkillPaths(cwd: string): string[] {
   return paths;
 }
 
-export async function discoverSkills(cwd: string): Promise<Skill[]> {
-  const records = await discoverSkillRecords(cwd);
-  return records.map((r) => parseSkillContent(r.content, r.source ?? 'fs'));
-}
 
 export async function discoverSkillRecords(cwd: string): Promise<SkillRecord[]> {
   const paths = getSkillPaths(cwd);
@@ -64,7 +59,6 @@ export async function discoverSkillRecords(cwd: string): Promise<SkillRecord[]> 
         try {
           const content = await readFile(skillFile, 'utf-8');
           const skill = parseSkillContent(content, searchPath, skillFile);
-          skill.basePath = join(searchPath, entry.name);
           const priority = skill.priority || 0;
 
           const existing = records.get(skill.name);
@@ -74,6 +68,7 @@ export async function discoverSkillRecords(cwd: string): Promise<SkillRecord[]> 
                 name: skill.name,
                 content,
                 source: searchPath,
+                filePath: skillFile,
               },
               priority,
             });

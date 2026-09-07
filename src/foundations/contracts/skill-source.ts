@@ -9,6 +9,7 @@ export interface SkillRecord {
   name: string;
   content: string;
   source?: string;
+  filePath?: string;
 }
 
 export interface SkillLiteral {
