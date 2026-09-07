@@ -325,3 +325,39 @@ export class UnsupportedBackendError extends PermissionError {
     this.operationKind = opts.operationKind;
   }
 }
+
+// ── Skill store errors ──────────────────────────────────────────────────
+
+/**
+ * Thrown when an operation requires a SkillStore (such as saving a generated
+ * skill) but no SkillStore is present in the effective sources list.
+ */
+export class SkillStoreUnavailableError extends SeepientError {
+  constructor(
+    message = "SKILL_STORE_UNAVAILABLE: No SkillStore is configured in the effective sources list. Remediation: To save generated skills in an SDK/stateless worker, inject a SkillStore in the `sources` array (e.g. `sources: [..., mySkillStore]`).",
+  ) {
+    super(message, "SKILL_STORE_UNAVAILABLE", false);
+    this.name = "SkillStoreUnavailableError";
+  }
+}
+
+/**
+ * Thrown when attempting to save a generated skill with a name that already
+ * exists in one of the effective sources without explicit update intent.
+ */
+export class SkillCollisionError extends SeepientError {
+  existingName: string;
+  existingSource?: string;
+
+  constructor(name: string, source?: string) {
+    super(
+      `Skill "${name}" already exists (collision in source: ${source ?? "unknown"}). To update the existing skill, provide explicit update intent (replace: true, changelogEntry: "...") or choose a different name.`,
+      "SKILL_COLLISION",
+      false,
+    );
+    this.name = "SkillCollisionError";
+    this.existingName = name;
+    this.existingSource = source;
+  }
+}
+

@@ -12,6 +12,11 @@ export {
 } from './skills/skill-invoker.js';
 export { buildSkillCatalog } from './skills/skill-catalog.js';
 export {
+  saveGeneratedSkill,
+  type SaveGeneratedSkillParams,
+  type SaveGeneratedSkillResult,
+} from './skills/generated-skill-save.js';
+export {
   runAgentLoop,
   type AgentLoopOptions,
   type AgentLoopResult,

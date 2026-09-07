@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { initializeSkillRegistry } from "../index.js";
 import { FsSkillSources } from "../fs-skill-sources.js";
 import { discoverSkills } from "../loader.js";
-import { buildSkillCatalog } from "../../../domain/skills/skill-catalog.js";
 import type { SkillSource, SkillRecord } from "../../../foundations/contracts/skill-source.js";
 
 let tmpHome: string;
@@ -128,22 +127,33 @@ describe("Skill sources composition & FsSkillSources (Spec 021-1, US1)", () => {
 
   it("no-sources single-mode call produces byte-equivalent registry/catalog golden over bundled + fixture layers (QS-S0)", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "seepient-golden-cwd-"));
+    function renderCatalog(metadata: Array<{ name: string; description: string; tags: string[] }>): string {
+      if (metadata.length === 0) return "";
+      const lines = metadata.map(s => {
+        const tags = s.tags.length > 0 ? ` [${s.tags.join(', ')}]` : '';
+        return `- ${s.name}: ${s.description}${tags}`;
+      });
+      return [
+        'AVAILABLE SKILLS (activate with use_skill tool):',
+        ...lines,
+        'When a user request matches a skill, call use_skill with the skill name.',
+      ].join('\n');
+    }
+
     try {
       writeSkill(join(cwd, ".seepient", "skills"), "golden-skill", "golden test");
 
       // Baseline discovery:
       const directSkills = await discoverSkills(cwd);
-      const directCatalog = buildSkillCatalog(directSkills.map(s => ({
+      const directCatalog = renderCatalog(directSkills.map(s => ({
         name: s.name,
         description: s.description,
-        version: s.version,
         tags: s.tags,
-        allowedTools: s.allowedTools,
       })));
 
       // Registry without sources in single-mode:
       const registry = await initializeSkillRegistry(cwd, { tenancyMode: "single" });
-      const registryCatalog = buildSkillCatalog(registry.getMetadata());
+      const registryCatalog = renderCatalog(registry.getMetadata());
 
       expect(registryCatalog).toBe(directCatalog);
       expect(registry.getMetadata()).toEqual(
