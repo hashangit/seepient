@@ -4,11 +4,13 @@ import { Skill, SkillMetadata, SkillRegistry } from './types.js';
 export class DefaultSkillRegistry implements SkillRegistry {
   private skills: Map<string, Skill>;
   private bodyCache: Map<string, string>;
+  private rawContentMap: Map<string, string>;
   private readonly maxCacheSize = 5;
 
-  constructor(skills: Skill[]) {
+  constructor(skills: Skill[], rawContentMap?: Map<string, string>) {
     this.skills = new Map(skills.map(s => [s.name, s]));
     this.bodyCache = new Map();
+    this.rawContentMap = rawContentMap ?? new Map();
   }
 
   get(name: string): Skill | undefined {
@@ -37,18 +39,31 @@ export class DefaultSkillRegistry implements SkillRegistry {
     const cached = this.bodyCache.get(name);
     if (cached !== undefined) return cached;
 
-    // Load body lazily from disk
-    try {
-      const content = await readFile(skill.filePath, 'utf-8');
-      const body = extractBody(content);
-      if (body === undefined) return undefined;
-
-      this.setCache(name, body);
-      return body;
-    } catch {
-      // File deleted, moved, or unreadable
-      return undefined;
+    // Check raw content map first (injected sources, inline literals)
+    const raw = this.rawContentMap.get(name);
+    if (raw !== undefined) {
+      const body = extractBody(raw);
+      if (body !== undefined) {
+        this.setCache(name, body);
+        return body;
+      }
     }
+
+    // Load body lazily from disk if filePath is present
+    if (skill.filePath) {
+      try {
+        const content = await readFile(skill.filePath, 'utf-8');
+        const body = extractBody(content);
+        if (body !== undefined) {
+          this.setCache(name, body);
+          return body;
+        }
+      } catch {
+        // File deleted, moved, or unreadable
+      }
+    }
+
+    return undefined;
   }
 
   private setCache(name: string, body: string): void {
