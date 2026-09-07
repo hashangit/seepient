@@ -174,7 +174,7 @@ export interface AskSeepientOptions {
   tier?: Tier;
   systemPrompt?: string;
   tools?: (string | UserToolDefinition | import("./contracts/custom-tools.js").AnyToolRegistration | import("./contracts/tool.js").ToolModule)[];
-  skills?: string[] | boolean;
+  skills?: string[] | boolean | import("./contracts/skill-source.js").SkillLiteral[];
   sources?: import("./contracts/skill-source.js").SkillSource[];
   cwd?: string;
   maxSteps?: number;
@@ -259,7 +259,7 @@ export interface CreateSeepientOptions {
   override?: { providerAccount?: string; model?: string; thinkingLevel?: any };
   systemPrompt?: string;
   tools?: (string | UserToolDefinition | import("./contracts/custom-tools.js").AnyToolRegistration | import("./contracts/tool.js").ToolModule)[];
-  skills?: string[] | boolean;
+  skills?: string[] | boolean | import("./contracts/skill-source.js").SkillLiteral[];
   sources?: import("./contracts/skill-source.js").SkillSource[];
   cwd?: string;
   maxSteps?: number;

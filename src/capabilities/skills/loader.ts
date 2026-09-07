@@ -1,10 +1,11 @@
-import { readdir } from 'fs/promises';
+import { readdir, readFile } from 'fs/promises';
 import { join, dirname } from 'path';
 import { existsSync } from 'fs';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 import { parseFrontmatter } from './parser.js';
 import { Skill } from './types.js';
+import type { SkillRecord } from '../../foundations/contracts/skill-source.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -74,4 +75,47 @@ export async function discoverSkills(cwd: string): Promise<Skill[]> {
   }
 
   return Array.from(skills.values());
+}
+
+export async function discoverSkillRecords(cwd: string): Promise<SkillRecord[]> {
+  const paths = getSkillPaths(cwd);
+  const records = new Map<string, { record: SkillRecord; priority: number }>();
+
+  // Load in reverse priority order so higher priority overwrites
+  for (const searchPath of [...paths].reverse()) {
+    if (!existsSync(searchPath)) continue;
+
+    try {
+      const entries = await readdir(searchPath, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const skillFile = join(searchPath, entry.name, 'SKILL.md');
+        if (!existsSync(skillFile)) continue;
+
+        try {
+          const content = await readFile(skillFile, 'utf-8');
+          const skill = await parseFrontmatter(skillFile);
+          const priority = skill.priority || 0;
+
+          const existing = records.get(skill.name);
+          if (!existing || priority >= existing.priority) {
+            records.set(skill.name, {
+              record: {
+                name: skill.name,
+                content,
+                source: searchPath,
+              },
+              priority,
+            });
+          }
+        } catch (error: any) {
+          console.warn(`Warning: Failed to load skill from ${skillFile}: ${error.message}`);
+        }
+      }
+    } catch {
+      // Directory not readable, skip silently
+    }
+  }
+
+  return Array.from(records.values()).map((r) => r.record);
 }

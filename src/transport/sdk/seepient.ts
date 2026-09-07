@@ -131,8 +131,34 @@ import {
  * Supports single-turn chat, multi-turn conversations, streaming responses,
  * model switching, tool execution, session persistence, and provider management.
  */
+function computeEffectiveSkillSources(
+  sources?: import("../../foundations/contracts/skill-source.js").SkillSource[],
+  skills?: string[] | boolean | import("../../foundations/contracts/skill-source.js").SkillLiteral[],
+): import("../../foundations/contracts/skill-source.js").SkillSource[] {
+  const effective: import("../../foundations/contracts/skill-source.js").SkillSource[] = sources ? [...sources] : [];
+  if (
+    Array.isArray(skills) &&
+    skills.length > 0 &&
+    typeof skills[0] === "object" &&
+    skills[0] !== null &&
+    "content" in skills[0]
+  ) {
+    const literals = skills as import("../../foundations/contracts/skill-source.js").SkillLiteral[];
+    effective.push({
+      list: () =>
+        literals.map((l) => ({
+          name: l.name,
+          content: l.content,
+          source: "inline",
+        })),
+    });
+  }
+  return effective;
+}
+
 export async function createSeepient(options?: CreateSeepientOptions): Promise<Seepient> {
   const opts = options ?? {};
+  const effectiveSources = computeEffectiveSkillSources(opts.sources, opts.skills);
 
   const tenancySignals: TenancySignals = {
     explicit: opts.tenancy,
@@ -140,7 +166,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     anyStoreInjected: Boolean(opts.auditStore || opts.policyStore || opts.capabilityLedger),
     runtimeInjected: Boolean(opts.runtime),
     persistInjected: Boolean(opts.persist),
-    skillSourcesInjected: Boolean(opts.sources && Array.isArray(opts.sources)),
+    skillSourcesInjected: effectiveSources.length > 0,
   };
   const { mode: tenancyMode, upgraded } = resolveTenancyMode(tenancySignals);
   emitTenancyNoticeOnce(upgraded);
@@ -203,14 +229,14 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   let skillCatalog = "";
   let skillRegistry: import("../../capabilities/skills/types.js").SkillRegistry | undefined;
   if (opts.skills !== false) {
-    if (tenancyMode === "multi" && (!opts.sources || opts.sources.length === 0)) {
+    if (tenancyMode === "multi" && effectiveSources.length === 0) {
       // In multi-tenant mode without injected sources, ambient discovery is skipped
     } else {
       try {
-        skillRegistry = await initializeSkillRegistry(opts.cwd ?? process.cwd(), { sources: opts.sources, tenancyMode });
+        skillRegistry = await initializeSkillRegistry(opts.cwd ?? process.cwd(), { sources: effectiveSources, tenancyMode });
         let meta = skillRegistry.getMetadata();
-        if (Array.isArray(opts.skills)) {
-          const wanted = new Set(opts.skills);
+        if (Array.isArray(opts.skills) && typeof opts.skills[0] === "string") {
+          const wanted = new Set(opts.skills as string[]);
           meta = meta.filter((s) => wanted.has(s.name));
         }
         if (meta.length > 0) {

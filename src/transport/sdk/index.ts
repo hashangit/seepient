@@ -81,6 +81,7 @@ export type {
   SkillStore,
   SkillLiteral,
 } from "../../foundations/contracts/skill-source.js";
+export { FsSkillSources } from "../../capabilities/skills/fs-skill-sources.js";
 
 // Spec 022 Tenancy exports
 export {
@@ -181,6 +182,31 @@ export {
 
 // ── askSeepient ──────────────────────────────────────────────────────────
 
+export function computeEffectiveSkillSources(
+  sources?: import("../../foundations/contracts/skill-source.js").SkillSource[],
+  skills?: string[] | boolean | import("../../foundations/contracts/skill-source.js").SkillLiteral[],
+): import("../../foundations/contracts/skill-source.js").SkillSource[] {
+  const effective: import("../../foundations/contracts/skill-source.js").SkillSource[] = sources ? [...sources] : [];
+  if (
+    Array.isArray(skills) &&
+    skills.length > 0 &&
+    typeof skills[0] === "object" &&
+    skills[0] !== null &&
+    "content" in skills[0]
+  ) {
+    const literals = skills as import("../../foundations/contracts/skill-source.js").SkillLiteral[];
+    effective.push({
+      list: () =>
+        literals.map((l) => ({
+          name: l.name,
+          content: l.content,
+          source: "inline",
+        })),
+    });
+  }
+  return effective;
+}
+
 /**
  * Resolve the skill catalog for a one-shot SDK call. Returns the system prompt
  * with the catalog appended and the held SkillRegistry instance, or the prompt
@@ -189,20 +215,21 @@ export {
  */
 async function resolveSkills(
   systemPrompt: string | undefined,
-  skills: string[] | boolean | undefined,
+  skills: string[] | boolean | import("../../foundations/contracts/skill-source.js").SkillLiteral[] | undefined,
   cwd?: string,
   tenancyMode?: TenancyMode,
   sources?: import("../../foundations/contracts/skill-source.js").SkillSource[],
 ): Promise<{ systemPrompt: string | undefined; skillRegistry?: import("../../capabilities/skills/types.js").SkillRegistry }> {
   if (skills === false) return { systemPrompt };
-  if (tenancyMode === "multi" && (!sources || sources.length === 0)) {
+  const effectiveSources = computeEffectiveSkillSources(sources, skills);
+  if (tenancyMode === "multi" && effectiveSources.length === 0) {
     return { systemPrompt };
   }
   try {
-    const skillRegistry = await initializeSkillRegistry(cwd ?? process.cwd(), { sources, tenancyMode });
+    const skillRegistry = await initializeSkillRegistry(cwd ?? process.cwd(), { sources: effectiveSources, tenancyMode });
     let metadata = skillRegistry.getMetadata();
-    if (Array.isArray(skills)) {
-      const wanted = new Set(skills);
+    if (Array.isArray(skills) && typeof skills[0] === "string") {
+      const wanted = new Set(skills as string[]);
       metadata = metadata.filter(s => wanted.has(s.name));
     }
     if (metadata.length === 0) return { systemPrompt, skillRegistry };
@@ -261,6 +288,7 @@ export async function askSeepient(
   options?: AskSeepientOptions,
 ): Promise<AskSeepientResult | AskSeepientStreamResult> {
   const opts = options ?? {};
+  const effectiveSources = computeEffectiveSkillSources(opts.sources, opts.skills);
 
   const tenancySignals: TenancySignals = {
     explicit: opts.tenancy,
@@ -268,7 +296,7 @@ export async function askSeepient(
     anyStoreInjected: Boolean(opts.auditStore || opts.policyStore || opts.capabilityLedger),
     runtimeInjected: Boolean(opts.runtime),
     persistInjected: false,
-    skillSourcesInjected: Boolean(opts.sources && Array.isArray(opts.sources)),
+    skillSourcesInjected: effectiveSources.length > 0,
   };
   const { mode: tenancyMode, upgraded } = resolveTenancyMode(tenancySignals);
   emitTenancyNoticeOnce(upgraded);

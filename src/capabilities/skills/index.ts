@@ -1,5 +1,6 @@
 export type { Skill, SkillFrontmatter, SkillMetadata, SkillRegistry, SkillModelConfig, TruncationResult } from './types.js';
 export type { SkillRecord, SkillSource, SkillStore, SkillLiteral } from '../../foundations/contracts/skill-source.js';
+export { FsSkillSources } from './fs-skill-sources.js';
 export { parseSkillFile, parseFrontmatter, parseSkillContent } from './parser.js';
 export { discoverSkills, getSkillPaths } from './loader.js';
 export { DefaultSkillRegistry } from './registry.js';
@@ -8,22 +9,27 @@ export type { ParsedArgs } from './args.js';
 export { resolveReferences } from './resolver.js';
 export { limitSkillBody, getSkillBodyLimits } from './types.js';
 
-import { discoverSkills } from './loader.js';
 import { parseSkillContent } from './parser.js';
 import { DefaultSkillRegistry } from './registry.js';
+import { FsSkillSources } from './fs-skill-sources.js';
 import type { Skill, SkillRegistry } from './types.js';
 import type { SkillSource } from '../../foundations/contracts/skill-source.js';
 
-async function loadSkillsFromSources(cwd: string, sources: SkillSource[]): Promise<Skill[]> {
+async function loadSkillsFromSources(
+  cwd: string,
+  sources: SkillSource[],
+): Promise<{ skills: Skill[]; rawContentMap: Map<string, string> }> {
   const map = new Map<string, Skill>();
+  const rawContentMap = new Map<string, string>();
   for (const src of sources) {
     const records = await src.list();
     for (const rec of records) {
       const parsed = parseSkillContent(rec.content, rec.source ?? "injected");
       map.set(parsed.name, parsed);
+      rawContentMap.set(parsed.name, rec.content);
     }
   }
-  return Array.from(map.values());
+  return { skills: Array.from(map.values()), rawContentMap };
 }
 
 /**
@@ -38,27 +44,16 @@ export async function initializeSkillRegistry(
   options?: { sources?: SkillSource[]; tenancyMode?: "single" | "multi" },
 ): Promise<SkillRegistry> {
   const isMulti = options?.tenancyMode === "multi";
-  let skills: Skill[] = [];
 
-  if (isMulti) {
-    // Multi-tenant mode: only injected sources are used; ambient discovery is NEVER invoked
-    if (options?.sources && options.sources.length > 0) {
-      skills = await loadSkillsFromSources(cwd, options.sources);
-    }
-  } else if (options?.sources && options.sources.length > 0) {
-    // Single-mode with sources: ambient discovery + sources (sources win on collision)
-    const ambientSkills = await discoverSkills(cwd);
-    const sourceSkills = await loadSkillsFromSources(cwd, options.sources);
-    const map = new Map<string, Skill>();
-    for (const s of ambientSkills) map.set(s.name, s);
-    for (const s of sourceSkills) map.set(s.name, s);
-    skills = Array.from(map.values());
-  } else {
-    // Single-mode default: ambient discovery
-    skills = await discoverSkills(cwd);
-  }
+  // Unified tenancy-aware composition (FR-002):
+  // Multi mode: injected sources only, ambient discovery is NEVER invoked
+  // Single mode: fs is the built-in first source, composed with injected sources (last-wins)
+  const effectiveSources: SkillSource[] = isMulti
+    ? (options?.sources ?? [])
+    : [new FsSkillSources(cwd), ...(options?.sources ?? [])];
 
-  const registry = new DefaultSkillRegistry(skills);
+  const { skills, rawContentMap } = await loadSkillsFromSources(cwd, effectiveSources);
+  const registry = new DefaultSkillRegistry(skills, rawContentMap);
 
   if (process.env.SEEPIENT_SKILLS_DEBUG) {
     console.log(`[SKILLS] Loaded ${skills.length} skills`);
