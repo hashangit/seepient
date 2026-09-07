@@ -132,6 +132,10 @@ const agent = await createSeepient({
 });
 ```
 
+:::warning Path reference resolution in injected skills
+`@path` references inside injected/inline skill bodies are NOT resolved on the `use_skill` tool path (slash-command path only, resolved against `process.cwd()`); injected skills should avoid `@path` until 018's invocation rework.
+:::
+
 ### Serverless and bundling disclosures
 
 :::warning Serverless filesystem discovery fails silently
@@ -556,22 +560,17 @@ model:
 ---
 ```
 
-When a skill with a `model.provider` field is invoked, `createSkillProviderSwitcher()` in `src/core/skill-invoker.ts` handles the temporary switch:
+When a skill with a `model.provider` field is invoked on the interactive slash-command path (REPL, TUI), `createRuntimeSkillProviderSwitcher()` in `src/domain/skills/skill-invoker.ts` handles the temporary switch:
 
 1. Captures the current provider and model.
-2. Creates a new provider instance if the skill specifies a different one.
+2. Creates an override for the provider runtime if the skill specifies a different one.
 3. After the skill execution completes, restores the original provider in a `finally` block.
 
 ```typescript
-import { createSkillProviderSwitcher } from "seepient";
+// Conceptual: internal domain runtime usage (interactive slash-command path):
+// import { createRuntimeSkillProviderSwitcher } from "./domain/skills/skill-invoker.js";
 
-const switcher = createSkillProviderSwitcher({
-  provider: currentProvider,
-  model: 'gpt-4',
-  models: config.models,  // Available provider configs with API keys
-});
-
-// Switch if the skill requires a different provider
+const switcher = createRuntimeSkillProviderSwitcher(runtime);
 const switched = await switcher.switchIfNeeded(skillResult);
 
 try {
@@ -581,13 +580,15 @@ try {
 }
 ```
 
-:::info
-Provider switching works across all adapters (CLI, SDK, Server), not just the CLI. If the required provider's API key is not configured, the switch is silently skipped and the default provider is used instead.
+:::note Scope and limitations
+- **Interactive slash-command path only**: Provider switching is scoped to the interactive slash-command path (REPL, TUI). The LLM-initiated `use_skill` tool path executes within the agent's active model without switching providers.
+- **Provider account mapping**: The frontmatter `model.provider` field maps directly to `providerAccount` in `ModelAssignmentOverride` (`skill-invoker.ts:183`). `assignment-resolver.ts:104` looks up the configured account by ID; in single-account setups this matches the vendor name (e.g. `anthropic`), but in multi-account configurations it requires the exact configured account ID.
+- **Internal API**: `createRuntimeSkillProviderSwitcher` is an internal domain-layer orchestrator and is not exported from the public `seepient` SDK entry.
 :::
 
 ## Two invocation paths
 
-Skills can be activated in two ways: via CLI slash commands or via the `use_skill` tool. Both paths share the same argument substitution, @path resolution, and body size limits, but differ in how the result is delivered.
+Skills can be activated in two ways: via CLI slash commands or via the `use_skill` tool. Both paths share argument substitution and body size limits, but differ in reference resolution and provider switching: `@path` resolution and per-skill provider switching apply to the slash-command path only.
 
 ### Path A: CLI slash command
 
@@ -608,7 +609,7 @@ Step-by-step flow:
 4. **Substitute args**: `substituteArgs(body, args)` replaces `$1`, `$ALL`, etc.
 5. **Resolve references**: `resolveReferences(body)` inlines `@path` files.
 6. **Enforce limits**: `limitSkillBody(body)` truncates if over 32K chars.
-7. **Switch provider**: `createSkillProviderSwitcher()` switches provider if the skill specifies `model.provider`.
+7. **Switch provider**: `createRuntimeSkillProviderSwitcher()` switches provider if the skill specifies `model.provider`.
 8. **Construct prompt**: The body becomes a user message.
    ```
    [Skill: docker-ops activated]

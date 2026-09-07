@@ -565,6 +565,14 @@ async function handleChat(
     return;
   }
 
+  // W248: Fail-closed off-contract input on server surfaces
+  if (parsed.skills !== undefined) {
+    if (!Array.isArray(parsed.skills) || parsed.skills.some((s) => typeof s !== "string")) {
+      sendError(res, 400, "BAD_REQUEST", "Field 'skills' must be an array of strings");
+      return;
+    }
+  }
+
   const keyHash = key.keyHash ?? (key.key ? hashKey(key.key) : "");
 
   // If sessionId is provided, verify it exists and belongs to caller.

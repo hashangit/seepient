@@ -25,7 +25,12 @@ async function loadSkillsFromSources(
       try {
         const parsed = parseSkillContent(rec.content, rec.source ?? "injected", rec.filePath ?? "");
         map.set(parsed.name, parsed);
-        if (!rec.filePath) {
+        // rawContentMap must mirror the composition winner: a filePath-backed
+        // record loads lazily from disk, so any content stored for this name
+        // by an earlier non-file record is stale and must not shadow it.
+        if (rec.filePath) {
+          rawContentMap.delete(parsed.name);
+        } else {
           rawContentMap.set(parsed.name, rec.content);
         }
       } catch (err: any) {

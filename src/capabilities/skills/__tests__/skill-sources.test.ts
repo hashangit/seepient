@@ -301,4 +301,45 @@ describe("Skill sources composition & FsSkillSources (Spec 021-1, US1)", () => {
       rmSync(cwd, { recursive: true, force: true });
     }
   });
+
+  it("W240: getBody always serves the composition winner's body", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "seepient-winner-cwd-"));
+    try {
+      writeSkill(join(cwd, ".seepient", "skills"), "dup", "from fs");
+
+      const fakeDb: SkillSource = {
+        list: () => [
+          {
+            name: "dup",
+            content: "---\nname: dup\ndescription: from db\n---\nDB BODY (SHADOWED)\n",
+            source: "db",
+          },
+        ],
+      };
+
+      // Order 1: [db, fs] -> fs is last, fs wins
+      const registryFsWins = await initializeSkillRegistry(cwd, {
+        sources: [fakeDb, new FsSkillSources(cwd)],
+        tenancyMode: "multi",
+      });
+
+      expect(registryFsWins.get("dup")?.description).toBe("from fs");
+      const bodyFsWins = await registryFsWins.getBody("dup");
+      expect(bodyFsWins).toContain("Body of dup.");
+      expect(bodyFsWins).not.toContain("DB BODY (SHADOWED)");
+
+      // Order 2: [fs, db] -> db is last, db wins
+      const registryDbWins = await initializeSkillRegistry(cwd, {
+        sources: [new FsSkillSources(cwd), fakeDb],
+        tenancyMode: "multi",
+      });
+
+      expect(registryDbWins.get("dup")?.description).toBe("from db");
+      const bodyDbWins = await registryDbWins.getBody("dup");
+      expect(bodyDbWins).toContain("DB BODY (SHADOWED)");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
 });
+
