@@ -216,4 +216,5 @@ Pass tool names as strings, or use group names (`"core"`, `"comm"`, `"advanced"`
 | [Hooks and Middleware](/sdk/hooks) | Lifecycle callbacks and request/response pipelines |
 | [Session Persistence](/sdk/session-persistence) | Built-in atomic files, in-memory, and custom storage backends |
 | [Stateless Workers](/sdk/stateless-workers) | Zero-disk multi-tenant embedding and storage contracts |
+| [Multi-Tenant Isolation](/sdk/multi-tenant) | Fail-closed multi-tenancy, store injection, and per-agent tool registries |
 | [Types Reference](/sdk/types) | Complete TypeScript types reference |

@@ -51,6 +51,8 @@ import {
 } from "../../tool-executor.js";
 import { initializeSkillRegistry } from "../../../capabilities/skills/index.js";
 import type { SkillSource } from "../../../capabilities/skills/types.js";
+import { runAgentLoop } from "../../agent-loop.js";
+import { createMockRuntime } from "../../__tests__/test-doubles.js";
 
 function createTenantTool(name: string): ToolModule {
   return {
@@ -117,12 +119,59 @@ describe("Spec 022 Multi-Tenant Isolation Matrix", () => {
     });
 
     it("Dim 3: Tool execution & authority — Tenant A tool cannot be executed by Tenant B", async () => {
-      const toolA = createTenantTool("tenant_a_exec_tool");
-      const registryA = new ToolRegistry();
-      registryA.register(toolA);
+      let executedA = false;
+      const toolA: ToolModule = {
+        name: "tenant_a_exec_tool",
+        definition: {
+          type: "function",
+          function: {
+            name: "tenant_a_exec_tool",
+            description: "Tenant A executable tool",
+            parameters: { type: "object", properties: {}, required: [] },
+          },
+        },
+        handler: async () => {
+          executedA = true;
+          return { success: true, output: "tenant A executed" };
+        },
+      };
 
+      const registryA = new ToolRegistry([toolA]);
       const registryB = new ToolRegistry();
+
+      // Static check: registry B cannot find tool A
       expect(registryB.find("tenant_a_exec_tool")).toBeUndefined();
+
+      // End-to-end execution check: model calls tenant A tool name in tenant B loop
+      const runtime = createMockRuntime([
+        {
+          toolCalls: [
+            {
+              id: "call_a_in_b",
+              name: "tenant_a_exec_tool",
+              arguments: "{}",
+            },
+          ],
+        },
+        { text: "Done" },
+      ]);
+
+      const result = await runAgentLoop({
+        runtime,
+        messages: [{ id: "m1", role: "user", content: "call tenant a tool", timestamp: Date.now() }],
+        toolDefs: [toolA.definition],
+        toolRegistry: registryB,
+        maxSteps: 3,
+        autoConfirm: true,
+      });
+
+      // Tenant A handler was never executed
+      expect(executedA).toBe(false);
+
+      // Tool execution failed closed in Tenant B loop
+      const toolStep = result.steps.find((s) => s.type === "tool_call");
+      expect(toolStep).toBeDefined();
+      expect((toolStep as any)?.toolCall?.result).toMatch(/HOST_TOOL_NOT_REGISTERED|not registered|denied|unknown/i);
     });
   });
 

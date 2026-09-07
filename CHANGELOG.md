@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Omitting `runtime` in multi-tenant mode throws `TENANCY_RUNTIME_REQUIRED`.
   - Missing any required storage backends (`auditStore`, `policyStore`, `capabilityLedger`, or `persist`) without `stateless: true` throws `TENANCY_STORE_INCOMPLETE`.
   - Writing outside injected stores in multi-tenant mode throws `TENANCY_AMBIENT_IO`.
+- **API-key-scoped server approvals**: HTTP server permission grants are now scoped by API key principal derived from `apiKeyHash`. Approval grants no longer leak or share across different API keys on the same server instance.
 
 **Added:**
 - **Per-agent `ToolRegistry`**: Instanced tool registry providing private tool resolution, registration, and duplicate-name conflict prevention (`TOOL_NAME_CONFLICT`).
