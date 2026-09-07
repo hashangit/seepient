@@ -267,23 +267,25 @@ export const HTTP_CONNECTOR: BrokerConnectorDescriptor = {
   },
 };
 
-const registry = new Map<string, BrokerConnectorDescriptor>([
-  [WEB_SEARCH_CONNECTOR.id, WEB_SEARCH_CONNECTOR],
-  [HTTP_CONNECTOR.id, HTTP_CONNECTOR],
-]);
-
-export function registerBrokerConnector(descriptor: BrokerConnectorDescriptor): void {
-  registry.set(descriptor.id, descriptor);
+/**
+ * Create a fresh per-agent connector catalog initialized with built-in connectors.
+ */
+export function createConnectorCatalog(): Map<string, BrokerConnectorDescriptor> {
+  return new Map<string, BrokerConnectorDescriptor>([
+    [WEB_SEARCH_CONNECTOR.id, WEB_SEARCH_CONNECTOR],
+    [HTTP_CONNECTOR.id, HTTP_CONNECTOR],
+  ]);
 }
 
-export function getBrokerConnector(id: string): BrokerConnectorDescriptor | undefined {
-  return registry.get(id);
-}
-
-export function clearBrokerConnectors(): void {
-  registry.clear();
-  registry.set(WEB_SEARCH_CONNECTOR.id, WEB_SEARCH_CONNECTOR);
-  registry.set(HTTP_CONNECTOR.id, HTTP_CONNECTOR);
+/**
+ * Retrieve a descriptor from a catalog (defaults to a fresh catalog with built-in descriptors).
+ */
+export function getBrokerConnector(
+  id: string,
+  catalog?: Map<string, BrokerConnectorDescriptor>,
+): BrokerConnectorDescriptor | undefined {
+  const cat = catalog ?? createConnectorCatalog();
+  return cat.get(id);
 }
 
 /**
@@ -295,10 +297,11 @@ export async function evaluateBrokerConnector(
   rawArgs: unknown,
   ctx: ToolAnalysisContext,
 ): Promise<EvaluatedConnectorMapping> {
-  const descriptor = getBrokerConnector(registration.connector);
+  const catalog = ctx.connectorCatalog ?? createConnectorCatalog();
+  const descriptor = getBrokerConnector(registration.connector, catalog);
   if (!descriptor) {
     throw new ConnectorMappingError(
-      `Unknown broker connector: "${registration.connector}". Registered connectors: ${[...registry.keys()].join(", ")}`,
+      `Unknown broker connector: "${registration.connector}". Registered connectors: ${[...catalog.keys()].join(", ")}`,
       "CONNECTOR_UNKNOWN",
     );
   }

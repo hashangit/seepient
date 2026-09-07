@@ -854,6 +854,7 @@ export class ProviderRuntime extends EventEmitter implements ProviderRuntimeCont
   }
 }
 
+// Spec 022 M4 / FR-017 pinned: defaultRuntimeInstance survives as single-mode default only; multi-mode rejects before reaching it.
 let defaultRuntimeInstance: ProviderRuntime | undefined;
 
 /**

@@ -88,9 +88,10 @@ export {
   tool,
   resolveTools,
   getToolGroup,
-  registerTool,
-  executeTool,
-  getAllToolDefinitions,
+  ToolRegistry,
+  ToolRegistrationError,
+  BUILT_IN_TOOL_MODULES,
+  normalizeToolResult,
 } from './tool-executor.js';
 
 
@@ -104,3 +105,16 @@ export {
 export { loggingMiddleware, type LoggingOptions } from './middleware/logging.js';
 export { rateLimitMiddleware, type RateLimitOptions } from './middleware/rate-limit.js';
 export { authMiddleware, type AuthOptions } from './middleware/auth.js';
+
+// Export tenancy mode and errors (Spec 022)
+export {
+  resolveTenancyMode,
+  validateTenancyCompleteness,
+  emitTenancyNoticeOnce,
+  TenancyRuntimeRequiredError,
+  TenancyStoreIncompleteError,
+  TenancyAmbientIoError,
+  type TenancyMode,
+  type TenancySignals,
+  type TenancyResolution,
+} from './tenancy/tenancy-mode.js';
