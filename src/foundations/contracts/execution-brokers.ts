@@ -262,7 +262,10 @@ export interface PolicySnapshot {
  * version.
  */
 export interface PolicyStore {
-  read(workspaceId: string): Promise<PolicySnapshot>;
+  read(
+    workspaceId: string,
+    opts?: { principalId?: string; tenancyMode?: "single" | "multi" },
+  ): Promise<PolicySnapshot>;
   compareAndSet(
     workspaceId: string,
     expectedVersion: number,
