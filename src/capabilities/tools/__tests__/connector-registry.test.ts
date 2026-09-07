@@ -6,8 +6,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   evaluateBrokerConnector,
   getBrokerConnector,
-  registerBrokerConnector,
-  clearBrokerConnectors,
+  createConnectorCatalog,
   resolveJsonPointer,
 } from "../connector-registry.js";
 import { ConnectorMappingError } from "../../../foundations/contracts/broker-connectors.js";
@@ -22,7 +21,6 @@ describe("Broker Connector Registry & Evaluator (QS-2.1 – QS-2.4)", () => {
   let artifacts: InMemoryArtifactStore;
 
   beforeEach(() => {
-    clearBrokerConnectors();
     artifacts = new InMemoryArtifactStore();
     ctx = {
       principalId: "test-user",
@@ -36,7 +34,23 @@ describe("Broker Connector Registry & Evaluator (QS-2.1 – QS-2.4)", () => {
         policyVersion: 1,
         policyDigest: "sha256:abcd",
       },
+      connectorCatalog: createConnectorCatalog(),
     };
+  });
+
+  it("T007: two catalogs are independent; mutating one leaves the other unchanged", () => {
+    const cat1 = createConnectorCatalog();
+    const cat2 = createConnectorCatalog();
+
+    cat1.set("tenant-custom", {
+      id: "tenant-custom",
+      supportedOperations: ["http:request"],
+      buildRequest: () => ({} as any),
+    });
+
+    expect(getBrokerConnector("tenant-custom", cat1)).toBeDefined();
+    expect(getBrokerConnector("tenant-custom", cat2)).toBeUndefined();
+    expect(getBrokerConnector("web-search", cat2)).toBeDefined();
   });
 
   it("QS-2.1: happy path — web-search connector produces valid broker action", async () => {

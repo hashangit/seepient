@@ -1,11 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   resolveTools,
-  getAllToolDefinitions,
-  registerTool,
   tool,
-  executeTool,
   normalizeToolResult,
+  ToolRegistry,
   CORE_TOOLS,
   COMM_TOOLS,
   ADVANCED_TOOLS,
@@ -13,12 +11,9 @@ import {
 } from "../tool-executor.js";
 import { builtInTools } from "../../capabilities/tools/index.js";
 
-// We test against the real built-in registry.
-// registerTool is global so we must be careful not to pollute across tests.
-
-describe("getAllToolDefinitions", () => {
+describe("ToolRegistry definitions", () => {
   it("returns at least the core tools", () => {
-    const defs = getAllToolDefinitions();
+    const defs = new ToolRegistry().definitions();
     const names = defs.map((d) => d.function.name);
     for (const name of CORE_TOOLS) {
       expect(names).toContain(name);
@@ -86,7 +81,7 @@ describe("resolveTools", () => {
     expect(defs).toHaveLength(1);
     expect(defs[0].function.description).toBe("custom tool");
     // Auto-generated name starts with "custom_tool_"
-    expect(defs[0].function.name).toMatch(/^custom_tool_\d+$/);
+    expect(defs[0].function.name).toMatch(/^custom_tool_[a-zA-Z0-9]+$/);
   });
 
   it("uses provided name from UserToolDefinition", () => {
@@ -132,14 +127,18 @@ describe("tool() factory", () => {
     }
   });
 
-  it("executeTool normalizes a string-returning handler to a ToolResult", async () => {
-    registerTool({
+  it("normalizes a string-returning handler to a ToolResult", async () => {
+    const reg = new ToolRegistry([]);
+    reg.register({
       name: "str-handler",
       risk: "safe",
       definition: { type: "function", function: { name: "str-handler-t051", description: "x", parameters: { type: "object", properties: {}, required: [] } } },
       handler: async () => "hello",
     });
-    const result = await executeTool("str-handler-t051", {});
+    const mod = reg.find("str-handler-t051");
+    expect(mod).toBeDefined();
+    const raw = await mod!.handler!({}, {});
+    const result = normalizeToolResult(raw);
     expect(result).toEqual({ output: "hello", success: true });
   });
 });
@@ -159,17 +158,18 @@ describe("normalizeToolResult", () => {
   });
 });
 
-describe("registerTool", () => {
+describe("ToolRegistry.register", () => {
   it("adds a tool to the registry", () => {
+    const reg = new ToolRegistry([]);
     const mod = tool({
       name: "test-register-tool",
       description: "test",
       parameters: { type: "object", properties: {} },
       execute: async () => "ok",
     });
-    registerTool(mod);
+    reg.register(mod);
 
-    const defs = getAllToolDefinitions();
+    const defs = reg.definitions();
     const names = defs.map((d) => d.function.name);
     expect(names).toContain("test-register-tool");
   });
@@ -200,7 +200,7 @@ describe("tool risk metadata", () => {
   });
 
   it("ToolDefinition does not include risk in wire format", () => {
-    const defs = getAllToolDefinitions();
+    const defs = new ToolRegistry().definitions();
     for (const def of defs) {
       expect((def as any).risk).toBeUndefined();
     }
