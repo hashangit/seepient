@@ -232,7 +232,7 @@ Current layout of the Obsidian vault (annotated):
 │       ├── contracts/                # store-contracts, sdk-injection-options, worker-deployment
 │       ├── quickstart.md             # QS-0–QS-4 validation scenarios + production budgets
 │       ├── tasks.md                  # T001–T018 dependency-ordered, US1–US3 story phases, test-first gates
-│       ├── 021-1-skill-sources/      # Sub-spec: injectable skill sources (021-1 — AMENDED 2026-09-07, ready; branch off 022, release owner-decided)
+│       ├── 021-1-skill-sources/      # Sub-spec: injectable skill sources (021-1 — IMPLEMENTED on branch 021-1-skill-sources, unreleased v0.8.0 block)
 │           ├── spec.md               # SkillSource/SkillStore + inline tier; FR-001–FR-010, M1–M7, SC-001–SC-007, checks CB-1–CB-8
 │           ├── plan.md               # P0 reconcile+gate → P1 FsSkillSources+inline → P2 write path+016/018/024 coordination → P3 example+docs
 │           ├── research.md           # 2026-08-31 ledger E1–E6/D1–D7 + 2026-09-07 re-baseline E7–E14/D8–D14 + supersession map
@@ -738,7 +738,7 @@ shell commands, and other important information, read the current plan:
   SDK surface, pre-1.0 in-place). tasks.md ready (T001–T035; every task carries
   a runnable self-check — grep proofs, targeted suites, micro-probes, UX-copy
   assertions; gates land red first to prove their detectors).
-- **READY FOR IMPLEMENTATION (amended 2026-09-07, re-baselined post-021-2/3/4/022)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/021-stateless-sdk-workers/021-1-skill-sources/plan.md`
+- **IMPLEMENTED (2026-09-07, branch 021-1-skill-sources, unreleased v0.8.0 block)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/021-stateless-sdk-workers/021-1-skill-sources/plan.md`
   — Injectable skill sources, reconciled onto the seam 022 already landed
   (its T028 degrade rule absorbed the read side: `sources` option,
   tenancy-aware `initializeSkillRegistry`, dim-7 matrix). 021-1 now: P0
