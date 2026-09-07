@@ -187,7 +187,7 @@ export class ActionLifecycle {
       const nowTs = this.now();
       const { checkRunLifetime, checkSessionLifetime } = await import("./persisted-capability-ledger.js");
       if (action.runId) {
-        const runRes = checkRunLifetime(action.runId, Number.MAX_SAFE_INTEGER, this.capabilityLedger, nowTs);
+        const runRes = checkRunLifetime(action.runId, Number.MAX_SAFE_INTEGER, this.capabilityLedger, nowTs, { principalId: action.principalId });
         if (runRes === "revoked") {
           const outcome = this.toOutcome(action, "denied", undefined, "capability-revoked");
           await this.record(action, "denied", "capability-revoked");
@@ -203,7 +203,7 @@ export class ActionLifecycle {
       // `action.sessionId`, so relying on it alone would let revoked session
       // authority keep authorizing later actions (spec 011 review fix).
       const boundSessionId = action.sessionId ?? this.sessionId;
-      if (boundSessionId && this.capabilityLedger.isSessionRevoked(boundSessionId)) {
+      if (boundSessionId && this.capabilityLedger.isSessionRevoked(boundSessionId, { principalId: action.principalId })) {
         const outcome = this.toOutcome(action, "denied", undefined, "capability-revoked");
         await this.record(action, "denied", "capability-revoked");
         return {
@@ -419,7 +419,7 @@ export class ActionLifecycle {
             },
           };
         }
-        if (this.capabilityLedger?.isSessionRevoked(sessionId)) {
+        if (this.capabilityLedger?.isSessionRevoked(sessionId, { principalId: action.principalId })) {
           const outcome = this.toOutcome(action, "denied", undefined, "capability-revoked");
           await this.record(action, "denied", "capability-revoked");
           return {
@@ -531,19 +531,23 @@ export class ActionLifecycle {
                 : current;
               try {
                 const nextCapabilities = [...retried.policy.capabilities];
-                const candidates = [
+                const targetPrincipal = action.principalId ?? "sdk-user";
+                const candidates: Capability[] = [
                   // Baseline seed authority is part of the project grant and
                   // must land even when a concurrent writer won the first
                   // CAS (version > 0 then means OUR baseline never landed);
                   // setCovers dedup keeps it out when the winner already
                   // wrote it.
                   ...(lifetimeKind === "project"
-                    ? this.persistentBaselineCapabilities
+                    ? this.persistentBaselineCapabilities.map((c) => ({ ...c, principalId: c.principalId ?? targetPrincipal }))
                     : []),
-                  ...fresh,
+                  ...fresh.map((c) => ({ ...c, principalId: c.principalId ?? targetPrincipal })),
                 ];
                 for (const capability of candidates) {
-                  if (!setCovers({ version: 1, capabilities: nextCapabilities }, capability)) {
+                  const samePrincipalCaps = nextCapabilities.filter(
+                    (c) => c.principalId === capability.principalId || (!c.principalId && !capability.principalId),
+                  );
+                  if (!setCovers({ version: 1, capabilities: samePrincipalCaps }, capability)) {
                     nextCapabilities.push(capability);
                   }
                 }
@@ -720,6 +724,7 @@ export class ActionLifecycle {
           const consumed = await this.capabilityLedger.consume(
             envelope.envelopeId,
             envelope.actionDigest,
+            { principalId: action.principalId },
           );
           if (!consumed) {
             // Already consumed — replay attempt.
@@ -744,7 +749,7 @@ export class ActionLifecycle {
             };
           }
         } else if (envelope.lifetime.kind === "run") {
-          const runRes = checkRunLifetime(envelope.runId, envelope.expiresAt ?? Infinity, this.capabilityLedger, nowTs);
+          const runRes = checkRunLifetime(envelope.runId, envelope.expiresAt ?? Infinity, this.capabilityLedger, nowTs, { principalId: action.principalId });
           if (runRes !== "ok") {
             const reason = runRes === "revoked" ? "capability-revoked" : "capability-expired";
             const outcome = this.toOutcome(action, "denied", undefined, reason);
@@ -757,7 +762,7 @@ export class ActionLifecycle {
             };
           }
         } else if (envelope.lifetime.kind === "session") {
-          const sessRes = checkSessionLifetime(action.sessionId ?? envelope.lifetime.sessionId, envelope.expiresAt, this.capabilityLedger, nowTs);
+          const sessRes = checkSessionLifetime(action.sessionId ?? envelope.lifetime.sessionId, envelope.expiresAt, this.capabilityLedger, nowTs, { principalId: action.principalId });
           if (sessRes !== "ok") {
             const reason = sessRes === "revoked" ? "capability-revoked" : "capability-expired";
             const outcome = this.toOutcome(action, "denied", undefined, reason);

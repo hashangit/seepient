@@ -114,6 +114,10 @@ export interface ActionLifecycleInputs {
   imageCapabilityProbe?: () => Promise<{ reachable: boolean; reason?: string }>;
   /** Optional: capability ledger for authority consumption & revocation (T107a, spec 021). */
   capabilityLedger?: CapabilityLedger;
+  /** Spec 022 T025: Operator-wide baseline capability set applied unstamped to all principals. */
+  operatorBaseline?: CapabilitySet;
+  /** Spec 022 Tenancy mode ("single" | "multi", defaults to "single"). */
+  tenancyMode?: "single" | "multi";
   /**
    * Optional: a caller-supplied terminal-event outbox. When provided AND the
    * audit store is a `LocalAuditStore`, the lifecycle uses THIS outbox instead
@@ -213,7 +217,10 @@ export async function buildActionLifecycle(
   let hasStoredPolicy = false;
   let globalCapabilities: Capability[] = [];
   try {
-    const snap = await policyStore.read(workspaceId);
+    const snap = await policyStore.read(workspaceId, {
+      principalId: inputs.principalId,
+      tenancyMode: inputs.tenancyMode ?? "single",
+    });
     if (snap.version > 0 || snap.policy.capabilities.length > 0) {
       principalPolicy = snap.policy;
       hasStoredPolicy = true;
@@ -221,10 +228,11 @@ export async function buildActionLifecycle(
       // If the snapshot predates the ceiling widening (ceilingVersion < CURRENT_CEILING_VERSION or undefined),
       // seed newly-defaulted capability kinds into stored principal policies.
       if (snap.ceilingVersion === undefined || snap.ceilingVersion < CURRENT_CEILING_VERSION) {
+        const principalId = inputs.principalId ?? "sdk-user";
         const newlyDefaulted: Capability[] = [
-          { kind: "network-destination", scheme: "https", host: "*" },
-          { kind: "external-recipient", service: "*", recipient: "*" },
-          { kind: "secret-ref", ref: "*" },
+          { kind: "network-destination", scheme: "https", host: "*", principalId },
+          { kind: "external-recipient", service: "*", recipient: "*", principalId },
+          { kind: "secret-ref", ref: "*", principalId },
         ];
         const reconciledCaps = [...principalPolicy.capabilities];
         let changed = false;
@@ -237,11 +245,25 @@ export async function buildActionLifecycle(
         if (changed) {
           principalPolicy = { version: 1 as const, capabilities: reconciledCaps };
           if (snap.version > 0) {
+            const rawSnap = await policyStore.read(workspaceId);
+            const otherCaps = rawSnap.policy.capabilities.filter(
+              (c) => c.principalId && c.principalId !== principalId,
+            );
+            const currentPrincipalCaps = rawSnap.policy.capabilities.filter(
+              (c) => !c.principalId || c.principalId === principalId,
+            );
+            const mergedPrincipalCaps = [...currentPrincipalCaps];
+            for (const cap of newlyDefaulted) {
+              if (!mergedPrincipalCaps.some((c) => c.kind === cap.kind)) {
+                mergedPrincipalCaps.push(cap);
+              }
+            }
+            principalPolicy = { version: 1 as const, capabilities: mergedPrincipalCaps };
             await policyStore
               .compareAndSet(
                 workspaceId,
-                snap.version,
-                principalPolicy,
+                rawSnap.version,
+                { version: 1 as const, capabilities: [...otherCaps, ...mergedPrincipalCaps] },
                 { kind: "service", authorityId: "policy-reconciliation", authenticatedBy: "system" },
               )
               .catch(() => {});
@@ -271,7 +293,10 @@ export async function buildActionLifecycle(
   // grants survive restarts and seed the active set. Caps already covered by
   // the workspace policy are not duplicated.
   try {
-    const globalSnap = await policyStore.read(GLOBAL_WORKSPACE_ID);
+    const globalSnap = await policyStore.read(GLOBAL_WORKSPACE_ID, {
+      principalId: inputs.principalId,
+      tenancyMode: inputs.tenancyMode ?? "single",
+    });
     if (globalSnap.policy.capabilities.length > 0) {
       globalCapabilities = bindGlobalPolicyCapabilities(
         globalSnap.policy.capabilities,
@@ -285,6 +310,15 @@ export async function buildActionLifecycle(
     }
   } catch {
     /* no global policy yet — fresh install continues below */
+  }
+
+  // Spec 022 T025: Embedder-supplied operator baseline applies unstamped to all principals.
+  if (inputs.operatorBaseline) {
+    const union: Capability[] = [...principalPolicy.capabilities];
+    for (const cap of inputs.operatorBaseline.capabilities) {
+      if (!setCovers(principalPolicy, cap)) union.push(cap);
+    }
+    principalPolicy = { version: 1 as const, capabilities: union };
   }
   const defaultModelEgressCap: Capability = {
     kind: "model-egress",
@@ -339,6 +373,13 @@ export async function buildActionLifecycle(
         activeCaps.push(capability);
       }
     }
+    if (inputs.operatorBaseline) {
+      for (const capability of inputs.operatorBaseline.capabilities) {
+        if (!setCovers({ version: 1, capabilities: activeCaps }, capability)) {
+          activeCaps.push(capability);
+        }
+      }
+    }
   }
 
   // Seed the default cap only on a fresh install; an explicit caller-supplied
@@ -386,8 +427,13 @@ export async function buildActionLifecycle(
     trustedHostAllowlist: inputs.trustedHostAllowlist ?? ["use_skill"],
   };
 
-  const capabilityLedger = inputs.capabilityLedger ?? new PersistedCapabilityLedger(inputs.auditRoot ? { root: path.join(inputs.auditRoot, "caps") } : undefined);
-  await capabilityLedger.load().catch(() => {});
+  const capabilityLedger =
+    inputs.capabilityLedger ??
+    new PersistedCapabilityLedger({
+      ...(inputs.auditRoot ? { root: path.join(inputs.auditRoot, "caps") } : {}),
+      defaultPrincipalId: inputs.principalId,
+    });
+  await capabilityLedger.load({ principalId: inputs.principalId }).catch(() => {});
 
   const policyDigest = computePolicyDigest(policyContext);
   const engine = new PolicyEngine(policyDigest, { ledger: capabilityLedger });

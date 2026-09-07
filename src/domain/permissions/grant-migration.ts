@@ -51,7 +51,7 @@ const SHELL_TOOLS = new Set(["execute_shell_command"]);
  * activate anything. The caller writes converted capabilities through the
  * PolicyStore compare-and-set flow.
  */
-export function classifyLegacyGrant(grant: Grant): MigrationOutcome {
+export function classifyLegacyGrant(grant: Grant, principalId?: string): MigrationOutcome {
   if (grant.scope === "session") {
     return { status: "ignored", reason: "session-scope" };
   }
@@ -79,7 +79,11 @@ export function classifyLegacyGrant(grant: Grant): MigrationOutcome {
     }
     return {
       status: "converted",
-      capability: { kind: "commit-file", path: grant.pattern },
+      capability: {
+        kind: "commit-file",
+        path: grant.pattern,
+        ...(principalId ? { principalId } : {}),
+      },
     };
   }
 
@@ -91,7 +95,10 @@ export function classifyLegacyGrant(grant: Grant): MigrationOutcome {
  * Converted capabilities are de-duplicated. Quarantined entries are returned
  * with their reasons for operator review.
  */
-export function migrateLegacyGrants(grants: Grant[]): {
+export function migrateLegacyGrants(
+  grants: Grant[],
+  opts?: { principalId?: string },
+): {
   capabilities: CapabilitySet;
   quarantined: Array<{ grant: Grant; reason: QuarantineReason }>;
   ignored: Grant[];
@@ -102,7 +109,7 @@ export function migrateLegacyGrants(grants: Grant[]): {
   const ignored: Grant[] = [];
 
   for (const grant of grants) {
-    const outcome = classifyLegacyGrant(grant);
+    const outcome = classifyLegacyGrant(grant, opts?.principalId);
     if (outcome.status === "converted") {
       const key = `${outcome.capability.kind}:${JSON.stringify(outcome.capability)}`;
       if (!seen.has(key)) {
