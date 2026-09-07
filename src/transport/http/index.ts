@@ -21,6 +21,7 @@ import { setupWebSocket, type WebSocketHandlerContext } from "../ws/websocket.js
 import { createConnectionRegistry } from "../ws/connection-registry.js";
 import { ServerSessionManager } from "./session-store.js";
 import { SettingsManager } from "../../domain/settings/settings-manager.js";
+import { ToolRegistry } from "../../domain/tool-executor.js";
 import type { SettingsHandlerContext } from "./settings-handlers.js";
 import type { WsServerHandle } from "../ws/websocket.js";
 import { loadMergedConfig, getConfigPaths, loadJsonConfig } from "../../foundations/config.js";
@@ -180,6 +181,7 @@ function handlePreflight(
 export async function runSeepientServer(options?: RunSeepientServerOptions): Promise<SeepientHttpServer> {
   const version = resolveVersion();
   const startTime = Date.now();
+  const serverToolRegistry = options?.toolRegistry ?? new ToolRegistry();
 
   // Spec 008: build a per-request pipeline factory when the operator opts in.
   // Product behavior: each API request gets its OWN permission identity
@@ -368,12 +370,13 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
       const gwSettingsAdapter = new GatewaySettingsAdapter(gatewayStorageDir);
       await gwSettingsAdapter.initialize();
 
-      // Use createGateway factory — proxy tools are registered into the Domain registry here (composition root)
+      // Use createGateway factory — proxy tools are registered into serverToolRegistry here (composition root, Spec 022)
       const { createGateway } = await import("../../capabilities/gateway/index.js");
-      const { registerTool } = await import("../../domain/tool-executor.js");
-      const gatewayInstance = await createGateway(gatewayConfig, gwSettingsAdapter, undefined, (tools) => tools.forEach(registerTool));
+      const gwResult = await createGateway(gatewayConfig, gwSettingsAdapter);
 
-      if (gatewayInstance) {
+      if (gwResult) {
+        const gatewayInstance = gwResult.gateway;
+        serverToolRegistry.registerMany(gwResult.tools);
         const { createGatewayRestHandler } = await import("./rest-gateway.js");
         const { importOpenApiSpec } = await import("../../capabilities/gateway/openapi-importer.js");
         gatewayHandler = createGatewayRestHandler({ gateway: gatewayInstance, settingsAdapter: gwSettingsAdapter, importOpenApiSpec, maxBodyBytes: maxBodyBytesSetting });
@@ -407,7 +410,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
           modelProviderClass: (opts.provider ?? "openai") as string,
         });
       }
-      return serverGenerateText({ ...opts, runtime: getServerRuntime(), wiredPipeline }, gatewayMiddleware);
+      return serverGenerateText({ ...opts, runtime: getServerRuntime(), wiredPipeline, toolRegistry: serverToolRegistry }, gatewayMiddleware);
     },
     listModels,
     listSkills,
@@ -457,7 +460,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
           modelProviderClass: (opts.provider ?? "openai") as string,
         });
       }
-      serverStreamText({ ...opts, runtime: getServerRuntime(), wiredPipeline }, gatewayMiddleware).catch((err: any) => {
+      serverStreamText({ ...opts, runtime: getServerRuntime(), wiredPipeline, toolRegistry: serverToolRegistry }, gatewayMiddleware).catch((err: any) => {
         // W162: generic wire text; raw detail in the request log only.
         opts.onError({
           code: "STREAM_ERROR",

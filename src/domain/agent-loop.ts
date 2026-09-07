@@ -12,7 +12,9 @@ import { createHookExecutor } from "./hooks.js";
 import type { Middleware, PipelineContext } from "../foundations/contracts/middleware.js";
 import { compose } from "../foundations/contracts/middleware.js";
 import { extractPattern } from "../foundations/grant-pattern.js";
-import { getAllToolModules } from "./tool-executor.js";
+import { BUILT_IN_TOOL_MODULES } from "./tool-executor.js";
+import type { ToolRegistryContract } from "../foundations/contracts/tool.js";
+import type { ToolModule } from "../foundations/contracts/tool.js";
 import { getModelMeta } from "../foundations/models-catalog.js";
 import type { WiredActionLifecycle } from "./permissions/action-lifecycle-factory.js";
 import type { PermissionRequest } from "../foundations/contracts/permission-policy.js";
@@ -52,6 +54,12 @@ export interface AgentLoopOptions {
    * Spec 008 wired action-lifecycle pipeline.
    */
   wiredPipeline?: WiredActionLifecycle;
+  /** Tool registry or tool modules for building host callbacks (Spec 022, FR-001/005). */
+  toolRegistry?: ToolRegistryContract;
+  toolModules?: readonly ToolModule[];
+  tools?: unknown[];
+  trustedHostAllowlist?: string[];
+  explicitRegistrationIds?: string[];
   /** Allow JS filesystem fallback for file commits when native helper is absent. */
   /** Commit-helper injection for tests/e2e (spec 019): pins the probe. */
   commitHelper?: import("../vendors/native-fs-commit/index.js").NativeCommitHelper;
@@ -387,8 +395,11 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     const { legacyApproveToolToBroker } = await import("../transport/legacy-adapter.js");
     const artifacts = new InMemoryArtifactStore();
     const hostCallbacks = new Map<string, (args: unknown) => Promise<unknown>>();
-    const allModules = getAllToolModules();
-    for (const mod of allModules) {
+    const modulesToWire: readonly ToolModule[] =
+      options.toolRegistry?.modules() ??
+      options.toolModules ??
+      BUILT_IN_TOOL_MODULES;
+    for (const mod of modulesToWire) {
       if (mod.handler) {
         hostCallbacks.set(mod.definition.function.name, (args) => mod.handler!(args as any, config));
       }
@@ -471,7 +482,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
       : undefined;
 
     wiredPipeline = await buildActionLifecycle({
-      principalId: "agent-user",
+      principalId: (options.config?.principalId as string) ?? "cli-user",
       runId: generateId(),
       sessionId: (options.config?.sessionId as string) ?? "default-session",
       workspaceRoot: options.cwd ?? process.cwd(),
@@ -481,10 +492,17 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
       artifacts,
       snapshotStore,
       imageCapabilityProbe,
-      // The wired host callbacks ARE the composition root's operator intent
-      // (spec 019 D8): they join the trusted-host allowlist alongside the
-      // settings default.
-      trustedHostAllowlist: [...(options as { trustedHostAllowlist?: string[] }).trustedHostAllowlist ?? ["use_skill"], ...hostCallbacks.keys()],
+      // Allowlist derivation (Spec 022 FR-005, contracts/tool-registry.md):
+      // effectiveAllowlist = configuredAllowlist ∪ explicitRegistrationIds ∪ hostToolNames(own registry)
+      trustedHostAllowlist: Array.from(
+        new Set([
+          ...(options.trustedHostAllowlist ?? ["use_skill"]),
+          ...(options.explicitRegistrationIds ?? []),
+          ...modulesToWire
+            .filter((m) => Boolean(m.handler))
+            .map((m) => m.definition.function.name),
+        ]),
+      ),
     });
   }
   if (!wiredPipeline) {

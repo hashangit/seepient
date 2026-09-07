@@ -66,6 +66,7 @@ describe("askSeepient — Unified One-Shot Entry Point", () => {
       runtime,
       tools: [],
       maxSteps: 1,
+      tenancy: "single",
     });
 
     expect(result.text).toBe("Paris is the capital of France.");
@@ -85,6 +86,7 @@ describe("askSeepient — Unified One-Shot Entry Point", () => {
       tools: [],
       maxSteps: 1,
       hooks: { onFinish },
+      tenancy: "single",
     });
 
     expect(onFinish).toHaveBeenCalledTimes(1);
@@ -117,6 +119,7 @@ describe("askSeepient — Unified One-Shot Entry Point", () => {
       askSeepient("Hello", {
         runtime,
         model: "mock-model",
+        tenancy: "single",
       }),
     ).rejects.toThrow(SeepientError);
   });
@@ -148,6 +151,7 @@ describe("askSeepient — Unified One-Shot Entry Point", () => {
       runtime,
       model: "mock-model",
       onError,
+      tenancy: "single",
     });
 
     await expect(promise).rejects.toThrow(SeepientError);
@@ -183,6 +187,7 @@ describe("askSeepient — Unified One-Shot Entry Point", () => {
       model: "mock-model",
       stream: true,
       onError,
+      tenancy: "single",
     });
 
     await expect(stream.fullText).rejects.toThrow(/invalid api key/);
@@ -210,6 +215,7 @@ describe("askSeepient — Unified One-Shot Entry Point", () => {
       maxSteps: 1,
       stream: true,
       hooks: { onFinish },
+      tenancy: "single",
     });
 
     for await (const _chunk of stream.textStream) {
@@ -240,6 +246,7 @@ describe("askSeepient — Unified One-Shot Entry Point", () => {
       maxSteps: 1,
       stream: true,
       onText,
+      tenancy: "single",
     });
 
     expect(typeof stream.abort).toBe("function");
@@ -266,6 +273,7 @@ describe("askSeepient — Unified One-Shot Entry Point", () => {
       tools: [],
       maxSteps: 1,
       stream: true,
+      tenancy: "single",
     });
 
     const response = stream.toResponse({
@@ -294,6 +302,7 @@ describe("askSeepient — Unified One-Shot Entry Point", () => {
       tools: [],
       maxSteps: 1,
       stream: true,
+      tenancy: "single",
     });
 
     const sseStream = stream.toSSEStream();
@@ -326,6 +335,7 @@ describe("askSeepient — Unified One-Shot Entry Point", () => {
       tools: [],
       maxSteps: 1,
       stream: true,
+      tenancy: "single",
     });
 
     stream.abort();
@@ -349,6 +359,7 @@ describe("askSeepient — Unified One-Shot Entry Point", () => {
       tools: [],
       maxSteps: 1,
       signal: external.signal,
+      tenancy: "single",
     });
 
     // The handlers are wired asynchronously before askSeepient resolves.

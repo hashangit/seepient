@@ -16,7 +16,8 @@ import { MemoryCredentialStore } from "../../domain/providers/credentials/memory
 import { AggregateInferenceAdapter } from "../../capabilities/inference/aggregate-adapter.js";
 import { runAgentLoop } from "../../domain/agent-loop.js";
 import { createHookExecutor } from "../../domain/hooks.js";
-import { resolveTools, getAllToolDefinitions } from "../../domain/tool-executor.js";
+import { resolveTools, ToolRegistry } from "../../domain/tool-executor.js";
+import type { ToolModule } from "../../foundations/contracts/tool.js";
 import {
   DEFAULT_TRUSTED_HOST_ALLOWLIST,
   extractHostCallbacks,
@@ -114,39 +115,13 @@ function toCapabilitySet(
   return cap;
 }
 
-/**
- * Warn when an embedder injects some but not all permission state stores.
- * Stateless workers require all stores to be injected; missing stores fall back to local disk.
- */
-export function warnIfPartialStoreInjection(opts: {
-  auditStore?: unknown;
-  policyStore?: unknown;
-  capabilityLedger?: unknown;
-}): void {
-  const injectedStores = {
-    auditStore: Boolean(opts.auditStore),
-    policyStore: Boolean(opts.policyStore),
-    capabilityLedger: Boolean(opts.capabilityLedger),
-  };
-  const storeCount =
-    Number(injectedStores.auditStore) +
-    Number(injectedStores.policyStore) +
-    Number(injectedStores.capabilityLedger);
-  if (storeCount > 0 && storeCount < 3) {
-    const missing = Object.entries(injectedStores)
-      .filter(([_, present]) => !present)
-      .map(([name]) => name);
-    const present = Object.entries(injectedStores)
-      .filter(([_, present]) => present)
-      .map(([name]) => name);
-    console.warn(
-      `[seepient] WARNING: Partial state store injection detected. ` +
-        `Injected: [${present.join(", ")}]. Missing: [${missing.join(", ")}]. ` +
-        `Missing stores will fall back to local disk at ~/.seepient or ./.seepient. ` +
-        `For fully stateless worker execution, all three permission stores (auditStore, policyStore, capabilityLedger) must be injected.`,
-    );
-  }
-}
+import {
+  resolveTenancyMode,
+  validateTenancyCompleteness,
+  emitTenancyNoticeOnce,
+  type TenancySignals,
+} from "../../domain/tenancy/tenancy-mode.js";
+
 
 // ── Primary Factory: createSeepient ──────────────────────────────────────
 
@@ -158,6 +133,28 @@ export function warnIfPartialStoreInjection(opts: {
  */
 export async function createSeepient(options?: CreateSeepientOptions): Promise<Seepient> {
   const opts = options ?? {};
+
+  const tenancySignals: TenancySignals = {
+    explicit: opts.tenancy,
+    principalIdSet: Boolean(opts.principalId && opts.principalId !== "default" && opts.principalId !== "sdk-user"),
+    anyStoreInjected: Boolean(opts.auditStore || opts.policyStore || opts.capabilityLedger),
+    runtimeInjected: Boolean(opts.runtime),
+    persistInjected: Boolean(opts.persist),
+    skillSourcesInjected: Boolean(opts.sources && Array.isArray(opts.sources)),
+  };
+  const { mode: tenancyMode, upgraded } = resolveTenancyMode(tenancySignals);
+  emitTenancyNoticeOnce(upgraded);
+
+  // Validate tenancy completeness before any runtime bootstrapping or ambient I/O
+  validateTenancyCompleteness(tenancyMode, {
+    runtime: opts.runtime,
+    auditStore: opts.auditStore,
+    policyStore: opts.policyStore,
+    capabilityLedger: opts.capabilityLedger,
+    persist: opts.persist,
+    stateless: opts.stateless,
+    isSessionful: Boolean(opts.sessionId || opts.persist),
+  });
 
   // If providers, modelAssignments, or overlay options are passed without an explicit runtime,
   // bootstrap a configured ProviderRuntime
@@ -206,28 +203,47 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   let skillCatalog = "";
   let skillRegistry: import("../../capabilities/skills/types.js").SkillRegistry | undefined;
   if (opts.skills !== false) {
-    try {
-      skillRegistry = await initializeSkillRegistry(opts.cwd ?? process.cwd());
-      let meta = skillRegistry.getMetadata();
-      if (Array.isArray(opts.skills)) {
-        const wanted = new Set(opts.skills);
-        meta = meta.filter((s) => wanted.has(s.name));
+    if (tenancyMode === "multi" && (!opts.sources || opts.sources.length === 0)) {
+      // In multi-tenant mode without injected sources, ambient discovery is skipped
+    } else {
+      try {
+        skillRegistry = await initializeSkillRegistry(opts.cwd ?? process.cwd(), { sources: opts.sources, tenancyMode });
+        let meta = skillRegistry.getMetadata();
+        if (Array.isArray(opts.skills)) {
+          const wanted = new Set(opts.skills);
+          meta = meta.filter((s) => wanted.has(s.name));
+        }
+        if (meta.length > 0) {
+          skillCatalog = buildSkillCatalog(meta);
+        }
+      } catch {
+        /* skill init is best-effort — don't block creation */
       }
-      if (meta.length > 0) {
-        skillCatalog = buildSkillCatalog(meta);
-      }
-    } catch {
-      /* skill init is best-effort — don't block creation */
     }
   }
 
   const composeSystem = () =>
     skillCatalog ? systemPrompt + "\n\n" + skillCatalog : systemPrompt;
 
-  // Tools
-  let toolDefs = opts.tools ? resolveTools(opts.tools) : getAllToolDefinitions();
+  // Tools — per-agent registry (Spec 022)
+  const toolRegistry = new ToolRegistry();
+  for (const item of opts.tools ?? []) {
+    if (
+      item &&
+      typeof item === "object" &&
+      "definition" in item &&
+      typeof (item as { definition?: any }).definition?.function?.name === "string" &&
+      typeof (item as { handler?: any }).handler === "function" &&
+      !("trust" in item)
+    ) {
+      toolRegistry.register(item as unknown as ToolModule);
+    }
+  }
+
+  let toolDefs = opts.tools ? resolveTools(opts.tools, toolRegistry) : toolRegistry.definitions();
   const { callbacks: hostCallbacks, registrationIds } = extractHostCallbacks(opts.tools, {
     skills: skillRegistry,
+    registry: toolRegistry,
   });
   const registrations = extractRegistrations(opts.tools);
 
@@ -294,8 +310,6 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     TerminalEventOutbox,
     recoverIndeterminateActions,
   } = await import("../../domain/permissions/audit-recorder.js");
-
-  warnIfPartialStoreInjection(opts);
 
   let auditOutbox:
     | import("../../domain/permissions/audit-recorder.js").TerminalEventOutbox
@@ -375,6 +389,8 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     auditStore,
     policyStore: opts.policyStore,
     capabilityLedger: opts.capabilityLedger,
+    operatorBaseline: toCapabilitySet(opts.operatorBaseline),
+    tenancyMode,
     terminalOutbox: auditOutbox,
   });
 
@@ -477,6 +493,7 @@ async function chat(userMessage: string): Promise<AgentResponse> {
         purpose,
         tier,
         messages: modelMessages,
+        toolRegistry,
         toolDefs,
         systemPrompt: systemPrompt,
         maxSteps,
@@ -584,6 +601,7 @@ async function chat(userMessage: string): Promise<AgentResponse> {
             purpose: streamOptions?.purpose ?? purpose,
             tier: streamOptions?.tier ?? tier,
             messages: modelMessages,
+            toolRegistry,
             toolDefs,
             systemPrompt: systemPrompt,
             maxSteps,
@@ -745,7 +763,7 @@ async function chat(userMessage: string): Promise<AgentResponse> {
   }
 
   function setTools(tools: string[]): void {
-    toolDefs = resolveTools(tools);
+    toolDefs = resolveTools(tools, toolRegistry);
   }
 
   function abort(): void {
@@ -937,6 +955,8 @@ async function chat(userMessage: string): Promise<AgentResponse> {
     switchProvider,
     setSystemPrompt,
     setTools,
+    getToolDefinitions: () => toolDefs,
+    getToolRegistry: () => toolRegistry,
     abort,
     clear,
     getHistory,

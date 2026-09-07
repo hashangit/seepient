@@ -197,6 +197,7 @@ describe("QS-1: Store injection and session round-trip", () => {
       runtime,
       model: "test-model",
       provider: "test-provider",
+      tenancy: "single",
     });
 
     await agent1.switchProvider("mock-account", "test-model");
@@ -220,6 +221,7 @@ describe("QS-1: Store injection and session round-trip", () => {
       persist: backend,
       runtime,
       model: "test-model",
+      tenancy: "single",
     });
 
     expect(agent2.sessionId).toBe(customSessionId);
@@ -254,6 +256,7 @@ describe("QS-1: Store injection and session round-trip", () => {
       runtime,
       cwd: workspaceA,
       model: "mock-model",
+      tenancy: "single",
     });
 
     // Chat and immediately abort
@@ -280,6 +283,7 @@ describe("QS-1: Store injection and session round-trip", () => {
       persist: backend,
       runtime,
       model: "mock-model",
+      tenancy: "single",
     });
 
     await expect(agent.chat("Failing message")).rejects.toThrow(/Upstream rate limit/);
@@ -469,6 +473,7 @@ describe("QS-1: Store injection and session round-trip", () => {
       runtime,
       cwd: workspaceA,
       model: "mock-model",
+      tenancy: "single",
     });
 
     expect(warnSpy).toHaveBeenCalledWith(

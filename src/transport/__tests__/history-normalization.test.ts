@@ -198,6 +198,7 @@ describe("F1 (SDK) — draft resolution in createSeepient", () => {
   it("an identical retry dedupes; the model input alternates with the text once", async () => {
     const { runtime, seenMessages } = recordingRuntime(1);
     const agent = await createSeepient({
+      tenancy: "single",
       runtime: runtime as any,
       persist: new MemoryPersistenceBackend(),
       tools: [],
@@ -220,6 +221,7 @@ describe("F1 (SDK) — draft resolution in createSeepient", () => {
   it("a different follow-up supersedes the failed draft", async () => {
     const { runtime, seenMessages } = recordingRuntime(1);
     const agent = await createSeepient({
+      tenancy: "single",
       runtime: runtime as any,
       persist: new MemoryPersistenceBackend(),
       tools: [],
@@ -250,6 +252,7 @@ describe("F1 (SDK) — draft resolution in createSeepient", () => {
 
     const { runtime, seenMessages } = recordingRuntime(0);
     const agent = await createSeepient({
+      tenancy: "single",
       runtime: runtime as any,
       persist: backend,
       sessionId: "legacy-pair",

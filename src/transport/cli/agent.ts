@@ -1,7 +1,8 @@
 import chalk from 'chalk';
 import ora from 'ora';
 import * as path from 'path';
-import { getAllToolDefinitions } from '../../domain/tool-executor.js';
+import { ToolRegistry } from '../../domain/tool-executor.js';
+import type { ToolModule, ToolDefinition } from '../../foundations/contracts/tool.js';
 import { buildSystemPrompt } from '../../domain/prompts/system-prompts.js';
 import { initializeSkillRegistry } from '../../capabilities/skills/index.js';
 import type { SkillRegistry } from '../../capabilities/skills/types.js';
@@ -54,6 +55,8 @@ export class Agent {
   private _policyProposals: Array<{ id: string; capability: Capability }> = [];
   private sessionId: string;
   private providerRuntime: ProviderRuntime;
+  private readonly _toolRegistry: ToolRegistry;
+  private readonly _hostCallbacks: Map<string, (args: unknown) => Promise<unknown>> = new Map();
 
   /** Attach custom or default ProviderRuntime */
   setProviderRuntime(runtime: ProviderRuntime): void {
@@ -67,6 +70,7 @@ export class Agent {
     systemPrompt?: string,
     persistence: PersistenceBackend | null = null,
     providerType?: string,
+    toolRegistry?: ToolRegistry,
   ) {
     this.providerRuntime = runtime;
     this.model = model;
@@ -79,6 +83,7 @@ export class Agent {
     this.providerType = providerType;
     this.persistence = persistence;
     this.sessionId = generateId();
+    this._toolRegistry = toolRegistry ?? new ToolRegistry();
 
     this.messages = [{
       id: generateId(),
@@ -86,6 +91,35 @@ export class Agent {
       content: this.systemPrompt,
       timestamp: now(),
     }];
+  }
+
+  getToolRegistry(): ToolRegistry {
+    return this._toolRegistry;
+  }
+
+  getToolDefinitions(): ToolDefinition[] {
+    return this._toolRegistry.definitions();
+  }
+
+  registerTool(tool: ToolModule): void {
+    this._toolRegistry.register(tool);
+    if (tool.handler) {
+      const fnName = tool.definition.function.name;
+      this._hostCallbacks.set(fnName, async (args: unknown) => {
+        const skills = this.skillRegistry ?? undefined;
+        return tool.handler!(
+          args as never,
+          { ...this.config, skills },
+          { skills },
+        );
+      });
+    }
+  }
+
+  registerManyTools(tools: readonly ToolModule[]): void {
+    for (const t of tools) {
+      this.registerTool(t);
+    }
   }
 
   /**
@@ -230,12 +264,10 @@ export class Agent {
     // handed down, so Capabilities never imports Domain (AGENTS.md
     // dependency direction — review finding).
     const { buildLocalBoundary } = await import("../../capabilities/execution/build-local-boundary.js");
-    const { getAllToolModules } = await import("../../domain/tool-executor.js");
-    const hostCallbacks = new Map<string, (args: unknown) => Promise<unknown>>();
-    for (const tool of getAllToolModules()) {
+    for (const tool of this._toolRegistry.modules()) {
       const fnName = tool.definition.function.name;
-      if (tool.handler) {
-        hostCallbacks.set(fnName, async (args: unknown) => {
+      if (tool.handler && !this._hostCallbacks.has(fnName)) {
+        this._hostCallbacks.set(fnName, async (args: unknown) => {
           const skills = this.skillRegistry ?? undefined;
           return tool.handler!(
             args as never,
@@ -258,7 +290,7 @@ export class Agent {
     });
     const { boundary: realBoundary } = await buildLocalBoundary({
       artifacts: sharedArtifacts,
-      hostCallbacks,
+      hostCallbacks: this._hostCallbacks,
       workspaceRoot: opts.workspaceRoot ?? process.cwd(),
       snapshotStore,
       commitHelper: opts.commitHelper,
@@ -480,9 +512,13 @@ export class Agent {
     if (idx === -1) throw new Error(`No proposal "${id}"`);
     const proposal = this._policyProposals[idx];
     const current = await this._policyStore.read(this._workspaceId);
+    const capability = {
+      ...proposal.capability,
+      principalId: proposal.capability.principalId ?? this.config?.principalId ?? 'cli-user',
+    };
     const next: CapabilitySet = {
       version: 1,
-      capabilities: [...current.policy.capabilities, proposal.capability],
+      capabilities: [...current.policy.capabilities, capability],
     };
     const snap = await this._policyStore.compareAndSet(
       this._workspaceId,
@@ -616,7 +652,8 @@ export class Agent {
           ? { model: this.model || undefined, providerAccount: this.providerAccount }
           : undefined,
         messages: this.messages,
-        toolDefs: getAllToolDefinitions(),
+        toolRegistry: this._toolRegistry,
+        toolDefs: this._toolRegistry.definitions(),
         maxSteps: 30,
         hooks: createHookExecutor(),
         config: { ...this.config, agentName: 'cli', runtime, skills: this.skillRegistry ?? undefined },

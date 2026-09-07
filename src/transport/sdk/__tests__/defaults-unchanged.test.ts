@@ -65,6 +65,7 @@ describe("QS-0: Defaults unchanged", () => {
     const agent = await createSeepient({
       cwd: workspaceDir,
       runtime: mockRuntime,
+      tenancy: "single",
     });
 
     const res = await agent.chat("Write a file");
@@ -122,6 +123,7 @@ describe("QS-0: Defaults unchanged", () => {
     const agent = await createSeepient({
       cwd: workspaceDir,
       runtime: mockRuntime,
+      tenancy: "single",
       // No approval broker or approveTool provided
     });
 
@@ -143,6 +145,7 @@ describe("QS-0: Defaults unchanged", () => {
       persist: sessionDir,
       cwd: workspaceDir,
       runtime: mockRuntime,
+      tenancy: "single",
     });
 
     await agent.chat("Persist this message");

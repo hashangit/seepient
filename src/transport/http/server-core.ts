@@ -1,7 +1,8 @@
 import type { AskSeepientResult, Usage, Message, ApproveToolFn, StepResult } from "../../foundations/types.js";
 import { runAgentLoop } from "../../domain/agent-loop.js";
 import { createHookExecutor } from "../../domain/hooks.js";
-import { resolveTools, getAllToolDefinitions } from "../../domain/tool-executor.js";
+import type { ToolRegistryContract } from "../../foundations/contracts/tool.js";
+import { resolveTools, ToolRegistry } from "../../domain/tool-executor.js";
 import { now } from "../../domain/context/message-convert.js";
 import { generateId } from "../../foundations/id.js";
 import { getDefaultProviderRuntime, type ProviderRuntime } from "../../domain/providers/provider-runtime.js";
@@ -49,15 +50,17 @@ export async function serverGenerateText(
     skills?: string[];
     history?: Message[];
     runtime?: ProviderRuntime | ProviderRuntimeContract;
+    toolRegistry?: ToolRegistryContract;
     /** Spec 008 wired pipeline (constructed by createServer). */
     wiredPipeline?: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle;
   },
   middleware?: Middleware[],
 ): Promise<AskSeepientResult> {
   const runtime = options.runtime ?? getDefaultProviderRuntime();
+  const registry = options.toolRegistry ?? new ToolRegistry();
 
   // Resolve tools
-  const toolDefs = options.tools ? resolveTools(options.tools) : getAllToolDefinitions();
+  const toolDefs = options.tools ? resolveTools(options.tools, registry) : registry.definitions();
 
   // Hooks
   const hooks = createHookExecutor();
@@ -99,6 +102,7 @@ export async function serverGenerateText(
     model: options.model,
     modelOverride: options.model,
     messages: modelMessages,
+    toolRegistry: registry,
     toolDefs,
     maxSteps: options.maxSteps ?? 5,
     hooks,
@@ -141,6 +145,7 @@ export async function handleAgentChatStream(
     history?: Message[];
     approveTool?: ApproveToolFn;
     runtime?: ProviderRuntime | ProviderRuntimeContract;
+    toolRegistry?: ToolRegistryContract;
     /** Spec 008 wired pipeline (constructed by createServer). */
     wiredPipeline?: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle;
     onText: (chunk: string) => void;
@@ -154,7 +159,8 @@ export async function handleAgentChatStream(
   middleware?: Middleware[],
 ): Promise<void> {
   const runtime = opts.runtime ?? getDefaultProviderRuntime();
-  const toolDefs = opts.tools ? resolveTools(opts.tools) : getAllToolDefinitions();
+  const registry = opts.toolRegistry ?? new ToolRegistry();
+  const toolDefs = opts.tools ? resolveTools(opts.tools, registry) : registry.definitions();
   const hooks = createHookExecutor();
 
   // Load session or create initial message list
@@ -193,6 +199,7 @@ export async function handleAgentChatStream(
       model: opts.model,
       modelOverride: opts.model,
       messages: modelMessages,
+      toolRegistry: registry,
       toolDefs,
       maxSteps: opts.maxSteps ?? 5,
       hooks,

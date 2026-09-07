@@ -188,6 +188,7 @@ describe("Multi-tool per-agent composition (W1, W2)", () => {
       tools,
       cwd: dir,
       approveTool: async () => true,
+      tenancy: "single",
     } as never);
 
     const response = await agent.chat("Check balance and transfer 500");
@@ -241,6 +242,7 @@ describe("askSeepient with trustedHostTool registration (W2)", () => {
       tools: [calculateTaxTool],
       cwd: dir,
       approveTool: async () => true,
+      tenancy: "single",
     });
 
     expect(calls).toEqual(["tax:1000"]);
