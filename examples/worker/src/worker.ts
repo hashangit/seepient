@@ -27,7 +27,11 @@ import {
   type ApprovalBroker,
   type PermissionRequest,
   type PermissionDecision,
+  type SkillSource,
+  FsSkillSources,
 } from "../../../src/transport/sdk/index.js";
+
+export { DbSkillSource } from "./db-skill-source.js";
 
 /**
  * Worker configuration passed by the embedder on task start.
@@ -46,6 +50,7 @@ export interface WorkerTaskConfig {
   consentMode?: ConsentMode;
   relayApproval?: (req: PermissionRequest) => Promise<PermissionDecision>;
   commitHelper?: any;
+  sources?: SkillSource[];
 }
 
 /**
@@ -270,6 +275,7 @@ export async function createWorkerAgent(config: WorkerTaskConfig): Promise<Seepi
     persist: persistence,
     consentMode: config.consentMode ?? "ask-everything",
     commitHelper: config.commitHelper,
+    sources: config.sources,
     approvalBroker: {
       mode: "callback",
       request: async (req: PermissionRequest) => {

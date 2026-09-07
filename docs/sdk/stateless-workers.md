@@ -67,7 +67,7 @@ console.log(result.text)
 ::: warning Store injection completeness
 Stateless operation requires injecting all three permission contracts (`auditStore`, `policyStore`, and `capabilityLedger`) along with `persist`. If 1 or 2 permission stores are injected, the SDK logs a warning (`[seepient] WARNING: Partial state store injection detected...`) and falls back missing stores to writing to `~/.seepient` or `./.seepient` on the local filesystem.
 
-For one-shot execution, `askSeepient()` also accepts `auditStore`, `policyStore`, `capabilityLedger`, `principalId`, and `runtime` to run without disk access.
+For one-shot execution, `askSeepient()` also accepts `auditStore`, `policyStore`, `capabilityLedger`, `principalId`, and `runtime` to run without disk access. For tenant-partitioned or serverless skills, inject external skill sources via `sources` or pass inline literals; see [Skill Sources](/sdk/skills#skill-sources).
 :::
 
 ---
@@ -79,7 +79,9 @@ For one-shot execution, `askSeepient()` also accepts `auditStore`, `policyStore`
 | **Settings** | Worker-local | Environment variables | Ephemeral per-worker configuration. |
 | **Model catalog** | Worker-local | In-memory cache | Cached catalog entries refreshed on startup. |
 | **Sandbox binaries** | Worker-local | Container image | Compiled helper (`fs-commit`) and sandbox (`bwrap`). |
-| **Skill definitions** | Worker-local | Read-only image mount | Bundled skill instructions. |
+| **Skill definitions (bundled)** | Worker-local | Read-only image mount | Bundled skill instructions. |
+| **Skill definitions (injected)** | Tenant-scoped | Injected `SkillSource` / DB | Tenant-partitioned skills and inline literals. See [Skill Sources](/sdk/skills#skill-sources). |
+| **Generated skills** | Tenant-scoped | Injected `SkillStore` | Persisted through embedder `SkillStore.save()`. |
 | **Session history** | Tenant-scoped | Injected `SessionStore` | Messages and tool invocations saved in database. |
 | **Audit trail** | Tenant-scoped | Injected `AuditStore` | Tamper-evident execution log entries. |
 | **Grants and policies** | Tenant-scoped | Injected `PolicyStore` | Tenant permission rules and consent levels. |
