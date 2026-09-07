@@ -67,6 +67,113 @@ const agent = await createSeepient({
 const reply = await agent.chat("Review my latest commit");
 ```
 
+## Skill sources
+
+In addition to ambient filesystem discovery, Seepient allows embedders to inject external skill sources via the `sources` option on `askSeepient()` and `createSeepient()`, or pass inline skill definitions via the `skills` option. This enables serverless execution, multi-tenant skill partitioning, and remote database catalogs.
+
+### The `SkillSource` and `SkillStore` contracts
+
+```typescript
+import type { SkillRecord, SkillSource, SkillStore, SkillLiteral } from "seepient";
+
+// Any object implementing list() satisfies SkillSource
+const dbSource: SkillSource = {
+  async list(): Promise<SkillRecord[]> {
+    return [
+      {
+        name: "customer-lookup",
+        content: "---\nname: customer-lookup\ndescription: Query customer CRM\n---\nProcedure...",
+        source: "crm-db", // Attribution label
+      },
+    ];
+  },
+};
+```
+
+### Inline skill literals
+
+For serverless functions, tests, or zero-infrastructure workflows, you can pass skill literals directly using `skills`:
+
+```typescript
+import { askSeepient } from "seepient";
+
+const result = await askSeepient("Summarize the latest report", {
+  skills: [
+    {
+      name: "summarize",
+      content: "---\nname: summarize\ndescription: Summarize text succinctly\n---\nSummary instructions...",
+    },
+  ],
+});
+```
+
+Inline literals are automatically synthesized into a source attributed as `"inline"` and appended after any explicit `sources`. They always shadow skills of the same name.
+
+### Composition semantics
+
+When constructing the agent's skill catalog, sources are composed in order with **last-wins** shadowing:
+
+| Tenancy Mode | Composition Pipeline | Behavior |
+|--------------|----------------------|----------|
+| `single` (default) | `[new FsSkillSources(cwd), ...(sources ?? []), inline?]` | Built-in filesystem layers load first. Injected `sources` override filesystem skills of the same name. Inline literals shadow everything. |
+| `multi` | `[...(sources ?? []), inline?]` | Ambient filesystem discovery is **never** invoked. Skills originate solely from injected `sources` and inline literals. |
+
+Example composing filesystem, organization-wide, and tenant-specific sources:
+
+```typescript
+import { createSeepient, FsSkillSources } from "seepient";
+
+const agent = await createSeepient({
+  sources: [
+    new FsSkillSources(process.cwd()), // Local filesystem layers
+    globalDbSource,                    // Shared company-wide skills
+    tenantDbSource,                    // Tenant-specific overrides (shadows global)
+  ],
+});
+```
+
+### Serverless and bundling disclosures
+
+:::warning Serverless filesystem discovery fails silently
+In serverless execution environments (AWS Lambda, Vercel Functions, Cloudflare Workers), filesystem-based ambient discovery typically finds no skills directories and produces an empty catalog **silently**. In serverless deployments, always inject explicit `sources` or pass inline skill literals (`skills: [...]`).
+:::
+
+:::tip Bundling skills in serverless packages
+If your serverless deployment relies on filesystem-bundled skills, ensure your framework bundler is configured to trace the skills directory into the output artifact. For example, in Next.js, declare `outputFileTracingIncludes` in `next.config.js`:
+
+```javascript
+// next.config.js
+module.exports = {
+  outputFileTracingIncludes: {
+    '/api/**': ['./skills/**/*'],
+  },
+};
+```
+:::
+
+### Saving generated skills
+
+When Seepient generates a new skill at runtime (e.g. via Spec 016 workflows), it saves the skill to the **last** `SkillStore` present in the effective sources list:
+
+```typescript
+import { createSeepient, type SkillStore, type SkillRecord } from "seepient";
+
+class TenantSkillStore implements SkillStore {
+  async list(): Promise<SkillRecord[]> {
+    return [];
+  }
+  async save(record: SkillRecord): Promise<void> {
+    // Persist to tenant database
+  }
+}
+
+const agent = await createSeepient({
+  sources: [new TenantSkillStore()],
+});
+```
+
+If no `SkillStore` is present in `sources`, skill generation fails closed with `SKILL_STORE_UNAVAILABLE` rather than writing uncontained files to the local disk.
+
 ## `initializeSkillRegistry()`
 
 Bootstraps the skill registry by scanning skill directories. This is the public API for initializing skills programmatically:

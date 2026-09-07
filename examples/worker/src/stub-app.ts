@@ -28,6 +28,7 @@ export interface StubAppState {
   sessions: Map<string, SessionData>;
   approvalRequests: PermissionRequest[];
   approvalDecision: boolean;
+  skills: Array<{ id: string; name: string; content: string; tenant_id: string | null; source?: string }>;
 }
 
 export function createStubApp(initialState?: Partial<StubAppState>): {
@@ -55,6 +56,7 @@ export function createStubApp(initialState?: Partial<StubAppState>): {
     sessions: new Map(),
     approvalRequests: [],
     approvalDecision: true,
+    skills: [],
     ...initialState,
   };
 
@@ -192,6 +194,28 @@ export function createStubApp(initialState?: Partial<StubAppState>): {
           };
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(decision));
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/skills") {
+      const tenantId = url.searchParams.get("tenantId");
+      const matched = state.skills.filter((s) =>
+        tenantId ? s.tenant_id === tenantId : s.tenant_id === null,
+      );
+      const records = matched.map((s) => ({
+        name: s.name,
+        content: s.content,
+        source: s.source ?? (tenantId ? `db:tenant:${tenantId}` : "db:global"),
+      }));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ skills: records }));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/skills") {
+      state.skills.push(jsonBody);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
       return;
     }
 

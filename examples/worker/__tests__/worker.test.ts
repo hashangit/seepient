@@ -17,7 +17,9 @@ import {
   RemotePolicyStore,
   RemoteAuditStore,
   RemoteCapabilityLedger,
+  DbSkillSource,
 } from "../src/worker.js";
+import { FsSkillSources } from "../../../src/transport/sdk/index.js";
 import { createStubApp } from "../src/stub-app.js";
 import { createFakeRuntime } from "../../../src/transport/sdk/__tests__/helpers/fake-stores.js";
 import { diskBackedFakeHelper } from "../../../src/capabilities/execution/__tests__/helpers/commit-helper-fakes.js";
@@ -146,4 +148,91 @@ describe("QS-4: Reference Worker End-to-End", () => {
     const offlinePolicyStore = new RemotePolicyStore("http://127.0.0.1:1");
     await expect(offlinePolicyStore.read("default")).rejects.toThrow(/Policy read failed/);
   });
+
+  it("QS-S3: DbSkillSource composes [fs, global, tenant] with tenant-specific shadowing", async () => {
+    // 1. Seed global and tenant skills in stub control plane
+    stubApp.state.skills.push(
+      {
+        id: "s-global-summarize",
+        name: "summarize",
+        content: "---\nname: summarize\ndescription: Global summarize procedure\n---\nGlobal body",
+        tenant_id: null,
+        source: "db:global",
+      },
+      {
+        id: "s-tenant-summarize",
+        name: "summarize",
+        content: "---\nname: summarize\ndescription: Tenant-specific summarize procedure\n---\nTenant body",
+        tenant_id: "tenant-abc",
+        source: "db:tenant:tenant-abc",
+      },
+      {
+        id: "s-global-health",
+        name: "health-check",
+        content: "---\nname: health-check\ndescription: Global health check\n---\nHealth check body",
+        tenant_id: null,
+        source: "db:global",
+      },
+    );
+
+    const globalSource = new DbSkillSource(`http://127.0.0.1:${controlPlanePort}`);
+    const tenantSource = new DbSkillSource(`http://127.0.0.1:${controlPlanePort}`, "tenant-abc");
+
+    let stepCount = 0;
+    const runtime = createFakeRuntime({
+      responses: () => {
+        stepCount++;
+        if (stepCount === 1) {
+          return {
+            toolCalls: [
+              {
+                id: "call-skill-1",
+                name: "use_skill",
+                arguments: { skill_name: "summarize" },
+              },
+            ],
+          };
+        }
+        return { text: "Summarize finished." };
+      },
+    });
+
+    const workerAgent = await createWorkerAgent({
+      tenantId: "tenant-abc",
+      principalId: "user-123",
+      sessionId: "session-skills",
+      workspaceDir,
+      runtime,
+      controlPlaneUrl: `http://127.0.0.1:${controlPlanePort}`,
+      consentMode: "ask-everything",
+      commitHelper: diskBackedFakeHelper(),
+      sources: [new FsSkillSources(workspaceDir), globalSource, tenantSource],
+    });
+
+    // Verify system prompt catalog composition:
+    // Tenant-specific "summarize" must shadow the global "summarize"
+    const history = workerAgent.getHistory();
+    const sysMsg: any = history.find((m: any) => m.role === "system");
+    const sysText =
+      typeof sysMsg?.content === "string"
+        ? sysMsg.content
+        : Array.isArray(sysMsg?.content)
+          ? sysMsg.content.map((c: any) => c.text ?? "").join("\n")
+          : "";
+
+    expect(sysText).toContain("summarize: Tenant-specific summarize procedure");
+    expect(sysText).not.toContain("Global summarize procedure");
+    expect(sysText).toContain("health-check: Global health check");
+
+    // Execute skill call
+    const response = await workerAgent.chat("Please summarize");
+    expect(response.toolCalls.length).toBe(1);
+
+    const toolMsg = workerAgent.getHistory().find((m: any) => m.role === "tool");
+    expect(toolMsg?.content).toContain("# summarize Skill Activated");
+    expect(toolMsg?.content).toContain("Tenant body");
+
+    await workerAgent.close();
+  });
 });
+
