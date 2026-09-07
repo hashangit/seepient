@@ -30,6 +30,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Skills scoping on 021-1 seam**: In multi-tenant mode, ambient skill discovery under `$HOME/.seepient/skills` is disabled; agents load strictly injected `SkillSource`s.
 - **Regression fences**: FR-017 process-state invariant gate (`src/foundations/__tests__/process-state-invariant.test.ts`) with bidirectional drift detection, and the multi-tenant isolation matrix (`src/domain/permissions/__tests__/multi-tenant-isolation.test.ts`) covering all 8 isolation dimensions.
 
+### Injectable skill sources and inline tier (Spec 021-1)
+
+**Added:**
+- **Foundations-placed skill source contracts**: Relocated `SkillRecord`, `SkillSource`, `SkillStore`, and `SkillLiteral` to `src/foundations/contracts/skill-source.ts`. String-only and self-contained; zero upward layer imports. Exported from SDK entry (`seepient`).
+- **Unified tenancy-aware skill composition**: Single parse-and-last-wins composition pipeline in `initializeSkillRegistry`. Single mode composes `[new FsSkillSources(cwd), ...(sources ?? []), inline?]` (defaults byte-equivalent); multi mode composes `[...(sources ?? []), inline?]` with ambient discovery strictly disabled (022 invariant).
+- **Inline skill literals**: `skills` option on `askSeepient` and `createSeepient` accepts `SkillLiteral[]` (`{ name, content }[]`) for serverless functions, tests, and zero-infrastructure execution without requiring custom classes. Synthesized into an inline source attributed as `"inline"`, shadowing injected sources.
+- **`FsSkillSources` built-in**: First-class `SkillSource` surfacing the five filesystem discovery layers as raw records with source labels. Exported from SDK entry (`seepient`).
+- **Generated-skill write path (`saveGeneratedSkill`)**: New hook in `src/domain/skills/generated-skill-save.ts` targeting embedder-supplied `SkillStore`s with Spec 016 semantics (collision refusal with guidance, version and changelog increments, `kind: "generated"` stamp). Destination is the last `SkillStore` in the effective source list. Fails closed with `SKILL_STORE_UNAVAILABLE` on SDK paths with no store (zero disk writes).
+- **Reference `DbSkillSource` example**: Complete implementation in `examples/worker/` demonstrating remote database-backed global (`tenant_id is null`) and tenant (`= $1`) queries with shadowing against a stub control plane.
+- **Docs & disclosures**: "Skill sources" section added to `docs/sdk/skills.md` documenting the inline tier, composition matrix, silent-empty disclosure for serverless functions, and `outputFileTracingIncludes` Next.js packaging requirements; cross-linked in `docs/sdk/stateless-workers.md`.
+
 ## [v0.7.2] - 2026-09-06
 
 ### Model contract enforcement, resilient JSON parsing & TUI status truth
