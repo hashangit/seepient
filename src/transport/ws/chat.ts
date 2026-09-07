@@ -33,6 +33,19 @@ export async function handleChat(
     return;
   }
 
+  // W248: Fail-closed off-contract input on server surfaces
+  if (msg.options?.skills !== undefined) {
+    if (!Array.isArray(msg.options.skills) || msg.options.skills.some((s) => typeof s !== "string")) {
+      safeSend(ws, {
+        type: "error",
+        code: "VALIDATION_ERROR",
+        retryable: false,
+        message: "Field 'skills' must be an array of strings",
+      });
+      return;
+    }
+  }
+
   // Busy guard: only one active chat turn per connection
   if (state.activeChats.size > 0) {
     safeSend(ws, {

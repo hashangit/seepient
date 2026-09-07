@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Reference `DbSkillSource` example**: Complete implementation in `examples/worker/` demonstrating remote database-backed global (`tenant_id is null`) and tenant (`= $1`) queries with shadowing against a stub control plane.
 - **Docs & disclosures**: "Skill sources" section added to `docs/sdk/skills.md` documenting the inline tier, composition matrix, silent-empty disclosure for serverless functions, and `outputFileTracingIncludes` Next.js packaging requirements; cross-linked in `docs/sdk/stateless-workers.md`.
 - **Review remediation & lazy loading restoration**: Fixed empty `skills: []` filter catalog leakage; enforced per-record warn-and-skip parsing; restored filesystem lazy-body loading and body cache; exported `saveGeneratedSkill`, `initializeSkillRegistry`, and typed error classes from SDK root; eliminated dead loader/parser code and consolidated frontmatter splitting into `splitFrontmatter`.
+- **Round 3 closure & input validation**: Fixed composition-winner body bug where rawContentMap retained shadowed content over later filesystem winners; enforced fail-closed input validation on REST (`/v1/chat`) and WS (`chat`) rejecting non-string skills arrays with 400/`VALIDATION_ERROR`; restored docs truth regarding runtime provider switcher, slash-path scope, and `@path` resolution.
 
 ## [v0.7.2] - 2026-09-06
 

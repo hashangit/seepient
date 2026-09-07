@@ -127,4 +127,27 @@ describe("W154e — resume/reconnect dispatch carries a .catch mirror", () => {
       if (fs.existsSync(rawKeyPath)) fs.unlinkSync(rawKeyPath);
     }
   });
+
+  it("W248: rejects chat message with VALIDATION_ERROR when skills array contains non-string elements", async () => {
+    const { ws, sent } = createMockWs();
+    const ctx = makeCtx();
+    const state = makeState(["agent:run"]);
+    const msg: ChatMessage = {
+      type: "chat",
+      id: "m-skills",
+      message: "hello",
+      options: {
+        skills: [{ name: "x", content: "y" }] as any,
+      },
+    };
+
+    await handleChat(ws, msg, state, ctx);
+
+    const err = sent.find((f) => f.type === "error");
+    expect(err).toBeDefined();
+    expect(err?.code).toBe("VALIDATION_ERROR");
+    expect(err?.message).toContain("Field 'skills' must be an array of strings");
+    expect(ctx.streamText).not.toHaveBeenCalled();
+  });
 });
+

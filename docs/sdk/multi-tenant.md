@@ -63,6 +63,10 @@ In `multi` mode, Seepient enforces a strict injection checklist at construction 
 | **Stateless One-Shot** | `stateless: true` | Optional: pass when executing sessionless calls (`askSeepient`) without persistence | N/A |
 | **Skills Sources** | `sources` | Optional: skill sources list. In `multi` mode, ambient discovery is never run; skills come solely from injected sources | N/A |
 
+:::note Standalone HTTP/WS server limitation
+Per-tenant skill injection is supported on the in-process SDK surface (`askSeepient`/`createSeepient` with `tenancy: "multi"` + `sources`); the standalone HTTP/WS server resolves skills from the host's ambient filesystem shared by all principals and exposes no per-tenant injection channel — embedders needing per-tenant skills must use the in-process SDK shape. Server-side injection is future work.
+:::
+
 ---
 
 ## Error Codes and Remediation

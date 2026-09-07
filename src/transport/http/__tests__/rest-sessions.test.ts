@@ -267,4 +267,30 @@ describe("REST Sessions & Chat Resume (Spec 021-2 / FR-005, FR-006)", () => {
       saveSpy.mockRestore();
     }
   });
+
+  it("W248: POST /v1/chat fails closed with 400 when skills contains non-string elements", async () => {
+    const { req, res } = createMockReqRes(
+      "POST",
+      "/v1/chat",
+      {
+        authorization: `Bearer ${key1}`,
+        "content-type": "application/json",
+      },
+      JSON.stringify({
+        message: "hello",
+        skills: [{ name: "x", content: "y" }],
+      }),
+    );
+
+    await new Promise<void>((resolve) => {
+      res.on("finish", resolve);
+      handler(req, res);
+    });
+
+    expect(res.statusCode).toBe(400);
+    const data = JSON.parse(res.body);
+    expect(data.error?.code).toBe("BAD_REQUEST");
+    expect(data.error?.message).toContain("Field 'skills' must be an array of strings");
+  });
 });
+
