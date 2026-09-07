@@ -208,4 +208,40 @@ describe("Generated Skill Save Path (Spec 021-1, US2, QS-S2)", () => {
       rmSync(tempCwd, { recursive: true, force: true });
     }
   });
+
+  it("preserves tags and allowedTools across replacements and formats YAML safely", async () => {
+    const store = new FakeMemorySkillStore();
+
+    // Initial save with tags, allowedTools, and a description containing colons and quotes
+    await saveGeneratedSkill({
+      name: "commit-helper",
+      description: "Helper for git: handles 'quotes' and colons",
+      body: "# Commit Helper Body",
+      tags: ["git", "vcs"],
+      allowedTools: ["exec_command"],
+      sources: [store],
+    });
+
+    const [firstRecord] = await store.list();
+    expect(firstRecord.content).toContain("tags:\n  - git\n  - vcs");
+    expect(firstRecord.content).toContain("allowedTools:\n  - exec_command");
+    expect(firstRecord.content).toContain('description: "Helper for git: handles \'quotes\' and colons"');
+
+    // Replace without re-specifying tags and allowedTools -> must preserve them
+    await saveGeneratedSkill({
+      name: "commit-helper",
+      description: "Updated description: still with colon",
+      body: "# Updated Body",
+      replace: true,
+      changelogEntry: "Update without tags param",
+      sources: [store],
+    });
+
+    const [updatedRecord] = await store.list();
+    expect(updatedRecord.content).toContain("version: 2");
+    expect(updatedRecord.content).toContain("tags:\n  - git\n  - vcs");
+    expect(updatedRecord.content).toContain("allowedTools:\n  - exec_command");
+    expect(updatedRecord.content).toContain('description: "Updated description: still with colon"');
+    expect(updatedRecord.content).toContain("Update without tags param");
+  });
 });

@@ -7,7 +7,12 @@ import {
   createSeepient,
   FsSkillSources,
   type SkillSource,
+  type SkillStore,
   type SkillLiteral,
+  saveGeneratedSkill,
+  initializeSkillRegistry,
+  SkillStoreUnavailableError,
+  SkillCollisionError,
 } from "../index.js";
 import {
   FakeAuditStore,
@@ -273,5 +278,79 @@ describe("SDK Skill Sources & Inline Tier (Spec 021-1, QS-S1)", () => {
     const sysMsg = capturedReq?.messages?.find((m: any) => m.role === "system");
     expect(messageText(sysMsg)).toContain("AVAILABLE SKILLS");
     expect(messageText(sysMsg)).toContain("multi-inline: multi tenant inline skill");
+  });
+
+  it("skills: [] passed to askSeepient filters catalog to empty (no AVAILABLE SKILLS in system prompt)", async () => {
+    let capturedReq: any = null;
+    const runtime = createFakeRuntime({
+      responses: (req) => {
+        capturedReq = req;
+        return { text: "Done" };
+      },
+    });
+
+    const fakeSource: SkillSource = {
+      list: () => [
+        {
+          name: "source-skill",
+          content: "---\nname: source-skill\ndescription: should be filtered out\n---\nBody",
+          source: "test-source",
+        },
+      ],
+    };
+
+    await askSeepient("Empty skills filter test", {
+      cwd: tmpCwd,
+      tenancy: "single",
+      runtime,
+      sources: [fakeSource],
+      skills: [],
+    });
+
+    const sysMsg = capturedReq?.messages?.find((m: any) => m.role === "system");
+    expect(messageText(sysMsg)).not.toContain("AVAILABLE SKILLS");
+    expect(messageText(sysMsg)).not.toContain("source-skill");
+  });
+
+  it("skills: [] passed to createSeepient filters catalog to empty (no AVAILABLE SKILLS in system prompt)", async () => {
+    const runtime = createFakeRuntime({
+      responses: () => ({ text: "Done" }),
+    });
+
+    const fakeSource: SkillSource = {
+      list: () => [
+        {
+          name: "source-skill",
+          content: "---\nname: source-skill\ndescription: should be filtered out\n---\nBody",
+          source: "test-source",
+        },
+      ],
+    };
+
+    const agent = await createSeepient({
+      cwd: tmpCwd,
+      tenancy: "single",
+      runtime,
+      sources: [fakeSource],
+      skills: [],
+    });
+
+    const history = agent.getHistory();
+    const sysMsg = history.find((m: any) => m.role === "system");
+    expect(messageText(sysMsg)).not.toContain("AVAILABLE SKILLS");
+    expect(messageText(sysMsg)).not.toContain("source-skill");
+  });
+
+  it("exports saveGeneratedSkill, initializeSkillRegistry, and errors from SDK entry point", async () => {
+    expect(typeof saveGeneratedSkill).toBe("function");
+    expect(typeof initializeSkillRegistry).toBe("function");
+    expect(SkillStoreUnavailableError).toBeDefined();
+    expect(SkillCollisionError).toBeDefined();
+
+    const err = new SkillStoreUnavailableError();
+    expect(err.code).toBe("SKILL_STORE_UNAVAILABLE");
+
+    const coll = new SkillCollisionError("test-skill", "fs");
+    expect(coll.code).toBe("SKILL_COLLISION");
   });
 });

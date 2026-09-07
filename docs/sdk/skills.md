@@ -153,10 +153,17 @@ module.exports = {
 
 ### Saving generated skills
 
-When Seepient generates a new skill at runtime (e.g. via Spec 016 workflows), it saves the skill to the **last** `SkillStore` present in the effective sources list:
+When Seepient generates a new skill at runtime (e.g. via Spec 016 workflows), or when saving skills programmatically, it saves the skill to the **last** `SkillStore` present in the effective sources list:
 
 ```typescript
-import { createSeepient, type SkillStore, type SkillRecord } from "seepient";
+import {
+  createSeepient,
+  saveGeneratedSkill,
+  type SkillStore,
+  type SkillRecord,
+  SkillStoreUnavailableError,
+  SkillCollisionError,
+} from "seepient";
 
 class TenantSkillStore implements SkillStore {
   async list(): Promise<SkillRecord[]> {
@@ -167,12 +174,29 @@ class TenantSkillStore implements SkillStore {
   }
 }
 
+const store = new TenantSkillStore();
+
+// Programmatic skill generation save:
+const result = await saveGeneratedSkill({
+  name: "summarize-meeting",
+  description: "Summarizes meeting notes into action items",
+  body: "# Summarize Meeting\nFollow these steps to extract action items...",
+  tags: ["productivity", "meetings"],
+  sources: [store],
+});
+
+console.log(`Saved v${result.version} to store`);
+
 const agent = await createSeepient({
-  sources: [new TenantSkillStore()],
+  sources: [store],
 });
 ```
 
-If no `SkillStore` is present in `sources`, skill generation fails closed with `SKILL_STORE_UNAVAILABLE` rather than writing uncontained files to the local disk.
+Key semantics for `saveGeneratedSkill`:
+- **Store destination**: Saves to the last `SkillStore` in `sources`.
+- **Collision refusal**: If a skill with the same name exists in any configured source, saving refuses with a `SkillCollisionError` unless `replace: true` is set.
+- **Version bump**: When `replace: true` is set, the version number automatically increments (e.g. `v1 -> v2`) and the changelog records the update.
+- **Fails closed**: If no `SkillStore` is present in `sources`, skill generation fails closed with `SkillStoreUnavailableError` (`SKILL_STORE_UNAVAILABLE`) rather than writing uncontained files to the local disk.
 
 ## `initializeSkillRegistry()`
 

@@ -82,6 +82,16 @@ export type {
   SkillLiteral,
 } from "../../foundations/contracts/skill-source.js";
 export { FsSkillSources } from "../../capabilities/skills/fs-skill-sources.js";
+export { initializeSkillRegistry } from "../../capabilities/skills/index.js";
+export {
+  saveGeneratedSkill,
+  type SaveGeneratedSkillParams,
+  type SaveGeneratedSkillResult,
+} from "../../domain/skills/generated-skill-save.js";
+export {
+  SkillStoreUnavailableError,
+  SkillCollisionError,
+} from "../../foundations/errors.js";
 
 // Spec 022 Tenancy exports
 export {
@@ -182,30 +192,8 @@ export {
 
 // ── askSeepient ──────────────────────────────────────────────────────────
 
-export function computeEffectiveSkillSources(
-  sources?: import("../../foundations/contracts/skill-source.js").SkillSource[],
-  skills?: string[] | boolean | import("../../foundations/contracts/skill-source.js").SkillLiteral[],
-): import("../../foundations/contracts/skill-source.js").SkillSource[] {
-  const effective: import("../../foundations/contracts/skill-source.js").SkillSource[] = sources ? [...sources] : [];
-  if (
-    Array.isArray(skills) &&
-    skills.length > 0 &&
-    typeof skills[0] === "object" &&
-    skills[0] !== null &&
-    "content" in skills[0]
-  ) {
-    const literals = skills as import("../../foundations/contracts/skill-source.js").SkillLiteral[];
-    effective.push({
-      list: () =>
-        literals.map((l) => ({
-          name: l.name,
-          content: l.content,
-          source: "inline",
-        })),
-    });
-  }
-  return effective;
-}
+import { computeEffectiveSkillSources } from "./skill-sources-helper.js";
+export { computeEffectiveSkillSources };
 
 /**
  * Resolve the skill catalog for a one-shot SDK call. Returns the system prompt
@@ -228,9 +216,14 @@ async function resolveSkills(
   try {
     const skillRegistry = await initializeSkillRegistry(cwd ?? process.cwd(), { sources: effectiveSources, tenancyMode });
     let metadata = skillRegistry.getMetadata();
-    if (Array.isArray(skills) && typeof skills[0] === "string") {
-      const wanted = new Set(skills as string[]);
-      metadata = metadata.filter(s => wanted.has(s.name));
+    const isLiteralList =
+      Array.isArray(skills) &&
+      skills.some(
+        (s) => typeof s === "object" && s !== null && "content" in s,
+      );
+    if (Array.isArray(skills) && !isLiteralList) {
+      const wanted = new Set(skills.filter((s): s is string => typeof s === "string"));
+      metadata = metadata.filter((s) => wanted.has(s.name));
     }
     if (metadata.length === 0) return { systemPrompt, skillRegistry };
     const catalog = buildSkillCatalog(metadata);

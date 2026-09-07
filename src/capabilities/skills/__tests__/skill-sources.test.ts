@@ -104,23 +104,38 @@ describe("Skill sources composition & FsSkillSources (Spec 021-1, US1)", () => {
     }
   });
 
-  it("malformed record content from a fake source rejected with the same errors as a malformed file (FR-005)", async () => {
+  it("malformed record content from a fake source is warned and skipped while valid records load (FR-005)", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "seepient-err-cwd-"));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const badSource: SkillSource = {
+      const mixedSource: SkillSource = {
         list: () => [
           {
             name: "bad-skill",
             content: "not a valid frontmatter without name",
             source: "bad-source",
           },
+          {
+            name: "good-skill",
+            content: "---\nname: good-skill\ndescription: a valid skill\n---\nValid body",
+            source: "mixed-source",
+          },
         ],
       };
 
-      await expect(
-        initializeSkillRegistry(cwd, { sources: [badSource], tenancyMode: "single" }),
-      ).rejects.toThrow(/Skill missing 'name' field/);
+      const registry = await initializeSkillRegistry(cwd, {
+        sources: [mixedSource],
+        tenancyMode: "multi",
+      });
+
+      expect(registry.get("bad-skill")).toBeUndefined();
+      expect(registry.get("good-skill")).toBeDefined();
+      expect(registry.get("good-skill")?.description).toBe("a valid skill");
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/Failed to parse skill record "bad-skill"/),
+      );
     } finally {
+      warnSpy.mockRestore();
       rmSync(cwd, { recursive: true, force: true });
     }
   });

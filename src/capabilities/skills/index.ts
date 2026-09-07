@@ -24,9 +24,15 @@ async function loadSkillsFromSources(
   for (const src of sources) {
     const records = await src.list();
     for (const rec of records) {
-      const parsed = parseSkillContent(rec.content, rec.source ?? "injected");
-      map.set(parsed.name, parsed);
-      rawContentMap.set(parsed.name, rec.content);
+      try {
+        const parsed = parseSkillContent(rec.content, rec.source ?? "injected");
+        map.set(parsed.name, parsed);
+        rawContentMap.set(parsed.name, rec.content);
+      } catch (err: any) {
+        console.warn(
+          `[SKILLS] Warning: Failed to parse skill record "${rec.name ?? "unnamed"}": ${err?.message ?? err}`,
+        );
+      }
     }
   }
   return { skills: Array.from(map.values()), rawContentMap };
