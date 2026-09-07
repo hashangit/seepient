@@ -224,8 +224,9 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
         if (meta.length > 0) {
           skillCatalog = buildSkillCatalog(meta);
         }
-      } catch {
+      } catch (err: any) {
         /* skill init is best-effort — don't block creation */
+        console.warn(`[SKILLS] Warning: Failed to resolve skills: ${err?.message ?? err}`);
       }
     }
   }

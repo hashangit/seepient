@@ -1,5 +1,6 @@
 import { readFile } from 'fs/promises';
 import { Skill, SkillMetadata, SkillRegistry } from './types.js';
+import { splitFrontmatter } from './parser.js';
 
 export class DefaultSkillRegistry implements SkillRegistry {
   private skills: Map<string, Skill>;
@@ -42,7 +43,7 @@ export class DefaultSkillRegistry implements SkillRegistry {
     // Check raw content map first (injected sources, inline literals)
     const raw = this.rawContentMap.get(name);
     if (raw !== undefined) {
-      const body = extractBody(raw);
+      const { body } = splitFrontmatter(raw);
       if (body !== undefined) {
         this.setCache(name, body);
         return body;
@@ -53,7 +54,7 @@ export class DefaultSkillRegistry implements SkillRegistry {
     if (skill.filePath) {
       try {
         const content = await readFile(skill.filePath, 'utf-8');
-        const body = extractBody(content);
+        const { body } = splitFrontmatter(content);
         if (body !== undefined) {
           this.setCache(name, body);
           return body;
@@ -80,21 +81,4 @@ export class DefaultSkillRegistry implements SkillRegistry {
   getNames(): string[] {
     return Array.from(this.skills.keys());
   }
-}
-
-/**
- * Extract the body text after the closing --- delimiter of YAML frontmatter.
- */
-function extractBody(content: string): string | undefined {
-  const trimmed = content.trimStart();
-  if (!trimmed.startsWith('---')) {
-    return content;
-  }
-
-  const endIdx = trimmed.indexOf('---', 3);
-  if (endIdx === -1) {
-    return undefined;
-  }
-
-  return trimmed.slice(endIdx + 3).trimStart() || undefined;
 }

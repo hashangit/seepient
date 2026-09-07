@@ -353,4 +353,65 @@ describe("SDK Skill Sources & Inline Tier (Spec 021-1, QS-S1)", () => {
     const coll = new SkillCollisionError("test-skill", "fs");
     expect(coll.code).toBe("SKILL_COLLISION");
   });
+
+  it("W220: source list() rejection produces console.warn and omits catalog in askSeepient", async () => {
+    let capturedReq: any = null;
+    const runtime = createFakeRuntime({
+      responses: (req) => {
+        capturedReq = req;
+        return { text: "Done" };
+      },
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      const rejectingSource: SkillSource = {
+        list: () => Promise.reject(new Error("Database connection refused")),
+      };
+
+      await askSeepient("Test failing source", {
+        cwd: tmpCwd,
+        tenancy: "single",
+        runtime,
+        sources: [rejectingSource],
+      });
+
+      const sysMsg = capturedReq?.messages?.find((m: any) => m.role === "system");
+      expect(messageText(sysMsg)).not.toContain("AVAILABLE SKILLS");
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/Failed to resolve skills: Database connection refused/),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("W220: source list() rejection produces console.warn and omits catalog in createSeepient", async () => {
+    const runtime = createFakeRuntime({
+      responses: () => ({ text: "Done" }),
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      const rejectingSource: SkillSource = {
+        list: () => Promise.reject(new Error("Database connection refused")),
+      };
+
+      const agent = await createSeepient({
+        cwd: tmpCwd,
+        tenancy: "single",
+        runtime,
+        sources: [rejectingSource],
+      });
+
+      const history = agent.getHistory();
+      const sysMsg = history.find((m: any) => m.role === "system");
+      expect(messageText(sysMsg)).not.toContain("AVAILABLE SKILLS");
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/Failed to resolve skills: Database connection refused/),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
 });

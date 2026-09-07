@@ -193,7 +193,6 @@ export {
 // ── askSeepient ──────────────────────────────────────────────────────────
 
 import { computeEffectiveSkillSources } from "./skill-sources-helper.js";
-export { computeEffectiveSkillSources };
 
 /**
  * Resolve the skill catalog for a one-shot SDK call. Returns the system prompt
@@ -231,7 +230,8 @@ async function resolveSkills(
       systemPrompt: systemPrompt ? systemPrompt + "\n\n" + catalog : catalog,
       skillRegistry,
     };
-  } catch {
+  } catch (err: any) {
+    console.warn(`[SKILLS] Warning: Failed to resolve skills: ${err?.message ?? err}`);
     return { systemPrompt };
   }
 }

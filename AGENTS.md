@@ -232,14 +232,15 @@ Current layout of the Obsidian vault (annotated):
 │       ├── contracts/                # store-contracts, sdk-injection-options, worker-deployment
 │       ├── quickstart.md             # QS-0–QS-4 validation scenarios + production budgets
 │       ├── tasks.md                  # T001–T018 dependency-ordered, US1–US3 story phases, test-first gates
-│       ├── 021-1-skill-sources/      # Sub-spec: injectable skill sources (021-1 — IMPLEMENTED on branch 021-1-skill-sources, unreleased v0.8.0 block)
+│       ├── 021-1-skill-sources/      # Sub-spec: injectable skill sources (021-1 — IMPLEMENTED + round-1 & round-2 remediation W200–W230 completed)
 │           ├── spec.md               # SkillSource/SkillStore + inline tier; FR-001–FR-010, M1–M7, SC-001–SC-007, checks CB-1–CB-8
 │           ├── plan.md               # P0 reconcile+gate → P1 FsSkillSources+inline → P2 write path+016/018/024 coordination → P3 example+docs
 │           ├── research.md           # 2026-08-31 ledger E1–E6/D1–D7 + 2026-09-07 re-baseline E7–E14/D8–D14 + supersession map
 │           ├── data-model.md         # SkillRecord (source? platform-stamped), tenancy-aware composition, last-store save rule
 │           ├── contracts/            # skill-source-contract, sdk-skill-options
 │           ├── quickstart.md         # QS-S0–QS-S5 validation scenarios + budgets + release discipline
-│           └── tasks.md              # T001–T016, US0 reconcile → US1 composition+inline → US2 write path → US3 example+docs; red-first gates
+│           ├── tasks.md              # T001–T016, US0 reconcile → US1 composition+inline → US2 write path → US3 example+docs; red-first gates
+│           └── remediation/          # Round-2 work order W200–W230 (post-review): lazy-body restoration + verified dead-code cleanup
 │       ├── 021-2-review-remediation/ # Sub-spec: consolidated review repairs (021-2 — SHIPPED in v0.7.0 via 021-3)
 │           ├── spec.md               # Release safety + server sessions + transport hardening + docs truth; FR-001–FR-019, M1–M12, SC-001–SC-010
 │           ├── plan.md               # US1 release safety → US2 sessions/WS integrity → US3 type truth ∥ US4 hardening/docs (blast-radius table)
@@ -763,6 +764,15 @@ shell commands, and other important information, read the current plan:
   this spec, CHANGELOG appends to the unreleased v0.8.0 block only. tasks.md
   ready (T001–T016, US0→US3, every task carries runnable self-checks). 024's
   per-workspace skill-trust gate rides this seam (M4 coordination note).
+  IMPLEMENTED on `021-1-skill-sources` (T001–T016 + round-1 review fixes
+  @ `65be17e`: empty-filter, per-record warn-skip, helper dedup, loader
+  single-read, SDK exports, saveGeneratedSkill frontmatter preservation;
+  1860 tests green). Round-2 work order COMPLETED (`remediation/tasks.md`,
+  W200–W230): restored lazy-body loading standard via `SkillRecord.filePath?`,
+  deleted verified dead-code (`parseFrontmatter`, `parseSkillFile`, `discoverSkills`,
+  unused `cwd`, dead `basePath`, splitter consolidation into `splitFrontmatter`),
+  un-exported internal helpers, added source-level failure warnings, and verified
+  all regression gates. Out of scope: server skills story (owner question pending).
 - **SHIPPED (021-3 remediation complete, v0.7.0)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/021-stateless-sdk-workers/021-3-remediation/tasks.md`
   — Work order W001–W033 from the 2026-09-06 architect + second-reviewer
   adjudication: red `pnpm test` gate (12 test-tsconfig errors), Docker

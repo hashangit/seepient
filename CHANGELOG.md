@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Generated-skill write path (`saveGeneratedSkill`)**: New hook in `src/domain/skills/generated-skill-save.ts` targeting embedder-supplied `SkillStore`s with Spec 016 semantics (collision refusal with guidance, version and changelog increments, `kind: "generated"` stamp). Destination is the last `SkillStore` in the effective source list. Fails closed with `SKILL_STORE_UNAVAILABLE` on SDK paths with no store (zero disk writes).
 - **Reference `DbSkillSource` example**: Complete implementation in `examples/worker/` demonstrating remote database-backed global (`tenant_id is null`) and tenant (`= $1`) queries with shadowing against a stub control plane.
 - **Docs & disclosures**: "Skill sources" section added to `docs/sdk/skills.md` documenting the inline tier, composition matrix, silent-empty disclosure for serverless functions, and `outputFileTracingIncludes` Next.js packaging requirements; cross-linked in `docs/sdk/stateless-workers.md`.
+- **Review remediation & lazy loading restoration**: Fixed empty `skills: []` filter catalog leakage; enforced per-record warn-and-skip parsing; restored filesystem lazy-body loading and body cache; exported `saveGeneratedSkill`, `initializeSkillRegistry`, and typed error classes from SDK root; eliminated dead loader/parser code and consolidated frontmatter splitting into `splitFrontmatter`.
 
 ## [v0.7.2] - 2026-09-06
 

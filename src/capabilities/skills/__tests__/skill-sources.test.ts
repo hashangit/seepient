@@ -1,13 +1,23 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import * as fsPromises from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { initializeSkillRegistry } from "../index.js";
 import { FsSkillSources } from "../fs-skill-sources.js";
-import { discoverSkills } from "../loader.js";
 import type { SkillSource, SkillRecord } from "../../../foundations/contracts/skill-source.js";
 
+import { readFile as fsReadFile } from "fs/promises";
+
 let tmpHome: string;
+
+vi.mock("fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("fs/promises")>();
+  return {
+    ...actual,
+    readFile: vi.fn(actual.readFile),
+  };
+});
 
 vi.mock("os", async (importOriginal) => {
   const actual = await importOriginal<typeof import("os")>();
@@ -158,28 +168,19 @@ describe("Skill sources composition & FsSkillSources (Spec 021-1, US1)", () => {
     try {
       writeSkill(join(cwd, ".seepient", "skills"), "golden-skill", "golden test");
 
-      // Baseline discovery:
-      const directSkills = await discoverSkills(cwd);
-      const directCatalog = renderCatalog(directSkills.map(s => ({
-        name: s.name,
-        description: s.description,
-        tags: s.tags,
-      })));
-
       // Registry without sources in single-mode:
       const registry = await initializeSkillRegistry(cwd, { tenancyMode: "single" });
-      const registryCatalog = renderCatalog(registry.getMetadata());
+      const golden = registry.get("golden-skill");
+      expect(golden).toBeDefined();
+      expect(golden?.description).toBe("golden test");
+      expect(golden?.version).toBe("1.0.0");
+      expect(golden?.source).toContain(join(".seepient", "skills"));
 
-      expect(registryCatalog).toBe(directCatalog);
-      expect(registry.getMetadata()).toEqual(
-        directSkills.map(s => ({
-          name: s.name,
-          description: s.description,
-          version: s.version,
-          tags: s.tags,
-          allowedTools: s.allowedTools,
-        }))
-      );
+      const meta = registry.getMetadata();
+      const catalog = renderCatalog(meta);
+      expect(catalog).toContain("AVAILABLE SKILLS (activate with use_skill tool):");
+      expect(catalog).toContain("- golden-skill: golden test");
+      expect(catalog).toContain("When a user request matches a skill, call use_skill with the skill name.");
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
@@ -225,6 +226,77 @@ describe("Skill sources composition & FsSkillSources (Spec 021-1, US1)", () => {
       expect(registry.get("home-skill")).toBeUndefined();
       expect(registry.get("project-skill")).toBeUndefined();
       expect(registry.getAll().length).toBe(1);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("W201: single-mode fs skills defer bodies via filePath with zero retention in rawContentMap, cached on demand", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "seepient-lazy-cwd-"));
+    try {
+      writeSkill(join(cwd, ".seepient", "skills"), "fs-one", "First FS skill");
+      writeSkill(join(cwd, ".seepient", "skills"), "fs-two", "Second FS skill");
+
+      const injected: SkillSource = {
+        list: () => [
+          {
+            name: "injected-one",
+            content: "---\nname: injected-one\ndescription: injected skill\n---\nInjected body\n",
+            source: "custom-db",
+          },
+        ],
+      };
+
+      const registry = await initializeSkillRegistry(cwd, {
+        sources: [injected],
+        tenancyMode: "single",
+      });
+
+      // Memory probe: fs skills must NOT be in rawContentMap
+      const rawMap = (registry as any).rawContentMap as Map<string, string>;
+      expect(rawMap.has("fs-one")).toBe(false);
+      expect(rawMap.has("fs-two")).toBe(false);
+      // Injected skill without filePath MUST be in rawContentMap
+      expect(rawMap.has("injected-one")).toBe(true);
+
+      // Verify fsReadFile call counts for on-demand loading and caching
+      const readSpy = vi.mocked(fsReadFile);
+      readSpy.mockClear();
+
+      // First getBody: loads from disk
+      const body1 = await registry.getBody("fs-one");
+      expect(body1).toContain("Body of fs-one");
+      expect(readSpy).toHaveBeenCalledTimes(1);
+
+      // Second getBody: served from bodyCache, no disk read
+      const body2 = await registry.getBody("fs-one");
+      expect(body2).toBe(body1);
+      expect(readSpy).toHaveBeenCalledTimes(1);
+
+      // Injected getBody: served from rawContentMap
+      const injectedBody = await registry.getBody("injected-one");
+      expect(injectedBody).toContain("Injected body");
+      // No extra readFile call for injected skill
+      expect(readSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("W203: deleting skill file after registry construction causes getBody to return undefined", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "seepient-deleted-cwd-"));
+    try {
+      writeSkill(join(cwd, ".seepient", "skills"), "transient-skill", "Will be deleted");
+      const registry = await initializeSkillRegistry(cwd, { tenancyMode: "single" });
+
+      expect(registry.get("transient-skill")).toBeDefined();
+
+      // Delete the skill file
+      rmSync(join(cwd, ".seepient", "skills", "transient-skill", "SKILL.md"));
+
+      // getBody fails gracefully and returns undefined
+      const body = await registry.getBody("transient-skill");
+      expect(body).toBeUndefined();
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }

@@ -20,7 +20,7 @@ vi.mock("os", async (importOriginal) => {
   };
 });
 
-import { discoverSkills } from "../loader.js";
+import { discoverSkillRecords } from "../loader.js";
 
 beforeAll(() => {
   tmpHome = mkdtempSync(join(tmpdir(), "seepient-loader-home-"));
@@ -44,10 +44,10 @@ describe("skills discovery: ~/.agents/skills", () => {
     writeSkill(join(tmpHome, ".agents", "skills"), "unslop", "remove slop from prose");
     const cwd = mkdtempSync(join(tmpdir(), "seepient-loader-cwd-"));
     try {
-      const skills = await discoverSkills(cwd);
-      const unslop = skills.find((s) => s.name === "unslop");
+      const records = await discoverSkillRecords(cwd);
+      const unslop = records.find((s) => s.name === "unslop");
       expect(unslop, "skill in ~/.agents/skills must be discovered").toBeDefined();
-      expect(unslop?.description).toBe("remove slop from prose");
+      expect(unslop?.content).toContain("description: remove slop from prose");
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
@@ -58,9 +58,9 @@ describe("skills discovery: ~/.agents/skills", () => {
     writeSkill(join(tmpHome, ".seepient", "skills"), "collide", "seepient copy");
     const cwd = mkdtempSync(join(tmpdir(), "seepient-loader-cwd-"));
     try {
-      const skills = await discoverSkills(cwd);
-      const collide = skills.find((s) => s.name === "collide");
-      expect(collide?.description).toBe("seepient copy");
+      const records = await discoverSkillRecords(cwd);
+      const collide = records.find((s) => s.name === "collide");
+      expect(collide?.content).toContain("description: seepient copy");
       expect(collide?.source).toContain(join(".seepient", "skills"));
     } finally {
       rmSync(cwd, { recursive: true, force: true });
