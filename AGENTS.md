@@ -232,14 +232,14 @@ Current layout of the Obsidian vault (annotated):
 │       ├── contracts/                # store-contracts, sdk-injection-options, worker-deployment
 │       ├── quickstart.md             # QS-0–QS-4 validation scenarios + production budgets
 │       ├── tasks.md                  # T001–T018 dependency-ordered, US1–US3 story phases, test-first gates
-│       ├── 021-1-skill-sources/      # Sub-spec: injectable skill sources (021-1 — planned, same branch/release)
-│           ├── spec.md               # SkillSource/SkillStore + inline tier; FR-001–FR-009, M1–M6, SC-001–SC-005
-│           ├── plan.md               # P0 contract+composition+inline → P1 write path+016/018 coordination → P2 example+docs
-│           ├── research.md           # Skills-gap design ledger E1–E6 + decisions D1–D7 (2026-08-31)
-│           ├── data-model.md         # SkillRecord, last-wins composition, generated-skill write path
+│       ├── 021-1-skill-sources/      # Sub-spec: injectable skill sources (021-1 — AMENDED 2026-09-07, ready; branch off 022, release owner-decided)
+│           ├── spec.md               # SkillSource/SkillStore + inline tier; FR-001–FR-010, M1–M7, SC-001–SC-007, checks CB-1–CB-8
+│           ├── plan.md               # P0 reconcile+gate → P1 FsSkillSources+inline → P2 write path+016/018/024 coordination → P3 example+docs
+│           ├── research.md           # 2026-08-31 ledger E1–E6/D1–D7 + 2026-09-07 re-baseline E7–E14/D8–D14 + supersession map
+│           ├── data-model.md         # SkillRecord (source? platform-stamped), tenancy-aware composition, last-store save rule
 │           ├── contracts/            # skill-source-contract, sdk-skill-options
-│           ├── quickstart.md         # QS-S0–QS-S4 validation scenarios + budgets
-│           └── tasks.md              # T001–T013 dependency-ordered, US1–US3 story phases, test-first gates
+│           ├── quickstart.md         # QS-S0–QS-S5 validation scenarios + budgets + release discipline
+│           └── tasks.md              # T001–T016, US0 reconcile → US1 composition+inline → US2 write path → US3 example+docs; red-first gates
 │       ├── 021-2-review-remediation/ # Sub-spec: consolidated review repairs (021-2 — SHIPPED in v0.7.0 via 021-3)
 │           ├── spec.md               # Release safety + server sessions + transport hardening + docs truth; FR-001–FR-019, M1–M12, SC-001–SC-010
 │           ├── plan.md               # US1 release safety → US2 sessions/WS integrity → US3 type truth ∥ US4 hardening/docs (blast-radius table)
@@ -738,14 +738,31 @@ shell commands, and other important information, read the current plan:
   SDK surface, pre-1.0 in-place). tasks.md ready (T001–T035; every task carries
   a runnable self-check — grep proofs, targeted suites, micro-probes, UX-copy
   assertions; gates land red first to prove their detectors).
-- **SAME-WINDOW DEPENDENCY (baseline per owner; seam verified on main @ 0.7.2)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/021-stateless-sdk-workers/021-1-skill-sources/plan.md`
-  — Injectable `SkillSource`/`SkillStore` + inline-skills tier so skill content
-  joins the store-contract family — serverless light shape gets a working skill
-  system, embedders compose global + tenant-scoped skills from their own DB with
-  last-wins shadowing, and 016's generated-skill writer retargets the store instead
-  of disk (fail-closed without one). tasks.md ready (T001–T013). 022 FR-014
-  depends on this contract surface; if it slips, FR-014 degrades to
-  discovery-off-in-multi-mode only.
+- **READY FOR IMPLEMENTATION (amended 2026-09-07, re-baselined post-021-2/3/4/022)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/021-stateless-sdk-workers/021-1-skill-sources/plan.md`
+  — Injectable skill sources, reconciled onto the seam 022 already landed
+  (its T028 degrade rule absorbed the read side: `sources` option,
+  tenancy-aware `initializeSkillRegistry`, dim-7 matrix). 021-1 now: P0
+  reconciliation — relocate the contract from `capabilities/skills/types.ts`
+  to `foundations/contracts/skill-source.ts` (deleting the dead `load()`
+  parser bypass and decorative `id`/`kind`), fix the two upward type-imports
+  in `foundations/types.ts:178/:263`, and harden the architecture gate
+  red-first so type-only upward imports can't return (its foundations rule
+  scans static imports only — verified blind spot). P1 `FsSkillSources` +
+  unified tenancy-aware composition (single = `[fs, ...sources]` last-wins,
+  multi = sources only, 022 FR-014 frozen) + the inline `SkillLiteral` tier
+  where literals COUNT as injected content for tenancy resolution. P2
+  `SkillStore.save()` behind `saveGeneratedSkill` (016 semantics, fail-closed
+  `SKILL_STORE_UNAVAILABLE`, save destination = last store in the effective
+  list). P3 `DbSkillSource` example + docs (skills.md sources section;
+  corrects the live `skillSources`-vs-`sources` contradiction in
+  ask-seepient.md/create-seepient.md). Checks CB-1–CB-8: hardened
+  architecture gate, legacy-vocabulary grep bans, matrix 8/8 non-regression
+  every story, QS-S0 byte-equivalence golden, docs truth, red-first gates,
+  no-shim rule. Branch `021-1-skill-sources` cut from 022 after it lands;
+  release vehicle is the OWNER's decision — no version bump/tag/cut from
+  this spec, CHANGELOG appends to the unreleased v0.8.0 block only. tasks.md
+  ready (T001–T016, US0→US3, every task carries runnable self-checks). 024's
+  per-workspace skill-trust gate rides this seam (M4 coordination note).
 - **SHIPPED (021-3 remediation complete, v0.7.0)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/021-stateless-sdk-workers/021-3-remediation/tasks.md`
   — Work order W001–W033 from the 2026-09-06 architect + second-reviewer
   adjudication: red `pnpm test` gate (12 test-tsconfig errors), Docker
@@ -817,16 +834,17 @@ shell commands, and other important information, read the current plan:
   Includes server startup parity (http/index.ts:185-242) and a reference
   worker with HTTP-callback stores; Docker scheduler multi-host and kernel
   tier explicitly out (isolation ladder is deployment guidance). P0 ≈5d,
-  P1 ≈3d, P2 ≈2d. Sub-spec 021-1 (`021-1-skill-sources/`, plan + tasks
-  complete — implementation starts after 021-2 lands, T001–T013, same
-  branch/release): injectable `SkillSource`/
-  `SkillStore` + inline-skills tier so skill content joins the store-contract
-  family — serverless light shape gets a working skill system (ambient fs
-  discovery silently no-ops there today), embedders compose global +
-  tenant-scoped skills from their own DB with last-wins shadowing, and 016's
-  generated-skill writer retargets the store instead of disk (fail-closed
-  without one). Consolidated SDK guide covering 020 + 021 + 021-1 is 021
-  task T016 (docs/sdk/). 021-1 ≈1 week.
+  P1 ≈3d, P2 ≈2d. Sub-spec 021-1 (`021-1-skill-sources/`, AMENDED
+  2026-09-07 — ready for implementation on a branch cut from the 022-landed
+  tree, release vehicle owner-decided; T001–T016, US0 reconciliation → US1
+  composition+inline → US2 write path → US3 example+docs): injectable
+  `SkillSource`/`SkillStore` + inline-skills tier reconciled onto 022's
+  landed `sources` seam — serverless light shape gets a working skill
+  system (ambient fs discovery silently no-ops there today), embedders
+  compose global + tenant-scoped skills from their own DB with last-wins
+  shadowing, and 016's generated-skill writer retargets the store instead
+  of disk (fail-closed without one). SDK docs coverage lands as 021-1
+  T012/T013 (docs/sdk/). 021-1 ≈2 weeks with gates.
 - **SHIPPED (spec 020 complete, v0.6.0, branch `020-custom-tool-execution-parity`)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/020-custom-tool-execution-parity/plan.md`
   — Custom-tool execution parity (020): 008's two policy-governed custom-tool
   rungs are contract-only (T005 types + T304 registration shipped; analyzer
