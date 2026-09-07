@@ -55,4 +55,5 @@ export interface GatewayConfig {
   semanticTopK: number;
   defaultRateLimitPerMin: number;
   maxAuditLogsInMemory: number;
+  tenancy?: "single" | "multi";
 }

@@ -9,14 +9,22 @@ export type {
 import type { Skill } from "../../foundations/contracts/skill-registry.js";
 
 /**
- * SkillSource signature seam placeholder for Spec 021-1.
- * Will be replaced in-place in Spec 021-1 by the canonical contract:
- * `list(): Promise<SkillRecord[]>`.
+ * Skill record representing raw unparsed skill content.
+ */
+export interface SkillRecord {
+  name: string;
+  content: string; // complete skill file text (frontmatter delimiters + body), raw
+  source?: string;  // attribution label ("db:global", "fs", "inline")
+}
+
+/**
+ * SkillSource signature seam for Spec 021-1 / Spec 022.
  */
 export interface SkillSource {
-  readonly id: string;
-  readonly kind: string;
-  load?(cwd: string): Promise<Skill[]>;
+  readonly id?: string;
+  readonly kind?: string;
+  list?(): Promise<SkillRecord[]> | SkillRecord[];
+  load?(cwd: string): Promise<Skill[]> | Skill[];
 }
 
 /** Default maximum skill body size in characters (~8k tokens at 4 chars/token). */

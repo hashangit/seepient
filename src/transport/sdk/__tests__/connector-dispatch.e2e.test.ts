@@ -89,6 +89,7 @@ describe("brokerConnector Dispatch & Parity (QS-2.1 – QS-2.4)", () => {
     };
 
     const agent = await createSeepient({
+      tenancy: "single",
       runtime: runtime as never,
       tools: [searchTool],
       network: mockNetwork,
@@ -168,6 +169,7 @@ describe("brokerConnector Dispatch & Parity (QS-2.1 – QS-2.4)", () => {
     };
 
     const agent = await createSeepient({
+      tenancy: "single",
       runtime: runtime as never,
       tools: [searchTool],
       network: mockNetwork,
@@ -216,6 +218,7 @@ describe("brokerConnector Dispatch & Parity (QS-2.1 – QS-2.4)", () => {
     ]);
 
     const agent2 = await createSeepient({
+      tenancy: "single",
       consentMode: "autonomous",
       runtime: runtime2 as never,
       tools: [missingSecretTool],
@@ -257,6 +260,7 @@ describe("brokerConnector Dispatch & Parity (QS-2.1 – QS-2.4)", () => {
     ]);
 
     const agent = await createSeepient({
+      tenancy: "single",
       runtime: runtime as never,
       tools: [badConnectorTool],
       approveTool: async () => {
@@ -316,6 +320,7 @@ describe("brokerConnector Dispatch & Parity (QS-2.1 – QS-2.4)", () => {
     ]);
 
     const agent = await createSeepient({
+      tenancy: "single",
       runtime: runtime as never,
       tools: [httpTool],
       network: mockNetwork,
@@ -337,6 +342,7 @@ describe("brokerConnector Dispatch & Parity (QS-2.1 – QS-2.4)", () => {
     ]);
 
     const ssrfAgent = await createSeepient({
+      tenancy: "single",
       runtime: ssrfRuntime as never,
       tools: [httpTool],
       consentMode: "autonomous",

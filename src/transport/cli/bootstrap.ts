@@ -19,6 +19,7 @@ import * as os from 'os';
 import * as readline from 'readline/promises';
 
 import { Agent } from './agent.js';
+import { ToolRegistry } from '../../domain/tool-executor.js';
 import { resolveLaunchMode, selectSystemPrompt } from '../../domain/prompts/system-prompts.js';
 import { getDefaultProviderRuntime } from '../../domain/providers/provider-runtime.js';
 import {
@@ -148,9 +149,51 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
   // defaultSessionPath()). Disabled backends can be added via registerBackend().
   fullConfig.hasExplicitModel = Boolean(options.model);
   const persistence = createPersistenceBackend({ type: 'file' });
-  const agent = new Agent(runtime, options.model ?? resolvedModel, fullConfig, systemPrompt, persistence, activeProviderType);
+  const toolRegistry = new ToolRegistry();
+  const agent = new Agent(runtime, options.model ?? resolvedModel, fullConfig, systemPrompt, persistence, activeProviderType, toolRegistry);
   if (cliProvider) {
     agent.switchProvider(cliProvider, options.model ?? resolvedModel);
+  }
+
+  // Initialize skills system
+  await agent.initializeSkills();
+
+  // Initialize gateway (if enabled) — register returned tools into per-agent registry (Spec 022)
+  let gatewayInstance: any = null;
+  try {
+    const settingsManager = new SettingsManager({
+      config: applyEnvOverrides(loadMergedConfig()),
+      projectConfigPath: LOCAL_CONFIG_FILE,
+      globalConfigPath: GLOBAL_CONFIG_FILE,
+    });
+    const gwEnabled = settingsManager.get('gateway.enabled').value as boolean;
+    if (gwEnabled) {
+      const gatewayConfig = {
+        enabled: true,
+        semanticTopK: settingsManager.get('gateway.semanticTopK').value as number,
+        defaultRateLimitPerMin: settingsManager.get('gateway.defaultRateLimitPerMin').value as number,
+        maxAuditLogsInMemory: settingsManager.get('gateway.maxAuditLogs').value as number,
+      };
+      const { GatewaySettingsAdapter } = await import('../../capabilities/gateway/settings-adapter.js');
+      const gwStorageDir = process.env.SEEPIENT_GATEWAY_DIR ?? path.join(os.homedir(), '.seepient');
+      const gwSettingsAdapter = new GatewaySettingsAdapter(gwStorageDir);
+      await gwSettingsAdapter.initialize();
+
+      const { createGateway } = await import('../../capabilities/gateway/index.js');
+      const gwResult = await createGateway(gatewayConfig, gwSettingsAdapter);
+
+      if (gwResult) {
+        gatewayInstance = gwResult.gateway;
+        agent.registerManyTools(gwResult.tools);
+        const { semanticToolInjectionMiddleware } = await import('../../domain/middleware/semantic-tools.js');
+        agent.setMiddleware([semanticToolInjectionMiddleware(gatewayInstance, gatewayConfig.semanticTopK)]);
+        if (options.interactive) {
+          console.log(chalk.green('Gateway initialized'));
+        }
+      }
+    }
+  } catch (e) {
+    console.warn(chalk.yellow(`Gateway initialization skipped: ${e instanceof Error ? e.message : String(e)}`));
   }
 
   // Spec 008 / 017: attach the protected PolicyStore. Active policy lives
@@ -232,46 +275,6 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
       console.warn(`[audit] Recovered ${recovered.length} indeterminate action(s): ${recovered.join(', ')}`);
     }
   } catch { /* best-effort — never block startup on audit recovery */ }
-
-  // Initialize skills system
-  await agent.initializeSkills();
-
-  // Initialize gateway (if enabled)
-  let gatewayInstance: any = null;
-  try {
-    const settingsManager = new SettingsManager({
-      config: applyEnvOverrides(loadMergedConfig()),
-      projectConfigPath: LOCAL_CONFIG_FILE,
-      globalConfigPath: GLOBAL_CONFIG_FILE,
-    });
-    const gwEnabled = settingsManager.get('gateway.enabled').value as boolean;
-    if (gwEnabled) {
-      const gatewayConfig = {
-        enabled: true,
-        semanticTopK: settingsManager.get('gateway.semanticTopK').value as number,
-        defaultRateLimitPerMin: settingsManager.get('gateway.defaultRateLimitPerMin').value as number,
-        maxAuditLogsInMemory: settingsManager.get('gateway.maxAuditLogs').value as number,
-      };
-      const { GatewaySettingsAdapter } = await import('../../capabilities/gateway/settings-adapter.js');
-      const gwStorageDir = process.env.SEEPIENT_GATEWAY_DIR ?? path.join(os.homedir(), '.seepient');
-      const gwSettingsAdapter = new GatewaySettingsAdapter(gwStorageDir);
-      await gwSettingsAdapter.initialize();
-
-      const { createGateway } = await import('../../capabilities/gateway/index.js');
-      const { registerTool } = await import('../../domain/tool-executor.js');
-      gatewayInstance = await createGateway(gatewayConfig, gwSettingsAdapter, undefined, (tools) => tools.forEach(registerTool));
-
-      if (gatewayInstance) {
-        const { semanticToolInjectionMiddleware } = await import('../../domain/middleware/semantic-tools.js');
-        agent.setMiddleware([semanticToolInjectionMiddleware(gatewayInstance, gatewayConfig.semanticTopK)]);
-        if (options.interactive) {
-          console.log(chalk.green('Gateway initialized'));
-        }
-      }
-    }
-  } catch (e) {
-    console.warn(chalk.yellow(`Gateway initialization skipped: ${e instanceof Error ? e.message : String(e)}`));
-  }
 
   // Ensure ~/seepient_documents exists
   const docsDir = path.join(os.homedir(), 'seepient_documents');

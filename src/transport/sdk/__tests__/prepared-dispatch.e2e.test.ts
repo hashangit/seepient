@@ -106,6 +106,7 @@ describe("preparedTool Dispatch & Parity (QS-1.1 – QS-1.6)", () => {
     ]);
 
     const agent = await createSeepient({
+      tenancy: "single",
       runtime: runtime as never,
       tools: [reportTool],
       cwd: dir,
@@ -171,6 +172,7 @@ describe("preparedTool Dispatch & Parity (QS-1.1 – QS-1.6)", () => {
     ]);
 
     const genRes = await askSeepient("Write note via generateText", {
+      tenancy: "single",
       runtime: genRuntime as never,
       tools: [makeTool("gen")],
       cwd: dir,
@@ -192,6 +194,7 @@ describe("preparedTool Dispatch & Parity (QS-1.1 – QS-1.6)", () => {
     ]);
 
     const stream = await askSeepient("Write note via streamText", { stream: true,
+      tenancy: "single",
       runtime: streamRuntime as never,
       tools: [makeTool("stream")],
       cwd: dir,
@@ -235,6 +238,7 @@ describe("preparedTool Dispatch & Parity (QS-1.1 – QS-1.6)", () => {
     ]);
 
     const agent = await createSeepient({
+      tenancy: "single",
       runtime: runtime as never,
       tools: [brokenDraftTool],
       cwd: dir,
@@ -278,6 +282,7 @@ describe("preparedTool Dispatch & Parity (QS-1.1 – QS-1.6)", () => {
     ]);
 
     const agent = await createSeepient({
+      tenancy: "single",
       runtime: runtime as never,
       tools: [throwingTool],
       cwd: dir,
@@ -321,6 +326,7 @@ describe("preparedTool Dispatch & Parity (QS-1.1 – QS-1.6)", () => {
 
     // Autonomous consent mode should not prompt for allowed operations within ceiling
     const agent = await createSeepient({
+      tenancy: "single",
       consentMode: "autonomous",
       runtime: runtime as never,
       tools: [makeSimpleReport()],
@@ -367,6 +373,7 @@ describe("preparedTool Dispatch & Parity (QS-1.1 – QS-1.6)", () => {
     ]);
 
     const agent = await createSeepient({
+      tenancy: "single",
       runtime: runtime as never,
       tools: [toolWithCommit],
       cwd: dir,

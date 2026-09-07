@@ -233,7 +233,7 @@ describe("/permissions protected-policy (T307, QS-3.3)", () => {
 
     const snap = await agent.getPolicyStore()!.read(computeWorkspaceId("/proj"));
     expect(snap.version).toBe(1);
-    expect(snap.policy.capabilities).toEqual([{ kind: "commit-file", path: "/proj/a.txt" }]);
+    expect(snap.policy.capabilities).toEqual([{ kind: "commit-file", path: "/proj/a.txt", principalId: "cli-user" }]);
   });
 
   it("revoke-cap removes the capability by index", async () => {

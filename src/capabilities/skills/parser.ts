@@ -59,6 +59,34 @@ export async function parseFrontmatter(filePath: string): Promise<Skill> {
   };
 }
 
+/**
+ * Parse a skill from raw content string.
+ */
+export function parseSkillContent(
+  content: string,
+  sourceLabel: string = "injected",
+  filePath: string = "",
+): Skill {
+  const { frontmatter } = extractFrontmatter(content);
+
+  if (!frontmatter.name) throw new Error(`Skill missing 'name' field in content`);
+  if (!frontmatter.description) throw new Error(`Skill missing 'description' field in content`);
+
+  return {
+    name: frontmatter.name,
+    description: frontmatter.description,
+    version: frontmatter.version || '1.0.0',
+    author: frontmatter.author,
+    tags: frontmatter.tags || [],
+    allowedTools: frontmatter.allowedTools,
+    priority: frontmatter.priority || 0,
+    basePath: '',
+    source: sourceLabel,
+    frontmatter,
+    filePath,
+  };
+}
+
 function extractFrontmatter(content: string): { frontmatter: SkillFrontmatter; body: string } {
   const trimmed = content.trimStart();
   if (!trimmed.startsWith('---')) {

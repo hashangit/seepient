@@ -18,7 +18,9 @@ import type {
 import { getDefaultProviderRuntime, type ProviderRuntime } from "../../domain/providers/provider-runtime.js";
 import { createHookExecutor } from "../../domain/hooks.js";
 import { StreamManager } from "../../domain/streaming/stream-manager.js";
-import { resolveTools, getAllToolDefinitions, extractHostCallbacks, extractRegistrations, DEFAULT_TRUSTED_HOST_ALLOWLIST } from "./tools.js";
+import { resolveTools, extractHostCallbacks, extractRegistrations, DEFAULT_TRUSTED_HOST_ALLOWLIST } from "./tools.js";
+import { ToolRegistry } from "../../domain/tool-executor.js";
+import type { ToolModule } from "../../foundations/contracts/tool.js";
 import { runAgentLoop } from "../../domain/agent-loop.js";
 import { initializeSkillRegistry } from "../../capabilities/skills/index.js";
 import { buildSkillCatalog } from "../../domain/skills/skill-catalog.js";
@@ -35,7 +37,6 @@ import * as path from 'path';
 // ── Re-exports ───────────────────────────────────────────────────────────
 
 export { createSeepient } from "./seepient.js";
-import { warnIfPartialStoreInjection } from "./seepient.js";
 export type {
   Seepient,
   CreateSeepientOptions,
@@ -75,6 +76,19 @@ export type { CapabilitySet, DecisionAuthority, ApprovalBroker, PermissionReques
 export type { ProviderRuntimeContract } from "../../foundations/contracts/provider-runtime.js";
 export type { ConsentMode } from "../../foundations/settings-schema.js";
 
+// Spec 022 Tenancy exports
+export {
+  resolveTenancyMode,
+  validateTenancyCompleteness,
+  emitTenancyNoticeOnce,
+  TenancyRuntimeRequiredError,
+  TenancyStoreIncompleteError,
+  TenancyAmbientIoError,
+  type TenancyMode,
+  type TenancySignals,
+  type TenancyResolution,
+} from "../../domain/tenancy/tenancy-mode.js";
+
 // Re-export middleware pipeline
 export {
   compose,
@@ -87,18 +101,35 @@ export {
 
 import type { GatewayConfig } from "../../capabilities/gateway/types.js";
 import type { GatewaySettingsAdapter } from "../../capabilities/gateway/settings-adapter.js";
+import {
+  resolveTenancyMode,
+  validateTenancyCompleteness,
+  emitTenancyNoticeOnce,
+  type TenancyMode,
+  type TenancySignals,
+} from "../../domain/tenancy/tenancy-mode.js";
 
-// Gateway (lazy — only loaded when used)
+// Gateway (lazy — only loaded when used; Spec 022 returns { gateway, tools }, no global registration)
 export const gateway = {
-  async createGateway(config: GatewayConfig, settingsAdapter?: GatewaySettingsAdapter) {
+  async createGateway(
+    config: GatewayConfig,
+    settingsAdapter?: GatewaySettingsAdapter,
+    options?: { tenancy?: TenancyMode },
+  ) {
     const { createGateway } = await import('../../capabilities/gateway/index.js');
     const { GatewaySettingsAdapter: Adapter } = await import('../../capabilities/gateway/settings-adapter.js');
-    const adapter = settingsAdapter ?? new Adapter(
-      process.env.SEEPIENT_GATEWAY_DIR ?? path.join(homedir(), '.seepient')
-    );
+    const mode = options?.tenancy ?? config.tenancy;
+    if (mode === "multi" && !settingsAdapter) {
+      const { TenancyAmbientIoError } = await import('../../domain/tenancy/tenancy-mode.js');
+      throw new TenancyAmbientIoError(
+        path.join(homedir(), '.seepient'),
+        'Ambient gateway adapter default at "~/.seepient" is forbidden in multi-tenant mode. Pass an explicit GatewaySettingsAdapter.',
+      );
+    }
+    const storageDir = process.env.SEEPIENT_GATEWAY_DIR ?? path.join(homedir(), '.seepient');
+    const adapter = settingsAdapter ?? new Adapter(storageDir);
     if (!settingsAdapter) await adapter.initialize();
-    const { registerTool } = await import('../../domain/tool-executor.js');
-    return createGateway(config, adapter, undefined, (tools) => tools.forEach(registerTool));
+    return createGateway(config, adapter);
   },
 };
 
@@ -154,10 +185,15 @@ async function resolveSkills(
   systemPrompt: string | undefined,
   skills: string[] | boolean | undefined,
   cwd?: string,
+  tenancyMode?: TenancyMode,
+  sources?: import("../../capabilities/skills/types.js").SkillSource[],
 ): Promise<{ systemPrompt: string | undefined; skillRegistry?: import("../../capabilities/skills/types.js").SkillRegistry }> {
   if (skills === false) return { systemPrompt };
+  if (tenancyMode === "multi" && (!sources || sources.length === 0)) {
+    return { systemPrompt };
+  }
   try {
-    const skillRegistry = await initializeSkillRegistry(cwd ?? process.cwd());
+    const skillRegistry = await initializeSkillRegistry(cwd ?? process.cwd(), { sources, tenancyMode });
     let metadata = skillRegistry.getMetadata();
     if (Array.isArray(skills)) {
       const wanted = new Set(skills);
@@ -219,6 +255,28 @@ export async function askSeepient(
   options?: AskSeepientOptions,
 ): Promise<AskSeepientResult | AskSeepientStreamResult> {
   const opts = options ?? {};
+
+  const tenancySignals: TenancySignals = {
+    explicit: opts.tenancy,
+    principalIdSet: Boolean(opts.principalId && opts.principalId !== "default" && opts.principalId !== "sdk-user"),
+    anyStoreInjected: Boolean(opts.auditStore || opts.policyStore || opts.capabilityLedger),
+    runtimeInjected: Boolean(opts.runtime),
+    persistInjected: false,
+    skillSourcesInjected: Boolean(opts.sources && Array.isArray(opts.sources)),
+  };
+  const { mode: tenancyMode, upgraded } = resolveTenancyMode(tenancySignals);
+  emitTenancyNoticeOnce(upgraded);
+
+  // Validate tenancy completeness before any runtime defaulting or I/O
+  validateTenancyCompleteness(tenancyMode, {
+    runtime: opts.runtime,
+    auditStore: opts.auditStore,
+    policyStore: opts.policyStore,
+    capabilityLedger: opts.capabilityLedger,
+    stateless: opts.stateless,
+    isSessionful: false,
+  });
+
   const maxSteps = opts.maxSteps ?? 10;
   const runtime = opts.runtime ?? getDefaultProviderRuntime();
 
@@ -243,13 +301,37 @@ export async function askSeepient(
   }
 
   // Resolve skill catalog and append to the system prompt
-  const { systemPrompt, skillRegistry } = await resolveSkills(opts.systemPrompt, opts.skills, opts.cwd);
+  const { systemPrompt, skillRegistry } = await resolveSkills(
+    opts.systemPrompt,
+    opts.skills,
+    opts.cwd,
+    tenancyMode,
+    opts.sources,
+  );
+
+  // Construct per-call ToolRegistry (Spec 022)
+  const toolRegistry = new ToolRegistry();
+  for (const item of opts.tools ?? []) {
+    if (
+      item &&
+      typeof item === "object" &&
+      "definition" in item &&
+      typeof (item as { definition?: any }).definition?.function?.name === "string" &&
+      typeof (item as { handler?: any }).handler === "function" &&
+      !("trust" in item)
+    ) {
+      toolRegistry.register(item as unknown as ToolModule);
+    }
+  }
 
   // Resolve tools
-  const toolDefs = opts.tools ? resolveTools(opts.tools) : getAllToolDefinitions();
+  const toolDefs = opts.tools ? resolveTools(opts.tools, toolRegistry) : toolRegistry.definitions();
   // spec 019 FR-006: explicit trustedHostTool registrations wire into the
   // boundary's host-callback map and join the operator allowlist.
-  const { callbacks: hostCallbacks, registrationIds } = extractHostCallbacks(opts.tools, { skills: skillRegistry });
+  const { callbacks: hostCallbacks, registrationIds } = extractHostCallbacks(opts.tools, {
+    skills: skillRegistry,
+    registry: toolRegistry,
+  });
   // spec 020 FR-001: custom preparedTool and brokerConnector registrations
   const registrations = extractRegistrations(opts.tools);
 
@@ -288,8 +370,6 @@ export async function askSeepient(
     ? (opts.consentMode === "autonomous" ? "autonomous" : opts.consentMode === "ask-everything" ? "manual" : "balanced")
     : (opts.approvalBroker || opts.approveTool ? "manual" : "never");
 
-  warnIfPartialStoreInjection(opts);
-
   const wiredPipeline = await buildActionLifecycle({
     principalId: opts.principalId ?? "sdk-user",
     runId: generateId(),
@@ -307,6 +387,8 @@ export async function askSeepient(
     auditStore: opts.auditStore,
     policyStore: opts.policyStore,
     capabilityLedger: opts.capabilityLedger,
+    operatorBaseline: toCapabilitySet(opts.operatorBaseline),
+    tenancyMode,
   });
 
   if (opts.stream) {
@@ -331,6 +413,7 @@ export async function askSeepient(
           purpose: opts.purpose,
           tier: opts.tier,
           messages,
+          toolRegistry,
           toolDefs,
           systemPrompt,
           maxSteps,
@@ -447,6 +530,7 @@ export async function askSeepient(
     purpose: opts.purpose,
     tier: opts.tier,
     messages,
+    toolRegistry,
     toolDefs,
     systemPrompt,
     maxSteps,

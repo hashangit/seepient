@@ -15,35 +15,38 @@ export {
   tool,
   resolveTools,
   getToolGroup,
-  // Registry and execution
-  registerTool,
-  executeTool,
-  getAllToolDefinitions,
+  ToolRegistry,
+  ToolRegistrationError,
+  BUILT_IN_TOOL_MODULES,
+  normalizeToolResult,
 } from "../../domain/tool-executor.js";
 
-import { getAllToolModules } from "../../domain/tool-executor.js";
+import { BUILT_IN_TOOL_MODULES, type ToolRegistry } from "../../domain/tool-executor.js";
 
 // ── spec 019 FR-006 (T022): host-callback wiring for trusted-host tools ──
 
 /**
  * Extract trusted-host callbacks from explicit `trustedHostTool({ trust:
- * "host" })` registrations in a tools list. The composition root passes the
- * result to `buildLocalBoundary({ hostCallbacks })` — after the ambient
- * registry fallback's deletion, the TrustedHostExecutor runs REGISTERED
- * callbacks only. The returned ids are also operator intent: they join the
- * effective trusted-host allowlist for the lifecycle.
+ * "host" })` registrations in a tools list, plus handlers from the agent's
+ * own ToolRegistry (Spec 022, FR-005).
  */
 export function extractHostCallbacks(
   tools?: readonly unknown[],
-  extra?: { skills?: import("../../capabilities/skills/types.js").SkillRegistry },
+  extra?: {
+    skills?: import("../../capabilities/skills/types.js").SkillRegistry;
+    registry?: ToolRegistry;
+  },
 ): { callbacks: Map<string, (args: unknown) => Promise<unknown>>; registrationIds: string[] } {
   const callbacks = new Map<string, (args: unknown) => Promise<unknown>>();
   const registrationIds: string[] = [];
-  for (const mod of getAllToolModules()) {
+
+  const modules = extra?.registry ? extra.registry.modules() : BUILT_IN_TOOL_MODULES;
+  for (const mod of modules) {
     if (typeof mod.handler === "function" && mod.definition?.function?.name) {
       callbacks.set(mod.definition.function.name, (args) => mod.handler!(args as never, {}, { skills: extra?.skills }));
     }
   }
+
   for (const input of tools ?? []) {
     const reg = input as import("../../foundations/contracts/custom-tools.js").TrustedHostToolRegistration | undefined;
     if (

@@ -9,7 +9,6 @@
 
 import chalk from 'chalk';
 import type { CommandHandler } from './registry.js';
-import { getAllToolDefinitions } from '../../../domain/tool-executor.js';
 import { getModelMeta } from '../../../foundations/models-catalog.js';
 import { buildContextBreakdown } from '../../../domain/context/context-breakdown.js';
 import type { ContextBreakdown } from '../../../foundations/contracts/context.js';
@@ -41,7 +40,7 @@ export const contextHandler: CommandHandler = async (ctx) => {
   const model = agent.getModel();
   const breakdown = buildContextBreakdown({
     messages: agent.getMessages(),
-    toolDefs: getAllToolDefinitions(),
+    toolDefs: agent.getToolDefinitions(),
     skillCatalog: agent.getSkillCatalog(),
     model,
     contextWindow: getModelMeta(model)?.contextWindow,

@@ -244,6 +244,7 @@ describe("Governed Boundary Test Suite (Task 3.1)", () => {
       runtime,
       tools: [customProbe],
       approveTool: async () => true,
+      tenancy: "single",
     });
 
     const res = await agent.chat("Run custom");
