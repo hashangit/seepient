@@ -50,7 +50,7 @@ import {
   ToolRegistry,
 } from "../../tool-executor.js";
 import { initializeSkillRegistry } from "../../../capabilities/skills/index.js";
-import type { SkillSource } from "../../../capabilities/skills/types.js";
+import type { SkillSource } from "../../../foundations/contracts/skill-source.js";
 import { runAgentLoop } from "../../agent-loop.js";
 import { createMockRuntime } from "../../__tests__/test-doubles.js";
 
@@ -262,8 +262,6 @@ describe("Spec 022 Multi-Tenant Isolation Matrix", () => {
 
       // Skills scoping (QS-4):
       const sourceA: SkillSource = {
-        id: "source-tenant-a",
-        kind: "in-memory",
         list: async () => [
           {
             name: "tenant_a_skill",

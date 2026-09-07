@@ -6,26 +6,6 @@ export type {
   SkillRegistryContract as SkillRegistry,
 } from "../../foundations/contracts/skill-registry.js";
 
-import type { Skill } from "../../foundations/contracts/skill-registry.js";
-
-/**
- * Skill record representing raw unparsed skill content.
- */
-export interface SkillRecord {
-  name: string;
-  content: string; // complete skill file text (frontmatter delimiters + body), raw
-  source?: string;  // attribution label ("db:global", "fs", "inline")
-}
-
-/**
- * SkillSource signature seam for Spec 021-1 / Spec 022.
- */
-export interface SkillSource {
-  readonly id?: string;
-  readonly kind?: string;
-  list?(): Promise<SkillRecord[]> | SkillRecord[];
-  load?(cwd: string): Promise<Skill[]> | Skill[];
-}
 
 /** Default maximum skill body size in characters (~8k tokens at 4 chars/token). */
 export const DEFAULT_SKILL_BODY_MAX_CHARS = 32_000;

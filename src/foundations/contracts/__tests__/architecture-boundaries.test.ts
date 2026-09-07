@@ -101,7 +101,7 @@ describe("architecture boundaries (spec 008, T008)", () => {
     for (const f of files) {
       if (layerOf(f) !== "foundations") continue;
       const src = readFileSync(f, "utf8");
-      for (const spec of internalSpecifiers(importSpecifiers(src))) {
+      for (const spec of internalSpecifiers(moduleSpecifiers(src))) {
         if (/\/(domain|capabilities|transport|ui|vendors)\//.test(spec)) {
           violations.push(`${relative(ROOT, f)} -> ${spec}`);
         }

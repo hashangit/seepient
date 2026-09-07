@@ -175,7 +175,7 @@ export interface AskSeepientOptions {
   systemPrompt?: string;
   tools?: (string | UserToolDefinition | import("./contracts/custom-tools.js").AnyToolRegistration | import("./contracts/tool.js").ToolModule)[];
   skills?: string[] | boolean;
-  sources?: import("../capabilities/skills/types.js").SkillSource[];
+  sources?: import("./contracts/skill-source.js").SkillSource[];
   cwd?: string;
   maxSteps?: number;
   temperature?: number;
@@ -260,7 +260,7 @@ export interface CreateSeepientOptions {
   systemPrompt?: string;
   tools?: (string | UserToolDefinition | import("./contracts/custom-tools.js").AnyToolRegistration | import("./contracts/tool.js").ToolModule)[];
   skills?: string[] | boolean;
-  sources?: import("../capabilities/skills/types.js").SkillSource[];
+  sources?: import("./contracts/skill-source.js").SkillSource[];
   cwd?: string;
   maxSteps?: number;
   persist?: string | PersistenceBackend | PersistenceConfig;

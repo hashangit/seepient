@@ -1,4 +1,5 @@
-export type { Skill, SkillFrontmatter, SkillMetadata, SkillRegistry, SkillModelConfig, TruncationResult, SkillSource, SkillRecord } from './types.js';
+export type { Skill, SkillFrontmatter, SkillMetadata, SkillRegistry, SkillModelConfig, TruncationResult } from './types.js';
+export type { SkillRecord, SkillSource, SkillStore, SkillLiteral } from '../../foundations/contracts/skill-source.js';
 export { parseSkillFile, parseFrontmatter, parseSkillContent } from './parser.js';
 export { discoverSkills, getSkillPaths } from './loader.js';
 export { DefaultSkillRegistry } from './registry.js';
@@ -10,22 +11,16 @@ export { limitSkillBody, getSkillBodyLimits } from './types.js';
 import { discoverSkills } from './loader.js';
 import { parseSkillContent } from './parser.js';
 import { DefaultSkillRegistry } from './registry.js';
-import type { Skill, SkillRegistry, SkillSource } from './types.js';
+import type { Skill, SkillRegistry } from './types.js';
+import type { SkillSource } from '../../foundations/contracts/skill-source.js';
 
 async function loadSkillsFromSources(cwd: string, sources: SkillSource[]): Promise<Skill[]> {
   const map = new Map<string, Skill>();
   for (const src of sources) {
-    if (src.list) {
-      const records = await src.list();
-      for (const rec of records) {
-        const parsed = parseSkillContent(rec.content, rec.source ?? src.id ?? "injected");
-        map.set(parsed.name, parsed);
-      }
-    } else if (src.load) {
-      const loaded = await src.load(cwd);
-      for (const s of loaded) {
-        map.set(s.name, s);
-      }
+    const records = await src.list();
+    for (const rec of records) {
+      const parsed = parseSkillContent(rec.content, rec.source ?? "injected");
+      map.set(parsed.name, parsed);
     }
   }
   return Array.from(map.values());

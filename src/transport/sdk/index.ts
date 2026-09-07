@@ -75,6 +75,12 @@ export type { CapabilityLedger, RevokeFilter } from "../../foundations/contracts
 export type { CapabilitySet, DecisionAuthority, ApprovalBroker, PermissionRequest, PermissionDecision } from "../../foundations/contracts/permission-policy.js";
 export type { ProviderRuntimeContract } from "../../foundations/contracts/provider-runtime.js";
 export type { ConsentMode } from "../../foundations/settings-schema.js";
+export type {
+  SkillRecord,
+  SkillSource,
+  SkillStore,
+  SkillLiteral,
+} from "../../foundations/contracts/skill-source.js";
 
 // Spec 022 Tenancy exports
 export {
@@ -186,7 +192,7 @@ async function resolveSkills(
   skills: string[] | boolean | undefined,
   cwd?: string,
   tenancyMode?: TenancyMode,
-  sources?: import("../../capabilities/skills/types.js").SkillSource[],
+  sources?: import("../../foundations/contracts/skill-source.js").SkillSource[],
 ): Promise<{ systemPrompt: string | undefined; skillRegistry?: import("../../capabilities/skills/types.js").SkillRegistry }> {
   if (skills === false) return { systemPrompt };
   if (tenancyMode === "multi" && (!sources || sources.length === 0)) {
