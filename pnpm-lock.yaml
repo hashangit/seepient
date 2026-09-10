@@ -79,7 +79,7 @@ importers:
         version: 28.1.0(supports-color@10.2.2)
       nodemailer:
         specifier: ^9.0.3
-        version: 9.0.3
+        version: 9.1.1
       openai:
         specifier: ^6.18.0
         version: 6.49.0(@aws-sdk/credential-provider-node@3.972.76)(@smithy/signature-v4@5.6.12)(ws@8.21.1)(zod@3.25.76)
@@ -159,7 +159,7 @@ importers:
         version: 5.3.0
       vitepress:
         specifier: ^1.0.0
-        version: 1.6.4(@algolia/client-search@5.57.0)(@types/node@25.9.5)(esbuild@0.28.1)(postcss@8.5.25)(search-insights@2.17.3)(tsx@4.23.1)(typescript@5.9.3)
+        version: 1.6.4(@algolia/client-search@5.57.0)(@types/node@25.9.5)(@types/react@19.2.17)(esbuild@0.28.1)(postcss@8.5.25)(react@19.2.8)(search-insights@2.17.3)(tsx@4.23.1)(typescript@5.9.3)
 
 packages:
 
@@ -2067,8 +2067,8 @@ packages:
     resolution: {integrity: sha512-LarFH0+6VfriEhqMMcLX2F7SwSXeWwnEAJEsYm5QKWchiVYVvJyV9v7UDvUv+w5HO23ZpQTXDv/GxdDdMyOuoQ==}
     engines: {node: '>= 6.13.0'}
 
-  nodemailer@9.0.3:
-    resolution: {integrity: sha512-n+YP+NKwR5zRWa60k3GiQ6Q3B4KXCoAw40dAKeCtYn020iNN74aWK2liXIC3ZEATeGql7we3tE3t8QwhY0eskw==}
+  nodemailer@9.1.1:
+    resolution: {integrity: sha512-izw9mVKFix6YSnC9eLgV6g1opl9DUlRio9ZNcq+Wu9Ujn2UwF+8Nl0B8nz22kEC+CTZCvinkxwJ0DeFbb6NwcQ==}
     engines: {node: '>=6.0.0'}
 
   object-assign@4.1.1:
@@ -3151,9 +3151,9 @@ snapshots:
 
   '@docsearch/css@3.8.2': {}
 
-  '@docsearch/js@3.8.2(@algolia/client-search@5.57.0)(search-insights@2.17.3)':
+  '@docsearch/js@3.8.2(@algolia/client-search@5.57.0)(@types/react@19.2.17)(react@19.2.8)(search-insights@2.17.3)':
     dependencies:
-      '@docsearch/react': 3.8.2(@algolia/client-search@5.57.0)(search-insights@2.17.3)
+      '@docsearch/react': 3.8.2(@algolia/client-search@5.57.0)(@types/react@19.2.17)(react@19.2.8)(search-insights@2.17.3)
       preact: 10.29.8
     transitivePeerDependencies:
       - '@algolia/client-search'
@@ -3163,13 +3163,15 @@ snapshots:
       - react-dom
       - search-insights
 
-  '@docsearch/react@3.8.2(@algolia/client-search@5.57.0)(search-insights@2.17.3)':
+  '@docsearch/react@3.8.2(@algolia/client-search@5.57.0)(@types/react@19.2.17)(react@19.2.8)(search-insights@2.17.3)':
     dependencies:
       '@algolia/autocomplete-core': 1.17.7(@algolia/client-search@5.57.0)(algoliasearch@5.57.0)(search-insights@2.17.3)
       '@algolia/autocomplete-preset-algolia': 1.17.7(@algolia/client-search@5.57.0)(algoliasearch@5.57.0)
       '@docsearch/css': 3.8.2
       algoliasearch: 5.57.0
     optionalDependencies:
+      '@types/react': 19.2.17
+      react: 19.2.8
       search-insights: 2.17.3
     transitivePeerDependencies:
       - '@algolia/client-search'
@@ -4702,7 +4704,7 @@ snapshots:
 
   node-forge@1.4.0: {}
 
-  nodemailer@9.0.3: {}
+  nodemailer@9.1.1: {}
 
   object-assign@4.1.1: {}
 
@@ -5198,10 +5200,10 @@ snapshots:
       fsevents: 2.3.3
       tsx: 4.23.1
 
-  vitepress@1.6.4(@algolia/client-search@5.57.0)(@types/node@25.9.5)(esbuild@0.28.1)(postcss@8.5.25)(search-insights@2.17.3)(tsx@4.23.1)(typescript@5.9.3):
+  vitepress@1.6.4(@algolia/client-search@5.57.0)(@types/node@25.9.5)(@types/react@19.2.17)(esbuild@0.28.1)(postcss@8.5.25)(react@19.2.8)(search-insights@2.17.3)(tsx@4.23.1)(typescript@5.9.3):
     dependencies:
       '@docsearch/css': 3.8.2
-      '@docsearch/js': 3.8.2(@algolia/client-search@5.57.0)(search-insights@2.17.3)
+      '@docsearch/js': 3.8.2(@algolia/client-search@5.57.0)(@types/react@19.2.17)(react@19.2.8)(search-insights@2.17.3)
       '@iconify-json/simple-icons': 1.2.94
       '@shikijs/core': 2.5.0
       '@shikijs/transformers': 2.5.0
