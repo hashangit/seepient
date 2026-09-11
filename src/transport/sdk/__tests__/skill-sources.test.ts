@@ -267,6 +267,7 @@ describe("SDK Skill Sources & Inline Tier (Spec 021-1, QS-S1)", () => {
     await askSeepient("Multi-mode literals test", {
       cwd: tmpCwd,
       tenancy: "multi",
+      principalId: "test-principal",
       runtime,
       auditStore: new FakeAuditStore(),
       policyStore: new FakePolicyStore(),
@@ -379,7 +380,7 @@ describe("SDK Skill Sources & Inline Tier (Spec 021-1, QS-S1)", () => {
       const sysMsg = capturedReq?.messages?.find((m: any) => m.role === "system");
       expect(messageText(sysMsg)).not.toContain("AVAILABLE SKILLS");
       expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringMatching(/Failed to resolve skills: Database connection refused/),
+        expect.stringMatching(/(?:failed to load skills|Failed to resolve skills): Database connection refused/i),
       );
     } finally {
       warnSpy.mockRestore();
@@ -408,7 +409,7 @@ describe("SDK Skill Sources & Inline Tier (Spec 021-1, QS-S1)", () => {
       const sysMsg = history.find((m: any) => m.role === "system");
       expect(messageText(sysMsg)).not.toContain("AVAILABLE SKILLS");
       expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringMatching(/Failed to resolve skills: Database connection refused/),
+        expect.stringMatching(/(?:failed to load skills|Failed to resolve skills): Database connection refused/i),
       );
     } finally {
       warnSpy.mockRestore();

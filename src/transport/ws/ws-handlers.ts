@@ -17,6 +17,7 @@ import type {
   ListProvidersMessage,
   SetProviderMessage,
   RemoveProviderMessage,
+  ListSkillsMessage,
   WebSocketHandlerContext,
   ConnectionState,
 } from "./ws-types.js";
@@ -76,148 +77,132 @@ export function handleConnection(
   // ── Message dispatch ───────────────────────────────────────────────
 
   ws.on("message", (data: Buffer) => {
-    let msg: ClientMessage;
-    try {
-      msg = JSON.parse(data.toString("utf-8")) as ClientMessage;
-    } catch {
-      safeSend(ws, {
-        type: "error",
-        code: "INVALID_MESSAGE",
-        retryable: false,
-        message: "Invalid JSON message",
-      });
-      return;
-    }
-
-    // W146: WS messages consume from the same per-key limiter as REST.
-    if (ctx.rateLimiter && !ctx.rateLimiter.consume(state.apiKeyHash)) {
-      const retryAfter = ctx.rateLimiter.getRetryAfterSeconds(state.apiKeyHash);
-      safeSend(ws, {
-        type: "error",
-        code: "RATE_LIMITED",
-        retryable: true,
-        message: `Rate limit exceeded${retryAfter > 0 ? `, retry after ${retryAfter}s` : ""}`,
-      });
-      return;
-    }
-
-    const requestId = (msg as any).id ?? crypto.randomUUID();
-    logTransportEvent({
-      level: "info",
-      event: "ws_dispatch",
-      requestId,
-      method: msg.type,
-      apiKeyHashPrefix: state.apiKeyHash ? state.apiKeyHash.slice(0, 8) : undefined,
-    });
-
-    switch (msg.type) {
-      case "chat":
-        void handleChat(ws, msg, state, ctx).catch((err: unknown) => {
-          const message = err instanceof Error ? err.message : String(err);
-          logTransportEvent({
-            level: "error",
-            event: "ws_dispatch",
-            requestId,
-            method: msg.type,
-            apiKeyHashPrefix: state.apiKeyHash ? state.apiKeyHash.slice(0, 8) : undefined,
-            error: message,
-          });
-          safeSend(ws, {
-            type: "error",
-            code: "INTERNAL_ERROR",
-            retryable: false,
-            message: "Internal server error",
-          });
-        });
-        break;
-      case "abort":
-        handleAbort(ws, msg, state);
-        break;
-      case "tool_approval_response":
-        handleToolApprovalResponse(ws, msg, ctx.registry);
-        break;
-      case "resume":
-        // W154e: unhandled rejections from these paths would crash the process
-        void handleResume(ws, msg, state, ctx).catch((err: unknown) => {
-          const message = err instanceof Error ? err.message : String(err);
-          logTransportEvent({
-            level: "error",
-            event: "ws_dispatch",
-            requestId,
-            method: msg.type,
-            apiKeyHashPrefix: state.apiKeyHash ? state.apiKeyHash.slice(0, 8) : undefined,
-            error: message,
-          });
-          safeSend(ws, {
-            type: "error",
-            code: "INTERNAL_ERROR",
-            retryable: false,
-            message: "Internal server error",
-          });
-        });
-        break;
-      case "reconnect":
-        void handleReconnect(ws, msg, state, ctx).catch((err: unknown) => {
-          const message = err instanceof Error ? err.message : String(err);
-          logTransportEvent({
-            level: "error",
-            event: "ws_dispatch",
-            requestId,
-            method: msg.type,
-            apiKeyHashPrefix: state.apiKeyHash ? state.apiKeyHash.slice(0, 8) : undefined,
-            error: message,
-          });
-          safeSend(ws, {
-            type: "error",
-            code: "INTERNAL_ERROR",
-            retryable: false,
-            message: "Internal server error",
-          });
-        });
-        break;
-      case "switch_provider":
-        handleSwitchProvider(ws, msg, state);
-        break;
-      case "list_models":
-        handleListModels(ws, ctx);
-        break;
-      case "list_skills":
-        handleListSkills(ws, ctx);
-        break;
-      case "ping":
-        safeSend(ws, {
-          type: "pong",
-          serverTime: new Date().toISOString(),
-        });
-        break;
-      case "get_settings":
-        handleWsSettingsMessage(ws, msg as GetSettingsMessage, state, ctx, (sCtx) =>
-          handleWsGetSettings(msg as GetSettingsMessage, ws, state, sCtx));
-        break;
-      case "update_settings":
-        handleWsSettingsMessage(ws, msg as UpdateSettingsMessage, state, ctx, (sCtx) =>
-          void handleWsUpdateSettings(msg as UpdateSettingsMessage, ws, state, sCtx));
-        break;
-      case "list_providers":
-        handleWsSettingsMessage(ws, msg as ListProvidersMessage, state, ctx, (sCtx) =>
-          void handleWsListProviders(msg as ListProvidersMessage, ws, state, sCtx));
-        break;
-      case "set_provider":
-        handleWsSettingsMessage(ws, msg as SetProviderMessage, state, ctx, (sCtx) =>
-          void handleWsSetProvider(msg as SetProviderMessage, ws, state, sCtx));
-        break;
-      case "remove_provider":
-        handleWsSettingsMessage(ws, msg as RemoveProviderMessage, state, ctx, (sCtx) =>
-          void handleWsRemoveProvider(msg as RemoveProviderMessage, ws, state, sCtx));
-        break;
-      default:
+    void (async () => {
+      let msg: ClientMessage;
+      try {
+        msg = JSON.parse(data.toString("utf-8")) as ClientMessage;
+      } catch {
         safeSend(ws, {
           type: "error",
-          code: "UNKNOWN_MESSAGE_TYPE",
+          code: "INVALID_MESSAGE",
           retryable: false,
-          message: `Unknown message type: ${(msg as { type: string }).type}`,
+          message: "Invalid JSON message",
         });
-    }
+        return;
+      }
+
+      const clientMsgId = (msg as any)?.id;
+      const requestId = clientMsgId ?? crypto.randomUUID();
+
+      // W146: WS messages consume from the same per-key limiter as REST.
+      if (ctx.rateLimiter && !ctx.rateLimiter.consume(state.apiKeyHash)) {
+        const retryAfter = ctx.rateLimiter.getRetryAfterSeconds(state.apiKeyHash);
+        safeSend(ws, {
+          type: "error",
+          code: "RATE_LIMITED",
+          retryable: true,
+          message: `Rate limit exceeded${retryAfter > 0 ? `, retry after ${retryAfter}s` : ""}`,
+          clientMsgId,
+        });
+        return;
+      }
+
+      logTransportEvent({
+        level: "info",
+        event: "ws_dispatch",
+        requestId,
+        method: msg.type,
+        apiKeyHashPrefix: state.apiKeyHash ? state.apiKeyHash.slice(0, 8) : undefined,
+      });
+
+      try {
+        switch (msg.type) {
+          case "chat":
+            await handleChat(ws, msg, state, ctx);
+            break;
+          case "abort":
+            handleAbort(ws, msg, state);
+            break;
+          case "tool_approval_response":
+            handleToolApprovalResponse(ws, msg, ctx.registry);
+            break;
+          case "resume":
+            await handleResume(ws, msg, state, ctx);
+            break;
+          case "reconnect":
+            await handleReconnect(ws, msg, state, ctx);
+            break;
+          case "switch_provider":
+            handleSwitchProvider(ws, msg, state);
+            break;
+          case "list_models":
+            handleListModels(ws, ctx);
+            break;
+          case "list_skills":
+            await handleListSkills(ws, msg as ListSkillsMessage, state, ctx);
+            break;
+          case "ping":
+            safeSend(ws, {
+              type: "pong",
+              serverTime: new Date().toISOString(),
+            });
+            break;
+          case "get_settings":
+            await handleWsSettingsMessage(ws, msg as GetSettingsMessage, state, ctx, (sCtx) =>
+              handleWsGetSettings(msg as GetSettingsMessage, ws, state, sCtx));
+            break;
+          case "update_settings":
+            await handleWsSettingsMessage(ws, msg as UpdateSettingsMessage, state, ctx, (sCtx) =>
+              handleWsUpdateSettings(msg as UpdateSettingsMessage, ws, state, sCtx));
+            break;
+          case "list_providers":
+            await handleWsSettingsMessage(ws, msg as ListProvidersMessage, state, ctx, (sCtx) =>
+              handleWsListProviders(msg as ListProvidersMessage, ws, state, sCtx));
+            break;
+          case "set_provider":
+            await handleWsSettingsMessage(ws, msg as SetProviderMessage, state, ctx, (sCtx) =>
+              handleWsSetProvider(msg as SetProviderMessage, ws, state, sCtx));
+            break;
+          case "remove_provider":
+            await handleWsSettingsMessage(ws, msg as RemoveProviderMessage, state, ctx, (sCtx) =>
+              handleWsRemoveProvider(msg as RemoveProviderMessage, ws, state, sCtx));
+            break;
+          default:
+            safeSend(ws, {
+              type: "error",
+              code: "UNKNOWN_MESSAGE_TYPE",
+              retryable: false,
+              message: `Unknown message type: ${(msg as { type: string }).type}`,
+              clientMsgId,
+            });
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        logTransportEvent({
+          level: "error",
+          event: "ws_dispatch",
+          requestId,
+          method: (msg as any)?.type,
+          apiKeyHashPrefix: state.apiKeyHash ? state.apiKeyHash.slice(0, 8) : undefined,
+          error: message,
+        });
+        safeSend(ws, {
+          type: "error",
+          code: "INTERNAL_ERROR",
+          retryable: false,
+          message: "Internal server error",
+          clientMsgId,
+        });
+      }
+    })().catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      logTransportEvent({
+        level: "error",
+        event: "ws_error",
+        requestId: "ws-unhandled",
+        error: message,
+      });
+    });
   });
 
   // ── Close ──────────────────────────────────────────────────────────

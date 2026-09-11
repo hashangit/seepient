@@ -9,6 +9,12 @@ export interface SkillRecord {
   name: string;
   content: string;
   source?: string;
+  /**
+   * Optional path on disk.
+   * By contract (FR-033), within a record, content is the body and filePath is
+   * the fallback. A record carrying both fields resolves from content, so an
+   * unreadable or remote filePath never yields an unloadable catalog entry.
+   */
   filePath?: string;
 }
 

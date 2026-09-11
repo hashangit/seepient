@@ -137,7 +137,8 @@ USER appuser
 # Default working directory for agent file operations
 WORKDIR /workspace
 
-# Server port
+# Server host and port
+ENV SEEPIENT_HOST=0.0.0.0
 EXPOSE 7337
 
 # Health check — verifies the server is responding on /v1/health

@@ -186,4 +186,36 @@ describe("stored-policy reconciliation (spec 017, T010 / FR-019)", () => {
 
     expect(wired.policyContext.principalPolicy.capabilities).toHaveLength(0);
   });
+
+  it("does not adopt unstamped legacy capabilities into a tenant under multi-tenancy mode", async () => {
+    // Write pre-fix snapshot with unstamped custom capabilities
+    await policyStore.compareAndSet(
+      workspaceId,
+      0,
+      {
+        version: 1,
+        capabilities: [
+          { kind: "read-root", root: workspaceRoot },
+          { kind: "commit-file", path: path.join(workspaceRoot, "secret-operator.txt") },
+        ],
+      },
+      { kind: "human", authorityId: "operator", authenticatedBy: "test" },
+    );
+
+    const wired = await buildActionLifecycle({
+      principalId: "tenant-99",
+      tenancyMode: "multi",
+      runId: "run-multi",
+      workspaceRoot,
+      approvalBroker: NOOP_BROKER,
+      executionBoundary: LOCAL_BOUNDARY,
+      policyStore,
+      auditRoot: path.join(tempDir, "audit"),
+      artifacts: new InMemoryArtifactStore(),
+    });
+
+    const tenantCaps = wired.policyContext.principalPolicy.capabilities;
+    // Unstamped commit-file should NOT be in tenant-99's policy
+    expect(tenantCaps.some((c) => c.kind === "commit-file" && c.path?.includes("secret-operator.txt"))).toBe(false);
+  });
 });

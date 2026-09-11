@@ -20,14 +20,29 @@ export function sendError(res: ServerResponse, status: number, code: string, mes
 }
 
 export async function parseBody(req: IncomingMessage, maxBytes = 1024 * 1024): Promise<string> {
+  const clHeader = req.headers["content-length"];
+  if (clHeader !== undefined) {
+    const contentLength = parseInt(clHeader, 10);
+    if (!isNaN(contentLength) && maxBytes > 0 && contentLength > maxBytes) {
+      if (typeof req.pause === "function") {
+        req.pause();
+      }
+      return Promise.reject(
+        new PayloadTooLargeError(`Request body exceeded maximum limit of ${maxBytes} bytes`),
+      );
+    }
+  }
+
   return new Promise((resolve, reject) => {
     let data = "";
     let bytes = 0;
     req.on("data", (chunk) => {
       bytes += chunk.length;
-      if (bytes > maxBytes) {
-        req.destroy();
-        reject(new PayloadTooLargeError("Request body exceeded maximum limit of 1048576 bytes"));
+      if (maxBytes > 0 && bytes > maxBytes) {
+        if (typeof req.pause === "function") {
+          req.pause();
+        }
+        reject(new PayloadTooLargeError(`Request body exceeded maximum limit of ${maxBytes} bytes`));
         return;
       }
       data += chunk;

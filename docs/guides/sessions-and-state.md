@@ -56,16 +56,19 @@ In serverless environments or multi-tenant web applications, writing to a local 
 You can inject custom storage adapters directly into `createSeepient`:
 
 ```typescript
-import { createSeepient, type SessionStore } from 'seepient'
+import { createSeepient, type PersistenceBackend, type SessionData } from 'seepient'
 
-class RedisSessionStore implements SessionStore {
-  async get(sessionId: string) { /* ... fetch from redis ... */ }
-  async save(session: SessionRecord) { /* ... write to redis ... */ }
-  async delete(sessionId: string) { /* ... */ }
+class RedisPersistenceBackend implements PersistenceBackend {
+  readonly __persistenceBackend = true as const
+
+  async save(sessionId: string, data: SessionData): Promise<void> { /* ... write to redis ... */ }
+  async load(sessionId: string): Promise<SessionData | null> { /* ... fetch from redis ... */ }
+  async delete(sessionId: string): Promise<void> { /* ... */ }
+  async list(): Promise<string[]> { /* ... */ }
 }
 
-const agent = createSeepient({
-  sessionStore: new RedisSessionStore(),
+const agent = await createSeepient({
+  persist: new RedisPersistenceBackend(),
   sessionId: 'user_42_workspace_99'
 })
 ```

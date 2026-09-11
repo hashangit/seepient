@@ -12,7 +12,7 @@
  */
 
 import type { Message, SessionData, PersistenceBackend } from "../../foundations/types.js";
-import { createPersistenceBackend } from "../../domain/sessions/session-store.js";
+import { createPersistenceBackend, MemoryPersistenceBackend } from "../../domain/sessions/session-store.js";
 import { logTransportEvent } from "../logging.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -383,7 +383,7 @@ export class ServerSessionManager {
     }
     this.sessions.delete(id);
     this.inFlightTurns.delete(id);
-    this.backend.delete(id).catch(() => {
+    this.backend.delete?.(id)?.catch(() => {
       // Best-effort — don't crash on delete errors
     });
   }
@@ -442,6 +442,90 @@ export class ServerSessionManager {
       }
     }
     return result;
+  }
+
+  /**
+   * List sessions for a specific API key hash across restarts (FR-030).
+   * Prefers backend.list() when available (durable session listing);
+   * if backend has no list() method or is MemoryPersistenceBackend,
+   * returns memory-resident sessions with source: "memory".
+   */
+  async listSessions(keyHash: string): Promise<{ sessions: SessionSummary[]; source?: string }> {
+    const isMemory =
+      this.backend instanceof MemoryPersistenceBackend ||
+      typeof (this.backend as any)?.list !== "function";
+
+    if (isMemory) {
+      return {
+        sessions: this.getSessionsByKey(keyHash),
+        source: "memory",
+      };
+    }
+
+    try {
+      const rawList = await (this.backend as any).list();
+      const result: SessionSummary[] = [];
+      const seen = new Set<string>();
+
+      // In-memory active unexpired sessions for this key
+      for (const session of this.sessions.values()) {
+        if (session.apiKeyHash === keyHash && !this.isExpired(session)) {
+          seen.add(session.id);
+          result.push({
+            id: session.id,
+            createdAt: session.createdAt,
+            updatedAt: session.updatedAt,
+            provider: session.provider,
+            model: session.model,
+            messageCount: session.messages.length,
+          });
+        }
+      }
+
+      // Durable backend sessions
+      for (const item of rawList) {
+        const id = typeof item === "string" ? item : item.id;
+        if (seen.has(id)) continue;
+
+        if (typeof item === "object" && item !== null && item.apiKeyHash !== undefined) {
+          // Summary from FilePersistenceBackend
+          if (item.apiKeyHash === keyHash) {
+            seen.add(id);
+            result.push({
+              id: item.id,
+              createdAt: item.createdAt,
+              updatedAt: item.updatedAt,
+              provider: item.provider,
+              model: item.model,
+              messageCount: item.messageCount,
+              ...(item.title ? { title: item.title } : {}),
+            });
+          }
+        } else {
+          // Backend returned string IDs or summaries without apiKeyHash; load metadata to verify ownership
+          const loaded = await this.loadSessionFromBackend(id);
+          if (loaded && loaded.apiKeyHash === keyHash && !this.isExpired(loaded)) {
+            seen.add(id);
+            result.push({
+              id: loaded.id,
+              createdAt: loaded.createdAt,
+              updatedAt: loaded.updatedAt,
+              provider: loaded.provider,
+              model: loaded.model,
+              messageCount: loaded.messages.length,
+            });
+          }
+        }
+      }
+
+      return { sessions: result };
+    } catch (err) {
+      console.warn("[session-store] Failed to list sessions from backend:", err);
+      return {
+        sessions: this.getSessionsByKey(keyHash),
+        source: "memory",
+      };
+    }
   }
 
   // ── Internal helpers ─────────────────────────────────────────────────

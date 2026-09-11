@@ -245,12 +245,13 @@ export async function buildActionLifecycle(
         if (changed) {
           principalPolicy = { version: 1 as const, capabilities: reconciledCaps };
           if (snap.version > 0) {
+            const isMulti = inputs.tenancyMode === "multi";
             const rawSnap = await policyStore.read(workspaceId);
             const otherCaps = rawSnap.policy.capabilities.filter(
-              (c) => c.principalId && c.principalId !== principalId,
+              (c) => c.principalId ? c.principalId !== principalId : isMulti,
             );
             const currentPrincipalCaps = rawSnap.policy.capabilities.filter(
-              (c) => !c.principalId || c.principalId === principalId,
+              (c) => isMulti ? c.principalId === principalId : (!c.principalId || c.principalId === principalId),
             );
             const mergedPrincipalCaps = [...currentPrincipalCaps];
             for (const cap of newlyDefaulted) {
@@ -312,6 +313,24 @@ export async function buildActionLifecycle(
     /* no global policy yet — fresh install continues below */
   }
 
+  // FR-022: Config-derived grants (Tavily, SMTP, webhooks) compose into operatorBaseline:
+  // - single-user mode: composed into operatorBaseline and folded into runtime baseline + active capabilities
+  //   preserving out-of-box brokered tools (017 promise).
+  // - multi-tenant mode: config grants do NOT auto-merge into tenant capabilities; only explicit operatorBaseline applies.
+  const isMultiTenant = inputs.tenancyMode === "multi";
+  const configGrants = isMultiTenant ? [] : deriveConfigGrants({ workspaceRoot: inputs.workspaceRoot });
+
+  const effectiveOperatorBaseline: CapabilitySet | undefined = (() => {
+    if (!inputs.operatorBaseline && configGrants.length === 0) return undefined;
+    const caps: Capability[] = inputs.operatorBaseline ? [...inputs.operatorBaseline.capabilities] : [];
+    for (const grant of configGrants) {
+      if (!caps.some((c) => JSON.stringify(c) === JSON.stringify(grant))) {
+        caps.push(grant);
+      }
+    }
+    return { version: 1 as const, capabilities: caps };
+  })();
+
   // Spec 022 T025: Embedder-supplied operator baseline applies unstamped to all principals.
   if (inputs.operatorBaseline) {
     const union: Capability[] = [...principalPolicy.capabilities];
@@ -320,6 +339,7 @@ export async function buildActionLifecycle(
     }
     principalPolicy = { version: 1 as const, capabilities: union };
   }
+
   const defaultModelEgressCap: Capability = {
     kind: "model-egress",
     providerClass: "*",
@@ -340,11 +360,12 @@ export async function buildActionLifecycle(
     };
   }
 
-  // Runtime baseline: caller-supplied or pass-through from deploymentCeiling + config-derived grants.
-  const derivedGrants = deriveConfigGrants({ workspaceRoot: inputs.workspaceRoot });
+  // Runtime baseline: caller-supplied or pass-through from deploymentCeiling + operator baseline.
   const defaultRuntimeBaseline: CapabilitySet = {
     version: 1 as const,
-    capabilities: [...deploymentCeiling.capabilities, ...derivedGrants],
+    capabilities: effectiveOperatorBaseline
+      ? [...deploymentCeiling.capabilities, ...effectiveOperatorBaseline.capabilities]
+      : [...deploymentCeiling.capabilities],
   };
   const runtimeBaseline = inputs.runtimeBaseline ?? defaultRuntimeBaseline;
 
@@ -360,8 +381,8 @@ export async function buildActionLifecycle(
   const activeCaps: Capability[] = inputs.activeCapabilities
     ? [...inputs.activeCapabilities.capabilities]
     : hasStoredPolicy
-      ? [...principalPolicy.capabilities, ...derivedGrants]
-      : [...baseFreshCaps, ...derivedGrants];
+      ? [...principalPolicy.capabilities]
+      : [...baseFreshCaps];
 
   // Global grants are additive active authority. Their mere existence must
   // not make a fresh workspace copy the entire deployment ceiling into its
@@ -373,8 +394,8 @@ export async function buildActionLifecycle(
         activeCaps.push(capability);
       }
     }
-    if (inputs.operatorBaseline) {
-      for (const capability of inputs.operatorBaseline.capabilities) {
+    if (effectiveOperatorBaseline) {
+      for (const capability of effectiveOperatorBaseline.capabilities) {
         if (!setCovers({ version: 1, capabilities: activeCaps }, capability)) {
           activeCaps.push(capability);
         }

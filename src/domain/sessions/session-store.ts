@@ -15,6 +15,7 @@ import type {
   PersistenceBackend,
   PersistenceConfig,
   SessionData,
+  SessionSummary,
 } from "../../foundations/types.js";
 
 // ── Session ID validation ───────────────────────────────────────────────
@@ -92,7 +93,7 @@ export class FilePersistenceBackend implements PersistenceBackend {
         };
 
     const filePath = this.filePath(id);
-    const tmpPath = filePath + ".tmp." + Date.now();
+    const tmpPath = `${filePath}.tmp.${Date.now()}.${Math.random().toString(36).slice(2)}`;
 
     try {
       await fs.writeFile(tmpPath, JSON.stringify(full, null, 2), "utf-8");
@@ -118,12 +119,31 @@ export class FilePersistenceBackend implements PersistenceBackend {
     }
   }
 
-  async list(): Promise<string[]> {
+  async list(): Promise<SessionSummary[]> {
     await this.ensureDir();
     const entries = await fs.readdir(this.basePath);
-    return entries
-      .filter((name) => name.endsWith(".json"))
-      .map((name) => name.slice(0, -".json".length));
+    const summaries: SessionSummary[] = [];
+    for (const name of entries) {
+      if (!name.endsWith(".json")) continue;
+      const id = name.slice(0, -".json".length);
+      try {
+        const raw = await fs.readFile(this.filePath(id), "utf-8");
+        const parsed = JSON.parse(raw);
+        summaries.push({
+          id,
+          createdAt: parsed.createdAt,
+          updatedAt: parsed.updatedAt ?? parsed.createdAt ?? Date.now(),
+          provider: parsed.provider,
+          model: parsed.model,
+          messageCount: Array.isArray(parsed.messages) ? parsed.messages.length : 0,
+          apiKeyHash: parsed.metadata?.apiKeyHash,
+          ...(parsed.title || parsed.metadata?.title ? { title: parsed.title ?? parsed.metadata?.title } : {}),
+        });
+      } catch {
+        // Skip unreadable or corrupted files
+      }
+    }
+    return summaries;
   }
 
   private async loadFromDisk(id: string): Promise<SessionData | null> {

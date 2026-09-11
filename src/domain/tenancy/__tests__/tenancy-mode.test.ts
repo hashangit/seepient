@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   resolveTenancyMode,
   validateTenancyCompleteness,
+  PrincipalRequiredError,
   TenancyRuntimeRequiredError,
   TenancyStoreIncompleteError,
   TenancyAmbientIoError,
@@ -70,9 +71,37 @@ describe("Tenancy Completeness Validation & UX Errors (T008)", () => {
     ).not.toThrow();
   });
 
+  it("throws PrincipalRequiredError if principalId is missing in multi mode with actionable copy", () => {
+    try {
+      validateTenancyCompleteness("multi", {
+        runtime: {},
+        auditStore: {},
+        policyStore: {},
+        capabilityLedger: {},
+      });
+      expect.unreachable("should have thrown");
+    } catch (err: any) {
+      expect(err).toBeInstanceOf(PrincipalRequiredError);
+      expect(err.code).toBe("PRINCIPAL_REQUIRED");
+      expect(err.retryable).toBe(false);
+      expect(err.message).toContain("PRINCIPAL_REQUIRED");
+      expect(err.message).toContain("explicit principalId");
+    }
+  });
+
+  it("throws PrincipalRequiredError if principalId is empty string in multi mode", () => {
+    expect(() =>
+      validateTenancyCompleteness("multi", {
+        principalId: "   ",
+        runtime: {},
+      }),
+    ).toThrow(PrincipalRequiredError);
+  });
+
   it("throws TenancyRuntimeRequiredError if runtime is missing in multi mode with actionable copy", () => {
     try {
       validateTenancyCompleteness("multi", {
+        principalId: "tenant-1",
         runtime: undefined,
         auditStore: {},
         policyStore: {},
@@ -92,6 +121,7 @@ describe("Tenancy Completeness Validation & UX Errors (T008)", () => {
   it("throws TenancyStoreIncompleteError if any permission store is missing in multi mode", () => {
     try {
       validateTenancyCompleteness("multi", {
+        principalId: "tenant-1",
         runtime: {},
         auditStore: {},
         policyStore: undefined,
@@ -113,6 +143,7 @@ describe("Tenancy Completeness Validation & UX Errors (T008)", () => {
   it("allows stateless: true agent without persist backend when permission stores are injected", () => {
     expect(() =>
       validateTenancyCompleteness("multi", {
+        principalId: "tenant-1",
         runtime: {},
         auditStore: {},
         policyStore: {},
@@ -126,6 +157,7 @@ describe("Tenancy Completeness Validation & UX Errors (T008)", () => {
   it("rejects stateless: true in multi mode when permission stores are missing", () => {
     expect(() =>
       validateTenancyCompleteness("multi", {
+        principalId: "tenant-1",
         runtime: {},
         isSessionful: false,
         stateless: true,
@@ -136,6 +168,7 @@ describe("Tenancy Completeness Validation & UX Errors (T008)", () => {
   it("requires persist backend in sessionful multi mode when stateless is not declared", () => {
     expect(() =>
       validateTenancyCompleteness("multi", {
+        principalId: "tenant-1",
         runtime: {},
         auditStore: {},
         policyStore: {},

@@ -31,6 +31,7 @@ import {
 import { runSetup } from './setup.js';
 import { isNonInteractive } from '../../foundations/environment.js';
 import { type ConsentMode, consentModeToApprovalMode } from '../../foundations/settings-schema.js';
+import { VALID_CONSENT_MODES } from '../../foundations/config.js';
 import type { PersistenceBackend } from '../../foundations/types.js';
 import { createPersistenceBackend } from '../../domain/sessions/session-store.js';
 import { SettingsManager } from '../../domain/settings/settings-manager.js';
@@ -44,6 +45,35 @@ export interface CliSessionContext {
   consentMode: ConsentMode;
   gatewayInstance: any;
   persistence: PersistenceBackend;
+}
+
+export function resolveRuntimeFlags(
+  options: any = {},
+  baseConfig: any = {},
+): { autoConfirm: boolean; consentMode: ConsentMode } {
+  // FR-019: --docker and --headless stop setting autoConfirm; only options.yes sets autoConfirm
+  const autoConfirm = Boolean(options.yes);
+
+  const rawConsentMode =
+    (options.yes ? 'autonomous' : undefined) ||
+    options.mode ||
+    options.consentMode ||
+    process.env.SEEPIENT_CONSENT_MODE ||
+    baseConfig.consentMode;
+  if (process.env.SEEPIENT_CONSENT_MODE && !VALID_CONSENT_MODES.includes(process.env.SEEPIENT_CONSENT_MODE as ConsentMode)) {
+    console.warn(
+      `[seepient] Warning: Unrecognized SEEPIENT_CONSENT_MODE "${process.env.SEEPIENT_CONSENT_MODE}". Valid options: ask-everything, edit-enabled, autonomous. Falling back to edit-enabled.`,
+    );
+  } else if (rawConsentMode && !VALID_CONSENT_MODES.includes(rawConsentMode)) {
+    console.warn(
+      `[seepient] Warning: Unrecognized consent mode "${rawConsentMode}". Valid options: ask-everything, edit-enabled, autonomous. Falling back to edit-enabled.`,
+    );
+  }
+  const consentMode: ConsentMode = VALID_CONSENT_MODES.includes(rawConsentMode)
+    ? (rawConsentMode as ConsentMode)
+    : 'edit-enabled';
+
+  return { autoConfirm, consentMode };
 }
 
 export async function bootstrapCliSession(options: any): Promise<CliSessionContext> {
@@ -64,19 +94,8 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
   (fullConfig as any).snapshotStore = snapshotStore;
 
   // 2. Inject runtime flags
-  fullConfig.autoConfirm = options.yes || options.headless || options.docker || false;
-
-  // 2b. Resolve consent mode from CLI flags, env var, and config
-  const rawConsentMode =
-    (options.yes ? 'autonomous' : undefined) ||
-    options.mode ||
-    options.consentMode ||
-    process.env.SEEPIENT_CONSENT_MODE ||
-    fullConfig.consentMode;
-  const validModes = ['ask-everything', 'edit-enabled', 'autonomous'];
-  const consentMode: ConsentMode = validModes.includes(rawConsentMode)
-    ? rawConsentMode
-    : 'edit-enabled';
+  const { autoConfirm, consentMode } = resolveRuntimeFlags(options, fullConfig);
+  fullConfig.autoConfirm = autoConfirm;
 
   // 3. Apply env var overrides for tool settings
   fullConfig = applyEnvOverrides(fullConfig);
@@ -225,12 +244,20 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
     const approvalDeadlineMs = Number.isFinite(rawDeadline)
       ? Math.min(Math.max(rawDeadline, 10_000), 3_600_000)
       : 600_000;
-    const effectiveConsentMode: ConsentMode =
-      (options.mode || options.consentMode)
-        ? consentMode
-        : (validModes.includes(String(deadlineSettings.get('permissions.consentMode')?.value))
-            ? (deadlineSettings.get('permissions.consentMode')?.value as ConsentMode)
-            : consentMode);
+    let effectiveConsentMode: ConsentMode = consentMode;
+    if (!options.mode && !options.consentMode) {
+      const settingVal = deadlineSettings.get('permissions.consentMode')?.value;
+      if (settingVal != null && settingVal !== '') {
+        const strVal = String(settingVal);
+        if (VALID_CONSENT_MODES.includes(strVal as ConsentMode)) {
+          effectiveConsentMode = strVal as ConsentMode;
+        } else {
+          console.warn(
+            `[seepient] Warning: Unrecognized consent mode "${strVal}" in settings. Valid options: ask-everything, edit-enabled, autonomous. Falling back to edit-enabled.`,
+          );
+        }
+      }
+    }
 
     const approvalMode = consentModeToApprovalMode(effectiveConsentMode);
 
@@ -297,10 +324,11 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
     if (maxAgeDays && maxAgeDays > 0) {
       const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000;
       const cutoff = Date.now() - maxAgeMs;
-      const ids = await persistence.list();
+      const rawList = await persistence.list?.() ?? [];
+      const ids = rawList.map((item: any) => typeof item === "string" ? item : item.id);
       await Promise.all(ids.map(async (id) => {
         const data = await persistence.load(id);
-        if (data && data.updatedAt < cutoff) await persistence.delete(id);
+        if (data && data.updatedAt < cutoff) await persistence.delete?.(id);
       }));
     }
   } catch { /* best-effort — never block startup on cleanup */ }
@@ -309,7 +337,8 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
   if (options.resume) {
     let resumeId = options.resume as string;
     if (resumeId === 'last') {
-      const ids = await persistence.list();
+      const rawList = await persistence.list?.() ?? [];
+      const ids = rawList.map((item: any) => typeof item === "string" ? item : item.id);
       if (ids.length === 0) {
         console.error(chalk.red('No saved sessions to resume.'));
         process.exit(1);

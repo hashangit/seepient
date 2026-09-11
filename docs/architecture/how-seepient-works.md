@@ -40,7 +40,7 @@ The Brain contains the coordination, reasoning, and policy logic.
 
 - **Agent loop**: Orchestrates multi-step reasoning. It constructs context, prompts the language model, parses tool invocations, streams responses, and tracks turn status.
 - **Model router**: Routes each task to the right model using the Purpose × Tier matrix (`text`, `commit`, `plan`, `vision`, `media` crossed with `standard`, `complex`, `efficient`). It handles provider discovery, circuit breaker cooldowns, and automatic fallback chains.
-- **Permission engine**: Evaluates every requested action against active consent modes (`always-ask`, `ask-untrusted`, `autonomous-trusted`). It prevents privilege escalation and ensures no tool bypasses user intent.
+- **Permission engine**: Evaluates every requested action against active consent modes (`ask-everything`, `edit-enabled`, `autonomous`). It prevents privilege escalation and ensures no tool bypasses user intent.
 - **Approval inbox**: A durable, file-locked store where pending permission requests wait for human confirmation. Pending requests survive process restarts and power cycles.
 - **Skills registry**: Discovers local and workspace `SKILL.md` playbooks, injecting task-specific context and instructions on demand without permanently bloating the token budget.
 - **Secret shield and egress gate**: Inspects tool inputs and model payloads to redact sensitive environment variables, API keys, and credential references before network transmission.
@@ -67,5 +67,5 @@ State in Seepient is structured, persistent, and verifiable.
 
 - **Session history**: Stores conversation messages, reasoning tokens, tool invocations, and command outputs. Sessions can be listed, resumed, forked into alternate branches, or exported to markdown.
 - **Tamper-evident audit log**: An append-only ledger recorded with strict `0600` filesystem permissions (readable only by the owner). Every tool call, approved action, rejected proposal, and sandbox violation is written using atomic fsync commits.
-- **Settings manager**: Resolves and merges settings across global configuration (`~/.seepient/config.json`), workspace configuration, environment variables, and CLI overrides.
+- **Settings manager**: Resolves and merges settings across global configuration (`~/.seepient/setting.json`), workspace configuration, environment variables, and CLI overrides.
 - **Credential vault**: Keeps API keys, tokens, and OAuth credentials isolated from model context. When supported by the host OS, secrets reside in the system keychain rather than plaintext files.

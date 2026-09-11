@@ -13,20 +13,20 @@ Skills follow a two-phase lifecycle: **discovery** at startup, then **activation
 
 ### Phase 1: Discovery (at startup)
 
-When the application starts, `discoverSkills(cwd)` scans configured skill directories. For each `SKILL.md` file found:
+When the application starts, `initializeSkillRegistry()` queries configured skill sources (built-in filesystem paths or injected `sources`). For each skill found:
 
-1. `parseFrontmatter()` reads **only the YAML header** -- the body is discarded immediately.
-2. A `Skill` object is created with metadata plus the `filePath` for later lazy loading.
-3. Skills with duplicate names are resolved by `priority` (higher wins).
+1. Skill frontmatter is parsed to extract metadata (name, description, tags, model preference) — the body is loaded lazily on demand.
+2. A `SkillRecord` is created with metadata and source provenance.
+3. Skills with duplicate names are resolved with explicit source-ordered precedence.
 
-After discovery, `buildSkillCatalog(metadata)` generates a compact text block listing every skill's name, description, and tags. This catalog is injected into the system prompt via the `skillCatalog` option on `AgentLoopOptions`, so the LLM always knows what skills are available.
+After discovery, `buildSkillCatalog(metadata)` generates a compact text block listing every skill's name, description, and tags. This catalog is composed into the system prompt, so the LLM always knows what skills are available.
 
 <DiagramFlow
   :steps="[
-    { title: 'discoverSkills(cwd)' },
-    { title: 'parseFrontmatter() for each SKILL.md', desc: 'Yields Skill objects without bodies' },
+    { title: 'initializeSkillRegistry(options)' },
+    { title: 'Frontmatter parsed for each skill', desc: 'Yields SkillRecord objects without bodies' },
     { title: 'buildSkillCatalog(metadata)', desc: 'Produces catalog lines such as \u0022- docker-ops: Docker container management [docker, deployment]\u0022' },
-    { title: 'Catalog appended to the system prompt' }
+    { title: 'Catalog composed into system prompt' }
   ]"
 />
 
@@ -115,8 +115,8 @@ When constructing the agent's skill catalog, sources are composed in order with 
 
 | Tenancy Mode | Composition Pipeline | Behavior |
 |--------------|----------------------|----------|
-| `single` (default) | `[new FsSkillSources(cwd), ...(sources ?? []), inline?]` | Built-in filesystem layers load first. Injected `sources` override filesystem skills of the same name. Inline literals shadow everything. |
-| `multi` | `[...(sources ?? []), inline?]` | Ambient filesystem discovery is **never** invoked. Skills originate solely from injected `sources` and inline literals. |
+| `single` (default) | `[new FsSkillSources(cwd), ...(sources ?? []), inline?]` | Built-in filesystem layers load first. Injected `sources` override filesystem skills of the same name. Inline literals shadow everything. Passing inline `skills` literals alone does not upgrade tenancy mode to `multi`. |
+| `multi` | `[...(sources ?? []), inline?]` | Ambient filesystem discovery is **never** invoked. Skills originate solely from injected `sources` and inline literals. Explicitly passing `sources` automatically upgrades tenancy mode to `multi`. |
 
 Example composing filesystem, organization-wide, and tenant-specific sources:
 
@@ -140,6 +140,10 @@ const agent = await createSeepient({
 
 :::warning Serverless filesystem discovery fails silently
 In serverless execution environments (AWS Lambda, Vercel Functions, Cloudflare Workers), filesystem-based ambient discovery typically finds no skills directories and produces an empty catalog **silently**. In serverless deployments, always inject explicit `sources` or pass inline skill literals (`skills: [...]`).
+:::
+
+:::warning Source failure partial fail-open
+If an injected skill source's `list()` throws an error, Seepient logs a warning naming the source label and continues composing the remaining sources rather than halting agent startup (partial fail-open).
 :::
 
 :::tip Bundling skills in serverless packages
@@ -224,7 +228,9 @@ Seepient Agent searches for skills in the following locations, in priority order
 | 1        | `SEEPIENT_SKILLS_PATH` env var     | Colon-separated custom paths  |
 | 2        | `.seepient/skills/`                | Project-level skills          |
 | 3        | `/mnt/skills/`                  | Docker volume mount           |
-| 4        | Bundled `skills/` directory     | Shipped with Seepient Agent            |
+| 4        | `~/.seepient/skills/`           | Global user skills            |
+| 5        | `~/.agents/skills/`             | Cross-agent shared skills     |
+| 6        | Bundled `skills/` directory     | Shipped with Seepient Agent   |
 
 Higher-priority paths override skills with the same name from lower-priority paths.
 
@@ -246,11 +252,20 @@ Seepient ships skills in the bundled `skills/` directory. They are discovered au
 
 | Skill | Purpose |
 | -------- | --------------------------------------------- |
-| `design` | Entry point for **all** design work. A router that classifies the request, fetches the matching skill from the upstream [OpenDesign](https://github.com/nexu-io/open-design/tree/main/skills) catalogue, maps its tools to Seepient's, and follows it. Use for UI/UX, mockups, prototypes, branding, slides/decks, image generation/editing, video/motion, design systems, Figma work, and design review. |
+| `debug-mantra` | Four-mantra debugging discipline (reproduce, trace, falsify, cross-reference) |
+| `design` | Entry point for all design work via upstream OpenDesign catalog |
 | `docker-ops` | Docker container and image operations |
+| `how` | Procedural implementation step-by-step guidance |
 | `k8s-deploy` | Kubernetes deployment operations |
 | `log-analyzer` | Log file analysis and triage |
+| `management-talk` | Translate engineering content for leadership and management |
+| `post-mortem` | Canonical post-mortem root cause analysis writeup |
+| `repo-review-ultra-deep` | Comprehensive, evidence-backed codebase and PR audit |
+| `repo-review-ultra-deep-lite` | Token-efficient fast repository and PR review |
+| `scrutinize` | Outsider-perspective architectural and change scrutiny |
 | `speckit-*` | SpecKit spec-driven workflow (`analyze`, `checklist`, `clarify`, `constitution`, `implement`, `plan`, `specify`, `tasks`, `taskstoissues`) |
+| `unslop` | Remove AI tells, filler, and repetitive prose patterns |
+| `why` | Architectural rationale and purpose investigation |
 
 Activate any of them by name:
 
@@ -478,16 +493,7 @@ The first invocation of any skill incurs a ~1--5 ms disk read, which is negligib
 
 After discovery, `buildSkillCatalog(metadata)` generates a compact text block from `SkillMetadata[]`. Each skill gets one line in the format `- name: description [tags]`, typically 40--80 characters.
 
-The catalog is injected into the system prompt via the `skillCatalog` option on `AgentLoopOptions`. Inside `runAgentLoop`, it is appended to the existing system message:
-
-```typescript
-// In agent-loop.ts
-if (skillCatalog && messages[0]?.role === 'system') {
-  messages[0] = { ...messages[0], content: messages[0].content + '\n\n' + skillCatalog };
-}
-```
-
-This works across all adapters (CLI, SDK, Server). Example of what the LLM sees:
+The catalog is composed into the system prompt when constructing the agent context. Across all surfaces (CLI, SDK, Server), it is included in the available skills block of the system context:
 
 ```
 AVAILABLE SKILLS (activate with use_skill tool):
@@ -502,7 +508,7 @@ Skill bodies are guarded by a three-layer defense against oversized context inje
 
 ### Layer 1: Load-time warning (8K chars / ~2K tokens)
 
-`parseFrontmatter()` in `parser.ts` checks the body length after extraction. If it exceeds the warning threshold, a `console.warn` is emitted. This is informational only -- the body is not modified.
+When a skill body is read into memory, its length is checked against `SEEPIENT_SKILL_BODY_WARN_CHARS` (default 8000). If it exceeds the threshold, a warning is emitted:
 
 ```
 [SKILLS] Warning: Skill "docker-ops" body is 12450 chars (~3113 tokens).
@@ -533,7 +539,7 @@ interface TruncationResult {
 
 ### Layer 3: Cumulative @path cap (2 MB total)
 
-The `@path` resolver stops inlining files when the cumulative resolved content would exceed 2 MB. Remaining references are replaced with a skip marker.
+In interactive CLI mode, the `@path` resolver inlines file contents passed as arguments in slash command queries. It stops inlining when cumulative resolved content reaches 2 MB; remaining references are replaced with a skip marker.
 
 ### Configurable thresholds
 
@@ -543,7 +549,7 @@ The `@path` resolver stops inlining files when the cumulative resolved content w
 | `SEEPIENT_SKILL_BODY_WARN_CHARS`     | `8000`   | Soft warning threshold       |
 
 :::tip
-If a skill is being truncated, split it into multiple smaller skills or use `@path` references to load instructions from separate files instead of embedding everything in the body.
+If a skill body exceeds the size limit, break it down into modular skills or delegate detailed instructions to specialized sub-skills. Note that `@path` references are resolved for CLI invocation arguments, not inside skill bodies.
 :::
 
 ## Provider switching
@@ -658,4 +664,5 @@ The `use_skill` tool path does **not** perform provider switching or `@path` res
 - [askSeepient()](/sdk/ask-seepient) -- One-shot execution with skills
 - [createSeepient()](/sdk/create-seepient) -- Stateful agent with skill support
 - [Custom Tools](/sdk/custom-tools) -- Build custom tools
+- [Worker Example](https://github.com/hashangit/seepient/tree/main/examples/worker) -- Full multi-tenant worker with custom skill sources and storage
 - [Types](/sdk/types) -- Full TypeScript type reference

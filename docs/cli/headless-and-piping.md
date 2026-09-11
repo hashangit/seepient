@@ -42,7 +42,7 @@ Example GitHub Action step:
 - name: Run Seepient Code Audit
   env:
     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-    SEEPIENT_CONSENT_MODE: autonomous-trusted
+    SEEPIENT_CONSENT_MODE: autonomous
   run: |
     seepient -y "Inspect modified files in this pull request and check compliance with project guidelines"
 ```

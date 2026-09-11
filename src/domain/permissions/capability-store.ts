@@ -90,6 +90,10 @@ function pathContains(parent: string, child: string): boolean {
  * pass a matching outer shape. This function is strict by default.
  */
 export function covers(outer: Capability, inner: Capability): boolean {
+  // Principal scoping: a capability stamped for one principal cannot cover another principal
+  if (outer.principalId && inner.principalId && outer.principalId !== inner.principalId) {
+    return false;
+  }
   // A deny on a kind can never cover anything.
   if (outer.kind !== inner.kind) {
     // Cross-kind coverage: a root-shaped capability can cover a more specific

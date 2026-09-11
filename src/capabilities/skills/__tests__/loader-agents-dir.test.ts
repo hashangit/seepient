@@ -30,12 +30,13 @@ afterAll(() => {
   rmSync(tmpHome, { recursive: true, force: true });
 });
 
-function writeSkill(root: string, name: string, description: string): void {
+function writeSkill(root: string, name: string, description: string, priority?: number): void {
   const dir = join(root, name);
   mkdirSync(dir, { recursive: true });
+  const prioLine = priority !== undefined ? `priority: ${priority}\n` : "";
   writeFileSync(
     join(dir, "SKILL.md"),
-    `---\nname: ${name}\ndescription: ${description}\n---\nBody of ${name}.\n`,
+    `---\nname: ${name}\ndescription: ${description}\n${prioLine}---\nBody of ${name}.\n`,
   );
 }
 
@@ -62,6 +63,22 @@ describe("skills discovery: ~/.agents/skills", () => {
       const collide = records.find((s) => s.name === "collide");
       expect(collide?.content).toContain("description: seepient copy");
       expect(collide?.source).toContain(join(".seepient", "skills"));
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("cross-source shadowing is strictly last-wins even if earlier source declares higher priority (FR-032, R41)", async () => {
+    // Earlier source in discovery (.agents/skills) declares high priority 100
+    writeSkill(join(tmpHome, ".agents", "skills"), "priority-invert", "agents high priority copy", 100);
+    // Higher-priority source (.seepient/skills) declares low priority 0
+    writeSkill(join(tmpHome, ".seepient", "skills"), "priority-invert", "seepient normal copy", 0);
+    const cwd = mkdtempSync(join(tmpdir(), "seepient-loader-cwd-"));
+    try {
+      const records = await discoverSkillRecords(cwd);
+      const match = records.find((s) => s.name === "priority-invert");
+      expect(match?.content).toContain("description: seepient normal copy");
+      expect(match?.source).toContain(join(".seepient", "skills"));
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }

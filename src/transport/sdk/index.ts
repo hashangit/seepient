@@ -23,6 +23,7 @@ import { ToolRegistry } from "../../domain/tool-executor.js";
 import type { ToolModule } from "../../foundations/contracts/tool.js";
 import { runAgentLoop } from "../../domain/agent-loop.js";
 import { initializeSkillRegistry } from "../../capabilities/skills/index.js";
+import { validateSessionId } from "./seepient.js";
 import { buildSkillCatalog } from "../../domain/skills/skill-catalog.js";
 import {
   now,
@@ -36,7 +37,7 @@ import * as path from 'path';
 
 // ── Re-exports ───────────────────────────────────────────────────────────
 
-export { createSeepient } from "./seepient.js";
+export { createSeepient, validateSessionId, MAX_SESSION_ID_LENGTH } from "./seepient.js";
 export type {
   Seepient,
   CreateSeepientOptions,
@@ -89,8 +90,30 @@ export {
   type SaveGeneratedSkillResult,
 } from "../../domain/skills/generated-skill-save.js";
 export {
+  SeepientError,
+  InferenceError,
+  ProviderError,
+  ToolError,
+  MaxStepsError,
+  AbortedError,
+  GatewayError,
+  WidgetError,
+  HashlineError,
+  PermissionError,
+  ApprovalBrokerError,
+  AuditError,
+  PolicyConflictError,
+  WorkerSchedulerError,
+  UnsupportedBackendError,
   SkillStoreUnavailableError,
   SkillCollisionError,
+  SkillBodyUnavailableError,
+  SkillBodyRequiredError,
+  PersistConfigInvalidError,
+  SessionIdInvalidError,
+  PrincipalRequiredError,
+  type InferenceErrorCode,
+  type InferenceErrorOptions,
 } from "../../foundations/errors.js";
 
 // Spec 022 Tenancy exports
@@ -116,6 +139,7 @@ export {
   authMiddleware,
 } from "../../domain/index.js";
 
+export { GatewaySettingsAdapter } from "../../capabilities/gateway/settings-adapter.js";
 import type { GatewayConfig } from "../../capabilities/gateway/types.js";
 import type { GatewaySettingsAdapter } from "../../capabilities/gateway/settings-adapter.js";
 import {
@@ -169,7 +193,6 @@ export type {
   PersistenceBackend,
   PersistenceConfig,
   SkillMetadata,
-  SeepientError,
   ToolRiskCategory,
   Purpose,
   Tier,
@@ -192,7 +215,7 @@ export {
 
 // ── askSeepient ──────────────────────────────────────────────────────────
 
-import { computeEffectiveSkillSources } from "./skill-sources-helper.js";
+import { computeEffectiveSkillSources, emitMultiZeroSourcesNoticeOnce } from "./skill-sources-helper.js";
 
 /**
  * Resolve the skill catalog for a one-shot SDK call. Returns the system prompt
@@ -210,6 +233,7 @@ async function resolveSkills(
   if (skills === false) return { systemPrompt };
   const effectiveSources = computeEffectiveSkillSources(sources, skills);
   if (tenancyMode === "multi" && effectiveSources.length === 0) {
+    emitMultiZeroSourcesNoticeOnce();
     return { systemPrompt };
   }
   try {
@@ -222,6 +246,11 @@ async function resolveSkills(
       );
     if (Array.isArray(skills) && !isLiteralList) {
       const wanted = new Set(skills.filter((s): s is string => typeof s === "string"));
+      const available = new Set(metadata.map((s) => s.name));
+      const missing = Array.from(wanted).filter((name) => !available.has(name));
+      if (missing.length > 0) {
+        console.warn(`[SKILLS] Warning: Skill filter requested unavailable skill(s): ${missing.join(", ")}`);
+      }
       metadata = metadata.filter((s) => wanted.has(s.name));
     }
     if (metadata.length === 0) return { systemPrompt, skillRegistry };
@@ -281,6 +310,9 @@ export async function askSeepient(
   options?: AskSeepientOptions,
 ): Promise<AskSeepientResult | AskSeepientStreamResult> {
   const opts = options ?? {};
+  if (opts.sessionId !== undefined) {
+    validateSessionId(opts.sessionId);
+  }
   const effectiveSources = computeEffectiveSkillSources(opts.sources, opts.skills);
 
   const tenancySignals: TenancySignals = {
@@ -289,7 +321,7 @@ export async function askSeepient(
     anyStoreInjected: Boolean(opts.auditStore || opts.policyStore || opts.capabilityLedger),
     runtimeInjected: Boolean(opts.runtime),
     persistInjected: false,
-    skillSourcesInjected: effectiveSources.length > 0,
+    skillSourcesInjected: Boolean(opts.sources && opts.sources.length > 0),
   };
   const { mode: tenancyMode, upgraded } = resolveTenancyMode(tenancySignals);
   emitTenancyNoticeOnce(upgraded);
@@ -302,6 +334,7 @@ export async function askSeepient(
     capabilityLedger: opts.capabilityLedger,
     stateless: opts.stateless,
     isSessionful: false,
+    principalId: opts.principalId,
   });
 
   const maxSteps = opts.maxSteps ?? 10;
@@ -439,6 +472,8 @@ export async function askSeepient(
             : undefined,
           purpose: opts.purpose,
           tier: opts.tier,
+          temperature: opts.temperature,
+          maxTokens: opts.maxTokens,
           messages,
           toolRegistry,
           toolDefs,
@@ -556,6 +591,8 @@ export async function askSeepient(
       : undefined,
     purpose: opts.purpose,
     tier: opts.tier,
+    temperature: opts.temperature,
+    maxTokens: opts.maxTokens,
     messages,
     toolRegistry,
     toolDefs,

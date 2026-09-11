@@ -46,7 +46,7 @@ The wizard supports four ways to store and reference credentials:
 
 1. **Environment variable reference (recommended)**: Links the provider to an existing environment variable name (for example, `ANTHROPIC_API_KEY`). Seepient resolves the secret from your environment at runtime, keeping credentials out of config files.
 2. **Keychain storage**: On macOS and supported Linux desktops, Seepient encrypts the API key and writes it directly to your operating system keychain.
-3. **Plaintext configuration**: Writes the API key to `~/.seepient/config.json` with `0600` permissions. Use this mode on headless servers without an OS keychain daemon.
+3. **Plaintext configuration**: Writes the API key to `~/.seepient/setting.json` with `0600` permissions. Use this mode on headless servers without an OS keychain daemon.
 4. **Keyless / local**: Configures local models (like Ollama on `http://127.0.0.1:11434`) that require no authentication tokens.
 
 ---
@@ -78,4 +78,4 @@ The wizard guides you through assigning models to operational roles:
 
 Before saving changes to disk, the wizard sends a minimal test ping to each configured provider. If the request fails (due to an invalid API key, network timeout, or billing restriction), the wizard highlights the error details and prompts you to correct the credentials.
 
-Settings are written atomically to `~/.seepient/config.json`. Existing comments, workspace-specific overrides, and unrelated settings are preserved.
+Settings are written atomically to `~/.seepient/setting.json`. Existing comments, workspace-specific overrides, and unrelated settings are preserved.

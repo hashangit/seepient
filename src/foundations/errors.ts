@@ -361,3 +361,81 @@ export class SkillCollisionError extends SeepientError {
   }
 }
 
+/**
+ * Thrown when a catalog-listed skill exists in the registry but its body
+ * cannot be loaded or is unreadable (FR-034).
+ */
+export class SkillBodyUnavailableError extends SeepientError {
+  skillName: string;
+
+  constructor(skillName: string, detail?: string) {
+    const detailMsg = detail ? ` (${detail})` : "";
+    super(
+      `SKILL_BODY_UNAVAILABLE: Skill '${skillName}' content is unavailable or unreadable${detailMsg}.`,
+      "SKILL_BODY_UNAVAILABLE",
+      false,
+    );
+    this.name = "SkillBodyUnavailableError";
+    this.skillName = skillName;
+  }
+}
+
+/**
+ * Thrown when attempting to save a generated skill with an empty body (FR-036).
+ */
+export class SkillBodyRequiredError extends SeepientError {
+  constructor(name: string) {
+    super(
+      `SKILL_BODY_REQUIRED: Cannot save skill '${name}' with an empty body.`,
+      "SKILL_BODY_REQUIRED",
+      false,
+    );
+    this.name = "SkillBodyRequiredError";
+  }
+}
+
+// ── Session persistence errors ──────────────────────────────────────────
+
+/**
+ * Thrown when the `persist` option passed to `createSeepient` does not match
+ * any supported persistence backend format.
+ */
+export class PersistConfigInvalidError extends SeepientError {
+  constructor(
+    message = 'PERSIST_CONFIG_INVALID: Invalid "persist" configuration shape. Supported forms are: (1) directory path string, (2) PersistenceConfig object ({ type: "file", path: "..." } or { type: "memory" }), or (3) a custom PersistenceBackend instance implementing load() and save().',
+  ) {
+    super(message, "PERSIST_CONFIG_INVALID", false);
+    this.name = "PersistConfigInvalidError";
+  }
+}
+
+/**
+ * Thrown when a session ID is invalid (format mismatch or exceeds 128 characters).
+ */
+export class SessionIdInvalidError extends SeepientError {
+  readonly sessionId: string;
+
+  constructor(sessionId: string, message?: string) {
+    const defaultMessage = `SESSION_ID_INVALID: Invalid session ID "${sessionId}". Only alphanumeric characters, dashes, and underscores are allowed (max 128 characters).`;
+    super(message ?? defaultMessage, "SESSION_ID_INVALID", false);
+    this.name = "SessionIdInvalidError";
+    this.sessionId = sessionId;
+  }
+}
+
+// ── Multi-tenant errors ─────────────────────────────────────────────────
+
+/**
+ * Thrown when multi-tenant mode is active (explicit or upgraded) but no explicit
+ * principalId is provided.
+ */
+export class PrincipalRequiredError extends SeepientError {
+  constructor(
+    message = 'PRINCIPAL_REQUIRED: tenancy: "multi" requires an explicit principalId. Pass a stable per-tenant identifier (e.g. tenantId or userId).',
+  ) {
+    super(message, "PRINCIPAL_REQUIRED", false);
+    this.name = "PrincipalRequiredError";
+  }
+}
+
+

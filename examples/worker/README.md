@@ -7,7 +7,7 @@ This example demonstrates how to embed the Seepient SDK in a stateless worker ti
 In this pattern:
 - **Embedder Control Plane**: Owns authentication, tenant state storage (audits, policies, session history), and user-facing approvals.
 - **Stateless Worker**: Spins up per-tenant or per-task in an isolated container/microVM. Embeds the Seepient SDK with injected store adapters (`AuditStore`, `PolicyStore`, `CapabilityLedger`, `PersistenceBackend`).
-- **Approval Relay**: Approval prompts are intercepted by `approveTool` and relayed to the embedder control plane.
+- **Approval Relay**: Approval prompts are intercepted by `approvalBroker` and relayed to the embedder control plane.
 
 ## Key Features
 - **Zero Local Disk Writes**: All persistent state routes to the embedder; ephemeral worker disk is discardable.

@@ -117,4 +117,37 @@ describe('SDK opts.model override', () => {
     expect(runAgentLoopMock.mock.calls[0][0].purpose).toBe('plan');
     expect(runAgentLoopMock.mock.calls[0][0].tier).toBe('efficient');
   });
+
+  it('askSeepient passes temperature and maxTokens to runAgentLoop (FR-017)', async () => {
+    const { runAgentLoopMock } = mockEntryPoints('resolved-default-model');
+    const { askSeepient } = await import('../index.js');
+
+    await askSeepient('hi', { tools: [], temperature: 0.7, maxTokens: 1000 });
+
+    expect(runAgentLoopMock).toHaveBeenCalledTimes(1);
+    expect(runAgentLoopMock.mock.calls[0][0].temperature).toBe(0.7);
+    expect(runAgentLoopMock.mock.calls[0][0].maxTokens).toBe(1000);
+  });
+
+  it('createSeepient passes override.thinkingLevel, temperature, and maxTokens (FR-017)', async () => {
+    const { runAgentLoopMock } = mockEntryPoints('resolved-default-model');
+    const { createSeepient } = await import('../index.js');
+
+    const agent = await createSeepient({
+      tools: [],
+      override: { thinkingLevel: 'high' },
+      temperature: 0.2,
+      maxTokens: 500,
+    });
+    await agent.chat('hi');
+
+    expect(runAgentLoopMock).toHaveBeenCalledTimes(1);
+    expect(runAgentLoopMock.mock.calls[0][0].modelOverride).toEqual({
+      model: undefined,
+      providerAccount: undefined,
+      thinkingLevel: 'high',
+    });
+    expect(runAgentLoopMock.mock.calls[0][0].temperature).toBe(0.2);
+    expect(runAgentLoopMock.mock.calls[0][0].maxTokens).toBe(500);
+  });
 });

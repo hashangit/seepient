@@ -16,9 +16,10 @@
  */
 
 import { parseInvocation, substituteArgs, type ParsedArgs } from '../../capabilities/skills/args.js';
-import { type SkillRegistry, limitSkillBody } from '../../capabilities/skills/types.js';
-import { type SkillMetadata } from '../../foundations/types.js';
+import { type SkillRegistry, type SkillMetadata, limitSkillBody } from '../../capabilities/skills/types.js';
 import { resolveReferences } from '../../capabilities/skills/resolver.js';
+import { SkillBodyUnavailableError } from '../../foundations/errors.js';
+export { SkillBodyUnavailableError };
 
 import type { ProviderRuntime, TurnSnapshot } from '../providers/provider-runtime.js';
 import type { InvocationPlan } from '../providers/assignment-resolver.js';
@@ -111,10 +112,10 @@ export async function invokeSkill(options: {
     return null;
   }
 
-  // Step 3: Get the skill body
+  // Step 3: Get the skill body (FR-034: typed failure if catalog-listed skill cannot load)
   const skillBody = await registry.getBody(skillName);
   if (!skillBody) {
-    return null;
+    throw new SkillBodyUnavailableError(skillName);
   }
 
   // Step 4: Substitute arguments into skill body
@@ -156,6 +157,7 @@ export async function invokeSkill(options: {
     skill: {
       name: skill.name,
       description: skill.description,
+      version: skill.version ?? "1.0.0",
       tags: skill.tags,
     },
     providerSwitchNeeded,

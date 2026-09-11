@@ -82,7 +82,7 @@
   "bugs": {
     "url": "https://github.com/hashangit/seepient/issues"
   },
-  "homepage": "https://hashangit.github.io/seepient/",
+  "homepage": "https://seepient.zyntopia.com",
   "description": "Seepient — your AI person. A skill-driven AI agent with CLI, SDK, and server adapters; multi-provider LLM support and Docker-native deployment. Coding is one of the things she does.",
   "engines": {
     "node": ">=22.19"
@@ -133,5 +133,6 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.4"
-  }
+  },
+  "packageManager": "pnpm@12.3.4+sha512.961aa41fb077da3a04a441d9f8e15ebc0c96da8ef710b2eb67bf9ee7cb0610eabd48f1fd85f51cffe73846785fa0f87c56a3a872a1d893f8446741b5cce45457"
 }

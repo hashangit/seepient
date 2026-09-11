@@ -30,7 +30,7 @@ const agent = await createSeepient({
   auditStore: tenantAuditStore,
   policyStore: tenantPolicyStore,
   capabilityLedger: tenantLedgerStore,
-  persist: tenantSessionStore,
+  persist: tenantPersistenceBackend,
 });
 ```
 
@@ -95,7 +95,7 @@ Per-tenant skill injection is supported on the in-process SDK surface (`askSeepi
     auditStore: myAuditStore,
     policyStore: myPolicyStore,
     capabilityLedger: myLedger,
-    persist: mySessionStore, // Required if sessionId is set unless stateless: true
+    persist: myPersistenceBackend, // Required if sessionId is set unless stateless: true
   });
   ```
 
@@ -178,9 +178,9 @@ All grants recorded by `PolicyStore` are stamped with the acting `principalId`:
 When platform operators want to provide foundational permissions to all tenants (such as basic read permissions) without mutating individual tenant stores:
 
 ```typescript
-import { createActionLifecycle } from "seepient";
+import { createSeepient } from "seepient";
 
-const lifecycle = createActionLifecycle({
+const agent = await createSeepient({
   principalId: "tenant_123",
   policyStore,
   operatorBaseline: {

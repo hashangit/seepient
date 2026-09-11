@@ -103,15 +103,17 @@ describe("REST Sessions & Chat Resume (Spec 021-2 / FR-005, FR-006)", () => {
 
     expect(res.statusCode).toBe(200);
     const data = JSON.parse(res.body);
-    expect(Array.isArray(data)).toBe(true);
-    expect(data.length).toBe(2);
+    const sessions = Array.isArray(data) ? data : data.sessions;
+    expect(Array.isArray(sessions)).toBe(true);
+    expect(sessions.length).toBe(2);
+    expect(data.source).toBe("memory");
 
-    const ids = data.map((d: any) => d.id);
+    const ids = sessions.map((d: any) => d.id);
     expect(ids).toContain(s1.id);
     expect(ids).toContain(s2.id);
 
     // Assert SessionSummary shape (no message bodies)
-    const summary = data.find((d: any) => d.id === s1.id);
+    const summary = sessions.find((d: any) => d.id === s1.id);
     expect(summary.id).toBe(s1.id);
     expect(summary.messageCount).toBe(1);
     expect(summary.provider).toBe("openai");
@@ -205,10 +207,11 @@ describe("REST Sessions & Chat Resume (Spec 021-2 / FR-005, FR-006)", () => {
     expect(lastGenerateTextOpts.message).toBe("Turn 2 msg");
   });
 
-  it("POST /v1/chat returns 404 for unknown or foreign sessionId", async () => {
+  it("POST /v1/chat adopts or creates on unknown sessionId (FR-026)", async () => {
+    const freshId = "fresh-session-" + Date.now();
     const body = JSON.stringify({
-      message: "Hello",
-      sessionId: "00000000-0000-0000-0000-000000000000",
+      message: "Hello fresh session",
+      sessionId: freshId,
     });
 
     const { req, res } = createMockReqRes("POST", "/v1/chat", {
@@ -221,7 +224,39 @@ describe("REST Sessions & Chat Resume (Spec 021-2 / FR-005, FR-006)", () => {
       handler(req, res);
     });
 
-    expect(res.statusCode).toBe(404);
+    expect(res.statusCode).toBe(200);
+    const data = JSON.parse(res.body);
+    expect(data.sessionId).toBe(freshId);
+
+    // Verify session now exists for key1
+    const session = await sessionManager.getSession(freshId, hashKey(key1));
+    expect(session).not.toBeNull();
+    expect(session!.id).toBe(freshId);
+  });
+
+  it("POST /v1/chat returns 403 for foreign sessionId owned by another key (FR-026)", async () => {
+    // Create session owned by key1
+    const s1 = await sessionManager.createSession(key1);
+
+    // key2 attempts to post to key1's session
+    const body = JSON.stringify({
+      message: "Probe foreign session",
+      sessionId: s1.id,
+    });
+
+    const { req, res } = createMockReqRes("POST", "/v1/chat", {
+      authorization: `Bearer ${key2}`,
+      "content-type": "application/json",
+    }, body);
+
+    await new Promise<void>((resolve) => {
+      res.on("finish", resolve);
+      handler(req, res);
+    });
+
+    expect(res.statusCode).toBe(403);
+    const data = JSON.parse(res.body);
+    expect(data.error.code).toBe("FORBIDDEN");
   });
 
   it("POST /v1/chat without sessionId is stateless (D1): no session created, no 429, no files saved", async () => {

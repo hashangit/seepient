@@ -26,11 +26,21 @@ import type { SettingsHandlerContext } from "./settings-handlers.js";
 import type { WsServerHandle } from "../ws/websocket.js";
 import { loadMergedConfig, getConfigPaths, loadJsonConfig } from "../../foundations/config.js";
 import { RateLimiter, globalRateLimiter } from "./rate-limit.js";
+import { logTransportEvent } from "../logging.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
 import type { RunSeepientServerOptions } from "../../foundations/types.js";
 export type { RunSeepientServerOptions };
+
+export {
+  generateApiKey,
+  validateApiKey,
+  revokeApiKey,
+  listApiKeys,
+  type KeyScope,
+  type ApiKeyEntry,
+} from "../auth/auth.js";
 
 interface ReadPackageJson {
   version: string;
@@ -79,30 +89,30 @@ function listModels(): Record<string, string[]> {
 }
 
 /**
- * Cached skill list — populated asynchronously at startup.
- */
-let cachedSkillList: { name: string; description: string; tags: string[] }[] = [];
-
-/**
- * Initialize the skill registry and cache the skill metadata list.
- * Called once during server startup.
+ * Initialize the skill registry.
+ * Called once during server startup to verify skills system.
  */
 export async function initializeSkills(): Promise<void> {
   try {
     const { initializeSkillRegistry } = await import("../../capabilities/skills/index.js");
+    await initializeSkillRegistry(process.cwd());
+  } catch {
+    // Skills system not available
+  }
+}
+
+async function listSkills(): Promise<{ name: string; description: string; tags: string[] }[]> {
+  try {
+    const { initializeSkillRegistry } = await import("../../capabilities/skills/index.js");
     const registry = await initializeSkillRegistry(process.cwd());
-    cachedSkillList = registry.getMetadata().map((s) => ({
+    return registry.getMetadata().map((s) => ({
       name: s.name,
       description: s.description,
       tags: s.tags,
     }));
   } catch {
-    // Skills system not available — keep empty list
+    return [];
   }
-}
-
-function listSkills(): { name: string; description: string; tags: string[] }[] {
-  return cachedSkillList;
 }
 
 // ── CORS helper ────────────────────────────────────────────────────────
@@ -288,6 +298,12 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
       },
     };
 
+    const serverOperatorBaseline: import("../../foundations/contracts/permission-policy.js").CapabilitySet | undefined = options?.operatorBaseline
+      ? (Array.isArray(options.operatorBaseline)
+          ? { version: 1 as const, capabilities: options.operatorBaseline }
+          : options.operatorBaseline)
+      : undefined;
+
     serverPipelineFactory = async (identity) => {
       return buildActionLifecycle({
         principalId: identity.principalId,
@@ -301,6 +317,8 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
         policyStore: options?.policyStore,
         capabilityLedger: options?.capabilityLedger,
         terminalOutbox: serverOutbox,
+        tenancyMode: "multi",
+        operatorBaseline: serverOperatorBaseline,
       });
     };
   }
@@ -342,6 +360,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     settingsManager,
     getOtherClients: (excludeWs) => wsRegistry.getOtherClients(excludeWs),
     maxBodyBytes: maxBodyBytesSetting,
+    runtime: getServerRuntime(),
   };
 
   // W161: re-read server.rateLimitRpm per consume — a settings PATCH takes
@@ -395,7 +414,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     version,
     startTime,
     sessionManager,
-    runtime: options?.runtime,
+    runtime: getServerRuntime(),
     generateText: async (opts) => {
       // Spec 008: construct a per-request pipeline with the authenticated
       // principal's identity. No shared state between requests.
@@ -438,7 +457,25 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     }
 
     // Delegate to REST handler
-    restHandler(req, res);
+    void Promise.resolve(restHandler(req, res)).catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      logTransportEvent({
+        level: "error",
+        event: "http_request",
+        requestId: crypto.randomUUID(),
+        status: 500,
+        error: message,
+      });
+      if (!res.headersSent) {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "Internal server error",
+          },
+        }));
+      }
+    });
   });
 
   // Create WebSocket handler context
@@ -541,7 +578,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
   // Listen immediately unless listen: false
   if (willListen) {
     const port = resolvePort(options);
-    const host = options?.host ?? "0.0.0.0";
+    const host = options?.host ?? process.env.SEEPIENT_HOST ?? "127.0.0.1";
     await new Promise<void>((resolve) => {
       server.listen(port, host, () => {
         // W162: port 0 means an OS-assigned ephemeral port — print the real one.

@@ -1,7 +1,9 @@
 /**
  * Spec 022 — Tenancy Mode & Fail-Closed Validation (contracts/tenancy-mode.md).
  */
-import { SeepientError } from "../../foundations/errors.js";
+import { SeepientError, PrincipalRequiredError } from "../../foundations/errors.js";
+
+export { PrincipalRequiredError };
 
 export type TenancyMode = "single" | "multi";
 
@@ -11,6 +13,7 @@ export interface TenancySignals {
   anyStoreInjected?: boolean;
   runtimeInjected?: boolean;
   persistInjected?: boolean;
+  /** Injected non-literal skill sources only; inline literals never set this (FR-016, M5). */
   skillSourcesInjected?: boolean;
 }
 
@@ -107,6 +110,7 @@ export interface TenancyValidationInputs {
   persist?: unknown;
   isSessionful?: boolean;
   stateless?: boolean;
+  principalId?: string;
 }
 
 /**
@@ -142,6 +146,11 @@ export function validateTenancyCompleteness(
       );
     }
     return;
+  }
+
+  // FR-020: principalId is checked FIRST in multi mode before runtime or store completeness
+  if (!inputs.principalId || (typeof inputs.principalId === "string" && inputs.principalId.trim().length === 0)) {
+    throw new PrincipalRequiredError();
   }
 
   if (!inputs.runtime) {

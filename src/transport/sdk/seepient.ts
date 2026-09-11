@@ -61,16 +61,18 @@ import {
 import { normalizeHistoryForSend } from "../../domain/sessions/normalize-history.js";
 import { generateId } from "../../foundations/id.js";
 import { surfaceLoopError, extractLoopError } from "./error-surfacing.js";
-import { SeepientError } from "../../foundations/errors.js";
+import { SeepientError, PersistConfigInvalidError, SessionIdInvalidError } from "../../foundations/errors.js";
 
 // ── Session persistence helpers ──────────────────────────────────────────
 
+export const MAX_SESSION_ID_LENGTH = 128;
 const SESSION_ID_RE = /^[a-zA-Z0-9_-]+$/;
 
-function validateSessionId(sessionId: string): void {
-  if (!sessionId || !SESSION_ID_RE.test(sessionId)) {
-    throw new Error(
-      `Invalid session ID "${sessionId}". Only alphanumeric characters, dashes, and underscores are allowed.`,
+export function validateSessionId(sessionId: string): void {
+  if (!sessionId || !SESSION_ID_RE.test(sessionId) || sessionId.length > MAX_SESSION_ID_LENGTH) {
+    throw new SessionIdInvalidError(
+      sessionId,
+      `SESSION_ID_INVALID: Invalid session ID "${sessionId}". Only alphanumeric characters, dashes, and underscores are allowed (max ${MAX_SESSION_ID_LENGTH} characters).`,
     );
   }
 }
@@ -131,7 +133,7 @@ import {
  * Supports single-turn chat, multi-turn conversations, streaming responses,
  * model switching, tool execution, session persistence, and provider management.
  */
-import { computeEffectiveSkillSources } from "./skill-sources-helper.js";
+import { computeEffectiveSkillSources, emitMultiZeroSourcesNoticeOnce } from "./skill-sources-helper.js";
 
 export async function createSeepient(options?: CreateSeepientOptions): Promise<Seepient> {
   const opts = options ?? {};
@@ -143,7 +145,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     anyStoreInjected: Boolean(opts.auditStore || opts.policyStore || opts.capabilityLedger),
     runtimeInjected: Boolean(opts.runtime),
     persistInjected: Boolean(opts.persist),
-    skillSourcesInjected: effectiveSources.length > 0,
+    skillSourcesInjected: Boolean(opts.sources && opts.sources.length > 0),
   };
   const { mode: tenancyMode, upgraded } = resolveTenancyMode(tenancySignals);
   emitTenancyNoticeOnce(upgraded);
@@ -157,6 +159,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     persist: opts.persist,
     stateless: opts.stateless,
     isSessionful: Boolean(opts.sessionId || opts.persist),
+    principalId: opts.principalId,
   });
 
   // If providers, modelAssignments, or overlay options are passed without an explicit runtime,
@@ -195,6 +198,9 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   let provider = opts.provider;
   let providerAccount = opts.providerAccount ?? opts.override?.providerAccount;
   let model = opts.model ?? opts.override?.model ?? "";
+  let thinkingLevel = opts.override?.thinkingLevel;
+  let temperature = opts.temperature;
+  let maxTokens = opts.maxTokens;
   let purpose = opts.purpose;
   let tier = opts.tier;
   let metadata = opts.metadata;
@@ -208,6 +214,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   if (opts.skills !== false) {
     if (tenancyMode === "multi" && effectiveSources.length === 0) {
       // In multi-tenant mode without injected sources, ambient discovery is skipped
+      emitMultiZeroSourcesNoticeOnce();
     } else {
       try {
         skillRegistry = await initializeSkillRegistry(opts.cwd ?? process.cwd(), { sources: effectiveSources, tenancyMode });
@@ -219,6 +226,11 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
           );
         if (Array.isArray(opts.skills) && !isLiteralList) {
           const wanted = new Set(opts.skills.filter((s): s is string => typeof s === "string"));
+          const available = new Set(meta.map((s) => s.name));
+          const missing = Array.from(wanted).filter((name) => !available.has(name));
+          if (missing.length > 0) {
+            console.warn(`[SKILLS] Warning: Skill filter requested unavailable skill(s): ${missing.join(", ")}`);
+          }
           meta = meta.filter((s) => wanted.has(s.name));
         }
         if (meta.length > 0) {
@@ -266,10 +278,21 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   if (opts.persist) {
     if (typeof opts.persist === "string") {
       backend = createPersistenceBackend({ type: "file", path: opts.persist });
-    } else if ("type" in opts.persist && typeof opts.persist.type === "string") {
+    } else if (
+      typeof opts.persist === "object" &&
+      opts.persist !== null &&
+      "type" in opts.persist &&
+      typeof (opts.persist as any).type === "string"
+    ) {
       backend = createPersistenceBackend(opts.persist as PersistenceConfig);
-    } else if ("__persistenceBackend" in opts.persist) {
+    } else if (
+      typeof opts.persist === "object" &&
+      opts.persist !== null &&
+      "__persistenceBackend" in opts.persist
+    ) {
       backend = opts.persist as PersistenceBackend;
+    } else {
+      throw new PersistConfigInvalidError();
     }
 
     if (backend) {
@@ -442,9 +465,9 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     }
   }
 
-  function currentModelOverride(): { model?: string; providerAccount?: string } | undefined {
-    return providerAccount || model
-      ? { model: model || undefined, providerAccount }
+  function currentModelOverride(): { model?: string; providerAccount?: string; thinkingLevel?: any } | undefined {
+    return providerAccount || model || thinkingLevel
+      ? { model: model || undefined, providerAccount, thinkingLevel }
       : undefined;
   }
 
@@ -501,6 +524,8 @@ async function chat(userMessage: string): Promise<AgentResponse> {
         modelOverride: currentModelOverride(),
         purpose,
         tier,
+        temperature,
+        maxTokens,
         messages: modelMessages,
         toolRegistry,
         toolDefs,
@@ -609,6 +634,8 @@ async function chat(userMessage: string): Promise<AgentResponse> {
             modelOverride: currentModelOverride(),
             purpose: streamOptions?.purpose ?? purpose,
             tier: streamOptions?.tier ?? tier,
+            temperature,
+            maxTokens,
             messages: modelMessages,
             toolRegistry,
             toolDefs,

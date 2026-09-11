@@ -26,7 +26,12 @@ async function resolveServerSkills(skills?: string[]): Promise<{ skillCatalog?: 
     let metadata = registry.getMetadata();
     if (skills && skills.length > 0) {
       const wanted = new Set(skills);
-      metadata = metadata.filter(s => wanted.has(s.name));
+      const available = new Set(metadata.map((s) => s.name));
+      const missing = Array.from(wanted).filter((name) => !available.has(name));
+      if (missing.length > 0) {
+        console.warn(`[SKILLS] Warning: Skill filter requested unavailable skill(s): ${missing.join(", ")}`);
+      }
+      metadata = metadata.filter((s) => wanted.has(s.name));
     }
     if (metadata.length === 0) return { skillRegistry: registry };
     return { skillCatalog: buildSkillCatalog(metadata), skillRegistry: registry };

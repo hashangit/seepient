@@ -337,7 +337,7 @@ interface CreateSeepientOptions {
   /** Maximum agent loop iterations per call. Default: 10. */
   maxSteps?: number;
   /** Session persistence: path, backend instance, or config object. */
-  persist?: string | PersistenceBackend | PersistenceConfig | SessionStore;
+  persist?: string | PersistenceBackend | PersistenceConfig;
   /** Lifecycle callbacks. */
   hooks?: Hooks;
   /** Extra config passed to tool handlers. */
@@ -736,18 +736,6 @@ interface SessionData {
   providerAccount?: string;
   model?: string;
   metadata?: Record<string, unknown>;
-}
-```
-
-### SessionStore (legacy adapter)
-
-```typescript
-/** @deprecated Use PersistenceBackend instead */
-interface SessionStore {
-  save(sessionId: string, messages: Message[]): Promise<void>;
-  load(sessionId: string): Promise<Message[] | null>;
-  delete(sessionId: string): Promise<void>;
-  list(): Promise<string[]>;
 }
 ```
 

@@ -72,6 +72,18 @@ program
     await runSetup(options);
   });
 
+program
+  .command('server')
+  .description('Start the Seepient HTTP and WebSocket server')
+  .allowUnknownOption(true)
+  .allowExcessArguments(true)
+  .action(async () => {
+    const serverIdx = process.argv.indexOf('server');
+    const rawArgs = serverIdx !== -1 ? process.argv.slice(serverIdx + 1) : [];
+    const { startStandaloneServer } = await import('../../transport/http/standalone.js');
+    await startStandaloneServer(rawArgs);
+  });
+
 import { registerAuthCommands } from '../../transport/cli/commands/auth-cli.js';
 import { registerProvidersCommands } from '../../transport/cli/commands/providers-cli.js';
 import { registerModelsCommands } from '../../transport/cli/commands/models-cli.js';
@@ -103,18 +115,30 @@ if (process.argv.includes('--docker')) {
   process.env.SEEPIENT_NO_INTERACTIVE = 'true';
 }
 
-// Global error containment for async CLI execution
-process.on("unhandledRejection", (reason: any) => {
-  const msg = reason?.message || String(reason);
-  console.error(chalk.red(`Error: ${msg}`));
-  process.exit(1);
-});
+export function getRegisteredCliOptions(): Array<{ flags: string; description: string; long?: string; short?: string }> {
+  return program.options.map((opt) => ({
+    flags: opt.flags,
+    description: opt.description,
+    long: opt.long,
+    short: opt.short,
+  }));
+}
+export { program as cliProgram };
 
-try {
-  await program.parseAsync(process.argv);
-} catch (err: any) {
-  if (err?.code !== "commander.helpDisplayed" && err?.code !== "commander.version" && err?.exitCode !== 0) {
-    console.error(chalk.red(`Error: ${err?.message || String(err)}`));
+if (!process.env.VITEST) {
+  // Global error containment for async CLI execution
+  process.on("unhandledRejection", (reason: any) => {
+    const msg = reason?.message || String(reason);
+    console.error(chalk.red(`Error: ${msg}`));
     process.exit(1);
+  });
+
+  try {
+    await program.parseAsync(process.argv);
+  } catch (err: any) {
+    if (err?.code !== "commander.helpDisplayed" && err?.code !== "commander.version" && err?.exitCode !== 0) {
+      console.error(chalk.red(`Error: ${err?.message || String(err)}`));
+      process.exit(1);
+    }
   }
 }

@@ -12,10 +12,48 @@
  */
 
 import type { SkillRecord, SkillSource, SkillStore } from "../../foundations/contracts/skill-source.js";
-import { SkillStoreUnavailableError, SkillCollisionError } from "../../foundations/errors.js";
+import { SkillStoreUnavailableError, SkillCollisionError, SkillBodyRequiredError } from "../../foundations/errors.js";
 import { splitFrontmatter } from "../../capabilities/skills/parser.js";
 
-export { SkillStoreUnavailableError, SkillCollisionError };
+export { SkillStoreUnavailableError, SkillCollisionError, SkillBodyRequiredError };
+
+const KNOWN_FRONTMATTER_KEYS = new Set([
+  "name",
+  "description",
+  "kind",
+  "version",
+  "origin",
+  "created_at",
+  "tags",
+  "allowedTools",
+  "changelog",
+]);
+
+function extractUnknownYamlBlocks(yaml: string): string[] {
+  const lines = yaml.split("\n");
+  const unknownBlocks: string[] = [];
+  let currentKey: string | null = null;
+  let currentBlock: string[] = [];
+
+  for (const line of lines) {
+    const keyMatch = line.match(/^([a-zA-Z0-9_-]+):/);
+    if (keyMatch) {
+      if (currentKey && !KNOWN_FRONTMATTER_KEYS.has(currentKey)) {
+        unknownBlocks.push(...currentBlock);
+      }
+      currentKey = keyMatch[1];
+      currentBlock = [line];
+    } else if (currentKey) {
+      currentBlock.push(line);
+    }
+  }
+
+  if (currentKey && !KNOWN_FRONTMATTER_KEYS.has(currentKey)) {
+    unknownBlocks.push(...currentBlock);
+  }
+
+  return unknownBlocks;
+}
 
 export interface SaveGeneratedSkillParams {
   name: string;
@@ -127,6 +165,7 @@ export async function saveGeneratedSkill(
   let origin = params.origin ?? "standalone";
   let prevTags: string[] | undefined;
   let prevAllowedTools: string[] | undefined;
+  let unknownFrontmatterLines: string[] = [];
 
   if (existingRecord) {
     if (!params.replace) {
@@ -134,6 +173,9 @@ export async function saveGeneratedSkill(
     }
 
     const { yaml } = splitFrontmatter(existingRecord.content);
+
+    // Extract any unknown frontmatter blocks to preserve verbatim (FR-036)
+    unknownFrontmatterLines = extractUnknownYamlBlocks(yaml);
 
     // Parse existing version
     const vMatch = yaml.match(/^version:\s*(.+)$/m);
@@ -176,6 +218,11 @@ export async function saveGeneratedSkill(
   const allowedTools = params.allowedTools ?? prevAllowedTools;
   const body = params.body ?? (params.content ? splitFrontmatter(params.content).body : "");
 
+  // Guard against empty body (FR-036 / R54)
+  if (!body || body.trim().length === 0) {
+    throw new SkillBodyRequiredError(params.name);
+  }
+
   const frontmatterLines: string[] = [
     "---",
     formatYamlScalar("name", params.name),
@@ -198,6 +245,10 @@ export async function saveGeneratedSkill(
     for (const tool of allowedTools) {
       frontmatterLines.push(formatYamlListItem(tool));
     }
+  }
+
+  if (unknownFrontmatterLines.length > 0) {
+    frontmatterLines.push(...unknownFrontmatterLines);
   }
 
   frontmatterLines.push("changelog:");

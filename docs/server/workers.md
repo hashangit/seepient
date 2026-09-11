@@ -5,15 +5,18 @@ description: Distributed worker scheduler, ephemeral Docker worker containers, a
 
 # Worker scheduler
 
-In distributed deployments and multi-tenant cloud architectures, Seepient isolates tool execution from the control plane using the **Worker Scheduler**.
+> [!NOTE]
+> **Status**: The remote worker scheduler is currently an unwired architectural component. In the current release, the remote HTTP and WebSocket server operates in inference, model routing, and planning mode. Effectful tool execution (file mutations and shell execution) on the server fails closed with `backend-unsupported` by design until the isolated worker container scheduler is integrated.
 
-Rather than executing shell commands or file modifications within the same process that handles user authentication and provider API keys, the server delegates tool execution to ephemeral Docker worker containers.
+In distributed deployments and multi-tenant cloud architectures, Seepient is designed to isolate tool execution from the control plane using a **Worker Scheduler**.
+
+Rather than executing shell commands or file modifications within the same process that handles user authentication and provider API keys, the server will delegate tool execution to ephemeral Docker worker containers.
 
 <DiagramFlow
   :steps="[
     { title: 'Seepient Control Plane', desc: 'REST / WebSocket server — holds API keys and user sessions' },
-    { title: 'Docker Worker Scheduler', desc: 'The only component with access to the Docker socket', edge: 'mTLS · signed WorkerDispatch payload' },
-    { title: 'Isolated Worker Container', desc: 'Secret-free: runs the command inside the sandbox jail with zero provider credentials', edge: 'Spawns an ephemeral container' }
+    { title: 'Docker Worker Scheduler', desc: 'Component managing worker lifecycles (unwired)', edge: 'mTLS · signed WorkerDispatch payload' },
+    { title: 'Isolated Worker Container', desc: 'Secret-free: runs commands inside the sandbox jail with zero provider credentials', edge: 'Spawns an ephemeral container' }
   ]"
 />
 
@@ -30,7 +33,7 @@ Rather than executing shell commands or file modifications within the same proce
 
 ## The WorkerDispatch protocol
 
-When a prepared action requires execution in worker mode:
+When effectful tool execution is delegated:
 
 1. **Dispatch generation**: The control plane creates a `WorkerDispatch` payload containing:
    - A unique, single-use `dispatchId` and cryptographic `nonce`
@@ -41,28 +44,6 @@ When a prepared action requires execution in worker mode:
 3. **Ephemeral container execution**: The scheduler launches an isolated worker container running the compiled native sandbox and commit helpers.
 4. **Evidence collection**: The worker records execution exit codes, stdout, stderr, and enforcement evidence, returning the signed result to the scheduler.
 5. **Teardown**: The container is destroyed immediately after the action completes or times out.
-
----
-
-## Configuring worker execution
-
-To enable Docker worker execution in your server configuration:
-
-```json
-{
-  "execution": {
-    "backend": "docker-worker",
-    "schedulerEndpoint": "https://scheduler.internal:8443",
-    "mtls": {
-      "caCertPath": "/etc/seepient/certs/ca.pem",
-      "clientCertPath": "/etc/seepient/certs/client.pem",
-      "clientKeyPath": "/etc/seepient/certs/client-key.pem"
-    },
-    "workerImage": "seepient/worker:latest",
-    "defaultTimeoutMs": 30000
-  }
-}
-```
 
 ---
 

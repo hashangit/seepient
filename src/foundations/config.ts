@@ -24,6 +24,9 @@ export function getLocalConfigFile(customCwd?: string): string {
 
 // ── Types ──────────────────────────────────────────────────────────────
 
+export const VALID_CONSENT_MODES = ['ask-everything', 'edit-enabled', 'autonomous'] as const;
+export type ConsentMode = (typeof VALID_CONSENT_MODES)[number];
+
 export interface AppConfig {
   hasExplicitModel?: boolean;
   // Existing tools (unchanged)
@@ -34,7 +37,7 @@ export interface AppConfig {
   smtpFrom?: string;
   tavilyApiKey?: string;
   autoConfirm?: boolean;
-  consentMode?: "ask-everything" | "edit-enabled" | "autonomous";
+  consentMode?: ConsentMode;
   feishuWebhook?: string;
   feishuKeyword?: string;
   dingtalkWebhook?: string;
@@ -140,6 +143,8 @@ export function applyEnvOverrides(config: AppConfig): AppConfig {
     const val = process.env.SEEPIENT_CONSENT_MODE;
     if (val === "ask-everything" || val === "edit-enabled" || val === "autonomous") {
       config.consentMode = val;
+    } else {
+      console.warn(`[seepient] Warning: Unrecognized SEEPIENT_CONSENT_MODE "${val}". Valid options: ask-everything, edit-enabled, autonomous. Falling back to edit-enabled.`);
     }
   }
 

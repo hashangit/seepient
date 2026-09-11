@@ -43,10 +43,12 @@ export function getSkillPaths(cwd: string): string[] {
 
 export async function discoverSkillRecords(cwd: string): Promise<SkillRecord[]> {
   const paths = getSkillPaths(cwd);
-  const records = new Map<string, { record: SkillRecord; priority: number }>();
+  const records = new Map<string, { record: SkillRecord; priority: number; sourceIndex: number }>();
 
   // Load in reverse priority order so higher priority overwrites
-  for (const searchPath of [...paths].reverse()) {
+  const reversed = [...paths].reverse();
+  for (let sourceIndex = 0; sourceIndex < reversed.length; sourceIndex++) {
+    const searchPath = reversed[sourceIndex];
     if (!existsSync(searchPath)) continue;
 
     try {
@@ -62,7 +64,11 @@ export async function discoverSkillRecords(cwd: string): Promise<SkillRecord[]> 
           const priority = skill.priority || 0;
 
           const existing = records.get(skill.name);
-          if (!existing || priority >= existing.priority) {
+          if (
+            !existing ||
+            sourceIndex > existing.sourceIndex ||
+            (sourceIndex === existing.sourceIndex && priority >= existing.priority)
+          ) {
             records.set(skill.name, {
               record: {
                 name: skill.name,
@@ -71,6 +77,7 @@ export async function discoverSkillRecords(cwd: string): Promise<SkillRecord[]> 
                 filePath: skillFile,
               },
               priority,
+              sourceIndex,
             });
           }
         } catch (error: any) {

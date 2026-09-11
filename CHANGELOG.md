@@ -5,9 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v0.8.0] - 2026-09-07
+## [v0.8.0] - Unreleased
 
-### Multi-tenant isolation hardening (Spec 022)
+### Multi-tenant isolation hardening & readiness remediation (Specs 022 & 022-1)
 
 **Breaking changes:**
 - **Migration from Deleted Exports**:
@@ -21,7 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Omitting `runtime` in multi-tenant mode throws `TENANCY_RUNTIME_REQUIRED`.
   - Missing any required storage backends (`auditStore`, `policyStore`, `capabilityLedger`, or `persist`) without `stateless: true` throws `TENANCY_STORE_INCOMPLETE`.
   - Writing outside injected stores in multi-tenant mode throws `TENANCY_AMBIENT_IO`.
-- **API-key-scoped server approvals**: HTTP server permission grants are now scoped by API key principal derived from `apiKeyHash`. Approval grants no longer leak or share across different API keys on the same server instance.
+- **Server Tenancy Threading (FR-021)**: HTTP server agent lifecycles now build with `tenancyMode: "multi"` scoped to the API key principal (`apiKeyHash`). Ambient unstamped legacy grants in the policy store are now invisible to server principals (policy reads run principal-filtered).
+  - *Transition guidance*: Operators should re-approve needed capabilities per API key, or seed per-principal stamped grants in the policy store. Foundational capabilities can be passed via `operatorBaseline`.
+- **Explicit `principalId` Required in Multi-Tenant Mode (FR-020)**: Setting `tenancy: "multi"` (explicit or upgraded) without providing an explicit `principalId` now throws a typed `PrincipalRequiredError` (`PRINCIPAL_REQUIRED`) at construction. The default `"sdk-user"` identity is restricted to single-user mode.
+  - *Transition guidance*: When configuring multi-tenant agents, pass a stable per-tenant identifier (e.g. `principalId: tenantId`).
+- **Server Loopback Default (FR-028)**: The HTTP/WebSocket server (`seepient-server`, `seepient server`, and `runSeepientServer`) now defaults to binding `127.0.0.1` (loopback) instead of `0.0.0.0` for local security.
+  - *Transition guidance*: To expose the server across all network interfaces, pass `--host 0.0.0.0`, set environment variable `SEEPIENT_HOST=0.0.0.0`, or specify `host: "0.0.0.0"` in `runSeepientServer` options. Official Docker images set `ENV SEEPIENT_HOST=0.0.0.0` out of the box.
+- **Docker and Headless Consent Mode Defaults (FR-019)**: The `--docker` and `--headless` (or `-n`) CLI flags no longer implicitly enable `autoConfirm: true` (which previously auto-approved all tool actions). Non-interactive and containerized environments now adhere to the standard deployment ceiling and consent boundaries; effectful tools requiring confirmation will fail with permission denials rather than executing automatically.
+  - *Transition guidance*: To run unattended or automated batch workflows requiring tool execution, pass `-y` / `--yes` or `--mode autonomous`, or configure `permissions.consentMode: "autonomous"` in `.seepient/setting.json`.
+- **Strict Cross-Source Skill Composition Order (FR-032)**: Skill `priority:` declarations in frontmatter now apply strictly *within* an individual source rather than globally across sources. Cross-source composition is strictly last-wins (injected sources override earlier filesystem sources, and inline skill literals override injected sources), guaranteeing predictable tenant shadowing.
+  - *Transition guidance*: If relying on high numeric `priority:` values to override downstream injected sources or inline literals, structure the injected `SkillSource` array in desired last-wins order or use inline literals.
 
 **Added:**
 - **Per-agent `ToolRegistry`**: Instanced tool registry providing private tool resolution, registration, and duplicate-name conflict prevention (`TOOL_NAME_CONFLICT`).
@@ -29,6 +38,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Principal-scoped permission state**: All persisted capabilities stamped with `principalId` on write; `PolicyStore.read` filters by `principalId` in multi mode. Added `operatorBaseline` lifecycle input for unprompted foundational permissions across all tenants.
 - **Skills scoping on 021-1 seam**: In multi-tenant mode, ambient skill discovery under `$HOME/.seepient/skills` is disabled; agents load strictly injected `SkillSource`s.
 - **Regression fences**: FR-017 process-state invariant gate (`src/foundations/__tests__/process-state-invariant.test.ts`) with bidirectional drift detection, and the multi-tenant isolation matrix (`src/domain/permissions/__tests__/multi-tenant-isolation.test.ts`) covering all 8 isolation dimensions.
+- **Session adopt-or-create parity (FR-026)**: REST `POST /v1/chat` unifies session creation behavior with WebSocket chat: passing an unknown `sessionId` creates and adopts the session with the authenticated principal's ownership, eliminating cross-transport drift. `GET /v1/sessions/:id` continues returning 404 for nonexistent sessions.
+- **Durable server session enumeration (FR-030)**: Added optional `list?(filter)` method to `PersistenceBackend` contract and implemented on `FilePersistenceBackend`. `GET /v1/sessions` enumerates persisted sessions across server restarts.
+- **Server crash prevention & safe WebSocket messaging (FR-025)**: Replaced raw `ws.send` calls with `safeSend` across settings and session-control handlers; wrapped message dispatching in catch-all error handler echoing `clientMsgId`; added unhandled rejection handlers preventing process exits on client disconnects.
+- **Runtime injection parity across transports (FR-027)**: WebSocket provider mutation handlers now resolve and target the injected `ProviderRuntime`, achieving full parity with REST handlers.
+- **Request caps & payload enforcement (FR-029)**: Clamped `maxSteps` with server settings/env configuration and response echoing; unified HTTP 413 `PAYLOAD_TOO_LARGE` handling on provider management endpoints without abrupt socket destruction.
+- **Skills residuals & failure legibility (FR-032–FR-038)**: Enforced strict cross-source last-wins order independent of internal priority declarations; implemented content-first body precedence; introduced `SkillBodyUnavailableError` (`SKILL_BODY_UNAVAILABLE`) with typed error handling across REPL and TUI; protected REPL/TUI against null skill registry crashes; preserved unknown frontmatter during generated skill save; enforced `agent:read` scope on REST and WS skill listings with dynamic per-turn reflection; restored body size warnings honoring `SEEPIENT_SKILL_BODY_WARN_CHARS`.
+- **Release verification gate & platform testing (FR-039, FR-040)**: `pack:verify` now enforces `assertNotPlaceholder()`, refusing publication of placeholder native binaries on local and CI paths alike; added macOS test runner matrix in CI and release workflows for cross-platform JavaScript and native parity.
 
 ### Injectable skill sources and inline tier (Spec 021-1)
 
