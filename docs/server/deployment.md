@@ -165,7 +165,7 @@ server.close();     // close event detaches the signal handlers as well
 fully independent HTTP + WebSocket stack (per-instance WebSocket server,
 connection registry, approval store). Closing one server never closes another
 server's connections. One caveat: default on-disk state (sessions under
-`./.seepient/sessions`, the local audit store, durable approvals under
+`./.seepient/sessions`, the local audit store, durable policies under
 `~/.seepient`) is process-wide by default — when embedding multiple servers,
 inject per-server `persist`, `auditStore`, `policyStore`, and
 `capabilityLedger` contracts to keep their state separated (see
@@ -281,7 +281,7 @@ Response:
 - [ ] Set at least one provider API key via environment variable
 - [ ] Generate API keys with minimal required scopes
 - [ ] Verify `~/.seepient/server-keys.json` permissions are `0600`
-- [ ] Mount a persistent volume for `./.seepient/sessions/` if using sessions
+- [ ] Mount a persistent volume for `./.seepient/sessions/` (or `SEEPIENT_SESSION_DIR`) if using sessions
 - [ ] Configure health check against `/v1/health`
 - [ ] Set `SEEPIENT_SESSION_TTL` appropriate for your use case
 - [ ] Enable WebSocket heartbeat (ping/pong every 30s) for Cloud Run deployments

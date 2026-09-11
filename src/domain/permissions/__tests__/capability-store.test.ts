@@ -34,6 +34,22 @@ describe("capability covers (T106)", () => {
     expect(covers(outer, { kind: "commit-file", path: "/p/a.txt.bak" })).toBe(false);
   });
 
+  it("enforces principal scoping: different principals never cover each other", () => {
+    const tenantA: Capability = { kind: "commit-file", path: "/p/a.txt", principalId: "tenant-a" };
+    const tenantB: Capability = { kind: "commit-file", path: "/p/a.txt", principalId: "tenant-b" };
+    const unstamped: Capability = { kind: "commit-file", path: "/p/a.txt" };
+
+    // Same principal covers
+    expect(covers(tenantA, { kind: "commit-file", path: "/p/a.txt", principalId: "tenant-a" })).toBe(true);
+    // Different principal never covers
+    expect(covers(tenantA, tenantB)).toBe(false);
+    expect(covers(tenantB, tenantA)).toBe(false);
+    // Unstamped outer (ceiling/baseline) covers tenant
+    expect(covers(unstamped, tenantA)).toBe(true);
+    // Tenant outer covers unstamped inner
+    expect(covers(tenantA, unstamped)).toBe(true);
+  });
+
   it("read-root covers read-file within root", () => {
     const outer: Capability = { kind: "read-root", root: "/proj" };
     expect(covers(outer, { kind: "read-file", path: "/proj/src/x.ts" })).toBe(true);

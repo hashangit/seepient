@@ -59,7 +59,7 @@ When the model emits a structured tool call (such as editing a file or running a
 ## Step 5: Policy evaluation and consent check
 
 The permission engine evaluates the `PreparedActionDraft` against three boundaries:
-1. **Active consent mode**: `always-ask`, `ask-untrusted`, or `autonomous-trusted`.
+1. **Active consent mode**: `ask-everything`, `edit-enabled`, or `autonomous`.
 2. **Path restrictions**: Ensures file modifications target paths inside the allowed workspace root, rejecting attempts to access sensitive directories like `/etc` or `~/.ssh`.
 3. **Self-evolution rules**: Rejects attempts by the model to modify Seepient's own security boundaries, permission stores, or audit configurations without explicit out-of-band authority.
 

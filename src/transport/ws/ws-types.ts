@@ -68,6 +68,7 @@ export interface ChatMessage {
 
 export interface ToolApprovalResponse {
   type: "tool_approval_response";
+  id?: string;
   callId: string;
   name: string;
   approved: boolean;
@@ -75,37 +76,44 @@ export interface ToolApprovalResponse {
 
 export interface AbortMessage {
   type: "abort";
+  id?: string;
   reason?: string;
 }
 
 export interface ResumeMessage {
   type: "resume";
+  id?: string;
   sessionId: string;
   lastMessageId?: string;
 }
 
 export interface ReconnectMessage {
   type: "reconnect";
+  id?: string;
   sessionId: string;
   lastSeenId?: string;
 }
 
 export interface SwitchProviderMessage {
   type: "switch_provider";
+  id?: string;
   provider: string;
   model?: string;
 }
 
 export interface ListModelsMessage {
   type: "list_models";
+  id?: string;
 }
 
 export interface ListSkillsMessage {
   type: "list_skills";
+  id?: string;
 }
 
 export interface PingMessage {
   type: "ping";
+  id?: string;
   clientTime: string;
 }
 
@@ -222,6 +230,8 @@ export interface DoneMessage {
   serverMsgId: string;
   usage: Usage;
   finishReason: string;
+  effectiveMaxSteps?: number;
+  maxSteps?: number;
 }
 
 export interface SessionCreatedMessage {
@@ -249,6 +259,7 @@ export interface ErrorMessage {
   message: string;
   provider?: string;
   tool?: string;
+  clientMsgId?: string;
 }
 
 export interface PongMessage {
@@ -377,7 +388,7 @@ export interface WebSocketHandlerContext {
     signal?: AbortSignal;
   }) => void | Promise<void>;
   listModels: () => Record<string, string[]>;
-  listSkills: () => { name: string; description: string; tags: string[] }[];
+  listSkills: () => { name: string; description: string; tags: string[] }[] | Promise<{ name: string; description: string; tags: string[] }[]>;
   settingsHandlerContext?: import("../http/settings-handlers.js").SettingsHandlerContext;
 }
 

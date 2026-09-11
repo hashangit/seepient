@@ -244,4 +244,70 @@ describe("Generated Skill Save Path (Spec 021-1, US2, QS-S2)", () => {
     expect(updatedRecord.content).toContain('description: "Updated description: still with colon"');
     expect(updatedRecord.content).toContain("Update without tags param");
   });
+
+  it("FR-036: no-body save throws SKILL_BODY_REQUIRED", async () => {
+    const store = new FakeMemorySkillStore();
+
+    await expect(
+      saveGeneratedSkill({
+        name: "empty-skill",
+        description: "Skill with no body",
+        body: "",
+        sources: [store],
+      }),
+    ).rejects.toThrow(/SKILL_BODY_REQUIRED/);
+
+    await expect(
+      saveGeneratedSkill({
+        name: "whitespace-skill",
+        description: "Skill with whitespace body",
+        body: "   \n\t  ",
+        sources: [store],
+      }),
+    ).rejects.toThrow(/SKILL_BODY_REQUIRED/);
+  });
+
+  it("FR-036: replace-save preserves model, author, and custom frontmatter keys", async () => {
+    const store = new FakeMemorySkillStore([
+      {
+        name: "rich-skill",
+        content: `---
+name: rich-skill
+description: Original rich skill
+author: Alice
+priority: 50
+model:
+  provider: anthropic
+  model: claude-3-5-sonnet
+custom_meta:
+  nested: true
+---
+# Original Body
+`,
+        source: "db",
+      },
+    ]);
+
+    const result = await saveGeneratedSkill({
+      name: "rich-skill",
+      description: "Updated rich skill",
+      body: "# New Updated Body",
+      replace: true,
+      sources: [store],
+    });
+
+    expect(result.saved).toBe(true);
+    expect(result.version).toBe(2);
+
+    const [updated] = await store.list();
+    expect(updated.content).toContain("version: 2");
+    expect(updated.content).toContain("description: Updated rich skill");
+    // Unknown keys preserved verbatim
+    expect(updated.content).toContain("author: Alice");
+    expect(updated.content).toContain("priority: 50");
+    expect(updated.content).toContain("model:\n  provider: anthropic\n  model: claude-3-5-sonnet");
+    expect(updated.content).toContain("custom_meta:\n  nested: true");
+    // Body is the new body
+    expect(updated.content).toContain("# New Updated Body");
+  });
 });

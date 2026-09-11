@@ -341,5 +341,59 @@ describe("Skill sources composition & FsSkillSources (Spec 021-1, US1)", () => {
       rmSync(cwd, { recursive: true, force: true });
     }
   });
+
+  it("FR-032: cross-source shadowing is strictly last-wins even if earlier source declares high priority", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "seepient-prio-invert-"));
+    try {
+      writeSkill(join(cwd, ".seepient", "skills"), "prio-skill", "from fs normal prio");
+
+      const fakeDb: SkillSource = {
+        list: () => [
+          {
+            name: "prio-skill",
+            content: "---\nname: prio-skill\ndescription: from db high prio\npriority: 999\n---\nDB HIGH PRIO BODY\n",
+            source: "db",
+          },
+        ],
+      };
+
+      // Order: [fakeDb, FsSkillSources] -> fs is last, fs wins even though db declared priority: 999
+      const registry = await initializeSkillRegistry(cwd, {
+        sources: [fakeDb, new FsSkillSources(cwd)],
+        tenancyMode: "multi",
+      });
+
+      expect(registry.get("prio-skill")?.description).toBe("from fs normal prio");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("FR-033 (R42): both-fields record with unreadable filePath still loads its content", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "seepient-both-fields-"));
+    try {
+      const bothFieldsSource: SkillSource = {
+        list: () => [
+          {
+            name: "both-fields-skill",
+            content: "---\nname: both-fields-skill\ndescription: has both content and unreadable filePath\n---\nBODY FROM CONTENT\n",
+            filePath: "/nonexistent/unreadable/path/SKILL.md",
+            source: "custom-db",
+          },
+        ],
+      };
+
+      const registry = await initializeSkillRegistry(cwd, {
+        sources: [bothFieldsSource],
+        tenancyMode: "multi",
+      });
+
+      expect(registry.get("both-fields-skill")).toBeDefined();
+      const body = await registry.getBody("both-fields-skill");
+      expect(body).toContain("BODY FROM CONTENT");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
 });
 

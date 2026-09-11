@@ -68,7 +68,7 @@ For multi-tenant workers and cloud functions requiring full state injection (aud
 | `capabilityLedger` | `CapabilityLedger`                    | Local file capability ledger | Injected ledger for capability lease consumption and revocations |
 | `systemPrompt`  | `string`                                 | `"You are a helpful assistant."` | System prompt prepended to every conversation |
 | `tools`         | `(string \| UserToolDefinition \| AnyToolRegistration)[]` | All built-in               | Tool names, group constants, or custom tool registrations (`trustedHostTool`, `preparedTool`, `brokerConnector`) |
-| `consentMode`   | `ConsentMode`                            | `"edit-enabled"`           | Permission consent mode (`"ask-everything"`, `"edit-enabled"`, `"autonomous"`) |
+| `consentMode`   | `ConsentMode`                            | `"never"`                  | Permission consent mode (`"ask-everything"`, `"edit-enabled"`, `"autonomous"`, default is deny-by-default when omitted without broker) |
 | `deploymentCeiling` | `CapabilitySet \| Capability[]`      | *(none)*                   | Maximum capability lease permitted for any execution |
 | `principalPolicy` | `CapabilitySet \| Capability[]`        | *(none)*                   | Pre-granted capabilities for the calling principal |
 | `approveTool`   | `ApproveToolFn`                          | *(none)*                   | Interactive tool approval callback |

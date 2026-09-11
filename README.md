@@ -49,7 +49,7 @@ Unlike "screen-seeing" agents (such as OpenClaw) that rely on visual interpretat
 - 🛡️ **Security & Permission Pipeline**: Single Domain-owned enforcement pipeline (`PolicyEngine` → `ApprovalBroker` → `ExecutionBoundary` → `AuditRecorder`) default-on across CLI, TUI, SDK, and HTTP/WebSocket server.
 - 🔒 **Fail-Closed Isolation & SSRF Defense**: Process containment (macOS Seatbelt / Linux Bubblewrap) and exact-file write helpers fail closed; SSRF guards prevent metadata reflection.
 - 💾 **Durable Approvals & 0600 Audit**: File-locked atomic NDJSON stores and append-only `0600` audit logs (`~/.seepient/audit.log`) with fsync before mutation commits.
-- 🐳 **Server Worker Backend**: ephemeral Docker worker container scheduler with mTLS transport, Ed25519/HMAC signed dispatches, and secret-free worker execution environments.
+- 🐳 **Server Mode Execution**: Standalone HTTP/WebSocket server operating in inference and planning mode, failing closed with `backend-unsupported` on effectful operations until the isolated container scheduler ships.
 - 🏗️ **Clean Modular Architecture**: Strict responsibility-driven layers (`UI → Transport → Domain → Capabilities → Vendors → Foundations`) with decomposed route modules, isolated WebSocket message families, centralized connection registry, and decoupled TUI state hooks.
 - 🖥️ **Interactive TUI**: In a TTY, a full-screen Ink/React UI with bordered always-on input, streaming feed, interactive terminal widgets (tables, forms, charts), session manager, message queue/`/steer`, and inline `write_file` diffs (atomic, crash-safe writes).
 
@@ -364,10 +364,12 @@ const server = await runSeepientServer({
 });
 ```
 
+For a complete multi-tenant stateless worker deployment, see the [reference worker example](./examples/worker).
+
 #### Programmatic Gateway Client
 ```ts
 import { gateway } from 'seepient';
-const gw = await gateway.createGateway({ enabled: true, semanticTopK: 3, defaultRateLimitPerMin: 60, maxAuditLogsInMemory: 1000 });
+const { gateway: gw, tools } = await gateway.createGateway({ enabled: true, semanticTopK: 3, defaultRateLimitPerMin: 60, maxAuditLogsInMemory: 1000 });
 ```
 
 ---
@@ -404,7 +406,7 @@ seepient -r last "Continue with the remaining test failures"
 | `-y, --yes` | Autonomous mode: auto-approve actions within deployment ceiling (alias for `--mode autonomous`) |
 | `--mode <mode>` | Set consent mode: `edit-enabled` (default) \| `ask-everything` \| `autonomous` |
 | `-r, --resume <id>` | Resume a conversation by session ID, or pass `last` for the most recent session |
-| `--docker` | Run in container mode: implies `--no-interactive` and suppresses interactive prompts |
+| `--docker` | Run in container mode: implies `--no-interactive` and suppresses interactive prompts (denies un-predeclared actions; pass `--mode autonomous` or `--yes` for unattended runs) |
 
 #### Consent Modes & Security Governance
 
@@ -431,8 +433,8 @@ Inspect model assignments, browse the live upstream catalog, and configure routi
 | `models list` | List configured purpose assignments | `--resolved` (show active runtime targets), `--json` |
 | `models browse [query]` | Search catalog models with reachability, context window, and pricing | `--reachable-only`, `--json` |
 | `models resolve <slot>` | Dry-run preview of the selected target and fallback chain (e.g. `text.standard`) | `--json` |
-| `models set <slot> <target>` | Assign a model to a slot (e.g. `text.standard anthropic/claude-sonnet-5`) | `--thinking <none\|low\|medium\|high>`, `--json` |
-| `models fallback <slot> <targets>` | Configure ordered fallback candidates (e.g. `anthropic/claude-sonnet-5,openai/gpt-4o`) | `--json` |
+| `models set <slot> <target>` | Assign a model to a slot (e.g. `text.standard anthropic/claude-sonnet-4-6-20260320`) | `--thinking <none\|low\|medium\|high>`, `--json` |
+| `models fallback <slot> <targets>` | Configure ordered fallback candidates (e.g. `anthropic/claude-sonnet-4-6-20260320,openai/gpt-5.4`) | `--json` |
 | `models status` | Display active assignments and credential health across all slots | `--json` |
 | `models check` | Pre-flight sanity check ensuring required model slots are configured | `--require <slots>`, `--offline`, `--json` |
 | `models probe <provider>` | Test connectivity, latency, and credential validity for a provider | `--json` |
@@ -545,7 +547,6 @@ Seepient loads configuration through a clear hierarchy:
 
 | Variable | Purpose | Default |
 |:---|:---|:---|
-| `SEEPIENT_SHELL_APPROVE` | Shell command approval: `auto` (approve all), `deny` (block all), or unset (interactive prompt) | unset |
 | `SEEPIENT_CONSENT_MODE` | Runtime permission level: `ask-everything`, `edit-enabled`, or `autonomous` | `edit-enabled` |
 | `SEEPIENT_SKILLS_PATH` | Colon-separated list of custom skill directories | unset |
 | `SEEPIENT_SESSION_DIR` | Directory for persisted conversation history | `~/.seepient/sessions` |
@@ -564,10 +565,10 @@ You can configure providers in three ways:
 If you have standard provider API keys in your environment or `.env`, Seepient detects them automatically at boot:
 - `OPENAI_API_KEY` (OpenAI)
 - `ANTHROPIC_API_KEY` (Anthropic Claude)
-- `GEMINI_API_KEY` (Google Gemini)
-- `DEEPSEEK_API_KEY` (DeepSeek)
-- `GROQ_API_KEY` (Groq)
-- `GLM_API_KEY` (Z.ai GLM)
+- `GLM_API_KEY` (Zhipu GLM)
+- `OPENAI_COMPAT_API_KEY` / `OPENAI_COMPAT_BASE_URL` (OpenAI-compatible endpoints, e.g. Ollama)
+
+Additional providers and models (Google Gemini, DeepSeek, Groq, etc.) can be configured via `seepient setup` or `seepient auth login`.
 
 #### 2. Guided wizard and interactive TUI dock
 - Run `seepient setup` for the first-run interactive onboarding wizard.
@@ -586,12 +587,12 @@ seepient auth login my-openai --env-var CUSTOM_OPENAI_KEY
 seepient auth login my-claude --key sk-ant-...
 
 # Register a local endpoint (Ollama, LM Studio, vLLM) without credentials
-seepient providers add ollama-local --upstream openai --base-url http://127.0.0.1:11434/v1 --credential none
+seepient providers add ollama-local --upstream openai --url http://127.0.0.1:11434/v1 --credential none
 
 # Assign default models by purpose and tier
-seepient models set text.standard openai/gpt-5.6-terra
-seepient models set text.efficient openai/gpt-5.6-luna
-seepient models set plan.standard openai/gpt-5.6-sol
+seepient models set text.standard openai/gpt-5.4
+seepient models set text.efficient openai/gpt-5.4-mini
+seepient models set plan.standard openai/gpt-5.4-pro
 ```
 
 ### Credential storage options
@@ -634,13 +635,13 @@ When saved to `~/.seepient/setting.json` or `.seepient/setting.json`, your provi
     "text": {
       "standard": {
         "providerAccount": "openai",
-        "model": "gpt-5.6-terra",
-        "fallback": [{ "providerAccount": "anthropic", "model": "claude-sonnet-5" }]
+        "model": "gpt-5.4",
+        "fallback": [{ "providerAccount": "anthropic", "model": "claude-sonnet-4-6-20260320" }]
       },
-      "efficient": { "providerAccount": "openai", "model": "gpt-5.6-luna" }
+      "efficient": { "providerAccount": "openai", "model": "gpt-5.4-mini" }
     },
-    "plan": { "standard": { "providerAccount": "openai", "model": "gpt-5.6-sol" } },
-    "media": { "image": { "providerAccount": "openai", "model": "gpt-image-2" } }
+    "plan": { "standard": { "providerAccount": "openai", "model": "gpt-5.4-pro" } },
+    "media": { "image": { "providerAccount": "openai", "model": "dall-e-3" } }
   },
   "retryPolicy": {
     "maxAttempts": 3,
@@ -681,7 +682,7 @@ Seepient includes a universal API gateway that connects to downstream MCP server
 **SDK**:
 ```ts
 import { gateway } from 'seepient';
-const gw = await gateway.createGateway({ enabled: true, semanticTopK: 3, defaultRateLimitPerMin: 60, maxAuditLogsInMemory: 1000 });
+const { gateway: gw, tools } = await gateway.createGateway({ enabled: true, semanticTopK: 3, defaultRateLimitPerMin: 60, maxAuditLogsInMemory: 1000 });
 ```
 
 ### Web Search (Tavily)
@@ -733,9 +734,11 @@ Reference files with @k8s/deployment.yaml.
 ### Discovery Locations
 Skills are discovered in priority order (last wins):
 1. Built-in bundled skills
-2. `~/.seepient/skills/`
-3. `.seepient/skills/` (project-level)
-4. `SEEPIENT_SKILLS_PATH` directories
+2. `~/.agents/skills/` (shared cross-agent skills)
+3. `~/.seepient/skills/` (user global skills)
+4. `/mnt/skills` (container volume mount)
+5. `.seepient/skills/` (project-level)
+6. `SEEPIENT_SKILLS_PATH` directories
 
 ```bash
 # Add custom skill directories
@@ -774,17 +777,10 @@ Use `--docker` for non-interactive execution inside containers:
 docker run --rm \
   --env-file .env \
   -v $(pwd)/workspace:/workspace \
-  seepient seepient chat "Check disk usage" --docker
+  seepient chat "Check disk usage" --docker
 ```
 
-When Seepient detects a container or non-interactive shell (or when passed `--docker`), it turns off interactive prompts and formats output cleanly for log streams.
-
-### Shell approval in containers
-
-Set `SEEPIENT_SHELL_APPROVE` to control command execution without interactive prompts:
-- `auto`: Approve commands automatically (recommended for isolated containers)
-- `deny`: Block all shell execution
-- _(unset)_: Ask interactively (requires a TTY)
+When Seepient detects a container or non-interactive shell (or when passed `--docker`), it turns off interactive prompts and formats output cleanly for log streams. Headless execution denies un-predeclared actions with typed remediation; pass `--mode autonomous` or `--yes` for unattended runs.
 
 ### Docker Compose setup
 

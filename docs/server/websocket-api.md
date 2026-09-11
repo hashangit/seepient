@@ -28,6 +28,8 @@ Authentication is performed via the `token` query parameter. The server validate
 If authentication fails after upgrade (should not happen in normal flow), the server sends an `error` message with code `UNAUTHORIZED` and closes the connection with code `4001`.
 :::
 
+The server enforces a maximum frame payload of `1048576` bytes (1 MiB) on all incoming WebSocket messages. Messages exceeding this limit will result in immediate connection closure with status `1009`.
+
 ---
 
 ## Client-to-Server messages

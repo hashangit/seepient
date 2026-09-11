@@ -234,5 +234,71 @@ describe("QS-4: Reference Worker End-to-End", () => {
 
     await workerAgent.close();
   });
+
+  it("FR-023: Tenant A's policy grant is invisible to Tenant B on a shared workspace", async () => {
+    const policyStore = new RemotePolicyStore(`http://127.0.0.1:${controlPlanePort}`);
+    const workspaceId = "shared-workspace-test";
+
+    // Compare and set grant for Tenant A
+    await policyStore.compareAndSet(
+      workspaceId,
+      0,
+      {
+        version: 1,
+        capabilities: [
+          { kind: "write-root", root: "/data/tenant-a", principalId: "tenant-a" },
+        ],
+      },
+      { kind: "service", authorityId: "test", authenticatedBy: "system" },
+    );
+
+    // Read policy as Tenant A in multi-tenant mode
+    const snapA = await policyStore.read(workspaceId, {
+      principalId: "tenant-a",
+      tenancyMode: "multi",
+    });
+    expect(snapA.policy.capabilities).toHaveLength(1);
+    expect(snapA.policy.capabilities[0].principalId).toBe("tenant-a");
+
+    // Read policy as Tenant B on the same shared workspace in multi-tenant mode
+    const snapB = await policyStore.read(workspaceId, {
+      principalId: "tenant-b",
+      tenancyMode: "multi",
+    });
+    // Tenant B must not see Tenant A's capability grant
+    expect(snapB.policy.capabilities.some((c) => c.principalId === "tenant-a")).toBe(false);
+    expect(snapB.policy.capabilities).toHaveLength(0);
+
+    // Also verify when a shared workspace has policies for both principals
+    stubApp.state.policySnapshots.set("shared-workspace-both", {
+      workspaceId: "shared-workspace-both",
+      version: 1,
+      policyDigest: "digest-both",
+      policy: {
+        version: 1,
+        capabilities: [
+          { kind: "write-root", root: "/data/tenant-a", principalId: "tenant-a" },
+          { kind: "write-root", root: "/data/tenant-b", principalId: "tenant-b" },
+        ],
+      },
+      mutationHistory: [],
+    });
+
+    const readB = await policyStore.read("shared-workspace-both", {
+      principalId: "tenant-b",
+      tenancyMode: "multi",
+    });
+    expect(readB.policy.capabilities).toHaveLength(1);
+    expect(readB.policy.capabilities[0].principalId).toBe("tenant-b");
+    expect(readB.policy.capabilities.some((c) => c.principalId === "tenant-a")).toBe(false);
+
+    const readA = await policyStore.read("shared-workspace-both", {
+      principalId: "tenant-a",
+      tenancyMode: "multi",
+    });
+    expect(readA.policy.capabilities).toHaveLength(1);
+    expect(readA.policy.capabilities[0].principalId).toBe("tenant-a");
+    expect(readA.policy.capabilities.some((c) => c.principalId === "tenant-b")).toBe(false);
+  });
 });
 

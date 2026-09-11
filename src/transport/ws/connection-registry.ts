@@ -65,7 +65,7 @@ export function createConnectionRegistry(): WsConnectionRegistry {
 
 // ── Send helper ──────────────────────────────────────────────────────
 
-export function safeSend(ws: WebSocket, message: ServerMessage): void {
+export function safeSend(ws: WebSocket, message: ServerMessage | Record<string, any>): void {
   try {
     if (ws.readyState === 1 /* OPEN */) {
       ws.send(JSON.stringify(message));

@@ -17,3 +17,33 @@ const dest = path.join(destDir, "seepient-fs-commit");
 fs.copyFileSync(src, dest);
 fs.chmodSync(dest, 0o755);
 console.log(`helper placed at ${dest}`);
+
+// Also stage into dist/native-fs-commit for pack verification (spec 022-1 / FR-039)
+const crypto = require("crypto");
+const distRoot = path.join("dist", "native-fs-commit");
+const platforms = ["darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64"];
+const binaries = {};
+const bytes = fs.readFileSync(src);
+const sha256 = crypto.createHash("sha256").update(bytes).digest("hex");
+
+for (const p of platforms) {
+  const pDir = path.join(distRoot, p);
+  fs.mkdirSync(pDir, { recursive: true });
+  const pDest = path.join(pDir, "seepient-fs-commit");
+  fs.copyFileSync(src, pDest);
+  fs.chmodSync(pDest, 0o755);
+  binaries[p] = {
+    path: `${p}/seepient-fs-commit`,
+    sha256,
+    bytes: bytes.length,
+  };
+}
+
+const manifestPath = path.join(distRoot, "manifest.json");
+const manifest = {
+  version: 1,
+  generatedAt: new Date().toISOString(),
+  binaries,
+};
+fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+console.log(`helper staged into dist/native-fs-commit for pack:verify (manifest updated)`);

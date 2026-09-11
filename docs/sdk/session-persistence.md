@@ -44,7 +44,7 @@ All persistence backends implement the same interface:
 
 ```typescript
 interface PersistenceBackend {
-  /** Brand discriminator — distinguishes from SessionStore. */
+  /** Brand discriminator — distinguishes from plain objects. */
   readonly __persistenceBackend: true;
 
   /** Save session data (messages, metadata, timestamps). Creates or updates. */
@@ -61,23 +61,16 @@ interface PersistenceBackend {
 }
 ```
 
-::: warning Breaking change in v0.2.2
-Third-party `PersistenceBackend` implementations must now include `readonly __persistenceBackend = true as const`. This brand field prevents the SDK from accidentally wrapping a `PersistenceBackend` and stripping metadata (`createdAt`, `provider`, `model`, custom `metadata`).
+::: warning Persistence contract
+Third-party `PersistenceBackend` implementations must include `readonly __persistenceBackend = true as const`. This brand field enables the SDK to validate custom backend instances and preserve session metadata (`createdAt`, `provider`, `model`, custom `metadata`).
 :::
 
-## Persistence Fidelity Tiers
+## Persistence Contract
 
-Seepient supports two tiers of session persistence contracts with distinct fidelity guarantees:
+All custom session storage implementations must implement the `PersistenceBackend` contract with full fidelity (`save`, `load`, `delete`, `list`):
 
-| Contract | Structure | Metadata Support | Tradeoff |
-|---|---|---|---|
-| `PersistenceBackend` | Full `SessionData` object (`messages`, `createdAt`, `updatedAt`, `provider`, `model`, `providerAccount`, `metadata`) | Full fidelity. Preserves exact creation times, model configurations, and custom application metadata across process restarts. | **Recommended for production.** Requires implementing `save`, `load`, `delete`, and `list` with the brand discriminator `readonly __persistenceBackend = true as const`. |
-| `SessionStore` (Adapter) | Array of `Message[]` (`get`, `set`) | Messages only. Automatically wrapped via `wrapAsPersistenceBackend`. | Discards provider, model, and custom metadata. Generates synthetic timestamps (`createdAt`/`updatedAt` set to load time). Best for simple or legacy backends. |
-
-### When to choose which contract
-
-- **Choose `PersistenceBackend`** when building production multi-tenant backends, worker fleets, or when you need audit logs and conversation resumption to accurately reflect the originating provider and model parameters.
-- **Choose `SessionStore`** only when adapting legacy key-value stores that store exclusively raw message arrays and do not need session-level metadata.
+- **Full fidelity**: Preserves exact creation times, model configurations, and custom application metadata across process restarts.
+- **Brand discriminator**: Implementations must include `readonly __persistenceBackend = true as const`.
 
 ## Asymmetric Storage Keying
 
@@ -93,7 +86,7 @@ When injecting storage contracts into `createSeepient` or `runSeepientServer` in
 This asymmetric design guarantees that actor accountability (`principalId`) is never conflated with workspace filesystem policies or conversation threads (`sessionId`).
 
 ::: warning Session ownership — resume is principal-bound
-Persisted sessions carry the `principalId` that created them (default `"sdk-user"`). Resuming a session under a different `principalId` fails closed with a `SESSION_OWNERSHIP_MISMATCH` error — the conversation history is never restored or continued across principals, even when tenants share one `PersistenceBackend`. Sessions persisted before ownership tracking (and sessions stored through the metadata-less `SessionStore` adapter) carry no owner stamp and are likewise not resumable. Custom `PersistenceBackend` implementations must round-trip the `principalId` field of `SessionData` to preserve this guarantee.
+Persisted sessions carry the `principalId` that created them (default `"sdk-user"`). Resuming a session under a different `principalId` fails closed with a `SESSION_OWNERSHIP_MISMATCH` error — the conversation history is never restored or continued across principals, even when tenants share one `PersistenceBackend`. Sessions persisted before ownership tracking carry no owner stamp and are likewise not resumable. Custom `PersistenceBackend` implementations must round-trip the `principalId` field of `SessionData` to preserve this guarantee.
 :::
 
 ## Built-in stores
@@ -382,8 +375,6 @@ For custom stores, implement TTL cleanup in your backend (Redis EX, database cro
 | Function                       | Signature                                        | Returns                     |
 |--------------------------------|--------------------------------------------------|-----------------------------|
 | `createPersistenceBackend()`   | `(config: PersistenceConfig) => PersistenceBackend` | `FilePersistenceBackend` or `MemoryPersistenceBackend` |
-| `createSessionStore()`         | `(path?: string) => PersistenceBackend`          | `FilePersistenceBackend` (legacy, deprecated) |
-| `createMemoryStore()`          | `() => PersistenceBackend`                       | `MemoryPersistenceBackend` (legacy, deprecated) |
 
 ```typescript
 import { createPersistenceBackend } from "seepient";
@@ -394,10 +385,6 @@ const fileStore = createPersistenceBackend({ type: "file", path: "./data/session
 // Testing: in-memory
 const testStore = createPersistenceBackend({ type: "memory" });
 ```
-
-::: tip
-`createSessionStore()` and `createMemoryStore()` are **deprecated** aliases. Use `createPersistenceBackend()` for new code.
-:::
 
 ## Related APIs
 

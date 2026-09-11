@@ -49,7 +49,7 @@ export async function handleWsListProviders(
   msg: ListProvidersMessage,
   ws: WebSocket,
   state: ConnectionState,
-  _ctx: SettingsHandlerContext,
+  ctx: SettingsHandlerContext,
 ): Promise<void> {
   if (!requireWsScope(state, "provider:read")) {
     safeSend(ws, { type: "providers_list", id: msg.id, providers: {}, error: { code: "FORBIDDEN", message: "Requires provider:read scope" } } as any);
@@ -59,10 +59,12 @@ export async function handleWsListProviders(
   const providers: Record<string, any> = {};
 
   try {
-    const { getDefaultProviderRuntime } = await import("../../domain/providers/provider-runtime.js");
     const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
-    const runtime = getDefaultProviderRuntime();
-    const api = createProviderManagerApi(runtime);
+    const runtime = ctx?.runtime;
+    if (!runtime) {
+      throw new Error("Provider runtime not configured");
+    }
+    const api = createProviderManagerApi(runtime as any);
     const apiState = await api.getState();
     for (const acc of apiState.accounts) {
       providers[acc.id] = {
@@ -87,7 +89,7 @@ export async function handleWsSetProvider(
   msg: SetProviderMessage,
   ws: WebSocket,
   state: ConnectionState,
-  _ctx: SettingsHandlerContext,
+  ctx: SettingsHandlerContext,
 ): Promise<void> {
   if (!requireWsScope(state, "provider:admin")) {
     safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "FORBIDDEN", message: "Requires provider:admin scope" } } as any);
@@ -102,10 +104,12 @@ export async function handleWsSetProvider(
   }
 
   try {
-    const { getDefaultProviderRuntime } = await import("../../domain/providers/provider-runtime.js");
     const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
-    const runtime = getDefaultProviderRuntime();
-    const api = createProviderManagerApi(runtime);
+    const runtime = ctx?.runtime;
+    if (!runtime) {
+      throw new Error("Provider runtime not configured");
+    }
+    const api = createProviderManagerApi(runtime as any);
 
     const isAllowPrivate = Boolean(allowPrivate);
     const saveRes = await api.saveAccount({
@@ -143,7 +147,7 @@ export async function handleWsRemoveProvider(
   msg: RemoveProviderMessage,
   ws: WebSocket,
   state: ConnectionState,
-  _ctx: SettingsHandlerContext,
+  ctx: SettingsHandlerContext,
 ): Promise<void> {
   if (!requireWsScope(state, "provider:admin")) {
     safeSend(ws, { type: "settings_updated", id: msg.id, error: { code: "FORBIDDEN", message: "Requires provider:admin scope" } } as any);
@@ -156,10 +160,12 @@ export async function handleWsRemoveProvider(
   }
 
   try {
-    const { getDefaultProviderRuntime } = await import("../../domain/providers/provider-runtime.js");
     const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
-    const runtime = getDefaultProviderRuntime();
-    const api = createProviderManagerApi(runtime);
+    const runtime = ctx?.runtime;
+    if (!runtime) {
+      throw new Error("Provider runtime not configured");
+    }
+    const api = createProviderManagerApi(runtime as any);
     const delRes = await api.deleteAccount(msg.providerType, { force: (msg as any).force === true });
     if (!delRes.ok) {
       safeSend(ws, {

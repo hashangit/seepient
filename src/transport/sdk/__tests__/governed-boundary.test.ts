@@ -62,6 +62,7 @@ describe("Governed Boundary Test Suite (Task 3.1)", () => {
 
     const seepient = await createSeepient({
       cwd: workspaceDir,
+      principalId: "test-user",
       runtime,
       auditStore,
       policyStore,
@@ -106,6 +107,7 @@ describe("Governed Boundary Test Suite (Task 3.1)", () => {
 
     const agent = await createSeepient({
       cwd: workspaceDir,
+      principalId: "test-user",
       runtime,
       auditStore,
       policyStore,
@@ -149,6 +151,7 @@ describe("Governed Boundary Test Suite (Task 3.1)", () => {
 
     const res = await askSeepient("Write file", {
       cwd: workspaceDir,
+      principalId: "test-user",
       runtime,
       auditStore,
       policyStore,
@@ -189,6 +192,7 @@ describe("Governed Boundary Test Suite (Task 3.1)", () => {
 
     const streamRes = await askSeepient("Stream write file", { stream: true,
       cwd: workspaceDir,
+      principalId: "test-user",
       runtime,
       auditStore,
       policyStore,

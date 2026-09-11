@@ -47,7 +47,7 @@ export interface RestHandlerContext {
   /** List available models grouped by provider */
   listModels: () => Record<string, string[]>;
   /** List available skill metadata */
-  listSkills: () => SkillMetadata[];
+  listSkills: () => SkillMetadata[] | Promise<SkillMetadata[]>;
   /** Settings handler context — required for settings/provider routes */
   settingsHandlerContext?: SettingsHandlerContext;
   /** Gateway REST handler — delegated for all /v1/gateway/* routes */
@@ -518,7 +518,13 @@ async function handleSkills(
     return;
   }
 
-  sendJSON(res, 200, { skills: ctx.listSkills() });
+  if (!hasScope(key, "agent:read")) {
+    sendError(res, 403, "FORBIDDEN", "API key lacks 'agent:read' scope");
+    return;
+  }
+
+  const skills = await ctx.listSkills();
+  sendJSON(res, 200, { skills });
 }
 
 async function handleChat(
@@ -585,7 +591,27 @@ async function handleChat(
     let session: import("../../foundations/types.js").SessionData | null;
     try {
       session = await ctx.sessionManager.getSession(sessionId, keyHash);
+      if (!session) {
+        session = await ctx.sessionManager.createSession(key.key ?? (key as any).rawKey ?? keyHash, {
+          id: sessionId,
+          provider: parsed.provider,
+          model: parsed.model,
+          apiKeyHash: keyHash,
+        });
+      }
     } catch (err: any) {
+      if (err?.code === "SESSION_ALREADY_EXISTS" || err?.message?.includes("already exists")) {
+        sendError(res, 403, "FORBIDDEN", `Session "${sessionId}" is not accessible`);
+        return;
+      }
+      if (err?.message?.includes("Invalid session ID format")) {
+        sendError(res, 400, "BAD_REQUEST", err.message);
+        return;
+      }
+      if (err?.message?.includes("Maximum concurrent sessions") || (err as any)?.code === "SESSION_LIMIT") {
+        sendError(res, 429, "SESSION_LIMIT", err.message);
+        return;
+      }
       if (err?.code === "NOT_FOUND" || err?.statusCode === 404 || err?.message?.includes("server owner")) {
         // W154f: operators must be able to diagnose legacy-session refusals —
         // log the teaching error before sending the sanitized wire response.
@@ -600,10 +626,6 @@ async function handleChat(
         return;
       }
       throw err;
-    }
-    if (!session) {
-      sendError(res, 404, "NOT_FOUND", `Session "${sessionId}" not found`);
-      return;
     }
 
     if (!ctx.sessionManager.acquireTurn(sessionId)) {
@@ -632,12 +654,22 @@ async function handleChat(
       });
     }
 
+    const envMaxSteps = process.env.SEEPIENT_MAX_STEPS ? parseInt(process.env.SEEPIENT_MAX_STEPS, 10) : undefined;
+    const settingMaxSteps = ctx.settingsHandlerContext?.settingsManager?.get("server.maxSteps")?.value as number | undefined;
+    const serverMaxSteps = (settingMaxSteps !== undefined && !isNaN(settingMaxSteps) && settingMaxSteps > 0)
+      ? settingMaxSteps
+      : (envMaxSteps !== undefined && !isNaN(envMaxSteps) && envMaxSteps > 0 ? envMaxSteps : 100);
+
+    const requestedSteps = parsed.maxSteps ?? 10;
+    const effectiveMaxSteps = Math.min(requestedSteps, serverMaxSteps);
+    const wasClamped = requestedSteps > serverMaxSteps;
+
     const result = await ctx.generateText({
       message: parsed.message,
       model: parsed.model,
       provider: parsed.provider,
       tools: parsed.tools,
-      maxSteps: parsed.maxSteps ?? 10,
+      maxSteps: effectiveMaxSteps,
       skills: parsed.skills,
       // Spec 008: pass authenticated principal identity (hashed API key) so
       // the per-request pipeline constructor derives `principalId` from it.
@@ -683,6 +715,7 @@ async function handleChat(
       usage: result.usage,
       finishReason: result.finishReason,
       ...(sessionId ? { sessionId } : {}),
+      ...(wasClamped ? { effectiveMaxSteps, maxSteps: effectiveMaxSteps } : {}),
     });
   } catch (err: unknown) {
     const rawMessage = err instanceof Error ? err.message : "Generation failed";
@@ -722,8 +755,10 @@ async function handleListSessions(
   }
 
   const keyHash = key.keyHash ?? (key.key ? hashKey(key.key) : "");
-  const summaries = ctx.sessionManager.getSessionsByKey(keyHash);
-  sendJSON(res, 200, summaries);
+  const listing = typeof ctx.sessionManager.listSessions === "function"
+    ? await ctx.sessionManager.listSessions(keyHash)
+    : { sessions: ctx.sessionManager.getSessionsByKey(keyHash), source: "memory" };
+  sendJSON(res, 200, listing);
 }
 
 async function handleGetSession(

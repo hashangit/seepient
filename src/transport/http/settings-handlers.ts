@@ -12,6 +12,7 @@ import type { WebSocket, ConnectionState } from '../ws/ws-types.js';
 import type { ApiKeyEntry, KeyScope } from '../auth/auth.js';
 import { hasScope } from '../auth/auth.js';
 import { parseBody } from './body.js';
+import { safeSend } from '../ws/connection-registry.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -21,6 +22,7 @@ export interface SettingsHandlerContext {
   maxBodyBytes?: number;
   /** Get all connected WS clients (excluding sender) */
   getOtherClients: (excludeWs?: WebSocket) => Array<{ ws: WebSocket; state: ConnectionState }>;
+  runtime?: import('../../foundations/contracts/provider-runtime.js').ProviderRuntimeContract | import('../../domain/providers/provider-runtime.js').ProviderRuntime;
 }
 
 // ── Mutex ─────────────────────────────────────────────────────────────────
@@ -206,14 +208,14 @@ export function handleWsGetSettings(
   ctx: SettingsHandlerContext,
 ): void {
   if (!requireWsScope(state, 'agent:read')) {
-    ws.send(JSON.stringify({ type: 'settings', id: msg.id, error: { code: 'FORBIDDEN', message: 'Requires agent:read scope' } }));
+    safeSend(ws, { type: 'settings', id: msg.id, error: { code: 'FORBIDDEN', message: 'Requires agent:read scope' } });
     return;
   }
 
   const all = ctx.settingsManager.listByCategory();
   const filtered = msg.category ? { [msg.category]: all[msg.category] ?? [] } : all;
 
-  ws.send(JSON.stringify({ type: 'settings', id: msg.id, settings: filtered }));
+  safeSend(ws, { type: 'settings', id: msg.id, settings: filtered });
 }
 
 export async function handleWsUpdateSettings(
@@ -223,7 +225,7 @@ export async function handleWsUpdateSettings(
   ctx: SettingsHandlerContext,
 ): Promise<void> {
   if (!requireWsScope(state, 'admin')) {
-    ws.send(JSON.stringify({ type: 'settings_updated', id: msg.id, error: { code: 'FORBIDDEN', message: 'Requires admin scope' } }));
+    safeSend(ws, { type: 'settings_updated', id: msg.id, error: { code: 'FORBIDDEN', message: 'Requires admin scope' } });
     return;
   }
 
@@ -260,15 +262,15 @@ export async function handleWsUpdateSettings(
   }
 
   if (errors.length > 0) {
-    ws.send(JSON.stringify({
+    safeSend(ws, {
       type: 'settings_updated', id: msg.id,
       error: { code: 'VALIDATION_ERROR', message: `${errors.length} field(s) failed validation`, details: errors },
-    }));
+    });
     return;
   }
 
   // Respond to sender
-  ws.send(JSON.stringify({ type: 'settings_updated', id: msg.id, applied, requiresRestart, restartAffected }));
+  safeSend(ws, { type: 'settings_updated', id: msg.id, applied, requiresRestart, restartAffected });
 
   // Broadcast to others
   broadcastSettingsChange(ctx, changedFields, requiresRestart, restartAffected, ws);
@@ -284,16 +286,16 @@ function broadcastSettingsChange(
   excludeWs?: WebSocket,
 ): void {
   const categories = new Set(changedFields.map(f => f.split('.')[0]));
-  const message = JSON.stringify({
+  const payload = {
     type: 'settings_changed',
     changedCategories: [...categories],
     changedFields,
     requiresRestart,
     restartAffected,
     timestamp: new Date().toISOString(),
-  });
+  };
 
   for (const client of ctx.getOtherClients(excludeWs)) {
-    try { client.ws.send(message); } catch { /* best-effort */ }
+    safeSend(client.ws, payload);
   }
 }

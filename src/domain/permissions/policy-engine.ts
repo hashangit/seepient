@@ -485,7 +485,7 @@ export class PolicyEngine implements PolicyEngineContract {
       pushLayer(trace, "backend", "deny");
       return deny(
         "approval-unavailable",
-        `Headless run: ${spec} is not predeclared. Pass consentMode (e.g. "autonomous") or provide an approval callback (approveTool).`,
+        `Headless run: ${spec} is not predeclared. Pass consentMode (e.g. "autonomous" or "edit-enabled") or provide an approval callback (approveTool). See docs/sdk/ask-seepient.md#permissions-and-consent-mode`,
         trace,
       );
     }
@@ -494,7 +494,7 @@ export class PolicyEngine implements PolicyEngineContract {
       pushLayer(trace, "backend", "deny");
       return deny(
         "approval-unavailable",
-        `Approval mode is 'never' and ${spec} is not predeclared. Pass consentMode (e.g. "autonomous") or provide an approval callback (approveTool).`,
+        `Approval mode is 'never' and ${spec} is not predeclared. Pass consentMode (e.g. "autonomous" or "edit-enabled") or provide an approval callback (approveTool). See docs/sdk/ask-seepient.md#permissions-and-consent-mode`,
         trace,
       );
     }

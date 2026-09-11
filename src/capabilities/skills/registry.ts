@@ -1,17 +1,19 @@
 import { readFile } from 'fs/promises';
-import { Skill, SkillMetadata, SkillRegistry } from './types.js';
+import { Skill, SkillMetadata, SkillRegistry, getSkillBodyLimits } from './types.js';
 import { splitFrontmatter } from './parser.js';
 
 export class DefaultSkillRegistry implements SkillRegistry {
   private skills: Map<string, Skill>;
   private bodyCache: Map<string, string>;
   private rawContentMap: Map<string, string>;
+  private warnedBodySkills: Set<string>;
   private readonly maxCacheSize = 5;
 
   constructor(skills: Skill[], rawContentMap?: Map<string, string>) {
     this.skills = new Map(skills.map(s => [s.name, s]));
     this.bodyCache = new Map();
     this.rawContentMap = rawContentMap ?? new Map();
+    this.warnedBodySkills = new Set();
   }
 
   get(name: string): Skill | undefined {
@@ -44,7 +46,7 @@ export class DefaultSkillRegistry implements SkillRegistry {
     const raw = this.rawContentMap.get(name);
     if (raw !== undefined) {
       const { body } = splitFrontmatter(raw);
-      if (body !== undefined) {
+      if (body !== undefined && body.trim().length > 0) {
         this.setCache(name, body);
         return body;
       }
@@ -68,6 +70,14 @@ export class DefaultSkillRegistry implements SkillRegistry {
   }
 
   private setCache(name: string, body: string): void {
+    const { warnChars } = getSkillBodyLimits();
+    if (body.length > warnChars && !this.warnedBodySkills.has(name)) {
+      this.warnedBodySkills.add(name);
+      console.warn(
+        `[SKILLS] Warning: Skill "${name}" body size (${body.length} chars) exceeds warning threshold (${warnChars} chars).`,
+      );
+    }
+
     this.bodyCache.delete(name); // Remove if exists (moves to end)
     this.bodyCache.set(name, body);
 

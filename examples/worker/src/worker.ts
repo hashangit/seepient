@@ -43,6 +43,7 @@ export interface WorkerTaskConfig {
   workspaceDir: string;
   runtime: ProviderRuntime;
   controlPlaneUrl: string;
+  tenancy?: "single" | "multi";
   auditStore?: AuditStore;
   policyStore?: PolicyStore;
   capabilityLedger?: CapabilityLedger;
@@ -106,15 +107,30 @@ export class RemotePolicyStore implements PolicyStore {
     this.baseUrl = baseUrl;
   }
 
-  async read(workspaceId: string): Promise<PolicySnapshot> {
+  async read(
+    workspaceId: string,
+    opts?: { principalId?: string; tenancyMode?: "single" | "multi" },
+  ): Promise<PolicySnapshot> {
     let res: Response;
     try {
-      res = await fetch(`${this.baseUrl}/api/policy?workspaceId=${encodeURIComponent(workspaceId)}`);
+      const params = new URLSearchParams({ workspaceId });
+      if (opts?.principalId) params.set("principalId", opts.principalId);
+      if (opts?.tenancyMode) params.set("tenancyMode", opts.tenancyMode);
+      res = await fetch(`${this.baseUrl}/api/policy?${params.toString()}`);
     } catch (err) {
       throw new Error(`[worker-policy] Policy read failed for workspace ${workspaceId}: ${err instanceof Error ? err.message : String(err)}`);
     }
     if (res.ok) {
       return (await res.json()) as PolicySnapshot;
+    }
+    if (res.status === 404) {
+      return {
+        workspaceId,
+        version: 0,
+        policyDigest: "empty",
+        policy: { version: 1, capabilities: [] },
+        mutationHistory: [],
+      };
     }
     throw new Error(`[worker-policy] Policy read failed for workspace ${workspaceId}: HTTP ${res.status}`);
   }
@@ -126,10 +142,11 @@ export class RemotePolicyStore implements PolicyStore {
     actor: DecisionAuthority,
     mutation?: { mutationId: string },
   ): Promise<PolicySnapshot> {
+    const principalId = next.capabilities?.find((c) => c.principalId)?.principalId;
     const res = await fetch(`${this.baseUrl}/api/policy`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspaceId, expectedVersion, next, actor, mutation }),
+      body: JSON.stringify({ workspaceId, expectedVersion, next, actor, mutation, principalId }),
     });
     if (res.ok) {
       return (await res.json()) as PolicySnapshot;
@@ -265,6 +282,7 @@ export async function createWorkerAgent(config: WorkerTaskConfig): Promise<Seepi
   const persistence = config.persistence ?? (config.controlPlaneUrl ? new RemotePersistenceBackend(config.controlPlaneUrl) : undefined);
 
   const agent = await createSeepient({
+    tenancy: config.tenancy,
     principalId: config.principalId,
     sessionId: config.sessionId,
     cwd: config.workspaceDir,

@@ -46,7 +46,7 @@ jobs:
       - name: Run Seepient Review
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          SEEPIENT_CONSENT_MODE: autonomous-trusted
+          SEEPIENT_CONSENT_MODE: autonomous
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Extract the pull request diff
@@ -70,5 +70,5 @@ jobs:
 ## Key security considerations
 
 - **Bubblewrap isolation**: The workflow installs `bubblewrap` so the agent executes inside a locked-down Linux user namespace.
-- **`SEEPIENT_CONSENT_MODE=autonomous-trusted`**: Authorizes file reads and inspections without waiting for interactive input.
+- **`SEEPIENT_CONSENT_MODE=autonomous`**: Authorizes file reads and inspections without waiting for interactive input.
 - **Read-only checkout**: The GitHub Actions token receives write permission only for pull-request comments (`pull-requests: write`), preventing the agent from pushing commits to protected branches without human review.

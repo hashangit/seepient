@@ -16,6 +16,10 @@ describe("Spec 022 SDK Tenancy Mode & Fail-Closed Enforcement (US2)", () => {
     resetTenancyNoticeForTest();
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   // ── T018: Once-per-process notice and signal upgrade ─────────────────────────
   describe("T018: resolveTenancyMode & emitTenancyNoticeOnce in SDK roots", () => {
     it("constructs two upgraded agents in one process — notice appears exactly once", async () => {
@@ -26,6 +30,7 @@ describe("Spec 022 SDK Tenancy Mode & Fail-Closed Enforcement (US2)", () => {
 
       // Agent 1: upgraded to multi due to injected runtime and stores
       await askSeepient("prompt 1", {
+        principalId: "tenant-1",
         runtime: runtime1,
         auditStore: new FakeAuditStore(),
         policyStore: new FakePolicyStore(),
@@ -35,6 +40,7 @@ describe("Spec 022 SDK Tenancy Mode & Fail-Closed Enforcement (US2)", () => {
 
       // Agent 2: second upgraded agent in same process
       await askSeepient("prompt 2", {
+        principalId: "tenant-2",
         runtime: runtime2,
         auditStore: new FakeAuditStore(),
         policyStore: new FakePolicyStore(),
@@ -68,6 +74,91 @@ describe("Spec 022 SDK Tenancy Mode & Fail-Closed Enforcement (US2)", () => {
 
       warnSpy.mockRestore();
     });
+
+    it("skills literals only -> runs in single mode without upgrade notice (FR-016)", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const agent = await createSeepient({
+        skills: [
+          {
+            name: "quick-skill",
+            content: "---\nname: quick-skill\ndescription: quick test\n---\nbody",
+          },
+        ],
+      });
+      await agent.close().catch(() => {});
+
+      const tenancyNotices = warnSpy.mock.calls.filter((call) =>
+        String(call[0]).includes("Tenancy mode automatically upgraded to \"multi\""),
+      );
+      expect(tenancyNotices).toHaveLength(0);
+
+      warnSpy.mockRestore();
+    });
+
+    it("sources injected -> upgrades to multi mode with upgrade notice (FR-016)", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const fakeSource = {
+        list: () => [{ name: "s1", content: "---\nname: s1\ndescription: d1\n---\nb", source: "test" }],
+      };
+
+      try {
+        await createSeepient({
+          principalId: "tenant-1",
+          sources: [fakeSource],
+        });
+      } catch {
+        // Expected to throw TENANCY_RUNTIME_REQUIRED because upgraded to multi
+      }
+
+      const tenancyNotices = warnSpy.mock.calls.filter((call) =>
+        String(call[0]).includes("Tenancy mode automatically upgraded to \"multi\""),
+      );
+      expect(tenancyNotices).toHaveLength(1);
+
+      warnSpy.mockRestore();
+    });
+  });
+
+  // ── FR-020: PRINCIPAL_REQUIRED enforcement in multi mode ──────────────────
+  describe("FR-020: PRINCIPAL_REQUIRED enforcement at both SDK roots", () => {
+    it("createSeepient in multi mode without principalId throws PRINCIPAL_REQUIRED", async () => {
+      await expect(
+        createSeepient({
+          tenancy: "multi",
+        }),
+      ).rejects.toMatchObject({
+        code: "PRINCIPAL_REQUIRED",
+        retryable: false,
+      });
+    });
+
+    it("askSeepient in multi mode without principalId throws PRINCIPAL_REQUIRED", async () => {
+      await expect(
+        askSeepient("test", {
+          tenancy: "multi",
+        }),
+      ).rejects.toMatchObject({
+        code: "PRINCIPAL_REQUIRED",
+        retryable: false,
+      });
+    });
+
+    it("upgraded multi mode without principalId throws PRINCIPAL_REQUIRED", async () => {
+      const runtime = createFakeRuntime();
+      await expect(
+        createSeepient({
+          runtime,
+          auditStore: new FakeAuditStore(),
+          policyStore: new FakePolicyStore(),
+          capabilityLedger: new FakeCapabilityLedger(),
+        }),
+      ).rejects.toMatchObject({
+        code: "PRINCIPAL_REQUIRED",
+        retryable: false,
+      });
+    });
   });
 
   // ── T019: TENANCY_RUNTIME_REQUIRED in multi mode ──────────────────────────
@@ -76,6 +167,7 @@ describe("Spec 022 SDK Tenancy Mode & Fail-Closed Enforcement (US2)", () => {
       await expect(
         createSeepient({
           tenancy: "multi",
+          principalId: "tenant-1",
         }),
       ).rejects.toMatchObject({
         code: "TENANCY_RUNTIME_REQUIRED",
@@ -87,6 +179,7 @@ describe("Spec 022 SDK Tenancy Mode & Fail-Closed Enforcement (US2)", () => {
       await expect(
         askSeepient("test", {
           tenancy: "multi",
+          principalId: "tenant-1",
         }),
       ).rejects.toMatchObject({
         code: "TENANCY_RUNTIME_REQUIRED",
@@ -102,6 +195,7 @@ describe("Spec 022 SDK Tenancy Mode & Fail-Closed Enforcement (US2)", () => {
       try {
         await createSeepient({
           tenancy: "multi",
+          principalId: "tenant-1",
           runtime,
           auditStore: new FakeAuditStore(),
           // policyStore and capabilityLedger missing

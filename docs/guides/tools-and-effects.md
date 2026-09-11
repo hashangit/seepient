@@ -57,7 +57,7 @@ Seepient ships with 15 built-in tools organized by capability:
 ## Read vs effectful tools
 
 - **Read-only tools** (such as `read_file`, `web_search`, and `get_current_datetime`) run without prompting in standard consent modes. They cannot alter files or execute arbitrary host instructions.
-- **Effectful tools** (such as `write_file`, `edit_file`, and `execute_shell_command`) mutate disk state or execute code. In `always-ask` mode, they prompt for confirmation with a clear visual preview of the command or file diff.
+- **Effectful tools** (such as `write_file`, `edit_file`, and `execute_shell_command`) mutate disk state or execute code. In `ask-everything` mode, they prompt for confirmation with a clear visual preview of the command or file diff.
 
 ## Dry runs
 

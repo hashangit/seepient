@@ -146,9 +146,10 @@ describe("Cross-Transport Session Lifecycle (Spec 021-2 / T014, QS-2)", () => {
     await restHandler(reqList1.req, reqList1.res);
     expect(reqList1.res.statusCode).toBe(200);
     const resBody1 = JSON.parse(reqList1.res.body);
-    expect(Array.isArray(resBody1)).toBe(true);
-    expect(resBody1.some((s: any) => s.id === "qs2-session")).toBe(true);
-    expect(resBody1.find((s: any) => s.id === "qs2-session")!.messageCount).toBe(2);
+    const sessionsList = Array.isArray(resBody1) ? resBody1 : resBody1.sessions;
+    expect(Array.isArray(sessionsList)).toBe(true);
+    expect(sessionsList.some((s: any) => s.id === "qs2-session")).toBe(true);
+    expect(sessionsList.find((s: any) => s.id === "qs2-session")!.messageCount).toBe(2);
 
     // 3. Second API key cannot see qs2-session
     const state2: ConnectionState = {
@@ -176,8 +177,9 @@ describe("Cross-Transport Session Lifecycle (Spec 021-2 / T014, QS-2)", () => {
     await restHandler(reqList2.req, reqList2.res);
     expect(reqList2.res.statusCode).toBe(200);
     const resBody2 = JSON.parse(reqList2.res.body);
-    expect(Array.isArray(resBody2)).toBe(true);
-    expect(resBody2.some((s: any) => s.id === "qs2-session")).toBe(false);
+    const sessionsList2 = Array.isArray(resBody2) ? resBody2 : resBody2.sessions;
+    expect(Array.isArray(sessionsList2)).toBe(true);
+    expect(sessionsList2.some((s: any) => s.id === "qs2-session")).toBe(false);
 
     // 4. Second WS connection using key1 resumes 'qs2-session'
     const { ws: ws2 } = createMockWs();

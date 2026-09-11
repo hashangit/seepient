@@ -116,7 +116,7 @@ When you specify `purpose: "coding"` and `tier: "complex"`, Seepient selects the
 
 The `options.tools` parameter controls which tools the agent can call:
 
-- **All built-in tools by default.** When you omit `options.tools`, Seepient loads all 15 built-in tools using `getAllToolDefinitions()`. The model can read files, write files, edit files, run shell commands, search the web, send notifications, capture screenshots, generate images, and execute skills.
+- **All built-in tools by default.** When you omit `options.tools`, Seepient loads the default built-in tools from its tool registry. The model can read files, write files, edit files, run shell commands, search the web, send notifications, capture screenshots, generate images, and execute skills.
 - **Pure text mode (`tools: []`).** Pass an empty array to disable tool execution entirely. The model receives no tool definitions, preventing tool calls and reducing prompt token usage.
 - **Selective tools.** Pass specific tool names (`tools: ["read_file", "web_search"]`) or group names (`tools: ["core"]`, `tools: ["comm"]`, `tools: ["advanced"]`).
 - **Custom tools.** Pass tool objects created with `trustedHostTool()`, `preparedTool()`, or `brokerConnector()`.
@@ -136,7 +136,7 @@ You do not need to pass API keys in code if they exist in your shell environment
 
 The `consentMode` option controls the execution boundary:
 
-- Defaults to `"edit-enabled"`. In this mode, the agent can read and write files within the workspace root (`options.cwd`, which defaults to `process.cwd()`). Destructive actions and operations outside the boundary require approval or fail with permission errors.
+- Defaults to `"never"` (deny-by-default when no broker is provided). In this mode, any effectful tool execution is denied unless predeclared. Pass `consentMode: "edit-enabled"` to allow reading and writing files within the workspace root (`options.cwd`, which defaults to `process.cwd()`). Destructive actions and operations outside the boundary require approval or fail with permission errors.
 - Pass `consentMode: "autonomous"` to run all permitted tools without interactive confirmation prompts.
 - Pass `consentMode: "ask-everything"` to require approval for every tool execution.
 
@@ -185,7 +185,7 @@ The `skills` option controls skill injection:
 | `tools` | `(string \| UserToolDefinition \| AnyToolRegistration)[]` | All 15 built-in tools | Tool names, tool groups (`"core"`, `"comm"`, `"advanced"`), or custom registrations. Pass `[]` for pure text |
 | `maxSteps` | `number` | `10` | Maximum agent loop iterations before terminating |
 | `systemPrompt` | `string` | *(none)* | Instructions prepended as a system message before the user prompt |
-| `consentMode` | `ConsentMode` | `"edit-enabled"` | Permission mode: `"edit-enabled"`, `"autonomous"`, or `"ask-everything"` |
+| `consentMode` | `ConsentMode` | `"never"` | Permission mode: `"edit-enabled"`, `"autonomous"`, or `"ask-everything"` (defaults to deny-by-default when omitted without broker) |
 | `cwd` | `string` | `process.cwd()` | Workspace root directory for file tools, boundaries, and skill discovery |
 | `skills` | `string[] \| boolean` | `true` | `true` loads all discovered skills, `false` disables skill discovery, string array loads specific skills |
 | `sources` | `SkillSource[]` | *(none)* | Injected skill sources for multi-tenant skill scoping. Disables ambient skill discovery in `multi` mode |
@@ -344,6 +344,7 @@ const searchResult = await askSeepient("Find recent changes in TypeScript 5.8", 
 // Allow the core file and shell group
 const fileResult = await askSeepient("Read package.json and update the description field", {
   tools: ["core"], // execute_shell_command, read_file, write_file, edit_file, get_current_datetime
+  consentMode: "edit-enabled",
   cwd: "/path/to/project",
 });
 ```
@@ -395,6 +396,7 @@ const result = await askSeepient(
   "Run the test suite, find why test/auth.test.ts fails, and fix the implementation",
   {
     tools: ["execute_shell_command", "read_file", "edit_file"],
+    consentMode: "edit-enabled",
     maxSteps: 8,
   },
 );

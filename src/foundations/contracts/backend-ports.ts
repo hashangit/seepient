@@ -14,6 +14,7 @@ export interface LanguageRequest {
   messages: CanonicalMessage[];
   thinkingLevel?: ThinkingLevel;
   maxOutputTokens?: number;
+  temperature?: number;
   tools?: ToolDefinition[];
 }
 

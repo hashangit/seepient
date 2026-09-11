@@ -9,13 +9,14 @@
  * 4. Default server startup without options continues to use default local stores.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as http from "node:http";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { runSeepientServer } from "../index.js";
 import { generateApiKey } from "../../auth/auth.js";
+import { computeWorkspaceId } from "../../../domain/permissions/policy-store.js";
 import {
   FakeAuditStore,
   FakePolicyStore,
@@ -163,6 +164,131 @@ describe("QS-3: Server Store Injection (FR-010)", () => {
     const server = await runSeepientServer({ listen: false });
     activeServers.push(server);
     expect(server).toBeDefined();
+  });
+
+  it("FR-021: unstamped legacy grant invisible to a server key over real HTTP; per-key stamped grant visible only to its key", async () => {
+    const keyEntry1 = generateApiKey(["agent:run"], { filePath: tempKeyPath, label: "tenant-key-1" });
+    const keyEntry2 = generateApiKey(["agent:run"], { filePath: tempKeyPath, label: "tenant-key-2" });
+
+    const auditStore = new FakeAuditStore();
+    const policyStore = new FakePolicyStore();
+    const capabilityLedger = new FakeCapabilityLedger();
+    const runtime = createFakeRuntime({
+      responses: [{ content: "response 1" }, { content: "response 2" }],
+    });
+
+    const workspaceId = computeWorkspaceId(fs.realpathSync(process.cwd()));
+    policyStore.snapshots.set(workspaceId, {
+      workspaceId,
+      version: 1,
+      policyDigest: "test-digest",
+      policy: {
+        version: 1,
+        capabilities: [
+          { kind: "network-destination", scheme: "https", host: "legacy-unstamped.internal" },
+          { kind: "network-destination", scheme: "https", host: "key1-only.internal", principalId: keyEntry1.keyHash },
+        ],
+      },
+      mutationHistory: [],
+    });
+
+    const readSpy = vi.spyOn(policyStore, "read");
+
+    const server = await runSeepientServer({
+      runtime,
+      auditStore,
+      policyStore,
+      capabilityLedger,
+      listen: false,
+    });
+    activeServers.push(server);
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const addr = server.address() as { port: number };
+
+    // Request 1 from Key 1
+    const postData1 = JSON.stringify({ message: "Hello from key 1", model: "mock-model" });
+    await new Promise<void>((resolve, reject) => {
+      const req = http.request(
+        {
+          hostname: "127.0.0.1",
+          port: addr.port,
+          path: "/v1/chat",
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Content-Length": Buffer.byteLength(postData1),
+            "Authorization": `Bearer ${keyEntry1.rawKey}`,
+          },
+        },
+        (res) => {
+          res.on("data", () => {});
+          res.on("end", () => resolve());
+        },
+      );
+      req.on("error", reject);
+      req.write(postData1);
+      req.end();
+    });
+
+    // Request 2 from Key 2
+    const postData2 = JSON.stringify({ message: "Hello from key 2", model: "mock-model" });
+    await new Promise<void>((resolve, reject) => {
+      const req = http.request(
+        {
+          hostname: "127.0.0.1",
+          port: addr.port,
+          path: "/v1/chat",
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Content-Length": Buffer.byteLength(postData2),
+            "Authorization": `Bearer ${keyEntry2.rawKey}`,
+          },
+        },
+        (res) => {
+          res.on("data", () => {});
+          res.on("end", () => resolve());
+        },
+      );
+      req.on("error", reject);
+      req.write(postData2);
+      req.end();
+    });
+
+    // Verify policy reads:
+    const read1 = readSpy.mock.calls.find((c) => c[1]?.principalId === keyEntry1.keyHash);
+    expect(read1).toBeDefined();
+    expect(read1![1]?.tenancyMode).toBe("multi");
+
+    const read2 = readSpy.mock.calls.find((c) => c[1]?.principalId === keyEntry2.keyHash);
+    expect(read2).toBeDefined();
+    expect(read2![1]?.tenancyMode).toBe("multi");
+
+    const result1 = await readSpy.mock.results.find((_, idx) => readSpy.mock.calls[idx][1]?.principalId === keyEntry1.keyHash)!.value;
+    const result2 = await readSpy.mock.results.find((_, idx) => readSpy.mock.calls[idx][1]?.principalId === keyEntry2.keyHash)!.value;
+
+    // In result1 (key 1):
+    // - legacy-unstamped.internal is invisible (filtered out by tenancyMode: "multi")
+    // - key1-only.internal is present
+    expect(result1.policy.capabilities.some((c: any) => c.host === "legacy-unstamped.internal")).toBe(false);
+    expect(result1.policy.capabilities.some((c: any) => c.host === "key1-only.internal")).toBe(true);
+
+    // In result2 (key 2):
+    // - legacy-unstamped.internal is invisible
+    // - key1-only.internal is invisible to key 2
+    expect(result2.policy.capabilities.some((c: any) => c.host === "legacy-unstamped.internal")).toBe(false);
+    expect(result2.policy.capabilities.some((c: any) => c.host === "key1-only.internal")).toBe(false);
+  });
+
+  it("FR-021 fence: server never constructs single-mode policy reads for chat principals", () => {
+    const serverIndexPath = path.resolve(__dirname, "../index.ts");
+    const serverIndexContent = fs.readFileSync(serverIndexPath, "utf-8");
+
+    // Must construct serverPipelineFactory with tenancyMode: "multi"
+    expect(serverIndexContent).toContain('tenancyMode: "multi"');
+    // Must NOT contain single mode anywhere in server index
+    expect(serverIndexContent).not.toContain('tenancyMode: "single"');
   });
 
   it("custom ProviderRuntimeContract is preserved on server and returns 501 for mutations without disk writes", async () => {

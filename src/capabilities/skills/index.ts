@@ -12,7 +12,7 @@ import { parseSkillContent } from './parser.js';
 import { DefaultSkillRegistry } from './registry.js';
 import { FsSkillSources } from './fs-skill-sources.js';
 import type { Skill, SkillRegistry } from './types.js';
-import type { SkillSource } from '../../foundations/contracts/skill-source.js';
+import type { SkillSource, SkillRecord } from '../../foundations/contracts/skill-source.js';
 
 async function loadSkillsFromSources(
   sources: SkillSource[],
@@ -20,15 +20,26 @@ async function loadSkillsFromSources(
   const map = new Map<string, Skill>();
   const rawContentMap = new Map<string, string>();
   for (const src of sources) {
-    const records = await src.list();
+    const isFsSource = src instanceof FsSkillSources;
+    let records: SkillRecord[];
+    try {
+      records = await src.list();
+    } catch (err: any) {
+      const label = (src as any)?.name ?? (src as any)?.constructor?.name ?? "injected";
+      console.warn(
+        `[SKILLS] Warning: Skill source "${label}" failed to load skills: ${err?.message ?? err}. Continuing with remaining sources.`,
+      );
+      continue;
+    }
     for (const rec of records) {
       try {
         const parsed = parseSkillContent(rec.content, rec.source ?? "injected", rec.filePath ?? "");
         map.set(parsed.name, parsed);
-        // rawContentMap must mirror the composition winner: a filePath-backed
-        // record loads lazily from disk, so any content stored for this name
-        // by an earlier non-file record is stale and must not shadow it.
-        if (rec.filePath) {
+        // FR-033: Content first, filePath fallback.
+        // Injected sources materialize content in rawContentMap, even if filePath is present.
+        // FsSkillSources defers bodies via filePath (lazy-loaded on getBody) and clears rawContentMap
+        // so that an earlier shadowed record's content does not leak through (W240).
+        if (isFsSource) {
           rawContentMap.delete(parsed.name);
         } else {
           rawContentMap.set(parsed.name, rec.content);

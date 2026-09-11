@@ -5,7 +5,7 @@ description: Programmatically read, update, watch, and reset configuration setti
 
 # Settings API
 
-The Seepient SDK provides a first-class programmatic facade for managing application and project configuration. Import the `settings` singleton from `'seepient'` to read, write, batch-update, watch, and reset settings across global (`~/.seepient/config.json`) and project (`./.seepient/config.json`) scopes.
+The Seepient SDK provides a first-class programmatic facade for managing application and project configuration. Import the `settings` singleton from `'seepient'` to read, write, batch-update, watch, and reset settings across global (`~/.seepient/setting.json`) and project (`./.seepient/setting.json`) scopes.
 
 ## Import
 

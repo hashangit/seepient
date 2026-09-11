@@ -33,9 +33,10 @@ The server delegates all LLM interaction directly to the core `runAgentLoop`, by
 | Feature | Detail |
 |---|---|
 | **Default port** | `7337` (configurable via `SEEPIENT_PORT` or `PORT` env) |
+| **Default host** | `127.0.0.1` (loopback; set `SEEPIENT_HOST=0.0.0.0` or `--host 0.0.0.0` for all interfaces) |
 | **CORS** | Opt-in: with no `server.corsOrigins` setting / `SEEPIENT_CORS_ORIGINS` env var, no `Access-Control-Allow-Origin` is emitted (set `*` to reflect any origin) |
 | **Graceful shutdown** | SIGINT / SIGTERM with 5-second drain timeout |
-| **Session storage** | File-based in `./.seepient/sessions/` |
+| **Session storage** | File-based in `./.seepient/sessions/` (or `SEEPIENT_SESSION_DIR`) |
 | **Auth** | API keys with scoped permissions |
 
 ## Startup commands
@@ -45,7 +46,7 @@ The server delegates all LLM interaction directly to the core `runAgentLoop`, by
 ```bash [Docker]
 docker run -d -p 7337:7337 \
   -e ANTHROPIC_API_KEY=sk-... \
-  -v ~/.seepient:/root/.seepient \
+  -v ~/.seepient:/home/appuser/.seepient \
   seepient-server
 ```
 
@@ -95,6 +96,10 @@ The `seepient server` CLI and `seepient-server` binary are configured via enviro
 ### Stateless Worker Mutation Guard
 When an injected `ProviderRuntimeContract` does not implement configuration mutations (`updateOverlay`), mutation endpoints (`PUT /v1/models/assignments/*`, `DELETE /v1/models/assignments/*`, `PUT /v1/providers/*`, `DELETE /v1/providers/*`) return `501 NOT_IMPLEMENTED` with zero filesystem writes. This ensures headless container workers remain strictly stateless without accidental disk mutations.
 
+### Durability Model
+- **Audit logs**: Durable with fsync before commit.
+- **Chat sessions**: Best-effort asynchronous persistence; answered is not persisted synchronously to disk before response delivery.
+
 ## Quick start
 
 1. **Install and run**
@@ -137,16 +142,12 @@ When an injected `ProviderRuntimeContract` does not implement configuration muta
 | Variable | Description | Default |
 |---|---|---|
 | `SEEPIENT_PORT` / `PORT` | Server listen port | `7337` |
+| `SEEPIENT_HOST` | Server host interface (`0.0.0.0` for all interfaces) | `127.0.0.1` |
 | `OPENAI_API_KEY` | OpenAI provider key | -- |
 | `ANTHROPIC_API_KEY` | Anthropic provider key | -- |
 | `GLM_API_KEY` | GLM provider key | -- |
 | `OPENAI_COMPAT_API_KEY` | API key for OpenAI-compatible provider | -- |
 | `OPENAI_COMPAT_BASE_URL` | Base URL for OpenAI-compatible provider | -- |
-| `LLM_MODEL` | Default model for OpenAI-compatible provider | `gpt-5.4` |
-| `LLM_PROVIDER` | Default provider (`openai`, `anthropic`, `glm`, `openai-compatible`) | Auto-detected |
-| `OPENAI_MODEL` | Default OpenAI model | `gpt-5.4` |
-| `ANTHROPIC_MODEL` | Default Anthropic model | `claude-sonnet-4-6-20260320` |
-| `GLM_MODEL` | Default GLM model | `glm-5.1` |
 | `SEEPIENT_SESSION_DIR` | Directory for session files | `./.seepient/sessions` |
 | `SEEPIENT_SESSION_TTL` | Session TTL in seconds | `86400` (24 hours) |
 | `SEEPIENT_SKILLS_PATH` | Colon-separated paths to skill directories | -- |

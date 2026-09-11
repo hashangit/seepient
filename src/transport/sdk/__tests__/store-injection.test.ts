@@ -361,6 +361,7 @@ describe("QS-1: Store injection and session round-trip", () => {
     // Create agent resuming this session WITHOUT providing provider/providerAccount/model/metadata in options
     const agent = await createSeepient({
       sessionId,
+      principalId: "sdk-user",
       persist: backend,
       runtime,
       cwd: workspaceA,
@@ -453,6 +454,7 @@ describe("QS-1: Store injection and session round-trip", () => {
     await expect(
       createSeepient({
         sessionId,
+        principalId: "sdk-user",
         auditStore: new FakeAuditStore(),
         policyStore: new FakePolicyStore(),
         capabilityLedger: new FakeCapabilityLedger(),

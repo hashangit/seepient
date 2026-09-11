@@ -44,9 +44,11 @@ export interface AgentLoopOptions {
   onStep?: (step: StepResult) => void;
   providerFactory?: ProviderFactory;
   turnSnapshot?: TurnSnapshot;
-  modelOverride?: string | { model?: string; providerAccount?: string };
+  modelOverride?: string | { model?: string; providerAccount?: string; thinkingLevel?: any };
   purpose?: Purpose;
   tier?: Tier;
+  temperature?: number;
+  maxTokens?: number;
   middleware?: Middleware[];
   approveTool?: ApproveToolFn;
   autoConfirm?: boolean;
@@ -578,7 +580,16 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
           );
           currentModel = plan.selectedTarget.model;
 
-          for await (const event of runtime.executeLanguage(plan, { messages: canonicalMessages, tools: toolDefs as any }, { signal })) {
+          for await (const event of runtime.executeLanguage(
+            plan,
+            {
+              messages: canonicalMessages,
+              tools: toolDefs as any,
+              temperature: options.temperature,
+              maxOutputTokens: options.maxTokens,
+            },
+            { signal },
+          )) {
             if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
               acc.appendText(event.delta.text);
               const deltaStep: StepResult = { type: "text_delta", content: event.delta.text, timestamp: now() };

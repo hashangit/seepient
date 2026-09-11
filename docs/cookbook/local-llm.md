@@ -24,41 +24,32 @@ Confirm Ollama is serving on `http://127.0.0.1:11434`.
 
 ## 2. Configure Seepient
 
-Edit your `~/.seepient/config.json`:
+You can configure Seepient to use your local Ollama instance in two ways:
 
-```json
-{
-  "providers": {
-    "local-ollama": {
-      "type": "openai-compatible",
-      "baseUrl": "http://127.0.0.1:11434/v1",
-      "apiKey": "ollama"
-    },
-    "anthropic": {
-      "credentialRef": { "type": "env", "key": "ANTHROPIC_API_KEY" }
-    }
-  },
-  "routing": {
-    "text": {
-      "standard": {
-        "provider": "local-ollama",
-        "model": "llama3.3",
-        "fallbacks": [
-          { "provider": "anthropic", "model": "claude-3-7-sonnet" }
-        ]
-      }
-    },
-    "commit": {
-      "standard": {
-        "provider": "local-ollama",
-        "model": "qwen2.5-coder:14b",
-        "fallbacks": [
-          { "provider": "anthropic", "model": "claude-3-7-sonnet" }
-        ]
-      }
-    }
-  }
-}
+### Option A: Environment variables (Recommended)
+
+Set the OpenAI-compatible base URL in your shell environment or `.env`:
+
+```bash
+export OPENAI_COMPAT_BASE_URL="http://127.0.0.1:11434/v1"
+export OPENAI_COMPAT_API_KEY="ollama"
+```
+
+### Option B: Interactive setup or CLI
+
+Run the interactive setup wizard to configure the provider and choose default models:
+
+```bash
+seepient setup
+```
+
+Or configure via the CLI:
+
+```bash
+seepient providers add local-ollama \
+  --adapter pi-ai \
+  --upstream openai-compatible \
+  --base-url http://127.0.0.1:11434/v1
 ```
 
 ---

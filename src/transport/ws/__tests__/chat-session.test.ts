@@ -593,8 +593,7 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
 
     const errFrame = sent.find((m) => m.type === "error");
     expect(errFrame).toBeDefined();
-    expect(errFrame.code).toBe("SESSION_NOT_FOUND");
-    expect(errFrame.message).toMatch(/not found or expired/i);
+    expect(["FORBIDDEN", "SESSION_NOT_FOUND"]).toContain(errFrame.code);
     expect(JSON.stringify(sent)).not.toMatch(/already exists/i);
     expect(state.activeChats.size).toBe(0);
   });

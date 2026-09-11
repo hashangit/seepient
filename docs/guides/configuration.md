@@ -8,8 +8,8 @@ description: Configure providers, models, consent modes, and sandbox settings in
 Seepient merges configuration from four layers:
 
 1. CLI command flags (highest precedence)
-2. Workspace configuration file (`.seepient/config.json` in current directory)
-3. User global configuration file (`~/.seepient/config.json`)
+2. Workspace configuration file (`.seepient/setting.json` in current directory)
+3. User global configuration file (`~/.seepient/setting.json`)
 4. Environment variables
 5. Built-in defaults (lowest precedence)
 
@@ -21,63 +21,46 @@ The recommended way to configure providers and models is the interactive setup w
 seepient setup
 ```
 
-The wizard writes validated configuration directly to `~/.seepient/config.json` and manages credentials securely in your operating system keychain when available.
+The wizard writes validated configuration directly to `~/.seepient/setting.json` and manages credentials securely in your operating system keychain when available.
 
 ## Configuration file format
 
-Configuration files use standard JSON format. Below is an annotated example:
+Configuration files (`setting.json`) use standard JSON format. Below is an annotated example of supported settings:
 
 ```json
 {
-  "defaultProvider": "anthropic",
-  "defaultModel": "claude-3-7-sonnet",
-  "consentMode": "ask-untrusted",
-  "sandbox": {
-    "enabled": true,
-    "allowNetwork": true
+  "smtpHost": "smtp.example.com",
+  "smtpPort": "587",
+  "smtpUser": "agent@example.com",
+  "tavilyApiKey": "tvly-sample-key",
+  "autoConfirm": false,
+  "permissions": {
+    "consentMode": "edit-enabled",
+    "approvalTimeoutMs": 600000,
+    "trustedHostAllowlist": ["use_skill"]
   },
-  "routing": {
-    "text": {
-      "standard": { "provider": "anthropic", "model": "claude-3-7-sonnet" },
-      "efficient": { "provider": "openai", "model": "gpt-4o-mini" },
-      "complex": { "provider": "anthropic", "model": "claude-3-7-sonnet" }
-    },
-    "commit": {
-      "standard": { "provider": "anthropic", "model": "claude-3-7-sonnet" }
-    },
-    "media": {
-      "standard": { "provider": "fal", "model": "flux-pro" }
-    }
+  "server": {
+    "maxBodyBytes": 10485760,
+    "maxSteps": 50,
+    "rateLimitRpm": 120
   },
-  "providers": {
-    "anthropic": {
-      "credentialRef": { "type": "env", "key": "ANTHROPIC_API_KEY" }
-    },
-    "openai": {
-      "credentialRef": { "type": "env", "key": "OPENAI_API_KEY" }
-    },
-    "local": {
-      "type": "openai-compatible",
-      "baseUrl": "http://127.0.0.1:11434/v1",
-      "apiKey": "ollama"
-    }
-  }
+  "gatewayEnabled": true
 }
 ```
 
+Provider credentials and model routing can be configured interactively via `seepient setup`, in the TUI Model & Provider Dock (`Ctrl+M` or `/models`), via CLI commands (`seepient auth login`, `seepient providers add`), or using environment variables.
+
 ## Environment variables
 
-### LLM providers
+### LLM providers (auto-detected at boot)
 
 | Variable | Provider | Purpose |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Anthropic | API key for Claude models |
 | `OPENAI_API_KEY` | OpenAI | API key for GPT models |
-| `GEMINI_API_KEY` | Google | API key for Gemini models |
 | `GLM_API_KEY` | Zhipu GLM | API key for GLM models |
-| `DEEPSEEK_API_KEY` | DeepSeek | API key for DeepSeek models |
-| `OPENROUTER_API_KEY` | OpenRouter | Multi-model routing gateway |
-| `FAL_KEY` | Fal.ai | Image generation and diffusion models |
+| `OPENAI_COMPAT_API_KEY` | OpenAI-Compatible | API key for custom or local endpoints |
+| `OPENAI_COMPAT_BASE_URL` | OpenAI-Compatible | Base URL (e.g. `http://127.0.0.1:11434/v1` for Ollama) |
 
 ### Tool integrations
 
@@ -88,26 +71,30 @@ Configuration files use standard JSON format. Below is an annotated example:
 | `SMTP_PORT` | SMTP Email | Mail server port |
 | `SMTP_USER` | SMTP Email | Username for authentication |
 | `SMTP_PASS` | SMTP Email | Password or app password |
-| `WEBHOOK_URL` | Notifications | Target endpoint for `send_notification` |
+| `FEISHU_WEBHOOK` | Feishu | Webhook endpoint for `send_notification` |
+| `DINGTALK_WEBHOOK` | DingTalk | Webhook endpoint for `send_notification` |
+| `WECOM_WEBHOOK` | WeCom | Webhook endpoint for `send_notification` |
 
 ### System and security settings
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `SEEPIENT_CONSENT_MODE` | `always-ask` | Consent mode: `always-ask`, `ask-untrusted`, or `autonomous-trusted` |
-| `SEEPIENT_SANDBOX` | `true` | Set to `false` to disable OS process sandboxing (macOS/Linux) |
-| `SEEPIENT_AUDIT_LOG` | `~/.seepient/audit.log` | Path to the append-only 0600 audit log file |
-| `SEEPIENT_CONFIG_DIR` | `~/.seepient` | Directory for sessions, credentials, and settings |
+| `SEEPIENT_CONSENT_MODE` | `edit-enabled` | Consent mode: `ask-everything`, `edit-enabled` (default), or `autonomous` |
+| `SEEPIENT_SESSION_DIR` | `~/.seepient/sessions` (CLI) / `./.seepient/sessions` (Server) | Directory for persisted conversation history |
+| `SEEPIENT_SKILLS_PATH` | unset | Colon-separated list of custom skill directories |
+| `SEEPIENT_UNCONTAINED` | unset | Set to `1` to run without platform sandbox containment |
+| `SEEPIENT_PORT` | `7337` | Port for the HTTP/WebSocket server |
+| `SEEPIENT_HOST` | `127.0.0.1` | Host interface for HTTP/WebSocket server (`127.0.0.1` loopback, `0.0.0.0` all interfaces) |
 
 ## Consent modes
 
 Seepient provides three consent modes that determine when user confirmation is requested before executing tools:
 
-### `always-ask` (default)
+### `ask-everything`
 Every tool call that causes external side effects requires confirmation. Read-only operations like reading a file run automatically, while shell executions and file writes prompt for confirmation.
 
-### `ask-untrusted`
-Known, trusted tools run automatically if they match pre-configured allowlists. Unrecognized shell commands or mutations outside the working directory still prompt for confirmation.
+### `edit-enabled` (default)
+Permits routine workspace edits, reads, and normal development tools without prompts. Shell commands or actions outside the workspace boundary prompt for confirmation.
 
-### `autonomous-trusted`
+### `autonomous`
 Actions within the configured working directory run without confirmation. Useful for continuous integration runners, Docker containers, and batch scripts where no interactive terminal is attached.

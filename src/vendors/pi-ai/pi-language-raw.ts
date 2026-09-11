@@ -287,6 +287,7 @@ export class PiLanguageRaw implements LanguageBackend {
       signal,
       apiKey,
       maxTokens: req.maxOutputTokens,
+      temperature: req.temperature,
       timeoutMs: opts?.timeoutMs,
     };
 

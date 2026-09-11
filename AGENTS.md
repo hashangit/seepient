@@ -115,7 +115,10 @@ Current layout of the Obsidian vault (annotated):
 ├── README.md                         # Vault overview / index
 ├── Architecture/                     # Cross-cutting architectural references
 ├── Reviews/                          # Product review reports
-│   └── 2026-09-06-product-review-017-to-021-4.md # 360° review of 017→021-4 (v0.5.3–v0.7.1): 7 P1s, no P0
+│   ├── 2026-09-06-product-review-017-to-021-4.md # 360° review of 017→021-4 (v0.5.3–v0.7.1): 7 P1s, no P0
+│   ├── 2026-09-07-product-readiness-review-021-to-022.md # Readiness review of 021→022 (v0.8.0 staged @ 5f64583): 🔴 not ready; 21 P1s (docs truth rot, first-hour defaults, sdk-user collapse, WS crash); 4 root causes + pre-v0.8.0 fix list
+│   ├── 2026-09-09-product-readiness-review-post-022-1.md # Post-022-1 verification (uncommitted tree @ 5f64583+): 🟡 ready with conditions; 7/11 original P1s closed, tenancy/crash/parity real; 5 remaining P1s (CI gate mispath, config.json myth, session-dir lie, fictional subcommands, consent table cell) + P2 security residuals (pre-017 reconciliation raw-read, covers() suppression)
+│   └── 2026-09-11-product-readiness-review-v0.8.0-cut.md # v0.8.0 cut assessment (4 deep dives + live CI/build/boot evidence): 🔴 not ready to cut; prior 5 P1s all closed but deeper pass found multi-tenant server composing ambient operator skills/stores (guards live in SDK wrappers, not Domain constructors), doc lie families alive on unscanned pages (sessions-and-state.md fiction, providers-add flags, *_MODEL envs, types.md defaults), first-hour dead ends (README WS .text/.delta, Docker invocations, persist resume, consentMode-less flagship examples), and release-train blockers (127 files uncommitted/unpushed, pnpm 12-vs-11 pin conflict breaks CI on commit, pnpm audit red on main, 6 CHANGELOG gaps); ~3-4 day path to green. NOTE: previous map entry pointed at a 2026-09-11-post-remediation-verification.md that does not exist in the vault
 ├── Implementation-Specs/             # One folder per spec: NNN-kebab-name/
 │   ├── 007-tui-parity-upgrade/       # TUI parity & generative widget upgrade
 │   │   ├── spec.md                   # Problem statement, requirements, scope
@@ -253,14 +256,22 @@ Current layout of the Obsidian vault (annotated):
 │       │   └── tasks.md              # W001–W041; owner D1 (sessionless chat = no session) + D2 (fallback: mandatory sessionId)
 │       └── 021-4-remediation/        # Work order: rename completion + embedding/security/session repairs (021-4 — SHIPPED in v0.7.0; D1 adopt / D2 fold / D3 send-time normalization)
 │           └── tasks.md              # W100–W172; askSeepient/runSeepientServer truth, WS scopes, broker byte-classifier, D3 send-time history normalization
-├── 022-multi-tenant-isolation/       # Multi-tenant isolation hardening (022 — planned, branch 022-multi-tenant-isolation)
+├── 022-multi-tenant-isolation/       # Multi-tenant isolation hardening (022 — implemented on 021-1 branch, unreleased v0.8.0)
 │   ├── spec.md                       # FR-001–FR-018, M1–M12, SC-001–SC-005; per-agent registries, tenancy mode, principal-scoped state, regression fence
 │   ├── plan.md                       # P0 registry+contracts → P1 tool-path retarget → P2 tenancy+scoped state → P3 skills/invariant/docs → P4 matrix+re-audit+release
 │   ├── research.md                   # 2026-09-07 full-boundary audit: E1–E20 evidence (2-class findings), D1–D14 decisions
 │   ├── data-model.md                 # ToolRegistry, tenancy decision matrix, stamped Capability, scoped ledger, state classification v2
 │   ├── quickstart.md                 # QS-1–QS-8 validation scenarios (isolation matrix, mutation check, re-audit) + QS-P budgets
 │   ├── tasks.md                      # T001–T035, US1–US5 story phases, test-first gates, per-task runnable self-checks
-│   └── contracts/                    # tool-registry, tenancy-mode, principal-scoped-state, isolation-harness
+│   ├── contracts/                    # tool-registry, tenancy-mode, principal-scoped-state, isolation-harness
+│   └── 022-1-readiness-remediation/  # Sub-spec: v0.8.0 readiness closure (022-1 — IMPLEMENTED, branch 022-1-readiness-remediation)
+│       ├── spec.md                   # FR-001–FR-041, M1–M12, SC-001–SC-008; closes all P1s from Reviews/2026-09-07-product-readiness-review-021-to-022.md
+│       ├── plan.md                   # P0 red-first gates → P1 front-door truth → P2 first-hour defaults → P3 tenancy closure → P4 server reliability → P5 skills residuals → P6 release gates
+│       ├── research.md               # AUTHORITATIVE disposition ledger R1–R63 (FR-001): every review finding → 022-1 FR or existing owner; D1–D14; S1–S5 holds
+│       ├── data-model.md             # PrincipalRequiredError/PERSIST_CONFIG_INVALID/SESSION_ID_INVALID, literal tenancy signal, list?() backend, server CLI parser, gate reports
+│       ├── quickstart.md             # QS-0–QS-8 automated validation scenarios + production budgets
+│       ├── tasks.md                  # T001–T048, US0 gates → US1..US6 stories, red-first gates (CB-1), [MANUAL]=0
+│       └── contracts/                # docs-truth-gates, server-entry-and-parity, tenancy-closure
 ├── 023-seepient-sage/                # Seepient Sage: unified telemetry tracing + full auditing (023 — planned, branch 023-seepient-sage)
 │   ├── spec.md                       # US1–US6, FR-001–FR-023, M1–M13, SC-001–SC-007; two-plane (audit+telemetry) system
 │   ├── plan.md                       # P0 correlation spine → P1 audit enrichment → P2 telemetry plane → P3 gap closure → P4 surfaces → P5 self-consumption
@@ -723,7 +734,50 @@ shell commands, and other important information, read the current plan:
   Baselines on 022 (tenancy context, principal-stamped stores);
   server audit root leaves `process.cwd()` for the Seepient home.
   Phases P0–P5 in plan.md; gates QS-1–QS-8 (SC-001–SC-007).
-- **ACTIVE PLAN**: `~/Documents/Obsidian/Seepient/Implementation-Specs/022-multi-tenant-isolation/plan.md`
+- **IMPLEMENTED (2026-09-08, unreleased v0.8.0 on 022-1-readiness-remediation branch)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/022-multi-tenant-isolation/022-1-readiness-remediation/plan.md`
+  — Readiness remediation (022-1): closes every P1 from the 2026-09-07
+  product-readiness review (`Reviews/2026-09-07-product-readiness-review-021-to-022.md`,
+  🔴 verdict, 21 P1s / 4 root causes) before v0.8.0 ships, on branch
+  `022-1-readiness-remediation` cut from `021-1-skill-sources` @ 5f64583.
+  Two halves. Point fixes: docs truth sweep (fictional consent modes on 8+
+  pages, fictional CLI flag table, nonexistent `seepient server` subcommand
+  becomes real with shared --port/--host parsing, dead Docker Hub images →
+  local build, workers.md unwired-scheduler rewrite, SEEPIENT_SHELL_APPROVE
+  purge, SessionStore tier purge + typed PERSIST_CONFIG_INVALID replacing
+  the silent no-op, error-hierarchy value exports, README sweeps);
+  first-hour defaults (SDK consentMode deny-by-default made doc-truth with
+  examples passing consentMode, inline skill literals stop tripping the
+  multi-tenancy upgrade so the 021-1 quickstart runs verbatim, dead
+  temperature/maxTokens/thinkingLevel wired or removed, sessionId 128-cap
+  at entry, --docker/--headless stop setting autoConfirm — minimal slice of
+  024-1); tenancy closure (PRINCIPAL_REQUIRED — no silent sdk-user collapse
+  in multi, server lifecycle threads tenancyMode "multi" completing 022's
+  own claim with operatorBaseline, config-derived operator grants stop
+  auto-inheriting into tenants, example honors principal scoping, matrix
+  dims 5/6 re-pointed at real stores + server dimension 9); server
+  reliability (WS settings crash closed at three layers: safeSend +
+  dispatch catch-all + process guard, REST/WS adopt-or-create unified,
+  WS provider mutations on the injected runtime, loopback default bind,
+  maxSteps clamp + 413 parity + clientMsgId echo, PersistenceBackend
+  list?() so sessions survive restart listing, durability disclosed);
+  skills residuals (strict cross-source last-wins, content-first body
+  precedence, SKILL_BODY_UNAVAILABLE legibility, filter-miss warns,
+  null-registry REPL safety, frontmatter-preserving replace, server
+  listing parity + agent:read scope, 8k body warn restored); release gates
+  (pack:verify calls assertNotPlaceholder, macOS JS CI job, CHANGELOG
+  truth amendments). Root-cause gates (the review's "complete solutions",
+  US0, land RED first): docs vocabulary gate (consent set, SEEPIENT_* env
+  names, CLI flags vs Commander truth, SDK-import fences), docs-example
+  import checks, defaults pin suite, WS crash fence. research.md is the
+  AUTHORITATIVE R1–R63 disposition ledger (FR-001) splitting every finding
+  against 024/024-1/024-2/025 — absorbed items (PRINCIPAL_REQUIRED, error
+  exports, SessionStore docs, adopt-or-create, loopback, pack:verify,
+  sessionId cap, consentMode truth, autoConfirm flag stop) drop from
+  024-2's P0 re-baseline. T001–T048, US0→US6, ~12.5 days; MVP = P0+P1+T023.
+  Open owner questions: OQ-1 literal-tenancy confirmation, OQ-2 Docker
+  registry publishing, OQ-3 release cut timing. Release owner-gated (CB-6),
+  appends to unreleased v0.8.0 block only.
+- **IMPLEMENTED (2026-09-07, unreleased v0.8.0 on 021-1 branch)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/022-multi-tenant-isolation/plan.md`
   — Multi-tenant isolation hardening (022): closes the 2026-09-07 audit
   findings that undermine 021's multi-tenant story — per-agent ToolRegistry +
   connector registries replace the process-global registry (cross-tenant tool

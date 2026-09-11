@@ -7,6 +7,7 @@ import type {
   ClientMessage,
   ResumeMessage,
   ReconnectMessage,
+  ListSkillsMessage,
   WebSocketHandlerContext,
   ConnectionState,
 } from "./ws-types.js";
@@ -32,6 +33,7 @@ export async function handleResume(
       code: "FORBIDDEN",
       retryable: false,
       message: "Requires agent:read scope",
+      ...(msg.id ? { clientMsgId: msg.id } : {}),
     });
     return;
   }
@@ -42,6 +44,7 @@ export async function handleResume(
       code: "REQUEST_IN_FLIGHT",
       retryable: true,
       message: "Cannot resume session while a stream is in flight on this connection",
+      ...(msg.id ? { clientMsgId: msg.id } : {}),
     });
     return;
   }
@@ -55,6 +58,7 @@ export async function handleResume(
       code: "SESSION_NOT_FOUND",
       retryable: false,
       message: "Session not found or expired",
+      ...(msg.id ? { clientMsgId: msg.id } : {}),
     });
     return;
   }
@@ -64,6 +68,7 @@ export async function handleResume(
       code: "SESSION_NOT_FOUND",
       retryable: false,
       message: "Session not found or expired",
+      ...(msg.id ? { clientMsgId: msg.id } : {}),
     });
     return;
   }
@@ -90,6 +95,7 @@ export async function handleReconnect(
       code: "FORBIDDEN",
       retryable: false,
       message: "Requires agent:read scope",
+      ...(msg.id ? { clientMsgId: msg.id } : {}),
     });
     return;
   }
@@ -100,6 +106,7 @@ export async function handleReconnect(
       code: "REQUEST_IN_FLIGHT",
       retryable: true,
       message: "Cannot reconnect session while a stream is in flight on this connection",
+      ...(msg.id ? { clientMsgId: msg.id } : {}),
     });
     return;
   }
@@ -113,6 +120,7 @@ export async function handleReconnect(
       code: "SESSION_NOT_FOUND",
       retryable: false,
       message: "Session not found or expired",
+      ...(msg.id ? { clientMsgId: msg.id } : {}),
     });
     return;
   }
@@ -122,6 +130,7 @@ export async function handleReconnect(
       code: "SESSION_NOT_FOUND",
       retryable: false,
       message: "Session not found or expired",
+      ...(msg.id ? { clientMsgId: msg.id } : {}),
     });
     return;
   }
@@ -144,23 +153,38 @@ export async function handleReconnect(
   });
 }
 
-export function handleListSkills(
+export async function handleListSkills(
   ws: WebSocket,
+  msg: ListSkillsMessage | undefined,
+  state: ConnectionState,
   ctx: WebSocketHandlerContext,
-): void {
+): Promise<void> {
+  if (!requireWsScope(state, "agent:read")) {
+    safeSend(ws, {
+      type: "error",
+      code: "FORBIDDEN",
+      retryable: false,
+      message: "Requires agent:read scope",
+      ...(msg?.id ? { clientMsgId: msg.id } : {}),
+    });
+    return;
+  }
+
+  const skills = await ctx.listSkills();
   safeSend(ws, {
     type: "skills_list",
-    skills: ctx.listSkills(),
+    skills,
+    ...(msg?.id ? { clientMsgId: msg.id } : {}),
   });
 }
 
-export function handleWsSettingsMessage(
+export async function handleWsSettingsMessage(
   ws: WebSocket,
-  _msg: ClientMessage,
+  msg: ClientMessage,
   _state: ConnectionState,
   ctx: WebSocketHandlerContext,
-  fn: (sCtx: SettingsHandlerContext) => void,
-): void {
+  fn: (sCtx: SettingsHandlerContext) => void | Promise<void>,
+): Promise<void> {
   const sCtx = ctx.settingsHandlerContext;
   if (!sCtx) {
     safeSend(ws, {
@@ -168,8 +192,9 @@ export function handleWsSettingsMessage(
       code: "SERVICE_UNAVAILABLE",
       retryable: false,
       message: "Settings not configured",
+      ...((msg as any)?.id ? { clientMsgId: (msg as any).id } : {}),
     });
     return;
   }
-  fn(sCtx);
+  await fn(sCtx);
 }

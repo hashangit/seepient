@@ -48,7 +48,12 @@ export function assertNoCleanInPublishHooks(packageJson) {
  * Throws if the package contains placeholder binaries.
  */
 export function assertNotPlaceholder(manifest) {
-  if (manifest && manifest.placeholder === true) {
+  if (!manifest) {
+    throw new Error(
+      "Refusing to publish package without native binaries! Build with `pnpm native:build` or use the release pipeline; placeholders never verify.",
+    );
+  }
+  if (manifest.placeholder === true) {
     throw new Error("Refusing to publish package containing placeholder native binaries!");
   }
 }
@@ -163,6 +168,20 @@ export function verifyPack(projectRoot = process.cwd(), opts = {}) {
 
   const filePaths = files.map((f) => (typeof f === "string" ? f : f.path));
   assertPackFiles(filePaths);
+
+  // 5. Assert not placeholder (FR-039)
+  if (!opts.allowPlaceholder) {
+    const manifestPath = path.join(projectRoot, "dist/native-fs-commit/manifest.json");
+    let manifest = null;
+    if (fs.existsSync(manifestPath)) {
+      try {
+        manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+      } catch {
+        manifest = null;
+      }
+    }
+    assertNotPlaceholder(manifest);
+  }
 
   return { success: true, count: filePaths.length };
 }

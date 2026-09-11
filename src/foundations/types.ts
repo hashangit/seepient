@@ -221,6 +221,7 @@ export interface AskSeepientOptions {
   /** Spec 022 Tenancy mode ("single" | "multi") and stateless declaration */
   tenancy?: "single" | "multi";
   stateless?: boolean;
+  sessionId?: string;
 }
 
 export interface AskSeepientResult {
@@ -263,6 +264,8 @@ export interface CreateSeepientOptions {
   sources?: import("./contracts/skill-source.js").SkillSource[];
   cwd?: string;
   maxSteps?: number;
+  temperature?: number;
+  maxTokens?: number;
   persist?: string | PersistenceBackend | PersistenceConfig;
   hooks?: Hooks;
   config?: Record<string, unknown>;
@@ -337,13 +340,24 @@ export interface AgentResponse {
  * (file system, Redis, SQLite, etc.). Server-specific metadata (TTL,
  * apiKeyHash) flows through the `metadata` field on `SessionData`.
  */
+export interface SessionSummary {
+  id: string;
+  updatedAt: number;
+  messageCount: number;
+  title?: string;
+  createdAt?: number;
+  provider?: string;
+  model?: string;
+  apiKeyHash?: string;
+}
+
 export interface PersistenceBackend {
   /** Brand discriminator distinguishing PersistenceBackend from older shapes */
   __persistenceBackend: true;
   save(id: string, data: SessionData): Promise<void>;
   load(id: string): Promise<SessionData | null>;
-  delete(id: string): Promise<void>;
-  list(): Promise<string[]>;
+  delete?(id: string): Promise<void>;
+  list?(): Promise<SessionSummary[] | string[]>;
 }
 
 /**
@@ -379,7 +393,7 @@ export interface SessionData {
 export interface RunSeepientServerOptions {
   /** Port to listen on (default: SEEPIENT_PORT, PORT, or 7337) */
   port?: number;
-  /** Host to bind to (default: "0.0.0.0") */
+  /** Host to bind to (default: "127.0.0.1") */
   host?: string;
   /** Enable CORS headers (default: true) */
   cors?: boolean;
@@ -399,6 +413,8 @@ export interface RunSeepientServerOptions {
   settingsManager?: import("./contracts/settings-manager-like.js").SettingsManagerLike;
   /** Injected per-server or per-agent ToolRegistry (Spec 022) */
   toolRegistry?: import("./contracts/tool.js").ToolRegistryContract;
+  /** Injected operator baseline capabilities applying unstamped to all server principals (FR-021) */
+  operatorBaseline?: import("./contracts/permission-policy.js").CapabilitySet | import("./contracts/permission-policy.js").Capability[];
   /**
    * Whether to start listening immediately.
    * Default: true. Set to false to create the configured http.Server without listening.

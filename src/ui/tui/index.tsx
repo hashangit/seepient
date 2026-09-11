@@ -95,7 +95,8 @@ export async function startTui({ queryParts, options }: StartTuiArgs): Promise<v
   // specs/002-channels-integration migration note).
   const PREVIEW_LEN = 80;
   const listSessions = async (): Promise<SessionListItem[]> => {
-    const ids = await persistence.list();
+    const rawList = await persistence.list?.() ?? [];
+    const ids = rawList.map((e: any) => typeof e === "string" ? e : e.id);
     const loaded = await Promise.all(ids.map((id) => persistence.load(id)));
     return loaded
       .filter((s): s is NonNullable<typeof s> => s != null)
@@ -133,7 +134,7 @@ export async function startTui({ queryParts, options }: StartTuiArgs): Promise<v
   };
 
   const onDeleteSession = async (sessionId: string): Promise<void> => {
-    await persistence.delete(sessionId);
+    await persistence.delete?.(sessionId);
   };
 
   // Export: write full SessionData as JSON to ./<short-id>.json. Returns the

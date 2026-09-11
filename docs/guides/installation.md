@@ -45,15 +45,19 @@ yarn global add seepient
 
 ## Docker container
 
-Run Seepient inside an isolated container with Chromium, CJK fonts, and native helpers pre-installed:
+Build and run Seepient locally from the cloned repository using Docker:
 
 ```bash
+# Build the local Docker image
+docker build -t seepient .
+
+# Run Seepient interactively
 docker run -it --rm \
   -v "$(pwd):/workspace" \
   -w /workspace \
   -e OPENAI_API_KEY="$OPENAI_API_KEY" \
   -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
-  seepient/seepient:latest
+  seepient
 ```
 
 To run the standalone HTTP and WebSocket server inside a container:
@@ -62,9 +66,9 @@ To run the standalone HTTP and WebSocket server inside a container:
 docker run -d \
   --name seepient-server \
   -p 7337:7337 \
-  -v seepient-data:/root/.seepient \
-  -e SEEPIENT_API_KEY="your-secret-api-key" \
-  seepient/server:latest
+  -v seepient-data:/home/appuser/.seepient \
+  -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+  seepient server --generate-api-key
 ```
 
 ## Platform compatibility

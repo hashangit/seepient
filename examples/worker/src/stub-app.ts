@@ -83,11 +83,38 @@ export function createStubApp(initialState?: Partial<StubAppState>): {
 
     if (req.method === "GET" && url.pathname === "/api/policy") {
       const workspaceId = url.searchParams.get("workspaceId") ?? "default";
-      const snapshot = state.policySnapshots.get(workspaceId);
+      const principalId = url.searchParams.get("principalId");
+      const tenancyMode = url.searchParams.get("tenancyMode");
+      const key = principalId ? `${workspaceId}:${principalId}` : workspaceId;
+      let snapshot = state.policySnapshots.get(key);
+      if (!snapshot && principalId) {
+        const wsSnapshot = state.policySnapshots.get(workspaceId);
+        if (wsSnapshot) {
+          const isMulti = tenancyMode === "multi";
+          const isDefaultSingleUser = !isMulti;
+          const filtered = wsSnapshot.policy.capabilities.filter((cap) => {
+            if (cap.principalId) {
+              return cap.principalId === principalId;
+            }
+            return isDefaultSingleUser;
+          });
+          snapshot = {
+            ...wsSnapshot,
+            policy: {
+              ...wsSnapshot.policy,
+              capabilities: filtered,
+            },
+          };
+        }
+      }
       if (!snapshot) {
-        res.writeHead(404, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "PolicyNotFound" }));
-        return;
+        snapshot = {
+          workspaceId,
+          version: 0,
+          policyDigest: "empty",
+          policy: { version: 1, capabilities: [] },
+          mutationHistory: [],
+        };
       }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(snapshot));
@@ -95,8 +122,10 @@ export function createStubApp(initialState?: Partial<StubAppState>): {
     }
 
     if (req.method === "POST" && url.pathname === "/api/policy") {
-      const { workspaceId, expectedVersion, next, actor, mutation } = jsonBody;
-      const current = state.policySnapshots.get(workspaceId) ?? {
+      const { workspaceId, expectedVersion, next, actor, mutation, principalId: bodyPrincipalId } = jsonBody;
+      const principalId = bodyPrincipalId ?? next?.capabilities?.find((c: any) => c.principalId)?.principalId;
+      const key = principalId ? `${workspaceId}:${principalId}` : workspaceId;
+      const current = state.policySnapshots.get(key) ?? state.policySnapshots.get(workspaceId) ?? {
         workspaceId,
         version: 0,
         policyDigest: "empty",
@@ -118,7 +147,7 @@ export function createStubApp(initialState?: Partial<StubAppState>): {
           ...(mutation ? [{ mutationId: mutation.mutationId, version: expectedVersion + 1 }] : []),
         ],
       };
-      state.policySnapshots.set(workspaceId, updated);
+      state.policySnapshots.set(key, updated);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(updated));
       return;

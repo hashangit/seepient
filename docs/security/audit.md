@@ -45,7 +45,7 @@ The audit log uses newline-delimited JSON (NDJSON). Each record contains a compl
   },
   "approval": {
     "decision": "approved",
-    "mode": "always-ask",
+    "mode": "ask-everything",
     "decidedBy": "human_interactive"
   },
   "outcome": {

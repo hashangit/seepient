@@ -160,6 +160,7 @@ export default defineConfig({
             { text: 'Hooks and middleware', link: '/sdk/hooks' },
             { text: 'Session persistence', link: '/sdk/session-persistence' },
             { text: 'Stateless workers', link: '/sdk/stateless-workers' },
+            { text: 'Multi-tenant isolation', link: '/sdk/multi-tenant' },
             { text: 'Types', link: '/sdk/types' }
           ]
         }
