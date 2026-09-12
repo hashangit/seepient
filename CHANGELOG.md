@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Omitting `runtime` in multi-tenant mode throws `TENANCY_RUNTIME_REQUIRED`.
   - Missing any required storage backends (`auditStore`, `policyStore`, `capabilityLedger`, or `persist`) without `stateless: true` throws `TENANCY_STORE_INCOMPLETE`.
   - Writing outside injected stores in multi-tenant mode throws `TENANCY_AMBIENT_IO`.
+- **SDK `consentMode` defaults to deny-by-default**: When `consentMode` is omitted in `createSeepient` or `askSeepient`, execution defaults to deny-by-default (unpredeclared effectful tools are denied with typed explanation unless predeclared or an `approvalBroker` is supplied). This replaces obsolete defaults; effectful scripts must specify an explicit `consentMode` (e.g. `edit-enabled` or `autonomous`) or attach an `approvalBroker`.
+- **Session ID Length & Format Validation**: `sessionId` inputs now enforce a 128-character cap and alphanumeric/dash/underscore format validation; invalid session IDs throw `SessionIdInvalidError` (`SESSION_ID_INVALID`).
+- **Strict Persist Configuration Validation**: Passing invalid or unparseable `persist` configurations now throws `PersistConfigInvalidError` (`PERSIST_CONFIG_INVALID`) at construction rather than failing silently or causing downstream runtime errors.
+- **Environment Variable Cleanup**: Removed obsolete and unread `OPENAI_BASE_URL` and `OPENAI_MODEL` from `.env.example`. Model assignments should be configured via `seepient setup`, `seepient models set`, or `.seepient/setting.json`.
 - **Server Tenancy Threading (FR-021)**: HTTP server agent lifecycles now build with `tenancyMode: "multi"` scoped to the API key principal (`apiKeyHash`). Ambient unstamped legacy grants in the policy store are now invisible to server principals (policy reads run principal-filtered).
   - *Transition guidance*: Operators should re-approve needed capabilities per API key, or seed per-principal stamped grants in the policy store. Foundational capabilities can be passed via `operatorBaseline`.
 - **Explicit `principalId` Required in Multi-Tenant Mode (FR-020)**: Setting `tenancy: "multi"` (explicit or upgraded) without providing an explicit `principalId` now throws a typed `PrincipalRequiredError` (`PRINCIPAL_REQUIRED`) at construction. The default `"sdk-user"` identity is restricted to single-user mode.
@@ -33,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - *Transition guidance*: If relying on high numeric `priority:` values to override downstream injected sources or inline literals, structure the injected `SkillSource` array in desired last-wins order or use inline literals.
 
 **Added:**
+- **`seepient server` CLI subcommand**: First-class command under the primary `seepient` binary with `--port`, `--host`, and `--generate-api-key` options, mirroring the standalone `seepient-server` binary.
+- **Typed Error Class Value Exports**: Exported `PersistConfigInvalidError`, `SessionIdInvalidError`, `PrincipalRequiredError`, `TenancyStoreIncompleteError`, and `TenancyRuntimeRequiredError` directly from `seepient` and `seepient/types`.
 - **Per-agent `ToolRegistry`**: Instanced tool registry providing private tool resolution, registration, and duplicate-name conflict prevention (`TOOL_NAME_CONFLICT`).
 - **Tenancy mode resolution & inference**: Explicit `tenancy: "single" | "multi"` option on `createSeepient` and `askSeepient`, with automatic upgrade to `multi` upon detection of multi-tenant injection signals (stores, runtime, principalId, skill sources, persist). Emits a one-time upgrade notice per process.
 - **Principal-scoped permission state**: All persisted capabilities stamped with `principalId` on write; `PolicyStore.read` filters by `principalId` in multi mode. Added `operatorBaseline` lifecycle input for unprompted foundational permissions across all tenants.

@@ -32,7 +32,7 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 
 # Pin pnpm to the version the lockfile/CI use — `pnpm@latest` makes corepack
 # resolve a moving target and the container cache can miss the shim's module.
-RUN corepack enable && corepack prepare pnpm@11.25.0 --activate
+RUN corepack enable && corepack prepare pnpm@12.3.4 --activate
 
 WORKDIR /build
 

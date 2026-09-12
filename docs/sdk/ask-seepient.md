@@ -127,7 +127,7 @@ The runtime resolves credentials through `CompositeCredentialStore`. It inspects
 
 1. Process environment variables
 2. Operating system keychain (macOS Keychain, Linux Secret Service, Windows Credential Manager)
-3. Local file store at `~/.seepient/credentials.json`
+3. Local credential store directory at `~/.seepient/credentials/`
 4. In-memory credentials if injected via SDK options
 
 You do not need to pass API keys in code if they exist in your shell environment or local credential store.
@@ -136,15 +136,16 @@ You do not need to pass API keys in code if they exist in your shell environment
 
 The `consentMode` option controls the execution boundary:
 
-- Defaults to `"never"` (deny-by-default when no broker is provided). In this mode, any effectful tool execution is denied unless predeclared. Pass `consentMode: "edit-enabled"` to allow reading and writing files within the workspace root (`options.cwd`, which defaults to `process.cwd()`). Destructive actions and operations outside the boundary require approval or fail with permission errors.
-- Pass `consentMode: "autonomous"` to run all permitted tools without interactive confirmation prompts.
+- When omitted, `consentMode` operates **deny-by-default**: any unpredeclared effectful tool execution is denied unless pre-granted in policy or an `approvalBroker` is supplied (this fail-closed behavior is neither `ask-everything` nor `autonomous`).
+- Pass `consentMode: "edit-enabled"` to allow reading and writing files within the workspace root (`options.cwd`, which defaults to `process.cwd()`). Destructive actions and operations outside the boundary require approval or fail with permission errors.
+- Pass `consentMode: "autonomous"` to run all permitted tools within the deployment ceiling without interactive confirmation prompts.
 - Pass `consentMode: "ask-everything"` to require approval for every tool execution.
 
 ### Skill discovery
 
 The `skills` option controls skill injection:
 
-- Defaults to `true`. Seepient scans the workspace root for `.agents/skills` and `.seepient/skills`. It adds the discovered skill descriptions to the system prompt.
+- Defaults to `true`. Seepient scans workspace skills (`.seepient/skills`), user skills (`~/.seepient/skills`), and the cross-agent shared skills directory (`$HOME/.agents/skills`). Discovered skill descriptions are composed into the system prompt catalog.
 - Pass `skills: false` to skip skill scanning.
 - Pass an array of names (`skills: ["git-workflow", "review"]`) to load only those skills.
 
@@ -185,7 +186,7 @@ The `skills` option controls skill injection:
 | `tools` | `(string \| UserToolDefinition \| AnyToolRegistration)[]` | All 15 built-in tools | Tool names, tool groups (`"core"`, `"comm"`, `"advanced"`), or custom registrations. Pass `[]` for pure text |
 | `maxSteps` | `number` | `10` | Maximum agent loop iterations before terminating |
 | `systemPrompt` | `string` | *(none)* | Instructions prepended as a system message before the user prompt |
-| `consentMode` | `ConsentMode` | `"never"` | Permission mode: `"edit-enabled"`, `"autonomous"`, or `"ask-everything"` (defaults to deny-by-default when omitted without broker) |
+| `consentMode` | `ConsentMode` | deny-by-default | Permission mode: `"edit-enabled"`, `"autonomous"`, or `"ask-everything"` (when omitted, unpredeclared effectful tools are denied unless pre-granted in policy or an `approvalBroker` is supplied) |
 | `cwd` | `string` | `process.cwd()` | Workspace root directory for file tools, boundaries, and skill discovery |
 | `skills` | `string[] \| boolean` | `true` | `true` loads all discovered skills, `false` disables skill discovery, string array loads specific skills |
 | `sources` | `SkillSource[]` | *(none)* | Injected skill sources for multi-tenant skill scoping. Disables ambient skill discovery in `multi` mode |

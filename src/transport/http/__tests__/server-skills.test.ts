@@ -70,26 +70,10 @@ describe("Server Skills Parity & Scope (Spec 022-1, US5 / FR-037)", () => {
     expect(body.error?.message).toContain("agent:read");
   });
 
-  it("GET /v1/skills succeeds with 'agent:read' scope and dynamically reflects new skills without restart", async () => {
+  it("GET /v1/skills in multi mode ignores ambient disk skills when no sources are passed", async () => {
     const keyEntry = generateApiKey(["agent:read"], { filePath: tempKeyPath, label: "read-key" });
 
-    const server = await runSeepientServer({ port: 0 });
-    activeServers.push(server);
-    const addr = server.address() as any;
-    const port = addr.port;
-
-    // 1. Initial request: empty skills
-    const res1 = await fetch(`http://127.0.0.1:${port}/v1/skills`, {
-      headers: {
-        Authorization: `Bearer ${keyEntry.rawKey}`,
-      },
-    });
-    expect(res1.status).toBe(200);
-    const body1 = await res1.json() as any;
-    expect(Array.isArray(body1.skills)).toBe(true);
-    expect(body1.skills.find((s: any) => s.name === "dynamic-skill")).toBeUndefined();
-
-    // 2. Add skill to disk in workspace
+    // 1. Add skill to disk in workspace
     const skillDir = path.join(tempDir, ".seepient", "skills", "dynamic-skill");
     fs.mkdirSync(skillDir, { recursive: true });
     fs.writeFileSync(
@@ -98,19 +82,55 @@ describe("Server Skills Parity & Scope (Spec 022-1, US5 / FR-037)", () => {
       "utf8",
     );
 
-    // 3. Second request: should dynamically reflect without server restart
-    const res2 = await fetch(`http://127.0.0.1:${port}/v1/skills`, {
+    // 2. Boot server without sources
+    const server = await runSeepientServer({ port: 0 });
+    activeServers.push(server);
+    const addr = server.address() as any;
+    const port = addr.port;
+
+    // 3. Request skills: should NOT discover ambient disk skill in multi mode
+    const res = await fetch(`http://127.0.0.1:${port}/v1/skills`, {
       headers: {
         Authorization: `Bearer ${keyEntry.rawKey}`,
       },
     });
-    expect(res2.status).toBe(200);
-    const body2 = await res2.json() as any;
-    expect(Array.isArray(body2.skills)).toBe(true);
-    const dynamicSkill = body2.skills.find((s: any) => s.name === "dynamic-skill");
-    expect(dynamicSkill).toBeDefined();
-    expect(dynamicSkill.description).toBe("dynamically added skill");
-    expect(dynamicSkill.tags).toContain("dynamic");
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(Array.isArray(body.skills)).toBe(true);
+    expect(body.skills.find((s: any) => s.name === "dynamic-skill")).toBeUndefined();
+    expect(body.skills).toEqual([]);
+  });
+
+  it("GET /v1/skills returns skills from injected sources", async () => {
+    const keyEntry = generateApiKey(["agent:read"], { filePath: tempKeyPath, label: "read-key-sources" });
+
+    const source: import("../../../foundations/contracts/skill-source.js").SkillSource = {
+      list: async () => [
+        {
+          name: "injected-skill",
+          content: "---\nname: injected-skill\ndescription: an injected skill\ntags: [test, custom]\n---\nSkill body\n",
+          source: "custom",
+        },
+      ],
+    };
+
+    const server = await runSeepientServer({ port: 0, sources: [source] });
+    activeServers.push(server);
+    const addr = server.address() as any;
+    const port = addr.port;
+
+    const res = await fetch(`http://127.0.0.1:${port}/v1/skills`, {
+      headers: {
+        Authorization: `Bearer ${keyEntry.rawKey}`,
+      },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(Array.isArray(body.skills)).toBe(true);
+    const skill = body.skills.find((s: any) => s.name === "injected-skill");
+    expect(skill).toBeDefined();
+    expect(skill.description).toBe("an injected skill");
+    expect(skill.tags).toEqual(["test", "custom"]);
   });
 
   it("WS list_skills rejects connection lacking 'agent:read' with FORBIDDEN error frame", async () => {

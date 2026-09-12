@@ -424,6 +424,11 @@ export class Agent {
     return this._wiredPipeline !== null;
   }
 
+  /** Return the wired action lifecycle pipeline if initialized. */
+  getWiredPipeline(): import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle | null {
+    return this._wiredPipeline;
+  }
+
   // ── Spec 008 protected policy store accessors (T307) ─────────────────
   // These route active-policy mutations exclusively through
   // PolicyStore.compareAndSet — the trusted administrative flow. Proposals

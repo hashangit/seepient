@@ -13,6 +13,8 @@ import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import { buildActionLifecycle } from "../action-lifecycle-factory.js";
 import { LocalPolicyStore, computeWorkspaceId, CURRENT_CEILING_VERSION } from "../policy-store.js";
+import { LocalAuditStore } from "../audit-recorder.js";
+import { PersistedCapabilityLedger } from "../persisted-capability-ledger.js";
 import { InMemoryArtifactStore } from "../../../capabilities/execution/in-memory-artifact-store.js";
 import type { ApprovalBroker } from "../../../foundations/contracts/permission-policy.js";
 import type { ExecutionBoundary } from "../../../foundations/contracts/execution-boundary.js";
@@ -202,6 +204,9 @@ describe("stored-policy reconciliation (spec 017, T010 / FR-019)", () => {
       { kind: "human", authorityId: "operator", authenticatedBy: "test" },
     );
 
+    const auditStore = new LocalAuditStore({ root: path.join(tempDir, "audit") });
+    const capabilityLedger = new PersistedCapabilityLedger({ root: path.join(tempDir, "caps") });
+
     const wired = await buildActionLifecycle({
       principalId: "tenant-99",
       tenancyMode: "multi",
@@ -210,7 +215,8 @@ describe("stored-policy reconciliation (spec 017, T010 / FR-019)", () => {
       approvalBroker: NOOP_BROKER,
       executionBoundary: LOCAL_BOUNDARY,
       policyStore,
-      auditRoot: path.join(tempDir, "audit"),
+      auditStore,
+      capabilityLedger,
       artifacts: new InMemoryArtifactStore(),
     });
 

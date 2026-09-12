@@ -91,6 +91,16 @@ export function handleConnection(
         return;
       }
 
+      if (!msg || typeof msg !== "object" || Array.isArray(msg)) {
+        safeSend(ws, {
+          type: "error",
+          code: "INVALID_MESSAGE",
+          retryable: false,
+          message: "Invalid JSON message",
+        });
+        return;
+      }
+
       const clientMsgId = (msg as any)?.id;
       const requestId = clientMsgId ?? crypto.randomUUID();
 

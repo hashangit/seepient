@@ -221,6 +221,7 @@ import { createSeepient } from 'seepient';
 const seepient = await createSeepient({
   provider: 'anthropic',
   model: 'claude-sonnet-4-5-20250929',
+  consentMode: 'edit-enabled',
 });
 
 const result = await seepient.chat('List all running Docker containers');
@@ -347,7 +348,8 @@ const seepient = await createSeepient({
 ```ts
 const seepient = await createSeepient({
   provider: 'anthropic',
-  persist: 'my-session',          // Resume a previous session
+  sessionId: 'my-session',        // Session identifier
+  persist: './sessions',          // Directory path or custom PersistenceBackend
 });
 ```
 
@@ -509,13 +511,15 @@ ws.onopen = () => {
   ws.send(JSON.stringify({
     type: 'chat',
     message: 'Analyze the error logs',
-    provider: 'anthropic',
+    options: { provider: 'anthropic' },
   }));
 };
 
 ws.onmessage = (event) => {
   const chunk = JSON.parse(event.data);
-  process.stdout.write(chunk.text);
+  if (chunk.type === 'text_delta' && chunk.delta) {
+    process.stdout.write(chunk.delta);
+  }
 };
 ```
 
@@ -777,7 +781,7 @@ Use `--docker` for non-interactive execution inside containers:
 docker run --rm \
   --env-file .env \
   -v $(pwd)/workspace:/workspace \
-  seepient chat "Check disk usage" --docker
+  seepient seepient chat "Check disk usage" --docker
 ```
 
 When Seepient detects a container or non-interactive shell (or when passed `--docker`), it turns off interactive prompts and formats output cleanly for log streams. Headless execution denies un-predeclared actions with typed remediation; pass `--mode autonomous` or `--yes` for unattended runs.

@@ -68,15 +68,17 @@ If the machine loses power immediately following a file write, the audit record 
 
 ## Inspecting the audit log
 
-Use the CLI to query and inspect audit records:
+Audit records are appended to `~/.seepient/audit.log`. You can inspect and filter the log using standard Unix tools:
 
 ```bash
-# View recent events
-seepient audit --limit 10
+# View the last 10 audit records formatted with jq
+tail -n 10 ~/.seepient/audit.log | jq .
 
-# Filter by a specific session
-seepient audit --session sess_20260905_a1b2
+# Filter records by a specific session ID
+grep '"sessionId":"sess_20260905_a1b2"' ~/.seepient/audit.log | jq .
 
-# Stream live audit records
+# Stream live audit records as actions execute
 tail -f ~/.seepient/audit.log | jq .
 ```
+
+In programmatic SDK applications, custom audit stores can be injected via the `auditStore` option in `createSeepient`, allowing audit events to be routed directly to external databases, SIEM pipelines, or log collectors.

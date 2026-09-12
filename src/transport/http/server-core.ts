@@ -20,9 +20,15 @@ import { buildSkillCatalog } from "../../domain/skills/skill-catalog.js";
  * prompt with the catalog appended, or undefined when no skills are found.
  * Best-effort: discovery failures are swallowed.
  */
-async function resolveServerSkills(skills?: string[]): Promise<{ skillCatalog?: string; skillRegistry?: import("../../capabilities/skills/types.js").SkillRegistry }> {
+async function resolveServerSkills(
+  skills?: string[],
+  sources?: import("../../foundations/contracts/skill-source.js").SkillSource[],
+): Promise<{ skillCatalog?: string; skillRegistry?: import("../../capabilities/skills/types.js").SkillRegistry }> {
   try {
-    const registry = await initializeSkillRegistry(process.cwd());
+    const registry = await initializeSkillRegistry(process.cwd(), {
+      tenancyMode: "multi",
+      sources: sources ?? [],
+    });
     let metadata = registry.getMetadata();
     if (skills && skills.length > 0) {
       const wanted = new Set(skills);
@@ -53,11 +59,13 @@ export async function serverGenerateText(
     tools?: string[];
     maxSteps?: number;
     skills?: string[];
+    sources?: import("../../foundations/contracts/skill-source.js").SkillSource[];
     history?: Message[];
     runtime?: ProviderRuntime | ProviderRuntimeContract;
     toolRegistry?: ToolRegistryContract;
     /** Spec 008 wired pipeline (constructed by createServer). */
     wiredPipeline?: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle;
+    tenancyMode?: "single" | "multi";
   },
   middleware?: Middleware[],
 ): Promise<AskSeepientResult> {
@@ -71,7 +79,7 @@ export async function serverGenerateText(
   const hooks = createHookExecutor();
 
   // Resolve skill catalog
-  const { skillCatalog, skillRegistry } = await resolveServerSkills(options.skills);
+  const { skillCatalog, skillRegistry } = await resolveServerSkills(options.skills, options.sources);
 
   // Build message list
   const messages: Message[] = [];
@@ -100,6 +108,7 @@ export async function serverGenerateText(
   const inputCount = modelMessages.length;
 
   const snapshot = await runtime.createTurnSnapshot();
+  const tenancyMode = options.tenancyMode ?? (options.wiredPipeline ? "multi" : "single");
 
   const result = await runAgentLoop({
     runtime,
@@ -114,6 +123,7 @@ export async function serverGenerateText(
     middleware,
     config: { agentName: "server", runtime, skills: skillRegistry },
     wiredPipeline: options.wiredPipeline,
+    tenancyMode,
   });
 
   // B6: extract the answer from THIS turn's output only — on abort/max_steps
@@ -147,12 +157,14 @@ export async function handleAgentChatStream(
     tools?: string[];
     maxSteps?: number;
     skills?: string[];
+    sources?: import("../../foundations/contracts/skill-source.js").SkillSource[];
     history?: Message[];
     approveTool?: ApproveToolFn;
     runtime?: ProviderRuntime | ProviderRuntimeContract;
     toolRegistry?: ToolRegistryContract;
     /** Spec 008 wired pipeline (constructed by createServer). */
     wiredPipeline?: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle;
+    tenancyMode?: "single" | "multi";
     onText: (chunk: string) => void;
     onToolCall: (call: { name: string; args: any; callId: string }) => void;
     onToolResult: (result: { callId: string; output: string; success: boolean }) => void;
@@ -170,7 +182,7 @@ export async function handleAgentChatStream(
 
   // Load session or create initial message list
   const messages: Message[] = [];
-  const { skillCatalog, skillRegistry } = await resolveServerSkills(opts.skills);
+  const { skillCatalog, skillRegistry } = await resolveServerSkills(opts.skills, opts.sources);
   if (skillCatalog) {
     messages.push({
       id: generateId(),
@@ -197,6 +209,7 @@ export async function handleAgentChatStream(
 
   try {
     const snapshot = await runtime.createTurnSnapshot();
+    const tenancyMode = opts.tenancyMode ?? (opts.wiredPipeline ? "multi" : "single");
 
     const result = await runAgentLoop({
       runtime,
@@ -213,6 +226,7 @@ export async function handleAgentChatStream(
       middleware: middleware ?? [],
       config: { agentName: "server", runtime, skills: skillRegistry },
       wiredPipeline: opts.wiredPipeline,
+      tenancyMode,
       onStep: (step) => {
         if ((step.type === "text" || step.type === "text_delta") && step.content) {
           accumulatedText += step.content;

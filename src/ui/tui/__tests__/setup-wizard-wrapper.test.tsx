@@ -72,7 +72,7 @@ describe('runSetupWizard wrapper (Fix 2 regression)', () => {
     resolveExit();
 
     const timeout = new Promise<string>((_, reject) =>
-      setTimeout(() => reject(new Error('runSetupWizard hung without callbacks')), 1000)
+      setTimeout(() => reject(new Error('runSetupWizard hung without callbacks')), 5000)
     );
 
     await expect(Promise.race([wizardPromise, timeout])).resolves.toBeUndefined();

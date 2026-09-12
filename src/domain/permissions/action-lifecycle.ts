@@ -484,8 +484,12 @@ export class ActionLifecycle {
                   this.policyContext.workspaceRoot,
                 )
               : option.capabilities;
+          const targetPrincipal = action.principalId ?? "sdk-user";
+          const targetCaps = current.policy.capabilities.filter(
+            (c) => c.principalId === targetPrincipal || (!c.principalId && !targetPrincipal),
+          );
           const fresh = persistentCapabilities.filter(
-            (c) => !setCovers(current.policy, c),
+            (c) => !setCovers({ version: 1, capabilities: targetCaps }, c),
           );
           // Audit copies of capabilities redact process argv (SC-011). The
           // trail must match the full mutation: on a fresh workspace a

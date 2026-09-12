@@ -67,6 +67,7 @@ export const compactHandler: CommandHandler = async (ctx) => {
         toolDefs: [], // no tools during summarization
         maxSteps: 1,
         hooks: createHookExecutor(),
+        wiredPipeline: agent.getWiredPipeline() ?? undefined,
       });
     } catch (error: any) {
       return { output: chalk.red(`Compaction failed: ${error.message}`) };

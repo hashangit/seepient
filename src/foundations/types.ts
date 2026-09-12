@@ -415,6 +415,8 @@ export interface RunSeepientServerOptions {
   toolRegistry?: import("./contracts/tool.js").ToolRegistryContract;
   /** Injected operator baseline capabilities applying unstamped to all server principals (FR-021) */
   operatorBaseline?: import("./contracts/permission-policy.js").CapabilitySet | import("./contracts/permission-policy.js").Capability[];
+  /** Injected skill sources for multi-tenant server skill resolution */
+  sources?: import("./contracts/skill-source.js").SkillSource[];
   /**
    * Whether to start listening immediately.
    * Default: true. Set to false to create the configured http.Server without listening.

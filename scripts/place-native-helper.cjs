@@ -22,27 +22,58 @@ console.log(`helper placed at ${dest}`);
 const crypto = require("crypto");
 const distRoot = path.join("dist", "native-fs-commit");
 const platforms = ["darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64"];
+const hostPlatform = `${platform}-${arch}`;
 const binaries = {};
 const bytes = fs.readFileSync(src);
 const sha256 = crypto.createHash("sha256").update(bytes).digest("hex");
+
+let hasPlaceholders = false;
 
 for (const p of platforms) {
   const pDir = path.join(distRoot, p);
   fs.mkdirSync(pDir, { recursive: true });
   const pDest = path.join(pDir, "seepient-fs-commit");
-  fs.copyFileSync(src, pDest);
-  fs.chmodSync(pDest, 0o755);
-  binaries[p] = {
-    path: `${p}/seepient-fs-commit`,
-    sha256,
-    bytes: bytes.length,
-  };
+  if (p === hostPlatform) {
+    fs.copyFileSync(src, pDest);
+    fs.chmodSync(pDest, 0o755);
+    binaries[p] = {
+      path: `${p}/seepient-fs-commit`,
+      sha256,
+      bytes: bytes.length,
+    };
+  } else {
+    let isReal = false;
+    if (fs.existsSync(pDest) && fs.statSync(pDest).size > 0) {
+      const pBytes = fs.readFileSync(pDest);
+      const isPlaceholder = pBytes.toString("utf8").includes("seepient-fs-commit-placeholder");
+      const pSha = crypto.createHash("sha256").update(pBytes).digest("hex");
+      if (!isPlaceholder && pSha !== sha256) {
+        isReal = true;
+        binaries[p] = {
+          path: `${p}/seepient-fs-commit`,
+          sha256: pSha,
+          bytes: pBytes.length,
+        };
+      }
+    }
+    if (!isReal) {
+      hasPlaceholders = true;
+      fs.writeFileSync(pDest, "#!/bin/sh\necho seepient-fs-commit-placeholder\n", { mode: 0o755 });
+      const pBytes = fs.readFileSync(pDest);
+      binaries[p] = {
+        path: `${p}/seepient-fs-commit`,
+        sha256: crypto.createHash("sha256").update(pBytes).digest("hex"),
+        bytes: pBytes.length,
+      };
+    }
+  }
 }
 
 const manifestPath = path.join(distRoot, "manifest.json");
 const manifest = {
   version: 1,
   generatedAt: new Date().toISOString(),
+  ...(hasPlaceholders ? { placeholder: true } : {}),
   binaries,
 };
 fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");

@@ -55,20 +55,23 @@ docker build -t seepient .
 docker run -it --rm \
   -v "$(pwd):/workspace" \
   -w /workspace \
-  -e OPENAI_API_KEY="$OPENAI_API_KEY" \
   -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
-  seepient
+  seepient seepient
 ```
 
 To run the standalone HTTP and WebSocket server inside a container:
 
 ```bash
+# Generate an API key
+docker run --rm seepient seepient-server --generate-api-key
+
+# Run the server container
 docker run -d \
   --name seepient-server \
   -p 7337:7337 \
   -v seepient-data:/home/appuser/.seepient \
   -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
-  seepient server --generate-api-key
+  seepient
 ```
 
 ## Platform compatibility

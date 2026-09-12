@@ -271,6 +271,19 @@ export async function handleChat(
         ? settingMaxSteps
         : (envMaxSteps !== undefined && !isNaN(envMaxSteps) && envMaxSteps > 0 ? envMaxSteps : 100);
 
+      if (msg.options?.maxSteps !== undefined) {
+        if (typeof msg.options.maxSteps !== "number" || !Number.isInteger(msg.options.maxSteps) || msg.options.maxSteps <= 0) {
+          safeSend(ws, {
+            type: "error",
+            code: "INVALID_REQUEST",
+            retryable: false,
+            message: "maxSteps must be a positive integer",
+            ...(msg.id ? { clientMsgId: msg.id } : {}),
+          });
+          return;
+        }
+      }
+
       const requestedSteps = msg.options?.maxSteps ?? 10;
       const effectiveMaxSteps = Math.min(requestedSteps, serverMaxSteps);
       const wasClamped = requestedSteps > serverMaxSteps;

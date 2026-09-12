@@ -5,12 +5,12 @@ description: Configure providers, models, consent modes, and sandbox settings in
 
 # Configuration
 
-Seepient merges configuration from four layers:
+Seepient merges configuration across layers in this precedence order:
 
 1. CLI command flags (highest precedence)
-2. Workspace configuration file (`.seepient/setting.json` in current directory)
-3. User global configuration file (`~/.seepient/setting.json`)
-4. Environment variables
+2. Environment variables
+3. Workspace configuration file (`.seepient/setting.json` in current directory)
+4. User global configuration file (`~/.seepient/setting.json`)
 5. Built-in defaults (lowest precedence)
 
 ## Managing settings interactively

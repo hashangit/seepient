@@ -245,7 +245,7 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
       ? Math.min(Math.max(rawDeadline, 10_000), 3_600_000)
       : 600_000;
     let effectiveConsentMode: ConsentMode = consentMode;
-    if (!options.mode && !options.consentMode) {
+    if (!options.yes && !options.mode && !options.consentMode) {
       const settingVal = deadlineSettings.get('permissions.consentMode')?.value;
       if (settingVal != null && settingVal !== '') {
         const strVal = String(settingVal);

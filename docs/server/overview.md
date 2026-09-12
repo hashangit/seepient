@@ -90,7 +90,7 @@ const server = await runSeepientServer({
 ```
 
 ::: note Standalone Binary vs Programmatic runSeepientServer
-The `seepient server` CLI and `seepient-server` binary are configured via environment variables (`PORT`, `HOST`, `SEEPIENT_API_KEYS_FILE`, `SEEPIENT_SECURITY_DIR`) and CLI flags. To inject custom in-memory or database-backed store contracts (`runtime`, `persist`, `auditStore`, `policyStore`, `capabilityLedger`), use the programmatic `runSeepientServer()` API from `seepient/server`.
+The `seepient server` CLI and `seepient-server` binary are configured via environment variables (`PORT`, `SEEPIENT_HOST`, `SEEPIENT_API_KEYS_FILE`, `SEEPIENT_SECURITY_DIR`) and CLI flags. To inject custom in-memory or database-backed store contracts (`runtime`, `persist`, `auditStore`, `policyStore`, `capabilityLedger`), use the programmatic `runSeepientServer()` API from `seepient/server`.
 :::
 
 ### Stateless Worker Mutation Guard

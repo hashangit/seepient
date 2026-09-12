@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildActionLifecycle } from "../action-lifecycle-factory.js";
 import { LocalPolicyStore } from "../policy-store.js";
+import { LocalAuditStore } from "../audit-recorder.js";
+import { PersistedCapabilityLedger } from "../persisted-capability-ledger.js";
 import type { Capability, CapabilitySet, ApprovalBroker } from "../../../foundations/contracts/permission-policy.js";
 
 const NOOP_BROKER: ApprovalBroker = {
@@ -89,6 +91,9 @@ describe("FR-022: Operator Baseline Composition & Single-Mode Byte Parity (T025)
   it("multi mode tenant baseline does NOT contain config-derived grants", async () => {
     const policyStore = new LocalPolicyStore({ root: join(tempDir, "policies") });
 
+    const auditStore = new LocalAuditStore({ root: join(tempDir, "audit") });
+    const capabilityLedger = new PersistedCapabilityLedger({ root: join(tempDir, "caps") });
+
     const lifecycleMulti = await buildActionLifecycle({
       principalId: "tenant-isolated",
       runId: "run-multi",
@@ -96,7 +101,8 @@ describe("FR-022: Operator Baseline Composition & Single-Mode Byte Parity (T025)
       approvalBroker: NOOP_BROKER,
       executionBoundary: FAKE_BOUNDARY,
       policyStore,
-      auditRoot: join(tempDir, "audit"),
+      auditStore,
+      capabilityLedger,
       tenancyMode: "multi",
     });
 
@@ -122,6 +128,9 @@ describe("FR-022: Operator Baseline Composition & Single-Mode Byte Parity (T025)
       capabilities: [explicitCap],
     };
 
+    const auditStore = new LocalAuditStore({ root: join(tempDir, "audit") });
+    const capabilityLedger = new PersistedCapabilityLedger({ root: join(tempDir, "caps") });
+
     const lifecycleMulti = await buildActionLifecycle({
       principalId: "tenant-explicit",
       runId: "run-multi-explicit",
@@ -129,7 +138,8 @@ describe("FR-022: Operator Baseline Composition & Single-Mode Byte Parity (T025)
       approvalBroker: NOOP_BROKER,
       executionBoundary: FAKE_BOUNDARY,
       policyStore,
-      auditRoot: join(tempDir, "audit"),
+      auditStore,
+      capabilityLedger,
       tenancyMode: "multi",
       operatorBaseline,
     });
