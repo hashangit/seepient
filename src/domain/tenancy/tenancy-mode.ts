@@ -7,6 +7,8 @@ export { PrincipalRequiredError };
 
 export type TenancyMode = "single" | "multi";
 
+export const SENTINEL_PRINCIPAL_IDS = new Set(["sdk-user", "default", "anonymous"]);
+
 export interface TenancySignals {
   explicit?: TenancyMode;
   principalIdSet?: boolean;
@@ -148,8 +150,10 @@ export function validateTenancyCompleteness(
     return;
   }
 
+
   // FR-020: principalId is checked FIRST in multi mode before runtime or store completeness
-  if (!inputs.principalId || (typeof inputs.principalId === "string" && inputs.principalId.trim().length === 0)) {
+  const trimmed = typeof inputs.principalId === "string" ? inputs.principalId.trim() : "";
+  if (!inputs.principalId || trimmed.length === 0 || SENTINEL_PRINCIPAL_IDS.has(trimmed)) {
     throw new PrincipalRequiredError();
   }
 

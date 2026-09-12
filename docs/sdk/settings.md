@@ -19,8 +19,8 @@ import { settings, SettingsError } from "seepient";
 import { settings } from "seepient";
 
 // Read a configuration setting
-const theme = settings.get("ui.theme");
-console.log(`Current theme: ${theme}`);
+const consentMode = settings.get("permissions.consentMode");
+console.log(`Current consent mode: ${consentMode}`);
 
 // Update a setting (persists to project config by default)
 await settings.set("permissions.consentMode", "autonomous");
@@ -47,13 +47,13 @@ function get(dotKey: string): SettingValue
 ```
 
 - **Parameters:**
-  - `dotKey` (`string`): The dot-notated setting path, e.g. `"ui.theme"`, `"permissions.consentMode"`, `"models.default"`.
+  - `dotKey` (`string`): The dot-notated setting path, e.g. `"permissions.consentMode"`, `"server.maxSteps"`, `"gateway.enabled"`.
 - **Returns:**
   - `SettingValue`: The resolved value (`string | number | boolean | null | Record<string, unknown>`). Throws `SettingsError` if the key is unknown.
 
 ```typescript
-const model = settings.get("models.default");
-const maxSteps = settings.get("agent.maxSteps");
+const maxSteps = settings.get("server.maxSteps");
+const consentMode = settings.get("permissions.consentMode");
 ```
 
 ---
@@ -74,7 +74,7 @@ function set(dotKey: string, value: string): Promise<void>
 
 ```typescript
 await settings.set("permissions.consentMode", "ask-everything");
-await settings.set("ui.compactMode", "true");
+await settings.set("server.maxSteps", "20");
 ```
 
 ---
@@ -95,8 +95,8 @@ function apply(updates: Record<string, string>): Promise<void>
 ```typescript
 await settings.apply({
   "permissions.consentMode": "autonomous",
-  "agent.maxSteps": "25",
-  "ui.theme": "vesper",
+  "server.maxSteps": "25",
+  "gateway.enabled": "true",
 });
 ```
 
@@ -138,7 +138,7 @@ for (const entry of entries) {
 
 ### `settings.listByCategory()`
 
-Returns all settings grouped by their category name (`"general"`, `"permissions"`, `"models"`, `"ui"`, etc.).
+Returns all settings grouped by their category name (`"permissions"`, `"tools"`, `"notifications"`, `"gateway"`, `"sessions"`, `"server"`).
 
 ```typescript
 function listByCategory(): Record<string, SettingEntry[]>

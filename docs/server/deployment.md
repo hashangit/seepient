@@ -11,11 +11,21 @@ Seepient Agent Server is a stateless Node.js process that can be deployed as a D
 
 ### Build and run
 
+Build the Docker container image locally from the repository root:
+
+```bash
+git clone https://github.com/seepient/seepient.git
+cd seepient
+docker build -t seepient .
+```
+
+Run the server with an API key and persistent storage volume for the non-root `appuser`:
+
 ```bash
 docker run -d -p 7337:7337 \
   -e ANTHROPIC_API_KEY=sk-ant-... \
-  -v ~/.seepient:/root/.seepient \
-  seepient-server
+  -v seepient-data:/home/appuser/.seepient \
+  seepient
 ```
 
 ### With multiple providers
@@ -25,9 +35,8 @@ docker run -d -p 7337:7337 \
   -e OPENAI_API_KEY=sk-... \
   -e ANTHROPIC_API_KEY=sk-ant-... \
   -e GLM_API_KEY=... \
-  -e LLM_PROVIDER=anthropic \
-  -v ~/.seepient:/root/.seepient \
-  seepient-server
+  -v seepient-data:/home/appuser/.seepient \
+  seepient
 ```
 
 ### With custom session directory
@@ -37,7 +46,7 @@ docker run -d -p 7337:7337 \
   -e ANTHROPIC_API_KEY=sk-ant-... \
   -e SEEPIENT_SESSION_DIR=/data/sessions \
   -v session-data:/data/sessions \
-  seepient-server
+  seepient
 ```
 
 ### Docker Compose
@@ -45,23 +54,25 @@ docker run -d -p 7337:7337 \
 ```yaml
 services:
   seepient:
-    image: seepient-server
+    image: seepient
     build: .
     ports:
       - "7337:7337"
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - LLM_PROVIDER=anthropic
       - SEEPIENT_SESSION_TTL=86400
     volumes:
-      - ./data/.seepient:/root/.seepient
+      - seepient-data:/home/appuser/.seepient
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7337/v1/health"]
       interval: 30s
       timeout: 5s
       retries: 3
+
+volumes:
+  seepient-data:
 ```
 
 ## Google Cloud Run
@@ -189,15 +200,10 @@ pm2 startup
 | Variable | Description | Required |
 |---|---|---|
 | `OPENAI_API_KEY` | OpenAI API key | For OpenAI provider |
-| `OPENAI_MODEL` | Default OpenAI model (default: `gpt-5.4`) | No |
 | `ANTHROPIC_API_KEY` | Anthropic API key | For Anthropic provider |
-| `ANTHROPIC_MODEL` | Default Anthropic model (default: `claude-sonnet-4-6-20260320`) | No |
 | `GLM_API_KEY` | GLM API key | For GLM provider |
-| `GLM_MODEL` | Default GLM model (default: `glm-5.1`) | No |
 | `OPENAI_COMPAT_API_KEY` | API key for OpenAI-compatible provider | For compatible provider |
 | `OPENAI_COMPAT_BASE_URL` | Base URL for OpenAI-compatible provider | For compatible provider |
-| `LLM_MODEL` | Default model for OpenAI-compatible provider (default: `gpt-5.4`) | No |
-| `LLM_PROVIDER` | Default provider (auto-detected if not set) | No |
 | `SEEPIENT_SKILLS_PATH` | Colon-separated paths to skill directories | No |
 | `SEEPIENT_MAX_BODY_BYTES` | Request body size cap in bytes across all REST routes — chat, settings, gateway, and provider management (default: 10485760). Set to `0` for an unlimited body size | No |
 | `SEEPIENT_CORS_ORIGINS` | Comma-separated CORS origin allowlist, or `*` to reflect any origin (default: no CORS headers at all) | No |
@@ -205,7 +211,7 @@ pm2 startup
 | `SEEPIENT_RATE_LIMIT_RPM` | Per-key requests-per-minute cap for REST and WebSocket traffic (default: 300). Set to `0` to disable | No |
 
 ::: tip Provider auto-detection
-If `LLM_PROVIDER` is not set, the server uses the first configured provider. If `OPENAI_API_KEY` is set, OpenAI becomes the default. Otherwise, the first provider with a configured API key is used.
+The server automatically uses the first provider with a configured API key. Model selections and purpose routing are configured via `.seepient/setting.json` or CLI provider configuration (`seepient setup` / `seepient providers`).
 :::
 
 ## Error codes

@@ -105,7 +105,7 @@ const entries: [string, SettingsMapEntry][] = [
   ['agent.autoConfirm', { dotKey: 'agent.autoConfirm', configPath: ['autoConfirm'], category: 'permissions', label: 'Auto-Confirm All Tools' }],
   ['permissions.consentMode', { dotKey: 'permissions.consentMode', configPath: ['permissions', 'consentMode'], category: 'permissions', label: 'Consent Mode (ask-everything | edit-enabled | autonomous)' }],
   ['permissions.autonomousWarned', { dotKey: 'permissions.autonomousWarned', configPath: ['permissions', 'autonomousWarned'], category: 'permissions', label: 'Autonomous warning acknowledged' }],
-  ['permissions.approvalTimeoutMs', { dotKey: 'permissions.approvalTimeoutMs', configPath: ['approvalTimeoutMs'], category: 'permissions', label: 'Approval Timeout (ms)' }],
+  ['permissions.approvalTimeoutMs', { dotKey: 'permissions.approvalTimeoutMs', configPath: ['permissions', 'approvalTimeoutMs'], category: 'permissions', label: 'Approval Timeout (ms)' }],
   ['permissions.trustedHostAllowlist', { dotKey: 'permissions.trustedHostAllowlist', configPath: ['permissions', 'trustedHostAllowlist'], category: 'permissions', label: 'Trusted-Host Tool Allowlist' }],
 
   // Gateway

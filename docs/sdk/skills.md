@@ -50,7 +50,7 @@ import { askSeepient } from "seepient";
 
 const result = await askSeepient("Deploy the staging environment", {
   skills: ["docker-ops"],
-  tools: ["core"],
+  tools: ["core", "comm", "advanced"],
 });
 ```
 
@@ -115,7 +115,7 @@ When constructing the agent's skill catalog, sources are composed in order with 
 
 | Tenancy Mode | Composition Pipeline | Behavior |
 |--------------|----------------------|----------|
-| `single` (default) | `[new FsSkillSources(cwd), ...(sources ?? []), inline?]` | Built-in filesystem layers load first. Injected `sources` override filesystem skills of the same name. Inline literals shadow everything. Passing inline `skills` literals alone does not upgrade tenancy mode to `multi`. |
+| `single` (default) | `[new FsSkillSources(cwd), ...(sources ?? []), inline?]` | Built-in filesystem layers load first. Injected `sources` override filesystem skills of the same name. Inline literals shadow everything. Note: Passing `sources` without explicitly setting `tenancy: "single"` automatically upgrades tenancy mode to `multi`; pass `tenancy: "single"` explicitly to preserve ambient filesystem discovery alongside injected sources. Passing inline `skills` literals alone does not upgrade tenancy mode to `multi`. |
 | `multi` | `[...(sources ?? []), inline?]` | Ambient filesystem discovery is **never** invoked. Skills originate solely from injected `sources` and inline literals. Explicitly passing `sources` automatically upgrades tenancy mode to `multi`. |
 
 Example composing filesystem, organization-wide, and tenant-specific sources:

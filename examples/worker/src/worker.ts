@@ -99,12 +99,14 @@ export class RemoteAuditStore implements AuditStore {
  */
 export class RemotePolicyStore implements PolicyStore {
   private readonly baseUrl: string;
+  private readonly principalId?: string;
 
-  constructor(baseUrl: string) {
+  constructor(baseUrl: string, principalId?: string) {
     if (!baseUrl) {
       throw new Error("[worker-policy] controlPlaneUrl is required for RemotePolicyStore");
     }
     this.baseUrl = baseUrl;
+    this.principalId = principalId;
   }
 
   async read(
@@ -114,7 +116,8 @@ export class RemotePolicyStore implements PolicyStore {
     let res: Response;
     try {
       const params = new URLSearchParams({ workspaceId });
-      if (opts?.principalId) params.set("principalId", opts.principalId);
+      const effPrincipal = opts?.principalId ?? this.principalId;
+      if (effPrincipal) params.set("principalId", effPrincipal);
       if (opts?.tenancyMode) params.set("tenancyMode", opts.tenancyMode);
       res = await fetch(`${this.baseUrl}/api/policy?${params.toString()}`);
     } catch (err) {
@@ -142,7 +145,7 @@ export class RemotePolicyStore implements PolicyStore {
     actor: DecisionAuthority,
     mutation?: { mutationId: string },
   ): Promise<PolicySnapshot> {
-    const principalId = next.capabilities?.find((c) => c.principalId)?.principalId;
+    const principalId = this.principalId ?? next.capabilities?.find((c) => c.principalId)?.principalId;
     const res = await fetch(`${this.baseUrl}/api/policy`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -277,7 +280,7 @@ export async function createWorkerAgent(config: WorkerTaskConfig): Promise<Seepi
     throw new Error("[worker] controlPlaneUrl is required when external stores are not explicitly provided");
   }
   const auditStore = config.auditStore ?? new RemoteAuditStore(config.controlPlaneUrl);
-  const policyStore = config.policyStore ?? new RemotePolicyStore(config.controlPlaneUrl);
+  const policyStore = config.policyStore ?? new RemotePolicyStore(config.controlPlaneUrl, config.principalId);
   const capabilityLedger = config.capabilityLedger ?? new RemoteCapabilityLedger(config.controlPlaneUrl);
   const persistence = config.persistence ?? (config.controlPlaneUrl ? new RemotePersistenceBackend(config.controlPlaneUrl) : undefined);
 

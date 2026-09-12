@@ -101,10 +101,13 @@ export async function initializeSkills(): Promise<void> {
   }
 }
 
-async function listSkills(): Promise<{ name: string; description: string; tags: string[] }[]> {
+async function listSkills(sources?: import("../../foundations/contracts/skill-source.js").SkillSource[]): Promise<{ name: string; description: string; tags: string[] }[]> {
   try {
     const { initializeSkillRegistry } = await import("../../capabilities/skills/index.js");
-    const registry = await initializeSkillRegistry(process.cwd());
+    const registry = await initializeSkillRegistry(process.cwd(), {
+      tenancyMode: "multi",
+      sources: sources ?? [],
+    });
     return registry.getMetadata().map((s) => ({
       name: s.name,
       description: s.description,
@@ -244,6 +247,13 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     const rootDir = process.cwd();
     const serverAuditStore = options?.auditStore ?? new LocalAuditStore({ root: rootDir });
     const isLocalStore = isLocalAuditStore(serverAuditStore);
+
+    const { LocalPolicyStore } = await import("../../domain/permissions/policy-store.js");
+    const { PersistedCapabilityLedger } = await import("../../domain/permissions/persisted-capability-ledger.js");
+    const serverPolicyStore = options?.policyStore ?? new LocalPolicyStore();
+    const serverCapabilityLedger = options?.capabilityLedger ?? new PersistedCapabilityLedger({
+      root: path.join(rootDir, "caps"),
+    });
     // The outbox MUST be backed by the SAME LocalAuditStore the per-request
     // lifecycles use, otherwise the flush timer + recovery operate on a
     // different pending-event set than the one live requests populate.
@@ -314,8 +324,8 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
         executionBoundary: unsupportedBoundary,
         approvalMode: "never",
         auditStore: serverAuditStore,
-        policyStore: options?.policyStore,
-        capabilityLedger: options?.capabilityLedger,
+        policyStore: serverPolicyStore,
+        capabilityLedger: serverCapabilityLedger,
         terminalOutbox: serverOutbox,
         tenancyMode: "multi",
         operatorBaseline: serverOperatorBaseline,
@@ -418,10 +428,15 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     generateText: async (opts) => {
       // Spec 008: construct a per-request pipeline with the authenticated
       // principal's identity. No shared state between requests.
+      const principal = opts.principalId ?? opts.apiKeyHash;
+      const { SENTINEL_PRINCIPAL_IDS, PrincipalRequiredError } = await import("../../domain/tenancy/tenancy-mode.js");
+      if (!principal || typeof principal !== "string" || principal.trim().length === 0 || SENTINEL_PRINCIPAL_IDS.has(principal.trim())) {
+        throw new PrincipalRequiredError();
+      }
       let wiredPipeline: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle | undefined;
       if (serverPipelineFactory) {
         wiredPipeline = await serverPipelineFactory({
-          principalId: opts.principalId ?? opts.apiKeyHash ?? "anonymous",
+          principalId: principal.trim(),
           tenantId: opts.tenantId ?? "default",
           sessionId: opts.sessionId ?? crypto.randomUUID(),
           runId: crypto.randomUUID(),
@@ -429,10 +444,10 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
           modelProviderClass: (opts.provider ?? "openai") as string,
         });
       }
-      return serverGenerateText({ ...opts, runtime: getServerRuntime(), wiredPipeline, toolRegistry: serverToolRegistry }, gatewayMiddleware);
+      return serverGenerateText({ ...opts, sources: options?.sources, runtime: getServerRuntime(), wiredPipeline, toolRegistry: serverToolRegistry, tenancyMode: "multi" }, gatewayMiddleware);
     },
     listModels,
-    listSkills,
+    listSkills: () => listSkills(options?.sources),
     settingsHandlerContext,
     gatewayHandler,
     maxBodyBytes: maxBodyBytesSetting,
@@ -486,10 +501,19 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     streamText: async (opts) => {
       // Spec 008: construct a per-request pipeline with the WS client's
       // authenticated identity. No shared state between connections.
+      const principal = opts.principalId ?? opts.apiKeyHash;
+      const { SENTINEL_PRINCIPAL_IDS, PrincipalRequiredError } = await import("../../domain/tenancy/tenancy-mode.js");
+      if (!principal || typeof principal !== "string" || principal.trim().length === 0 || SENTINEL_PRINCIPAL_IDS.has(principal.trim())) {
+        opts.onError({
+          code: "PRINCIPAL_REQUIRED",
+          message: "Principal required in multi-tenant mode",
+        });
+        return;
+      }
       let wiredPipeline: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle | undefined;
       if (serverPipelineFactory) {
         wiredPipeline = await serverPipelineFactory({
-          principalId: opts.principalId ?? opts.apiKeyHash ?? "anonymous",
+          principalId: principal.trim(),
           tenantId: opts.tenantId ?? "default",
           sessionId: opts.sessionId ?? crypto.randomUUID(),
           runId: crypto.randomUUID(),
@@ -497,7 +521,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
           modelProviderClass: (opts.provider ?? "openai") as string,
         });
       }
-      serverStreamText({ ...opts, runtime: getServerRuntime(), wiredPipeline, toolRegistry: serverToolRegistry }, gatewayMiddleware).catch((err: any) => {
+      serverStreamText({ ...opts, sources: options?.sources, runtime: getServerRuntime(), wiredPipeline, toolRegistry: serverToolRegistry, tenancyMode: "multi" }, gatewayMiddleware).catch((err: any) => {
         // W162: generic wire text; raw detail in the request log only.
         opts.onError({
           code: "STREAM_ERROR",
@@ -511,7 +535,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
       });
     },
     listModels,
-    listSkills,
+    listSkills: () => listSkills(options?.sources),
     settingsHandlerContext,
   };
 

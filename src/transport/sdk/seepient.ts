@@ -538,6 +538,7 @@ async function chat(userMessage: string): Promise<AgentResponse> {
         middleware: opts.middleware,
         approveTool: opts.approveTool,
         wiredPipeline,
+        tenancyMode,
       });
       // W151/A1: on a resolved error, skip a contentless assistant — but keep
       // one carrying tool calls (dropping it would orphan its tool result).
@@ -634,8 +635,8 @@ async function chat(userMessage: string): Promise<AgentResponse> {
             modelOverride: currentModelOverride(),
             purpose: streamOptions?.purpose ?? purpose,
             tier: streamOptions?.tier ?? tier,
-            temperature,
-            maxTokens,
+            temperature: streamOptions?.temperature ?? temperature,
+            maxTokens: streamOptions?.maxTokens ?? maxTokens,
             messages: modelMessages,
             toolRegistry,
             toolDefs,
@@ -648,6 +649,7 @@ async function chat(userMessage: string): Promise<AgentResponse> {
             middleware: opts.middleware,
             approveTool: opts.approveTool,
             wiredPipeline,
+            tenancyMode,
             onStep: (step) => {
               if (streamOptions?.onStep) streamOptions.onStep(step);
               if (

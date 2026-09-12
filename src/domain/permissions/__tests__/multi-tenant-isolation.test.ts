@@ -24,6 +24,13 @@ import { join } from "node:path";
 import * as http from "node:http";
 import { LocalPolicyStore, computeWorkspaceId } from "../policy-store.js";
 import { PersistedCapabilityLedger } from "../persisted-capability-ledger.js";
+import { LocalAuditStore } from "../audit-recorder.js";
+import { buildActionLifecycle } from "../action-lifecycle-factory.js";
+import { validateTenancyCompleteness, SENTINEL_PRINCIPAL_IDS, TenancyStoreIncompleteError } from "../../tenancy/tenancy-mode.js";
+import { PrincipalRequiredError } from "../../../foundations/errors.js";
+import { InMemoryArtifactStore } from "../../../capabilities/execution/in-memory-artifact-store.js";
+import type { ExecutionBoundary } from "../../../foundations/contracts/execution-boundary.js";
+import type { ApprovalBroker } from "../../../foundations/contracts/permission-policy.js";
 
 let createSeepient: any;
 let askSeepient: any;
@@ -551,6 +558,131 @@ describe("Spec 022 Multi-Tenant Isolation Matrix", () => {
         await new Promise<void>((resolve) => server.close(() => resolve()));
         delete process.env.SEEPIENT_API_KEYS_FILE;
       }
+    });
+
+    it("Dim 5b: covers() freshness filter — Tenant B existing stored grant does not suppress Tenant A project grant persistence", async () => {
+      const policyDir = join(sandboxHome, "policies-dim5b");
+      const policyStore = new LocalPolicyStore({ root: policyDir });
+      const workspaceId = computeWorkspaceId(sandboxHome);
+
+      // Pre-populate policy with a grant stamped for tenant-b
+      await policyStore.compareAndSet(
+        workspaceId,
+        0,
+        {
+          version: 1,
+          capabilities: [
+            {
+              kind: "process",
+              executable: "/bin/echo",
+              principalId: "tenant-b",
+            },
+          ],
+        },
+        { kind: "human", authorityId: "admin", authenticatedBy: "test" },
+      );
+
+      const auditStore = new LocalAuditStore({ root: join(sandboxHome, "audit-dim5b") });
+      const ledger = new FakeCapabilityLedger();
+      const testBoundary: ExecutionBoundary = {
+        capabilities: {
+          backend: "local-native",
+          capabilityKinds: [
+            "read-root",
+            "write-root",
+            "process",
+            "model-egress",
+          ],
+          exactCommit: false,
+          hostFilteredEgress: false,
+          environmentIsolation: true,
+          supportedOperationKinds: ["none", "process"],
+        },
+        execute: async (action) => ({
+          state: "succeeded",
+          result: { output: "ok", success: true },
+          evidence: { backend: "local-native", actionDigest: action.actionDigest, executorId: "test", operationKind: "process" },
+        }),
+      };
+
+      const projectBroker: ApprovalBroker = {
+        mode: "inline",
+        request: async (req) => {
+          const choice = req.approvalChoices.find((c) => c.lifetime === "project") ?? req.approvalChoices[0];
+          return {
+            approved: true,
+            requestId: req.requestId,
+            actionDigest: req.actionDigest,
+            actorId: "tenant-a-user",
+            optionId: choice?.optionId ?? req.approvalOptions[0]?.optionId,
+            lifetime: choice?.lifetime ?? "project",
+            decidedAt: Date.now(),
+          };
+        },
+      };
+
+      const wired = await buildActionLifecycle({
+        principalId: "tenant-a",
+        tenancyMode: "multi",
+        runId: "run-tenant-a",
+        sessionId: "sess-tenant-a",
+        workspaceRoot: sandboxHome,
+        policyStore,
+        auditStore,
+        capabilityLedger: ledger,
+        approvalBroker: projectBroker,
+        executionBoundary: testBoundary,
+        artifacts: new InMemoryArtifactStore(),
+      });
+
+      const action = await wired.analyzers.execute_shell_command(
+        { command: "/bin/echo hello" },
+        { ...wired.analysisContext, toolCallId: "call-tenant-a" },
+      );
+
+      const runResult = await wired.lifecycle.run(action);
+      expect(runResult.outcome.state).toBe("succeeded");
+
+      // Verify that tenant-a's grant was persisted and NOT suppressed by tenant-b's grant
+      const snapA = await policyStore.read(workspaceId, { principalId: "tenant-a", tenancyMode: "multi" });
+      expect(snapA.policy.capabilities.some((c) => c.kind === "process" && c.principalId === "tenant-a")).toBe(true);
+    });
+
+    it("Dim 8c: buildActionLifecycle throws TenancyStoreIncompleteError in multi mode if any store is missing", async () => {
+      await expect(
+        buildActionLifecycle({
+          principalId: "tenant-x",
+          tenancyMode: "multi",
+          workspaceRoot: sandboxHome,
+        } as any),
+      ).rejects.toThrowError(TenancyStoreIncompleteError);
+    });
+
+    it("Dim 8d: validateTenancyCompleteness rejects sentinel principal IDs in multi mode", () => {
+      for (const sentinel of SENTINEL_PRINCIPAL_IDS) {
+        expect(() =>
+          validateTenancyCompleteness("multi", {
+            principalId: sentinel,
+            runtime: {} as any,
+            auditStore: {} as any,
+            policyStore: {} as any,
+            capabilityLedger: {} as any,
+          }),
+        ).toThrow(PrincipalRequiredError);
+      }
+    });
+
+    it("Dim 8e: runAgentLoop throws PIPELINE_NOT_INITIALIZED in multi mode when wiredPipeline is omitted", async () => {
+      const runtime = createMockRuntime([{ text: "hello" }]);
+      await expect(
+        runAgentLoop({
+          runtime,
+          messages: [{ id: "m1", role: "user", content: "hi", timestamp: Date.now() }],
+          toolDefs: [],
+          maxSteps: 3,
+          tenancyMode: "multi",
+        }),
+      ).rejects.toThrow(/wiredPipeline is required in multi-tenant mode/);
     });
   });
 });

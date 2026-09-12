@@ -73,8 +73,11 @@ Inspects and registers upstream model providers.
 # List configured providers
 seepient providers list
 
-# Register a custom OpenAI-compatible endpoint
-seepient providers add local-ollama --adapter pi-ai --upstream openai-compatible --base-url http://127.0.0.1:11434/v1
+# Register a local Ollama endpoint
+seepient providers add local-ollama --upstream ollama --url http://127.0.0.1:11434/v1 --allow-private
+
+# Register a custom OpenAI-compatible endpoint with an API key
+seepient providers add custom-ai --upstream openai --url https://api.example.com/v1 --credential env:CUSTOM_API_KEY
 ```
 
 ### `seepient models`
@@ -83,6 +86,17 @@ Inspects model catalogs and configures model assignments.
 ```bash
 # List available models across active providers
 seepient models list
+```
+
+### `seepient generate`
+Direct media generation commands for image models.
+
+```bash
+# Generate an image from a prompt
+seepient generate image "A futuristic city skyline at twilight" --output ./images
+
+# Generate variations or edits
+seepient generate image "Make the sky overcast" --operation edit --output ./images
 ```
 
 ---
@@ -101,14 +115,11 @@ seepient-server [options]
 | `--host <string>` | String | `127.0.0.1` | Network interface to bind to (`0.0.0.0` for all interfaces). |
 | `--generate-api-key` | Boolean | `false` | Generates an ephemeral cryptographic API key and prints it on startup. |
 
-
 ---
 
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
-| `0` | Execution completed successfully. |
-| `1` | Runtime error or unhandled model execution failure. |
-| `2` | Configuration error, invalid command flags, or missing API credentials. |
-| `130` | Terminated by user (`SIGINT` or `Ctrl+C`). |
+| `0` | Execution completed successfully (or clean user exit via SIGINT). |
+| `1` | Runtime error, invalid configuration/flags, or unhandled execution failure. |

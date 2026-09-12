@@ -68,7 +68,7 @@ For multi-tenant workers and cloud functions requiring full state injection (aud
 | `capabilityLedger` | `CapabilityLedger`                    | Local file capability ledger | Injected ledger for capability lease consumption and revocations |
 | `systemPrompt`  | `string`                                 | `"You are a helpful assistant."` | System prompt prepended to every conversation |
 | `tools`         | `(string \| UserToolDefinition \| AnyToolRegistration)[]` | All built-in               | Tool names, group constants, or custom tool registrations (`trustedHostTool`, `preparedTool`, `brokerConnector`) |
-| `consentMode`   | `ConsentMode`                            | `"never"`                  | Permission consent mode (`"ask-everything"`, `"edit-enabled"`, `"autonomous"`, default is deny-by-default when omitted without broker) |
+| `consentMode`   | `ConsentMode`                            | deny-by-default            | Permission consent mode (`"ask-everything"`, `"edit-enabled"`, `"autonomous"`). When omitted, unpredeclared effectful tools are denied unless pre-granted in policy or an `approvalBroker` is supplied |
 | `deploymentCeiling` | `CapabilitySet \| Capability[]`      | *(none)*                   | Maximum capability lease permitted for any execution |
 | `principalPolicy` | `CapabilitySet \| Capability[]`        | *(none)*                   | Pre-granted capabilities for the calling principal |
 | `approveTool`   | `ApproveToolFn`                          | *(none)*                   | Interactive tool approval callback |
@@ -254,9 +254,12 @@ const agent3 = await createSeepient({
 await agent.chat("My name is Alice");
 await agent.chat("I'm working on a React project");
 
-// In a new process, recreate the agent with the same persist path:
-// const agent2 = await createSeepient({ persist: "./sessions/my-agent" });
-// The conversation history will be loaded automatically.
+// In a new process, recreate the agent with the same persist path and sessionId:
+// const agent2 = await createSeepient({
+//   sessionId: "my-session-id",
+//   persist: "./sessions",
+// });
+// To resume a previous conversation, the caller must supply the same sessionId.
 ```
 
 #### Custom persistence backends

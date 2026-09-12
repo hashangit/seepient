@@ -311,6 +311,9 @@ describe("Spec 022 US3: Principal-Scoped Permission State (T023-T026)", () => {
         capabilities: [{ kind: "process", executable: "/usr/bin/security-probe" }],
       };
 
+      const auditStore = new LocalAuditStore({ root: path.join(tempDir, "audit") });
+      const capabilityLedger = new PersistedCapabilityLedger({ root: path.join(tempDir, "caps") });
+
       // Tenant A lifecycle
       const lifecycleA = await buildActionLifecycle({
         principalId: "tenant-a",
@@ -319,7 +322,8 @@ describe("Spec 022 US3: Principal-Scoped Permission State (T023-T026)", () => {
         approvalBroker: NOOP_BROKER,
         executionBoundary: FAKE_BOUNDARY as any,
         policyStore: store,
-        auditRoot: path.join(tempDir, "audit"),
+        auditStore,
+        capabilityLedger,
         operatorBaseline,
         deploymentCeiling: { version: 1, capabilities: [] },
         principalPolicy: { version: 1, capabilities: [] },
@@ -334,7 +338,8 @@ describe("Spec 022 US3: Principal-Scoped Permission State (T023-T026)", () => {
         approvalBroker: NOOP_BROKER,
         executionBoundary: FAKE_BOUNDARY as any,
         policyStore: store,
-        auditRoot: path.join(tempDir, "audit"),
+        auditStore,
+        capabilityLedger,
         operatorBaseline,
         deploymentCeiling: { version: 1, capabilities: [] },
         principalPolicy: { version: 1, capabilities: [] },

@@ -31,6 +31,7 @@ function resolveVersion(): string {
       import.meta.dirname ?? ".",
       "..",
       "..",
+      "..",
       "package.json",
     );
     const raw = fs.readFileSync(pkgPath, "utf-8");
@@ -82,6 +83,7 @@ export function registerProcessGuards(): void {
       error: message,
     });
     process.stderr.write(`${logEntry}\n`);
+    process.exit(1);
   });
 }
 

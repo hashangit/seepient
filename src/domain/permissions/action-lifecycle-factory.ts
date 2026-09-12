@@ -180,6 +180,17 @@ export const DEFAULT_LOCAL_DEPLOYMENT_CEILING_CAPABILITIES: Capability[] = [
 export async function buildActionLifecycle(
   inputs: ActionLifecycleInputs,
 ): Promise<WiredActionLifecycle> {
+  if (inputs.tenancyMode === "multi") {
+    const missing: string[] = [];
+    if (!inputs.auditStore) missing.push("auditStore");
+    if (!inputs.policyStore) missing.push("policyStore");
+    if (!inputs.capabilityLedger) missing.push("capabilityLedger");
+    if (missing.length > 0) {
+      const { TenancyStoreIncompleteError } = await import("../tenancy/tenancy-mode.js");
+      throw new TenancyStoreIncompleteError(missing);
+    }
+  }
+
   const workspaceId = computeWorkspaceId(inputs.workspaceRoot);
   const policyStore = inputs.policyStore ?? new LocalPolicyStore();
 

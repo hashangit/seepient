@@ -65,6 +65,8 @@ export interface AgentLoopOptions {
   /** Allow JS filesystem fallback for file commits when native helper is absent. */
   /** Commit-helper injection for tests/e2e (spec 019): pins the probe. */
   commitHelper?: import("../vendors/native-fs-commit/index.js").NativeCommitHelper;
+  /** Tenancy mode ('single' | 'multi'). When 'multi', wiredPipeline is strictly required. */
+  tenancyMode?: "single" | "multi";
 }
 
 export interface AgentLoopError {
@@ -482,6 +484,10 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
           }
         }
       : undefined;
+
+    if (options.tenancyMode === "multi" || (options.config as any)?.tenancyMode === "multi") {
+      throw new SeepientError("wiredPipeline is required in multi-tenant mode", "PIPELINE_NOT_INITIALIZED", false);
+    }
 
     wiredPipeline = await buildActionLifecycle({
       principalId: (options.config?.principalId as string) ?? "cli-user",

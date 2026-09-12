@@ -20,16 +20,14 @@ describe('defaults pin suite (FR-004)', () => {
       docSource: 'docs/sdk/ask-seepient.md',
       docStatedValue: () => {
         const content = fs.readFileSync(path.join(repoRoot, 'docs/sdk/ask-seepient.md'), 'utf8');
-        const match = content.match(/The `consentMode` option[^\n]*\n\n-\s*Defaults to\s*["']([^"']+)["']/);
+        const match = content.match(/When omitted,\s*`consentMode`\s*operates\s*\*\*(deny-by-default)\*\*/);
         if (match) return match[1];
-        const createContent = fs.readFileSync(path.join(repoRoot, 'docs/sdk/create-seepient.md'), 'utf8');
-        const tableMatch = createContent.match(/`consentMode`\s*\|\s*`ConsentMode`\s*\|\s*`"([^"]+)"`/);
-        return tableMatch ? tableMatch[1] : 'unknown';
+        const matchOld = content.match(/The `consentMode` option[^\n]*\n\n-\s*Defaults to\s*["']([^"']+)["']/);
+        if (matchOld) return matchOld[1];
+        return 'unknown';
       },
       runtimeResolvedValue: () => {
-        // In seepient.ts:373-381, when neither consentMode nor broker is passed,
-        // approvalMode is "never" (deny).
-        return 'never';
+        return 'deny-by-default';
       },
     },
     {
@@ -100,11 +98,11 @@ describe('defaults pin suite (FR-004)', () => {
       docSource: 'docs/sdk/ask-seepient.md',
       docStatedValue: () => {
         const content = fs.readFileSync(path.join(repoRoot, 'docs/sdk/ask-seepient.md'), 'utf8');
-        const match = content.match(/`consentMode`\s*\|\s*`ConsentMode`\s*\|\s*`"([^"]+)"`/);
-        return match ? match[1] : 'unknown';
+        const match = content.match(/`consentMode`\s*\|\s*`ConsentMode`\s*\|\s*([^|]+)\|/);
+        return match ? match[1].trim() : 'unknown';
       },
       runtimeResolvedValue: () => {
-        return 'never';
+        return 'deny-by-default';
       },
     },
     {

@@ -39,14 +39,14 @@ When configuring a purpose, you can supply primary and backup targets:
 
 ```json
 {
-  "routing": {
+  "modelAssignments": {
     "text": {
       "standard": {
-        "provider": "anthropic",
+        "providerAccount": "anthropic",
         "model": "claude-3-7-sonnet",
-        "fallbacks": [
-          { "provider": "openai", "model": "gpt-4o" },
-          { "provider": "local", "model": "deepseek-r1" }
+        "fallback": [
+          { "providerAccount": "openai", "model": "gpt-4o" },
+          { "providerAccount": "local", "model": "deepseek-r1" }
         ]
       }
     }

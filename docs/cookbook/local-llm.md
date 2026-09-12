@@ -47,9 +47,9 @@ Or configure via the CLI:
 
 ```bash
 seepient providers add local-ollama \
-  --adapter pi-ai \
-  --upstream openai-compatible \
-  --base-url http://127.0.0.1:11434/v1
+  --upstream ollama \
+  --url http://127.0.0.1:11434/v1 \
+  --allow-private
 ```
 
 ---
