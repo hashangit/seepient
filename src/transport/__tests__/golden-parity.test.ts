@@ -69,7 +69,7 @@ describe("013 Golden Cross-Surface Parity (FR-039 / T056)", () => {
 
     const configStore2 = new ProviderConfigStore(":memory:");
     const credStore2 = new MemoryCredentialStore({ isIsolated: false });
-    const sdk = await createSeepient({ credentials: credStore2 });
+    const sdk = await createSeepient({ credentials: credStore2, tenancy: "single" });
 
     const configStore3 = new ProviderConfigStore(":memory:");
     const credStore3 = new MemoryCredentialStore({ isIsolated: false });

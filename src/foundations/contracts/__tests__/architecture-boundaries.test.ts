@@ -318,4 +318,37 @@ describe("architecture boundaries (spec 008, T008)", () => {
 
     expect(violations).toEqual([]);
   });
+
+  it("T071 / CI invariant: multi-capable roots pass tenancyMode into buildLocalBoundary and buildActionLifecycle", () => {
+    const targetFiles = [
+      "transport/sdk/index.ts",
+      "transport/sdk/seepient.ts",
+      "domain/agent-loop.ts",
+    ];
+
+    const violations: string[] = [];
+    for (const rel of targetFiles) {
+      const absPath = join(ROOT, rel);
+      expect(existsSync(absPath), `Target file ${rel} must exist`).toBe(true);
+      const src = readFileSync(absPath, "utf8");
+
+      // Check buildLocalBoundary call
+      if (src.includes("buildLocalBoundary(")) {
+        const blbMatch = src.match(/buildLocalBoundary\(\{([\s\S]*?)\}\)/);
+        if (!blbMatch || !blbMatch[1].includes("tenancyMode")) {
+          violations.push(`${rel}: buildLocalBoundary call does not pass tenancyMode`);
+        }
+      }
+
+      // Check buildActionLifecycle call
+      if (src.includes("buildActionLifecycle(")) {
+        const balMatch = src.match(/buildActionLifecycle\(\{([\s\S]*?)\}\)/);
+        if (!balMatch || !balMatch[1].includes("tenancyMode")) {
+          violations.push(`${rel}: buildActionLifecycle call does not pass tenancyMode`);
+        }
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
 });

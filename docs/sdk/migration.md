@@ -132,7 +132,7 @@ const agent = await createTenantAgent({
 ## 4. String-Only `tools` at Chat Edges
 
 ### Summary
-REST (`POST /v1/chat`) and WebSocket (`chat.start`) endpoints now strictly validate the `tools` array at ingestion. Each entry must be a valid tool name string (`string[]`). Passing object definitions or non-string entries is rejected immediately with `400 Bad Request` or a typed `VALIDATION_ERROR` frame, preventing model context injection attacks.
+REST (`POST /v1/chat`) and WebSocket (`chat`) endpoints now strictly validate the `tools` array at ingestion. Each entry must be a valid tool name string (`string[]`). Passing object definitions or non-string entries is rejected immediately with `400 Bad Request` or a typed `VALIDATION_ERROR` frame, preventing model context injection attacks.
 
 ### Before (v0.7.x)
 ```json no-check
@@ -180,4 +180,100 @@ const myCustomAuditStore = {
   isIsolated: true,
   // ... store implementation
 };
+```
+
+---
+
+## 6. Principal ID Requirement and Sentinel Rejection
+
+### Summary
+In multi-tenant mode (`tenancy: "multi"` or inferred from injected stores/credentials), `principalId` is strictly required and must match `/^[a-zA-Z0-9_-]{1,128}$/`. Default and sentinel identities (`"sdk-user"`, `"cli-user"`, `"default"`, `"anonymous"`) are rejected case-insensitively with `PrincipalRequiredError` (`PRINCIPAL_REQUIRED`).
+
+### Before (v0.7.x)
+```typescript no-check
+// In v0.7.x, omitting principalId defaulted to "sdk-user"
+const agent = await createSeepient({
+  tenancy: "multi",
+  cwd: "/workspaces/t1",
+  runtime: tenantRuntime,
+});
+```
+
+### After (v0.8.0)
+```typescript
+import { createSeepient } from "seepient";
+
+const agent = await createSeepient({
+  tenancy: "multi",
+  principalId: "tenant_user_123",
+  cwd: "/workspaces/tenant_user_123",
+  runtime: tenantRuntime,
+  auditStore,
+  policyStore,
+  capabilityLedger,
+});
+```
+
+---
+
+## 7. Inference Fail-Closed Credentials & Egress
+
+### Summary
+In multi-tenant mode, omitting provider credentials throws `CredentialRequiredError` (`CREDENTIAL_REQUIRED`). Inference calls never fall back to ambient host environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.) inside vendor libraries. Custom `baseUrl` routing requires an explicit network capability grant (`model-egress` / `network-egress`), preventing Bearer-key exfiltration.
+
+### Before (v0.7.x)
+```typescript no-check
+// In v0.7.x, omitting credentials fell back to process.env.OPENAI_API_KEY
+const agent = await createSeepient({
+  tenancy: "multi",
+  principalId: "tenant_1",
+  cwd: "/workspaces/t1",
+});
+```
+
+### After (v0.8.0)
+```typescript
+import { createSeepient, createIsolatedProviderRuntime, MemoryCredentialStore } from "seepient";
+
+const credentialStore = new MemoryCredentialStore([
+  {
+    providerId: "openai",
+    auth: { kind: "api_key", apiKey: tenantApiKey },
+  },
+]);
+
+const agent = await createSeepient({
+  tenancy: "multi",
+  principalId: "tenant_1",
+  cwd: "/workspaces/t1",
+  runtime: createIsolatedProviderRuntime({ credentialStore }),
+  auditStore,
+  policyStore,
+  capabilityLedger,
+});
+```
+
+---
+
+## 8. Isolated Credential Store Refusal of Environment References
+
+### Summary
+`MemoryCredentialStore` stamped `isIsolated: true` refuses to resolve ambient `{ kind: "env" }` references. In isolated mode, attempting to lease an env-backed credential throws `CredentialRequiredError` rather than reading host `process.env`. In multi-tenant setups, inject static `{ kind: "api_key", apiKey: ... }` credentials.
+
+### Before (v0.7.x)
+```typescript no-check
+// In v0.7.x, MemoryCredentialStore resolved env vars from host process.env
+const credentialStore = new MemoryCredentialStore([
+  { providerId: "openai", auth: { kind: "env", variable: "OPENAI_API_KEY" } },
+]);
+```
+
+### After (v0.8.0)
+```typescript
+import { MemoryCredentialStore } from "seepient";
+
+// In multi-tenant mode, pass the resolved secret value directly
+const credentialStore = new MemoryCredentialStore([
+  { providerId: "openai", auth: { kind: "api_key", apiKey: resolvedTenantKey } },
+]);
 ```

@@ -317,15 +317,23 @@ describe('docs vocabulary gate (FR-002)', () => {
     expect(verifiedSuites.length).toBeGreaterThanOrEqual(10);
   });
 
-  it('check 7: banned-identifier sweep — deleted exports must not appear anywhere in docs/ (FR-015)', () => {
+  it('check 7: banned-identifier sweep — deleted exports and fictions must not appear anywhere in docs/, README, CHANGELOG, or examples (FR-015, FR-031, FR-034)', () => {
     const bannedIdentifiers = [
       'getDefaultProviderRuntime',
+      'TENANCY_EDGE_VALIDATION_FAILED',
+      'seepient/types',
     ];
 
     const violations: string[] = [];
-    const docFiles = getAllMarkdownFiles(docsDir);
+    const filesToScan = [
+      ...getAllMarkdownFiles(docsDir),
+      readmePath,
+      path.join(repoRoot, 'CHANGELOG.md'),
+      ...getAllMarkdownFiles(path.join(repoRoot, 'examples')),
+    ];
 
-    for (const file of docFiles) {
+    for (const file of filesToScan) {
+      if (!fs.existsSync(file)) continue;
       const relPath = path.relative(repoRoot, file);
       const content = fs.readFileSync(file, 'utf8');
       const lines = content.split('\n');
@@ -339,6 +347,6 @@ describe('docs vocabulary gate (FR-002)', () => {
       }
     }
 
-    expect(violations, 'Banned identifier violations (FR-015)').toEqual([]);
+    expect(violations, 'Banned identifier violations (FR-015, FR-031, FR-034)').toEqual([]);
   });
 });

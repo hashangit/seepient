@@ -43,15 +43,12 @@ async function readContent(
 
 /**
  * Commit-files executor. Validates every target via the FileCommitBroker
- * (which delegates to the native helper when available). When the native
- * helper is absent (exactCommit:false), falls back to an atomic temp+rename
- * write — the SAME mechanism the legacy write_file tool uses. The fallback
- * is less safe (no TOCTOU protection), but:
+ * (which delegates to the native helper). When the native helper is absent
+ * (useNative: false), file commits fail closed with EXACT_COMMIT_UNAVAILABLE
+ * (FR-007) rather than performing unverified filesystem mutations:
  *  1. The write uses the PREPARED bytes and destination (not model args).
- *  2. The capability envelope is still checked.
- *  3. Policy and audit still govern the call.
- * The boundary honestly advertises exactCommit:false so policy and the user
- * know the exact-commit guarantee isn't available.
+ *  2. The capability envelope is verified before commit.
+ *  3. Policy and audit strictly govern the operation.
  */
 export class CommitFilesExecutor implements OperationExecutor {
   readonly kind = "commit-files" as const;

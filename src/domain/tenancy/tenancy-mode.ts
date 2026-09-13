@@ -24,6 +24,7 @@ export interface TenancySignals {
   persistInjected?: boolean;
   /** Injected non-literal skill sources only; inline literals never set this (FR-016, M5). */
   skillSourcesInjected?: boolean;
+  credentialsInjected?: boolean;
 }
 
 export interface TenancyResolution {
@@ -102,7 +103,8 @@ export function resolveTenancyMode(signals: TenancySignals): TenancyResolution {
       signals.anyStoreInjected ||
       signals.runtimeInjected ||
       signals.persistInjected ||
-      signals.skillSourcesInjected,
+      signals.skillSourcesInjected ||
+      signals.credentialsInjected,
   );
 
   if (hasSignal) {

@@ -37,6 +37,9 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Verify mutation probes
+        run: pnpm run test:probes
+
       - name: Build
         run: pnpm run build
 

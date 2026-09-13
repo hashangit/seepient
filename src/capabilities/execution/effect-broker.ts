@@ -410,17 +410,46 @@ export class EffectBroker implements EffectBrokerContract {
         payload = { msgtype: "text", text: { content } };
       }
 
+      try {
+        const parsed = new URL(webhookUrl);
+        const host = parsed.hostname.toLowerCase();
+        if (DENIED_HOSTS.has(host) || isBrokerDeniedAddress(host)) {
+          return this.denied(
+            request.requestId,
+            `DESTINATION_DENIED: Webhook URL host ${host} is denied`,
+            "DESTINATION_DENIED",
+          );
+        }
+      } catch (err: any) {
+        if (err?.name === "TypeError") {
+          return this.denied(
+            request.requestId,
+            `DESTINATION_DENIED: Webhook URL ${webhookUrl} is malformed`,
+            "DESTINATION_DENIED",
+          );
+        }
+      }
+
       // W183: webhook destinations are operator-configured but still routed
       // through the validated, pinned fetch — no deadline-less unbounded reads.
-      const response = await safeSsrfFetch(
-        webhookUrl,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        },
-        { maxResponseBytes: 1024 * 1024 },
-      );
+      let response: any;
+      try {
+        response = await safeSsrfFetch(
+          webhookUrl,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          },
+          { maxResponseBytes: 1024 * 1024 },
+        );
+      } catch (err: any) {
+        return this.denied(
+          request.requestId,
+          `DESTINATION_DENIED: Webhook URL ${webhookUrl} is denied: ${err?.message ?? err}`,
+          "DESTINATION_DENIED",
+        );
+      }
 
       const result: any = await response.json().catch(() => ({}));
       const isSuccess =

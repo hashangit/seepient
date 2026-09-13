@@ -66,6 +66,7 @@ export async function serverGenerateText(
     /** Spec 008 wired pipeline (constructed by createServer). */
     wiredPipeline?: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle;
     tenancyMode?: "single" | "multi";
+    builtInTools?: boolean;
   },
   middleware?: Middleware[],
 ): Promise<AskSeepientResult> {
@@ -78,7 +79,7 @@ export async function serverGenerateText(
 
   // Resolve tools
   const isMulti = (options as any).tenancyMode === "multi";
-  const toolDefs = options.tools ? resolveTools(options.tools, registry) : (isMulti ? [] : registry.definitions());
+  const toolDefs = options.tools ? resolveTools(options.tools, registry) : ((isMulti && !(options as any).builtInTools) ? [] : registry.definitions());
 
   // Hooks
   const hooks = createHookExecutor();
@@ -170,6 +171,7 @@ export async function handleAgentChatStream(
     /** Spec 008 wired pipeline (constructed by createServer). */
     wiredPipeline?: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle;
     tenancyMode?: "single" | "multi";
+    builtInTools?: boolean;
     onText: (chunk: string) => void;
     onToolCall: (call: { name: string; args: any; callId: string }) => void;
     onToolResult: (result: { callId: string; output: string; success: boolean }) => void;
@@ -187,7 +189,7 @@ export async function handleAgentChatStream(
   const runtime = opts.runtime ?? createIsolatedProviderRuntime();
   const registry = opts.toolRegistry ?? new ToolRegistry();
   const isMulti = (opts as any).tenancyMode === "multi";
-  const toolDefs = opts.tools ? resolveTools(opts.tools, registry) : (isMulti ? [] : registry.definitions());
+  const toolDefs = opts.tools ? resolveTools(opts.tools, registry) : ((isMulti && !(opts as any).builtInTools) ? [] : registry.definitions());
   const hooks = createHookExecutor();
 
   // Load session or create initial message list

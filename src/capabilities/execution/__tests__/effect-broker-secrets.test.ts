@@ -453,4 +453,102 @@ describe("EffectBroker credential resolution & auth headers (P0-1)", () => {
     expect(result.error?.code).toBe("CREDENTIAL_REQUIRED");
     expect(result.error?.message).toContain("CREDENTIAL_REQUIRED");
   });
+
+  it("T066: SMTP host resolving to 127.0.0.1 is denied with typed code (FR-038)", async () => {
+    const broker = new EffectBroker({
+      artifacts,
+      network: {
+        resolve: vi.fn().mockResolvedValue(["127.0.0.1"]),
+        fetch: vi.fn(),
+      },
+      secretResolver: (ref) => {
+        if (ref === "smtpHost") return "127.0.0.1";
+        if (ref === "smtpUser") return "user@example.com";
+        if (ref === "smtpPass") return "secret";
+        return undefined;
+      },
+    });
+
+    const bodyArtifact = await artifacts.put(new TextEncoder().encode("email body"), "text/plain");
+    const request: BrokeredEffectRequest = {
+      kind: "external-send",
+      requestId: "req-smtp-loopback",
+      service: "smtp",
+      recipients: [{ service: "smtp", recipient: "test@example.com" }],
+      payload: bodyArtifact,
+      secretRefs: ["smtpHost"],
+    };
+
+    const envelope: CapabilityEnvelope = {
+      version: 1,
+      envelopeId: "env-smtp-loopback",
+      principalId: "user-1",
+      runId: "run-1",
+      actionDigest: "digest-smtp",
+      capabilities: [{ kind: "external-recipient", service: "*", recipient: "*" }],
+      lifetime: { kind: "action", actionDigest: "digest-smtp", consumeOnce: true },
+      issuedBy: { kind: "service", authorityId: "policy-engine", authenticatedBy: "test" },
+      issuedAt: Date.now(),
+      policyDigest: "pol-1",
+    };
+
+    const auth: BrokerAuthContext = {
+      leaseId: "lease-smtp",
+      actionDigest: "digest-smtp",
+      singleUseRequestId: "req-smtp-loopback",
+      expiresAt: Date.now() + 60_000,
+    };
+
+    const result = await broker.execute(request, envelope, auth);
+    expect(result.status).toBe("denied");
+    expect(result.error?.code).toBe("DESTINATION_DENIED");
+  });
+
+  it("T066: Webhook URL to link-local address is denied (FR-038)", async () => {
+    const broker = new EffectBroker({
+      artifacts,
+      network: {
+        resolve: vi.fn().mockResolvedValue(["169.254.169.254"]),
+        fetch: vi.fn(),
+      },
+      secretResolver: (ref) => {
+        if (ref === "feishuWebhook") return "http://169.254.169.254/webhook";
+        return undefined;
+      },
+    });
+
+    const bodyArtifact = await artifacts.put(new TextEncoder().encode("webhook payload"), "text/plain");
+    const request: BrokeredEffectRequest = {
+      kind: "external-send",
+      requestId: "req-feishu-linklocal",
+      service: "feishu",
+      recipients: [{ service: "feishu", recipient: "webhook" }],
+      payload: bodyArtifact,
+      secretRefs: ["feishuWebhook"],
+    };
+
+    const envelope: CapabilityEnvelope = {
+      version: 1,
+      envelopeId: "env-feishu-linklocal",
+      principalId: "user-1",
+      runId: "run-1",
+      actionDigest: "digest-feishu",
+      capabilities: [{ kind: "external-recipient", service: "*", recipient: "*" }],
+      lifetime: { kind: "action", actionDigest: "digest-feishu", consumeOnce: true },
+      issuedBy: { kind: "service", authorityId: "policy-engine", authenticatedBy: "test" },
+      issuedAt: Date.now(),
+      policyDigest: "pol-1",
+    };
+
+    const auth: BrokerAuthContext = {
+      leaseId: "lease-feishu",
+      actionDigest: "digest-feishu",
+      singleUseRequestId: "req-feishu-linklocal",
+      expiresAt: Date.now() + 60_000,
+    };
+
+    const result = await broker.execute(request, envelope, auth);
+    expect(result.status).toBe("denied");
+    expect(result.error?.code).toBe("DESTINATION_DENIED");
+  });
 });

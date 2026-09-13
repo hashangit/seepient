@@ -373,5 +373,19 @@ describe("Spec 022 SDK Tenancy Mode & Fail-Closed Enforcement (US2)", () => {
       expect(typeof agent.chat).toBe("function");
       await agent.close();
     });
+
+    it("T065: credentials-only injection upgrades to multi with PrincipalRequiredError guidance (FR-037)", async () => {
+      const { MemoryCredentialStore } = await import("../../../domain/providers/credentials/memory-credential-store.js");
+      const creds = new MemoryCredentialStore({ isIsolated: true });
+
+      await expect(
+        createSeepient({
+          credentials: creds,
+        }),
+      ).rejects.toMatchObject({
+        name: "PrincipalRequiredError",
+        code: "PRINCIPAL_REQUIRED",
+      });
+    });
   });
 });

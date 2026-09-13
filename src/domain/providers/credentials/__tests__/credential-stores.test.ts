@@ -280,5 +280,24 @@ describe("CredentialStore implementations (QS-P4.1)", () => {
       // Password MUST be written to stdin
       expect(capturedStdin).toBe("sk-secret-password-val");
     });
+
+    it("T067: isolated composite + {kind:'keychain'} ref -> typed CredentialRequiredError, no TypeError (FR-039)", async () => {
+      const { CompositeCredentialStore } = await import("../composite-credential-store.js");
+      const { MemoryCredentialStore } = await import("../memory-credential-store.js");
+      const isolatedComposite = new CompositeCredentialStore({
+        memory: new MemoryCredentialStore({ isIsolated: true }),
+        isIsolated: true,
+      });
+
+      const handle = await isolatedComposite.resolve({
+        kind: "keychain",
+        service: "test-service",
+        account: "test-user",
+      });
+
+      expect(handle).toBeDefined();
+      expect(await handle.isResolvable()).toBe(false);
+      expect(() => handle.acquireLease()).toThrowError(/CREDENTIAL_REQUIRED/);
+    });
   });
 });

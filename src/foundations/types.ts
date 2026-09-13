@@ -311,6 +311,10 @@ export interface Seepient {
   getUsage(): CumulativeUsage;
   /** Flush any pending terminal audit events (T109a durability lifecycle). */
   flushAudit(): Promise<number>;
+  /** Revoke capabilities for a specific run (FR-041). */
+  revokeRun(runId: string): Promise<void>;
+  /** Revoke capabilities for a specific session (FR-041). */
+  revokeSession(sessionId: string): Promise<void>;
   /** Close agent and flush remaining audit records. */
   close(): Promise<void>;
 
@@ -413,6 +417,8 @@ export interface RunSeepientServerOptions {
   settingsManager?: import("./contracts/settings-manager-like.js").SettingsManagerLike;
   /** Injected per-server or per-agent ToolRegistry (Spec 022) */
   toolRegistry?: import("./contracts/tool.js").ToolRegistryContract;
+  /** Explicit opt-in to built-in tools on multi-tenant server (FR-027) */
+  builtInTools?: boolean;
   /** Injected operator baseline capabilities applying unstamped to all server principals (FR-021) */
   operatorBaseline?: import("./contracts/permission-policy.js").CapabilitySet | import("./contracts/permission-policy.js").Capability[];
   /** Injected skill sources for multi-tenant server skill resolution */
