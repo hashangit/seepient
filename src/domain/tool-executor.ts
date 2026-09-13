@@ -78,6 +78,10 @@ export class ToolRegistry implements ToolRegistryContract {
     return this._modules.map((m) => m.definition);
   }
 
+  list(): (ToolDefinition & { name: string })[] {
+    return this._modules.map((m) => Object.assign({}, m.definition, { name: m.definition.function.name }));
+  }
+
   find(name: string): ToolModule | undefined {
     return this._byName.get(name);
   }

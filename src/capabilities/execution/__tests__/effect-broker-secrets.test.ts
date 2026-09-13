@@ -357,4 +357,100 @@ describe("EffectBroker credential resolution & auth headers (P0-1)", () => {
     expect(result.status).toBe("denied");
     expect(result.error?.message).toMatch(/refusing to forward secret-bearing body/);
   });
+
+  it("denies with CREDENTIAL_REQUIRED error code when custom secretRef cannot be resolved in multi mode (FR-014)", async () => {
+    const broker = new EffectBroker({
+      artifacts,
+      network: {
+        resolve: vi.fn().mockResolvedValue(["93.184.216.34"]),
+        fetch: vi.fn(),
+      },
+      tenancyMode: "multi",
+      // secretResolver returns undefined (or omitted)
+    });
+
+    const request: BrokeredEffectRequest = {
+      kind: "http",
+      requestId: "req-missing-sec",
+      destination: { scheme: "https", host: "api.example.com" },
+      method: "GET",
+      headers: {},
+      secretRefs: ["CUSTOM_TENANT_SECRET"],
+    };
+
+    const envelope: CapabilityEnvelope = {
+      version: 1,
+      envelopeId: "env-missing-sec",
+      principalId: "user-1",
+      runId: "run-1",
+      actionDigest: "digest-missing-sec",
+      capabilities: [
+        { kind: "network-destination", scheme: "https", host: "api.example.com" },
+        { kind: "secret-ref", ref: "CUSTOM_TENANT_SECRET" },
+      ],
+      lifetime: { kind: "action", actionDigest: "digest-missing-sec", consumeOnce: true },
+      issuedBy: { kind: "service", authorityId: "policy-engine", authenticatedBy: "test" },
+      issuedAt: Date.now(),
+      policyDigest: "pol-1",
+    };
+
+    const auth: BrokerAuthContext = {
+      leaseId: "lease-missing-sec",
+      actionDigest: "digest-missing-sec",
+      singleUseRequestId: "req-missing-sec",
+      expiresAt: Date.now() + 60_000,
+    };
+
+    const result = await broker.execute(request, envelope, auth);
+    expect(result.status).toBe("denied");
+    expect(result.error?.code).toBe("CREDENTIAL_REQUIRED");
+    expect(result.error?.message).toContain("CREDENTIAL_REQUIRED");
+  });
+
+  it("denies with CREDENTIAL_REQUIRED error code when Tavily search secret is missing in multi mode (FR-014)", async () => {
+    const broker = new EffectBroker({
+      artifacts,
+      network: {
+        resolve: vi.fn().mockResolvedValue(["93.184.216.34"]),
+        fetch: vi.fn(),
+      },
+      tenancyMode: "multi",
+    });
+
+    const request: BrokeredEffectRequest = {
+      kind: "http",
+      requestId: "req-missing-tavily",
+      destination: { scheme: "https", host: "api.tavily.com" },
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      secretRefs: ["TAVILY_API_KEY"],
+    };
+
+    const envelope: CapabilityEnvelope = {
+      version: 1,
+      envelopeId: "env-missing-tavily",
+      principalId: "user-1",
+      runId: "run-1",
+      actionDigest: "digest-missing-tavily",
+      capabilities: [
+        { kind: "network-destination", scheme: "https", host: "api.tavily.com" },
+      ],
+      lifetime: { kind: "action", actionDigest: "digest-missing-tavily", consumeOnce: true },
+      issuedBy: { kind: "service", authorityId: "policy-engine", authenticatedBy: "test" },
+      issuedAt: Date.now(),
+      policyDigest: "pol-1",
+    };
+
+    const auth: BrokerAuthContext = {
+      leaseId: "lease-missing-tavily",
+      actionDigest: "digest-missing-tavily",
+      singleUseRequestId: "req-missing-tavily",
+      expiresAt: Date.now() + 60_000,
+    };
+
+    const result = await broker.execute(request, envelope, auth);
+    expect(result.status).toBe("denied");
+    expect(result.error?.code).toBe("CREDENTIAL_REQUIRED");
+    expect(result.error?.message).toContain("CREDENTIAL_REQUIRED");
+  });
 });

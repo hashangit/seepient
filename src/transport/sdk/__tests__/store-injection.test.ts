@@ -394,6 +394,7 @@ describe("QS-1: Store injection and session round-trip", () => {
     const runtime = createFakeRuntime({ responses: [{ content: "Alpha reply" }] });
 
     const alpha = await createSeepient({
+      cwd: "/tmp/tenant-alpha",
       sessionId: "sess-tenant-isolation",
       principalId: "tenant-alpha",
       auditStore: new FakeAuditStore(),
@@ -413,6 +414,7 @@ describe("QS-1: Store injection and session round-trip", () => {
     // A different principal cannot resume the session — history stays isolated
     await expect(
       createSeepient({
+        cwd: "/tmp/tenant-beta",
         sessionId: "sess-tenant-isolation",
         principalId: "tenant-beta",
         auditStore: new FakeAuditStore(),
@@ -426,6 +428,7 @@ describe("QS-1: Store injection and session round-trip", () => {
 
     // The owning principal still resumes with history intact
     const resumed = await createSeepient({
+      cwd: "/tmp/tenant-alpha",
       sessionId: "sess-tenant-isolation",
       principalId: "tenant-alpha",
       auditStore: new FakeAuditStore(),
@@ -453,6 +456,7 @@ describe("QS-1: Store injection and session round-trip", () => {
 
     await expect(
       createSeepient({
+        cwd: "/tmp/tenant-attacker",
         sessionId,
         principalId: "tenant-attacker",
         auditStore: new FakeAuditStore(),

@@ -13,12 +13,12 @@ The Seepient SDK provides strict multi-tenant isolation guarantees. When running
 
 Seepient operates in one of two tenancy modes:
 
-1. **`single` (default)**: Optimized for single-user CLI and developer workflows. Allows ambient filesystem defaults (`~/.seepient`), environment variable credential discovery, and local session files.
-2. **`multi`**: Fail-closed mode for multi-tenant deployments. Disables ambient filesystem access, requires full store and runtime injection, scopes permissions and ledgers by `principalId`, and confines tools strictly to each agent's per-agent registry.
+1. **`single` (default)**: Optimized for single-user CLI and developer workflows. Allows ambient filesystem defaults (`~/.seepient`), environment variable credential discovery, and local session files. Created via `createAmbientProviderRuntime()` when unsupplied.
+2. **`multi`**: Fail-closed mode for multi-tenant deployments. Disables ambient filesystem access, requires full store and runtime injection, scopes permissions and ledgers by `principalId`, requires an explicit workspace `cwd`, and confines tools strictly to each agent's per-agent registry.
 
 ### Declaring Tenancy
 
-You can declare tenancy explicitly at the SDK root:
+You can declare tenancy explicitly with `createSeepient`:
 
 ```typescript
 import { createSeepient } from "seepient";
@@ -26,7 +26,26 @@ import { createSeepient } from "seepient";
 const agent = await createSeepient({
   tenancy: "multi",
   principalId: "tenant_corp_123",
+  cwd: "/var/workspaces/tenant_corp_123",
   runtime: tenantRuntime,
+  auditStore: tenantAuditStore,
+  policyStore: tenantPolicyStore,
+  capabilityLedger: tenantLedgerStore,
+  persist: tenantPersistenceBackend,
+});
+```
+
+### Typed Entry: `createTenantAgent`
+
+For compile-time guarantee of completeness, use `createTenantAgent`. It enforces that runtime, three stores, workspace directory, and a valid principal are supplied:
+
+```typescript
+import { createTenantAgent, createIsolatedProviderRuntime } from "seepient";
+
+const agent = await createTenantAgent({
+  principalId: "tenant_corp_123",
+  cwd: "/var/workspaces/tenant_corp_123",
+  runtime: createIsolatedProviderRuntime({ /* tenant credentials */ }),
   auditStore: tenantAuditStore,
   policyStore: tenantPolicyStore,
   capabilityLedger: tenantLedgerStore,
@@ -55,55 +74,72 @@ In `multi` mode, Seepient enforces a strict injection checklist at construction 
 
 | Dependency | Parameter | Requirement | Error on Omission |
 |------------|-----------|-------------|-------------------|
-| **Isolated Runtime** | `runtime` | Required: isolated `ProviderRuntime` instance with tenant-scoped credentials | `TENANCY_RUNTIME_REQUIRED` |
+| **Isolated Runtime** | `runtime` | Required: isolated `ProviderRuntime` instance (`isIsolated: true`) | `TENANCY_RUNTIME_REQUIRED` |
+| **Workspace Root** | `cwd` | Required: explicit tenant workspace directory to prevent cross-tenant disk leaks | `TENANCY_WORKSPACE_REQUIRED` |
 | **Audit Store** | `auditStore` | Required: embedder `AuditStore` adapter | `TENANCY_STORE_INCOMPLETE` |
 | **Policy Store** | `policyStore` | Required: embedder `PolicyStore` adapter | `TENANCY_STORE_INCOMPLETE` |
 | **Capability Ledger** | `capabilityLedger` | Required: embedder `CapabilityLedger` adapter | `TENANCY_STORE_INCOMPLETE` |
 | **Session Store** | `persist` | Required for sessionful agents (`sessionId` or persistent sessions) | `TENANCY_STORE_INCOMPLETE` |
 | **Stateless One-Shot** | `stateless: true` | Optional: pass when executing sessionless calls (`askSeepient`) without persistence | N/A |
-| **Skills Sources** | `sources` | Optional: skill sources list. In `multi` mode, ambient discovery is never run; skills come solely from injected sources | N/A |
+| **Skills Sources** | `sources` | Optional: skill sources list. In `multi` mode, ambient discovery is disabled | N/A |
 
-:::note Standalone HTTP/WS server limitation
-Per-tenant skill injection is supported on the in-process SDK surface (`askSeepient`/`createSeepient` with `tenancy: "multi"` + `sources`); the standalone HTTP/WS server resolves skills from the host's ambient filesystem shared by all principals and exposes no per-tenant injection channel — embedders needing per-tenant skills must use the in-process SDK shape. Server-side injection is future work.
-:::
+---
+
+## Guarantees & Verifying Tests
+
+Every multi-tenant security guarantee is pinned by an automated CI regression test:
+
+| Guarantee / Invariant | Enforced Behavior in Multi Mode | Error Code / Outcome | Verifying Test Suite |
+|---|---|---|---|
+| **Zero Ambient Host Secrets** | Execution brokers never resolve host `process.env` secrets | Throws `CREDENTIAL_REQUIRED` before dispatch | `src/domain/permissions/__tests__/composition-closure/exfil-journey.test.ts` |
+| **Zero Host Dotfile / Disk Writes** | Replay ledgers default to in-memory (`InMemoryReplayLedger`); no `$HOME/.seepient` writes | Zero writes under `$HOME/.seepient` and cwd | `src/domain/permissions/__tests__/composition-closure/zero-write-brokered.test.ts` |
+| **Principal Traversal & Sentinel Rejection** | Branded slug validation (`/^[a-zA-Z0-9_-]{1,128}$/`); case-insensitive sentinel rejection | Throws `InvalidPrincipalIdError` | `src/domain/permissions/__tests__/composition-closure/identity-validation.test.ts` |
+| **Session Isolation & Anti-Squatting** | Server sessions partitioned by composite key `${apiKeyHash}:${sessionId}` | Foreign tenant access returns 404 | `src/transport/__tests__/rest-ws-parity.test.ts` |
+| **Isolated Server Default Boot** | `runSeepientServer()` boots with isolated empty runtime; no ambient credentials | Emits notice; zero ambient providers; zero writes under `$HOME/.seepient` and cwd; ambient runtime rejected with `TenancyRuntimeRequiredError` | `src/transport/http/__tests__/isolated-boot.test.ts` |
+| **Inverted Constructor Defaults** | No-arg `new ProviderRuntime()` is isolated in-memory by default | Stamped `isIsolated: true`; zero env providers | `src/domain/providers/__tests__/isolated-defaults.test.ts` |
+| **Inference Wrapper Fail-Closed** | Raw wrappers throw before vendor client invocation for none-kind / undefined secrets | Throws `CREDENTIAL_REQUIRED`; zero outbound network calls | `src/domain/permissions/__tests__/composition-closure/inference-armed-journey.test.ts` |
+| **BaseUrl Egress Verification** | Custom `baseUrl` requires granted `network-destination` capability | Throws permission error; blocks egress | `src/vendors/pi-ai/__tests__/inference-fail-closed.test.ts` |
+| **Explicit Workspace Contract** | Both SDK roots require explicit `cwd`; server derives workspace per principal | Throws `TENANCY_WORKSPACE_REQUIRED` on omission | `src/transport/sdk/__tests__/sdk-tenancy.test.ts` |
+| **Gateway Default-Off** | Operator ambient gateway is never composed into tenant context by default | Zero gateway tools unless explicit opt-in | `src/transport/http/__tests__/gateway-default-off.test.ts` |
+| **Edge Tool Validation** | REST /v1/chat endpoint validates `tools` as `string[]` | 400 Bad Request before dispatch | `src/transport/http/__tests__/tools-edge.test.ts` |
+| **Reference Worker Control Plane** | Bearer token authentication required; composite keying `principal:resource` | Unauthenticated returns 401; scoped `list()` | `examples/worker/src/__tests__/control-plane.test.ts` |
+| **Profile A Local Preservation** | Local CLI/TUI and bare SDK single-mode workflows continue working with ambient conveniences | Clean execution with host keys and dotfiles | `src/__tests__/profile-a-smoke.test.ts` |
 
 ---
 
 ## Error Codes and Remediation
 
-### 1. `TENANCY_RUNTIME_REQUIRED`
-- **Cause**: An agent initialized in `multi` mode (explicitly or inferred) without providing an isolated `runtime`. Ambient runtime creation (`getDefaultProviderRuntime()`) is forbidden in multi-tenant mode.
+### 1. `CREDENTIAL_REQUIRED`
+- **Cause**: An execution tool or inference operation in `multi` mode attempted to resolve a secret that was not supplied in the tenant's credentials or injected secret resolver. Seepient never falls back to host environment variables in multi-tenant mode.
+- **Remediation**: Inject the required API key or credentials into the tenant's `ProviderRuntime` or supply a `secretResolver` in the broker options.
+
+### 2. `TENANCY_WORKSPACE_REQUIRED`
+- **Cause**: An agent initialized in `multi` mode without an explicit `cwd` / workspace root.
+- **Remediation**: Provide a dedicated per-tenant workspace directory (e.g. `cwd: "/var/workspaces/" + tenantId`).
+
+### 3. `TENANCY_RUNTIME_REQUIRED`
+- **Cause**: An agent initialized in `multi` mode without providing an isolated `runtime` (or using a runtime without `isIsolated: true`). Ambient runtime creation (`createAmbientProviderRuntime()`) is reserved for single-mode CLI roots.
 - **Remediation**:
   ```typescript
-  // Pass an explicit ProviderRuntime instance
+  import { createIsolatedProviderRuntime } from "seepient";
+
   const agent = await createSeepient({
     tenancy: "multi",
-    runtime: myTenantProviderRuntime,
+    cwd: "/var/workspaces/tenant-1",
+    runtime: createIsolatedProviderRuntime({ /* credentials */ }),
     // ...
   });
-  // Or if running a local single-user script, declare single mode explicitly:
-  // tenancy: "single"
   ```
 
-### 2. `TENANCY_STORE_INCOMPLETE`
+### 4. `TENANCY_STORE_INCOMPLETE`
 - **Cause**: One or more required stores (`auditStore`, `policyStore`, `capabilityLedger`, or `persist` for sessionful agents) were omitted in `multi` mode.
-- **Remediation**: Inject all required storage adapters (`auditStore`, `policyStore`, `capabilityLedger`). For sessionful agents running without session persistence, specify `stateless: true` to exempt `persist`:
-  ```typescript
-  const agent = await createSeepient({
-    tenancy: "multi",
-    runtime,
-    auditStore: myAuditStore,
-    policyStore: myPolicyStore,
-    capabilityLedger: myLedger,
-    persist: myPersistenceBackend, // Required if sessionId is set unless stateless: true
-  });
-  ```
+- **Remediation**: Inject all required storage adapters (`auditStore`, `policyStore`, `capabilityLedger`). For sessionful agents running without session persistence, specify `stateless: true` to exempt `persist`.
 
-### 3. `TENANCY_AMBIENT_IO`
+### 5. `TENANCY_AMBIENT_IO`
 - **Cause**: An attempt was made in `multi` mode to read or write ambient operator configuration or local files under `~/.seepient/**` outside an injected store's own path.
 - **Remediation**: Multi-tenant agents must use injected storage and memory backends; do not configure agents to rely on host-level operator settings.
 
-### 4. `TOOL_NAME_CONFLICT`
+### 6. `TOOL_NAME_CONFLICT`
 - **Cause**: Two tools with the identical name were added to the same agent registry.
 - **Remediation**: Ensure that custom tools, MCP gateway tools, and built-in tools within an agent's configuration have distinct names.
 

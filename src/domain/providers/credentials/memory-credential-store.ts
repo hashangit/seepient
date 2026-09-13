@@ -10,7 +10,7 @@ import type {
   PersistedCredentialRecord,
   CredentialMeta,
 } from "../../../foundations/schemas/credential-store.js";
-import { SeepientError } from "../../../foundations/errors.js";
+import { SeepientError, CredentialRequiredError } from "../../../foundations/errors.js";
 
 interface StoredEntry {
   record: PersistedCredentialRecord;
@@ -19,11 +19,20 @@ interface StoredEntry {
   meta?: CredentialMeta;
 }
 
+export interface MemoryCredentialStoreOptions {
+  isIsolated?: boolean;
+}
+
 /**
  * In-memory CredentialStore for testing and SDK host-app embedded modes.
  */
 export class MemoryCredentialStore implements CredentialStore {
+  readonly isIsolated: boolean;
   private entries = new Map<string, StoredEntry>();
+
+  constructor(opts?: MemoryCredentialStoreOptions) {
+    this.isIsolated = opts?.isIsolated ?? true;
+  }
 
   async resolve(ref: CredentialRef): Promise<CredentialHandle> {
     if (ref.kind === "none") {
@@ -48,6 +57,22 @@ export class MemoryCredentialStore implements CredentialStore {
     }
 
     if (ref.kind === "env") {
+      if (this.isIsolated) {
+        return {
+          id: `env:${ref.name}`,
+          ref,
+          activeLeaseCount: 0,
+          async isResolvable() {
+            return false;
+          },
+          acquireLease(): CredentialLease {
+            throw new CredentialRequiredError(
+              `CREDENTIAL_REQUIRED: Environment variable credential "${ref.name}" cannot be resolved in isolated multi-tenant mode without explicit credential injection.`,
+            );
+          },
+        };
+      }
+
       const varName = ref.name;
       return {
         id: `env:${varName}`,
@@ -187,5 +212,17 @@ export class MemoryCredentialStore implements CredentialStore {
 
   async delete(id: string): Promise<void> {
     this.entries.delete(id);
+  }
+
+  resolveSecret(ref: string): string | undefined {
+    const entry = this.entries.get(ref);
+    if (!entry) return undefined;
+    if (entry.record.kind === "api_key") {
+      return entry.record.keyValue;
+    }
+    if (entry.record.kind === "oauth") {
+      return entry.record.access;
+    }
+    return undefined;
   }
 }

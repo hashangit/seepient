@@ -9,7 +9,7 @@
 import path from "node:path";
 import { Command } from "commander";
 import chalk from "chalk";
-import { getDefaultProviderRuntime } from "../../../domain/providers/provider-runtime.js";
+import { createAmbientProviderRuntime } from "../../../domain/providers/provider-runtime.js";
 import {
   createProviderManagerApi,
   type ProviderManagerApi,
@@ -19,7 +19,7 @@ import {
 import { generateImagesStructured } from "../../../capabilities/media/media.js";
 
 export function registerModelsCommands(program: Command, apiOverride?: ProviderManagerApi): void {
-  const getApi = () => apiOverride ?? createProviderManagerApi(getDefaultProviderRuntime());
+  const getApi = () => apiOverride ?? createProviderManagerApi(createAmbientProviderRuntime());
   const modelsCmd = program.command("models").description("Manage purpose-based model assignments, browse catalog, and resolve status");
 
   modelsCmd
@@ -504,7 +504,7 @@ export function registerModelsCommands(program: Command, apiOverride?: ProviderM
     .option("--mask <path>", "Input mask path for editing")
     .option("--output <dir>", "Output directory for generated images", ".")
     .action(async (opts) => {
-      const runtime = getDefaultProviderRuntime();
+      const runtime = createAmbientProviderRuntime();
       const count = parseInt(opts.count, 10) || 1;
       const resolvedOutputDir = path.resolve(opts.output ?? ".");
       const destinations: string[] = [];

@@ -21,6 +21,8 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
 import { createHash } from "node:crypto";
+import { InvalidPrincipalIdError } from "../../foundations/errors.js";
+import { PRINCIPAL_ID_RE } from "../tenancy/tenancy-mode.js";
 import type {
   CapabilityLedger,
   CapabilityLedgerScope,
@@ -48,6 +50,19 @@ type LedgerEntry =
       revokedAt: number;
     };
 
+const STALE_LOCK_MS = 30_000;
+export async function breakStaleLedgerLock(lockFile: string, thresholdMs = STALE_LOCK_MS): Promise<void> {
+  let stat: import("node:fs").Stats;
+  try {
+    stat = await fs.stat(lockFile);
+  } catch {
+    return;
+  }
+  if (Date.now() - stat.mtimeMs > thresholdMs) {
+    await fs.unlink(lockFile).catch(() => {});
+  }
+}
+
 /**
  * Persisted capability ledger. Backed by an append-only NDJSON file with
  * fsync on every append; the in-memory index is rebuilt on startup.
@@ -56,6 +71,7 @@ type LedgerEntry =
  * synchronous after load() completes.
  */
 export class PersistedCapabilityLedger implements CapabilityLedger {
+  readonly isIsolated: boolean;
   private readonly dir: string;
   private readonly consumedDigestsByPrincipal = new Map<string, Set<string>>();
   private readonly consumedEnvelopesByPrincipal = new Map<string, Set<string>>();
@@ -64,6 +80,7 @@ export class PersistedCapabilityLedger implements CapabilityLedger {
   private readonly defaultPrincipalId: string;
 
   constructor(opts?: { root?: string; defaultPrincipalId?: string }) {
+    this.isIsolated = Boolean(opts?.root);
     this.dir =
       opts?.root ??
       (process.env.SEEPIENT_SECURITY_DIR
@@ -76,16 +93,25 @@ export class PersistedCapabilityLedger implements CapabilityLedger {
     return scope?.principalId ?? this.defaultPrincipalId;
   }
 
+  private assertValidPrincipalId(principalId: string): void {
+    if (!PRINCIPAL_ID_RE.test(principalId)) {
+      throw new InvalidPrincipalIdError(`Invalid principalId "${principalId}" for ledger storage path`);
+    }
+  }
+
   private getPrincipalDir(principalId: string): string {
+    this.assertValidPrincipalId(principalId);
     return path.join(this.dir, principalId);
   }
 
   /** Path builder for caps/<principalId>/ledger.ndjson (Spec 022 T026) */
   private getFileForPrincipal(principalId: string): string {
+    this.assertValidPrincipalId(principalId);
     return path.join(this.dir, principalId, "ledger.ndjson");
   }
 
   private getLockForPrincipal(principalId: string): string {
+    this.assertValidPrincipalId(principalId);
     return path.join(this.dir, principalId, "ledger.ndjson.lock");
   }
 
@@ -186,7 +212,10 @@ export class PersistedCapabilityLedger implements CapabilityLedger {
       try {
         lockHandle = await fs.open(lockFile, "wx", 0o600);
         break;
-      } catch {
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+          await breakStaleLedgerLock(lockFile);
+        }
         await new Promise((r) => setTimeout(r, 25));
       }
     }
@@ -287,7 +316,10 @@ export class PersistedCapabilityLedger implements CapabilityLedger {
       try {
         lockHandle = await fs.open(lockFile, "wx", 0o600);
         break;
-      } catch {
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+          await breakStaleLedgerLock(lockFile);
+        }
         await new Promise((r) => setTimeout(r, 25));
       }
     }

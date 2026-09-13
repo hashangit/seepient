@@ -63,16 +63,16 @@ describe("013 Golden Cross-Surface Parity (FR-039 / T056)", () => {
   it("produces identical outcomes across Controller, SDK, and Server HTTP handlers", async () => {
     // Setup isolated instances for Controller, SDK, and Server
     const configStore1 = new ProviderConfigStore(":memory:");
-    const credStore1 = new MemoryCredentialStore();
+    const credStore1 = new MemoryCredentialStore({ isIsolated: false });
     const runtime1 = new ProviderRuntime({ configStore: configStore1, credentialStore: credStore1 });
     const controller = createProviderManagerApi(runtime1);
 
     const configStore2 = new ProviderConfigStore(":memory:");
-    const credStore2 = new MemoryCredentialStore();
+    const credStore2 = new MemoryCredentialStore({ isIsolated: false });
     const sdk = await createSeepient({ credentials: credStore2 });
 
     const configStore3 = new ProviderConfigStore(":memory:");
-    const credStore3 = new MemoryCredentialStore();
+    const credStore3 = new MemoryCredentialStore({ isIsolated: false });
     const runtime3 = new ProviderRuntime({ configStore: configStore3, credentialStore: credStore3 });
     const serverHandler = createRestHandler({
       version: "0.2.2",

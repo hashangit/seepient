@@ -32,6 +32,7 @@ export interface ToolRegistryContract {
   registerMany(modules: ToolModule[]): void;
   modules(): readonly ToolModule[];
   definitions(): ToolDefinition[];
+  list(): (ToolDefinition & { name: string })[];
   find(name: string): ToolModule | undefined;
 }
 

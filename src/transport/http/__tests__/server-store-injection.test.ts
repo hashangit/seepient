@@ -177,7 +177,7 @@ describe("QS-3: Server Store Injection (FR-010)", () => {
       responses: [{ content: "response 1" }, { content: "response 2" }],
     });
 
-    const workspaceId = computeWorkspaceId(fs.realpathSync(process.cwd()));
+    const workspaceId = computeWorkspaceId(path.join(process.cwd(), ".seepient", "workspaces", keyEntry1.keyHash));
     policyStore.snapshots.set(workspaceId, {
       workspaceId,
       version: 1,
@@ -297,6 +297,7 @@ describe("QS-3: Server Store Injection (FR-010)", () => {
     const { EventEmitter } = await import("node:events");
 
     const runtime: import("../../../foundations/contracts/provider-runtime.js").ProviderRuntimeContract = {
+      isIsolated: true,
       createTurnSnapshot: async () => ({
         revision: 1,
         createdAt: new Date().toISOString(),
@@ -367,6 +368,163 @@ describe("QS-3: Server Store Injection (FR-010)", () => {
     const parsedBody = JSON.parse(res.body);
     expect(parsedBody.error.code).toBe("NOT_IMPLEMENTED");
     expect(parsedBody.error.message).toContain("Injected provider runtime does not implement configuration mutations");
+  });
+
+  it("server rejects ambient stores without isIsolated: true with TENANCY_STORE_INCOMPLETE (P1-2)", async () => {
+    const runtime = createFakeRuntime();
+    const ambientStore = { isIsolated: false } as any;
+
+    await expect(
+      runSeepientServer({
+        runtime,
+        auditStore: ambientStore,
+        listen: false,
+      }),
+    ).rejects.toThrow(/TENANCY_STORE_INCOMPLETE|isIsolated/);
+
+    await expect(
+      runSeepientServer({
+        runtime,
+        policyStore: ambientStore,
+        listen: false,
+      }),
+    ).rejects.toThrow(/TENANCY_STORE_INCOMPLETE|isIsolated/);
+
+    await expect(
+      runSeepientServer({
+        runtime,
+        capabilityLedger: ambientStore,
+        listen: false,
+      }),
+    ).rejects.toThrow(/TENANCY_STORE_INCOMPLETE|isIsolated/);
+  });
+
+  it("server uses custom apiKeysFile without relying on ambient server-keys.json (P2-3)", async () => {
+    const customKeyPath = path.join(
+      os.tmpdir(),
+      `custom-server-keys-${Date.now()}-${Math.random().toString(36).slice(2)}.json`,
+    );
+    try {
+      const keyEntry = generateApiKey(["agent:run"], { filePath: customKeyPath, label: "custom-key" });
+      const runtime = createFakeRuntime({
+        responses: [{ content: "Custom key response." }],
+      });
+
+      const server = await runSeepientServer({
+        runtime,
+        apiKeysFile: customKeyPath,
+        listen: false,
+      });
+      activeServers.push(server);
+
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const addr = server.address() as { port: number };
+
+      const response = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const req = http.request(
+          {
+            hostname: "127.0.0.1",
+            port: addr.port,
+            path: "/v1/chat",
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${keyEntry.rawKey}`,
+            },
+          },
+          (res) => {
+            let data = "";
+            res.on("data", (chunk) => { data += chunk; });
+            res.on("end", () => { resolve({ status: res.statusCode ?? 0, body: data }); });
+          },
+        );
+        req.on("error", reject);
+        req.write(JSON.stringify({ message: "Hello", model: "mock-model" }));
+        req.end();
+      });
+
+      expect(response.status).toBe(200);
+      const data = JSON.parse(response.body);
+      expect(data.text).toBe("Custom key response.");
+    } finally {
+      if (fs.existsSync(customKeyPath)) {
+        fs.unlinkSync(customKeyPath);
+      }
+    }
+  });
+
+  it("P0-1: WebSocket upgrade respects injected apiKeysFile and rejects ambient keys", async () => {
+    const ambientKeyPath = path.join(
+      os.tmpdir(),
+      `ambient-keys-${Date.now()}-${Math.random().toString(36).slice(2)}.json`,
+    );
+    const customKeyPath = path.join(
+      os.tmpdir(),
+      `custom-keys-${Date.now()}-${Math.random().toString(36).slice(2)}.json`,
+    );
+    const originalEnv = process.env.SEEPIENT_API_KEYS_FILE;
+    try {
+      process.env.SEEPIENT_API_KEYS_FILE = ambientKeyPath;
+      const ambientKey = generateApiKey(["agent:run", "admin"], { filePath: ambientKeyPath, label: "ambient-key" });
+      const customKey = generateApiKey(["agent:run", "admin"], { filePath: customKeyPath, label: "custom-key" });
+
+      const runtime = createFakeRuntime({
+        responses: [{ content: "P0-1 verified." }],
+      });
+
+      const server = await runSeepientServer({
+        runtime,
+        apiKeysFile: customKeyPath,
+        listen: false,
+      });
+      activeServers.push(server);
+
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const addr = server.address() as { port: number };
+
+      const testUpgrade = (rawKey: string): Promise<number> => {
+        return new Promise((resolve, reject) => {
+          const req = http.request({
+            host: "127.0.0.1",
+            port: addr.port,
+            path: "/ws",
+            headers: {
+              connection: "Upgrade",
+              upgrade: "websocket",
+              "sec-websocket-version": "13",
+              "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+              authorization: `Bearer ${rawKey}`,
+            },
+          });
+          req.on("response", (res) => {
+            resolve(res.statusCode ?? 0);
+            res.resume();
+          });
+          req.on("upgrade", (_res, socket) => {
+            socket.destroy();
+            resolve(101);
+          });
+          req.on("error", reject);
+          req.end();
+        });
+      };
+
+      // 1. WebSocket upgrade with ambient key MUST fail with 401
+      const ambientWsStatus = await testUpgrade(ambientKey.rawKey!);
+      expect(ambientWsStatus).toBe(401);
+
+      // 2. WebSocket upgrade with custom injected key MUST succeed with 101
+      const customWsStatus = await testUpgrade(customKey.rawKey!);
+      expect(customWsStatus).toBe(101);
+    } finally {
+      if (originalEnv !== undefined) {
+        process.env.SEEPIENT_API_KEYS_FILE = originalEnv;
+      } else {
+        delete process.env.SEEPIENT_API_KEYS_FILE;
+      }
+      if (fs.existsSync(ambientKeyPath)) fs.unlinkSync(ambientKeyPath);
+      if (fs.existsSync(customKeyPath)) fs.unlinkSync(customKeyPath);
+    }
   });
 });
 

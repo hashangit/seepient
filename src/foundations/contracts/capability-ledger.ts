@@ -27,6 +27,7 @@ export interface CapabilityLedgerScope {
  * policy digest it authenticates.
  */
 export interface CapabilityLedger {
+  readonly isIsolated?: boolean;
   /** Load existing ledger state from persistent storage if applicable. */
   load(scope?: CapabilityLedgerScope): Promise<void>;
 

@@ -29,6 +29,7 @@ import type {
   PolicyStore as PolicyStoreContract,
 } from "../../foundations/contracts/execution-brokers.js";
 import { PolicyConflictError } from "../../foundations/errors.js";
+import { PRINCIPAL_ID_RE, InvalidPrincipalIdError } from "../tenancy/tenancy-mode.js";
 
 /**
  * Stable workspace identity for GLOBAL protected policy (spec 011 persistent
@@ -136,15 +137,30 @@ interface StoredSnapshot {
   mutationHistory?: Array<{ mutationId: string; version: number }>;
 }
 
+const STALE_LOCK_MS = 30_000;
+export async function breakStalePolicyLock(lockFile: string, thresholdMs = STALE_LOCK_MS): Promise<void> {
+  let stat: import("node:fs").Stats;
+  try {
+    stat = await fs.stat(lockFile);
+  } catch {
+    return;
+  }
+  if (Date.now() - stat.mtimeMs > thresholdMs) {
+    await fs.unlink(lockFile).catch(() => {});
+  }
+}
+
 /**
  * Local protected policy store. Uses a sibling lockfile for mutual exclusion
  * and atomic rename for replacement. All file permissions are private.
  */
 export class LocalPolicyStore implements PolicyStoreContract {
+  readonly isIsolated: boolean;
   private readonly dir: string;
   private readonly root: string;
 
   constructor(opts?: { root?: string }) {
+    this.isIsolated = Boolean(opts?.root);
     this.root =
       opts?.root ??
       (process.env.SEEPIENT_SECURITY_DIR
@@ -153,11 +169,19 @@ export class LocalPolicyStore implements PolicyStoreContract {
     this.dir = this.root;
   }
 
+  private assertValidSlug(slug: string): void {
+    if (!slug || !PRINCIPAL_ID_RE.test(slug)) {
+      throw new InvalidPrincipalIdError(`Invalid identifier "${slug}" for policy storage path`);
+    }
+  }
+
   private fileFor(workspaceId: string): string {
+    this.assertValidSlug(workspaceId);
     return path.join(this.dir, `${workspaceId}.json`);
   }
 
   private lockFor(workspaceId: string): string {
+    this.assertValidSlug(workspaceId);
     return path.join(this.dir, `${workspaceId}.lock`);
   }
 
@@ -174,35 +198,44 @@ export class LocalPolicyStore implements PolicyStoreContract {
 
   /**
    * Acquire an exclusive lock via O_EXCL lockfile. Released in `finally`.
-   * Throws on contention so the caller can surface `policy-conflict`.
+   * Breaks stale locks older than 30s. Throws on contention so the caller
+   * can surface `policy-conflict`.
    */
   private async withLock<T>(workspaceId: string, fn: () => Promise<T>): Promise<T> {
     await this.ensureDir();
     const lockPath = this.lockFor(workspaceId);
-    try {
-      // O_EXCL create — fails if another process holds the lock.
-      const handle = await fs.open(lockPath, "wx", 0o600);
+    let acquired = false;
+    for (let attempt = 0; attempt < 5; attempt++) {
       try {
-        await handle.writeFile(String(process.pid));
-      } finally {
-        await handle.close();
+        const handle = await fs.open(lockPath, "wx", 0o600);
+        try {
+          await handle.writeFile(String(process.pid));
+        } finally {
+          await handle.close();
+        }
+        acquired = true;
+        break;
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== "EEXIST") throw err;
+        await breakStalePolicyLock(lockPath);
+        if (attempt === 4) {
+          throw new PolicyConflictError("Policy store is locked by another process", {
+            workspaceId,
+          });
+        }
+        await new Promise((r) => setTimeout(r, 25));
       }
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code === "EEXIST") {
-        throw new PolicyConflictError("Policy store is locked by another process", {
-          workspaceId,
-        });
-      }
-      throw err;
     }
     try {
       return await fn();
     } finally {
-      try {
-        await fs.unlink(lockPath);
-      } catch {
-        /* lock already released */
+      if (acquired) {
+        try {
+          await fs.unlink(lockPath);
+        } catch {
+          /* lock already released */
+        }
       }
     }
   }

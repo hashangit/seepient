@@ -14,11 +14,16 @@ import type {
 } from "./ws-types.js";
 import { DurableApprovalStore } from "../../domain/permissions/durable-approval-store.js";
 
+export interface ConnectionRegistryOptions {
+  durableApprovalStore?: DurableApprovalStore;
+  inMemory?: boolean;
+}
+
 /**
  * Create a per-instance registry holding active connections, pending tool
  * approvals, and the durable approval store.
  */
-export function createConnectionRegistry(): WsConnectionRegistry {
+export function createConnectionRegistry(opts?: ConnectionRegistryOptions): WsConnectionRegistry {
   const activeConnections = new Map<WebSocket, ConnectionState>();
   const pendingApprovals = new Map<string, {
     continuationId: string;
@@ -28,8 +33,10 @@ export function createConnectionRegistry(): WsConnectionRegistry {
     toolName: string;
     createdAt: number;
   }>();
-  const durableApprovalStore = new DurableApprovalStore();
-  void durableApprovalStore.load();
+  const durableApprovalStore =
+    opts?.durableApprovalStore ??
+    new DurableApprovalStore({ inMemory: opts?.inMemory ?? true });
+  void durableApprovalStore.load().catch(() => {});
 
   return {
     activeConnections,

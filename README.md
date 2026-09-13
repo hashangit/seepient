@@ -6,7 +6,7 @@
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg?style=flat-square)](https://github.com/hashangit/seepient/blob/main/LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com)
 
-**The Engineering-First Headless Agent Framework: CLI, SDK, and Server. Stable, Scalable Automation for the Post-Vision Era.**
+**The Engineering-First Headless Agent Framework across CLI, TUI, SDK, Server, and Container Workers. Stable, Scalable Automation for the Post-Vision Era.**
 
 **Platform support** — chat, planning, and file reads work everywhere. Model-authored file writes are enforced through exact atomic commits via the bundled native helper (`native/fs-commit`): fully supported on **macOS (arm64/x64)** and **Linux (x64/arm64)**; on **Windows** writes are refused before approval (read-only) until a win32 helper exists. There is no unguarded write fallback.
 
@@ -16,9 +16,9 @@
 
 ---
 
-Seepient Agent is a high-stability, open-source automation framework specifically engineered for **headless systems**.
+Seepient Agent is a high-stability, open-source automation framework spanning the **full spectrum of deployment surfaces**: **CLI**, **TUI**, **embedded SDK**, **programmatic server**, **REST/WS server**, and **serverless/container workers** — all sharing one agent loop, one permission engine, and one durable audit trail.
 
-Unlike "screen-seeing" agents (such as OpenClaw) that rely on visual interpretation, Seepient Agent is built on a foundation of precise command-driven execution. This makes it significantly more **stable**, **robust from an engineering perspective**, and **easier to scale** across complex environments—whether it's a local server, a CI/CD pipeline, or thousands of containerized nodes.
+Unlike "screen-seeing" agents (such as OpenClaw) that rely on visual interpretation, Seepient Agent is built on a foundation of precise command-driven execution. This makes it significantly more **stable**, **robust from an engineering perspective**, and **easier to scale** across complex environments—whether it's a developer terminal, a CI/CD pipeline, an embedded backend application, or thousands of containerized worker nodes.
 
 ## Why Seepient Agent?
 - 🐳 **Docker Native**: Built to run safely inside containers with pre-packaged Chromium, CJK fonts, non-root security, and native helper binaries.
@@ -27,7 +27,7 @@ Unlike "screen-seeing" agents (such as OpenClaw) that rely on visual interpretat
 - 📈 **Massive Scalability**: Low resource consumption allows orchestrating thousands of instances (e.g., in K8s) for true automation swarms.
 - 🔌 **Swarm Ready**: Stateless design allows for easy orchestration via K8s, Docker Swarm, or simple shell loops.
 - 🧩 **Extensible Integrations**: Built-in support for Web Search (Tavily), Email (SMTP), and Notification Webhooks (Feishu, DingTalk, WeCom).
-- 📦 **SDK & Server**: TypeScript SDK for programmatic use, standalone HTTP/WebSocket server for remote access.
+- 🌐 **Full Deployment Spectrum**: Native support across CLI, TUI, embedded SDK, programmatic server, REST/WS server, and serverless/container workers with unified governance.
 - 🛠 **Skills System**: Loadable skill packs with file references, custom tool registration, and extensible workflows.
 
 ## Features
@@ -43,8 +43,10 @@ Unlike "screen-seeing" agents (such as OpenClaw) that rely on visual interpretat
 - 🌐 **Web Search**: Integrated with Tavily for real-time information retrieval.
 - 🕒 **Time Accuracy**: Built-in tool to get precise system date and time for correct temporal context.
 - 📧 **Communication**: Send emails and push notifications to chat groups automatically.
-- 📦 **TypeScript SDK**: Programmatic access via 3 statefulness tiers: `askSeepient` (one-shot), `createSeepient` (stateful multi-turn), and `runSeepientServer` (remote server).
-- 🖥 **Server Mode**: Standalone HTTP/WebSocket server with REST v2 management API (`/v1/providers`, `/v1/models` with ETag/If-Match), API key auth, and session management.
+- 🌐 **Full Deployment Spectrum**: Native support across CLI, interactive TUI, embedded TypeScript SDK, programmatic server, standalone REST/WS server daemon, and serverless/container workers.
+- 📦 **TypeScript SDK & Programmatic Server**: Programmatic access via `askSeepient` (one-shot), `createSeepient` (stateful multi-turn), and `runSeepientServer` (embeddable server with custom store injection).
+- 🖥 **Standalone REST & WebSocket Server**: High-performance HTTP/WebSocket service with REST v2 management APIs (`/v1/providers`, `/v1/models` with ETag/If-Match), API key auth, and session management.
+- 🐳 **Stateless Container & Cloud Workers**: Ephemeral worker deployment pattern with zero local disk footprint, externalized store contracts, and isolated container execution.
 - 🛠 **Skills System**: Loadable skill packs from directories with `@path` file references, turn-scoped skill switching, and custom tool creation.
 - 🛡️ **Security & Permission Pipeline**: Single Domain-owned enforcement pipeline (`PolicyEngine` → `ApprovalBroker` → `ExecutionBoundary` → `AuditRecorder`) default-on across CLI, TUI, SDK, and HTTP/WebSocket server.
 - 🔒 **Fail-Closed Isolation & SSRF Defense**: Process containment (macOS Seatbelt / Linux Bubblewrap) and exact-file write helpers fail closed; SSRF guards prevent metadata reflection.
@@ -134,6 +136,17 @@ import { runSeepientServer } from 'seepient/server';
 
 ## Usage
 
+Seepient spans the **full spectrum of deployment surfaces**: **CLI**, **TUI**, **embedded SDK**, **programmatic server**, **REST/WS server**, and **serverless/container workers**. Every surface shares the same underlying agent core, model routing, and fail-closed permission pipeline.
+
+| Surface | Description | Primary Interface | Ideal Workload |
+| :--- | :--- | :--- | :--- |
+| **[CLI](#3-command-line-interface-cli)** | Headless one-shots, Unix pipes, scriptable subcommands | `seepient "prompt" -y` | CI/CD pipelines, shell scripts, cron jobs |
+| **[TUI](#1-terminal-user-interface-tui)** | Full-screen interactive terminal UI with live widgets | `seepient` | Daily interactive developer workflows & diff reviews |
+| **[Embedded SDK](#2-embedded-typescript-sdk)** | Programmatic agent instances inside Node.js apps | `createSeepient()`, `askSeepient()` | Integrating autonomous capabilities into backend services |
+| **[Programmatic Server](#5-programmatic-server)** | Embeddable server runtime with custom injected stores | `runSeepientServer()` | Multi-tenant platforms & microservices with custom backends |
+| **[REST / WS Server](#4-standalone-rest--websocket-server)** | Standalone network daemon with auth & session APIs | HTTP / WS daemon (`--port 7337`) | Remote agent access, web frontends, cross-language clients |
+| **[Container Workers](#6-serverless--container-workers)** | Ephemeral, stateless containerized worker execution | Docker, K8s, microVMs | Scalable automation swarms with zero local state footprint |
+
 ### 1. Terminal User Interface (TUI)
 
 Running `seepient` in any standard terminal launches a full-screen interactive interface built with Ink and React:
@@ -210,9 +223,9 @@ Type `/` in the composer for fuzzy autocomplete across all commands and custom s
 
 ---
 
-### 2. TypeScript SDK & Programmatic Usage
+### 2. Embedded TypeScript SDK
 
-Seepient Agent provides a TypeScript SDK for building agent-powered applications.
+Seepient Agent provides an embedded TypeScript SDK (`createSeepient`, `askSeepient`) for building autonomous agent capabilities directly into your Node.js applications.
 
 #### Basic Agent
 ```ts
@@ -353,20 +366,7 @@ const seepient = await createSeepient({
 });
 ```
 
-#### Programmatic Server Creation & Custom Store Injection
-```ts
-import { runSeepientServer } from "seepient/server";
-
-// Stateless worker mode with custom runtime and in-memory stores
-const server = await runSeepientServer({
-  port: 7337,
-  runtime: myCustomRuntime,
-  persist: myRedisBackend,
-  auditStore: myRemoteAuditStore,
-});
-```
-
-For a complete multi-tenant stateless worker deployment, see the [reference worker example](./examples/worker).
+> **Tip**: To run Seepient as an embeddable server with custom store injection, see [5. Programmatic Server](#5-programmatic-server). For ephemeral worker tier deployments with zero local disk footprint, see [6. Serverless & Container Workers](#6-serverless--container-workers).
 
 #### Programmatic Gateway Client
 ```ts
@@ -470,9 +470,9 @@ Supported options: `--prompt <text>`, `--operation <generate|variation|edit|mask
 
 ---
 
-### 4. Server Mode
+### 4. Standalone REST & WebSocket Server
 
-Run Seepient Agent as a standalone HTTP/WebSocket server for remote agent access or stateless worker deployments. The HTTP server operates in inference and planning mode in this release; effectful tool execution fails closed with `backend-unsupported` by design until the isolated worker scheduler ships.
+Run Seepient Agent as a standalone HTTP/WebSocket daemon (`seepient-server`) for remote agent access, web frontends, or cross-language clients. The HTTP server operates in inference and planning mode in this release; effectful tool execution fails closed with `backend-unsupported` by design until the isolated worker scheduler ships.
 
 #### Starting the Server
 ```bash
@@ -523,18 +523,59 @@ ws.onmessage = (event) => {
 };
 ```
 
-#### Programmatic Server Creation & Custom Store Injection
+---
+
+### 5. Programmatic Server
+
+Embed a custom Seepient server directly within your Node.js application, microservice, or backend tier with full control over runtime configuration, storage adapters, and audit recording:
+
 ```ts
 import { runSeepientServer } from "seepient/server";
 
-// Stateless worker mode with custom runtime and in-memory stores
+// Embeddable server with custom stores and runtime
 const server = await runSeepientServer({
   port: 7337,
+  host: "127.0.0.1",
   runtime: myCustomRuntime,
   persist: myRedisBackend,
   auditStore: myRemoteAuditStore,
 });
+
+// Graceful shutdown
+await server.close();
 ```
+
+---
+
+### 6. Serverless & Container Workers
+
+For high-throughput automation swarms, serverless functions, or multi-tenant cloud architectures (Docker, Kubernetes, AWS Lambda, Cloud Run, microVMs), Seepient can be deployed as ephemeral, stateless container workers:
+
+- **Zero Local Disk Footprint**: When embedder store adapters are injected, Seepient writes zero persistent state to the local worker filesystem.
+- **Multi-Tenant Isolation**: Each task or tenant executes within an isolated container or microVM with OS-level sandboxing (`bwrap` on Linux, Seatbelt on macOS) and exact atomic file writes.
+- **Externalized Storage Sovereignty**: Sessions, audit records, and policy grants stream back to your centralized databases via injected store contracts.
+
+```ts
+import { createSeepient, createIsolatedProviderRuntime } from "seepient";
+import { RemoteAuditStore, RedisPersistence, PostgresPolicyStore, RemoteCapabilityLedger } from "./stores.js";
+
+// Ephemeral worker instance with externalized state
+const worker = await createSeepient({
+  principalId: tenantId,
+  cwd: `/tmp/workspace-${tenantId}`,
+  runtime: createIsolatedProviderRuntime(),
+  auditStore: new RemoteAuditStore(tenantId),
+  persist: new RedisPersistence(sessionId),
+  policyStore: new PostgresPolicyStore(tenantId),
+  capabilityLedger: new RemoteCapabilityLedger(tenantId),
+  consentMode: 'autonomous',
+});
+
+const result = await worker.chat(taskPrompt);
+await worker.dispose();
+```
+
+For a complete runnable multi-tenant stateless worker deployment, see the [reference worker example](./examples/worker) and the [Stateless Workers Guide](https://seepient.dev/sdk/stateless-workers).
 
 ---
 

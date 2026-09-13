@@ -1,12 +1,12 @@
 import chalk from 'chalk';
-import { getDefaultProviderRuntime } from '../../../domain/providers/provider-runtime.js';
+import { createAmbientProviderRuntime } from '../../../domain/providers/provider-runtime.js';
 import { isNonInteractive } from '../../../foundations/environment.js';
 import { Agent } from '../agent.js';
 import type { CommandHandler } from './registry.js';
 
 export function modelsHandler(agent: Agent, _config: any, activeProviderType: string): CommandHandler {
   const handler: CommandHandler = async () => {
-    const runtime = agent.getProviderRuntime() ?? getDefaultProviderRuntime();
+    const runtime = agent.getProviderRuntime() ?? createAmbientProviderRuntime();
     const effectiveConfig = await runtime.getConfigStore().getEffectiveConfig();
     const providers = Object.entries(effectiveConfig.providers || {});
 

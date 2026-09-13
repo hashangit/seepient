@@ -51,11 +51,13 @@ export interface SettingsManagerOptions {
   globalConfigPath?: string;
   projectConfig?: Record<string, any>;
   globalConfig?: Record<string, any>;
+  isIsolated?: boolean;
 }
 
 // ── SettingsManager ───────────────────────────────────────────────────────
 
 export class SettingsManager {
+  readonly isIsolated?: boolean;
   private config: Record<string, any>;
   private projectConfigPath?: string;
   private globalConfigPath?: string;
@@ -64,6 +66,7 @@ export class SettingsManager {
   private listeners: Array<(changedKeys: string[]) => void> = [];
 
   constructor(options: SettingsManagerOptions) {
+    this.isIsolated = options.isIsolated;
     this.config = { ...options.config };
     this.projectConfigPath = options.projectConfigPath;
     this.globalConfigPath = options.globalConfigPath;
@@ -83,8 +86,9 @@ export class SettingsManager {
     const secret = isSecretField(dotKey);
 
     // Check env var first (empty string = not explicitly set → fall through to default)
+    // In isolated mode (Profile B multi-tenant), never query ambient process.env
     const envVar = ENV_VAR_MAP.get(dotKey);
-    if (envVar && process.env[envVar]) {
+    if (!this.isIsolated && envVar && process.env[envVar]) {
       const raw = this.parseEnvValue(process.env[envVar], schema);
       const value = secret && raw != null ? this.maskValue(String(raw)) : raw;
       return { value, origin: `env: ${envVar}`, masked: secret };
@@ -145,20 +149,18 @@ export class SettingsManager {
 
     // Determine write target
     const writePath = this.resolveWriteTarget(dotKey);
-    if (!writePath) {
-      throw new SettingsError('No config file path available for writing.', 'SETTINGS_WRITE_FAILED');
-    }
+    if (writePath) {
+      // Check env var override
+      const envVar = ENV_VAR_MAP.get(dotKey);
+      if (envVar && process.env[envVar]) {
+        console.warn(`Note: This key is overridden by env var ${envVar}. Saving to config. The env var takes precedence until unset.`);
+      }
 
-    // Check env var override
-    const envVar = ENV_VAR_MAP.get(dotKey);
-    if (envVar && process.env[envVar]) {
-      console.warn(`Note: This key is overridden by env var ${envVar}. Saving to config. The env var takes precedence until unset.`);
+      // Read current file, apply change, write
+      const fileConfig = await this.readConfigFile(writePath);
+      this.applyValueToConfig(fileConfig, mapEntry.configPath, value);
+      await this.persist(writePath, fileConfig);
     }
-
-    // Read current file, apply change, write
-    const fileConfig = await this.readConfigFile(writePath);
-    this.applyValueToConfig(fileConfig, mapEntry.configPath, value);
-    await this.persist(writePath, fileConfig);
 
     // Update in-memory
     this.applyValueToConfig(this.config, mapEntry.configPath, value);
@@ -177,13 +179,11 @@ export class SettingsManager {
     }
 
     const writePath = this.resolveWriteTarget(dotKey);
-    if (!writePath) {
-      throw new SettingsError('No config file path available for writing.', 'SETTINGS_WRITE_FAILED');
+    if (writePath) {
+      const fileConfig = await this.readConfigFile(writePath);
+      this.removeValueFromConfig(fileConfig, mapEntry.configPath);
+      await this.persist(writePath, fileConfig);
     }
-
-    const fileConfig = await this.readConfigFile(writePath);
-    this.removeValueFromConfig(fileConfig, mapEntry.configPath);
-    await this.persist(writePath, fileConfig);
 
     // Reset in-memory to default
     const schema = SETTINGS_SCHEMA.get(dotKey);
@@ -307,6 +307,7 @@ export class SettingsManager {
   }
 
   private resolveConfigOrigin(configPath: string[]): string {
+    if (this.isIsolated) return 'server';
     if (this.hasPath(this.projectConfig, configPath)) return 'project config';
     if (this.hasPath(this.globalConfig, configPath)) return 'global config';
     return 'default';

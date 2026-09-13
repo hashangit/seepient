@@ -262,6 +262,7 @@ export interface PolicySnapshot {
  * version.
  */
 export interface PolicyStore {
+  readonly isIsolated?: boolean;
   read(
     workspaceId: string,
     opts?: { principalId?: string; tenancyMode?: "single" | "multi" },
@@ -348,6 +349,7 @@ export interface AuditStore {
    * or `false` / omitted for remote / distributed / in-memory stores.
    */
   readonly isLocal?: boolean;
+  readonly isIsolated?: boolean;
   append(
     event: ActionAuditEvent,
     opts: { idempotencyKey: string },

@@ -21,7 +21,7 @@ import * as readline from 'readline/promises';
 import { Agent } from './agent.js';
 import { ToolRegistry } from '../../domain/tool-executor.js';
 import { resolveLaunchMode, selectSystemPrompt } from '../../domain/prompts/system-prompts.js';
-import { getDefaultProviderRuntime } from '../../domain/providers/provider-runtime.js';
+import { createAmbientProviderRuntime } from '../../domain/providers/provider-runtime.js';
 import {
   loadJsonConfig,
   applyEnvOverrides,
@@ -101,7 +101,7 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
   fullConfig = applyEnvOverrides(fullConfig);
 
   // 5. Load provider config via ProviderRuntime
-  const runtime = getDefaultProviderRuntime();
+  const runtime = createAmbientProviderRuntime();
   let effectiveConfig = await runtime.getConfigStore().getEffectiveConfig();
   let hasProviders = Object.keys(effectiveConfig.providers || {}).length > 0;
 

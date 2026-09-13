@@ -71,7 +71,7 @@ When you call `askSeepient(prompt)` without options, or omit specific fields, Se
 
 ### Provider and model resolution
 
-Seepient routes requests through `getDefaultProviderRuntime()`. Before execution begins, the runtime creates an immutable snapshot of the effective configuration and resolves an invocation plan:
+In single-user mode, Seepient automatically wires an ambient provider runtime (or your explicitly provided runtime). Before execution begins, the runtime creates an immutable snapshot of the effective configuration and resolves an invocation plan:
 
 ```
 1. Explicit options (options.model, options.provider, options.providerAccount)
@@ -196,7 +196,7 @@ The `skills` option controls skill injection:
 | `hooks` | `Hooks` | *(none)* | Lifecycle callbacks (`beforeToolCall`, `afterToolCall`, `onStep`, `onError`, `onFinish`) |
 | `middleware` | `Middleware[]` | *(none)* | Functions for request and response interception |
 | `metadata` | `Record<string, unknown>` | `{}` | Custom metadata passed to middleware and audit loggers |
-| `runtime` | `ProviderRuntimeContract` | `getDefaultProviderRuntime()` | Custom provider runtime instance |
+| `runtime` | `ProviderRuntimeContract` | `createAmbientProviderRuntime()` in single-mode; required isolated runtime in multi-mode | Custom provider runtime instance |
 | `auditStore` | `AuditStore` | Local file store | Storage backend for recording action lifecycle events |
 | `policyStore` | `PolicyStore` | Local file store | Storage backend for grant snapshots and policy mutations |
 | `capabilityLedger` | `CapabilityLedger` | Local file store | Storage backend for capability lease consumption and revocation |

@@ -180,4 +180,21 @@ describe("store-owned WAL metadata (round 8 P0)", () => {
     );
     expect(after.mutationHistory).toEqual([{ mutationId: "mut-legacy", version: 1 }]);
   });
+
+  it("rejects path traversal and invalid characters in workspaceId", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pol-traversal-"));
+    const store = new LocalPolicyStore({ root });
+
+    await expect(store.read("../../etc/passwd")).rejects.toThrow(/Invalid identifier/);
+    await expect(store.read("workspace with spaces")).rejects.toThrow(/Invalid identifier/);
+    await expect(store.read("ws/slash")).rejects.toThrow(/Invalid identifier/);
+    await expect(
+      store.compareAndSet(
+        "../escape",
+        0,
+        { version: 1, capabilities: [] },
+        { kind: "human", authorityId: "operator", authenticatedBy: "cli" },
+      ),
+    ).rejects.toThrow(/Invalid identifier/);
+  });
 });

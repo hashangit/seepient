@@ -5,19 +5,56 @@ This example demonstrates how to embed the Seepient SDK in a stateless worker ti
 ## Architecture
 
 In this pattern:
-- **Embedder Control Plane**: Owns authentication, tenant state storage (audits, policies, session history), and user-facing approvals.
-- **Stateless Worker**: Spins up per-tenant or per-task in an isolated container/microVM. Embeds the Seepient SDK with injected store adapters (`AuditStore`, `PolicyStore`, `CapabilityLedger`, `PersistenceBackend`).
+- **Embedder Control Plane**: Owns authentication, tenant state storage (audits, policies, session history), and user-facing approvals. Issues per-tenant Bearer tokens (`POST /api/auth/token`).
+- **Stateless Worker**: Spins up per-tenant or per-task in an isolated container/microVM. Authenticates to the control plane with per-tenant Bearer tokens (`Authorization: Bearer <token>`). Embeds the Seepient SDK with injected store adapters (`AuditStore`, `PolicyStore`, `CapabilityLedger`, `PersistenceBackend`).
 - **Approval Relay**: Approval prompts are intercepted by `approvalBroker` and relayed to the embedder control plane.
 
 ## Key Features
 - **Zero Local Disk Writes**: All persistent state routes to the embedder; ephemeral worker disk is discardable.
-- **Multi-Tenant Isolation**: Tenant A cannot reach or affect Tenant B's execution state or credentials.
-- **Fail-Closed Security**: Native OS sandbox and permission pipeline remain enforced inside the worker.
+- **Multi-Tenant Isolation**: Tenant A cannot reach or affect Tenant B's execution state or credentials; control plane endpoints are strictly scoped by composite keys (`principal:resource`).
+- **Fail-Closed Security**: Native OS sandbox and permission pipeline remain enforced inside the worker; unauthenticated control plane requests fail closed with 401.
 
-## Running the Example Test
+## Authentication & Scoping (FR-018 / FR-003–FR-005)
+
+All control plane endpoints require Bearer authentication.
+- **Tokens must be explicitly issued**: Tokens must be issued by the control plane (`POST /api/auth/token`) and supplied via `controlPlaneToken`. Unknown, unissued, or forged tokens fail closed with `401 Unauthorized` (no auto-adoption).
+- **Identity derived exclusively from token**: The control plane derives tenant identity (`authPrincipal`) strictly from the authenticated token lookup. Any `principalId` supplied in request bodies (e.g. `POST /api/sessions`, `POST /api/audit`, `POST /api/policy`) is ignored to prevent principal re-binding.
+- **Strict resource scoping**: Stored resources (sessions, policies, audits, capability digests) are composite-keyed by principal (`principal:resource`). Deletions and listings operate strictly within the caller's authenticated scope.
+- **Explicit token requirement**: Omission of `controlPlaneToken` when instantiating worker stores or `createWorkerAgent` throws `ControlPlaneTokenRequiredError` (`CONTROL_PLANE_TOKEN_REQUIRED`).
+
+### Issuing a Token and Starting a Worker
+
+```typescript
+import { createWorkerAgent } from "./src/worker.js";
+
+// 1. Embedder control plane issues a per-tenant token (requires admin secret)
+const tokenRes = await fetch("https://control-plane.internal/api/auth/token", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "x-admin-key": process.env.CONTROL_PLANE_ADMIN_KEY!,
+  },
+  body: JSON.stringify({ principalId: "tenant-abc" }),
+});
+const { token } = await tokenRes.json();
+
+// 2. Launch worker agent with the issued controlPlaneToken
+const agent = await createWorkerAgent({
+  tenantId: "tenant-abc",
+  principalId: "tenant-abc",
+  sessionId: "session-1",
+  workspaceDir: "/tmp/workspace-tenant-abc",
+  runtime,
+  controlPlaneUrl: "https://control-plane.internal",
+  controlPlaneToken: token,
+});
+```
+
+## Running the Example Tests
 
 ```bash
 pnpm vitest run examples/worker/__tests__/worker.test.ts
+pnpm vitest run examples/worker/src/__tests__/control-plane.test.ts
 ```
 
 ## Container Image & Sandbox Binaries (Spec 019 Matrix)
@@ -38,8 +75,8 @@ import { createSeepient, FsSkillSources } from "seepient";
 import { DbSkillSource } from "./src/db-skill-source.js";
 
 // Global skills (tenant_id is null) + tenant skills (tenant_id = $1)
-const globalSource = new DbSkillSource("https://control-plane.internal");
-const tenantSource = new DbSkillSource("https://control-plane.internal", tenantId);
+const globalSource = new DbSkillSource("https://control-plane.internal", { controlPlaneToken: token });
+const tenantSource = new DbSkillSource("https://control-plane.internal", { tenantId, controlPlaneToken: token });
 
 const agent = await createSeepient({
   sources: [

@@ -15,7 +15,7 @@ import type {
   Usage,
   SeepientError,
 } from "../../foundations/types.js";
-import { getDefaultProviderRuntime, type ProviderRuntime } from "../../domain/providers/provider-runtime.js";
+import { createAmbientProviderRuntime, createIsolatedProviderRuntime, type ProviderRuntime } from "../../domain/providers/provider-runtime.js";
 import { createHookExecutor } from "../../domain/hooks.js";
 import { StreamManager } from "../../domain/streaming/stream-manager.js";
 import { resolveTools, extractHostCallbacks, extractRegistrations, DEFAULT_TRUSTED_HOST_ALLOWLIST } from "./tools.js";
@@ -37,7 +37,13 @@ import * as path from 'path';
 
 // ── Re-exports ───────────────────────────────────────────────────────────
 
-export { createSeepient, validateSessionId, MAX_SESSION_ID_LENGTH } from "./seepient.js";
+export {
+  createSeepient,
+  createTenantAgent,
+  validateSessionId,
+  MAX_SESSION_ID_LENGTH,
+  type CreateTenantAgentOptions,
+} from "./seepient.js";
 export type {
   Seepient,
   CreateSeepientOptions,
@@ -68,7 +74,7 @@ export {
   type HostToolContext,
 } from "./custom-tools.js";
 export { settings, SettingsError } from "./settings.js";
-export { getDefaultProviderRuntime, ProviderRuntime } from "../../domain/providers/provider-runtime.js";
+export { createAmbientProviderRuntime, createIsolatedProviderRuntime, ProviderRuntime } from "../../domain/providers/provider-runtime.js";
 export { ProviderConfigStore } from "../../domain/providers/config-store/provider-config-store.js";
 export { MemoryCredentialStore } from "../../domain/providers/credentials/memory-credential-store.js";
 export type { AuditStore, PolicyStore, ActionAuditEvent, PolicySnapshot } from "../../foundations/contracts/execution-brokers.js";
@@ -112,6 +118,8 @@ export {
   PersistConfigInvalidError,
   SessionIdInvalidError,
   PrincipalRequiredError,
+  TenancyWorkspaceRequiredError,
+  CredentialRequiredError,
   type InferenceErrorCode,
   type InferenceErrorOptions,
 } from "../../foundations/errors.js";
@@ -121,6 +129,7 @@ export {
   resolveTenancyMode,
   validateTenancyCompleteness,
   emitTenancyNoticeOnce,
+  emitCredentialsSingleUserWarningOnce,
   TenancyRuntimeRequiredError,
   TenancyStoreIncompleteError,
   TenancyAmbientIoError,
@@ -146,9 +155,11 @@ import {
   resolveTenancyMode,
   validateTenancyCompleteness,
   emitTenancyNoticeOnce,
+  emitCredentialsSingleUserWarningOnce,
   type TenancyMode,
   type TenancySignals,
 } from "../../domain/tenancy/tenancy-mode.js";
+import { TenancyWorkspaceRequiredError } from "../../foundations/errors.js";
 
 // Gateway (lazy — only loaded when used; Spec 022 returns { gateway, tools }, no global registration)
 export const gateway = {
@@ -337,8 +348,12 @@ export async function askSeepient(
     principalId: opts.principalId,
   });
 
+  if (tenancyMode === "multi" && (!opts.cwd || typeof opts.cwd !== "string" || opts.cwd.trim().length === 0)) {
+    throw new TenancyWorkspaceRequiredError();
+  }
+
   const maxSteps = opts.maxSteps ?? 10;
-  const runtime = opts.runtime ?? getDefaultProviderRuntime();
+  const runtime = opts.runtime ?? createAmbientProviderRuntime();
 
   // One abort controller per call: bridges the caller's signal and drives the
   // agent loop AND media vendor operations in both modes, so `stream.abort()`
@@ -416,7 +431,15 @@ export async function askSeepient(
     runtime,
     artifacts: sharedArtifacts,
     signal: abortController.signal,
+    tenancyMode,
   });
+  const secretResolver =
+    tenancyMode === "multi"
+      ? (ref: string) => {
+          const store = (runtime as any).credentialStore ?? (runtime as any).getCredentialStore?.();
+          return store?.resolveSecret?.(ref) ?? undefined;
+        }
+      : undefined;
   const { boundary } = await buildLocalBoundary({
     artifacts: sharedArtifacts,
     workspaceRoot: opts.cwd ?? process.cwd(),
@@ -425,6 +448,8 @@ export async function askSeepient(
     vendorOperationHandler,
     commitHelper: opts.commitHelper,
     network: opts.network,
+    tenancyMode,
+    secretResolver,
   });
   const approvalMode = opts.consentMode
     ? (opts.consentMode === "autonomous" ? "autonomous" : opts.consentMode === "ask-everything" ? "manual" : "balanced")
@@ -480,6 +505,7 @@ export async function askSeepient(
           systemPrompt,
           maxSteps,
           hooks,
+          tenancyMode,
           signal: abortController.signal,
           config: { ...opts.config, runtime, skills: skillRegistry },
           metadata: opts.metadata,
@@ -605,6 +631,7 @@ export async function askSeepient(
     middleware: opts.middleware,
     approveTool: opts.approveTool,
     wiredPipeline,
+    tenancyMode,
     onStep: opts.onStep || opts.onText || opts.onToolCall || opts.onToolResult ? (step: StepResult) => {
       if (opts.onStep) opts.onStep(step);
       if ((step.type === "text" || step.type === "text_delta") && step.content) {

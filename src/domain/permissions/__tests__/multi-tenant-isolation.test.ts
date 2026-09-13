@@ -31,13 +31,11 @@ import { PrincipalRequiredError } from "../../../foundations/errors.js";
 import { InMemoryArtifactStore } from "../../../capabilities/execution/in-memory-artifact-store.js";
 import type { ExecutionBoundary } from "../../../foundations/contracts/execution-boundary.js";
 import type { ApprovalBroker } from "../../../foundations/contracts/permission-policy.js";
+import { FilePersistenceBackend } from "../../sessions/session-store.js";
+import { ProviderRuntime } from "../../providers/provider-runtime.js";
 
 let createSeepient: any;
 let askSeepient: any;
-let FakeAuditStore: any;
-let FakePolicyStore: any;
-let FakeCapabilityLedger: any;
-let RecordingPersistenceBackend: any;
 let createFakeRuntime: any;
 let runSeepientServer: any;
 let generateApiKey: any;
@@ -51,10 +49,6 @@ beforeAll(async () => {
   createSeepient = sdk.createSeepient;
   askSeepient = sdk.askSeepient;
   const fakes = await import("../../../transport/sdk/__tests__/helpers/fake-stores.js");
-  FakeAuditStore = fakes.FakeAuditStore;
-  FakePolicyStore = fakes.FakePolicyStore;
-  FakeCapabilityLedger = fakes.FakeCapabilityLedger;
-  RecordingPersistenceBackend = fakes.RecordingPersistenceBackend;
   createFakeRuntime = fakes.createFakeRuntime;
 });
 import { ProviderConfigStore } from "../../providers/config-store/provider-config-store.js";
@@ -284,7 +278,7 @@ describe("Spec 022 Multi-Tenant Isolation Matrix", () => {
     });
 
     it("Dim 7: Sessions & skills — Session resume cross-principal fails with SESSION_OWNERSHIP_MISMATCH and multi mode skill catalogs isolate to injected sources", async () => {
-      const backend = new RecordingPersistenceBackend();
+      const backend = new FilePersistenceBackend(join(sandboxHome, "dim7-sessions"));
       const sessionId = "sess-tenant-isolation-1";
 
       // Tenant A creates and persists session
@@ -336,33 +330,41 @@ describe("Spec 022 Multi-Tenant Isolation Matrix", () => {
     });
 
     it("Dim 8: Ambient I/O — multi mode agent turn causes zero writes under $HOME/.seepient", async () => {
-      const audit = new FakeAuditStore();
-      const policy = new FakePolicyStore();
-      const ledger = new FakeCapabilityLedger();
-      const config = new ProviderConfigStore(":memory:");
-      const cred = new CompositeCredentialStore({
-        memory: new MemoryCredentialStore(),
-        primaryWriteStore: "memory",
-      });
-      const runtime = createFakeRuntime({
-        configStore: config,
-        credentialStore: cred,
-        responses: [{ text: "response" }],
-      });
+      const storeDir = mkdtempSync(join(tmpdir(), "seepient-real-stores-"));
+      try {
+        const audit = new LocalAuditStore({ root: join(storeDir, "audit") });
+        const policy = new LocalPolicyStore({ root: join(storeDir, "policy") });
+        const ledger = new PersistedCapabilityLedger({ root: join(storeDir, "ledger") });
+        const config = new ProviderConfigStore(":memory:");
+        const cred = new CompositeCredentialStore({
+          memory: new MemoryCredentialStore(),
+          primaryWriteStore: "memory",
+        });
+        const runtime = createFakeRuntime({
+          configStore: config,
+          credentialStore: cred,
+          responses: [{ text: "response" }],
+        });
 
-      await askSeepient("Hello", {
-        tenancy: "multi",
-        principalId: "tenant-dim",
-        runtime,
-        auditStore: audit,
-        policyStore: policy,
-        capabilityLedger: ledger,
-        stateless: true,
-      } as any);
+        await askSeepient("Hello", {
+          cwd: sandboxHome,
+          tenancy: "multi",
+          principalId: "tenant-dim",
+          runtime,
+          auditStore: audit,
+          policyStore: policy,
+          capabilityLedger: ledger,
+          stateless: true,
+        } as any);
 
-      // Verify no files or directories were created anywhere in sandboxHome
-      expect(readdirSync(sandboxHome)).toEqual([]);
-      expect(existsSync(join(sandboxHome, ".seepient"))).toBe(false);
+        // Verify no files or directories were created anywhere in sandboxHome
+        expect(readdirSync(sandboxHome)).toEqual([]);
+        expect(existsSync(join(sandboxHome, ".seepient"))).toBe(false);
+      } finally {
+        try {
+          rmSync(storeDir, { recursive: true, force: true });
+        } catch {}
+      }
     });
 
     it("Dim 8b: Fail-closed — multi mode with stateless: true but missing stores throws TENANCY_STORE_INCOMPLETE", async () => {
@@ -378,6 +380,7 @@ describe("Spec 022 Multi-Tenant Isolation Matrix", () => {
 
       await expect(
         askSeepient("Hello", {
+          cwd: sandboxHome,
           tenancy: "multi",
           principalId: "tenant-dim",
           runtime,
@@ -407,9 +410,9 @@ describe("Spec 022 Multi-Tenant Isolation Matrix", () => {
 
       const serverPolicyDir = join(sandboxHome, "server-policies");
       const policyStore = new LocalPolicyStore({ root: serverPolicyDir });
-      const auditStore = new FakeAuditStore();
-      const capabilityLedger = new FakeCapabilityLedger();
-      const backend = new RecordingPersistenceBackend();
+      const auditStore = new LocalAuditStore({ root: join(sandboxHome, "server-audit") });
+      const capabilityLedger = new PersistedCapabilityLedger({ root: join(sandboxHome, "server-caps") });
+      const backend = new FilePersistenceBackend(join(sandboxHome, "server-sessions"));
 
       const sessionId = "session-key-1";
       await backend.save(sessionId, {
@@ -444,15 +447,28 @@ describe("Spec 022 Multi-Tenant Isolation Matrix", () => {
         const addr = server.address() as { port: number };
         const port = addr.port;
 
-        const serverWorkspaceId = computeWorkspaceId(process.cwd());
+        const wsKey1 = computeWorkspaceId(join(process.cwd(), ".seepient", "workspaces", keyEntry1.keyHash));
+        const wsKey2 = computeWorkspaceId(join(process.cwd(), ".seepient", "workspaces", keyEntry2.keyHash));
 
         await policyStore.compareAndSet(
-          serverWorkspaceId,
+          wsKey1,
           0,
           {
             version: 1,
             capabilities: [
               { kind: "network-destination", scheme: "https", host: "key1-only.internal", principalId: keyEntry1.keyHash },
+              { kind: "network-destination", scheme: "https", host: "legacy-unstamped.internal" },
+            ],
+          },
+          { kind: "service", authorityId: "test-admin", authenticatedBy: "test" },
+        );
+
+        await policyStore.compareAndSet(
+          wsKey2,
+          0,
+          {
+            version: 1,
+            capabilities: [
               { kind: "network-destination", scheme: "https", host: "key2-only.internal", principalId: keyEntry2.keyHash },
               { kind: "network-destination", scheme: "https", host: "legacy-unstamped.internal" },
             ],
@@ -515,6 +531,17 @@ describe("Spec 022 Multi-Tenant Isolation Matrix", () => {
         expect(snap2.policy.capabilities.some((c: any) => c.host === "legacy-unstamped.internal")).toBe(false);
 
         // ── (b) Session ownership across keys ──────────────────────────────
+        // GET with key2 on key1's session returns 404 (invisibility)
+        const resGetSess = await sendHttp({
+          method: "GET",
+          path: "/v1/sessions/session-key-1",
+          headers: {
+            Authorization: `Bearer ${keyEntry2.rawKey}`,
+          },
+        });
+        expect(resGetSess.status).toBe(404);
+
+        // Under FR-012: POST with key2 using key1's sessionId creates an isolated session in key2's partition without hijacking key1
         const resHijack = await sendHttp(
           {
             method: "POST",
@@ -526,17 +553,8 @@ describe("Spec 022 Multi-Tenant Isolation Matrix", () => {
           },
           JSON.stringify({ message: "Hijack attempt", sessionId: "session-key-1" }),
         );
-        expect(resHijack.status).toBe(403);
-        expect(JSON.parse(resHijack.body).error.code).toBe("FORBIDDEN");
-
-        const resGetSess = await sendHttp({
-          method: "GET",
-          path: "/v1/sessions/session-key-1",
-          headers: {
-            Authorization: `Bearer ${keyEntry2.rawKey}`,
-          },
-        });
-        expect(resGetSess.status).toBe(404);
+        expect(resHijack.status).toBe(200);
+        expect(JSON.parse(resHijack.body).sessionId).toBe("session-key-1");
 
         // ── (c) Provider mutations land on injected runtime only ───────────
         const resMutate = await sendHttp(
@@ -583,7 +601,7 @@ describe("Spec 022 Multi-Tenant Isolation Matrix", () => {
       );
 
       const auditStore = new LocalAuditStore({ root: join(sandboxHome, "audit-dim5b") });
-      const ledger = new FakeCapabilityLedger();
+      const ledger = new PersistedCapabilityLedger({ root: join(sandboxHome, "ledger-dim5b") });
       const testBoundary: ExecutionBoundary = {
         capabilities: {
           backend: "local-native",
@@ -683,6 +701,109 @@ describe("Spec 022 Multi-Tenant Isolation Matrix", () => {
           tenancyMode: "multi",
         }),
       ).rejects.toThrow(/wiredPipeline is required in multi-tenant mode/);
+    });
+
+    it("SC-002 new case 1: default-boot composition boots isolated empty runtime with zero ambient composition", async () => {
+      process.env.ANTHROPIC_API_KEY = "sk-ant-operator-ambient-key";
+      process.env.OPENAI_API_KEY = "sk-proj-operator-ambient-key";
+
+      const tempKeyPath = join(sandboxHome, "api-keys-default-boot.json");
+      process.env.SEEPIENT_API_KEYS_FILE = tempKeyPath;
+
+      const keyEntry = generateApiKey(["agent:run", "agent:read"], {
+        filePath: tempKeyPath,
+        label: "tenant-boot-key",
+      });
+
+      const server = await runSeepientServer({
+        listen: false,
+      });
+
+      try {
+        await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+        const addr = server.address() as { port: number };
+        const port = addr.port;
+
+        const res = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+          const req = http.request(
+            {
+              hostname: "127.0.0.1",
+              port,
+              path: "/v1/chat",
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${keyEntry.rawKey}`,
+                "Content-Type": "application/json",
+              },
+            },
+            (resp) => {
+              let body = "";
+              resp.on("data", (chunk) => (body += chunk));
+              resp.on("end", () => resolve({ status: resp.statusCode ?? 500, body }));
+            },
+          );
+          req.on("error", reject);
+          req.write(JSON.stringify({ message: "Hello", model: "anthropic/claude-3-haiku" }));
+          req.end();
+        });
+
+        // The isolated server has no ambient provider credentials, so it must fail typed
+        expect(res.status).toBeGreaterThanOrEqual(400);
+        expect(res.body).not.toContain("sk-ant-operator-ambient-key");
+        expect(res.body).not.toContain("sk-proj-operator-ambient-key");
+      } finally {
+        server.close();
+        delete process.env.ANTHROPIC_API_KEY;
+        delete process.env.OPENAI_API_KEY;
+      }
+    });
+
+    it("SC-002 new case 2: post-inversion trap — new ProviderRuntime() composes zero ambient providers and sibling mutations are isolated", async () => {
+      process.env.ANTHROPIC_API_KEY = "sk-ant-decoy-trap-key";
+      process.env.OPENAI_API_KEY = "sk-proj-decoy-trap-key";
+
+      try {
+        const r1 = new ProviderRuntime();
+        const r2 = new ProviderRuntime();
+
+        expect(r1.isIsolated).toBe(true);
+        expect(r2.isIsolated).toBe(true);
+
+        const config1 = await r1.getConfig();
+        const config2 = await r2.getConfig();
+
+        // Must compose zero ambient providers from host env
+        expect(Object.keys(config1.providers ?? {})).toHaveLength(0);
+        expect(Object.keys(config2.providers ?? {})).toHaveLength(0);
+
+        // Credential store must not resolve host env credentials through fallback
+        const credStore1 = r1.getCredentialStore();
+        expect(credStore1).toBeDefined();
+        const credResult = await credStore1!.resolve({
+          kind: "env",
+          name: "OPENAI_API_KEY",
+        });
+        expect(await credResult?.isResolvable()).toBe(false);
+        expect(() => credResult?.acquireLease()).toThrow(/CREDENTIAL_REQUIRED/);
+
+        // Mutating r1 does not leak to r2
+        const cfgStore1 = r1.getConfigStore() as any;
+        if (cfgStore1?.addProvider) {
+          await cfgStore1.addProvider("tenant-a-provider", {
+            adapter: "pi-ai",
+            upstreamProvider: "openai",
+            credential: { kind: "none" },
+            baseUrl: "https://tenant-a.api.example.com",
+          });
+          const updatedConfig1 = await r1.getConfig();
+          const updatedConfig2 = await r2.getConfig();
+          expect(updatedConfig1.providers?.["tenant-a-provider"]).toBeDefined();
+          expect(updatedConfig2.providers?.["tenant-a-provider"]).toBeUndefined();
+        }
+      } finally {
+        delete process.env.ANTHROPIC_API_KEY;
+        delete process.env.OPENAI_API_KEY;
+      }
     });
   });
 });

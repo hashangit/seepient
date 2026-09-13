@@ -2213,4 +2213,264 @@ describe("multi-mutation WAL history (round 7 P0)", () => {
       }
     }
   });
+
+  it("P1-A: in multi-tenant mode, persistent approval re-reads policy store with tenancy context and does not launder workspace wildcards", async () => {
+    const { InMemoryCapabilityLedger } = await import("../in-memory-stores.js");
+    const audit = new LocalAuditStore({ root: dir });
+    const ledger = new InMemoryCapabilityLedger();
+    let readOptsReceived: any = undefined;
+    let casCapabilitiesReceived: any = undefined;
+
+    const mockStore: any = {
+      isIsolated: true,
+      read: async (workspaceId: string, opts?: any) => {
+        if (opts) {
+          readOptsReceived = opts;
+          return {
+            workspaceId,
+            version: 1,
+            policyDigest: "d1",
+            policy: {
+              version: 1,
+              capabilities: [
+                { kind: "read-root", root: dir, principalId: opts.principalId },
+              ],
+            },
+            mutationHistory: [],
+          };
+        }
+        // Unscoped / raw read returns workspace-global wildcard and other principal's grants
+        return {
+          workspaceId,
+          version: 1,
+          policyDigest: "d1",
+          policy: {
+            version: 1,
+            capabilities: [
+              { kind: "write-root", root: "*" },
+              { kind: "commit-file", path: join(dir, "b.txt"), principalId: "tenant-b" },
+            ],
+          },
+          mutationHistory: [],
+        };
+      },
+      compareAndSet: async (workspaceId: string, version: number, next: any) => {
+        casCapabilitiesReceived = next.capabilities;
+        return {
+          workspaceId,
+          version: version + 1,
+          policyDigest: "d2",
+          policy: next,
+          mutationHistory: [],
+        };
+      },
+    };
+
+    const targetFile = join(dir, "out.txt");
+    const base = writeAction("d-persist-test");
+    const action: PreparedToolAction = {
+      ...base,
+      principalId: "tenant-a",
+      effects: [
+        {
+          kind: "filesystem-write",
+          targets: [
+            {
+              target: {
+                canonicalPath: targetFile,
+                canonicalParent: dir,
+                basename: "out.txt",
+                exists: false,
+                finalSymlink: false,
+              },
+              mode: "create",
+            },
+          ],
+        },
+      ],
+      display: {
+        ...base.display,
+        summary: targetFile,
+        canonicalTargets: [targetFile],
+      },
+      operation: {
+        kind: "commit-files",
+        commits: [
+          {
+            destination: {
+              canonicalPath: targetFile,
+              canonicalParent: dir,
+              basename: "out.txt",
+              exists: false,
+              finalSymlink: false,
+            },
+            content: {
+              artifactId: "art-1",
+              sha256: "h1",
+              byteLength: 4,
+              mediaType: "text/plain",
+            },
+          },
+        ],
+      },
+    };
+
+    const wired = await buildActionLifecycle({
+      principalId: "tenant-a",
+      tenancyMode: "multi",
+      runId: "r-persist",
+      sessionId: "s-persist",
+      workspaceRoot: dir,
+      approvalBroker: {
+        mode: "inline",
+        request: async (req) => approved(req, "tenant-a", "project"),
+      },
+      executionBoundary: fakeBoundary({ output: "ok", success: true }),
+      auditStore: audit,
+      capabilityLedger: ledger,
+      policyStore: mockStore,
+    });
+
+    const res = await wired.lifecycle.run(action);
+    expect(res.outcome.state).toBe("succeeded");
+
+    // Verify policyStore.read was called with tenancyMode: "multi" and principalId: "tenant-a"
+    expect(readOptsReceived).toBeDefined();
+    expect(readOptsReceived.tenancyMode).toBe("multi");
+    expect(readOptsReceived.principalId).toBe("tenant-a");
+
+    // Verify CAS capabilities did NOT include the workspace wildcard write-root *
+    expect(casCapabilitiesReceived).toBeDefined();
+    const hasWildcard = casCapabilitiesReceived.some((c: any) => c.kind === "write-root" && c.root === "*");
+    expect(hasWildcard).toBe(false);
+    const hasTenantB = casCapabilitiesReceived.some((c: any) => c.kind === "commit-file" && c.principalId === "tenant-b");
+    expect(hasTenantB).toBe(true);
+  });
+
+  it("NEW-3: persistent approval CAS preserves other principals' grants in a shared workspace", async () => {
+    const { InMemoryCapabilityLedger } = await import("../in-memory-stores.js");
+    const audit = new LocalAuditStore({ root: dir });
+    const ledger = new InMemoryCapabilityLedger();
+    let currentCapabilities: Capability[] = [
+      { kind: "read-root", root: join(dir, "cli-scope"), principalId: "cli-user" },
+    ];
+    let casCapabilitiesReceived: any = undefined;
+
+    const mockStore: any = {
+      isIsolated: true,
+      read: async (workspaceId: string, opts?: any) => {
+        if (opts?.principalId) {
+          const isMulti = opts.tenancyMode === "multi";
+          const isDefaultSingleUser = !isMulti;
+          const filtered = currentCapabilities.filter((cap) => {
+            if (cap.principalId) return cap.principalId === opts.principalId;
+            return isDefaultSingleUser;
+          });
+          return {
+            workspaceId,
+            version: 1,
+            policyDigest: "d1",
+            policy: { version: 1, capabilities: filtered },
+            mutationHistory: [],
+          };
+        }
+        return {
+          workspaceId,
+          version: 1,
+          policyDigest: "d1",
+          policy: { version: 1, capabilities: currentCapabilities },
+          mutationHistory: [],
+        };
+      },
+      compareAndSet: async (workspaceId: string, version: number, next: any) => {
+        casCapabilitiesReceived = next.capabilities;
+        currentCapabilities = next.capabilities;
+        return {
+          workspaceId,
+          version: version + 1,
+          policyDigest: "d2",
+          policy: next,
+          mutationHistory: [],
+        };
+      },
+    };
+
+    const targetFile = join(dir, "sdk-out.txt");
+    const base = writeAction("sdk-persist-test");
+    const action: PreparedToolAction = {
+      ...base,
+      principalId: "sdk-user",
+      effects: [
+        {
+          kind: "filesystem-write",
+          targets: [
+            {
+              target: {
+                canonicalPath: targetFile,
+                canonicalParent: dir,
+                basename: "sdk-out.txt",
+                exists: false,
+                finalSymlink: false,
+              },
+              mode: "create",
+            },
+          ],
+        },
+      ],
+      display: {
+        ...base.display,
+        summary: targetFile,
+        canonicalTargets: [targetFile],
+      },
+      operation: {
+        kind: "commit-files",
+        commits: [
+          {
+            destination: {
+              canonicalPath: targetFile,
+              canonicalParent: dir,
+              basename: "sdk-out.txt",
+              exists: false,
+              finalSymlink: false,
+            },
+            content: {
+              artifactId: "art-1",
+              sha256: "h1",
+              byteLength: 4,
+              mediaType: "text/plain",
+            },
+          },
+        ],
+      },
+    };
+
+    const wired = await buildActionLifecycle({
+      principalId: "sdk-user",
+      tenancyMode: "single",
+      runId: "r-persist-sdk",
+      sessionId: "s-persist-sdk",
+      workspaceRoot: dir,
+      approvalBroker: {
+        mode: "inline",
+        request: async (req) => approved(req, "sdk-user", "project"),
+      },
+      executionBoundary: fakeBoundary({ output: "ok", success: true }),
+      auditStore: audit,
+      capabilityLedger: ledger,
+      policyStore: mockStore,
+    });
+
+    const res = await wired.lifecycle.run(action);
+    expect(res.outcome.state).toBe("succeeded");
+
+    // Verify casCapabilitiesReceived retained the pre-existing cli-user capability
+    expect(casCapabilitiesReceived).toBeDefined();
+    const cliCap = casCapabilitiesReceived?.find((c: any) => c.principalId === "cli-user");
+    expect(cliCap).toBeDefined();
+    expect((cliCap as any).root).toBe(join(dir, "cli-scope"));
+
+    // And also has the sdk-user capability
+    const sdkCap = casCapabilitiesReceived?.find((c: any) => c.principalId === "sdk-user");
+    expect(sdkCap).toBeDefined();
+  });
 });

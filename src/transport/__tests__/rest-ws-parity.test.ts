@@ -172,7 +172,7 @@ describe("REST and WS adopt-or-create parity (FR-026)", () => {
 
     expect(getForeignRes.statusCode).toBe(404);
 
-    // 4. POST /v1/chat with foreign key2 targeting key1's session returns 403
+    // 4. Under FR-012: POST /v1/chat with foreign key2 targeting key1's session creates an isolated session in key2's partition (no 403 squatting/existence leak)
     const { req: probeReq, res: probeRes } = createMockReqRes(
       "POST",
       "/v1/chat",
@@ -188,9 +188,14 @@ describe("REST and WS adopt-or-create parity (FR-026)", () => {
       restHandler(probeReq, probeRes);
     });
 
-    expect(probeRes.statusCode).toBe(403);
+    expect(probeRes.statusCode).toBe(200);
     const probeData = JSON.parse(probeRes.body);
-    expect(probeData.error.code).toBe("FORBIDDEN");
+    expect(probeData.sessionId).toBe(sessionId);
+
+    // key1's session remains untouched
+    const s1Reload = await sessionManager.getSession(sessionId, hashKey(key1));
+    expect(s1Reload).not.toBeNull();
+    expect(s1Reload!.messages.length).toBe(2);
   });
 
   it("WS: fresh-id chat creates session, appears in listing, foreign probe is denied", async () => {
@@ -233,7 +238,7 @@ describe("REST and WS adopt-or-create parity (FR-026)", () => {
     const sessions = Array.isArray(body2) ? body2 : body2.sessions;
     expect(sessions.some((s: any) => s.id === sessionId)).toBe(true);
 
-    // 3. WS connection with foreign key2 attempting to use sessionId is denied with FORBIDDEN
+    // 3. Under FR-012: WS connection with foreign key2 using sessionId creates an isolated session in key2's partition
     const { ws: ws2, sent: sent2, handlers: handlers2 } = createMockWs();
     handleConnection(ws2, { headers: { authorization: `Bearer ${key2}` } } as any, wsCtx);
     const onMessage2 = handlers2.get("message")!;
@@ -247,9 +252,14 @@ describe("REST and WS adopt-or-create parity (FR-026)", () => {
 
     await new Promise((r) => setTimeout(r, 40));
 
-    const forbidden = sent2.find((m) => m.type === "error" && m.clientMsgId === "ws-probe-msg-2");
-    expect(forbidden).toBeDefined();
-    expect(forbidden.code).toBe("FORBIDDEN");
+    const ack2 = sent2.find((m) => m.type === "ack" && m.clientMsgId === "ws-probe-msg-2");
+    expect(ack2).toBeDefined();
+    const done2 = sent2.find((m) => m.type === "done");
+    expect(done2).toBeDefined();
+
+    // key1's session remains untouched
+    const s1ReloadWs = await sessionManager.getSession(sessionId, hashKey(key1));
+    expect(s1ReloadWs).not.toBeNull();
   });
 
   it("Cross-surface: session created via REST can be resumed via WS and vice-versa", async () => {

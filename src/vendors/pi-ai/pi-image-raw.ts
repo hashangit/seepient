@@ -1,4 +1,6 @@
 import { builtinImagesModels } from "@earendil-works/pi-ai/providers/all";
+import { createPiCredentialStore } from "./pi-auth-adapter.js";
+import { assertBaseUrlEgressAllowed } from "../egress-check.js";
 import type {
   ImagesModel,
   ImagesApi,
@@ -62,9 +64,16 @@ function resolveSignal(opts?: InferenceOptions): {
  */
 export class PiImageRaw implements ImageBackend {
   private imageModels: any;
+  private credentialStore?: any;
 
-  constructor(customImageModels?: any) {
-    this.imageModels = customImageModels ?? builtinImagesModels();
+  constructor(customImageModels?: any, credentialStore?: any) {
+    this.credentialStore = credentialStore;
+    if (customImageModels) {
+      this.imageModels = customImageModels;
+    } else {
+      const piStore = credentialStore ? createPiCredentialStore(credentialStore) : undefined;
+      this.imageModels = builtinImagesModels(piStore ? { credentials: piStore } : undefined);
+    }
   }
 
   async generate(
@@ -99,7 +108,22 @@ export class PiImageRaw implements ImageBackend {
       }
 
       const secret = await lease.secret();
-      const apiKey = secret.kind === "api_key" ? secret.value : undefined;
+      if (opts?.tenancyMode === "multi") {
+        if (!secret || secret.kind !== "api_key" || !secret.value) {
+          throw new InferenceError({
+            code: "auth",
+            message: `CREDENTIAL_REQUIRED: Multi-tenant image inference requires an explicit api_key credential for provider "${target.upstreamProvider}".`,
+            providerAccount: target.providerAccount,
+            model: target.model,
+            retryable: false,
+          });
+        }
+        if (target.baseUrl) {
+          assertBaseUrlEgressAllowed(target.baseUrl, opts.capabilities, target);
+        }
+      }
+
+      const apiKey = secret?.kind === "api_key" ? secret.value : undefined;
 
       const providerName = target.upstreamProvider;
       let model = this.imageModels.getModel(providerName, target.model) as
@@ -114,6 +138,10 @@ export class PiImageRaw implements ImageBackend {
           model: target.model,
           retryable: false,
         });
+      }
+
+      if (target.baseUrl) {
+        model = { ...model, baseUrl: target.baseUrl };
       }
 
       const inputContents: ImagesInputContent[] = [

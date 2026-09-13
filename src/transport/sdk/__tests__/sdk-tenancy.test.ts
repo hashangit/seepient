@@ -2,7 +2,7 @@
  * Spec 022 — SDK Tenancy Mode & Fail-Closed Defaults (US2: T018–T022).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { askSeepient, createSeepient, gateway } from "../index.js";
+import { askSeepient, createSeepient, createTenantAgent, gateway } from "../index.js";
 import { resetTenancyNoticeForTest } from "../../../domain/tenancy/tenancy-mode.js";
 import {
   FakeAuditStore,
@@ -30,6 +30,7 @@ describe("Spec 022 SDK Tenancy Mode & Fail-Closed Enforcement (US2)", () => {
 
       // Agent 1: upgraded to multi due to injected runtime and stores
       await askSeepient("prompt 1", {
+        cwd: "/tmp/tenant-1",
         principalId: "tenant-1",
         runtime: runtime1,
         auditStore: new FakeAuditStore(),
@@ -40,6 +41,7 @@ describe("Spec 022 SDK Tenancy Mode & Fail-Closed Enforcement (US2)", () => {
 
       // Agent 2: second upgraded agent in same process
       await askSeepient("prompt 2", {
+        cwd: "/tmp/tenant-2",
         principalId: "tenant-2",
         runtime: runtime2,
         auditStore: new FakeAuditStore(),
@@ -161,6 +163,44 @@ describe("Spec 022 SDK Tenancy Mode & Fail-Closed Enforcement (US2)", () => {
     });
   });
 
+  // ── FR-015: TENANCY_WORKSPACE_REQUIRED enforcement in multi mode ───────────
+  describe("FR-015: TENANCY_WORKSPACE_REQUIRED enforcement at both SDK roots", () => {
+    it("createSeepient in multi mode without cwd throws TENANCY_WORKSPACE_REQUIRED", async () => {
+      const runtime = createFakeRuntime();
+      await expect(
+        createSeepient({
+          tenancy: "multi",
+          principalId: "tenant-1",
+          runtime,
+          auditStore: new FakeAuditStore(),
+          policyStore: new FakePolicyStore(),
+          capabilityLedger: new FakeCapabilityLedger(),
+        }),
+      ).rejects.toMatchObject({
+        code: "TENANCY_WORKSPACE_REQUIRED",
+        retryable: false,
+      });
+    });
+
+    it("askSeepient in multi mode without cwd throws TENANCY_WORKSPACE_REQUIRED", async () => {
+      const runtime = createFakeRuntime();
+      await expect(
+        askSeepient("test", {
+          tenancy: "multi",
+          principalId: "tenant-1",
+          runtime,
+          auditStore: new FakeAuditStore(),
+          policyStore: new FakePolicyStore(),
+          capabilityLedger: new FakeCapabilityLedger(),
+          stateless: true,
+        }),
+      ).rejects.toMatchObject({
+        code: "TENANCY_WORKSPACE_REQUIRED",
+        retryable: false,
+      });
+    });
+  });
+
   // ── T019: TENANCY_RUNTIME_REQUIRED in multi mode ──────────────────────────
   describe("T019: TENANCY_RUNTIME_REQUIRED enforcement at both roots", () => {
     it("createSeepient in multi mode without runtime throws TENANCY_RUNTIME_REQUIRED with remediation", async () => {
@@ -267,6 +307,8 @@ describe("Spec 022 SDK Tenancy Mode & Fail-Closed Enforcement (US2)", () => {
       // and does NOT fall back to synthesizing openai provider from ambient OPENAI_API_KEY
       await expect(
         askSeepient("test query", {
+          cwd: "/tmp/test",
+          principalId: "test-principal",
           tenancy: "multi",
           runtime: emptyRuntime,
           auditStore: new FakeAuditStore(),
@@ -276,6 +318,60 @@ describe("Spec 022 SDK Tenancy Mode & Fail-Closed Enforcement (US2)", () => {
           provider: "openai",
         }),
       ).rejects.toThrow();
+    });
+  });
+
+  // ── DP10: createTenantAgent typed factory ─────────────────────────────────
+  describe("DP10: createTenantAgent typed constructor entry", () => {
+    it("validates principalId at entry (empty, sentinel, regex)", async () => {
+      const runtime = createFakeRuntime();
+      const baseOpts = {
+        cwd: "/tmp/tenant-test",
+        runtime,
+        auditStore: new FakeAuditStore(),
+        policyStore: new FakePolicyStore(),
+        capabilityLedger: new FakeCapabilityLedger(),
+      };
+
+      // Empty principalId
+      await expect(
+        createTenantAgent({ ...baseOpts, principalId: "" }),
+      ).rejects.toMatchObject({
+        code: "PRINCIPAL_REQUIRED",
+      });
+
+      // Sentinel principalId
+      await expect(
+        createTenantAgent({ ...baseOpts, principalId: "default" }),
+      ).rejects.toMatchObject({
+        code: "INVALID_PRINCIPAL_ID",
+      });
+
+      // Invalid character principalId
+      await expect(
+        createTenantAgent({ ...baseOpts, principalId: "bad/principal/id" }),
+      ).rejects.toMatchObject({
+        code: "INVALID_PRINCIPAL_ID",
+      });
+    });
+
+    it("creates a functional multi-tenant agent on happy path", async () => {
+      const runtime = createFakeRuntime({
+        responses: [{ text: "Hello from isolated tenant agent" }],
+      });
+
+      const agent = await createTenantAgent({
+        principalId: "tenant_corp_123",
+        cwd: "/tmp/tenant_corp_123",
+        runtime,
+        auditStore: new FakeAuditStore(),
+        policyStore: new FakePolicyStore(),
+        capabilityLedger: new FakeCapabilityLedger(),
+      });
+
+      expect(agent).toBeDefined();
+      expect(typeof agent.chat).toBe("function");
+      await agent.close();
     });
   });
 });

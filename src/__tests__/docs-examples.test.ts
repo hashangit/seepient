@@ -14,6 +14,7 @@ const loadBearingPages = [
   'skills.md',
   'multi-tenant.md',
   'stateless-workers.md',
+  'migration.md',
 ];
 
 describe('docs example import and runtime checks (FR-003)', () => {
@@ -124,7 +125,7 @@ describe('docs example import and runtime checks (FR-003)', () => {
     const mockRuntime = createMockRuntime([
       { content: 'Done updating package.json.' },
     ]);
-    const spy = vi.spyOn(prModule, 'getDefaultProviderRuntime').mockReturnValue(mockRuntime);
+    const spy = vi.spyOn(prModule, 'createAmbientProviderRuntime').mockReturnValue(mockRuntime);
 
     try {
       // Flagship example 1: ask-seepient.md:345

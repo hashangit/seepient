@@ -48,6 +48,20 @@ export async function handleChat(
     }
   }
 
+  // FR-016 (VULN-22): Fail-closed tools array edge validation
+  if ((msg.options as any)?.tools !== undefined) {
+    if (!Array.isArray((msg.options as any).tools) || (msg.options as any).tools.some((t: any) => typeof t !== "string")) {
+      safeSend(ws, {
+        type: "error",
+        code: "VALIDATION_ERROR",
+        retryable: false,
+        message: "Field 'tools' must be an array of strings",
+        ...(msg.id ? { clientMsgId: msg.id } : {}),
+      });
+      return;
+    }
+  }
+
   // Busy guard: only one active chat turn per connection
   if (state.activeChats.size > 0) {
     safeSend(ws, {
@@ -69,7 +83,7 @@ export async function handleChat(
 
   const releaseSessionTurn = () => {
     if (acquiredSessionId) {
-      ctx.sessionManager.releaseTurn(acquiredSessionId);
+      ctx.sessionManager.releaseTurn(acquiredSessionId, state.apiKeyHash);
       acquiredSessionId = null;
     }
   };
@@ -111,7 +125,7 @@ export async function handleChat(
         }
         // W154d: pin the connection to the session only after the turn lock
         // is acquired — a busy-reject must not re-pin the connection.
-        if (!ctx.sessionManager.acquireTurn(session.id)) {
+        if (!ctx.sessionManager.acquireTurn(session.id, state.apiKeyHash)) {
           safeSend(ws, {
             type: "error",
             code: "REQUEST_IN_FLIGHT",
@@ -125,7 +139,7 @@ export async function handleChat(
         acquiredSessionId = session.id;
 
         // F1: resolve a dangling failed-turn draft before history is captured.
-        ctx.sessionManager.resolveTrailingDraft(session.id);
+        ctx.sessionManager.resolveTrailingDraft(session.id, state.apiKeyHash);
 
         history = [...session.messages];
       } catch (err: unknown) {
@@ -199,7 +213,7 @@ export async function handleChat(
           content: msg.message,
           timestamp: Date.now(),
         };
-        ctx.sessionManager.addMessage(acquiredSessionId!, userMsg);
+        ctx.sessionManager.addMessage(acquiredSessionId!, userMsg, state.apiKeyHash);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         logTransportEvent({
@@ -383,7 +397,7 @@ export async function handleChat(
                     content: result.text,
                     timestamp: Date.now(),
                   };
-                  ctx.sessionManager.addMessage(acquiredSessionId, assistantMsg);
+                  ctx.sessionManager.addMessage(acquiredSessionId, assistantMsg, state.apiKeyHash);
                 } catch (err: unknown) {
                   const message = err instanceof Error ? err.message : String(err);
                   logTransportEvent({

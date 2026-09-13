@@ -10,6 +10,8 @@ export interface MediaVendorOperationHandlerOptions {
   runtime: ProviderRuntime | ProviderRuntimeContract | (() => ProviderRuntime | ProviderRuntimeContract | undefined);
   artifacts: InMemoryArtifactStore;
   signal?: AbortSignal;
+  tenancyMode?: "single" | "multi";
+  capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[];
 }
 
 function classifyMediaError(
@@ -106,9 +108,13 @@ function classifyMediaError(
  */
 export function createMediaVendorOperationHandler(
   opts: MediaVendorOperationHandlerOptions,
-): (req: Extract<BrokeredEffectRequest, { kind: "vendor-operation" }>) => Promise<BrokeredEffectResult> {
+): (
+  req: Extract<BrokeredEffectRequest, { kind: "vendor-operation" }>,
+  capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[],
+) => Promise<BrokeredEffectResult> {
   return async (
     req: Extract<BrokeredEffectRequest, { kind: "vendor-operation" }>,
+    capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[],
   ): Promise<BrokeredEffectResult> => {
     const runtime = typeof opts.runtime === "function" ? opts.runtime() : opts.runtime;
     if (!runtime) {
@@ -131,7 +137,16 @@ export function createMediaVendorOperationHandler(
     if (req.connector === "media" && req.operation === "generate_image") {
       const { generateImageRuntime } = await import("../../capabilities/media/media.js");
       try {
-        const execResult = await generateImageRuntime(req.input as any, runtime, opts.signal);
+        const execResult = await generateImageRuntime(
+          req.input as any,
+          runtime,
+          opts.signal,
+          undefined,
+          {
+            tenancyMode: opts.tenancyMode,
+            capabilities: capabilities ?? opts.capabilities,
+          },
+        );
         if (execResult.images.length === 0) {
           return {
             requestId: req.requestId,
@@ -170,6 +185,8 @@ export function createMediaVendorOperationHandler(
         const text = await optimizePrompt(input.raw_prompt, input.context, {
           runtime,
           signal: opts.signal,
+          tenancyMode: opts.tenancyMode,
+          capabilities: capabilities ?? opts.capabilities,
         });
         const artifact = await opts.artifacts.put(new TextEncoder().encode(text), "text/plain");
         return {

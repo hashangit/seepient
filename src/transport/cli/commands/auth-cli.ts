@@ -10,7 +10,7 @@ import chalk from "chalk";
 import * as readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { generateApiKey, KeyScope } from "../../auth/auth.js";
-import { getDefaultProviderRuntime } from "../../../domain/providers/provider-runtime.js";
+import { createAmbientProviderRuntime } from "../../../domain/providers/provider-runtime.js";
 import { createProviderManagerApi } from "../provider-manager-api.js";
 
 export function registerAuthCommands(program: Command): void {
@@ -23,7 +23,7 @@ export function registerAuthCommands(program: Command): void {
     .option("--env-var <name>", "Environment variable name containing the API key")
     .option("--upstream <upstream>", "Upstream provider name (e.g. openai, anthropic, google)")
     .action(async (providerId, opts) => {
-      const runtime = getDefaultProviderRuntime();
+      const runtime = createAmbientProviderRuntime();
       const api = createProviderManagerApi(runtime);
       const state = await api.getState();
       const existing = state.accounts.find((a) => a.id === providerId);
@@ -169,7 +169,7 @@ export function registerAuthCommands(program: Command): void {
     .description("Remove credentials for a provider account")
     .option("--json", "Output result as JSON")
     .action(async (providerId, opts) => {
-      const runtime = getDefaultProviderRuntime();
+      const runtime = createAmbientProviderRuntime();
       const api = createProviderManagerApi(runtime);
       const res = await api.logoutAccount(providerId);
       if (opts.json) {

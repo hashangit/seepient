@@ -30,7 +30,6 @@ export const PINNED_ACCEPTED_STATE: readonly string[] = Object.freeze([
   "foundations/models-catalog.ts:globalCatalogAccessor",
   "domain/sessions/session-store.ts:registry",
   "domain/providers/config-store/provider-config-store.ts:baseConfigCache",
-  "domain/providers/provider-runtime.ts:defaultRuntimeInstance",
   "domain/tenancy/tenancy-mode.ts:noticePrinted",
   "transport/auth/auth.ts:cachedKeys",
   "transport/auth/auth.ts:cacheMtimeMs",

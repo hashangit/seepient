@@ -10,38 +10,53 @@ import type {
   PersistedCredentialRecord,
   CredentialMeta,
 } from "../../../foundations/schemas/credential-store.js";
-import { SeepientError } from "../../../foundations/errors.js";
+import { SeepientError, CredentialRequiredError } from "../../../foundations/errors.js";
 import { EnvCredentialStore } from "./env-credential-store.js";
 import { FileCredentialStore } from "./file-credential-store.js";
 import { KeychainCredentialStore } from "./keychain-credential-store.js";
 import { MemoryCredentialStore } from "./memory-credential-store.js";
 
+export interface CompositeCredentialStoreOptions {
+  env?: EnvCredentialStore;
+  file?: FileCredentialStore;
+  keychain?: KeychainCredentialStore;
+  memory?: MemoryCredentialStore;
+  primaryWriteStore?: "file" | "keychain" | "memory";
+  /** @internal Set only by createAmbientCompositeCredentialStore */
+  isIsolated?: boolean;
+}
+
 /**
- * Unified CompositeCredentialStore routing credential resolution and persistence
- * across env, file, keychain, and memory stores based on ref.kind.
+ * Composite CredentialStore that chains multiple backends with fallback logic.
+ * Reads fallback: File -> Keychain -> Env.
+ * Writes route to primary write store (File by default in ambient, Memory by default in isolated).
  */
 export class CompositeCredentialStore implements CredentialStore {
+  readonly isIsolated: boolean;
   readonly envStore: EnvCredentialStore;
   readonly fileStore: FileCredentialStore;
   readonly keychainStore: KeychainCredentialStore;
   readonly memoryStore: MemoryCredentialStore;
   private primaryWriteStore: "file" | "keychain" | "memory";
 
-  constructor(customStores?: {
-    env?: EnvCredentialStore;
-    file?: FileCredentialStore;
-    keychain?: KeychainCredentialStore;
-    memory?: MemoryCredentialStore;
-    primaryWriteStore?: "file" | "keychain" | "memory";
-  }) {
+  constructor(customStores?: CompositeCredentialStoreOptions) {
+    if (customStores?.primaryWriteStore === "file" && customStores?.isIsolated === undefined) {
+      this.isIsolated = false;
+    } else {
+      this.isIsolated = customStores?.isIsolated ?? true;
+    }
     this.envStore = customStores?.env ?? new EnvCredentialStore();
     this.fileStore = customStores?.file ?? new FileCredentialStore();
     this.keychainStore = customStores?.keychain ?? new KeychainCredentialStore();
-    this.memoryStore = customStores?.memory ?? new MemoryCredentialStore();
-    this.primaryWriteStore = customStores?.primaryWriteStore ?? "file";
+    this.memoryStore = customStores?.memory ?? new MemoryCredentialStore({ isIsolated: this.isIsolated });
+    this.primaryWriteStore =
+      customStores?.primaryWriteStore ?? (this.isIsolated ? "memory" : "file");
   }
 
   private getWriteStore(): CredentialStore {
+    if (this.isIsolated && this.primaryWriteStore !== "memory") {
+      return this.memoryStore;
+    }
     if (this.primaryWriteStore === "memory") return this.memoryStore;
     if (this.primaryWriteStore === "keychain") return this.keychainStore;
     return this.fileStore;
@@ -70,10 +85,28 @@ export class CompositeCredentialStore implements CredentialStore {
     }
 
     if (ref.kind === "env") {
+      if (this.isIsolated) {
+        return {
+          id: `env:${ref.name}`,
+          ref,
+          activeLeaseCount: 0,
+          async isResolvable() {
+            return false;
+          },
+          acquireLease(): CredentialLease {
+            throw new CredentialRequiredError(
+              `CREDENTIAL_REQUIRED: Environment variable credential "${ref.name}" cannot be resolved in isolated multi-tenant mode without explicit credential injection.`,
+            );
+          },
+        };
+      }
       return this.envStore.resolve(ref);
     }
 
     if (ref.kind === "seepient") {
+      if (this.isIsolated) {
+        return this.memoryStore.resolve(ref);
+      }
       try {
         const handle = await this.fileStore.resolve(ref);
         if (await handle.isResolvable()) {
@@ -94,6 +127,21 @@ export class CompositeCredentialStore implements CredentialStore {
     }
 
     if (ref.kind === "keychain") {
+      if (this.isIsolated) {
+        return {
+          id: `keychain:${ref.service}:${ref.account}`,
+          ref,
+          activeLeaseCount: 0,
+          async isResolvable() {
+            return false;
+          },
+          acquireLease(): CredentialLease {
+            throw new CredentialRequiredError(
+              `CREDENTIAL_REQUIRED: Keychain credential "${ref.service}/${ref.account}" cannot be resolved in isolated multi-tenant mode.`,
+            );
+          },
+        };
+      }
       return this.keychainStore.resolve(ref);
     }
 
@@ -117,12 +165,18 @@ export class CompositeCredentialStore implements CredentialStore {
   }
 
   async get(id: string): Promise<CredentialRecord | undefined> {
+    if (this.isIsolated) {
+      return this.memoryStore.get(id);
+    }
     const fromWrite = await this.getWriteStore().get(id);
     if (fromWrite) return fromWrite;
     return this.fileStore.get(id);
   }
 
   async getRecord(id: string): Promise<PersistedCredentialRecord | undefined> {
+    if (this.isIsolated) {
+      return this.memoryStore.getRecord(id);
+    }
     const ws = this.getWriteStore();
     if (ws.getRecord) {
       const rec = await ws.getRecord(id);
@@ -136,10 +190,31 @@ export class CompositeCredentialStore implements CredentialStore {
   }
 
   async list(): Promise<CredentialRecord[]> {
+    if (this.isIsolated) {
+      return this.memoryStore.list();
+    }
     return this.getWriteStore().list();
   }
 
   async delete(id: string): Promise<void> {
     return this.getWriteStore().delete(id);
   }
+
+  resolveSecret(ref: string): string | undefined {
+    return this.memoryStore.resolveSecret(ref);
+  }
+}
+
+/**
+ * Factory for creating an ambient CompositeCredentialStore (Profile A single-user mode).
+ * Reads and writes through to ~/.seepient/credentials, keychain, and process.env.
+ */
+export function createAmbientCompositeCredentialStore(
+  options?: Omit<CompositeCredentialStoreOptions, "isIsolated">,
+): CompositeCredentialStore {
+  return new CompositeCredentialStore({
+    ...options,
+    primaryWriteStore: options?.primaryWriteStore ?? "file",
+    isIsolated: false,
+  });
 }

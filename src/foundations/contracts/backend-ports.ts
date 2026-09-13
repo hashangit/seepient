@@ -21,6 +21,8 @@ export interface LanguageRequest {
 export interface InferenceOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
+  tenancyMode?: "single" | "multi";
+  capabilities?: import("./permission-policy.js").Capability[];
 }
 
 export interface InferenceTarget {

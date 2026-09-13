@@ -288,4 +288,57 @@ describe('docs vocabulary gate (FR-002)', () => {
     expect(report.subcommands, 'CLI subcommand violations').toEqual([]);
     expect(report.sdkImports, 'SDK import violations (R9, R10)').toEqual([]);
   });
+
+  it('check 6: multi-tenant vocabulary and guarantees in docs/sdk/multi-tenant.md (FR-019)', () => {
+    const multiTenantDoc = path.join(docsDir, 'sdk/multi-tenant.md');
+    expect(fs.existsSync(multiTenantDoc)).toBe(true);
+    const content = fs.readFileSync(multiTenantDoc, 'utf8');
+
+    // New required identifiers (FR-019)
+    const requiredIdentifiers = [
+      'CREDENTIAL_REQUIRED',
+      'TENANCY_WORKSPACE_REQUIRED',
+      'createAmbientProviderRuntime',
+      'createTenantAgent',
+    ];
+
+    for (const id of requiredIdentifiers) {
+      expect(content, `multi-tenant.md must document identifier ${id}`).toContain(id);
+    }
+
+    // Every claim in the guarantees table must name an existing test file in the repo
+    const claimMatches = content.matchAll(/\|\s*`([^`]+\.test\.ts)`\s*\|/g);
+    const verifiedSuites: string[] = [];
+    for (const m of claimMatches) {
+      const testPath = path.join(repoRoot, m[1]);
+      expect(fs.existsSync(testPath), `Claimed test file ${m[1]} must exist on disk`).toBe(true);
+      verifiedSuites.push(m[1]);
+    }
+    expect(verifiedSuites.length).toBeGreaterThanOrEqual(10);
+  });
+
+  it('check 7: banned-identifier sweep — deleted exports must not appear anywhere in docs/ (FR-015)', () => {
+    const bannedIdentifiers = [
+      'getDefaultProviderRuntime',
+    ];
+
+    const violations: string[] = [];
+    const docFiles = getAllMarkdownFiles(docsDir);
+
+    for (const file of docFiles) {
+      const relPath = path.relative(repoRoot, file);
+      const content = fs.readFileSync(file, 'utf8');
+      const lines = content.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        for (const banned of bannedIdentifiers) {
+          if (line.includes(banned)) {
+            violations.push(`${relPath}:${i + 1} contains banned identifier "${banned}"`);
+          }
+        }
+      }
+    }
+
+    expect(violations, 'Banned identifier violations (FR-015)').toEqual([]);
+  });
 });

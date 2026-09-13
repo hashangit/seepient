@@ -58,6 +58,8 @@ export interface RestHandlerContext {
   maxBodyBytes?: number;
   /** Rate limiter instance */
   rateLimiter?: RateLimiter;
+  /** Optional custom API keys file path */
+  apiKeysFile?: string;
 }
 
 interface ChatRequest {
@@ -270,7 +272,7 @@ export function createRestHandler(ctx: RestHandlerContext) {
       }
 
       // Authenticated routes: enforce auth and rate limiting
-      const key = authMiddleware(req);
+      const key = (req as any).apiKey ?? authMiddleware(req, ctx.apiKeysFile);
       if (!key) {
         sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key");
         return;
@@ -288,8 +290,8 @@ export function createRestHandler(ctx: RestHandlerContext) {
 
       const getRuntime = async () => {
         if (ctx.runtime) return ctx.runtime;
-        const { getDefaultProviderRuntime } = await import("../../domain/providers/provider-runtime.js");
-        return getDefaultProviderRuntime();
+        const { createIsolatedProviderRuntime } = await import("../../domain/providers/provider-runtime.js");
+        return createIsolatedProviderRuntime();
       };
 
       switch (route.handler) {
@@ -319,36 +321,26 @@ export function createRestHandler(ctx: RestHandlerContext) {
           await handleSettingsPatch(req, res, ctx, route.params.category);
           break;
         case "provider_runtime": {
-          const key = authMiddleware(req);
-          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
           const { handleGetProviderRuntime } = await import("./provider-management/accounts.js");
           await handleGetProviderRuntime(req, res, (await getRuntime()) as any, key);
           break;
         }
         case "catalog": {
-          const key = authMiddleware(req);
-          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
           const { handleGetCatalog } = await import("./provider-management/catalog.js");
           await handleGetCatalog(req, res, (await getRuntime()) as any, key);
           break;
         }
         case "models_resolve": {
-          const key = authMiddleware(req);
-          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
           const { handleResolveModel } = await import("./provider-management/catalog.js");
           await handleResolveModel(req, res, (await getRuntime()) as any, key);
           break;
         }
         case "models_assignments": {
-          const key = authMiddleware(req);
-          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
           const { handleGetAssignments } = await import("./provider-management/assignments.js");
           await handleGetAssignments(req, res, (await getRuntime()) as any, key, route.params.purpose, route.params.tier);
           break;
         }
         case "models_assignment_put": {
-          const key = authMiddleware(req);
-          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
           const rt = await getRuntime();
           if (!isMutableRuntime(rt)) {
             sendError(res, 501, "NOT_IMPLEMENTED", "Injected provider runtime does not implement configuration mutations");
@@ -359,8 +351,6 @@ export function createRestHandler(ctx: RestHandlerContext) {
           break;
         }
         case "models_assignment_delete": {
-          const key = authMiddleware(req);
-          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
           const rt = await getRuntime();
           if (!isMutableRuntime(rt)) {
             sendError(res, 501, "NOT_IMPLEMENTED", "Injected provider runtime does not implement configuration mutations");
@@ -371,22 +361,16 @@ export function createRestHandler(ctx: RestHandlerContext) {
           break;
         }
         case "providers_v2_list": {
-          const key = authMiddleware(req);
-          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
           const { handleGetProviders } = await import("./provider-management/accounts.js");
           await handleGetProviders(req, res, (await getRuntime()) as any, key);
           break;
         }
         case "provider_v2_get": {
-          const key = authMiddleware(req);
-          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
           const { handleGetProviders } = await import("./provider-management/accounts.js");
           await handleGetProviders(req, res, (await getRuntime()) as any, key, route.params.providerId);
           break;
         }
         case "provider_v2_put": {
-          const key = authMiddleware(req);
-          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
           const rt = await getRuntime();
           if (!isMutableRuntime(rt)) {
             sendError(res, 501, "NOT_IMPLEMENTED", "Injected provider runtime does not implement configuration mutations");
@@ -397,8 +381,6 @@ export function createRestHandler(ctx: RestHandlerContext) {
           break;
         }
         case "provider_v2_delete": {
-          const key = authMiddleware(req);
-          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
           const rt = await getRuntime();
           if (!isMutableRuntime(rt)) {
             sendError(res, 501, "NOT_IMPLEMENTED", "Injected provider runtime does not implement configuration mutations");
@@ -409,8 +391,6 @@ export function createRestHandler(ctx: RestHandlerContext) {
           break;
         }
         case "provider_probe": {
-          const key = authMiddleware(req);
-          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
           const urlObj = new URL(req.url ?? "/", "http://localhost");
           const full = urlObj.searchParams.get("full") === "true";
           const { handleProbeProvider } = await import("./provider-management/catalog.js");
@@ -418,8 +398,6 @@ export function createRestHandler(ctx: RestHandlerContext) {
           break;
         }
         case "provider_oauth_start": {
-          const key = authMiddleware(req);
-          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
           const rt = await getRuntime();
           if (!isMutableRuntime(rt)) {
             sendError(res, 501, "NOT_IMPLEMENTED", "Injected provider runtime does not implement configuration mutations");
@@ -430,8 +408,6 @@ export function createRestHandler(ctx: RestHandlerContext) {
           break;
         }
         case "provider_oauth_complete": {
-          const key = authMiddleware(req);
-          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
           const rt = await getRuntime();
           if (!isMutableRuntime(rt)) {
             sendError(res, 501, "NOT_IMPLEMENTED", "Injected provider runtime does not implement configuration mutations");
@@ -442,8 +418,6 @@ export function createRestHandler(ctx: RestHandlerContext) {
           break;
         }
         case "provider_refresh_models": {
-          const key = authMiddleware(req);
-          if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); break; }
           const rt = await getRuntime();
           if (!isMutableRuntime(rt)) {
             sendError(res, 501, "NOT_IMPLEMENTED", "Injected provider runtime does not implement configuration mutations");
@@ -498,7 +472,7 @@ async function handleModels(
   res: ServerResponse,
   ctx: RestHandlerContext,
 ): Promise<void> {
-  const key = authMiddleware(req);
+  const key = (req as any).apiKey ?? authMiddleware(req, ctx.apiKeysFile);
   if (!key) {
     sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key");
     return;
@@ -512,7 +486,7 @@ async function handleSkills(
   res: ServerResponse,
   ctx: RestHandlerContext,
 ): Promise<void> {
-  const key = authMiddleware(req);
+  const key = (req as any).apiKey ?? authMiddleware(req, ctx.apiKeysFile);
   if (!key) {
     sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key");
     return;
@@ -533,7 +507,7 @@ async function handleChat(
   ctx: RestHandlerContext,
 ): Promise<void> {
   // Auth
-  const key = authMiddleware(req);
+  const key = (req as any).apiKey ?? authMiddleware(req, ctx.apiKeysFile);
   if (!key) {
     sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key");
     return;
@@ -575,6 +549,14 @@ async function handleChat(
   if (parsed.skills !== undefined) {
     if (!Array.isArray(parsed.skills) || parsed.skills.some((s) => typeof s !== "string")) {
       sendError(res, 400, "BAD_REQUEST", "Field 'skills' must be an array of strings");
+      return;
+    }
+  }
+
+  // FR-016 (VULN-22): Fail-closed tools array edge validation
+  if ((parsed as any).tools !== undefined) {
+    if (!Array.isArray((parsed as any).tools) || (parsed as any).tools.some((t: any) => typeof t !== "string")) {
+      sendError(res, 400, "BAD_REQUEST", "Field 'tools' must be an array of strings");
       return;
     }
   }
@@ -628,7 +610,7 @@ async function handleChat(
       throw err;
     }
 
-    if (!ctx.sessionManager.acquireTurn(sessionId)) {
+    if (!ctx.sessionManager.acquireTurn(sessionId, keyHash)) {
       sendError(res, 409, "REQUEST_IN_FLIGHT", `Session "${sessionId}" has a request already in flight`);
       return;
     }
@@ -637,7 +619,7 @@ async function handleChat(
     // F1: resolve a dangling failed-turn draft before history is captured —
     // the new prompt dedupes/supersedes it on disk, so the assembled model
     // input and the stored history stay alternating.
-    ctx.sessionManager.resolveTrailingDraft(sessionId);
+    ctx.sessionManager.resolveTrailingDraft(sessionId, keyHash);
 
     history = [...session.messages];
   }
@@ -651,7 +633,7 @@ async function handleChat(
         role: "user",
         content: parsed.message,
         timestamp: Date.now(),
-      });
+      }, keyHash);
     }
 
     const envMaxSteps = process.env.SEEPIENT_MAX_STEPS ? parseInt(process.env.SEEPIENT_MAX_STEPS, 10) : undefined;
@@ -706,7 +688,7 @@ async function handleChat(
         role: "assistant",
         content: result.text,
         timestamp: Date.now(),
-      });
+      }, keyHash);
     }
 
     sendJSON(res, 200, {
@@ -733,7 +715,7 @@ async function handleChat(
     });
   } finally {
     if (turnAcquired && sessionId) {
-      ctx.sessionManager.releaseTurn(sessionId);
+      ctx.sessionManager.releaseTurn(sessionId, keyHash);
     }
   }
 }
@@ -743,7 +725,7 @@ async function handleListSessions(
   res: ServerResponse,
   ctx: RestHandlerContext,
 ): Promise<void> {
-  const key = authMiddleware(req);
+  const key = (req as any).apiKey ?? authMiddleware(req, ctx.apiKeysFile);
   if (!key) {
     sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key");
     return;
@@ -767,7 +749,7 @@ async function handleGetSession(
   ctx: RestHandlerContext,
   sessionId: string,
 ): Promise<void> {
-  const key = authMiddleware(req);
+  const key = (req as any).apiKey ?? authMiddleware(req, ctx.apiKeysFile);
   if (!key) {
     sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key");
     return;
@@ -812,7 +794,7 @@ async function handleSettingsGet(
   ctx: RestHandlerContext,
   category?: string,
 ): Promise<void> {
-  const key = authMiddleware(req);
+  const key = (req as any).apiKey ?? authMiddleware(req, ctx.apiKeysFile);
   if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); return; }
   (req as any).apiKey = key;
 
@@ -826,7 +808,7 @@ async function handleSettingsSchema(
   res: ServerResponse,
   ctx: RestHandlerContext,
 ): Promise<void> {
-  const key = authMiddleware(req);
+  const key = (req as any).apiKey ?? authMiddleware(req, ctx.apiKeysFile);
   if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); return; }
   (req as any).apiKey = key;
 
@@ -841,7 +823,7 @@ async function handleSettingsPatch(
   ctx: RestHandlerContext,
   category?: string,
 ): Promise<void> {
-  const key = authMiddleware(req);
+  const key = (req as any).apiKey ?? authMiddleware(req, ctx.apiKeysFile);
   if (!key) { sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key"); return; }
   (req as any).apiKey = key;
 

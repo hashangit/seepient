@@ -14,12 +14,13 @@ import * as crypto from "node:crypto";
 import { homedir } from "os";
 
 import { getSyncBuiltinCatalog } from "../../domain/providers/model-catalog.js";
-import { getDefaultProviderRuntime } from "../../domain/providers/provider-runtime.js";
+import { createIsolatedProviderRuntime } from "../../domain/providers/provider-runtime.js";
 import { serverGenerateText, serverStreamText } from "./server-core.js";
 import { createRestHandler, type RestHandlerContext } from "./rest.js";
 import { setupWebSocket, type WebSocketHandlerContext } from "../ws/websocket.js";
 import { createConnectionRegistry } from "../ws/connection-registry.js";
 import { ServerSessionManager } from "./session-store.js";
+import { MemoryPersistenceBackend } from "../../domain/sessions/session-store.js";
 import { SettingsManager } from "../../domain/settings/settings-manager.js";
 import { ToolRegistry } from "../../domain/tool-executor.js";
 import type { SettingsHandlerContext } from "./settings-handlers.js";
@@ -51,7 +52,12 @@ interface ReadPackageJson {
  * `dispose()` handle that un-registers the server's process signal handlers
  * (registered only when the server listens) — W130 embedding contract.
  */
-export type SeepientHttpServer = http.Server & { dispose: () => void };
+export type SeepientHttpServer = http.Server & {
+  dispose: () => void;
+  server?: http.Server;
+  runtime?: any;
+  getRuntime?: () => any;
+};
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -237,27 +243,57 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
         "the local CLI/SDK for tool execution.",
     );
   }
-  const getServerRuntime = () => options?.runtime ?? getDefaultProviderRuntime();
+  let serverRuntime: any;
+  if (options?.runtime) {
+    const runtimeAny = options.runtime as any;
+    if (
+      runtimeAny.isIsolated !== true ||
+      (runtimeAny.configStore && runtimeAny.configStore.isIsolated !== true) ||
+      (runtimeAny.credentialStore && runtimeAny.credentialStore.isIsolated !== true)
+    ) {
+      const { TenancyRuntimeRequiredError } = await import("../../domain/tenancy/tenancy-mode.js");
+      throw new TenancyRuntimeRequiredError();
+    }
+    serverRuntime = options.runtime;
+  } else {
+    process.stderr.write("[seepient] Notice: server booted with isolated empty ProviderRuntime.\n");
+    serverRuntime = createIsolatedProviderRuntime();
+  }
+  const getServerRuntime = () => serverRuntime;
 
   if (serverPermissionPipelineEnabled) {
     const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
     const { NoneApprovalBroker } = await import("../approval-brokers.js");
-    const { LocalAuditStore, TerminalEventOutbox, recoverIndeterminateActions } = await import("../../domain/permissions/audit-recorder.js");
+    const { TerminalEventOutbox, recoverIndeterminateActions } = await import("../../domain/permissions/audit-recorder.js");
     const { isLocalAuditStore } = await import("../../foundations/contracts/execution-brokers.js");
-    const rootDir = process.cwd();
-    const serverAuditStore = options?.auditStore ?? new LocalAuditStore({ root: rootDir });
+    const { InMemoryAuditStore, InMemoryPolicyStore, InMemoryCapabilityLedger } = await import("../../domain/permissions/in-memory-stores.js");
+
+    if (
+      (options?.auditStore && (options.auditStore as any).isIsolated !== true) ||
+      (options?.policyStore && (options.policyStore as any).isIsolated !== true) ||
+      (options?.capabilityLedger && (options.capabilityLedger as any).isIsolated !== true)
+    ) {
+      const { TenancyStoreIncompleteError } = await import("../../domain/tenancy/tenancy-mode.js");
+      throw new TenancyStoreIncompleteError(
+        [],
+        'Multi-tenant mode requires isolated stores (isIsolated: true). Ambient stores cannot be used in multi-tenant mode.',
+      );
+    }
+
+    const serverAuditStore = options?.auditStore ?? new InMemoryAuditStore();
     const isLocalStore = isLocalAuditStore(serverAuditStore);
 
-    const { LocalPolicyStore } = await import("../../domain/permissions/policy-store.js");
-    const { PersistedCapabilityLedger } = await import("../../domain/permissions/persisted-capability-ledger.js");
-    const serverPolicyStore = options?.policyStore ?? new LocalPolicyStore();
-    const serverCapabilityLedger = options?.capabilityLedger ?? new PersistedCapabilityLedger({
-      root: path.join(rootDir, "caps"),
-    });
+    const serverPolicyStore = options?.policyStore ?? new InMemoryPolicyStore();
+    const serverCapabilityLedger = options?.capabilityLedger ?? new InMemoryCapabilityLedger();
     // The outbox MUST be backed by the SAME LocalAuditStore the per-request
     // lifecycles use, otherwise the flush timer + recovery operate on a
     // different pending-event set than the one live requests populate.
-    const serverOutbox = isLocalStore ? new TerminalEventOutbox(serverAuditStore as import("../../domain/permissions/audit-recorder.js").LocalAuditStore) : undefined;
+    const serverOutbox = isLocalStore
+      ? new TerminalEventOutbox(
+          serverAuditStore as import("../../domain/permissions/audit-recorder.js").LocalAuditStore,
+          (serverAuditStore as any).dir ? { outboxDir: path.join((serverAuditStore as any).dir, "outbox") } : undefined,
+        )
+      : undefined;
     serverOutboxRef = serverOutbox;
 
     // The periodic flush timer MUST start regardless of whether the one-time
@@ -333,34 +369,42 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     };
   }
 
-  // Resolve session directory
-  const sessionDir = process.env.SEEPIENT_SESSION_DIR ??
-    path.join(process.cwd(), ".seepient", "sessions");
-
+  // Resolve session persistence: in multi-tenant server mode, default to in-memory
+  // unless an explicit persist backend or SEEPIENT_SESSION_DIR is provided (P1-7.1 / Rule 9.2).
+  const sessionDir = process.env.SEEPIENT_SESSION_DIR;
   const sessionTTL = (options?.sessionTTL ?? parseInt(process.env.SEEPIENT_SESSION_TTL ?? "86400", 10)) * 1000;
 
   // Create session manager
   const sessionManager = new ServerSessionManager({
     sessionDir,
     sessionTTL,
-    backend: options?.persist,
+    backend: options?.persist ?? (sessionDir ? undefined : new MemoryPersistenceBackend()),
   });
   sessionManager.startCleanup();
 
   // Create settings handler context (shared by REST and WS)
-  const configPaths = getConfigPaths();
-  const mergedConfig = loadMergedConfig();
-  const projectConfig = loadJsonConfig(configPaths.local);
-  const globalConfig = loadJsonConfig(configPaths.global);
-  const settingsManager = options?.settingsManager ?? new SettingsManager({
-    config: mergedConfig as unknown as Record<string, any>,
-    projectConfigPath: configPaths.local,
-    globalConfigPath: configPaths.global,
-    projectConfig: projectConfig.config as Record<string, any>,
-    globalConfig: globalConfig.config as Record<string, any>,
-  });
+  let settingsManager = options?.settingsManager;
+  if (!settingsManager) {
+    // NEW-1: In multi-tenant mode, do NOT read ambient host operator dotfiles (~/.seepient/setting.json)
+    // or host environment variables into tenant settings context. Use an isolated in-memory SettingsManager.
+    const serverConfig: Record<string, any> = {
+      server: {
+        ...(process.env.SEEPIENT_CORS_ORIGINS ? { corsOrigins: process.env.SEEPIENT_CORS_ORIGINS } : {}),
+        ...(process.env.SEEPIENT_MAX_BODY_BYTES ? { maxBodyBytes: parseInt(process.env.SEEPIENT_MAX_BODY_BYTES, 10) } : {}),
+        ...(process.env.SEEPIENT_RATE_LIMIT_RPM ? { rateLimitRpm: parseInt(process.env.SEEPIENT_RATE_LIMIT_RPM, 10) } : {}),
+      },
+    };
+    settingsManager = new SettingsManager({
+      config: serverConfig,
+      projectConfigPath: undefined,
+      globalConfigPath: undefined,
+      projectConfig: {},
+      globalConfig: {},
+      isIsolated: true,
+    });
+  }
   // W131: per-instance WS registries — never module-global
-  const wsRegistry = createConnectionRegistry();
+  const wsRegistry = createConnectionRegistry({ inMemory: true });
   // Wire registered server settings: env override -> settings value -> default
   const corsOriginsSetting = settingsManager.get("server.corsOrigins").value as string | undefined;
   const maxBodyBytesSetting = settingsManager.get("server.maxBodyBytes").value as number | undefined;
@@ -371,6 +415,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     getOtherClients: (excludeWs) => wsRegistry.getOtherClients(excludeWs),
     maxBodyBytes: maxBodyBytesSetting,
     runtime: getServerRuntime(),
+    tenancyMode: "multi",
   };
 
   // W161: re-read server.rateLimitRpm per consume — a settings PATCH takes
@@ -381,21 +426,41 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
   );
   globalRateLimiter.setDefaultRpm(rateLimitRpmSetting ?? 300);
 
-  // Initialize gateway (if enabled)
+  // Initialize gateway (FR-017 / FR-010: default-off in multi-tenant server boot; requires explicit opt-in with isolated storageDir)
   let gatewayHandler: ((req: any, res: any, path: string, method: string) => Promise<void>) | undefined;
   let gatewayMiddleware: import("../../foundations/contracts/middleware.js").Middleware[] | undefined;
+  const explicitGateway = options?.gateway;
+  const isGatewayOptedIn = Boolean(
+    explicitGateway === true ||
+    (typeof explicitGateway === "object" && explicitGateway !== null && explicitGateway.enabled !== false)
+  );
+
+  if (isGatewayOptedIn) {
+    const gwOpts = typeof explicitGateway === "object" && explicitGateway !== null ? explicitGateway : {};
+    const ambientHomeSeepient = path.resolve(path.join(homedir(), ".seepient"));
+    const explicitDir = gwOpts.storageDir ? path.resolve(gwOpts.storageDir) : undefined;
+    if (!explicitDir || explicitDir === ambientHomeSeepient) {
+      const { SeepientError } = await import("../../foundations/errors.js");
+      throw new SeepientError(
+        "GATEWAY_ISOLATION_REQUIRED: Gateway opt-in on a multi-tenant server requires an explicit isolated storageDir. Ambient ~/.seepient or ambient environment storage is not permitted.",
+        "GATEWAY_ISOLATION_REQUIRED",
+        false,
+      );
+    }
+  }
+
   try {
-    const gwEnabled = settingsManager.get("gateway.enabled").value as boolean;
-    if (gwEnabled) {
+    if (isGatewayOptedIn) {
+      const gwOpts = typeof explicitGateway === "object" && explicitGateway !== null ? explicitGateway : {};
       const gatewayConfig = {
         enabled: true,
-        semanticTopK: settingsManager.get("gateway.semanticTopK").value as number,
-        defaultRateLimitPerMin: settingsManager.get("gateway.defaultRateLimitPerMin").value as number,
-        maxAuditLogsInMemory: settingsManager.get("gateway.maxAuditLogs").value as number,
+        semanticTopK: (gwOpts.semanticTopK ?? settingsManager.get("gateway.semanticTopK").value) as number,
+        defaultRateLimitPerMin: (gwOpts.defaultRateLimitPerMin ?? settingsManager.get("gateway.defaultRateLimitPerMin").value) as number,
+        maxAuditLogsInMemory: (gwOpts.maxAuditLogsInMemory ?? settingsManager.get("gateway.maxAuditLogs").value) as number,
       };
 
       const { GatewaySettingsAdapter } = await import("../../capabilities/gateway/settings-adapter.js");
-      const gatewayStorageDir = process.env.SEEPIENT_GATEWAY_DIR ?? path.join(homedir(), ".seepient");
+      const gatewayStorageDir = gwOpts.storageDir!;
       const gwSettingsAdapter = new GatewaySettingsAdapter(gatewayStorageDir);
       await gwSettingsAdapter.initialize();
 
@@ -408,14 +473,17 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
         serverToolRegistry.registerMany(gwResult.tools);
         const { createGatewayRestHandler } = await import("./rest-gateway.js");
         const { importOpenApiSpec } = await import("../../capabilities/gateway/openapi-importer.js");
-        gatewayHandler = createGatewayRestHandler({ gateway: gatewayInstance, settingsAdapter: gwSettingsAdapter, importOpenApiSpec, maxBodyBytes: maxBodyBytesSetting });
+        gatewayHandler = createGatewayRestHandler({ gateway: gatewayInstance, settingsAdapter: gwSettingsAdapter, importOpenApiSpec, maxBodyBytes: maxBodyBytesSetting, apiKeysFile: options?.apiKeysFile });
 
         // Wire semantic injection middleware
         const { semanticToolInjectionMiddleware } = await import("../../domain/middleware/semantic-tools.js");
         gatewayMiddleware = [semanticToolInjectionMiddleware(gatewayInstance, gatewayConfig.semanticTopK)];
       }
     }
-  } catch (e) {
+  } catch (e: any) {
+    if (e?.code === "GATEWAY_ISOLATION_REQUIRED") {
+      throw e;
+    }
     console.error("[server] Gateway initialization failed:", e instanceof Error ? e.message : String(e));
   }
 
@@ -440,7 +508,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
           tenantId: opts.tenantId ?? "default",
           sessionId: opts.sessionId ?? crypto.randomUUID(),
           runId: crypto.randomUUID(),
-          workspaceRoot: process.cwd(),
+          workspaceRoot: path.join(process.cwd(), ".seepient", "workspaces", principal.trim()),
           modelProviderClass: (opts.provider ?? "openai") as string,
         });
       }
@@ -452,6 +520,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     gatewayHandler,
     maxBodyBytes: maxBodyBytesSetting,
     rateLimiter: serverRateLimiter,
+    apiKeysFile: options?.apiKeysFile,
   };
 
   const restHandler = createRestHandler(restCtx);
@@ -517,7 +586,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
           tenantId: opts.tenantId ?? "default",
           sessionId: opts.sessionId ?? crypto.randomUUID(),
           runId: crypto.randomUUID(),
-          workspaceRoot: process.cwd(),
+          workspaceRoot: path.join(process.cwd(), ".seepient", "workspaces", principal.trim()),
           modelProviderClass: (opts.provider ?? "openai") as string,
         });
       }
@@ -537,6 +606,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     listModels,
     listSkills: () => listSkills(options?.sources),
     settingsHandlerContext,
+    apiKeysFile: options?.apiKeysFile,
   };
 
   // Set up WebSocket (async, but we wait for it)
@@ -590,14 +660,29 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     process.on("SIGTERM", shutdownListener);
   }
 
+  const unhandledRejectionListener = (reason: unknown) => {
+    logTransportEvent({
+      level: "error",
+      event: "unhandled_rejection",
+      error: reason instanceof Error ? reason.message : String(reason),
+      stack: reason instanceof Error ? reason.stack : undefined,
+    });
+  };
+  process.on("unhandledRejection", unhandledRejectionListener);
+
   // Dispose handle (C5): full teardown — un-registers this server's signal
   // handlers AND closes the server (which also detaches the WS layer and,
   // via the close event, re-runs the handler removal idempotently).
   (server as SeepientHttpServer).dispose = () => {
     process.removeListener("SIGINT", shutdownListener);
     process.removeListener("SIGTERM", shutdownListener);
+    process.removeListener("unhandledRejection", unhandledRejectionListener);
     server.close();
   };
+
+  server.on("close", () => {
+    process.removeListener("unhandledRejection", unhandledRejectionListener);
+  });
 
   // Listen immediately unless listen: false
   if (willListen) {
@@ -612,6 +697,11 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
       });
     });
   }
+
+  (server as any).server = server;
+  (server as any).runtime = serverRuntime;
+  (server as any).getRuntime = () => serverRuntime;
+  (server as any).toolRegistry = serverToolRegistry;
 
   return server as SeepientHttpServer;
 }

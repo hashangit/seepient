@@ -220,4 +220,28 @@ describe("Real sandbox primitive confinement (NFR-004)", () => {
       await fs.rm(tmpRoot, { recursive: true, force: true }).catch(() => {});
     }
   });
+
+  it("FR-009: buildLocalBoundary gates SEEPIENT_UNCONTAINED on tenancyMode", async () => {
+    const { buildLocalBoundary } = await import("../build-local-boundary.js");
+    const { UncontainedSandbox } = await import("../../../vendors/sandbox-runtime/index.js");
+    const oldEnv = process.env.SEEPIENT_UNCONTAINED;
+    process.env.SEEPIENT_UNCONTAINED = "1";
+    try {
+      // In single mode (default), SEEPIENT_UNCONTAINED=1 is honored
+      const single = await buildLocalBoundary({ tenancyMode: "single" });
+      expect(single.boundary.capabilities.uncontainedOptIn).toBe(true);
+
+      // In multi mode, SEEPIENT_UNCONTAINED=1 is ignored; uncontainedOptIn stays false
+      const multi = await buildLocalBoundary({ tenancyMode: "multi" });
+      expect(multi.boundary.capabilities.uncontainedOptIn).toBe(false);
+
+      // Explicit code-level option still overrides in multi mode
+      const explicit = await buildLocalBoundary({ tenancyMode: "multi", unsafeUncontained: true });
+      expect(explicit.boundary.capabilities.uncontainedOptIn).toBe(true);
+    } finally {
+      if (oldEnv !== undefined) process.env.SEEPIENT_UNCONTAINED = oldEnv;
+      else delete process.env.SEEPIENT_UNCONTAINED;
+    }
+  });
 });
+

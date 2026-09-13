@@ -51,7 +51,7 @@ export function handleConnection(
 ): void {
   // Auth check — the token should have been validated during upgrade,
   // but verify again for safety
-  const key = authMiddleware(req);
+  const key = authMiddleware(req, ctx.apiKeysFile);
   if (!key) {
     safeSend(ws, {
       type: "error",

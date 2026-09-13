@@ -123,7 +123,7 @@ describe("W151 — resolved-error turns persist no assistant row (REST)", () => 
     expect(res.statusCode).toBe(502);
 
     // No assistant row: only the persisted user message exists
-    const stored = await backend.load("w151-rest-session") as unknown as SessionData;
+    const stored = (await backend.load(`${hashKey(ownerRawKey)}:w151-rest-session`) ?? await backend.load("w151-rest-session")) as unknown as SessionData;
     const roles = stored.messages.map((m) => m.role);
     expect(roles).toEqual(["user"]);
   });
@@ -160,7 +160,7 @@ describe("W151 — resolved-error turns persist no assistant row (REST)", () => 
     );
 
     expect(res.statusCode).toBe(200);
-    const stored = await backend.load("w151-rest-ok") as unknown as SessionData;
+    const stored = (await backend.load(`${hashKey(ownerRawKey)}:w151-rest-ok`) ?? await backend.load("w151-rest-ok")) as unknown as SessionData;
     const roles = stored.messages.map((m) => m.role);
     expect(roles).toEqual(["user", "assistant"]);
   });

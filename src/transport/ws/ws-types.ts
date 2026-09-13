@@ -390,6 +390,7 @@ export interface WebSocketHandlerContext {
   listModels: () => Record<string, string[]>;
   listSkills: () => { name: string; description: string; tags: string[] }[] | Promise<{ name: string; description: string; tags: string[] }[]>;
   settingsHandlerContext?: import("../http/settings-handlers.js").SettingsHandlerContext;
+  apiKeysFile?: string;
 }
 
 // ── Connection state ─────────────────────────────────────────────────

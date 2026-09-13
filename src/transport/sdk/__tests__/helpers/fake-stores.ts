@@ -36,6 +36,7 @@ import {
 
 /** In-memory AuditStore with call recording and idempotency dedup. */
 export class FakeAuditStore implements AuditStore {
+  readonly isIsolated = true;
   readonly appends: Array<{ event: ActionAuditEvent; idempotencyKey: string }> = [];
   readonly seenKeys = new Set<string>();
   readonly terminalEvents = new Map<string, ActionAuditEvent>();
@@ -76,6 +77,7 @@ export class FakeAuditStore implements AuditStore {
 
 /** In-memory PolicyStore with compare-and-set version tracking. */
 export class FakePolicyStore implements PolicyStore {
+  readonly isIsolated = true;
   readonly snapshots = new Map<string, PolicySnapshot>();
   readonly calls: Array<{
     type: "read" | "compareAndSet";
@@ -159,6 +161,7 @@ export class FakePolicyStore implements PolicyStore {
 
 /** In-memory CapabilityLedger with consumption & revocation tracking. */
 export class FakeCapabilityLedger implements CapabilityLedger {
+  readonly isIsolated = true;
   readonly consumedDigests = new Set<string>();
   readonly consumedEnvelopes = new Set<string>();
   readonly revokedRuns = new Set<string>();
@@ -248,6 +251,7 @@ export class FakeCapabilityLedger implements CapabilityLedger {
 
 /** Recording in-memory PersistenceBackend tracking save/load/delete calls. */
 export class RecordingPersistenceBackend implements PersistenceBackend {
+  readonly isIsolated = true;
   readonly __persistenceBackend = true as const;
   readonly store = new Map<string, SessionData>();
   readonly saves: Array<{ id: string; data: SessionData }> = [];
