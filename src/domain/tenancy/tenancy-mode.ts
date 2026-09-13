@@ -1,11 +1,18 @@
 /**
  * Spec 022 — Tenancy Mode & Fail-Closed Validation (contracts/tenancy-mode.md).
  */
-import { SeepientError, PrincipalRequiredError } from "../../foundations/errors.js";
+import {
+  SeepientError,
+  PrincipalRequiredError,
+  InvalidPrincipalIdError,
+  TenancyWorkspaceRequiredError,
+} from "../../foundations/errors.js";
 
-export { PrincipalRequiredError };
+export { PrincipalRequiredError, InvalidPrincipalIdError, TenancyWorkspaceRequiredError };
 
 export type TenancyMode = "single" | "multi";
+
+export const PRINCIPAL_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;
 
 export const SENTINEL_PRINCIPAL_IDS = new Set(["sdk-user", "default", "anonymous"]);
 
@@ -30,9 +37,10 @@ export interface TenancyResolution {
 export class TenancyRuntimeRequiredError extends SeepientError {
   constructor(message?: string) {
     const defaultMessage =
-      'Multi-tenant mode requires an explicit ProviderRuntime to be injected. ' +
-      'Pass an isolated runtime instance via options.runtime, or set tenancy: "single" ' +
-      'if running in a single-user environment.';
+      'Multi-tenant mode requires an isolated ProviderRuntime (isIsolated: true). ' +
+      'Construct your runtime with createIsolatedProviderRuntime() or default new ProviderRuntime(). ' +
+      'Do not pass an ambient runtime created with createAmbientProviderRuntime(). ' +
+      'Or set tenancy: "single" if running in a single-user environment.';
     super(message ?? defaultMessage, "TENANCY_RUNTIME_REQUIRED", false);
     this.name = "TenancyRuntimeRequiredError";
   }
@@ -151,14 +159,38 @@ export function validateTenancyCompleteness(
   }
 
 
-  // FR-020: principalId is checked FIRST in multi mode before runtime or store completeness
-  const trimmed = typeof inputs.principalId === "string" ? inputs.principalId.trim() : "";
-  if (!inputs.principalId || trimmed.length === 0 || SENTINEL_PRINCIPAL_IDS.has(trimmed)) {
+  // FR-020 & FR-011: principalId is checked FIRST in multi mode before runtime or store completeness
+  const rawPrincipal = inputs.principalId;
+  if (!rawPrincipal || typeof rawPrincipal !== "string" || rawPrincipal.trim().length === 0) {
     throw new PrincipalRequiredError();
+  }
+  const trimmed = rawPrincipal.trim();
+  if (SENTINEL_PRINCIPAL_IDS.has(trimmed.toLowerCase())) {
+    throw new InvalidPrincipalIdError(
+      `INVALID_PRINCIPAL_ID: principalId "${trimmed}" is a reserved sentinel value. Use an explicit tenant principal.`,
+    );
+  }
+  if (!PRINCIPAL_ID_RE.test(trimmed)) {
+    throw new InvalidPrincipalIdError(
+      `INVALID_PRINCIPAL_ID: principalId "${trimmed}" must match /^[a-zA-Z0-9_-]{1,128}$/.`,
+    );
   }
 
   if (!inputs.runtime) {
     throw new TenancyRuntimeRequiredError();
+  }
+
+  const runtimeAny = inputs.runtime as any;
+  if (
+    runtimeAny.isIsolated !== true ||
+    (runtimeAny.configStore && runtimeAny.configStore.isIsolated !== true) ||
+    (runtimeAny.credentialStore && runtimeAny.credentialStore.isIsolated !== true)
+  ) {
+    throw new TenancyRuntimeRequiredError(
+      'Multi-tenant mode requires an isolated ProviderRuntime (isIsolated: true) and isolated sub-stores (configStore, credentialStore). ' +
+      'Construct your runtime with createIsolatedProviderRuntime() or default new ProviderRuntime(). ' +
+      'Do not pass an ambient runtime created with createAmbientProviderRuntime().'
+    );
   }
 
   const missing: string[] = [];
@@ -174,16 +206,28 @@ export function validateTenancyCompleteness(
   if (missing.length > 0) {
     throw new TenancyStoreIncompleteError(missing);
   }
+
+  if (
+    (inputs.auditStore as any)?.isIsolated !== true ||
+    (inputs.policyStore as any)?.isIsolated !== true ||
+    (inputs.capabilityLedger as any)?.isIsolated !== true
+  ) {
+    throw new TenancyStoreIncompleteError(
+      [],
+      'Multi-tenant mode requires isolated stores (isIsolated: true). ' +
+      'Ambient stores cannot be used in multi-tenant mode.'
+    );
+  }
 }
 
-let noticePrinted = false;
+let noticePrinted = { tenancy: false, credentials: false };
 
 /**
  * Emits the one-time tenancy upgrade notice to stderr/console.warn if upgraded is true.
  */
 export function emitTenancyNoticeOnce(upgraded: boolean): void {
-  if (!upgraded || noticePrinted) return;
-  noticePrinted = true;
+  if (!upgraded || noticePrinted.tenancy) return;
+  noticePrinted.tenancy = true;
   console.warn(
     `[seepient] Notice: Tenancy mode automatically upgraded to "multi" based on injected state. ` +
       `To run in single-user mode explicitly, pass tenancy: "single".`,
@@ -191,5 +235,18 @@ export function emitTenancyNoticeOnce(upgraded: boolean): void {
 }
 
 export function resetTenancyNoticeForTest(): void {
-  noticePrinted = false;
+  noticePrinted = { tenancy: false, credentials: false };
+}
+
+/**
+ * Emits a warning when credentials or providers are injected in single-user mode (NEW-9).
+ */
+export function emitCredentialsSingleUserWarningOnce(): void {
+  if (noticePrinted.credentials) return;
+  noticePrinted.credentials = true;
+  console.warn(
+    `[seepient] Notice: Running in single-user mode with custom credentials/providers. ` +
+      `Ambient ~/.seepient stores and single-user policies will be used. ` +
+      `For multi-tenant isolation, pass tenancy: "multi" and inject isolated stores.`,
+  );
 }

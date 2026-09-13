@@ -12,17 +12,48 @@ export interface TokenBucket {
 }
 
 export class RateLimiter {
+  static readonly MAX_BUCKETS = 10_000;
+  static readonly IDLE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
   private buckets = new Map<string, TokenBucket>();
   private defaultRpm: number;
+  private maxBuckets: number;
   /**
    * W161: optional live rpm source (e.g. the settings manager) — re-read per
    * consume so a settings PATCH takes effect without a restart.
    */
   private rpmProvider?: () => number | undefined;
 
-  constructor(defaultRpm = 300, rpmProvider?: () => number | undefined) {
+  constructor(
+    defaultRpm = 300,
+    rpmProvider?: () => number | undefined,
+    maxBuckets = RateLimiter.MAX_BUCKETS,
+  ) {
     this.defaultRpm = defaultRpm;
     this.rpmProvider = rpmProvider;
+    this.maxBuckets = maxBuckets;
+  }
+
+  get size(): number {
+    return this.buckets.size;
+  }
+
+  private prune(now: number): void {
+    const cutoff = now - RateLimiter.IDLE_TTL_MS;
+    for (const [k, b] of this.buckets) {
+      if (b.lastRefill < cutoff) {
+        this.buckets.delete(k);
+      }
+    }
+    if (this.buckets.size >= this.maxBuckets) {
+      const excess = this.buckets.size - this.maxBuckets + 1;
+      let count = 0;
+      for (const k of this.buckets.keys()) {
+        this.buckets.delete(k);
+        count++;
+        if (count >= excess) break;
+      }
+    }
   }
 
   setDefaultRpm(rpm: number): void {
@@ -68,11 +99,18 @@ export class RateLimiter {
     let bucket = this.buckets.get(key);
 
     if (!bucket) {
+      if (this.buckets.size >= this.maxBuckets) {
+        this.prune(now);
+      }
       // Start with (rpm - 1) tokens since this request consumes the first token
       bucket = { tokens: rpm - 1, lastRefill: now };
       this.buckets.set(key, bucket);
       return true;
     }
+
+    // Refresh LRU order
+    this.buckets.delete(key);
+    this.buckets.set(key, bucket);
 
     // Refill tokens based on elapsed time
     const elapsed = now - bucket.lastRefill;

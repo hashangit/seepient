@@ -7,7 +7,7 @@
  */
 
 import {
-  getDefaultProviderRuntime,
+  createAmbientProviderRuntime,
   ProviderRuntime,
 } from "../../domain/providers/provider-runtime.js";
 import type { ProviderRuntimeContract } from "../../foundations/contracts/provider-runtime.js";
@@ -121,8 +121,18 @@ import {
   resolveTenancyMode,
   validateTenancyCompleteness,
   emitTenancyNoticeOnce,
+  emitCredentialsSingleUserWarningOnce,
+  PRINCIPAL_ID_RE,
+  SENTINEL_PRINCIPAL_IDS,
   type TenancySignals,
 } from "../../domain/tenancy/tenancy-mode.js";
+import {
+  TenancyWorkspaceRequiredError,
+  PrincipalRequiredError,
+  InvalidPrincipalIdError,
+} from "../../foundations/errors.js";
+import type { AuditStore, PolicyStore } from "../../foundations/contracts/execution-brokers.js";
+import type { CapabilityLedger } from "../../foundations/contracts/capability-ledger.js";
 
 
 // ── Primary Factory: createSeepient ──────────────────────────────────────
@@ -150,6 +160,14 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   const { mode: tenancyMode, upgraded } = resolveTenancyMode(tenancySignals);
   emitTenancyNoticeOnce(upgraded);
 
+  const hasInjectedCredentials = Boolean(
+    (opts.credentials && Object.keys(opts.credentials).length > 0) ||
+    (opts.providers && (Array.isArray(opts.providers) ? opts.providers.length > 0 : Object.keys(opts.providers).length > 0)),
+  );
+  if (tenancyMode === "single" && hasInjectedCredentials) {
+    emitCredentialsSingleUserWarningOnce();
+  }
+
   // Validate tenancy completeness before any runtime bootstrapping or ambient I/O
   validateTenancyCompleteness(tenancyMode, {
     runtime: opts.runtime,
@@ -161,6 +179,10 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     isSessionful: Boolean(opts.sessionId || opts.persist),
     principalId: opts.principalId,
   });
+
+  if (tenancyMode === "multi" && (!opts.cwd || typeof opts.cwd !== "string" || opts.cwd.trim().length === 0)) {
+    throw new TenancyWorkspaceRequiredError();
+  }
 
   // If providers, modelAssignments, or overlay options are passed without an explicit runtime,
   // bootstrap a configured ProviderRuntime
@@ -186,7 +208,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
         adapter,
       });
     } else {
-      bootstrapRuntime = getDefaultProviderRuntime();
+      bootstrapRuntime = createAmbientProviderRuntime();
     }
   }
   const runtime: ProviderRuntimeContract | ProviderRuntime = bootstrapRuntime;
@@ -380,10 +402,18 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   let currentVendorHandler = createMediaVendorOperationHandler({
     runtime,
     artifacts: sharedArtifacts,
+    tenancyMode,
   });
   const vendorOperationHandler = (
     req: Parameters<typeof currentVendorHandler>[0],
   ) => currentVendorHandler(req);
+  const secretResolver =
+    tenancyMode === "multi"
+      ? (ref: string) => {
+          const store = (runtime as any).credentialStore ?? (runtime as any).getCredentialStore?.();
+          return store?.resolveSecret?.(ref) ?? undefined;
+        }
+      : undefined;
   const { boundary } = await buildLocalBoundary({
     artifacts: sharedArtifacts,
     workspaceRoot: opts.cwd ?? process.cwd(),
@@ -392,6 +422,8 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     vendorOperationHandler,
     commitHelper: opts.commitHelper,
     network: opts.network,
+    tenancyMode,
+    secretResolver,
   });
   const approvalMode = opts.consentMode
     ? opts.consentMode === "autonomous"
@@ -496,6 +528,8 @@ async function chat(userMessage: string): Promise<AgentResponse> {
         runtime,
         artifacts: sharedArtifacts,
         signal: activeAbortController.signal,
+        tenancyMode,
+        capabilities: wiredPipeline.activeCapabilities?.capabilities,
       });
 
       resolveTrailingUserDraft(messages);
@@ -601,6 +635,8 @@ async function chat(userMessage: string): Promise<AgentResponse> {
         runtime,
         artifacts: sharedArtifacts,
         signal: streamAbort.signal,
+        tenancyMode,
+        capabilities: wiredPipeline.activeCapabilities?.capabilities,
       });
       const mergedHooks = {
         ...opts.hooks,
@@ -1014,4 +1050,56 @@ async function chat(userMessage: string): Promise<AgentResponse> {
     resolve,
     dispose,
   };
+}
+
+/**
+ * Parameter options for createTenantAgent (DP10).
+ * Types strictly require an isolated ProviderRuntimeContract, all three stores, and explicit cwd.
+ */
+export interface CreateTenantAgentOptions
+  extends Omit<
+    CreateSeepientOptions,
+    | "tenancy"
+    | "runtime"
+    | "auditStore"
+    | "policyStore"
+    | "capabilityLedger"
+    | "cwd"
+    | "principalId"
+  > {
+  principalId: string;
+  runtime: ProviderRuntimeContract;
+  auditStore: AuditStore;
+  policyStore: PolicyStore;
+  capabilityLedger: CapabilityLedger;
+  cwd: string;
+}
+
+/**
+ * Typed factory for creating an isolated multi-tenant Seepient agent (DP10).
+ * Validates principalId format at entry and guarantees zero ambient fallback.
+ */
+export async function createTenantAgent(
+  options: CreateTenantAgentOptions,
+): Promise<Seepient> {
+  const rawPrincipal = options.principalId;
+  if (!rawPrincipal || typeof rawPrincipal !== "string" || rawPrincipal.trim().length === 0) {
+    throw new PrincipalRequiredError();
+  }
+  const trimmed = rawPrincipal.trim();
+  if (SENTINEL_PRINCIPAL_IDS.has(trimmed.toLowerCase())) {
+    throw new InvalidPrincipalIdError(
+      `INVALID_PRINCIPAL_ID: principalId "${trimmed}" is a reserved sentinel value. Use an explicit tenant principal.`,
+    );
+  }
+  if (!PRINCIPAL_ID_RE.test(trimmed)) {
+    throw new InvalidPrincipalIdError(
+      `INVALID_PRINCIPAL_ID: principalId "${trimmed}" must match /^[a-zA-Z0-9_-]{1,128}$/.`,
+    );
+  }
+
+  return createSeepient({
+    ...options,
+    tenancy: "multi",
+  });
 }

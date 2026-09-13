@@ -8,6 +8,7 @@ import {
   KeychainCredentialStore,
   MemoryCredentialStore,
   CompositeCredentialStore,
+  createAmbientCompositeCredentialStore,
 } from "../index.js";
 import { SeepientError } from "../../../../foundations/errors.js";
 
@@ -186,9 +187,9 @@ describe("CredentialStore implementations (QS-P4.1)", () => {
   });
 
   describe("CompositeCredentialStore", () => {
-    it("routes resolution to appropriate store based on ref.kind", async () => {
+    it("ambient store routes resolution to appropriate store based on ref.kind", async () => {
       process.env.COMPOSITE_TEST_KEY = "sk-composite-env";
-      const composite = new CompositeCredentialStore();
+      const composite = createAmbientCompositeCredentialStore();
 
       // 1. Env
       const envHandle = await composite.resolve({ kind: "env", name: "COMPOSITE_TEST_KEY" });
@@ -201,6 +202,27 @@ describe("CredentialStore implementations (QS-P4.1)", () => {
       const noneLease = noneHandle.acquireLease();
       expect(await noneLease.secret()).toEqual({ kind: "none" });
       await noneLease.release();
+    });
+
+    it("isolated store has isIsolated: true and no ambient env or disk read-through", async () => {
+      process.env.COMPOSITE_TEST_KEY = "sk-composite-env";
+      const isolated = new CompositeCredentialStore();
+      expect(isolated.isIsolated).toBe(true);
+
+      const envResult = await isolated.resolve({ kind: "env", name: "COMPOSITE_TEST_KEY" });
+      expect(await envResult.isResolvable()).toBe(false);
+      expect(() => envResult.acquireLease()).toThrow(/CREDENTIAL_REQUIRED/);
+
+      const missing = await isolated.get("non-existent-id");
+      expect(missing).toBeUndefined();
+    });
+
+    it("primaryWriteStore: 'file' sets isIsolated: false unless explicitly overridden (P2-1)", () => {
+      const storeDefault = new CompositeCredentialStore({ primaryWriteStore: "file" });
+      expect(storeDefault.isIsolated).toBe(false);
+
+      const storeExplicit = new CompositeCredentialStore({ primaryWriteStore: "file", isIsolated: true });
+      expect(storeExplicit.isIsolated).toBe(true);
     });
 
     it("stores and resolves oauth credentials across composite layers (T040)", async () => {

@@ -145,7 +145,7 @@ describe("REST Sessions & Chat Resume (Spec 021-2 / FR-005, FR-006)", () => {
     expect(data.text).toBe("Echo: Hello again");
 
     // Check that user and assistant messages were persisted through sessionManager
-    const updated = await sessionManager.getSession(session.id, (sessionManager as any).sessions.get(session.id)!.apiKeyHash);
+    const updated = await sessionManager.getSession(session.id, hashKey(key1));
     expect(updated).not.toBeNull();
     expect(updated!.messages.length).toBe(2);
     expect(updated!.messages[0].role).toBe("user");
@@ -234,7 +234,7 @@ describe("REST Sessions & Chat Resume (Spec 021-2 / FR-005, FR-006)", () => {
     expect(session!.id).toBe(freshId);
   });
 
-  it("POST /v1/chat returns 403 for foreign sessionId owned by another key (FR-026)", async () => {
+  it("POST /v1/chat isolates foreign sessionId under caller's partition without squatting (FR-012)", async () => {
     // Create session owned by key1
     const s1 = await sessionManager.createSession(key1);
 
@@ -254,9 +254,20 @@ describe("REST Sessions & Chat Resume (Spec 021-2 / FR-005, FR-006)", () => {
       handler(req, res);
     });
 
-    expect(res.statusCode).toBe(403);
+    // Under FR-012: foreign collision is indistinguishable from fresh creation (no 403 existence leak or squatting)
+    expect(res.statusCode).toBe(200);
     const data = JSON.parse(res.body);
-    expect(data.error.code).toBe("FORBIDDEN");
+    expect(data.sessionId).toBe(s1.id);
+
+    // key1's session is untouched
+    const session1 = await sessionManager.getSession(s1.id, hashKey(key1));
+    expect(session1).not.toBeNull();
+    expect(session1!.messages.length).toBe(0);
+
+    // key2 has its own isolated session with that ID
+    const session2 = await sessionManager.getSession(s1.id, hashKey(key2));
+    expect(session2).not.toBeNull();
+    expect(session2!.messages.length).toBe(2);
   });
 
   it("POST /v1/chat without sessionId is stateless (D1): no session created, no 429, no files saved", async () => {

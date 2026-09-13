@@ -122,10 +122,10 @@ describe("Tenancy Completeness Validation & UX Errors (T008)", () => {
     try {
       validateTenancyCompleteness("multi", {
         principalId: "tenant-1",
-        runtime: {},
-        auditStore: {},
+        runtime: { isIsolated: true },
+        auditStore: { isIsolated: true },
         policyStore: undefined,
-        capabilityLedger: {},
+        capabilityLedger: { isIsolated: true },
       });
       expect.unreachable("should have thrown");
     } catch (err: any) {
@@ -140,14 +140,76 @@ describe("Tenancy Completeness Validation & UX Errors (T008)", () => {
     }
   });
 
+  it("throws TenancyRuntimeRequiredError if runtime is not isolated in multi mode", () => {
+    expect(() =>
+      validateTenancyCompleteness("multi", {
+        principalId: "tenant-1",
+        runtime: { isIsolated: false },
+        auditStore: { isIsolated: true },
+        policyStore: { isIsolated: true },
+        capabilityLedger: { isIsolated: true },
+      }),
+    ).toThrow(TenancyRuntimeRequiredError);
+
+    try {
+      validateTenancyCompleteness("multi", {
+        principalId: "tenant-1",
+        runtime: { isIsolated: false },
+        auditStore: { isIsolated: true },
+        policyStore: { isIsolated: true },
+        capabilityLedger: { isIsolated: true },
+      });
+    } catch (err: any) {
+      expect(err.message).toContain("createIsolatedProviderRuntime");
+      expect(err.message).toContain("createAmbientProviderRuntime");
+    }
+  });
+
+  it("throws TenancyStoreIncompleteError if injected store is ambient (isIsolated: false)", () => {
+    expect(() =>
+      validateTenancyCompleteness("multi", {
+        principalId: "tenant-1",
+        runtime: { isIsolated: true },
+        auditStore: { isIsolated: false },
+        policyStore: { isIsolated: true },
+        capabilityLedger: { isIsolated: true },
+      }),
+    ).toThrow(TenancyStoreIncompleteError);
+  });
+
+  it("throws TenancyStoreIncompleteError if injected store is stamp-less (missing isIsolated: true)", () => {
+    expect(() =>
+      validateTenancyCompleteness("multi", {
+        principalId: "tenant-1",
+        runtime: { isIsolated: true },
+        auditStore: {}, // stamp-less
+        policyStore: { isIsolated: true },
+        capabilityLedger: { isIsolated: true },
+      }),
+    ).toThrow(TenancyStoreIncompleteError);
+  });
+
+  it("accepts stamped isolated stores in multi mode", () => {
+    expect(() =>
+      validateTenancyCompleteness("multi", {
+        principalId: "tenant-1",
+        runtime: { isIsolated: true },
+        auditStore: { isIsolated: true },
+        policyStore: { isIsolated: true },
+        capabilityLedger: { isIsolated: true },
+        stateless: true,
+      }),
+    ).not.toThrow();
+  });
+
   it("allows stateless: true agent without persist backend when permission stores are injected", () => {
     expect(() =>
       validateTenancyCompleteness("multi", {
         principalId: "tenant-1",
-        runtime: {},
-        auditStore: {},
-        policyStore: {},
-        capabilityLedger: {},
+        runtime: { isIsolated: true },
+        auditStore: { isIsolated: true },
+        policyStore: { isIsolated: true },
+        capabilityLedger: { isIsolated: true },
         isSessionful: true,
         stateless: true,
       }),
@@ -158,7 +220,7 @@ describe("Tenancy Completeness Validation & UX Errors (T008)", () => {
     expect(() =>
       validateTenancyCompleteness("multi", {
         principalId: "tenant-1",
-        runtime: {},
+        runtime: { isIsolated: true },
         isSessionful: false,
         stateless: true,
       }),
@@ -169,10 +231,10 @@ describe("Tenancy Completeness Validation & UX Errors (T008)", () => {
     expect(() =>
       validateTenancyCompleteness("multi", {
         principalId: "tenant-1",
-        runtime: {},
-        auditStore: {},
-        policyStore: {},
-        capabilityLedger: {},
+        runtime: { isIsolated: true },
+        auditStore: { isIsolated: true },
+        policyStore: { isIsolated: true },
+        capabilityLedger: { isIsolated: true },
         isSessionful: true,
         stateless: false,
       }),
@@ -186,6 +248,59 @@ describe("Tenancy Completeness Validation & UX Errors (T008)", () => {
     expect(err.targetPath).toBe("~/.seepient/settings.json");
     expect(err.message).toContain("~/.seepient/settings.json");
     expect(err.message).toContain("injected");
+  });
+
+  it("rejects unstamped or ambient configStore/credentialStore in multi mode (P1-B)", () => {
+    const baseStores = {
+      principalId: "tenant-a",
+      auditStore: { isIsolated: true },
+      policyStore: { isIsolated: true },
+      capabilityLedger: { isIsolated: true },
+    };
+
+    // 1. Unstamped configStore (isIsolated: undefined)
+    expect(() =>
+      validateTenancyCompleteness("multi", {
+        ...baseStores,
+        runtime: { isIsolated: true, configStore: {} },
+      }),
+    ).toThrow(TenancyRuntimeRequiredError);
+
+    // 2. Ambient configStore (isIsolated: false)
+    expect(() =>
+      validateTenancyCompleteness("multi", {
+        ...baseStores,
+        runtime: { isIsolated: true, configStore: { isIsolated: false } },
+      }),
+    ).toThrow(TenancyRuntimeRequiredError);
+
+    // 3. Unstamped credentialStore (isIsolated: undefined)
+    expect(() =>
+      validateTenancyCompleteness("multi", {
+        ...baseStores,
+        runtime: { isIsolated: true, credentialStore: {} },
+      }),
+    ).toThrow(TenancyRuntimeRequiredError);
+
+    // 4. Ambient credentialStore (isIsolated: false)
+    expect(() =>
+      validateTenancyCompleteness("multi", {
+        ...baseStores,
+        runtime: { isIsolated: true, credentialStore: { isIsolated: false } },
+      }),
+    ).toThrow(TenancyRuntimeRequiredError);
+
+    // 5. Complete isolated runtime + sub-stores passes
+    expect(() =>
+      validateTenancyCompleteness("multi", {
+        ...baseStores,
+        runtime: {
+          isIsolated: true,
+          configStore: { isIsolated: true },
+          credentialStore: { isIsolated: true },
+        },
+      }),
+    ).not.toThrow();
   });
 });
 

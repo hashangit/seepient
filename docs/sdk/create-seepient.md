@@ -60,7 +60,7 @@ For multi-tenant workers and cloud functions requiring full state injection (aud
 | `overlayFile`   | `string`                                 | *(none)*                   | Config overlay file path, or `":memory:"` for zero-disk ephemeral agents |
 | `adapter`       | `InferenceAdapter`                       | `AggregateInferenceAdapter`| Custom inference adapter or test double |
 | `override`      | `{ providerAccount?, model?, thinkingLevel? }` | *(none)*             | Per-instance model and account override |
-| `runtime`       | `ProviderRuntime`                        | `getDefaultProviderRuntime()` | Provider runtime instance managing credentials, configurations, and inference adapters |
+| `runtime`       | `ProviderRuntime`                        | `createAmbientProviderRuntime()` in single-mode; required isolated runtime in multi-mode | Provider runtime instance managing credentials, configurations, and inference adapters |
 | `principalId`   | `string`                                 | `"sdk-user"`               | Identity of the calling principal/user, threaded into audit events and capability grants |
 | `sessionId`     | `string`                                 | Auto-generated UUID        | Explicit session ID (`^[a-zA-Z0-9_-]+$`) for tracking and persistence |
 | `auditStore`    | `AuditStore`                             | Local file audit store     | Injected audit store for recording action lifecycle events |

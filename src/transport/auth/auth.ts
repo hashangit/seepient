@@ -44,7 +44,12 @@ export function hashKey(rawKey: string): string {
 
 // ── In-memory cache ────────────────────────────────────────────────────
 
-let cachedKeys: Map<string, ApiKeyEntry> | null = null;
+interface CachedFileEntry {
+  mtimeMs: number;
+  keys: Map<string, ApiKeyEntry>;
+}
+
+let cachedKeys: Map<string, CachedFileEntry> | null = null;
 let cacheMtimeMs: number = 0;
 
 // ── Key store I/O ──────────────────────────────────────────────────────
@@ -96,10 +101,16 @@ function invalidateCache(): void {
 }
 
 function loadCache(filePath: string): Map<string, ApiKeyEntry> {
+  if (!cachedKeys) {
+    cachedKeys = new Map<string, CachedFileEntry>();
+  }
+
+  const cached = cachedKeys.get(filePath);
   try {
     const stat = fs.statSync(filePath);
-    if (cachedKeys && stat.mtimeMs === cacheMtimeMs) {
-      return cachedKeys;
+    if (cached && stat.mtimeMs === cached.mtimeMs) {
+      cacheMtimeMs = stat.mtimeMs;
+      return cached.keys;
     }
   } catch {
     // File may not exist yet
@@ -112,13 +123,15 @@ function loadCache(filePath: string): Map<string, ApiKeyEntry> {
       map.set(entry.keyHash, entry);
     }
   }
-  cachedKeys = map;
 
+  let mtime = 0;
   try {
-    cacheMtimeMs = fs.statSync(filePath).mtimeMs;
+    mtime = fs.statSync(filePath).mtimeMs;
   } catch {
-    cacheMtimeMs = 0;
+    mtime = 0;
   }
+  cacheMtimeMs = mtime;
+  cachedKeys.set(filePath, { mtimeMs: mtime, keys: map });
 
   return map;
 }
@@ -225,10 +238,14 @@ export function extractBearerToken(req: IncomingMessage): string | null {
 /**
  * Authentication middleware helper that extracts and validates the API key.
  */
-export function authMiddleware(req: IncomingMessage): ApiKeyEntry | null {
+export function authMiddleware(
+  req: IncomingMessage,
+  options?: { filePath?: string } | string,
+): ApiKeyEntry | null {
   const token = extractBearerToken(req);
   if (!token) return null;
-  return validateApiKey(token);
+  const filePath = typeof options === "string" ? options : options?.filePath;
+  return validateApiKey(token, filePath ? { filePath } : undefined);
 }
 
 /**

@@ -49,7 +49,10 @@ export async function buildLocalBoundary(opts?: {
   /** Network adapter override (tests inject a stub; default is the real Node adapter). */
   network?: BrokerNetworkAdapter;
   /** Optional handler for vendor-operation broker requests (e.g. media generation/optimization). */
-  vendorOperationHandler?: (req: Extract<import("../../foundations/contracts/prepared-action.js").BrokeredEffectRequest, { kind: "vendor-operation" }>) => Promise<import("../../foundations/contracts/execution-brokers.js").BrokeredEffectResult>;
+  vendorOperationHandler?: (
+    req: Extract<import("../../foundations/contracts/prepared-action.js").BrokeredEffectRequest, { kind: "vendor-operation" }>,
+    capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[],
+  ) => Promise<import("../../foundations/contracts/execution-brokers.js").BrokeredEffectResult>;
   /**
    * Session snapshot store for read-side tagging and edit-time patch
    * application (spec 019 FR-001). The composition root owns the store so
@@ -62,6 +65,10 @@ export async function buildLocalBoundary(opts?: {
    * seam the broker unit tests use.
    */
   commitHelper?: import("../../foundations/contracts/execution-brokers.js").CommitHelper;
+  /** Optional secret resolver for injecting credentials securely inside the broker. */
+  secretResolver?: (ref: string) => string | undefined;
+  /** Tenancy mode ('single' | 'multi'). In multi mode, ambient secret fallback is disabled. */
+  tenancyMode?: "single" | "multi";
 }): Promise<BuildLocalBoundaryResult> {
   const artifacts = opts?.artifacts ?? new InMemoryArtifactStore();
 
@@ -76,7 +83,8 @@ export async function buildLocalBoundary(opts?: {
   // the SAME value must drive both the executor (which honors it) and the
   // advertised environmentIsolation capability (which policy reads), so an
   // operator who follows the setup message can actually run (review P1).
-  const unsafeUncontained = opts?.unsafeUncontained ?? process.env.SEEPIENT_UNCONTAINED === "1";
+  const unsafeUncontained =
+    opts?.unsafeUncontained ?? (opts?.tenancyMode === "multi" ? false : process.env.SEEPIENT_UNCONTAINED === "1");
 
   // Process sandbox: probe and instantiate the best native sandbox backend (ASRT/Seatbelt/Bubblewrap).
   const sandbox = unsafeUncontained
@@ -88,6 +96,8 @@ export async function buildLocalBoundary(opts?: {
     artifacts,
     network: opts?.network ?? new NodeNetworkAdapter(),
     vendorOperationHandler: opts?.vendorOperationHandler,
+    tenancyMode: opts?.tenancyMode,
+    secretResolver: opts?.secretResolver,
   });
 
   // Host callbacks map for built-in and custom tools (consulted by the
@@ -100,7 +110,7 @@ export async function buildLocalBoundary(opts?: {
   registry.register(new ReadFileExecutor({ artifacts, snapshotStore: opts?.snapshotStore }));
   registry.register(new CommitFilesExecutor({ broker: commitBroker, artifacts, useNative: probe.available }));
   registry.register(new ProcessExecutor({ sandbox, unsafeUncontained }));
-  registry.register(new BrokerExecutor({ broker: effectBroker, artifacts, workspaceRoot: opts?.workspaceRoot, commitBroker }));
+  registry.register(new BrokerExecutor({ broker: effectBroker, artifacts, workspaceRoot: opts?.workspaceRoot, commitBroker, tenancyMode: opts?.tenancyMode }));
   registry.register(new TrustedHostExecutor(hostCallbacks));
 
   const boundary = new LocalExecutionBoundary({

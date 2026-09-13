@@ -87,16 +87,43 @@ export class ServerSessionManager {
   /** W154g: per-key in-flight createSession count (closes the cap race). */
   private inFlightCreatesPerKey: Map<string, number> = new Map();
 
+  private compositeKey(keyHash: string, sessionId: string): string {
+    return `${keyHash}:${sessionId}`;
+  }
+
+  private findResidentSession(sessionId: string, apiKeyHash?: string): TrackedSession | undefined {
+    if (apiKeyHash) {
+      return this.sessions.get(this.compositeKey(apiKeyHash, sessionId));
+    }
+    const direct = this.sessions.get(sessionId);
+    if (direct) return direct;
+    const matches: TrackedSession[] = [];
+    for (const s of this.sessions.values()) {
+      if (s.id === sessionId) {
+        matches.push(s);
+      }
+    }
+    if (matches.length === 1) {
+      return matches[0];
+    }
+    return undefined;
+  }
+
   /**
    * Attempt to acquire an in-flight turn lock for a session ID.
    * Returns true if lock was acquired, false if a turn is already in-flight.
    */
-  acquireTurn(sessionId: string): boolean {
-    if (this.inFlightTurns.has(sessionId)) {
+  acquireTurn(sessionId: string, apiKeyHash?: string): boolean {
+    const session = this.findResidentSession(sessionId, apiKeyHash);
+    const effectiveKeyHash = apiKeyHash ?? session?.apiKeyHash;
+    const lockKey = effectiveKeyHash
+      ? this.compositeKey(effectiveKeyHash, sessionId)
+      : sessionId;
+
+    if (this.inFlightTurns.has(lockKey) || (effectiveKeyHash && this.inFlightTurns.has(sessionId))) {
       return false;
     }
-    this.inFlightTurns.add(sessionId);
-    const session = this.sessions.get(sessionId);
+    this.inFlightTurns.add(lockKey);
     if (session) {
       session.lastActivityAt = Date.now();
     }
@@ -106,9 +133,13 @@ export class ServerSessionManager {
   /**
    * Release the in-flight turn lock for a session ID.
    */
-  releaseTurn(sessionId: string): void {
+  releaseTurn(sessionId: string, apiKeyHash?: string): void {
+    const session = this.findResidentSession(sessionId, apiKeyHash);
+    const effectiveKeyHash = apiKeyHash ?? session?.apiKeyHash;
+    if (effectiveKeyHash) {
+      this.inFlightTurns.delete(this.compositeKey(effectiveKeyHash, sessionId));
+    }
     this.inFlightTurns.delete(sessionId);
-    const session = this.sessions.get(sessionId);
     if (session) {
       session.lastActivityAt = Date.now();
     }
@@ -117,7 +148,14 @@ export class ServerSessionManager {
   /**
    * Check if a turn is currently in flight for this session ID.
    */
-  isTurnInFlight(sessionId: string): boolean {
+  isTurnInFlight(sessionId: string, apiKeyHash?: string): boolean {
+    const session = this.findResidentSession(sessionId, apiKeyHash);
+    const effectiveKeyHash = apiKeyHash ?? session?.apiKeyHash;
+    if (effectiveKeyHash) {
+      if (this.inFlightTurns.has(this.compositeKey(effectiveKeyHash, sessionId))) {
+        return true;
+      }
+    }
     return this.inFlightTurns.has(sessionId);
   }
 
@@ -233,25 +271,33 @@ export class ServerSessionManager {
 
     const finalId = id ?? crypto.randomUUID();
     const explicitId = id;
+    const cKey = this.compositeKey(keyHash, finalId);
     if (explicitId !== undefined) {
       if (!SESSION_ID_RE.test(finalId) || finalId.length > MAX_SESSION_ID_LENGTH) {
         throw new Error(
           `Invalid session ID format: must match ${SESSION_ID_RE} (max ${MAX_SESSION_ID_LENGTH} characters)`,
         );
       }
-      if (this.sessions.has(finalId) || this.inFlightCreations.has(finalId)) {
+      if (this.sessions.has(cKey) || this.inFlightCreations.has(cKey)) {
         const err = new Error(`SESSION_ALREADY_EXISTS: Session "${finalId}" already exists`);
         (err as any).code = "SESSION_ALREADY_EXISTS";
         throw err;
       }
-      this.inFlightCreations.add(finalId);
+      this.inFlightCreations.add(cKey);
     }
 
     try {
-      if (explicitId !== undefined && (await this.loadSessionFromBackend(finalId)) !== null) {
-        const err = new Error(`SESSION_ALREADY_EXISTS: Session "${finalId}" already exists`);
-        (err as any).code = "SESSION_ALREADY_EXISTS";
-        throw err;
+      if (explicitId !== undefined) {
+        const backendSession = await this.loadSessionFromBackend(finalId, keyHash);
+        if (backendSession !== null) {
+          // If the backend session has the same apiKeyHash or no owner, treat as collision for this tenant.
+          // If it has a different apiKeyHash, it's a foreign-key collision which is indistinguishable from fresh creation.
+          if (!backendSession.apiKeyHash || backendSession.apiKeyHash === keyHash) {
+            const err = new Error(`SESSION_ALREADY_EXISTS: Session "${finalId}" already exists`);
+            (err as any).code = "SESSION_ALREADY_EXISTS";
+            throw err;
+          }
+        }
       }
 
       const now = Date.now();
@@ -267,11 +313,11 @@ export class ServerSessionManager {
         model,
       };
 
-      this.sessions.set(finalId, session);
+      this.sessions.set(cKey, session);
       try {
         await this.persistSessionAsync(session);
       } catch (err) {
-        this.sessions.delete(finalId);
+        this.sessions.delete(cKey);
         throw err;
       }
 
@@ -285,7 +331,7 @@ export class ServerSessionManager {
       };
     } finally {
       if (explicitId !== undefined) {
-        this.inFlightCreations.delete(finalId);
+        this.inFlightCreations.delete(cKey);
       }
     }
   }
@@ -296,13 +342,14 @@ export class ServerSessionManager {
    * by the provided API key.
    */
   async getSession(id: string, apiKeyHash: string): Promise<SessionData | null> {
-    let session: TrackedSession | null | undefined = this.sessions.get(id);
+    const cKey = this.compositeKey(apiKeyHash, id);
+    let session: TrackedSession | null | undefined = this.sessions.get(cKey);
 
     if (!session) {
       // Try loading from persistence backend. W153: do NOT cache into the
       // resident map yet — a denied probe must not pin the victim's session
       // in memory until TTL.
-      session = await this.loadSessionFromBackend(id);
+      session = await this.loadSessionFromBackend(id, apiKeyHash);
       if (!session) return null;
     }
 
@@ -316,11 +363,11 @@ export class ServerSessionManager {
 
     // Check expiration (W152: an in-flight turn defers the absolute TTL)
     if (this.isExpired(session)) {
-      this.deleteSession(id);
+      this.deleteSession(id, apiKeyHash);
       return null;
     }
 
-    this.sessions.set(id, session);
+    this.sessions.set(cKey, session);
 
     return {
       id: session.id,
@@ -344,8 +391,8 @@ export class ServerSessionManager {
    * Callers must hold the session's turn lock. No-op when the last message
    * was answered (assistant) or the session is empty.
    */
-  resolveTrailingDraft(sessionId: string): void {
-    const session = this.sessions.get(sessionId);
+  resolveTrailingDraft(sessionId: string, apiKeyHash?: string): void {
+    const session = this.findResidentSession(sessionId, apiKeyHash);
     if (!session) return;
     const last = session.messages[session.messages.length - 1];
     if (!last || last.role !== "user") return;
@@ -359,8 +406,8 @@ export class ServerSessionManager {
    * Add a message to an existing session.
    * Updates the last-activity timestamp.
    */
-  addMessage(sessionId: string, message: Message): void {
-    const session = this.sessions.get(sessionId);
+  addMessage(sessionId: string, message: Message, apiKeyHash?: string): void {
+    const session = this.findResidentSession(sessionId, apiKeyHash);
     if (!session) {
       throw new Error(`Session "${sessionId}" not found.`);
     }
@@ -377,9 +424,24 @@ export class ServerSessionManager {
    * W152: refuses while a turn is in flight — deleting a live session would
    * clear its writer lock and let a second writer start mid-stream.
    */
-  deleteSession(id: string): void {
-    if (this.inFlightTurns.has(id)) {
+  deleteSession(id: string, apiKeyHash?: string): void {
+    const session = this.findResidentSession(id, apiKeyHash);
+    const effectiveKeyHash = apiKeyHash ?? session?.apiKeyHash;
+    const lockKey = effectiveKeyHash
+      ? this.compositeKey(effectiveKeyHash, id)
+      : id;
+
+    if (this.inFlightTurns.has(lockKey) || (effectiveKeyHash && this.inFlightTurns.has(id))) {
       return;
+    }
+
+    if (effectiveKeyHash) {
+      const cKey = this.compositeKey(effectiveKeyHash, id);
+      this.sessions.delete(cKey);
+      this.inFlightTurns.delete(cKey);
+      this.backend.delete?.(cKey)?.catch(() => {
+        // Best-effort — don't crash on delete errors
+      });
     }
     this.sessions.delete(id);
     this.inFlightTurns.delete(id);
@@ -393,7 +455,7 @@ export class ServerSessionManager {
    */
   getActiveSessions(): SessionData[] {
     const active: SessionData[] = [];
-    for (const [id, session] of this.sessions) {
+    for (const session of this.sessions.values()) {
       if (!this.isExpired(session)) {
         active.push({
           id: session.id,
@@ -412,13 +474,20 @@ export class ServerSessionManager {
    * Remove expired sessions from memory and backend.
    */
   cleanup(): void {
-    for (const [id, session] of this.sessions) {
+    for (const session of this.sessions.values()) {
       if (this.isExpired(session)) {
-        this.deleteSession(id);
+        this.deleteSession(session.id, session.apiKeyHash);
       }
     }
     for (const id of this.inFlightTurns) {
-      if (!this.sessions.has(id)) {
+      let found = false;
+      for (const session of this.sessions.values()) {
+        if (session.id === id || this.compositeKey(session.apiKeyHash, session.id) === id) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
         this.inFlightTurns.delete(id);
       }
     }
@@ -536,7 +605,7 @@ export class ServerSessionManager {
     // Absolute TTL — W152: an in-flight turn defers expiry, otherwise any
     // cleanup pass (or getSession probe) could evict a session mid-stream.
     if (now - session.createdAt > this.sessionTTL) {
-      if (this.isTurnInFlight(session.id)) {
+      if (this.isTurnInFlight(session.id, session.apiKeyHash)) {
         return false;
       }
       return true;
@@ -544,7 +613,7 @@ export class ServerSessionManager {
 
     // Inactivity timeout
     if (now - session.lastActivityAt > this.inactivityTimeout) {
-      if (this.isTurnInFlight(session.id)) {
+      if (this.isTurnInFlight(session.id, session.apiKeyHash)) {
         return false;
       }
       return true;
@@ -566,7 +635,8 @@ export class ServerSessionManager {
         lastActivityAt: session.lastActivityAt,
       },
     };
-    this.backend.save(session.id, data).catch((err: unknown) => {
+    const storageKey = this.compositeKey(session.apiKeyHash, session.id);
+    this.backend.save(storageKey, data).catch((err: unknown) => {
       // Best-effort persistence — don't crash on write errors
       logTransportEvent({
         level: "error",
@@ -591,12 +661,17 @@ export class ServerSessionManager {
         lastActivityAt: session.lastActivityAt,
       },
     };
-    await this.backend.save(session.id, data);
+    const storageKey = this.compositeKey(session.apiKeyHash, session.id);
+    await this.backend.save(storageKey, data);
   }
 
-  private async loadSessionFromBackend(id: string): Promise<TrackedSession | null> {
+  private async loadSessionFromBackend(id: string, apiKeyHash?: string): Promise<TrackedSession | null> {
     try {
-      const data = await this.backend.load(id);
+      const storageKey = apiKeyHash ? this.compositeKey(apiKeyHash, id) : id;
+      let data = await this.backend.load(storageKey);
+      if (!data && apiKeyHash) {
+        data = await this.backend.load(id);
+      }
       if (!data) return null;
 
       const metadata = data.metadata ?? {};

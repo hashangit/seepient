@@ -7,17 +7,40 @@
  */
 
 import type { SkillSource, SkillRecord } from "../../../src/transport/sdk/index.js";
+import { ControlPlaneTokenRequiredError } from "./worker.js";
+
+export interface DbSkillSourceOptions {
+  tenantId?: string;
+  token?: string;
+  controlPlaneToken?: string;
+}
 
 export class DbSkillSource implements SkillSource {
   private readonly baseUrl: string;
   private readonly tenantId?: string;
+  private readonly token: string;
 
-  constructor(baseUrl: string, tenantId?: string) {
+  constructor(
+    baseUrl: string,
+    tenantIdOrOpts?: string | DbSkillSourceOptions,
+    token?: string,
+  ) {
     if (!baseUrl) {
       throw new Error("[db-skill-source] baseUrl is required");
     }
     this.baseUrl = baseUrl;
-    this.tenantId = tenantId;
+    let resolvedToken: string | undefined;
+    if (typeof tenantIdOrOpts === "object" && tenantIdOrOpts !== null) {
+      this.tenantId = tenantIdOrOpts.tenantId;
+      resolvedToken = tenantIdOrOpts.controlPlaneToken ?? tenantIdOrOpts.token;
+    } else {
+      this.tenantId = tenantIdOrOpts;
+      resolvedToken = token;
+    }
+    if (!resolvedToken || resolvedToken.trim().length === 0) {
+      throw new ControlPlaneTokenRequiredError("[db-skill-source] controlPlaneToken is required");
+    }
+    this.token = resolvedToken;
   }
 
   async list(): Promise<SkillRecord[]> {
@@ -25,7 +48,11 @@ export class DbSkillSource implements SkillSource {
       ? `${this.baseUrl}/api/skills?tenantId=${encodeURIComponent(this.tenantId)}`
       : `${this.baseUrl}/api/skills`;
 
-    const res = await fetch(url);
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+      },
+    });
     if (!res.ok) {
       throw new Error(`[db-skill-source] Failed to fetch skills: HTTP ${res.status}`);
     }

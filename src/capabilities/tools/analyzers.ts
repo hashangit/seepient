@@ -139,25 +139,38 @@ export function snapshotPath(target: CanonicalPathTarget): FileSnapshot | undefi
 
 /** Sensitivity classification for read sources. */
 export function classifyReadSensitivity(canonicalPath: string): SensitivityClass {
-  const lower = canonicalPath.toLowerCase();
-  if (
-    lower.includes("/.seepient/security/") ||
-    lower.includes("/.ssh/") ||
-    lower.includes("/.aws/credentials") ||
-    lower.includes("/.env") ||
-    lower.endsWith(".pem") ||
-    lower.endsWith(".key")
-  ) {
-    return "secret";
+  let resolved = canonicalPath;
+  try {
+    resolved = fs_realpathSync(canonicalPath);
+  } catch {
+    /* keep canonicalPath */
   }
-  if (
-    lower.includes("/.seepient/") ||
-    lower.includes("/.config/") ||
-    lower.includes("/.gnupg/")
-  ) {
-    return "sensitive";
-  }
-  return "normal";
+
+  const check = (p: string): SensitivityClass | null => {
+    const lower = p.toLowerCase();
+    if (
+      lower.includes("/.seepient/security/") ||
+      lower.includes("/.ssh/") ||
+      lower.includes("/.aws/credentials") ||
+      lower.includes("/.env") ||
+      lower.endsWith(".pem") ||
+      lower.endsWith(".key")
+    ) {
+      return "secret";
+    }
+    if (
+      lower.includes("/.seepient/") ||
+      lower.includes("/.config/") ||
+      lower.includes("/.gnupg/")
+    ) {
+      return "sensitive";
+    }
+    return null;
+  };
+
+  const fromResolved = check(resolved);
+  if (fromResolved) return fromResolved;
+  return check(canonicalPath) ?? "normal";
 }
 
 /** Analyzer helper: build a PreparedToolAction. */
@@ -207,6 +220,11 @@ export async function analyzeReadFile(
 ): Promise<PreparedToolAction> {
   const cwd = ctx.workspace.canonicalRoot;
   const target = await canonicalizePath(args.path, cwd);
+  if (target.finalSymlink) {
+    throw new Error(
+      `Refusing read: ${target.canonicalPath} is a symbolic link. Read the resolved real path instead.`,
+    );
+  }
   const sensitivity = classifyReadSensitivity(target.canonicalPath);
   const expected = snapshotPath(target) ?? { exists: false };
 
@@ -830,12 +848,27 @@ export async function analyzeGenerateImage(
 
   const cwd = ctx.workspace.canonicalRoot;
 
-  // Resolve input targets (read side-effect if image_path or mask_path is provided)
-  const inputTargets = await Promise.all(
-    [args.image_path, args.mask_path]
-      .filter((p): p is string => typeof p === "string" && p.length > 0)
-      .map((p) => canonicalizePath(p, cwd)),
-  );
+  let imageTarget: CanonicalPathTarget | undefined;
+  if (typeof args.image_path === "string" && args.image_path.length > 0) {
+    imageTarget = await canonicalizePath(args.image_path, cwd);
+    if (imageTarget.finalSymlink) {
+      throw new Error(
+        `Refusing image input: ${imageTarget.canonicalPath} is a symbolic link. Use the resolved real path instead.`,
+      );
+    }
+  }
+
+  let maskTarget: CanonicalPathTarget | undefined;
+  if (typeof args.mask_path === "string" && args.mask_path.length > 0) {
+    maskTarget = await canonicalizePath(args.mask_path, cwd);
+    if (maskTarget.finalSymlink) {
+      throw new Error(
+        `Refusing image mask: ${maskTarget.canonicalPath} is a symbolic link. Use the resolved real path instead.`,
+      );
+    }
+  }
+
+  const inputTargets = [imageTarget, maskTarget].filter((t): t is CanonicalPathTarget => !!t);
 
   // Resolve save destination: output_path takes precedence over output_dir, defaulting to workspace root
   const count = typeof args.n === "number" && args.n > 0 ? Math.floor(args.n) : 1;
@@ -884,6 +917,13 @@ export async function analyzeGenerateImage(
     destinations: targets,
   };
 
+  let maxSensitivity: SensitivityClass = "normal";
+  for (const input of inputTargets) {
+    const s = classifyReadSensitivity(input.canonicalPath);
+    if (s === "secret") maxSensitivity = "secret";
+    else if (s === "sensitive" && maxSensitivity !== "secret") maxSensitivity = "sensitive";
+  }
+
   const effects: EffectRequest[] = [
     { kind: "network-egress", destinations: [{ scheme: "https", host: "*" }] },
     {
@@ -897,8 +937,8 @@ export async function analyzeGenerateImage(
     {
       kind: "model-egress",
       providerClass: ctx.modelProviderClass,
-      dataClasses: ["normal"],
-      sources: ["image-response"],
+      dataClasses: inputTargets.length > 0 ? [maxSensitivity] : ["normal"],
+      sources: inputTargets.length > 0 ? inputTargets.map((t) => t.canonicalPath) : ["image-response"],
     },
   ];
 
@@ -906,15 +946,17 @@ export async function analyzeGenerateImage(
     effects.unshift({
       kind: "filesystem-read",
       targets: inputTargets,
-      sensitivity: "normal",
+      sensitivity: maxSensitivity,
     });
   }
 
   const inputObj: Record<string, import("../../foundations/contracts/tool-effects.js").JsonValue> = {};
   if (args.prompt !== undefined) inputObj.prompt = args.prompt;
   if (outputCommit) inputObj.outputPath = outputCommit.destination.canonicalPath;
-  if (args.image_path !== undefined) inputObj.imagePath = args.image_path;
-  if (args.mask_path !== undefined) inputObj.maskPath = args.mask_path;
+  if (imageTarget) inputObj.imagePath = imageTarget.canonicalPath;
+  else if (args.image_path !== undefined) inputObj.imagePath = args.image_path;
+  if (maskTarget) inputObj.maskPath = maskTarget.canonicalPath;
+  else if (args.mask_path !== undefined) inputObj.maskPath = args.mask_path;
   if (args.mode !== undefined) inputObj.mode = args.mode;
   if (args.model !== undefined) inputObj.model = args.model;
   if (args.n !== undefined) inputObj.n = args.n;

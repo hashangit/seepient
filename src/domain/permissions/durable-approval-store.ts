@@ -31,15 +31,21 @@ export interface PendingApprovalRecord {
   decision?: PermissionDecision;
 }
 export class DurableApprovalStore {
+  readonly isIsolated: boolean;
   private readonly dir: string;
+  private readonly inMemory: boolean;
   private records = new Map<string, ApprovalRecord>();
   private pendingRecords = new Map<string, PendingApprovalRecord>();
-  constructor(opts?: { root?: string }) {
-    this.dir =
-      opts?.root ??
-      (process.env.SEEPIENT_SECURITY_DIR
-        ? path.join(process.env.SEEPIENT_SECURITY_DIR, "approvals")
-        : path.join(os.homedir(), ".seepient", "security", "approvals"));
+
+  constructor(opts?: { root?: string; inMemory?: boolean }) {
+    this.inMemory = opts?.inMemory ?? false;
+    this.isIsolated = this.inMemory;
+    this.dir = this.inMemory
+      ? ""
+      : (opts?.root ??
+          (process.env.SEEPIENT_SECURITY_DIR
+            ? path.join(process.env.SEEPIENT_SECURITY_DIR, "approvals")
+            : path.join(os.homedir(), ".seepient", "security", "approvals")));
   }
 
   private get file(): string {
@@ -47,6 +53,7 @@ export class DurableApprovalStore {
   }
 
   async load(): Promise<void> {
+    if (this.inMemory) return;
     await this.ensureDir();
     let raw: string;
     try {
@@ -98,7 +105,9 @@ export class DurableApprovalStore {
   }
 
   async getRequest(requestId: string): Promise<PermissionRequest | undefined> {
-    await this.load();
+    if (!this.inMemory) {
+      await this.load();
+    }
     const rec = this.records.get(requestId);
     if (!rec) return undefined;
     if (rec.request.expiresAt < Date.now()) return undefined; // expired
@@ -106,11 +115,14 @@ export class DurableApprovalStore {
   }
 
   async getDecision(requestId: string): Promise<PermissionDecision | undefined> {
-    await this.load();
+    if (!this.inMemory) {
+      await this.load();
+    }
     return this.records.get(requestId)?.decision;
   }
 
   private async ensureDir(): Promise<void> {
+    if (this.inMemory) return;
     await fs.mkdir(this.dir, { recursive: true, mode: 0o700 });
     try {
       await fs.chmod(this.dir, 0o700);
@@ -118,6 +130,7 @@ export class DurableApprovalStore {
   }
 
   private async persist(): Promise<void> {
+    if (this.inMemory) return;
     await this.ensureDir();
     const reqLines = [...this.records.values()].map((r) => JSON.stringify({ kind: "request", ...r }));
     const pendingLines = [...this.pendingRecords.values()].map((r) => JSON.stringify({ kind: "pending", ...r }));

@@ -33,6 +33,8 @@ export interface MediaConfig {
   runtime?: any;
   commitBroker?: FileCommitBroker;
   envelope?: CapabilityEnvelope;
+  tenancyMode?: "single" | "multi";
+  capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[];
 }
 
 export interface RuntimeImageOutput {
@@ -68,6 +70,10 @@ export async function generateImageRuntime(
   runtime: any,
   signal?: AbortSignal,
   timeoutMs?: number,
+  opts?: {
+    tenancyMode?: "single" | "multi";
+    capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[];
+  },
 ): Promise<RuntimeImageExecutionResult> {
   const mode = req.mode ?? (req.imagePath && req.maskPath ? "edit" : req.imagePath ? "variation" : "text-to-image");
 
@@ -99,6 +105,10 @@ export async function generateImageRuntime(
 
   let inputImage: any;
   if (req.imagePath && fs.existsSync(req.imagePath)) {
+    const st = fs.lstatSync(req.imagePath);
+    if (st.isSymbolicLink()) {
+      throw new Error(`Refusing image input: ${req.imagePath} is a symbolic link`);
+    }
     inputImage = {
       type: "image" as const,
       mediaType: "image/png" as const,
@@ -108,6 +118,10 @@ export async function generateImageRuntime(
 
   let mask: any;
   if (req.maskPath && fs.existsSync(req.maskPath)) {
+    const st = fs.lstatSync(req.maskPath);
+    if (st.isSymbolicLink()) {
+      throw new Error(`Refusing image mask: ${req.maskPath} is a symbolic link`);
+    }
     mask = {
       type: "image" as const,
       mediaType: "image/png" as const,
@@ -130,6 +144,8 @@ export async function generateImageRuntime(
     {
       signal,
       timeoutMs,
+      tenancyMode: opts?.tenancyMode,
+      capabilities: opts?.capabilities,
     },
   );
 
@@ -197,7 +213,16 @@ export async function generateImagesStructured(
 
   const generatedFiles: string[] = [];
   try {
-    const execResult = await generateImageRuntime(req, config.runtime, config.signal, config.timeoutMs);
+    const execResult = await generateImageRuntime(
+      req,
+      config.runtime,
+      config.signal,
+      config.timeoutMs,
+      {
+        tenancyMode: config.tenancyMode,
+        capabilities: config.capabilities ?? config.envelope?.capabilities,
+      },
+    );
 
     if (req.outputPath) {
       const resolvedPath = path.resolve(req.outputPath);
@@ -312,6 +337,8 @@ RULES:
     {
       signal: config.signal,
       timeoutMs: config.timeoutMs,
+      tenancyMode: config.tenancyMode,
+      capabilities: config.capabilities ?? config.envelope?.capabilities,
     },
   )) {
     if (event.type === "content_block_delta" && event.delta.type === "text_delta") {

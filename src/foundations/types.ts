@@ -418,10 +418,18 @@ export interface RunSeepientServerOptions {
   /** Injected skill sources for multi-tenant server skill resolution */
   sources?: import("./contracts/skill-source.js").SkillSource[];
   /**
+   * Explicit gateway opt-in (FR-017).
+   * In multi-tenant server boot, the operator's ambient gateway is default-off.
+   * Supplying explicit `gateway` is the only composition channel until a per-principal surface exists.
+   */
+  gateway?: boolean | { enabled?: boolean; semanticTopK?: number; defaultRateLimitPerMin?: number; maxAuditLogsInMemory?: number; storageDir?: string };
+  /**
    * Whether to start listening immediately.
    * Default: true. Set to false to create the configured http.Server without listening.
    */
   listen?: boolean;
+  /** Custom API keys file path (overrides SEEPIENT_API_KEYS_FILE and ambient ~/.seepient/server-keys.json) */
+  apiKeysFile?: string;
 }
 
 export interface SkillMetadata {

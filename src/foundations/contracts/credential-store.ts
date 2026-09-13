@@ -32,4 +32,6 @@ export interface CredentialStore {
   put(id: string, record: PersistedCredentialRecord, meta?: CredentialMeta): Promise<void>;
   list(): Promise<CredentialRecord[]>;
   delete(id: string): Promise<void>;
+  /** Synchronously resolve a secret reference from memory in isolated runtimes. */
+  resolveSecret?(ref: string): string | undefined;
 }

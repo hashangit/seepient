@@ -32,6 +32,7 @@ interface StoredFilePayload {
  * Directory mode 0700, file mode 0600, atomic writes.
  */
 export class FileCredentialStore implements CredentialStore {
+  readonly isIsolated = false;
   private baseDir: string;
 
   constructor(customBaseDir?: string) {

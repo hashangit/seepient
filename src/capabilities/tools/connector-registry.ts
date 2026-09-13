@@ -232,6 +232,12 @@ export const HTTP_CONNECTOR: BrokerConnectorDescriptor = {
 
     const effects: EffectRequest[] = [
       { kind: "network-egress", destinations: [destination] },
+      {
+        kind: "model-egress",
+        providerClass: ctx.modelProviderClass,
+        dataClasses: ["normal"],
+        sources: [parsedUrl.hostname],
+      },
     ];
     if (secretRefs.length > 0) {
       effects.push({ kind: "secret-use", secretRefs });

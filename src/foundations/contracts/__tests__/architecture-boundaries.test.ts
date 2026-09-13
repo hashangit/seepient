@@ -13,8 +13,8 @@
  * directly.
  */
 import { describe, it, expect } from "vitest";
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { join, relative, dirname, resolve } from "node:path";
 
 const ROOT = join(import.meta.dirname, "..", "..", "..");
 
@@ -44,7 +44,7 @@ function layerOf(absPath: string): string | null {
 /** Parse `import ... from "x"` / `import "x"` specifiers from a source file (static only). */
 function importSpecifiers(source: string): string[] {
   const out: string[] = [];
-  const re = /import\s+(?:[\s\S]*?\s+from\s+)?["']([^"']+)["']/g;
+  const re = /import\s+(?:[^;]*?\s+from\s+)?["']([^"']+)["']/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(source)) !== null) out.push(m[1]);
   return out;
@@ -56,8 +56,8 @@ function importSpecifiers(source: string): string[] {
 function moduleSpecifiers(source: string): string[] {
   const out: string[] = [];
   const patterns = [
-    /import\s+(?:[\s\S]*?\s+from\s+)?["']([^"']+)["']/g, // static import
-    /export\s+(?:[\s\S]*?\s+from\s+)?["']([^"']+)["']/g, // re-export
+    /import\s+(?:[^;]*?\s+from\s+)?["']([^"']+)["']/g, // static import
+    /export\s+(?:[^;]*?\s+from\s+)?["']([^"']+)["']/g, // re-export
     /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g,            // dynamic import()
     /\brequire\s*\(\s*["']([^"']+)["']\s*\)/g,           // require()
   ];
@@ -253,5 +253,69 @@ describe("architecture boundaries (spec 008, T008)", () => {
       }
     }
     expect(violations, violations.join("\n")).toEqual([]);
+  });
+
+  it("FR-021 / DP9: (a) no createAmbientProviderRuntime import under src/transport/http/**", () => {
+    const violations: string[] = [];
+    for (const f of files) {
+      const rel = relative(ROOT, f).replace(/\\/g, "/");
+      if (!rel.startsWith("transport/http/")) continue;
+      if (rel.endsWith(".test.ts") || rel.endsWith(".test.tsx")) continue;
+      const src = readFileSync(f, "utf8");
+      if (src.includes("createAmbientProviderRuntime")) {
+        violations.push(`${rel} references createAmbientProviderRuntime`);
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("FR-021 / DP9: (b) no pi-ai auth imports outside src/vendors/pi-ai/**", () => {
+    const violations: string[] = [];
+    for (const f of files) {
+      const rel = relative(ROOT, f).replace(/\\/g, "/");
+      if (rel.startsWith("vendors/pi-ai/")) continue;
+      if (rel.endsWith(".test.ts") || rel.endsWith(".test.tsx")) continue;
+      // domain/providers/oauth-service.ts is the sanctioned Domain-level OAuth facade (Spec 013)
+      if (rel === "domain/providers/oauth-service.ts") continue;
+      const src = readFileSync(f, "utf8");
+      for (const spec of moduleSpecifiers(src)) {
+        if (spec.includes("pi-auth-adapter") || (spec.includes("pi-ai") && (spec.includes("auth") || spec.includes("login") || spec.includes("credential")))) {
+          violations.push(`${rel} imports pi-ai auth: ${spec}`);
+        }
+      }
+      const importAuthRe = /import\s+[^;]*?\b(auth|resolveSecretApiKey|resolveAuth|piAiAuth)\b[^;]*?from\s+["'][^"']*pi-ai[^"']*["']/g;
+      let m;
+      while ((m = importAuthRe.exec(src)) !== null) {
+        violations.push(`${rel} imports pi-ai auth symbol: ${m[0]}`);
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("FR-021 / DP9: (c) no effect-executor reachable from the server composition root", () => {
+    // The server composition root (src/transport/http/**) must remain effect-free (Spec 022-2 / plan D5.3).
+    // It must never import effect-executors (build-local-boundary, effect-broker, executors).
+    const forbiddenExecutors = [
+      "capabilities/execution/executors",
+      "capabilities/execution/effect-broker",
+      "capabilities/execution/build-local-boundary",
+    ];
+
+    const violations: string[] = [];
+    for (const f of files) {
+      const rel = relative(ROOT, f).replace(/\\/g, "/");
+      if (!rel.startsWith("transport/http/")) continue;
+      if (rel.endsWith(".test.ts") || rel.endsWith(".test.tsx")) continue;
+      const src = readFileSync(f, "utf8");
+      for (const spec of moduleSpecifiers(src)) {
+        const isForbidden = forbiddenExecutors.some((executor) => spec.includes(executor)) ||
+          (spec.includes("execution/") && (spec.includes("broker") || spec.includes("executor") || spec.includes("boundary")));
+        if (isForbidden) {
+          violations.push(`${rel} imports effect-executor: ${spec}`);
+        }
+      }
+    }
+
+    expect(violations).toEqual([]);
   });
 });

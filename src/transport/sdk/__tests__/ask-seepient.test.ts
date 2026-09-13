@@ -29,6 +29,7 @@ vi.mock("../../../domain/media/vendor-operation-handler.js", () => ({
  */
 function createHangingRuntime(): ProviderRuntimeContract {
   return {
+    isIsolated: true,
     createTurnSnapshot: async () => ({
       revision: 1,
       createdAt: new Date().toISOString(),
@@ -96,6 +97,7 @@ describe("askSeepient — Unified One-Shot Entry Point", () => {
 
   it("throws typed SeepientError in non-streaming mode on provider error", async () => {
     const runtime = {
+      isIsolated: true,
       createTurnSnapshot: async () => ({
         revision: 1,
         createdAt: new Date().toISOString(),
@@ -127,6 +129,7 @@ describe("askSeepient — Unified One-Shot Entry Point", () => {
   // W111: onError parity between streaming and non-streaming modes.
   it("invokes opts.onError AND rejects in non-streaming mode on provider error", async () => {
     const runtime = {
+      isIsolated: true,
       createTurnSnapshot: async () => ({
         revision: 1,
         createdAt: new Date().toISOString(),
@@ -165,6 +168,7 @@ describe("askSeepient — Unified One-Shot Entry Point", () => {
   // non-streaming path throws), even when the caller has no onError callback.
   it("streaming fullText rejects on provider error instead of resolving empty", async () => {
     const runtime = {
+      isIsolated: true,
       createTurnSnapshot: async () => ({
         revision: 1,
         createdAt: new Date().toISOString(),

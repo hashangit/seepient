@@ -524,7 +524,7 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
         // session must survive the mid-stream eviction attempt. Simulate the
         // legacy loss directly (backend-driven eviction) so the error-frame
         // contract of this test is still exercised.
-        (sessionManager as any).sessions.delete("evicted-sess");
+        (sessionManager as any).sessions.delete("test-key-hash:evicted-sess");
         options.onDone({
           text: "Stream completed after eviction",
           usage: { promptTokens: 5, completionTokens: 5, totalTokens: 10, cost: 0 },
@@ -550,7 +550,7 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
     expect(state.activeChats.size).toBe(0);
   });
 
-  it("foreign-owned session id produces SESSION_NOT_FOUND without leaking existence (W011)", async () => {
+  it("foreign-owned session id creates isolated session in caller partition without leaking existence (FR-012 / VULN-3)", async () => {
     const backend = new MemoryPersistenceBackend();
     const sessionManager = new ServerSessionManager({ backend });
     const { ws, sent } = createMockWs();
@@ -577,9 +577,16 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
     } as any;
 
     const ctx: WebSocketHandlerContext = {
-        registry: createConnectionRegistry(),
+      registry: createConnectionRegistry(),
       sessionManager,
-      streamText: vi.fn(),
+      streamText: async (options) => {
+        options.onText("Hello back");
+        options.onDone({
+          text: "Hello back",
+          usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15, cost: 0 },
+          finishReason: "stop",
+        });
+      },
       listModels: () => ({}),
       listSkills: () => [],
     };
@@ -592,10 +599,15 @@ describe("WebSocket Session Lifecycle & Concurrency Guard (Spec 021-2 / FR-004, 
     );
 
     const errFrame = sent.find((m) => m.type === "error");
-    expect(errFrame).toBeDefined();
-    expect(["FORBIDDEN", "SESSION_NOT_FOUND"]).toContain(errFrame.code);
+    expect(errFrame).toBeUndefined();
     expect(JSON.stringify(sent)).not.toMatch(/already exists/i);
-    expect(state.activeChats.size).toBe(0);
+    expect(state.sessionId).toBe("foreign-session-123");
+
+    // Both sessions exist independently:
+    const otherSession = await sessionManager.getSession("foreign-session-123", "other-key-hash");
+    const attackerSession = await sessionManager.getSession("foreign-session-123", "attacker-key-hash");
+    expect(otherSession).not.toBeNull();
+    expect(attackerSession).not.toBeNull();
   });
 
   it("rejects resume and reconnect during in-flight turn with REQUEST_IN_FLIGHT, releasing acquired lock on completion (W034)", async () => {

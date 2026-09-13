@@ -8,8 +8,8 @@
 export interface LogLine {
   ts: string;
   level: "info" | "warn" | "error";
-  event: "http_request" | "ws_dispatch" | "ws_error" | "probe" | "persist_error" | "session_resume_refused" | "generation_error";
-  requestId: string;
+  event: "http_request" | "ws_dispatch" | "ws_error" | "probe" | "persist_error" | "session_resume_refused" | "generation_error" | "unhandled_rejection";
+  requestId?: string;
   method?: string;
   path?: string;
   status?: number;

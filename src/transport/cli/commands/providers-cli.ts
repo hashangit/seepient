@@ -8,7 +8,7 @@
 
 import { Command } from "commander";
 import chalk from "chalk";
-import { getDefaultProviderRuntime } from "../../../domain/providers/provider-runtime.js";
+import { createAmbientProviderRuntime } from "../../../domain/providers/provider-runtime.js";
 import { createProviderManagerApi, type AccountInput } from "../provider-manager-api.js";
 
 function parseCredentialMode(raw?: string): AccountInput["credential"] {
@@ -36,7 +36,7 @@ export function registerProvidersCommands(program: Command): void {
     .option("--pool <pool>", "Filter by capability pool: language | image")
     .option("--json", "Output provider accounts as JSON")
     .action(async (opts) => {
-      const runtime = getDefaultProviderRuntime();
+      const runtime = createAmbientProviderRuntime();
       const api = createProviderManagerApi(runtime);
       const state = await api.getState();
 
@@ -104,7 +104,7 @@ export function registerProvidersCommands(program: Command): void {
     .option("--compat <compat>", "Wire protocol compatibility (openai | anthropic | google | openai-responses)")
     .option("--json", "Output result as JSON")
     .action(async (id, opts) => {
-      const runtime = getDefaultProviderRuntime();
+      const runtime = createAmbientProviderRuntime();
       const api = createProviderManagerApi(runtime);
 
       const credential = parseCredentialMode(opts.credential);
@@ -143,7 +143,7 @@ export function registerProvidersCommands(program: Command): void {
     .option("--compat <compat>", "Wire protocol compatibility")
     .option("--json", "Output result as JSON")
     .action(async (id, opts) => {
-      const runtime = getDefaultProviderRuntime();
+      const runtime = createAmbientProviderRuntime();
       const api = createProviderManagerApi(runtime);
       const state = await api.getState();
       const existing = state.accounts.find((a) => a.id === id);
@@ -189,7 +189,7 @@ export function registerProvidersCommands(program: Command): void {
     .option("--force", "Force remove even if referenced by active model slots")
     .option("--json", "Output result as JSON")
     .action(async (id, opts) => {
-      const runtime = getDefaultProviderRuntime();
+      const runtime = createAmbientProviderRuntime();
       const api = createProviderManagerApi(runtime);
 
       const res = await api.deleteAccount(id, { force: !!opts.force });

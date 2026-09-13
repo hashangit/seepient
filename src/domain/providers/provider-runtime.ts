@@ -12,9 +12,9 @@ import type {
 import type { CredentialStore } from "../../foundations/contracts/credential-store.js";
 import { InferenceError } from "../../foundations/errors.js";
 import { AggregateInferenceAdapter } from "../../capabilities/inference/aggregate-adapter.js";
-import { ProviderConfigStore } from "./config-store/provider-config-store.js";
+import { ProviderConfigStore, createAmbientProviderConfigStore } from "./config-store/provider-config-store.js";
 import { ModelCatalog, extractUserDeclaredModels } from "./model-catalog.js";
-import { CompositeCredentialStore } from "./credentials/composite-credential-store.js";
+import { CompositeCredentialStore, createAmbientCompositeCredentialStore } from "./credentials/composite-credential-store.js";
 import {
   type TurnSnapshot,
   type InvocationPlan,
@@ -212,11 +212,14 @@ export interface CapabilityHealth {
   cooldownUntil?: number;
 }
 
+const AMBIENT_CONSTRUCTOR_TOKEN = Symbol("AMBIENT_CONSTRUCTOR_TOKEN");
+
 /**
  * Central ProviderRuntime managing turn snapshots, plan resolution, execution dispatch,
  * and multi-target retries with cooldown tracking and dynamic catalog synchronization.
  */
 export class ProviderRuntime extends EventEmitter implements ProviderRuntimeContract {
+  readonly isIsolated: boolean;
   readonly configStore: ProviderConfigStore;
   readonly credentialStore: CredentialStore;
   readonly modelCatalog: ModelCatalog;
@@ -224,8 +227,9 @@ export class ProviderRuntime extends EventEmitter implements ProviderRuntimeCont
 
   private healthMap = new Map<string, CapabilityHealth>();
 
-  constructor(options?: ProviderRuntimeOptions) {
+  constructor(options?: ProviderRuntimeOptions, internalToken?: typeof AMBIENT_CONSTRUCTOR_TOKEN) {
     super();
+    this.isIsolated = internalToken === AMBIENT_CONSTRUCTOR_TOKEN ? false : true;
     this.configStore = options?.configStore ?? new ProviderConfigStore();
     this.credentialStore = options?.credentialStore ?? new CompositeCredentialStore();
     this.modelCatalog = options?.modelCatalog ?? new ModelCatalog();
@@ -234,6 +238,10 @@ export class ProviderRuntime extends EventEmitter implements ProviderRuntimeCont
 
   getConfigStore(): ProviderConfigStore {
     return this.configStore;
+  }
+
+  async getConfig() {
+    return this.configStore.getEffectiveConfig();
   }
 
   getCredentialStore(): CredentialStore {
@@ -854,22 +862,26 @@ export class ProviderRuntime extends EventEmitter implements ProviderRuntimeCont
   }
 }
 
-// Spec 022 M4 / FR-017 pinned: defaultRuntimeInstance survives as single-mode default only; multi-mode rejects before reaching it.
-let defaultRuntimeInstance: ProviderRuntime | undefined;
-
 /**
- * Returns the default global ProviderRuntime instance for composition root wiring.
+ * Explicit isolated construction with optional injectable stores.
+ * Every defaulted store is isolated in-memory.
  */
-export function getDefaultProviderRuntime(): ProviderRuntime {
-  if (!defaultRuntimeInstance) {
-    defaultRuntimeInstance = new ProviderRuntime();
-  }
-  return defaultRuntimeInstance;
+export function createIsolatedProviderRuntime(options?: ProviderRuntimeOptions): ProviderRuntime {
+  return new ProviderRuntime(options);
 }
 
 /**
- * Resets the default global ProviderRuntime instance (used in tests).
+ * The ONLY sanctioned ambient composition (Profile A roots + the SDK single-mode path — FR-006).
+ * Wires ambient ProviderConfigStore and CompositeCredentialStore.
  */
-export function resetDefaultProviderRuntime(): void {
-  defaultRuntimeInstance = undefined;
+export function createAmbientProviderRuntime(): ProviderRuntime {
+  const configStore = createAmbientProviderConfigStore();
+  const credentialStore = createAmbientCompositeCredentialStore();
+  return new ProviderRuntime(
+    {
+      configStore,
+      credentialStore,
+    },
+    AMBIENT_CONSTRUCTOR_TOKEN,
+  );
 }

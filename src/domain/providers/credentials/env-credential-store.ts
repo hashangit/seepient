@@ -16,6 +16,7 @@ import { SeepientError } from "../../../foundations/errors.js";
  * Environment-variable-based CredentialStore (kind: 'env').
  */
 export class EnvCredentialStore implements CredentialStore {
+  readonly isIsolated = false;
   async resolve(ref: CredentialRef): Promise<CredentialHandle> {
     if (ref.kind !== "env") {
       throw new SeepientError(

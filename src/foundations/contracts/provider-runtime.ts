@@ -50,6 +50,13 @@ export interface InvocationPlan {
  * Public structural contract for ProviderRuntime across Seepient layers.
  */
 export interface ProviderRuntimeContract {
+  /**
+   * true when this runtime was constructed by the isolated path (default
+   * constructors or createIsolatedProviderRuntime); false only for
+   * createAmbientProviderRuntime() output. Stamped at construction; multi-mode
+   * roots require isIsolated === true on all injected runtimes and stores.
+   */
+  readonly isIsolated: boolean;
   createTurnSnapshot(): Promise<TurnSnapshot>;
   resolvePlan(
     snapshot: TurnSnapshot,
@@ -68,6 +75,7 @@ export interface ProviderRuntimeContract {
     payload: unknown,
     options?: { signal?: AbortSignal },
   ): Promise<unknown>;
+  getConfig?(): Promise<ProviderEffectiveConfig>;
   getConfigStore?(): unknown;
   getCredentialStore?(): CredentialStore;
   modelCatalog?: {

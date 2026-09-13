@@ -11,6 +11,7 @@ import type {
 import { InferenceError } from "../../foundations/errors.js";
 import { classifyInferenceError } from "../../foundations/errors/error-classifier.js";
 import { canonicalToOpenAIImageParams } from "./openai-canonical-converter.js";
+import { assertBaseUrlEgressAllowed } from "../egress-check.js";
 
 /**
  * Raw OpenAI Image backend executing directly via the OpenAI SDK.
@@ -41,6 +42,21 @@ export class OpenAIImageRaw implements ImageBackend {
       }
 
       const secret = await lease.secret();
+      if (opts?.tenancyMode === "multi") {
+        if (!secret || secret.kind !== "api_key" || !secret.value) {
+          throw new InferenceError({
+            code: "auth",
+            message: `CREDENTIAL_REQUIRED: Multi-tenant image inference requires an explicit api_key credential for provider "${target.upstreamProvider}".`,
+            providerAccount: target.providerAccount,
+            model: target.model,
+            retryable: false,
+          });
+        }
+        if (target.baseUrl) {
+          assertBaseUrlEgressAllowed(target.baseUrl, opts.capabilities, target);
+        }
+      }
+
       if (secret.kind !== "api_key") {
         throw new InferenceError({
           code: "auth",

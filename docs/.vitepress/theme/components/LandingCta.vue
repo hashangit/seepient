@@ -17,10 +17,12 @@ const columns = [
   {
     title: 'Surfaces',
     links: [
-      { text: 'Terminal UI', href: '/tui/overview' },
       { text: 'CLI', href: '/cli/overview' },
-      { text: 'TypeScript SDK', href: '/sdk/overview' },
-      { text: 'Server', href: '/server/overview' },
+      { text: 'Terminal UI (TUI)', href: '/tui/overview' },
+      { text: 'Embedded SDK', href: '/sdk/overview' },
+      { text: 'Programmatic Server', href: '/sdk/stateless-workers' },
+      { text: 'REST / WS Server', href: '/server/overview' },
+      { text: 'Container Workers', href: '/server/workers' },
     ],
   },
   {

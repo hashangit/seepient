@@ -52,8 +52,9 @@ describe("HTTP server audit recovery initialization (T109c)", () => {
         "utf8",
       );
 
-      // Startup triggers reload + flush + recoverIndeterminateActions.
-      const server = await runSeepientServer({ listen: false });
+      // Startup triggers reload + flush + recoverIndeterminateActions on injected LocalAuditStore.
+      const { LocalAuditStore } = await import("../../../domain/permissions/audit-recorder.js");
+      const server = await runSeepientServer({ listen: false, auditStore: new LocalAuditStore({ root: tmpDir }) });
       expect(server).toBeDefined();
       server.close();
 

@@ -438,4 +438,43 @@ export class PrincipalRequiredError extends SeepientError {
   }
 }
 
+/**
+ * Thrown when a principalId violates the allowed slug grammar /^[a-zA-Z0-9_-]{1,128}$/
+ * or matches a case-insensitive sentinel ("default", "anonymous", "sdk-user").
+ */
+export class InvalidPrincipalIdError extends PrincipalRequiredError {
+  constructor(
+    message = 'INVALID_PRINCIPAL_ID: principalId must match /^[a-zA-Z0-9_-]{1,128}$/ and cannot be a sentinel value ("default", "anonymous", "sdk-user").',
+  ) {
+    super(message);
+    this.code = "INVALID_PRINCIPAL_ID";
+    this.name = "InvalidPrincipalIdError";
+  }
+}
+
+/**
+ * Thrown when multi-tenant mode is active without an explicit cwd/workspace.
+ */
+export class TenancyWorkspaceRequiredError extends SeepientError {
+  constructor(
+    message = 'TENANCY_WORKSPACE_REQUIRED: tenancy: "multi" requires an explicit cwd/workspaceRoot to prevent cross-tenant disk contamination.',
+  ) {
+    super(message, "TENANCY_WORKSPACE_REQUIRED", false);
+    this.name = "TenancyWorkspaceRequiredError";
+  }
+}
+
+/**
+ * Thrown when an explicit credential is required in multi-tenant mode but was omitted
+ * or cannot be resolved without ambient fallback.
+ */
+export class CredentialRequiredError extends SeepientError {
+  constructor(
+    message = 'CREDENTIAL_REQUIRED: Explicit credential required in multi-tenant mode.',
+  ) {
+    super(message, "CREDENTIAL_REQUIRED", false);
+    this.name = "CredentialRequiredError";
+  }
+}
+
 

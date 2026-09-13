@@ -5,7 +5,7 @@ import type { ToolRegistryContract } from "../../foundations/contracts/tool.js";
 import { resolveTools, ToolRegistry } from "../../domain/tool-executor.js";
 import { now } from "../../domain/context/message-convert.js";
 import { generateId } from "../../foundations/id.js";
-import { getDefaultProviderRuntime, type ProviderRuntime } from "../../domain/providers/provider-runtime.js";
+import { createIsolatedProviderRuntime, type ProviderRuntime } from "../../domain/providers/provider-runtime.js";
 import type { ProviderRuntimeContract } from "../../foundations/contracts/provider-runtime.js";
 import type { Middleware } from "../../foundations/contracts/middleware.js";
 import { extractLoopError } from "../sdk/error-surfacing.js";
@@ -69,11 +69,16 @@ export async function serverGenerateText(
   },
   middleware?: Middleware[],
 ): Promise<AskSeepientResult> {
-  const runtime = options.runtime ?? getDefaultProviderRuntime();
+  if (options.runtime && (options.runtime as any).isIsolated !== true && options.tenancyMode === "multi") {
+    const { TenancyRuntimeRequiredError } = await import("../../domain/tenancy/tenancy-mode.js");
+    throw new TenancyRuntimeRequiredError();
+  }
+  const runtime = options.runtime ?? createIsolatedProviderRuntime();
   const registry = options.toolRegistry ?? new ToolRegistry();
 
   // Resolve tools
-  const toolDefs = options.tools ? resolveTools(options.tools, registry) : registry.definitions();
+  const isMulti = (options as any).tenancyMode === "multi";
+  const toolDefs = options.tools ? resolveTools(options.tools, registry) : (isMulti ? [] : registry.definitions());
 
   // Hooks
   const hooks = createHookExecutor();
@@ -175,9 +180,14 @@ export async function handleAgentChatStream(
   },
   middleware?: Middleware[],
 ): Promise<void> {
-  const runtime = opts.runtime ?? getDefaultProviderRuntime();
+  if (opts.runtime && (opts.runtime as any).isIsolated !== true && (opts as any).tenancyMode === "multi") {
+    const { TenancyRuntimeRequiredError } = await import("../../domain/tenancy/tenancy-mode.js");
+    throw new TenancyRuntimeRequiredError();
+  }
+  const runtime = opts.runtime ?? createIsolatedProviderRuntime();
   const registry = opts.toolRegistry ?? new ToolRegistry();
-  const toolDefs = opts.tools ? resolveTools(opts.tools, registry) : registry.definitions();
+  const isMulti = (opts as any).tenancyMode === "multi";
+  const toolDefs = opts.tools ? resolveTools(opts.tools, registry) : (isMulti ? [] : registry.definitions());
   const hooks = createHookExecutor();
 
   // Load session or create initial message list

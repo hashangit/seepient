@@ -32,6 +32,11 @@ export interface ConfigViolation {
   value?: unknown;
 }
 
+export interface ProviderConfigStoreOptions {
+  overlayPath?: string;
+  isIsolated?: boolean;
+}
+
 /**
  * Manages the runtime provider configuration store with optimistic concurrency locking (If-Match),
  * cross-process file locking (O_EXCL), fsync durability, and deep-patch overlay persistence.
@@ -39,15 +44,24 @@ export interface ConfigViolation {
 export class ProviderConfigStore {
   private overlayPath?: string;
   private currentOverlay: OverlayDocument;
+  readonly isIsolated: boolean;
 
-  constructor(customOverlayPath?: string) {
-    if (customOverlayPath === ":memory:") {
-      this.overlayPath = undefined;
+  constructor(customOverlayPathOrOptions?: string | ProviderConfigStoreOptions) {
+    if (typeof customOverlayPathOrOptions === "object" && customOverlayPathOrOptions !== null) {
+      this.overlayPath = customOverlayPathOrOptions.overlayPath;
+      this.isIsolated = customOverlayPathOrOptions.isIsolated ?? (this.overlayPath === undefined);
+    } else if (typeof customOverlayPathOrOptions === "string") {
+      if (customOverlayPathOrOptions === ":memory:") {
+        this.overlayPath = undefined;
+        this.isIsolated = true;
+      } else {
+        this.overlayPath = customOverlayPathOrOptions;
+        this.isIsolated = false;
+      }
     } else {
-      this.overlayPath =
-        customOverlayPath ??
-        process.env.SEEPIENT_OVERLAY_PATH ??
-        path.join(os.homedir(), ".seepient", "providers-overlay.json");
+      // Inverted default (FR-005): no-arg construction is isolated in-memory
+      this.overlayPath = undefined;
+      this.isIsolated = true;
     }
 
     this.currentOverlay = {
@@ -244,6 +258,18 @@ export class ProviderConfigStore {
     return [];
   }
 
+  async addProvider(id: string, provider: any): Promise<OverlayDocument> {
+    const current = await this.getOverlay();
+    return this.updateOverlay(
+      {
+        providers: {
+          [id]: provider,
+        },
+      },
+      current.revision,
+    );
+  }
+
   /**
    * Applies a deep patch to the overlay document with mandatory optimistic concurrency check (If-Match).
    */
@@ -365,18 +391,31 @@ export class ProviderConfigStore {
     customCwd?: string,
   ): Promise<ProviderEffectiveConfig> {
     let defaults: ProviderEffectiveConfig;
-    if (baseDefaultsOrCreds && "providers" in baseDefaultsOrCreds) {
-      const standardDefaults = await getDefaultBaseConfigAsync(undefined, customCwd);
-      defaults = {
-        ...standardDefaults,
-        ...baseDefaultsOrCreds,
-        providers: baseDefaultsOrCreds.providers ?? standardDefaults.providers,
-      };
+    if (this.isIsolated) {
+      const emptyBase = createEmptyBaseConfig();
+      if (baseDefaultsOrCreds && "providers" in baseDefaultsOrCreds) {
+        defaults = {
+          ...emptyBase,
+          ...baseDefaultsOrCreds,
+          providers: baseDefaultsOrCreds.providers ?? emptyBase.providers,
+        };
+      } else {
+        defaults = emptyBase;
+      }
     } else {
-      defaults = await getDefaultBaseConfigAsync(
-        baseDefaultsOrCreds as { put: (id: string, record: any, meta?: any) => Promise<void> } | undefined,
-        customCwd,
-      );
+      if (baseDefaultsOrCreds && "providers" in baseDefaultsOrCreds) {
+        const standardDefaults = await getDefaultBaseConfigAsync(undefined, customCwd);
+        defaults = {
+          ...standardDefaults,
+          ...baseDefaultsOrCreds,
+          providers: baseDefaultsOrCreds.providers ?? standardDefaults.providers,
+        };
+      } else {
+        defaults = await getDefaultBaseConfigAsync(
+          baseDefaultsOrCreds as { put: (id: string, record: any, meta?: any) => Promise<void> } | undefined,
+          customCwd,
+        );
+      }
     }
     const overlay = await this.getOverlay();
     const patch = overlay.patch;
@@ -402,6 +441,31 @@ export class ProviderConfigStore {
     this.validateEffective(effective);
     return JSON.parse(JSON.stringify(effective));
   }
+}
+
+/**
+ * Creates an empty base configuration for isolated in-memory stores (zero env synthesis).
+ */
+export function createEmptyBaseConfig(): ProviderEffectiveConfig {
+  return {
+    schemaVersion: 2,
+    revision: 0,
+    updatedAt: new Date().toISOString(),
+    providers: {},
+    modelAssignments: { text: {} },
+    retryPolicy: DEFAULT_RETRY_POLICY,
+  };
+}
+
+/**
+ * Creates an ambient ProviderConfigStore wired to ~/.seepient/providers-overlay.json
+ * and host environment variable synthesis (Profile A composition roots only).
+ */
+export function createAmbientProviderConfigStore(): ProviderConfigStore {
+  const overlayPath =
+    process.env.SEEPIENT_OVERLAY_PATH ??
+    path.join(os.homedir(), ".seepient", "providers-overlay.json");
+  return new ProviderConfigStore({ overlayPath, isIsolated: false });
 }
 
 /**

@@ -210,8 +210,48 @@ export class ReadFileExecutor implements OperationExecutor {
     operation: Extract<PreparedToolAction["operation"], { kind: "read-file" }>,
     _opts: { signal?: AbortSignal; onUpdate?: (u: ToolProgress) => void },
   ): Promise<ExecutionResult> {
+    if (operation.target.finalSymlink) {
+      return {
+        state: "failed",
+        error: {
+          code: "SYMLINK_READ_DENIED",
+          message: `Reads of symbolic links are prohibited: ${operation.target.canonicalPath}`,
+          retryable: false,
+        },
+        evidence: {
+          backend: "local-native",
+          actionDigest: action.actionDigest,
+          executorId: "read-file-denied",
+          operationKind: "read-file",
+        },
+      };
+    }
+    let realTarget = operation.target.canonicalPath;
+    try {
+      const { lstatSync, realpathSync } = await import("node:fs");
+      const st = lstatSync(operation.target.canonicalPath);
+      if (st.isSymbolicLink()) {
+        return {
+          state: "failed",
+          error: {
+            code: "SYMLINK_READ_DENIED",
+            message: `Reads of symbolic links are prohibited: ${operation.target.canonicalPath}`,
+            retryable: false,
+          },
+          evidence: {
+            backend: "local-native",
+            actionDigest: action.actionDigest,
+            executorId: "read-file-denied",
+            operationKind: "read-file",
+          },
+        };
+      }
+      realTarget = realpathSync(operation.target.canonicalPath);
+    } catch {
+      /* non-existent paths fail in readFile below */
+    }
     // T108a: deny reads of the security directory
-    if (isSecurityPath(operation.target.canonicalPath)) {
+    if (isSecurityPath(operation.target.canonicalPath) || isSecurityPath(realTarget)) {
       return {
         state: "failed",
         error: {
@@ -342,6 +382,7 @@ export class BrokerExecutor implements OperationExecutor {
   private readonly artifacts?: PreparationArtifactStore;
   private readonly workspaceRoot?: string;
   private readonly commitBroker?: FileCommitBroker;
+  private readonly tenancyMode: "single" | "multi";
 
   constructor(opts: {
     broker: EffectBroker;
@@ -349,11 +390,13 @@ export class BrokerExecutor implements OperationExecutor {
     workspaceRoot?: string;
     /** spec 019 FR-011: for outputCommit handoff after a successful fetch. */
     commitBroker?: FileCommitBroker;
+    tenancyMode?: "single" | "multi";
   }) {
     this.broker = opts.broker;
     this.artifacts = opts.artifacts;
     this.workspaceRoot = opts.workspaceRoot;
     this.commitBroker = opts.commitBroker;
+    this.tenancyMode = opts.tenancyMode ?? "single";
   }
   async execute(
     action: PreparedToolAction,
@@ -361,77 +404,15 @@ export class BrokerExecutor implements OperationExecutor {
     operation: Extract<PreparedToolAction["operation"], { kind: "broker" }>,
     _opts: { signal?: AbortSignal; onUpdate?: (u: ToolProgress) => void },
   ): Promise<ExecutionResult> {
-    // Preflight credential checks (spec 017, T014; spec 020, T015)
-    const { resolveCredentials } = await import("../../foundations/security/credential-resolver.js");
-    const creds = resolveCredentials(undefined, this.workspaceRoot);
+    // In multi mode, skip ambient credential resolution completely (FR-008).
+    // Broker handles explicit secret resolution via secretResolver and fails closed with CREDENTIAL_REQUIRED.
+    if (this.tenancyMode !== "multi") {
+      // Preflight credential checks (spec 017, T014; spec 020, T015)
+      const { resolveCredentials } = await import("../../foundations/security/credential-resolver.js");
+      const creds = resolveCredentials(undefined, this.workspaceRoot);
 
-    if (action.toolName === "web_search" && !creds.tavilyApiKey) {
-      const failure = createSetupFailure("web_search", "Tavily API key", "TAVILY_API_KEY / search.tavilyApiKey");
-      return {
-        state: "failed",
-        error: {
-          code: "SETUP_REQUIRED",
-          message: failure.message,
-          retryable: false,
-        },
-        evidence: {
-          backend: "local-native",
-          actionDigest: action.actionDigest,
-          executorId: "broker-preflight",
-          operationKind: "broker",
-        },
-      };
-    }
-
-    if (action.toolName !== "web_search" && operation.request.secretRefs && operation.request.secretRefs.length > 0) {
-      for (const ref of operation.request.secretRefs) {
-        const canonicalRef = ref === "tavily" ? "tavilyApiKey" : ref;
-        const resolvedVal = (creds as unknown as Record<string, unknown>)[canonicalRef] ?? (creds as unknown as Record<string, unknown>)[ref];
-        if (!resolvedVal) {
-          return {
-            state: "failed",
-            error: {
-              code: "CONNECTOR_SECRET_UNRESOLVED",
-              message: `Required secret reference "${ref}" cannot be resolved. Configure ${ref} in environment or credentials store.`,
-              retryable: false,
-            },
-            evidence: {
-              backend: "local-native",
-              actionDigest: action.actionDigest,
-              executorId: "broker-secret-preflight",
-              operationKind: "broker",
-            },
-          };
-        }
-      }
-    }
-    if (action.toolName === "send_email" && (!creds.smtpHost || !creds.smtpUser || !creds.smtpPass)) {
-      const failure = createSetupFailure("send_email", "SMTP configuration", "SMTP_HOST / smtp.host");
-      return {
-        state: "failed",
-        error: {
-          code: "SETUP_REQUIRED",
-          message: failure.message,
-          retryable: false,
-        },
-        evidence: {
-          backend: "local-native",
-          actionDigest: action.actionDigest,
-          executorId: "broker-preflight",
-          operationKind: "broker",
-        },
-      };
-    }
-    if (action.toolName === "send_notification") {
-      const platform = (operation.request as any)?.service ?? "feishu";
-      const platformWebhook =
-        platform === "feishu" ? creds.feishuWebhook :
-        platform === "dingtalk" ? creds.dingtalkWebhook :
-        platform === "wecom" ? creds.wecomWebhook :
-        undefined;
-      if (!platformWebhook) {
-        const envKey = `${String(platform).toUpperCase()}_WEBHOOK`;
-        const failure = createSetupFailure("send_notification", `${platform} webhook URL`, `${envKey} / notifications.${platform}.webhook`);
+      if (action.toolName === "web_search" && !creds.tavilyApiKey) {
+        const failure = createSetupFailure("web_search", "Tavily API key", "TAVILY_API_KEY / search.tavilyApiKey");
         return {
           state: "failed",
           error: {
@@ -446,6 +427,73 @@ export class BrokerExecutor implements OperationExecutor {
             operationKind: "broker",
           },
         };
+      }
+
+      if (action.toolName !== "web_search" && operation.request.secretRefs && operation.request.secretRefs.length > 0) {
+        for (const ref of operation.request.secretRefs) {
+          const canonicalRef = ref === "tavily" ? "tavilyApiKey" : ref;
+          const resolvedVal = (creds as unknown as Record<string, unknown>)[canonicalRef] ?? (creds as unknown as Record<string, unknown>)[ref];
+          if (!resolvedVal) {
+            return {
+              state: "failed",
+              error: {
+                code: "CONNECTOR_SECRET_UNRESOLVED",
+                message: `Required secret reference "${ref}" cannot be resolved. Configure ${ref} in environment or credentials store.`,
+                retryable: false,
+              },
+              evidence: {
+                backend: "local-native",
+                actionDigest: action.actionDigest,
+                executorId: "broker-secret-preflight",
+                operationKind: "broker",
+              },
+            };
+          }
+        }
+      }
+
+      if (action.toolName === "send_email" && (!creds.smtpHost || !creds.smtpUser || !creds.smtpPass)) {
+        const failure = createSetupFailure("send_email", "SMTP configuration", "SMTP_HOST / smtp.host");
+        return {
+          state: "failed",
+          error: {
+            code: "SETUP_REQUIRED",
+            message: failure.message,
+            retryable: false,
+          },
+          evidence: {
+            backend: "local-native",
+            actionDigest: action.actionDigest,
+            executorId: "broker-preflight",
+            operationKind: "broker",
+          },
+        };
+      }
+      if (action.toolName === "send_notification") {
+        const platform = (operation.request as any)?.service ?? "feishu";
+        const platformWebhook =
+          platform === "feishu" ? creds.feishuWebhook :
+          platform === "dingtalk" ? creds.dingtalkWebhook :
+          platform === "wecom" ? creds.wecomWebhook :
+          undefined;
+        if (!platformWebhook) {
+          const envKey = `${String(platform).toUpperCase()}_WEBHOOK`;
+          const failure = createSetupFailure("send_notification", `${platform} webhook URL`, `${envKey} / notifications.${platform}.webhook`);
+          return {
+            state: "failed",
+            error: {
+              code: "SETUP_REQUIRED",
+              message: failure.message,
+              retryable: false,
+            },
+            evidence: {
+              backend: "local-native",
+              actionDigest: action.actionDigest,
+              executorId: "broker-preflight",
+              operationKind: "broker",
+            },
+          };
+        }
       }
     }
 

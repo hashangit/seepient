@@ -11,6 +11,10 @@
     "./server": {
       "import": "./dist/transport/http/index.js",
       "types": "./dist/transport/http/index.d.ts"
+    },
+    "./types": {
+      "import": "./dist/foundations/types.js",
+      "types": "./dist/foundations/types.d.ts"
     }
   },
   "types": "./dist/transport/sdk/index.d.ts",
@@ -32,6 +36,7 @@
     "test:unit": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:probes": "tsx scripts/verify-mutation-probes.ts",
     "bench:provider": "vitest run src/domain/providers/__tests__/provider-benchmark.test.ts",
     "native:build": "cargo build --manifest-path native/fs-commit/Cargo.toml --release && node scripts/place-native-helper.cjs",
     "native:test": "cargo test --manifest-path native/fs-commit/Cargo.toml",
@@ -90,7 +95,7 @@
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.67",
     "@anthropic-ai/sdk": "^0.52.0",
-    "@earendil-works/pi-ai": "0.84.4",
+    "@earendil-works/pi-ai": "0.85.1",
     "@google/genai": "2.15.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@mozilla/readability": "^0.6.0",

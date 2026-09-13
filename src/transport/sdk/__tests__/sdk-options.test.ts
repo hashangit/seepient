@@ -32,7 +32,8 @@ function mockEntryPoints(resolvedModel: string) {
   };
 
   vi.doMock('../../../domain/providers/provider-runtime.js', () => ({
-    getDefaultProviderRuntime: vi.fn().mockReturnValue(mockRuntime),
+    createAmbientProviderRuntime: vi.fn().mockReturnValue(mockRuntime),
+    createIsolatedProviderRuntime: vi.fn().mockReturnValue(mockRuntime),
     ProviderRuntime: vi.fn().mockImplementation(() => mockRuntime),
   }));
 

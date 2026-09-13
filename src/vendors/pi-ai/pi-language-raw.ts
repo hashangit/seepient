@@ -30,6 +30,7 @@ import {
   canonicalToPiMessages,
   canonicalToPiTools,
 } from "./pi-canonical-converter.js";
+import { assertBaseUrlEgressAllowed } from "../egress-check.js";
 
 type AssistantContentBlock = TextBlock | ReasoningBlock | ToolUseBlock;
 
@@ -103,7 +104,19 @@ async function resolveSecretApiKey(
   target: InferenceTarget,
   credentialStore?: any,
   signal?: AbortSignal,
+  tenancyMode?: "single" | "multi",
 ): Promise<string | undefined> {
+  if (tenancyMode === "multi") {
+    if (!secret || secret.kind !== "api_key" || !secret.value) {
+      throw new InferenceError({
+        code: "auth",
+        message: `CREDENTIAL_REQUIRED: Multi-tenant inference requires an explicit api_key credential for provider "${target.upstreamProvider}".`,
+        providerAccount: target.providerAccount,
+        model: target.model,
+        retryable: false,
+      });
+    }
+  }
   if (!secret) return undefined;
   if (secret.kind === "api_key") {
     return secret.value;
@@ -232,7 +245,20 @@ export class PiLanguageRaw implements LanguageBackend {
         this.models.getProviders().some((p) => p.id === providerName));
     const piProvider = model ? (model.provider || providerName) : (isKnown ? providerName : "openai");
 
-    if (!isKnown && !target.baseUrl) {
+    if (opts?.tenancyMode === "multi") {
+      if (!isKnown) {
+        throw new InferenceError({
+          code: "invalid_request",
+          message: `Custom or unknown upstream provider "${target.upstreamProvider}" synthetic fallback to "openai" is forbidden in multi-tenant mode.`,
+          providerAccount: target.providerAccount,
+          model: target.model,
+          retryable: false,
+        });
+      }
+      if (target.baseUrl) {
+        assertBaseUrlEgressAllowed(target.baseUrl, opts.capabilities, target);
+      }
+    } else if (!isKnown && !target.baseUrl) {
       throw new InferenceError({
         code: "invalid_request",
         message: `Custom or unknown upstream provider "${target.upstreamProvider}" requires a baseUrl`,
@@ -322,7 +348,7 @@ export class PiLanguageRaw implements LanguageBackend {
       }
 
       const secret = await lease.secret();
-      const apiKey = await resolveSecretApiKey(secret, target, this.credentialStore, signal);
+      const apiKey = await resolveSecretApiKey(secret, target, this.credentialStore, signal, opts?.tenancyMode);
 
       const { model, context, streamOptions } = this.prepareInvocation(
         target,
@@ -593,7 +619,7 @@ export class PiLanguageRaw implements LanguageBackend {
       }
 
       const secret = await lease.secret();
-      const apiKey = await resolveSecretApiKey(secret, target, this.credentialStore, signal);
+      const apiKey = await resolveSecretApiKey(secret, target, this.credentialStore, signal, opts?.tenancyMode);
 
       const { model, context, streamOptions } = this.prepareInvocation(
         target,

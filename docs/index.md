@@ -1,7 +1,7 @@
 ---
 layout: page
 title: Seepient — An autonomous AI agent species
-description: Terminal UI, CLI, TypeScript SDK, and standalone server over one agent loop, one permission engine, and one audit trail.
+description: "Full spectrum of deployment surfaces: CLI, TUI, embedded SDK, programmatic server, REST/WS server, and serverless/container workers over one agent loop, one permission engine, and one audit trail."
 outline: false
 search: false
 ---

@@ -415,7 +415,12 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
 
     const { createMediaVendorOperationHandler } = await import("./media/vendor-operation-handler.js");
     const vendorOperationHandler = runtime
-      ? createMediaVendorOperationHandler({ runtime, artifacts, signal })
+      ? createMediaVendorOperationHandler({
+          runtime,
+          artifacts,
+          signal,
+          tenancyMode: options.tenancyMode,
+        })
       : undefined;
 
     const { boundary } = await buildLocalBoundary({
@@ -425,6 +430,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
       snapshotStore,
       commitHelper: options.commitHelper,
       vendorOperationHandler,
+      tenancyMode: options.tenancyMode,
     });
     const broker = approveTool
       ? legacyApproveToolToBroker(approveTool)
@@ -594,7 +600,11 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
               temperature: options.temperature,
               maxOutputTokens: options.maxTokens,
             },
-            { signal },
+            {
+              signal,
+              tenancyMode: options.tenancyMode,
+              capabilities: wiredPipeline?.grantedCapabilities ?? wiredPipeline?.activeCapabilities?.capabilities,
+            },
           )) {
             if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
               acc.appendText(event.delta.text);

@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [v0.8.0] - Unreleased
 
+### Multi-tenant composition closure & isolated construction defaults (Spec 022-2)
+
+**Breaking changes:**
+- **Inverted Construction Defaults (FR-004, FR-005, FR-006)**:
+  Default constructors (`new ProviderRuntime()`, `new PolicyStore()`, `new PersistedCapabilityLedger()`, `new LocalAuditStore()`) are now isolated in-memory by default (`isIsolated: true`, empty config/credentials). Ambient host dotfiles (`~/.seepient/setting.json`), local skill dirs, and `process.env` lookups are physically decoupled. The legacy `getDefaultProviderRuntime()` export has been removed with zero compatibility shims. For single-user Profile A scripts requiring host dotfiles and ambient credentials, call `createAmbientProviderRuntime()` explicitly or use bare SDK single-mode defaults.
+  - *Transition guidance*: See [docs/sdk/migration.md](docs/sdk/migration.md) for before/after migration examples.
+- **SDK & Transport `tools` Option String-Only (FR-011)**:
+  `createSeepient({ tools })`, `askSeepient({ tools })`, REST `POST /v1/chat`, and WebSocket `chat` now accept only tool names (`string[]`). Passing arbitrary tool object definitions or complex objects is rejected at the boundary with typed errors (`TENANCY_EDGE_VALIDATION_FAILED` / HTTP 400 `INVALID_ARGUMENT`).
+- **Mandatory Workspace in Multi-Tenant Mode (FR-010)**:
+  Calling `createSeepient` or `askSeepient` with `tenancy: "multi"` without an explicit non-empty `cwd` throws `TenancyWorkspaceRequiredError` (`TENANCY_WORKSPACE_REQUIRED`). Multi-tenant agents never inherit `process.cwd()`.
+- **Inference Egress & Fail-Closed Credentials (FR-014, FR-015, VULN-16)**:
+  In multi-tenant mode, omitting provider credentials throws `CredentialRequiredError` (`CREDENTIAL_REQUIRED`); inference calls never fall back to host environment variables in vendor libraries. Furthermore, directing inference requests to a custom `baseUrl` requires an explicit network capability grant (`model-egress` / `network-egress`), preventing Bearer-token exfiltration.
+- **Server Default In-Memory Stores & Runtime Guard (FR-007, FR-008, P1)**:
+  `runSeepientServer` and `seepient-server` in multi-tenant mode now default all storage backends (`auditStore`, `policyStore`, `capabilityLedger`, `replayLedger`) to isolated in-memory stores (`InMemoryAuditStore`, `InMemoryPolicyStore`, `InMemoryCapabilityLedger`, `InMemoryReplayLedger`) with zero writes to host `$HOME/.seepient` or `process.cwd()`. Injected stores must carry `isIsolated: true`. Passing an ambient runtime (`isIsolated !== true`) throws `TenancyRuntimeRequiredError`.
+- **Gateway Opt-In Guard on Server Multi Boot (FR-017, VULN-17)**:
+  `runSeepientServer` and `seepient-server` in multi-tenant mode no longer compose ambient operator gateway tools into tenant model contexts by default. Composed only when explicitly opted in via `gateway: true` with an explicit isolated storage directory (`gatewayOptions.storageDir`); omitting isolated storage throws `GATEWAY_ISOLATION_REQUIRED`.
+- **Worker Control Plane Token Derivation & Isolation (FR-018, P0-2, P0-W1, VULN-19)**:
+  The reference worker example control plane requires an authenticated per-tenant Bearer token on every request, deriving the caller's tenant principal exclusively from the token mapping (`KNOWN_TOKENS` dictionary or unguessable random tokens minted via `POST /api/auth/token` with `x-admin-key`). Any `principalId` field passed in request bodies (`POST /api/sessions`, `POST /api/audit`, `POST /api/policy`) is ignored to prevent token re-binding. Endpoints are partitioned by composite `principal:resource` keys; cross-tenant session enumeration returns empty lists; unauthenticated requests return 401.
+- **Sub-Store Stamp Regime & Credential Isolation (P1-B, P2-1, P2-10)**:
+  `validateTenancyCompleteness` and the HTTP server boot validator now require `isIsolated: true` on `runtime.configStore` and `runtime.credentialStore`. `MemoryCredentialStore` is stamped `isIsolated: true` and refuses to resolve ambient `{ kind: "env" }` references in isolated mode, throwing typed `CredentialRequiredError` upon lease acquisition instead of reading live `process.env`. `CompositeCredentialStore` sets `isIsolated = false` if configured with `primaryWriteStore: "file"`.
+- **SDK Tenancy Context Threading on Approval CAS Re-Read (P1-A)**:
+  `ActionLifecycle` now threads tenant `principalId` and `tenancyMode` into `policyStore.read(...)` during approval persistence and retries, preventing workspace-global capabilities (e.g. `write-root *`) from leaking into tenant execution envelopes.
+- **Server In-Memory Durable Approval Store (P2-4)**:
+  `createConnectionRegistry` and `DurableApprovalStore` support `inMemory: true` by default, eliminating ambient directory creation under `~/.seepient/security/approvals` on server boot.
+- **Machine-Readable CREDENTIAL_REQUIRED Code Across Connectors (P2-2)**:
+  `EffectBroker` missing-secret denials now consistently return typed `CREDENTIAL_REQUIRED` across http, Tavily, SMTP, and webhook connectors.
+- **Tenant Secret Resolution in Brokered Boundaries (FR-011, FR-013, FR-014)**:
+  Multi-tenant execution boundaries wired with `secretResolver` resolve tenant-injected secrets for brokered connector tools without host `process.env` fallback. Brokered tools requiring secrets fail closed with `CREDENTIAL_REQUIRED` if omitted by the tenant.
+- **Principal ID & Session Key Hardening (FR-008, FR-009, VULN-2)**:
+  `principalId` is validated against `/^[a-zA-Z0-9_-]{1,128}$/` at ingestion, eliminating path traversal (`../`). Session keys are compositely namespaced (`apiKeyHash:sessionId`), preventing session squatting across API keys.
+- **Injected Store Stamp Tightening (FR-005, P2-8)**:
+  In multi-tenant mode (`tenancy: "multi"`), all injected permission stores (`auditStore`, `policyStore`, `capabilityLedger`) must strictly carry `isIsolated: true`. Stamp-less custom store objects (`isIsolated === undefined`) or ambient stores (`isIsolated: false`) are rejected at construction with `TenancyStoreIncompleteError` (`TENANCY_STORE_INCOMPLETE`). Built-in in-memory stores carry this stamp automatically. See [docs/sdk/migration.md](docs/sdk/migration.md).
+- **Multi Policy Wildcard Ceilings Removed (FR-019, P2-5)**:
+  In multi-tenant mode, policy stores and fresh-install lifecycles no longer seed per-principal wildcard capabilities (`secret-ref "*"`, `network-destination https "*"`, `external-recipient "*"`). Stored policy reconciliation from Spec 017 is restricted to single-user mode. *Owner Decision on Tenant baseUrl Egress*: Custom `baseUrl` destinations in multi-tenant mode require an explicit `network-destination` or `model-egress` capability in the tenant's policy rather than inheriting an ambient wildcard. This prevents arbitrary egress while ensuring tenant credential routing is strictly governed.
+
+- **Cross-Tenant Session Disk Isolation & Lock Partitioning (Spec 022-3)**:
+  Persistence storage keys are now strictly composited as `apiKeyHash:sessionId`, isolating session files on disk (`${apiKeyHash}:${sessionId}.json`) and in backend storage. Turn writer locks (`inFlightTurns`) are strictly keyed by composite keys, ensuring concurrent turns across tenants sharing session IDs never block each other. Session deletion by one tenant never affects another tenant's session in memory or on disk.
+- **Image Inference Egress & Credential Hardening (OpenAI & Google Image Generation)**:
+  `OpenAIImageRaw` and `GoogleImageRaw` now strictly enforce multi-tenant isolation: omitting provider credentials fails closed with `CredentialRequiredError` (`CREDENTIAL_REQUIRED`), eliminating host environment key fallback (`OPENAI_API_KEY`, `GEMINI_API_KEY`). Directing image inference to custom `baseUrl` destinations requires explicit egress capability validation via quarantine-compliant `assertBaseUrlEgressAllowed`.
+- **Post-022-3 Security Remediation & Store Isolation Closure**:
+  - **Server Injected Store Isolation Assertion (P1-2)**: `runSeepientServer` verifies `isIsolated: true` on injected `auditStore`, `policyStore`, and `capabilityLedger` before booting, throwing `TenancyStoreIncompleteError` on ambient stores.
+  - **Outbox Directory Store Anchoring (P1-3)**: `TerminalEventOutbox` automatically anchors its pending outbox file to `store.dir/outbox`, eliminating ambient host writes to `~/.seepient/security/outbox`.
+  - **Media Vendor Operation Capability Forwarding (P1-4)**: `EffectBroker` forwards envelope capabilities through `vendorOperationHandler` to `generateImageRuntime`, enabling authorized custom `baseUrl` egress when granted `network-destination` capabilities.
+  - **LocalPolicyStore Slug Validation & Traversal Defense (P1-5)**: `LocalPolicyStore` enforces strict slug validation (`PRINCIPAL_ID_RE`) on `workspaceId`, throwing `InvalidPrincipalIdError` on directory traversal attempts.
+  - **Gateway Cross-Tenant Log Scoping (P1-6)**: `GET /v1/gateway/audit` and `GET /v1/gateway/usage` now strictly require `admin` scope instead of `agent:read`.
+  - **RateLimiter Bounded Memory & Eviction (P2-1)**: `RateLimiter` enforces bounded capacity (`MAX_BUCKETS = 10_000`) with idle bucket pruning (> 5 minutes) and LRU eviction under memory pressure.
+  - **Anti-Vacuity Security Guard Verification (P2-2)**: Pinned `guard.assertGuardedPathExecuted(1)` in inference-armed journeys to ensure fail-closed execution paths are guaranteed non-vacuous.
+  - **Server Custom `apiKeysFile` Decoupling (P2-3)**: `RunSeepientServerOptions` supports `apiKeysFile?: string;` to decouple containerized server deployments from ambient host `~/.seepient/server-keys.json`.
+
+**Added:**
+- **Shared Vendor Egress Assertion (`src/vendors/egress-check.ts`)**: Quarantine-compliant network egress validator usable across vendor image and language providers without violating internal architecture boundaries.
+- **`createIsolatedProviderRuntime()` & `createAmbientProviderRuntime()` Factories**: Explicit construction paths for isolated in-memory runtimes and ambient operator runtimes.
+- **`InMemoryReplayLedger`**: High-performance in-memory replay ledger for isolated multi-tenant execution, eliminating host disk contention and file locks.
+- **Typed Error Classes**: Exported `CredentialRequiredError`, `TenancyWorkspaceRequiredError`, and `TenancyEdgeValidationFailedError` from `seepient` and `seepient/types`.
+- **Architecture Boundary Gates (FR-021)**: Structural assertions in CI preventing `createAmbientProviderRuntime` in `src/transport/http/**`, pi-ai auth imports outside vendor quarantine, and effect-executor imports reachable from the server composition root.
+- **Adversarial Regression Test Suite (FR-002, FR-003, FR-020)**: Journeys J1–J11 covering all 5 P0 vulnerability classes with anti-vacuity guard verification.
+
 ### Multi-tenant isolation hardening & readiness remediation (Specs 022 & 022-1)
 
 **Breaking changes:**
