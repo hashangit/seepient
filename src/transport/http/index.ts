@@ -200,7 +200,7 @@ function handlePreflight(
 export async function runSeepientServer(options?: RunSeepientServerOptions): Promise<SeepientHttpServer> {
   const version = resolveVersion();
   const startTime = Date.now();
-  const serverToolRegistry = options?.toolRegistry ?? new ToolRegistry();
+  const serverToolRegistry = options?.toolRegistry ?? (options?.builtInTools ? new ToolRegistry() : new ToolRegistry([]));
 
   // Spec 008: build a per-request pipeline factory when the operator opts in.
   // Product behavior: each API request gets its OWN permission identity
@@ -512,7 +512,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
           modelProviderClass: (opts.provider ?? "openai") as string,
         });
       }
-      return serverGenerateText({ ...opts, sources: options?.sources, runtime: getServerRuntime(), wiredPipeline, toolRegistry: serverToolRegistry, tenancyMode: "multi" }, gatewayMiddleware);
+      return serverGenerateText({ ...opts, sources: options?.sources, runtime: getServerRuntime(), wiredPipeline, toolRegistry: serverToolRegistry, tenancyMode: "multi", builtInTools: options?.builtInTools }, gatewayMiddleware);
     },
     listModels,
     listSkills: () => listSkills(options?.sources),
@@ -590,7 +590,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
           modelProviderClass: (opts.provider ?? "openai") as string,
         });
       }
-      serverStreamText({ ...opts, sources: options?.sources, runtime: getServerRuntime(), wiredPipeline, toolRegistry: serverToolRegistry, tenancyMode: "multi" }, gatewayMiddleware).catch((err: any) => {
+      serverStreamText({ ...opts, sources: options?.sources, runtime: getServerRuntime(), wiredPipeline, toolRegistry: serverToolRegistry, tenancyMode: "multi", builtInTools: options?.builtInTools }, gatewayMiddleware).catch((err: any) => {
         // W162: generic wire text; raw detail in the request log only.
         opts.onError({
           code: "STREAM_ERROR",

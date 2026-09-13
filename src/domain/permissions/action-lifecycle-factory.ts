@@ -262,7 +262,16 @@ export async function buildActionLifecycle(
       principalId: inputs.principalId,
       tenancyMode: inputs.tenancyMode ?? "single",
     });
-    if (snap.version > 0 || snap.policy.capabilities.length > 0) {
+    const hasPrincipalCaps = snap.policy.capabilities.length > 0;
+    let onlyOtherPrincipals = false;
+    if (!hasPrincipalCaps && snap.version > 0) {
+      const rawSnap = await policyStore.read(workspaceId);
+      if (rawSnap.policy.capabilities.length > 0) {
+        onlyOtherPrincipals = true;
+      }
+    }
+
+    if (hasPrincipalCaps || (snap.version > 0 && !onlyOtherPrincipals)) {
       principalPolicy = snap.policy;
       hasStoredPolicy = true;
       // Stored-policy reconciliation (FR-019 / spec 017 / 022-3 T029):

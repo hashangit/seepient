@@ -2473,4 +2473,140 @@ describe("multi-mutation WAL history (round 7 P0)", () => {
     const sdkCap = casCapabilitiesReceived?.find((c: any) => c.principalId === "sdk-user");
     expect(sdkCap).toBeDefined();
   });
+
+  it("T041: CAS erasure prevention: global grants from distinct principals in same store preserve each other", async () => {
+    const { InMemoryCapabilityLedger } = await import("../in-memory-stores.js");
+    const policyStore = new LocalPolicyStore({ root: join(dir, "policy") });
+    const audit = new LocalAuditStore({ root: dir });
+    const ledger = new InMemoryCapabilityLedger();
+
+    const fileA = join(dir, "out-a.txt");
+    const fileB = join(dir, "out-b.txt");
+
+    const makeWriteAction = (principalId: string, filePath: string): PreparedToolAction => {
+      const base = writeAction(`action-${principalId}`);
+      return {
+        ...base,
+        principalId,
+        effects: [
+          {
+            kind: "filesystem-write",
+            targets: [
+              {
+                target: {
+                  canonicalPath: filePath,
+                  canonicalParent: dir,
+                  basename: filePath.split("/").pop()!,
+                  exists: false,
+                  finalSymlink: false,
+                },
+                mode: "create",
+              },
+            ],
+          },
+        ],
+        display: {
+          ...base.display,
+          summary: filePath,
+          canonicalTargets: [filePath],
+        },
+        operation: {
+          kind: "commit-files",
+          commits: [
+            {
+              destination: {
+                canonicalPath: filePath,
+                canonicalParent: dir,
+                basename: filePath.split("/").pop()!,
+                exists: false,
+                finalSymlink: false,
+              },
+              content: {
+                artifactId: `art-${principalId}`,
+                sha256: "h1",
+                byteLength: 4,
+                mediaType: "text/plain",
+              },
+            },
+          ],
+        },
+      };
+    };
+
+    let promptsA = 0;
+    const brokerA: ApprovalBroker = {
+      mode: "inline",
+      request: async (req) => {
+        promptsA++;
+        return approved(req, "principal-a", "global");
+      },
+    };
+
+    let promptsB = 0;
+    const brokerB: ApprovalBroker = {
+      mode: "inline",
+      request: async (req) => {
+        promptsB++;
+        return approved(req, "principal-b", "global");
+      },
+    };
+
+    // 1. Principal A executes and approves global grant
+    const wiredA1 = await buildActionLifecycle({
+      principalId: "principal-a",
+      tenancyMode: "single",
+      runId: "run-a1",
+      sessionId: "session-a1",
+      workspaceRoot: dir,
+      approvalBroker: brokerA,
+      executionBoundary: fakeBoundary({ output: "ok", success: true }),
+      auditStore: audit,
+      capabilityLedger: ledger,
+      policyStore,
+    });
+    const resA1 = await wiredA1.lifecycle.run(makeWriteAction("principal-a", fileA));
+    expect(resA1.outcome.state).toBe("succeeded");
+    expect(promptsA).toBe(1);
+
+    // 2. Principal B executes and approves different global grant in the same store
+    const wiredB1 = await buildActionLifecycle({
+      principalId: "principal-b",
+      tenancyMode: "single",
+      runId: "run-b1",
+      sessionId: "session-b1",
+      workspaceRoot: dir,
+      approvalBroker: brokerB,
+      executionBoundary: fakeBoundary({ output: "ok", success: true }),
+      auditStore: audit,
+      capabilityLedger: ledger,
+      policyStore,
+    });
+    const resB1 = await wiredB1.lifecycle.run(makeWriteAction("principal-b", fileB));
+    expect(resB1.outcome.state).toBe("succeeded");
+    expect(promptsB).toBe(1);
+
+    // 3. Principal A runs a second action for the same file in a fresh lifecycle instance
+    // A's grant must NOT have been erased by B's CAS write!
+    const brokerA2: ApprovalBroker = {
+      mode: "inline",
+      request: async () => {
+        throw new Error("Broker A2 called! Principal A's grant was erased by Principal B's CAS write.");
+      },
+    };
+    const wiredA2 = await buildActionLifecycle({
+      principalId: "principal-a",
+      tenancyMode: "single",
+      runId: "run-a2",
+      sessionId: "session-a2",
+      workspaceRoot: dir,
+      approvalBroker: brokerA2,
+      executionBoundary: fakeBoundary({ output: "ok", success: true }),
+      auditStore: audit,
+      capabilityLedger: ledger,
+      policyStore,
+    });
+    const resA2 = await wiredA2.lifecycle.run(makeWriteAction("principal-a", fileA));
+    expect(resA2.outcome.state).toBe("succeeded");
+    expect(promptsA).toBe(1); // Not prompted again
+  });
 });

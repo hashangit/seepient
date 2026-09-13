@@ -517,7 +517,7 @@ ws.onopen = () => {
 
 ws.onmessage = (event) => {
   const chunk = JSON.parse(event.data);
-  if (chunk.type === 'text_delta' && chunk.delta) {
+  if (chunk.type === 'text' && chunk.delta) {
     process.stdout.write(chunk.delta);
   }
 };

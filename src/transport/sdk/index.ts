@@ -73,7 +73,15 @@ export {
   type LegacyHostToolRegistration,
   type HostToolContext,
 } from "./custom-tools.js";
+/**
+ * @warning Profile A only. Ambient configuration access reading from ~/.seepient/setting.json.
+ * Do not use in multi-tenant environments.
+ */
 export { settings, SettingsError } from "./settings.js";
+/**
+ * @warning Profile A only. Ambient operator provider runtime reading process.env credentials and host dotfiles.
+ * For multi-tenant hosting, use createIsolatedProviderRuntime() or new ProviderRuntime() instead.
+ */
 export { createAmbientProviderRuntime, createIsolatedProviderRuntime, ProviderRuntime } from "../../domain/providers/provider-runtime.js";
 export { ProviderConfigStore } from "../../domain/providers/config-store/provider-config-store.js";
 export { MemoryCredentialStore } from "../../domain/providers/credentials/memory-credential-store.js";
@@ -89,6 +97,10 @@ export type {
   SkillLiteral,
 } from "../../foundations/contracts/skill-source.js";
 export { FsSkillSources } from "../../capabilities/skills/fs-skill-sources.js";
+/**
+ * @warning Profile A only. Ambient skill registry initialization discovering skills from host dotfiles and local directories.
+ * In multi-tenant mode, inject explicit SkillSource instances instead.
+ */
 export { initializeSkillRegistry } from "../../capabilities/skills/index.js";
 export {
   saveGeneratedSkill,
@@ -219,6 +231,10 @@ function toCapabilitySet(cap: import("../../foundations/contracts/permission-pol
 
 export {
   createPersistenceBackend,
+  /**
+   * @warning Profile A only. Modifies process-wide persistence backend registry.
+   * In multi-tenant environments, pass instanced PersistenceBackend implementations directly.
+   */
   registerBackend,
 } from "../../domain/sessions/session-store.js";
 
@@ -326,6 +342,11 @@ export async function askSeepient(
   }
   const effectiveSources = computeEffectiveSkillSources(opts.sources, opts.skills);
 
+  const hasInjectedCredentials = Boolean(
+    ((opts as any).credentials && Object.keys((opts as any).credentials).length > 0) ||
+    ((opts as any).providers && (Array.isArray((opts as any).providers) ? (opts as any).providers.length > 0 : Object.keys((opts as any).providers).length > 0)),
+  );
+
   const tenancySignals: TenancySignals = {
     explicit: opts.tenancy,
     principalIdSet: Boolean(opts.principalId && opts.principalId !== "default" && opts.principalId !== "sdk-user"),
@@ -333,6 +354,7 @@ export async function askSeepient(
     runtimeInjected: Boolean(opts.runtime),
     persistInjected: false,
     skillSourcesInjected: Boolean(opts.sources && opts.sources.length > 0),
+    credentialsInjected: hasInjectedCredentials,
   };
   const { mode: tenancyMode, upgraded } = resolveTenancyMode(tenancySignals);
   emitTenancyNoticeOnce(upgraded);

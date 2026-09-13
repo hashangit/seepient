@@ -154,8 +154,14 @@ import { createSeepient, trustedHostTool } from "seepient";
 
 // Tool specific to Tenant A
 const tenantATool = trustedHostTool({
-  name: "billing_portal",
-  description: "Manage tenant billing",
+  definition: {
+    type: "function",
+    function: {
+      name: "billing_portal",
+      description: "Manage tenant billing",
+      parameters: { type: "object", properties: {} },
+    },
+  },
   execute: async () => ({ status: "ok" }),
 });
 

@@ -38,6 +38,7 @@ describe("Public SDK Instance Contract (QS-P6.6)", () => {
     };
 
     const seepient = await createSeepient({
+      tenancy: "single",
       providers: {
         main: {
           adapter: "pi-ai",

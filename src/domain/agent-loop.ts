@@ -503,6 +503,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
       modelProviderClass,
       approvalBroker: broker,
       executionBoundary: boundary,
+      tenancyMode: options.tenancyMode,
       artifacts,
       snapshotStore,
       imageCapabilityProbe,

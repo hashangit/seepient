@@ -35,7 +35,11 @@ interface KeyStore {
 }
 
 function getKeyPath(customPath?: string): string {
-  return customPath ?? process.env.SEEPIENT_API_KEYS_FILE ?? path.join(os.homedir(), ".seepient", "server-keys.json");
+  if (customPath) return customPath;
+  if (process.env.SEEPIENT_API_KEYS_FILE) return process.env.SEEPIENT_API_KEYS_FILE;
+  const ambientPath = path.join(os.homedir(), ".seepient", "server-keys.json");
+  console.error(`[seepient] Notice: Falling back to ambient API keys at ${ambientPath}`);
+  return ambientPath;
 }
 
 export function hashKey(rawKey: string): string {

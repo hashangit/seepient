@@ -149,6 +149,11 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   const opts = options ?? {};
   const effectiveSources = computeEffectiveSkillSources(opts.sources, opts.skills);
 
+  const hasInjectedCredentials = Boolean(
+    (opts.credentials && Object.keys(opts.credentials).length > 0) ||
+    (opts.providers && (Array.isArray(opts.providers) ? opts.providers.length > 0 : Object.keys(opts.providers).length > 0)),
+  );
+
   const tenancySignals: TenancySignals = {
     explicit: opts.tenancy,
     principalIdSet: Boolean(opts.principalId && opts.principalId !== "default" && opts.principalId !== "sdk-user"),
@@ -156,14 +161,11 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     runtimeInjected: Boolean(opts.runtime),
     persistInjected: Boolean(opts.persist),
     skillSourcesInjected: Boolean(opts.sources && opts.sources.length > 0),
+    credentialsInjected: hasInjectedCredentials,
   };
   const { mode: tenancyMode, upgraded } = resolveTenancyMode(tenancySignals);
   emitTenancyNoticeOnce(upgraded);
 
-  const hasInjectedCredentials = Boolean(
-    (opts.credentials && Object.keys(opts.credentials).length > 0) ||
-    (opts.providers && (Array.isArray(opts.providers) ? opts.providers.length > 0 : Object.keys(opts.providers).length > 0)),
-  );
   if (tenancyMode === "single" && hasInjectedCredentials) {
     emitCredentialsSingleUserWarningOnce();
   }
@@ -871,6 +873,20 @@ async function chat(userMessage: string): Promise<AgentResponse> {
     return 0;
   }
 
+  async function revokeRun(runId: string): Promise<void> {
+    const ledger = wiredPipeline.capabilityLedger;
+    if (ledger) {
+      await ledger.revoke({ runId }, { principalId });
+    }
+  }
+
+  async function revokeSession(targetSessionId: string): Promise<void> {
+    const ledger = wiredPipeline.capabilityLedger;
+    if (ledger) {
+      await ledger.revoke({ sessionId: targetSessionId }, { principalId });
+    }
+  }
+
   async function close(): Promise<void> {
     abort();
     await flushAudit();
@@ -1036,6 +1052,8 @@ async function chat(userMessage: string): Promise<AgentResponse> {
     getHistory,
     getUsage,
     flushAudit,
+    revokeRun,
+    revokeSession,
     close,
 
     // Provider management

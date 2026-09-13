@@ -11,10 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Breaking changes:**
 - **Inverted Construction Defaults (FR-004, FR-005, FR-006)**:
-  Default constructors (`new ProviderRuntime()`, `new PolicyStore()`, `new PersistedCapabilityLedger()`, `new LocalAuditStore()`) are now isolated in-memory by default (`isIsolated: true`, empty config/credentials). Ambient host dotfiles (`~/.seepient/setting.json`), local skill dirs, and `process.env` lookups are physically decoupled. The legacy `getDefaultProviderRuntime()` export has been removed with zero compatibility shims. For single-user Profile A scripts requiring host dotfiles and ambient credentials, call `createAmbientProviderRuntime()` explicitly or use bare SDK single-mode defaults.
+  `ProviderRuntime` default constructor (`new ProviderRuntime()`) is now isolated in-memory by default (`isIsolated: true`, empty config/credentials). For multi-tenant permission storage, explicit in-memory backends (`InMemoryAuditStore`, `InMemoryPolicyStore`, `InMemoryCapabilityLedger`, `InMemoryReplayLedger`) are provided and carry `isIsolated: true` by default. Ambient disk stores (`LocalPolicyStore`, `LocalAuditStore`, `PersistedCapabilityLedger`) remain ambient single-user stores (`isIsolated: false`). The legacy default provider runtime export has been removed with zero compatibility shims. For single-user Profile A scripts requiring host dotfiles and ambient credentials, call `createAmbientProviderRuntime()` explicitly or use bare SDK single-mode defaults.
   - *Transition guidance*: See [docs/sdk/migration.md](docs/sdk/migration.md) for before/after migration examples.
 - **SDK & Transport `tools` Option String-Only (FR-011)**:
-  `createSeepient({ tools })`, `askSeepient({ tools })`, REST `POST /v1/chat`, and WebSocket `chat` now accept only tool names (`string[]`). Passing arbitrary tool object definitions or complex objects is rejected at the boundary with typed errors (`TENANCY_EDGE_VALIDATION_FAILED` / HTTP 400 `INVALID_ARGUMENT`).
+  REST `POST /v1/chat` and WebSocket `chat` now accept only tool names (`string[]`). Passing arbitrary tool object definitions or non-string items is rejected at the boundary with HTTP 400 `BAD_REQUEST` ("Field 'tools' must be an array of strings") or WebSocket `VALIDATION_ERROR`.
 - **Mandatory Workspace in Multi-Tenant Mode (FR-010)**:
   Calling `createSeepient` or `askSeepient` with `tenancy: "multi"` without an explicit non-empty `cwd` throws `TenancyWorkspaceRequiredError` (`TENANCY_WORKSPACE_REQUIRED`). Multi-tenant agents never inherit `process.cwd()`.
 - **Inference Egress & Fail-Closed Credentials (FR-014, FR-015, VULN-16)**:
@@ -60,7 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Shared Vendor Egress Assertion (`src/vendors/egress-check.ts`)**: Quarantine-compliant network egress validator usable across vendor image and language providers without violating internal architecture boundaries.
 - **`createIsolatedProviderRuntime()` & `createAmbientProviderRuntime()` Factories**: Explicit construction paths for isolated in-memory runtimes and ambient operator runtimes.
 - **`InMemoryReplayLedger`**: High-performance in-memory replay ledger for isolated multi-tenant execution, eliminating host disk contention and file locks.
-- **Typed Error Classes**: Exported `CredentialRequiredError`, `TenancyWorkspaceRequiredError`, and `TenancyEdgeValidationFailedError` from `seepient` and `seepient/types`.
+- **Typed Error Classes**: Exported `CredentialRequiredError` and `TenancyWorkspaceRequiredError` from `seepient`.
 - **Architecture Boundary Gates (FR-021)**: Structural assertions in CI preventing `createAmbientProviderRuntime` in `src/transport/http/**`, pi-ai auth imports outside vendor quarantine, and effect-executor imports reachable from the server composition root.
 - **Adversarial Regression Test Suite (FR-002, FR-003, FR-020)**: Journeys J1–J11 covering all 5 P0 vulnerability classes with anti-vacuity guard verification.
 
@@ -95,7 +95,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Added:**
 - **`seepient server` CLI subcommand**: First-class command under the primary `seepient` binary with `--port`, `--host`, and `--generate-api-key` options, mirroring the standalone `seepient-server` binary.
-- **Typed Error Class Value Exports**: Exported `PersistConfigInvalidError`, `SessionIdInvalidError`, `PrincipalRequiredError`, `TenancyStoreIncompleteError`, and `TenancyRuntimeRequiredError` directly from `seepient` and `seepient/types`.
+- **Typed Error Class Value Exports**: Exported `PersistConfigInvalidError`, `SessionIdInvalidError`, `PrincipalRequiredError`, `TenancyStoreIncompleteError`, and `TenancyRuntimeRequiredError` directly from `seepient`.
 - **Per-agent `ToolRegistry`**: Instanced tool registry providing private tool resolution, registration, and duplicate-name conflict prevention (`TOOL_NAME_CONFLICT`).
 - **Tenancy mode resolution & inference**: Explicit `tenancy: "single" | "multi"` option on `createSeepient` and `askSeepient`, with automatic upgrade to `multi` upon detection of multi-tenant injection signals (stores, runtime, principalId, skill sources, persist). Emits a one-time upgrade notice per process.
 - **Principal-scoped permission state**: All persisted capabilities stamped with `principalId` on write; `PolicyStore.read` filters by `principalId` in multi mode. Added `operatorBaseline` lifecycle input for unprompted foundational permissions across all tenants.

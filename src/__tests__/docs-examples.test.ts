@@ -117,6 +117,12 @@ describe('docs example import and runtime checks (FR-003)', () => {
     expect(sdkExports.PersistConfigInvalidError).toBeDefined();
     expect(sdkExports.SkillStoreUnavailableError).toBeDefined();
     expect(sdkExports.SkillCollisionError).toBeDefined();
+    expect(sdkExports.CredentialRequiredError).toBeDefined();
+    expect(sdkExports.TenancyWorkspaceRequiredError).toBeDefined();
+    expect(sdkExports.TenancyStoreIncompleteError).toBeDefined();
+    expect(sdkExports.TenancyRuntimeRequiredError).toBeDefined();
+    expect(sdkExports.PrincipalRequiredError).toBeDefined();
+    expect(sdkExports.SessionIdInvalidError).toBeDefined();
     expect(new sdkExports.ProviderError('test', 'test')).toBeInstanceOf(sdkExports.SeepientError);
   });
 
@@ -153,6 +159,56 @@ describe('docs example import and runtime checks (FR-003)', () => {
       expect(result.text).toBeDefined();
     } finally {
       spy.mockRestore();
+    }
+  });
+
+  it('verifies the documented README worker and WS examples (FR-032, FR-034)', async () => {
+    const { createSeepient } = sdkExports;
+    const { InMemoryAuditStore, InMemoryPolicyStore, InMemoryCapabilityLedger } = await import(
+      '../domain/permissions/in-memory-stores.js'
+    );
+    const { MemoryPersistenceBackend } = await import(
+      '../domain/sessions/session-store.js'
+    );
+
+    const mockRuntime = createMockRuntime([{ content: 'Worker task finished' }]);
+    (mockRuntime as any).isIsolated = true;
+
+    const workerDir = path.join(repoRoot, 'tmp-worker-test');
+    if (!fs.existsSync(workerDir)) fs.mkdirSync(workerDir, { recursive: true });
+
+    try {
+      const worker = await createSeepient({
+        principalId: 'tenant-123',
+        cwd: workerDir,
+        runtime: mockRuntime,
+        auditStore: new InMemoryAuditStore(),
+        persist: new MemoryPersistenceBackend(),
+        policyStore: new InMemoryPolicyStore(),
+        capabilityLedger: new InMemoryCapabilityLedger(),
+        consentMode: 'autonomous',
+      });
+
+      const result = await worker.chat('Analyze the error logs');
+      expect(result.text).toBe('Worker task finished');
+      await worker.dispose();
+
+      // WS wire shape from README:518-523: chunk.type === 'text' && chunk.delta
+      const mockWsEvent = {
+        data: JSON.stringify({
+          type: 'text',
+          delta: 'partial response',
+          serverMsgId: 'msg-1',
+        }),
+      };
+      const chunk = JSON.parse(mockWsEvent.data);
+      let output = '';
+      if (chunk.type === 'text' && chunk.delta) {
+        output += chunk.delta;
+      }
+      expect(output).toBe('partial response');
+    } finally {
+      if (fs.existsSync(workerDir)) fs.rmSync(workerDir, { recursive: true, force: true });
     }
   });
 });

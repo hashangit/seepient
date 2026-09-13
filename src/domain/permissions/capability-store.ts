@@ -66,6 +66,7 @@ type CapKind = Capability["kind"];
  * `/project/data` match `/project/database`.
  */
 function normalizePathForComparison(p: string): string {
+  if (!p || typeof p !== "string") return "";
   if (p.startsWith("/private/")) return p.slice(8);
   return p;
 }
