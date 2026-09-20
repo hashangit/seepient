@@ -477,4 +477,49 @@ export class CredentialRequiredError extends SeepientError {
   }
 }
 
+/**
+ * Thrown when global approval lifetime is requested or persisted in multi-tenant mode.
+ */
+export class GlobalLifetimeForbiddenError extends PermissionError {
+  constructor(
+    message = "GLOBAL_LIFETIME_FORBIDDEN: global approval lifetime is not available in multi-tenant mode; use project or session scope",
+  ) {
+    super(message, "GLOBAL_LIFETIME_FORBIDDEN", { retryable: false });
+    this.name = "GlobalLifetimeForbiddenError";
+  }
+}
+
+/**
+ * Thrown when a file path resolves outside the tenant workspace boundary.
+ */
+export class PathEscapesWorkspaceError extends ToolError {
+  readonly resolvedPath: string;
+  constructor(resolvedPath: string, message?: string) {
+    super(
+      message ?? `PATH_ESCAPES_WORKSPACE: ${resolvedPath} resolves outside your workspace; ask your operator or work on a copy`,
+    );
+    this.name = "PathEscapesWorkspaceError";
+    this.code = "PATH_ESCAPES_WORKSPACE";
+    this.retryable = false;
+    this.resolvedPath = resolvedPath;
+  }
+}
+
+/**
+ * Thrown when attempting to read a hardlinked file with link count > 1.
+ */
+export class PathHardlinkRefusedError extends ToolError {
+  readonly targetPath: string;
+  constructor(targetPath: string, message?: string) {
+    super(
+      message ?? `PATH_HARDLINK_REFUSED: Reads of hardlinked files (link count > 1) are prohibited: ${targetPath} has another name outside your workspace`,
+    );
+    this.name = "PathHardlinkRefusedError";
+    this.code = "PATH_HARDLINK_REFUSED";
+    this.retryable = false;
+    this.targetPath = targetPath;
+  }
+}
+
+
 

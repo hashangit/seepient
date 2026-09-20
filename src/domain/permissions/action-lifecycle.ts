@@ -45,7 +45,7 @@ import type { ToolResult } from "../../foundations/types.js";
 import type { PolicyEngine } from "./policy-engine.js";
 import { generateId } from "../../foundations/id.js";
 import { idempotencyKey } from "./audit-recorder.js";
-import { PolicyConflictError } from "../../foundations/errors.js";
+import { PolicyConflictError, GlobalLifetimeForbiddenError } from "../../foundations/errors.js";
 import {
   GLOBAL_WORKSPACE_ID,
   scopeGlobalPolicyCapabilities,
@@ -350,6 +350,9 @@ export class ActionLifecycle {
       // Round 4 P1: no silent lifetime default — an approved decision must
       // name an explicit supported lifetime or be rejected below.
       const lifetimeKind = answer.lifetime;
+      if (this.tenancyMode === "multi" && lifetimeKind === "global") {
+        throw new GlobalLifetimeForbiddenError();
+      }
       if (
         !option.supportedLifetimes.includes(lifetimeKind) ||
         !decision.request.offeredLifetimes.includes(lifetimeKind)
@@ -450,20 +453,7 @@ export class ActionLifecycle {
         // Exact capabilities only: the choice projection never offers a
         // bounded persistent choice.
         if (this.tenancyMode === "multi" && lifetimeKind === "global") {
-          const outcome = this.toOutcome(action, "denied", undefined, "invalid-approval-response");
-          await this.record(action, "denied", "invalid-approval-response");
-          return {
-            decision,
-            approval: answer,
-            outcome,
-            toolResult: {
-              output: denialOutput(
-                "invalid-approval-response",
-                "Global lifetime approval is not permitted in multi-tenant mode",
-              ),
-              success: false,
-            },
-          };
+          throw new GlobalLifetimeForbiddenError();
         }
 
         const targetWorkspaceId =
@@ -560,17 +550,23 @@ export class ActionLifecycle {
             // Retry once on a concurrent-writer conflict (stale version).
             for (let attempt = 0; attempt < 2 && !persisted; attempt++) {
               try {
-                // P1-1: Read raw un-filtered snapshot under CAS lock to preserve other principals' grants and unstamped grants.
-                // Filtered readOpts was used for the initial authorization decision; write-merge must not erase other principals.
-                const isMulti = this.tenancyMode === "multi";
+                // P1-1 & FR-016: One-bucket unstamped CAS semantics.
+                // Raw un-filtered snapshot read preserves other principals' grants and unstamped baseline.
+                // Partition raw capabilities into three disjoint sets:
+                // 1) otherPrincipalCaps: capabilities explicitly belonging to other principals.
+                // 2) unstampedCaps: baseline workspace capabilities with no principalId. Carried verbatim once.
+                // 3) currentPrincipalCaps: capabilities explicitly belonging to targetPrincipal.
                 const targetPrincipal = action.principalId ?? this.principalId ?? "sdk-user";
+                const isMulti = this.tenancyMode === "multi";
                 const rawSnap = await this.policyStore.read(targetWorkspaceId);
-
-                const otherCaps = rawSnap.policy.capabilities.filter((c) =>
-                  c.principalId ? c.principalId !== targetPrincipal : !isMulti,
+                const otherPrincipalCaps = rawSnap.policy.capabilities.filter(
+                  (c) => Boolean(c.principalId && c.principalId !== targetPrincipal),
                 );
-                const currentPrincipalCaps = rawSnap.policy.capabilities.filter((c) =>
-                  isMulti ? c.principalId === targetPrincipal : (!c.principalId || c.principalId === targetPrincipal),
+                const unstampedCaps = rawSnap.policy.capabilities.filter(
+                  (c) => !c.principalId && (!isMulti || !((c.kind === "write-root" || c.kind === "read-root") && (c as any).root === "*")),
+                );
+                const currentPrincipalCaps = rawSnap.policy.capabilities.filter(
+                  (c) => c.principalId === targetPrincipal,
                 );
 
                 const nextPrincipalCaps = [...currentPrincipalCaps];
@@ -586,10 +582,7 @@ export class ActionLifecycle {
                   ...fresh.map((c) => ({ ...c, principalId: c.principalId ?? targetPrincipal })),
                 ];
                 for (const capability of candidates) {
-                  const samePrincipalCaps = nextPrincipalCaps.filter(
-                    (c) => c.principalId === capability.principalId || (!c.principalId && !capability.principalId),
-                  );
-                  if (!setCovers({ version: 1, capabilities: samePrincipalCaps }, capability)) {
+                  if (!setCovers({ version: 1, capabilities: nextPrincipalCaps }, capability)) {
                     nextPrincipalCaps.push(capability);
                   }
                 }
@@ -598,7 +591,7 @@ export class ActionLifecycle {
                   rawSnap.version,
                   {
                     version: 1 as const,
-                    capabilities: [...otherCaps, ...nextPrincipalCaps],
+                    capabilities: [...otherPrincipalCaps, ...unstampedCaps, ...nextPrincipalCaps],
                   },
                   {
                     kind: "human",

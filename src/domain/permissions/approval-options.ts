@@ -419,7 +419,7 @@ export function buildApprovalOptions(
     const pass = deduped.every(
       (c) =>
         backend.capabilityKinds.includes(c.kind) &&
-        !deniedForCap(context.immutableDenies, c) &&
+        !deniedForCap(context.immutableDenies ?? [], c) &&
         eligible(c, context),
     );
     if (pass) passing.push({ caps: deduped, key });

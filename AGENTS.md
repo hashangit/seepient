@@ -108,7 +108,7 @@ Never write fallback logic that queries `process.env` or `~/.seepient` when an i
 
 ### 9.3 Parse at Ingestion, Don't Validate at Storage
 Never pass unvalidated strings for tenant identities or session identifiers across boundaries:
-- Ingestion parsers at the SDK, HTTP, and WebSocket edges must parse inputs into branded, slug-validated types (`TenantPrincipalId`, `SessionId`) matching `/^[a-zA-Z0-9_-]{1,128}$/`.
+- Ingestion parsers at the SDK, HTTP, and WebSocket edges must parse inputs into branded, slug-validated types: `TenantPrincipalId` matching `/^[a-zA-Z0-9_-]{1,128}$/` and `SessionId` matching `/^[a-zA-Z0-9_:-]{1,256}$/`.
 - Sentinels (`default`, `anonymous`, `sdk-user`) must be rejected case-insensitively in multi-tenant mode.
 - Deep storage layers (`LocalAuditStore`, `PersistedCapabilityLedger`) must accept only pre-validated types to ensure path traversal (`../../`) is structurally impossible.
 

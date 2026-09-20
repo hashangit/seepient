@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [v0.8.0] - Unreleased
 
+### Round 2 — Authorization truth, symlink plane, and sentinel unification (Spec 022-4)
+
+**Breaking changes & Behavior changes:**
+- **In-Workspace Symlinks Allowed via Authorize-What-You-Open (FR-013, Behavior Change)**:
+  Permissions now apply to the target file's canonical realpath rather than the intermediate reference name. In-workspace symbolic links pointing to real paths inside the workspace ceiling are now fully allowed (superseding the earlier static refusal). Symbolic links whose realpath escapes the workspace ceiling are denied with typed `PathEscapesWorkspaceError` (`PATH_ESCAPES_WORKSPACE`).
+- **Atomic FD-Pinned Reads & TOCTOU Elimination (FR-013)**:
+  `ReadFileExecutor` and media image/mask analyzers now atomically open target files using `O_RDONLY | O_NOFOLLOW` and read directly from the pinned file descriptor. The previously separate `lstat` followed by `readFile(path)` TOCTOU window is eliminated.
+- **Hardlink Gate (FR-014)**:
+  Read targets with link counts `st_nlink > 1` are denied with typed `PathHardlinkRefusedError` (`PATH_HARDLINK_REFUSED`), preventing unauthorized file access through hardlinks created outside the workspace ceiling unless explicitly permitted by an operator opt-in.
+- **Offered-Lifetimes Truth in Multi-Tenant Mode (FR-015)**:
+  `buildNeedsApproval` and `ApprovalBroker` exclude `global` from the offered lifetimes list when `tenancyMode === "multi"`. If `global` lifetime is directly requested in multi-tenant mode, execution fails closed with `GlobalLifetimeForbiddenError` (`GLOBAL_LIFETIME_FORBIDDEN`) rather than a misleading `invalid-approval-response` denial.
+- **One-Bucket Unstamped CAS Semantics (FR-016)**:
+  Policy compare-and-set reconciliation now partitions capabilities into disjoint sets (`otherPrincipalCaps`, `unstampedCaps`, `currentPrincipalCaps`), merging unstamped capabilities exactly once (`[...otherPrincipalCaps, ...unstampedCaps, ...nextPrincipalCaps]`). This eliminates exponential 2^K capability duplication across sequential approvals while ensuring unstamped capabilities are never silently erased in multi-tenant mode.
+- **Sentinel Unification (FR-017)**:
+  `cli-user` literals have been removed from the codebase and unified into the single sentinel value `sdk-user`. Single-mode stamp and read operations across CLI and SDK surfaces consistently use `sdk-user`.
+  - *Migration Note*: Workspaces containing approvals previously stamped with `cli-user` will require one re-approval under `sdk-user`.
+- **Executable Mutation-Probe CI Step (FR-018)**:
+  `scripts/verify-mutation-probes.ts` has been hardened to spawn real `vitest run` processes per registered security guard under neutralization, asserting each journey turns red when its guard is neutralized. Grep-only checks and guard self-tests have been deleted.
+- **SDK In-Memory Backend Exports (FR-021)**:
+  `InMemoryAuditStore`, `InMemoryPolicyStore`, `InMemoryCapabilityLedger`, and `InMemoryReplayLedger` are exported directly from the SDK root (`seepient`), enabling embedders to construct isolated in-memory stores without deep imports.
+
 ### Multi-tenant composition closure & isolated construction defaults (Spec 022-2)
 
 **Breaking changes:**

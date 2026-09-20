@@ -242,12 +242,14 @@ describe("W153 — denied probes must not cache the victim's session", () => {
     const probingManager = new ServerSessionManager({ backend });
     const denied = await probingManager.getSession("w153-victim", FOREIGN_HASH);
     expect(denied).toBeNull();
-    expect(probingManager.getActiveSessions()).toHaveLength(0);
+    expect(probingManager.getActiveSessions(FOREIGN_HASH)).toHaveLength(0);
+    expect(probingManager.getActiveSessions(OWNER_HASH)).toHaveLength(0);
 
     // The owner's probe succeeds and only then takes up residency
     const owned = await probingManager.getSession("w153-victim", OWNER_HASH);
     expect(owned).not.toBeNull();
-    expect(probingManager.getActiveSessions()).toHaveLength(1);
+    expect(probingManager.getActiveSessions(OWNER_HASH)).toHaveLength(1);
+    expect(probingManager.getActiveSessions(FOREIGN_HASH)).toHaveLength(0);
   });
 });
 

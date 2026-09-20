@@ -85,6 +85,12 @@ export { settings, SettingsError } from "./settings.js";
 export { createAmbientProviderRuntime, createIsolatedProviderRuntime, ProviderRuntime } from "../../domain/providers/provider-runtime.js";
 export { ProviderConfigStore } from "../../domain/providers/config-store/provider-config-store.js";
 export { MemoryCredentialStore } from "../../domain/providers/credentials/memory-credential-store.js";
+export {
+  InMemoryAuditStore,
+  InMemoryPolicyStore,
+  InMemoryCapabilityLedger,
+} from "../../domain/permissions/in-memory-stores.js";
+export { InMemoryReplayLedger } from "../../capabilities/execution/in-memory-replay-ledger.js";
 export type { AuditStore, PolicyStore, ActionAuditEvent, PolicySnapshot } from "../../foundations/contracts/execution-brokers.js";
 export type { CapabilityLedger, RevokeFilter } from "../../foundations/contracts/capability-ledger.js";
 export type { CapabilitySet, DecisionAuthority, ApprovalBroker, PermissionRequest, PermissionDecision } from "../../foundations/contracts/permission-policy.js";

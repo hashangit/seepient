@@ -151,6 +151,8 @@ export interface PolicyContext {
    * are recorded through `PolicyStore.compareAndSet`, never grants files.
    */
   workspaceId?: string;
+  /** Spec 022-4: Tenancy mode for scoping approvals. Global lifetime is forbidden in multi mode. */
+  tenancyMode?: "single" | "multi";
 }
 
 export interface PolicyTrace {

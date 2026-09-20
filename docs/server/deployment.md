@@ -23,18 +23,6 @@ Run the server with an API key and persistent storage volume for the non-root `a
 
 ```bash
 docker run -d -p 7337:7337 \
-  -e ANTHROPIC_API_KEY=sk-ant-... \
-  -v seepient-data:/home/appuser/.seepient \
-  seepient
-```
-
-### With multiple providers
-
-```bash
-docker run -d -p 7337:7337 \
-  -e OPENAI_API_KEY=sk-... \
-  -e ANTHROPIC_API_KEY=sk-ant-... \
-  -e GLM_API_KEY=... \
   -v seepient-data:/home/appuser/.seepient \
   seepient
 ```
@@ -43,9 +31,9 @@ docker run -d -p 7337:7337 \
 
 ```bash
 docker run -d -p 7337:7337 \
-  -e ANTHROPIC_API_KEY=sk-ant-... \
   -e SEEPIENT_SESSION_DIR=/data/sessions \
   -v session-data:/data/sessions \
+  -v seepient-data:/home/appuser/.seepient \
   seepient
 ```
 
@@ -59,8 +47,6 @@ services:
     ports:
       - "7337:7337"
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - SEEPIENT_SESSION_TTL=86400
     volumes:
       - seepient-data:/home/appuser/.seepient
@@ -84,7 +70,7 @@ gcloud run deploy seepient \
   --min-instances 1 \
   --max-instances 10 \
   --timeout 3600 \
-  --set-env-vars "ANTHROPIC_API_KEY=sk-ant-..."
+  --set-env-vars "SEEPIENT_SESSION_TTL=86400"
 ```
 
 ### Cloud Run WebSocket considerations
@@ -106,7 +92,7 @@ gcloud run deploy seepient \
   --min-instances 1 \
   --max-instances 10 \
   --timeout 3600 \
-  --set-secrets "ANTHROPIC_API_KEY=anthropic-key:latest"
+  --set-env-vars "SEEPIENT_SESSION_TTL=86400"
 ```
 
 ## Bare metal / Node.js
@@ -117,8 +103,8 @@ gcloud run deploy seepient \
 # Install
 npm install -g seepient
 
-# Run with environment
-ANTHROPIC_API_KEY=sk-ant-... seepient server
+# Run server
+seepient server
 ```
 
 ### Programmatic
@@ -170,13 +156,10 @@ removes the signal handlers too:
 server.dispose();   // un-registers handlers + closes the server
 // or simply:
 server.close();     // close event detaches the signal handlers as well
-```
+Express or Fastify app, a CLI, or a test harness). Each call creates its own
+isolated HTTP server and WebSocket server instances.
 
-**Multiple servers per process.** Each `runSeepientServer()` call creates a
-fully independent HTTP + WebSocket stack (per-instance WebSocket server,
-connection registry, approval store). Closing one server never closes another
-server's connections. One caveat: default on-disk state (sessions under
-`./.seepient/sessions`, the local audit store, durable policies under
+However, ambient operator state (`~/.seepient/setting.json` and
 `~/.seepient`) is process-wide by default — when embedding multiple servers,
 inject per-server `persist`, `auditStore`, `policyStore`, and
 `capabilityLedger` contracts to keep their state separated (see
@@ -188,30 +171,28 @@ inject per-server `persist`, `auditStore`, `policyStore`, and
 npm install -g pm2 seepient
 
 # Start with PM2
-ANTHROPIC_API_KEY=sk-ant-... pm2 start "seepient server" --name seepient
+pm2 start "seepient server" --name seepient
 
 # Save for auto-restart
 pm2 save
 pm2 startup
 ```
 
-## Provider environment variables
+## Server environment variables
 
 | Variable | Description | Required |
 |---|---|---|
-| `OPENAI_API_KEY` | OpenAI API key | For OpenAI provider |
-| `ANTHROPIC_API_KEY` | Anthropic API key | For Anthropic provider |
-| `GLM_API_KEY` | GLM API key | For GLM provider |
-| `OPENAI_COMPAT_API_KEY` | API key for OpenAI-compatible provider | For compatible provider |
-| `OPENAI_COMPAT_BASE_URL` | Base URL for OpenAI-compatible provider | For compatible provider |
+| `SEEPIENT_API_KEYS_FILE` | Path to server API keys JSON file | No |
+| `SEEPIENT_SESSION_DIR` | Directory for file-backed sessions | No |
+| `SEEPIENT_SESSION_TTL` | Session TTL in seconds (default: 86400) | No |
 | `SEEPIENT_SKILLS_PATH` | Colon-separated paths to skill directories | No |
 | `SEEPIENT_MAX_BODY_BYTES` | Request body size cap in bytes across all REST routes — chat, settings, gateway, and provider management (default: 10485760). Set to `0` for an unlimited body size | No |
 | `SEEPIENT_CORS_ORIGINS` | Comma-separated CORS origin allowlist, or `*` to reflect any origin (default: no CORS headers at all) | No |
 | `SEEPIENT_WS_MAX_CONNECTIONS_PER_KEY` | Per-key WebSocket connection cap (default: 50); dead peers are terminated by a 30s heartbeat sweep and release their slot | No |
 | `SEEPIENT_RATE_LIMIT_RPM` | Per-key requests-per-minute cap for REST and WebSocket traffic (default: 300). Set to `0` to disable | No |
 
-::: tip Provider auto-detection
-The server automatically uses the first provider with a configured API key. Model selections and purpose routing are configured via `.seepient/setting.json` or CLI provider configuration (`seepient setup` / `seepient providers`).
+::: warning Server provider isolation
+The standalone server binary boots with an isolated empty provider runtime by default. Host environment provider keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.) are not automatically inherited to prevent ambient credential leakage. Model providers are configured via `.seepient/setting.json` in the configuration mount (or via the provider management API), or injected explicitly when embedding `runSeepientServer({ runtime })`.
 :::
 
 ## Error codes

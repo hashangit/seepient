@@ -13,9 +13,15 @@ export function createSecurityGuard(findingId: string): SecurityGuard {
   let count = 0;
   const tags: string[] = [];
 
+  const envKey = `NEUTRALIZE_${findingId.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
+  const isNeutralized =
+    process.env[envKey] === "1" ||
+    process.env.NEUTRALIZE_GUARD === findingId;
+
   return {
     findingId,
     recordHit(tag?: string) {
+      if (isNeutralized) return;
       count++;
       if (tag) tags.push(tag);
     },

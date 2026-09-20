@@ -174,7 +174,9 @@ function buildPermissionRequest(
       "action",
       "run",
       ...(sessionId ? (["session"] as const) : []),
-      ...(workspaceId ? (["project", "global"] as const) : []),
+      ...(workspaceId
+        ? (context.tenancyMode === "multi" ? (["project"] as const) : (["project", "global"] as const))
+        : []),
     ],
     createdAt: now,
     expiresAt: now + deadlineMs,
@@ -270,7 +272,7 @@ export class PolicyEngine implements PolicyEngineContract {
     const opEffects = operationEffects(action.operation);
     for (const effect of opEffects) {
       const rule = isDeniedByRule(
-        context.immutableDenies,
+        context.immutableDenies ?? [],
         effect,
         this.firstTargetForEffect(action, effect),
       );
@@ -507,7 +509,9 @@ export class PolicyEngine implements PolicyEngineContract {
       "action",
       "run",
       ...(sessionId ? (["session"] as const) : []),
-      ...(context.workspaceId ? (["project", "global"] as const) : []),
+      ...(context.workspaceId
+        ? (context.tenancyMode === "multi" ? (["project"] as const) : (["project", "global"] as const))
+        : []),
     ];
     const approvalOptions = buildApprovalOptions({
       action,

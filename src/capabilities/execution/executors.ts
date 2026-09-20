@@ -29,7 +29,7 @@ import type {
   PreparationArtifactStore,
   EffectBroker,
 } from "../../foundations/contracts/execution-brokers.js";
-import { UnsupportedBackendError } from "../../foundations/errors.js";
+import { UnsupportedBackendError, PathHardlinkRefusedError } from "../../foundations/errors.js";
 import { isSecurityPath } from "./environment-policy.js";
 import { createSetupFailure } from "../../foundations/contracts/setup-failure.js";
 
@@ -195,10 +195,16 @@ export class ReadFileExecutor implements OperationExecutor {
   readonly kind = "read-file" as const;
   private readonly artifacts?: PreparationArtifactStore;
   private readonly snapshotStore?: SnapshotStore;
+  private readonly operatorAllowsHardlinks: boolean;
 
-  constructor(opts?: { artifacts?: PreparationArtifactStore; snapshotStore?: SnapshotStore }) {
+  constructor(opts?: {
+    artifacts?: PreparationArtifactStore;
+    snapshotStore?: SnapshotStore;
+    operatorAllowsHardlinks?: boolean;
+  }) {
     this.artifacts = opts?.artifacts;
     this.snapshotStore = opts?.snapshotStore;
+    this.operatorAllowsHardlinks = opts?.operatorAllowsHardlinks ?? false;
   }
 
   async execute(
@@ -207,12 +213,15 @@ export class ReadFileExecutor implements OperationExecutor {
     operation: Extract<PreparedToolAction["operation"], { kind: "read-file" }>,
     _opts: { signal?: AbortSignal; onUpdate?: (u: ToolProgress) => void },
   ): Promise<ExecutionResult> {
-    if (operation.target.finalSymlink) {
+    const targetPath = operation.target.canonicalPath;
+
+    // T108a: deny reads of the security directory
+    if (isSecurityPath(targetPath)) {
       return {
         state: "failed",
         error: {
-          code: "SYMLINK_READ_DENIED",
-          message: `Reads of symbolic links are prohibited: ${operation.target.canonicalPath}`,
+          code: "SECURITY_PATH_DENIED",
+          message: `Reads of the security directory are prohibited: ${targetPath}`,
           retryable: false,
         },
         evidence: {
@@ -223,16 +232,41 @@ export class ReadFileExecutor implements OperationExecutor {
         },
       };
     }
-    let realTarget = operation.target.canonicalPath;
+
+    let handle: import("node:fs/promises").FileHandle | undefined;
     try {
-      const { lstatSync, realpathSync } = await import("node:fs");
-      const st = lstatSync(operation.target.canonicalPath);
+      const { open } = await import("node:fs/promises");
+      const { constants } = await import("node:fs");
+
+      try {
+        handle = await open(targetPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+      } catch (err: any) {
+        if (err?.code === "ELOOP" || err?.code === "EMLINK") {
+          return {
+            state: "failed",
+            error: {
+              code: "SYMLINK_READ_DENIED",
+              message: `Reads of symbolic links are prohibited: ${targetPath}`,
+              retryable: false,
+            },
+            evidence: {
+              backend: "local-native",
+              actionDigest: action.actionDigest,
+              executorId: "read-file-denied",
+              operationKind: "read-file",
+            },
+          };
+        }
+        throw err;
+      }
+
+      const st = await handle.stat();
       if (st.isSymbolicLink()) {
         return {
           state: "failed",
           error: {
             code: "SYMLINK_READ_DENIED",
-            message: `Reads of symbolic links are prohibited: ${operation.target.canonicalPath}`,
+            message: `Reads of symbolic links are prohibited: ${targetPath}`,
             retryable: false,
           },
           evidence: {
@@ -243,31 +277,27 @@ export class ReadFileExecutor implements OperationExecutor {
           },
         };
       }
-      realTarget = realpathSync(operation.target.canonicalPath);
-    } catch {
-      /* non-existent paths fail in readFile below */
-    }
-    // T108a: deny reads of the security directory
-    if (isSecurityPath(operation.target.canonicalPath) || isSecurityPath(realTarget)) {
-      return {
-        state: "failed",
-        error: {
-          code: "SECURITY_PATH_DENIED",
-          message: `Reads of the security directory are prohibited: ${operation.target.canonicalPath}`,
-          retryable: false,
-        },
-        evidence: {
-          backend: "local-native",
-          actionDigest: action.actionDigest,
-          executorId: "read-file-denied",
-          operationKind: "read-file",
-        },
-      };
-    }
-    try {
-      const { readFile } = await import("node:fs/promises");
-      const content = await readFile(operation.target.canonicalPath, "utf-8");
-      const tag = this.snapshotStore?.record(operation.target.canonicalPath, content);
+
+      if (st.nlink > 1 && !this.operatorAllowsHardlinks) {
+        const err = new PathHardlinkRefusedError(targetPath);
+        return {
+          state: "failed",
+          error: {
+            code: err.code,
+            message: err.message,
+            retryable: false,
+          },
+          evidence: {
+            backend: "local-native",
+            actionDigest: action.actionDigest,
+            executorId: "read-file-denied",
+            operationKind: "read-file",
+          },
+        };
+      }
+
+      const content = await handle.readFile({ encoding: "utf-8" });
+      const tag = this.snapshotStore?.record(targetPath, content);
       const output = tag ? `${content}\n\n[content-tag:${tag}]` : content;
       return {
         state: "succeeded",
@@ -277,14 +307,14 @@ export class ReadFileExecutor implements OperationExecutor {
           actionDigest: action.actionDigest,
           executorId: "read-file",
           operationKind: "read-file",
-          committedTargets: [operation.target.canonicalPath],
+          committedTargets: [targetPath],
         },
       };
-    } catch (err) {
+    } catch (err: any) {
       return {
         state: "failed",
         error: {
-          code: "READ_FAILED",
+          code: err?.code ?? "READ_FAILED",
           message: err instanceof Error ? err.message : String(err),
           retryable: false,
         },
@@ -295,6 +325,8 @@ export class ReadFileExecutor implements OperationExecutor {
           operationKind: "read-file",
         },
       };
+    } finally {
+      await handle?.close();
     }
   }
 }

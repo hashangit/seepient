@@ -24,6 +24,38 @@ import type {
 import type { PreparationArtifactStore } from "../../foundations/contracts/execution-brokers.js";
 import type { ToolAnalysisContext } from "../../foundations/contracts/custom-tools.js";
 import { generateId } from "../../foundations/id.js";
+import { PathEscapesWorkspaceError } from "../../foundations/errors.js";
+
+/**
+ * Authorizes a read target path against the tenant's workspace ceiling (FR-002, FR-003).
+ * Read permissions apply to the real file: if the realpath remains within the workspace,
+ * it is authorized and the target's canonicalPath is updated to the realpath.
+ * If the realpath escapes the workspace ceiling, it throws PathEscapesWorkspaceError.
+ */
+function authorizeReadTargetPath(rawPath: string, cwd: string, target: CanonicalPathTarget): string {
+  let realPath: string;
+  try {
+    realPath = fs_realpathSync(target.canonicalPath);
+  } catch {
+    realPath = target.canonicalPath;
+  }
+  let realWorkspace: string;
+  try {
+    realWorkspace = fs_realpathSync(cwd);
+  } catch {
+    realWorkspace = cwd;
+  }
+  const rel = path.relative(realWorkspace, realPath);
+  const isInside = rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+  if (!isInside) {
+    throw new PathEscapesWorkspaceError(realPath);
+  }
+  if (target.finalSymlink) {
+    target.canonicalPath = realPath;
+    target.finalSymlink = false;
+  }
+  return realPath;
+}
 
 /**
  * Analyzer signature: maps tool args + analysis context to a prepared action.
@@ -220,11 +252,7 @@ export async function analyzeReadFile(
 ): Promise<PreparedToolAction> {
   const cwd = ctx.workspace.canonicalRoot;
   const target = await canonicalizePath(args.path, cwd);
-  if (target.finalSymlink) {
-    throw new Error(
-      `Refusing read: ${target.canonicalPath} is a symbolic link. Read the resolved real path instead.`,
-    );
-  }
+  authorizeReadTargetPath(args.path, cwd, target);
   const sensitivity = classifyReadSensitivity(target.canonicalPath);
   const expected = snapshotPath(target) ?? { exists: false };
 
@@ -851,21 +879,13 @@ export async function analyzeGenerateImage(
   let imageTarget: CanonicalPathTarget | undefined;
   if (typeof args.image_path === "string" && args.image_path.length > 0) {
     imageTarget = await canonicalizePath(args.image_path, cwd);
-    if (imageTarget.finalSymlink) {
-      throw new Error(
-        `Refusing image input: ${imageTarget.canonicalPath} is a symbolic link. Use the resolved real path instead.`,
-      );
-    }
+    authorizeReadTargetPath(args.image_path, cwd, imageTarget);
   }
 
   let maskTarget: CanonicalPathTarget | undefined;
   if (typeof args.mask_path === "string" && args.mask_path.length > 0) {
     maskTarget = await canonicalizePath(args.mask_path, cwd);
-    if (maskTarget.finalSymlink) {
-      throw new Error(
-        `Refusing image mask: ${maskTarget.canonicalPath} is a symbolic link. Use the resolved real path instead.`,
-      );
-    }
+    authorizeReadTargetPath(args.mask_path, cwd, maskTarget);
   }
 
   const inputTargets = [imageTarget, maskTarget].filter((t): t is CanonicalPathTarget => !!t);
@@ -964,6 +984,7 @@ export async function analyzeGenerateImage(
   if (args.quality !== undefined) inputObj.quality = args.quality;
   if (args.style !== undefined) inputObj.style = args.style;
   if (args.output_dir !== undefined) inputObj.outputDir = args.output_dir;
+  inputObj.workspaceRoot = cwd;
 
   const operation: PreparedOperation = {
     kind: "broker",

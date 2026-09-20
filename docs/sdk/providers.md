@@ -80,19 +80,15 @@ Seepient Agent automatically detects API keys from environment variables.
 | `GLM_API_KEY`         | GLM        |
 | `OPENAI_COMPAT_API_KEY` | OpenAI-compatible (Ollama, vLLM, Together AI, etc.) |
 
-### Generic keys
+### OpenAI-compatible settings
 
 | Environment Variable    | Purpose                                      |
 | ----------------------- | -------------------------------------------- |
 | `OPENAI_COMPAT_BASE_URL` | Base URL for the OpenAI-compatible provider (required when using that provider) |
-| `OPENAI_COMPAT_MODEL` | Model name at your inference provider (default: `gpt-5.4`) |
-| `LLM_PROVIDER`        | Default provider: `"openai"`, `"anthropic"`, `"glm"`, or `"openai-compatible"` |
-| `LLM_MODEL`           | Generic model override for any provider (lower priority than provider-specific `*_MODEL` vars) |
 
 ```bash
 # Use Anthropic with its own key
 export ANTHROPIC_API_KEY=sk-ant-...
-export LLM_PROVIDER=anthropic
 ```
 
 ---

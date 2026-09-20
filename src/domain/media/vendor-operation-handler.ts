@@ -145,6 +145,7 @@ export function createMediaVendorOperationHandler(
           {
             tenancyMode: opts.tenancyMode,
             capabilities: capabilities ?? opts.capabilities,
+            workspaceRoot: (req.input as any)?.workspaceRoot,
           },
         );
         if (execResult.images.length === 0) {

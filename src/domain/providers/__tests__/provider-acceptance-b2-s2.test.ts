@@ -24,8 +24,7 @@ describe("Acceptance Tests: B-2, B-3, S-1, S-2", () => {
   });
 
   describe("B-2: Environment Variable Projection & Overlay Precedence", () => {
-    it("projects LLM_PROVIDER=anthropic and ANTHROPIC_API_KEY into effective config", async () => {
-      vi.stubEnv("LLM_PROVIDER", "anthropic");
+    it("projects ANTHROPIC_API_KEY into effective config", async () => {
       vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-api-test-key-123456");
 
       const store = new ProviderConfigStore(overlayPath);
@@ -36,7 +35,6 @@ describe("Acceptance Tests: B-2, B-3, S-1, S-2", () => {
     });
 
     it("overlay patch takes precedence over environment variable projection", async () => {
-      vi.stubEnv("LLM_PROVIDER", "anthropic");
       vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-api-test-key-123456");
 
       const store = new ProviderConfigStore(overlayPath);
