@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 022-2-composition-closure]
   pull_request:
-    branches: [main]
+    branches: [main, 022-2-composition-closure]
 
 jobs:
   build-and-test:
