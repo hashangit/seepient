@@ -297,11 +297,14 @@ export async function buildActionLifecycle(
           if (snap.version > 0) {
             const isMulti = inputs.tenancyMode === "multi";
             const rawSnap = await policyStore.read(workspaceId);
-            const otherCaps = rawSnap.policy.capabilities.filter(
-              (c) => c.principalId ? c.principalId !== principalId : isMulti,
+            const otherPrincipalCaps = rawSnap.policy.capabilities.filter(
+              (c) => Boolean(c.principalId && c.principalId !== principalId),
+            );
+            const unstampedCaps = rawSnap.policy.capabilities.filter(
+              (c) => !c.principalId,
             );
             const currentPrincipalCaps = rawSnap.policy.capabilities.filter(
-              (c) => isMulti ? c.principalId === principalId : (!c.principalId || c.principalId === principalId),
+              (c) => c.principalId === principalId,
             );
             const mergedPrincipalCaps = [...currentPrincipalCaps];
             for (const cap of newlyDefaulted) {
@@ -309,12 +312,12 @@ export async function buildActionLifecycle(
                 mergedPrincipalCaps.push(cap);
               }
             }
-            principalPolicy = { version: 1 as const, capabilities: mergedPrincipalCaps };
+            principalPolicy = { version: 1 as const, capabilities: [...unstampedCaps, ...mergedPrincipalCaps] };
             await policyStore
               .compareAndSet(
                 workspaceId,
                 rawSnap.version,
-                { version: 1 as const, capabilities: [...otherCaps, ...mergedPrincipalCaps] },
+                { version: 1 as const, capabilities: [...otherPrincipalCaps, ...unstampedCaps, ...mergedPrincipalCaps] },
                 { kind: "service", authorityId: "policy-reconciliation", authenticatedBy: "system" },
               )
               .catch(() => {});
@@ -505,6 +508,7 @@ export async function buildActionLifecycle(
     workspaceId,
     // Spec 019 (FR-006): operator allowlist for trusted-host execution.
     trustedHostAllowlist: inputs.trustedHostAllowlist ?? ["use_skill"],
+    tenancyMode: inputs.tenancyMode,
   };
 
   const capabilityLedger =

@@ -496,7 +496,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     }
 
     wiredPipeline = await buildActionLifecycle({
-      principalId: (options.config?.principalId as string) ?? "cli-user",
+      principalId: (options.config?.principalId as string) ?? "sdk-user",
       runId: generateId(),
       sessionId: (options.config?.sessionId as string) ?? "default-session",
       workspaceRoot: options.cwd ?? process.cwd(),

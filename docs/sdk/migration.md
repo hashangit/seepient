@@ -37,12 +37,11 @@ For multi-tenant hosting, use `createIsolatedProviderRuntime()` or default const
 ```typescript
 import { createIsolatedProviderRuntime, MemoryCredentialStore } from "seepient";
 
-const credentialStore = new MemoryCredentialStore([
-  {
-    providerId: "openai",
-    auth: { kind: "api_key", apiKey: "sk-tenant-key" },
-  },
-]);
+const credentialStore = new MemoryCredentialStore();
+await credentialStore.put("openai", {
+  kind: "api_key",
+  keyValue: "sk-tenant-key",
+});
 const tenantRuntime = createIsolatedProviderRuntime({ credentialStore });
 ```
 
@@ -159,7 +158,7 @@ Custom tools must be registered on the server per-agent tool registry during com
 ## 5. Injected Store Isolation Stamps (`isIsolated: true`)
 
 ### Summary
-In multi-tenant mode, custom store implementations injected into `createSeepient` or `askSeepient` (`auditStore`, `policyStore`, `capabilityLedger`) must explicitly declare `isIsolated: true`. Stamp-less custom store objects are rejected with `TENANCY_STORE_INCOMPLETE`. Built-in in-memory stores (`InMemoryAuditStore`, `InMemoryPolicyStore`, `InMemoryReplayLedger`) carry this stamp automatically.
+In multi-tenant mode, custom store implementations injected into `createSeepient` or `askSeepient` (`auditStore`, `policyStore`, `capabilityLedger`) must explicitly declare `isIsolated: true`. Stamp-less custom store objects are rejected with `TENANCY_STORE_INCOMPLETE`. Built-in in-memory stores (`InMemoryAuditStore`, `InMemoryPolicyStore`, `InMemoryCapabilityLedger`, `InMemoryReplayLedger`) carry this stamp automatically and can be imported directly from `"seepient"`.
 
 ### Before (v0.7.x)
 ```typescript no-check
@@ -176,6 +175,19 @@ const agent = await createSeepient({
 
 ### After (v0.8.0)
 ```typescript
+import {
+  InMemoryAuditStore,
+  InMemoryPolicyStore,
+  InMemoryCapabilityLedger,
+  InMemoryReplayLedger,
+} from "seepient";
+
+const auditStore = new InMemoryAuditStore();
+const policyStore = new InMemoryPolicyStore();
+const capabilityLedger = new InMemoryCapabilityLedger();
+const replayLedger = new InMemoryReplayLedger();
+
+// Or custom store implementation declaring isIsolated: true explicitly:
 const myCustomAuditStore = {
   isIsolated: true,
   // ... store implementation
@@ -187,7 +199,7 @@ const myCustomAuditStore = {
 ## 6. Principal ID Requirement and Sentinel Rejection
 
 ### Summary
-In multi-tenant mode (`tenancy: "multi"` or inferred from injected stores/credentials), `principalId` is strictly required and must match `/^[a-zA-Z0-9_-]{1,128}$/`. Default and sentinel identities (`"sdk-user"`, `"cli-user"`, `"default"`, `"anonymous"`) are rejected case-insensitively with `PrincipalRequiredError` (`PRINCIPAL_REQUIRED`).
+In multi-tenant mode (`tenancy: "multi"` or inferred from injected stores/credentials), `principalId` is strictly required and must match `/^[a-zA-Z0-9_-]{1,128}$/`. Default and sentinel identities (`"sdk-user"`, `"default"`, `"anonymous"`) are rejected case-insensitively with `PrincipalRequiredError` (`PRINCIPAL_REQUIRED`).
 
 ### Before (v0.7.x)
 ```typescript no-check
@@ -233,23 +245,29 @@ const agent = await createSeepient({
 
 ### After (v0.8.0)
 ```typescript
-import { createSeepient, createIsolatedProviderRuntime, MemoryCredentialStore } from "seepient";
+import {
+  createSeepient,
+  createIsolatedProviderRuntime,
+  MemoryCredentialStore,
+  InMemoryAuditStore,
+  InMemoryPolicyStore,
+  InMemoryCapabilityLedger,
+} from "seepient";
 
-const credentialStore = new MemoryCredentialStore([
-  {
-    providerId: "openai",
-    auth: { kind: "api_key", apiKey: tenantApiKey },
-  },
-]);
+const credentialStore = new MemoryCredentialStore();
+await credentialStore.put("openai", {
+  kind: "api_key",
+  keyValue: tenantApiKey,
+});
 
 const agent = await createSeepient({
   tenancy: "multi",
   principalId: "tenant_1",
   cwd: "/workspaces/t1",
   runtime: createIsolatedProviderRuntime({ credentialStore }),
-  auditStore,
-  policyStore,
-  capabilityLedger,
+  auditStore: new InMemoryAuditStore(),
+  policyStore: new InMemoryPolicyStore(),
+  capabilityLedger: new InMemoryCapabilityLedger(),
 });
 ```
 
@@ -258,14 +276,16 @@ const agent = await createSeepient({
 ## 8. Isolated Credential Store Refusal of Environment References
 
 ### Summary
-`MemoryCredentialStore` stamped `isIsolated: true` refuses to resolve ambient `{ kind: "env" }` references. In isolated mode, attempting to lease an env-backed credential throws `CredentialRequiredError` rather than reading host `process.env`. In multi-tenant setups, inject static `{ kind: "api_key", apiKey: ... }` credentials.
+`MemoryCredentialStore` stamped `isIsolated: true` refuses to resolve ambient `{ kind: "env" }` references. In isolated mode, attempting to lease an env-backed credential throws `CredentialRequiredError` rather than reading host `process.env`. In multi-tenant setups, inject static `{ kind: "api_key", keyValue: ... }` credentials.
 
 ### Before (v0.7.x)
 ```typescript no-check
 // In v0.7.x, MemoryCredentialStore resolved env vars from host process.env
-const credentialStore = new MemoryCredentialStore([
-  { providerId: "openai", auth: { kind: "env", variable: "OPENAI_API_KEY" } },
-]);
+const credentialStore = new MemoryCredentialStore();
+await credentialStore.put("openai", {
+  kind: "env",
+  name: "OPENAI_API_KEY",
+});
 ```
 
 ### After (v0.8.0)
@@ -273,7 +293,9 @@ const credentialStore = new MemoryCredentialStore([
 import { MemoryCredentialStore } from "seepient";
 
 // In multi-tenant mode, pass the resolved secret value directly
-const credentialStore = new MemoryCredentialStore([
-  { providerId: "openai", auth: { kind: "api_key", apiKey: resolvedTenantKey } },
-]);
+const credentialStore = new MemoryCredentialStore();
+await credentialStore.put("openai", {
+  kind: "api_key",
+  keyValue: resolvedTenantKey,
+});
 ```

@@ -30,9 +30,8 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-ini
     && rm /tmp/rustup-init.sh
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-# Pin pnpm to the version the lockfile/CI use — `pnpm@latest` makes corepack
-# resolve a moving target and the container cache can miss the shim's module.
-RUN corepack enable && corepack prepare pnpm@12.3.4 --activate
+# Pin pnpm to the version the lockfile/CI use.
+RUN npm install -g pnpm@12.3.4
 
 WORKDIR /build
 

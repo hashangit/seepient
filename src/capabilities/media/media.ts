@@ -10,6 +10,7 @@ import { safeSsrfFetch } from '../../foundations/network/ssrf-fetch.js';
 import * as path from 'path';
 import type { FileCommitBroker } from '../../foundations/contracts/execution-brokers.js';
 import type { CapabilityEnvelope } from '../../foundations/contracts/permission-policy.js';
+import { PathHardlinkRefusedError } from '../../foundations/errors.js';
 
 export interface ImageRequest {
   prompt?: string;
@@ -24,6 +25,7 @@ export interface ImageRequest {
   quality?: string;
   style?: string;
   outputDir?: string;
+  workspaceRoot?: string;
 }
 
 export interface MediaConfig {
@@ -73,6 +75,8 @@ export async function generateImageRuntime(
   opts?: {
     tenancyMode?: "single" | "multi";
     capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[];
+    workspaceRoot?: string;
+    operatorAllowsHardlinks?: boolean;
   },
 ): Promise<RuntimeImageExecutionResult> {
   const mode = req.mode ?? (req.imagePath && req.maskPath ? "edit" : req.imagePath ? "variation" : "text-to-image");
@@ -81,7 +85,15 @@ export async function generateImageRuntime(
     throw new Error("Prompt cannot be empty for image generation.");
   }
 
-  if ((mode === "variation" || mode === "edit") && (!req.imagePath || !fs.existsSync(req.imagePath))) {
+  const workspaceRoot = opts?.workspaceRoot ?? req.workspaceRoot ?? process.cwd();
+  const resolvedImagePath = req.imagePath
+    ? (path.isAbsolute(req.imagePath) ? req.imagePath : path.resolve(workspaceRoot, req.imagePath))
+    : undefined;
+  const resolvedMaskPath = req.maskPath
+    ? (path.isAbsolute(req.maskPath) ? req.maskPath : path.resolve(workspaceRoot, req.maskPath))
+    : undefined;
+
+  if ((mode === "variation" || mode === "edit") && (!resolvedImagePath || !fs.existsSync(resolvedImagePath))) {
     throw new Error(`Input image path "${req.imagePath}" not found.`);
   }
 
@@ -104,29 +116,57 @@ export async function generateImageRuntime(
   }
 
   let inputImage: any;
-  if (req.imagePath && fs.existsSync(req.imagePath)) {
-    const st = fs.lstatSync(req.imagePath);
-    if (st.isSymbolicLink()) {
-      throw new Error(`Refusing image input: ${req.imagePath} is a symbolic link`);
+  if (resolvedImagePath && fs.existsSync(resolvedImagePath)) {
+    let fd: number | undefined;
+    try {
+      fd = fs.openSync(resolvedImagePath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+      const st = fs.fstatSync(fd);
+      if (st.isSymbolicLink()) {
+        throw new Error(`Refusing image input: ${resolvedImagePath} is a symbolic link`);
+      }
+      if (st.nlink > 1 && !opts?.operatorAllowsHardlinks) {
+        throw new PathHardlinkRefusedError(resolvedImagePath);
+      }
+      inputImage = {
+        type: "image" as const,
+        mediaType: "image/png" as const,
+        data: fs.readFileSync(fd).toString("base64"),
+      };
+    } catch (err: any) {
+      if (err?.code === "ELOOP" || err?.code === "EMLINK") {
+        throw new Error(`Refusing image input: ${resolvedImagePath} is a symbolic link`);
+      }
+      throw err;
+    } finally {
+      if (fd !== undefined) fs.closeSync(fd);
     }
-    inputImage = {
-      type: "image" as const,
-      mediaType: "image/png" as const,
-      data: fs.readFileSync(req.imagePath).toString("base64"),
-    };
   }
 
   let mask: any;
-  if (req.maskPath && fs.existsSync(req.maskPath)) {
-    const st = fs.lstatSync(req.maskPath);
-    if (st.isSymbolicLink()) {
-      throw new Error(`Refusing image mask: ${req.maskPath} is a symbolic link`);
+  if (resolvedMaskPath && fs.existsSync(resolvedMaskPath)) {
+    let fd: number | undefined;
+    try {
+      fd = fs.openSync(resolvedMaskPath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+      const st = fs.fstatSync(fd);
+      if (st.isSymbolicLink()) {
+        throw new Error(`Refusing image mask: ${resolvedMaskPath} is a symbolic link`);
+      }
+      if (st.nlink > 1 && !opts?.operatorAllowsHardlinks) {
+        throw new PathHardlinkRefusedError(resolvedMaskPath);
+      }
+      mask = {
+        type: "image" as const,
+        mediaType: "image/png" as const,
+        data: fs.readFileSync(fd).toString("base64"),
+      };
+    } catch (err: any) {
+      if (err?.code === "ELOOP" || err?.code === "EMLINK") {
+        throw new Error(`Refusing image mask: ${resolvedMaskPath} is a symbolic link`);
+      }
+      throw err;
+    } finally {
+      if (fd !== undefined) fs.closeSync(fd);
     }
-    mask = {
-      type: "image" as const,
-      mediaType: "image/png" as const,
-      data: fs.readFileSync(req.maskPath).toString("base64"),
-    };
   }
 
   const result = await runtime.executeImage(

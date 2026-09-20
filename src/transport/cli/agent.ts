@@ -306,7 +306,7 @@ export class Agent {
       workspaceRoot: this._workspaceRoot,
     });
     this._wiredPipeline = await buildActionLifecycle({
-      principalId: "cli-user",
+      principalId: "sdk-user",
       runId: this.sessionId,
       sessionId: this.sessionId,
       workspaceRoot: opts.workspaceRoot ?? process.cwd(),
@@ -519,7 +519,7 @@ export class Agent {
     const current = await this._policyStore.read(this._workspaceId);
     const capability = {
       ...proposal.capability,
-      principalId: proposal.capability.principalId ?? this.config?.principalId ?? 'cli-user',
+      principalId: proposal.capability.principalId ?? this.config?.principalId ?? 'sdk-user',
     };
     const next: CapabilitySet = {
       version: 1,

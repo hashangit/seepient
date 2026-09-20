@@ -451,12 +451,12 @@ export class ServerSessionManager {
   }
 
   /**
-   * Get all active (non-expired) sessions.
+   * Get all active (non-expired) sessions scoped to an API key hash.
    */
-  getActiveSessions(): SessionData[] {
+  getActiveSessions(apiKeyHash: string): SessionData[] {
     const active: SessionData[] = [];
     for (const session of this.sessions.values()) {
-      if (!this.isExpired(session)) {
+      if (session.apiKeyHash === apiKeyHash && !this.isExpired(session)) {
         active.push({
           id: session.id,
           messages: session.messages,

@@ -155,13 +155,10 @@ if (refresh.ok) {
 For local test runners or ephemeral developer tasks, bootstrap an agent with an in-memory configuration store without modifying host dotfiles. (For hosted multi-tenant deployments, see [Multi-Tenant SDK Architecture](./multi-tenant.md) for full isolation guarantees):
 
 ```typescript
-import {
-  createSeepient,
-  ProviderConfigStore,
-  MemoryCredentialStore,
-} from "seepient";
+import { createSeepient } from "seepient";
 
 const agent = await createSeepient({
+  tenancy: "single",
   // Use ":memory:" so no files are written to disk
   overlayFile: ":memory:",
   

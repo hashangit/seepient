@@ -84,9 +84,25 @@ describe('docs vocabulary gate (FR-002)', () => {
     const knownSrcEnvVars = new Set<string>();
     for (const file of srcFiles) {
       const content = fs.readFileSync(file, 'utf8');
-      const matches = content.matchAll(/\b(SEEPIENT_[A-Z0-9_]+)\b/g);
-      for (const m of matches) {
+      for (const m of content.matchAll(/\b(SEEPIENT_[A-Z0-9_]+)\b/g)) {
         knownSrcEnvVars.add(m[1]);
+      }
+      for (const m of content.matchAll(/process\.env\.([A-Z0-9_]+)/g)) {
+        knownSrcEnvVars.add(m[1]);
+      }
+      for (const m of content.matchAll(/process\.env\[['"]([A-Z0-9_]+)['"]\]/g)) {
+        knownSrcEnvVars.add(m[1]);
+      }
+      for (const m of content.matchAll(/resolve\(["']([A-Z0-9_]+)["']/g)) {
+        knownSrcEnvVars.add(m[1]);
+      }
+    }
+
+    const { FORBIDDEN_ENV_PREFIXES, ALLOWED_ENV_KEYS } = await import('../capabilities/execution/environment-policy.js');
+    for (const k of ALLOWED_ENV_KEYS) knownSrcEnvVars.add(k);
+    for (const p of FORBIDDEN_ENV_PREFIXES) {
+      if (!p.endsWith('_') && p !== 'LLM_PROVIDER' && p !== 'LLM_MODEL') {
+        knownSrcEnvVars.add(p);
       }
     }
 
@@ -100,6 +116,7 @@ describe('docs vocabulary gate (FR-002)', () => {
       }
     }
 
+    const docEnvRegex = /\b(SEEPIENT_[A-Z0-9_]+|[A-Z][A-Z0-9_]*_(?:API_KEY|BASE_URL|MODEL)|SMTP_[A-Z0-9_]+)\b/g;
     for (const file of envScanFiles) {
       if (!fs.existsSync(file)) continue;
       const relPath = path.relative(repoRoot, file);
@@ -110,10 +127,11 @@ describe('docs vocabulary gate (FR-002)', () => {
         if (line.includes('SEEPIENT_SHELL_APPROVE')) {
           report.envVars.push(`${relPath}:${i + 1} references banned env var SEEPIENT_SHELL_APPROVE`);
         }
-        const matches = line.matchAll(/\b(SEEPIENT_[A-Z0-9_]+)\b/g);
+        const matches = line.matchAll(docEnvRegex);
         for (const match of matches) {
           const varName = match[1];
-          // Exact token check against tokens found in src/
+          if (/^(?:YOUR_|BANK_|CUSTOM_|MY_)/.test(varName)) continue;
+          // Exact token check against tokens found in code allowlist
           if (!knownSrcEnvVars.has(varName)) {
             report.envVars.push(`${relPath}:${i + 1} references unknown env var ${varName}`);
           }

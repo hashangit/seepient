@@ -574,6 +574,7 @@ import { askSeepient } from "seepient";
 const result = await askSeepient("Summarize today's invoice", {
   tenancy: "multi",
   principalId: "tenant-acme",
+  cwd: "/workspaces/tenant-acme",
   runtime: tenantRuntime,
   auditStore: tenantAuditStore,
   policyStore: tenantPolicyStore,

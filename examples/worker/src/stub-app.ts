@@ -78,10 +78,15 @@ export function isForbiddenWildcardCapability(cap: any): boolean {
         cap.dataClasses.includes("*") ||
         cap.dataClasses.includes("secret")
       );
+    case "read-file":
+    case "commit-file":
+      return !cap.path || cap.path === "*";
     case "trusted-host":
       return !cap.registrationId || cap.registrationId === "*";
+    case "activate-change-class":
+      return true;
     default:
-      return false;
+      return true;
   }
 }
 

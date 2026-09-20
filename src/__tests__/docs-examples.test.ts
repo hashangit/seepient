@@ -9,16 +9,19 @@ const repoRoot = path.resolve(__dirname, '../..');
 const docsSdkDir = path.join(repoRoot, 'docs/sdk');
 
 const loadBearingPages = [
-  'ask-seepient.md',
-  'create-seepient.md',
-  'skills.md',
-  'multi-tenant.md',
-  'stateless-workers.md',
-  'migration.md',
+  'docs/sdk/ask-seepient.md',
+  'docs/sdk/create-seepient.md',
+  'docs/sdk/skills.md',
+  'docs/sdk/multi-tenant.md',
+  'docs/sdk/stateless-workers.md',
+  'docs/sdk/migration.md',
+  'docs/sdk/session-persistence.md',
+  'docs/sdk/provider-management.md',
+  'docs/server/deployment.md',
 ];
 
 describe('docs example import and runtime checks (FR-003)', () => {
-  it('verifies all SDK imports in the 5 load-bearing SDK pages resolve (R10)', () => {
+  it('verifies all SDK imports in the load-bearing docs pages resolve (R10, FR-019)', () => {
     function extractExportNames(filePath: string): Set<string> {
       const content = fs.readFileSync(filePath, 'utf8');
       const names = new Set<string>();
@@ -45,7 +48,7 @@ describe('docs example import and runtime checks (FR-003)', () => {
     const unexportedImports: string[] = [];
 
     for (const page of loadBearingPages) {
-      const filePath = path.join(docsSdkDir, page);
+      const filePath = path.join(repoRoot, page);
       if (!fs.existsSync(filePath)) continue;
       const content = fs.readFileSync(filePath, 'utf8');
 
@@ -210,5 +213,80 @@ describe('docs example import and runtime checks (FR-003)', () => {
     } finally {
       if (fs.existsSync(workerDir)) fs.rmSync(workerDir, { recursive: true, force: true });
     }
+  });
+
+  it('verifies construction of snippets from the 5 first-hour docs pages (FR-019)', async () => {
+    // 1. migration.md
+    const credentialStore = new sdkExports.MemoryCredentialStore();
+    await credentialStore.put("openai", {
+      kind: "api_key",
+      keyValue: "sk-tenant-key",
+    });
+    const tenantRuntime = sdkExports.createIsolatedProviderRuntime({ credentialStore });
+    expect(tenantRuntime.isIsolated).toBe(true);
+
+    const agentMigration = await sdkExports.createSeepient({
+      tenancy: "multi",
+      principalId: "tenant_1",
+      cwd: repoRoot,
+      runtime: tenantRuntime,
+      auditStore: new sdkExports.InMemoryAuditStore(),
+      policyStore: new sdkExports.InMemoryPolicyStore(),
+      capabilityLedger: new sdkExports.InMemoryCapabilityLedger(),
+      stateless: true,
+    });
+    expect(agentMigration).toBeDefined();
+    await agentMigration.dispose();
+
+    // 2. session-persistence.md
+    const { MemoryPersistenceBackend } = await import('../domain/sessions/session-store.js');
+    const agentPersist = await sdkExports.createSeepient({
+      tenancy: "single",
+      sessionId: "user-alice-session",
+      persist: new MemoryPersistenceBackend(),
+    });
+    expect(agentPersist).toBeDefined();
+    expect(agentPersist.sessionId).toBe("user-alice-session");
+    await agentPersist.dispose();
+
+    // 3. provider-management.md
+    const agentProvider = await sdkExports.createSeepient({
+      tenancy: "single",
+      overlayFile: ":memory:",
+      providers: {
+        isolated_openai: {
+          adapter: "pi-ai",
+          upstreamProvider: "openai",
+          credential: { kind: "env", name: "OPENAI_API_KEY" },
+        },
+      },
+      modelAssignments: {
+        text: {
+          standard: { providerAccount: "isolated_openai", model: "gpt-5.4" },
+        },
+      },
+    });
+    expect(agentProvider).toBeDefined();
+    await agentProvider.dispose();
+
+    // 4. ask-seepient.md
+    const mockRuntime = createMockRuntime([{ content: "Summary of invoice" }]);
+    (mockRuntime as any).isIsolated = true;
+
+    const askRes = await sdkExports.askSeepient("Summarize today's invoice", {
+      tenancy: "multi",
+      principalId: "tenant-acme",
+      cwd: repoRoot,
+      runtime: mockRuntime,
+      auditStore: new sdkExports.InMemoryAuditStore(),
+      policyStore: new sdkExports.InMemoryPolicyStore(),
+      capabilityLedger: new sdkExports.InMemoryCapabilityLedger(),
+      stateless: true,
+    });
+    expect(askRes.text).toBe("Summary of invoice");
+
+    // 5. deployment.md
+    const serverModule = await import('../transport/http/index.js');
+    expect(serverModule.runSeepientServer).toBeDefined();
   });
 });
