@@ -136,7 +136,7 @@ jobs:
 
             NEW_SEEPIENT_VER=$(node -p "require('./package.json').version")
             git commit -am "chore(deps): bump @earendil-works/pi-ai to ${UPSTREAM_VER} and seepient to ${NEW_SEEPIENT_VER}"
-            git push origin "${BRANCH}"
+            git push --force-with-lease origin "${BRANCH}"
 
             PR_URL=$(gh pr create \
               --title "chore(deps): bump @earendil-works/pi-ai to ${UPSTREAM_VER}" \
@@ -176,7 +176,7 @@ jobs:
           else
             echo "Verification failed or breaking-range classification. Creating Draft PR..."
             git commit -am "chore(deps): bump @earendil-works/pi-ai to ${UPSTREAM_VER} [verification required]"
-            git push origin "${BRANCH}"
+            git push --force-with-lease origin "${BRANCH}"
 
             DRAFT_PR=$(gh pr create \
               --draft \
