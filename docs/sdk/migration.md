@@ -299,3 +299,47 @@ await credentialStore.put("openai", {
   keyValue: resolvedTenantKey,
 });
 ```
+
+---
+
+## 9. 022-3 Breaking Changes
+
+### Summary
+Server sessions are now held **in memory** until a `persist` backend is explicitly injected. Previously, a server booted without a persistence option silently wrote session files to the host filesystem (`~/.seepient/sessions` or the working directory). Now the default backend is in-memory (`MemoryPersistenceBackend`); nothing touches disk unless you supply `persist` or a session directory.
+
+### Migration action
+If you relied on sessions surviving a restart without configuring persistence, inject a `persist` backend (or set a session directory) explicitly — in-memory sessions are lost when the process exits.
+
+---
+
+## 10. 022-4 Breaking Changes
+
+### Sentinel unification: `cli-user` → `sdk-user`
+
+The `cli-user` sentinel has been removed. All single-mode principals — CLI and SDK alike — are now stamped `sdk-user`.
+
+**Migration action:** approvals previously granted to `cli-user` are ignored after the upgrade. Re-approve once under the new sentinel; grants recorded after the upgrade carry over unchanged.
+
+### In-workspace symlinks are allowed on reads
+
+Reads are authorized against the canonical **realpath** of the target, not the name it is reached by. Symbolic links that resolve inside your workspace ceiling are now allowed (the earlier blanket refusal is superseded). Links whose realpath escapes the workspace ceiling are denied with `PATH_ESCAPES_WORKSPACE`.
+
+**Migration action:** none for normal use. If you linked out of the workspace to grant access to an external file, copy the file into the workspace instead.
+
+### Hardlinked read targets are refused
+
+Reading a file with more than one name on the filesystem (hardlink, `st_nlink > 1`) is denied with `PATH_HARDLINK_REFUSED`. This closes exfiltration through hardlinks created outside the workspace ceiling.
+
+**Migration action:** read regular files inside the workspace. If a legitimate hardlink workflow exists, ask your operator about the explicit opt-in.
+
+### `global` approval lifetime unavailable in multi-tenant mode
+
+In multi-tenant mode, `global` is no longer offered as an approval lifetime. Requesting it directly fails closed with `GLOBAL_LIFETIME_FORBIDDEN` instead of producing a misleading denial. Use `project` or `session` scope instead.
+
+**Migration action:** tenants that persisted `global` lifetimes should re-issue approvals at `project` or `session` scope.
+
+### Read identity verification (device/inode)
+
+The read plane now records the authorized file's device and inode identity and verifies it when the file is opened for execution. If the file at the path changes between authorization and read, the read is denied with `PATH_IDENTITY_MISMATCH`.
+
+**Migration action:** treat `PATH_IDENTITY_MISMATCH` as a retry signal — the file changed mid-flight; re-read it and retry the operation.

@@ -194,7 +194,8 @@ export type PermissionDenyReason =
   | "capability-revoked"
   /** Spec 019 FR-002: the backend cannot enforce exact commits and the
    *  interim JS fallback was not opted into — denied before any prompt. */
-  | "exact-commit-unavailable";
+  | "exact-commit-unavailable"
+  | "global-lifetime-forbidden";
 
 /**
  * Closed decision union. `needs-approval` carries the immutable request and

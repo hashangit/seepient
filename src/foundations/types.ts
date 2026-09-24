@@ -405,6 +405,12 @@ export interface RunSeepientServerOptions {
   sessionTTL?: number;
   /** Injected ProviderRuntime */
   runtime?: import("./contracts/provider-runtime.js").ProviderRuntimeContract;
+  /**
+   * Operator provider config file (standalone server's durable provider
+   * channel). Overlay shape ({ providers, modelAssignments }); loaded once at
+   * boot into an isolated runtime. Ignored when `runtime` is injected.
+   */
+  providersFile?: string;
   /** Injected session persistence backend */
   persist?: PersistenceBackend;
   /** Injected tenant audit store */

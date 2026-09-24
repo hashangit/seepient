@@ -220,6 +220,16 @@ export class RemotePolicyStore implements PolicyStore {
     if (res.ok) {
       return (await res.json()) as PolicySnapshot;
     }
+    if (res.status === 409) {
+      // Typed conflict so the lifecycle's single-retry CAS loop fires instead
+      // of surfacing an honest approval as approval-unavailable (pass-10 P2-2).
+      const { PolicyConflictError } = await import(
+        "../../../src/foundations/errors.js"
+      );
+      throw new PolicyConflictError(
+        `[worker-policy] compareAndSet version conflict: HTTP ${res.status}`,
+      );
+    }
     throw new Error(`[worker-policy] compareAndSet failed: HTTP ${res.status}`);
   }
 }

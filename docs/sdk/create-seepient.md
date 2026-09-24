@@ -238,16 +238,19 @@ import { createSeepient } from "seepient";
 
 // Option 1: File-based persistence (just pass a path)
 const agent = await createSeepient({
+  tenancy: "single",
   persist: "./sessions/my-agent",
 });
 
 // Option 2: In-memory persistence (great for testing)
 const agent2 = await createSeepient({
+  tenancy: "single",
   persist: { type: "memory" },
 });
 
 // Option 3: Explicit file config
 const agent3 = await createSeepient({
+  tenancy: "single",
   persist: { type: "file", path: "/var/data/sessions" },
 });
 
@@ -256,6 +259,7 @@ await agent.chat("I'm working on a React project");
 
 // In a new process, recreate the agent with the same persist path and sessionId:
 // const agent2 = await createSeepient({
+//   tenancy: "single",
 //   sessionId: "my-session-id",
 //   persist: "./sessions",
 // });
@@ -295,6 +299,7 @@ registerBackend("redis", (config) => new RedisBackend(config.url as string));
 
 // Then use by type name
 const agent = await createSeepient({
+  tenancy: "single",
   persist: { type: "redis", url: "redis://localhost:6379" },
 });
 ```
@@ -310,7 +315,7 @@ const myBackend: PersistenceBackend = {
   async list() { return []; },
 };
 
-const agent = await createSeepient({ persist: myBackend });
+const agent = await createSeepient({ tenancy: "single", persist: myBackend });
 ```
 
 ### Dynamic tools

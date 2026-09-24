@@ -72,9 +72,19 @@ export function createConnectionRegistry(opts?: ConnectionRegistryOptions): WsCo
 
 // ── Send helper ──────────────────────────────────────────────────────
 
+/** Egress backpressure cap: a tenant that stops reading while answering
+ * pings would otherwise buffer unbounded stream data in the shared process
+ * (pass-10 P2-1). Over the cap the connection is terminated, not paused, so
+ * the client sees a clean close instead of a server OOM. */
+const MAX_BUFFERED_SEND_BYTES = 4 * 1024 * 1024;
+
 export function safeSend(ws: WebSocket, message: ServerMessage | Record<string, any>): void {
   try {
     if (ws.readyState === 1 /* OPEN */) {
+      if (ws.bufferedAmount > MAX_BUFFERED_SEND_BYTES) {
+        ws.close(1013, "Send buffer overflow: client not reading");
+        return;
+      }
       ws.send(JSON.stringify(message));
     }
   } catch {

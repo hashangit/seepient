@@ -387,5 +387,25 @@ describe("Spec 022 SDK Tenancy Mode & Fail-Closed Enforcement (US2)", () => {
         code: "PRINCIPAL_REQUIRED",
       });
     });
+
+    it("pass-10 P1-5: #private-field CredentialStore is still detected as an injected-credentials signal", async () => {
+      // Object.keys() on this store returns [] — the pre-R3 signal missed it
+      // and silently composed ambient single mode for multi-shaped callers.
+      class PrivateFieldCredentialStore {
+        #records = new Map<string, unknown>();
+        async resolve(ref: any) { return this.#records.get(String(ref)) as any; }
+        async get(id: string) { return this.#records.get(id) as any; }
+        async put(id: string, record: any) { this.#records.set(id, record); }
+      }
+
+      await expect(
+        createSeepient({
+          credentials: new PrivateFieldCredentialStore() as any,
+        }),
+      ).rejects.toMatchObject({
+        name: "PrincipalRequiredError",
+        code: "PRINCIPAL_REQUIRED",
+      });
+    });
   });
 });

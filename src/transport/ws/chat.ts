@@ -35,6 +35,17 @@ export async function handleChat(
   }
 
   // W248: Fail-closed off-contract input on server surfaces
+  if (typeof (msg as any).message !== "string") {
+    safeSend(ws, {
+      type: "error",
+      code: "VALIDATION_ERROR",
+      retryable: false,
+      message: "Field 'message' must be a string",
+      ...(msg.id ? { clientMsgId: msg.id } : {}),
+    });
+    return;
+  }
+
   if (msg.options?.skills !== undefined) {
     if (!Array.isArray(msg.options.skills) || msg.options.skills.some((s) => typeof s !== "string")) {
       safeSend(ws, {

@@ -7,7 +7,7 @@
  * precomputed result.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdtempSync, rmSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, realpathSync, writeFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -76,7 +76,16 @@ function actionWith(kind: PreparedToolAction["operation"]["kind"], op: Partial<P
     return { ...base, operation: { kind, commits: [], ...op } } as PreparedToolAction;
   }
   if (kind === "read-file") {
-    return { ...base, operation: { kind, target: { canonicalPath: op.destinationPath ?? "/x", canonicalParent: "/", basename: "x", exists: true, finalSymlink: false }, expected: { exists: true }, ...op } } as PreparedToolAction;
+    // Mirror the analyzer contract: the executor verifies the opened file
+    // against the authorization-time snapshot identity (pass-10 P1-1).
+    let expected: Record<string, unknown> = { exists: true };
+    if (op.destinationPath) {
+      try {
+        const st = statSync(op.destinationPath);
+        expected = { exists: true, device: String(st.dev), inode: String(st.ino), size: st.size };
+      } catch { /* path may not exist (security-path denial case) */ }
+    }
+    return { ...base, operation: { kind, target: { canonicalPath: op.destinationPath ?? "/x", canonicalParent: "/", basename: "x", exists: true, finalSymlink: false }, expected, ...op } } as PreparedToolAction;
   }
   if (kind === "none") {
     return { ...base, operation: { kind, result: { output: "ok", success: true }, ...op } } as PreparedToolAction;

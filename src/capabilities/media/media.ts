@@ -10,7 +10,8 @@ import { safeSsrfFetch } from '../../foundations/network/ssrf-fetch.js';
 import * as path from 'path';
 import type { FileCommitBroker } from '../../foundations/contracts/execution-brokers.js';
 import type { CapabilityEnvelope } from '../../foundations/contracts/permission-policy.js';
-import { PathHardlinkRefusedError } from '../../foundations/errors.js';
+import { PathHardlinkRefusedError, PathIdentityMismatchError } from '../../foundations/errors.js';
+import { isGuardNeutralized } from '../../foundations/test-seams.js';
 
 export interface ImageRequest {
   prompt?: string;
@@ -18,6 +19,10 @@ export interface ImageRequest {
   destinations?: string[];
   imagePath?: string;
   maskPath?: string;
+  /** Authorization-time device/inode pin for the input image (authorize-what-you-open). */
+  imageIdentity?: { dev: number; ino: number };
+  /** Authorization-time device/inode pin for the mask image. */
+  maskIdentity?: { dev: number; ino: number };
   mode?: 'text-to-image' | 'variation' | 'edit';
   model?: string;
   n?: number;
@@ -119,13 +124,23 @@ export async function generateImageRuntime(
   if (resolvedImagePath && fs.existsSync(resolvedImagePath)) {
     let fd: number | undefined;
     try {
-      fd = fs.openSync(resolvedImagePath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+      fd = fs.openSync(resolvedImagePath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
       const st = fs.fstatSync(fd);
       if (st.isSymbolicLink()) {
         throw new Error(`Refusing image input: ${resolvedImagePath} is a symbolic link`);
       }
       if (st.nlink > 1 && !opts?.operatorAllowsHardlinks) {
         throw new PathHardlinkRefusedError(resolvedImagePath);
+      }
+      // Authorization-time identity pin: without it O_NOFOLLOW only guards the
+      // final component, so a parent-directory swap redirects this read.
+      if (
+        !isGuardNeutralized("P1-1-READ-IDENTITY") &&
+        (!req.imageIdentity ||
+          String(st.dev) !== String(req.imageIdentity.dev) ||
+          String(st.ino) !== String(req.imageIdentity.ino))
+      ) {
+        throw new PathIdentityMismatchError(resolvedImagePath);
       }
       inputImage = {
         type: "image" as const,
@@ -146,13 +161,21 @@ export async function generateImageRuntime(
   if (resolvedMaskPath && fs.existsSync(resolvedMaskPath)) {
     let fd: number | undefined;
     try {
-      fd = fs.openSync(resolvedMaskPath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+      fd = fs.openSync(resolvedMaskPath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
       const st = fs.fstatSync(fd);
       if (st.isSymbolicLink()) {
         throw new Error(`Refusing image mask: ${resolvedMaskPath} is a symbolic link`);
       }
       if (st.nlink > 1 && !opts?.operatorAllowsHardlinks) {
         throw new PathHardlinkRefusedError(resolvedMaskPath);
+      }
+      if (
+        !isGuardNeutralized("P1-1-READ-IDENTITY") &&
+        (!req.maskIdentity ||
+          String(st.dev) !== String(req.maskIdentity.dev) ||
+          String(st.ino) !== String(req.maskIdentity.ino))
+      ) {
+        throw new PathIdentityMismatchError(resolvedMaskPath);
       }
       mask = {
         type: "image" as const,

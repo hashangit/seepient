@@ -40,6 +40,8 @@ export interface WSServer {
 export interface WebSocket {
   send(data: string): void;
   close(code?: number, reason?: string): void;
+  /** Bytes queued but not yet flushed to the socket (egress backpressure). */
+  bufferedAmount: number;
   /** Hard-close without a close handshake (dead-peer cleanup). */
   terminate(): void;
   on(event: "message", cb: (data: Buffer) => void): void;

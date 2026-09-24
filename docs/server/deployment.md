@@ -192,7 +192,31 @@ pm2 startup
 | `SEEPIENT_RATE_LIMIT_RPM` | Per-key requests-per-minute cap for REST and WebSocket traffic (default: 300). Set to `0` to disable | No |
 
 ::: warning Server provider isolation
-The standalone server binary boots with an isolated empty provider runtime by default. Host environment provider keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.) are not automatically inherited to prevent ambient credential leakage. Model providers are configured via `.seepient/setting.json` in the configuration mount (or via the provider management API), or injected explicitly when embedding `runSeepientServer({ runtime })`.
+The standalone server binary boots with an isolated empty provider runtime by default. Host environment provider keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.) are not automatically inherited to prevent ambient credential leakage. There are exactly two ways to give the server durable providers:
+
+1. **`--providers-file <path>`** (or `runSeepientServer({ providersFile })`) — an operator-owned JSON file read once at boot into the isolated runtime. It carries provider accounts, model assignments, and credentials (the file is the operator's plaintext secret surface — mount it read-only and keep it out of tenant-visible volumes; `chmod 600`):
+   ```json
+   {
+     "providers": {
+       "openai-main": {
+         "adapter": "pi-ai",
+         "upstreamProvider": "openai",
+         "credential": { "kind": "seepient", "id": "openai-main-key" }
+       }
+     },
+     "modelAssignments": {
+       "text": { "standard": { "providerAccount": "openai-main", "model": "gpt-5-nano" } }
+     },
+     "credentials": {
+       "openai-main-key": { "kind": "api_key", "keyValue": "sk-..." }
+     }
+   }
+   ```
+   The file is never written back to; runtime mutations via the provider management API stay in-memory and are lost on restart.
+
+2. **Inject a runtime when embedding**: `runSeepientServer({ runtime })` with an isolated `ProviderRuntime` you constructed yourself.
+
+Note: `.seepient/setting.json` in a mounted volume is **not** read for provider configuration — the isolated runtime never reads ambient settings files.
 :::
 
 ## Error codes

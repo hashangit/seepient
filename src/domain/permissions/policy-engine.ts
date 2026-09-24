@@ -45,6 +45,7 @@ import {
 } from "./capability-store.js";
 import type { CapabilityLedger } from "../../foundations/contracts/capability-ledger.js";
 import { buildApprovalChoices, buildApprovalOptions } from "./approval-options.js";
+import { isGuardNeutralized } from "../../foundations/test-seams.js";
 import { realpathSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
@@ -175,7 +176,9 @@ function buildPermissionRequest(
       "run",
       ...(sessionId ? (["session"] as const) : []),
       ...(workspaceId
-        ? (context.tenancyMode === "multi" ? (["project"] as const) : (["project", "global"] as const))
+        ? (context.tenancyMode === "multi"
+            ? (isGuardNeutralized("R2-LIFETIME-TRUTH") ? (["project", "global"] as const) : (["project"] as const))
+            : (["project", "global"] as const))
         : []),
     ],
     createdAt: now,

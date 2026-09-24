@@ -27,6 +27,7 @@ import type { SettingsHandlerContext } from "./settings-handlers.js";
 import type { WsServerHandle } from "../ws/websocket.js";
 import { loadMergedConfig, getConfigPaths, loadJsonConfig } from "../../foundations/config.js";
 import { RateLimiter, globalRateLimiter } from "./rate-limit.js";
+import { isGuardNeutralized } from "../../foundations/test-seams.js";
 import { logTransportEvent } from "../logging.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -255,6 +256,12 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
       throw new TenancyRuntimeRequiredError();
     }
     serverRuntime = options.runtime;
+  } else if (options?.providersFile) {
+    const { createRuntimeFromProvidersFile } = await import("../../domain/providers/provider-runtime.js");
+    serverRuntime = await createRuntimeFromProvidersFile(options.providersFile);
+    process.stderr.write(
+      `[seepient] Notice: server booted with providers loaded from ${options.providersFile} (isolated runtime; file read once at boot).\n`,
+    );
   } else {
     process.stderr.write("[seepient] Notice: server booted with isolated empty ProviderRuntime.\n");
     serverRuntime = createIsolatedProviderRuntime();
@@ -280,10 +287,18 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
       );
     }
 
-    const serverAuditStore = options?.auditStore ?? new InMemoryAuditStore();
+    const serverAuditStore =
+      options?.auditStore ??
+      (isGuardNeutralized("VULN-9")
+        ? new (await import("../../domain/permissions/audit-recorder.js")).LocalAuditStore()
+        : new InMemoryAuditStore());
     const isLocalStore = isLocalAuditStore(serverAuditStore);
 
-    const serverPolicyStore = options?.policyStore ?? new InMemoryPolicyStore();
+    const serverPolicyStore =
+      options?.policyStore ??
+      (isGuardNeutralized("VULN-9")
+        ? new (await import("../../domain/permissions/policy-store.js")).LocalPolicyStore()
+        : new InMemoryPolicyStore());
     const serverCapabilityLedger = options?.capabilityLedger ?? new InMemoryCapabilityLedger();
     // The outbox MUST be backed by the SAME LocalAuditStore the per-request
     // lifecycles use, otherwise the flush timer + recovery operate on a

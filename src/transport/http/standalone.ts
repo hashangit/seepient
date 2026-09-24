@@ -112,17 +112,17 @@ export async function startStandaloneServer(args: string[] = process.argv.slice(
   const port = parsedArgs.port;
   const host = parsedArgs.host ?? process.env.SEEPIENT_HOST ?? "127.0.0.1";
   const sessionTTL = parseInt(process.env.SEEPIENT_SESSION_TTL ?? "", 10);
-  const apiKeysFile = process.env.SEEPIENT_API_KEYS_FILE;
-
-  // Expose API keys file path for the auth module if provided
-  if (apiKeysFile) {
-    process.env.SEEPIENT_API_KEYS_FILE = apiKeysFile;
+  const apiKeysFile = parsedArgs.apiKeysFile ?? process.env.SEEPIENT_API_KEYS_FILE;
+  if (parsedArgs.apiKeysFile) {
+    process.env.SEEPIENT_API_KEYS_FILE = parsedArgs.apiKeysFile;
   }
 
   const options: RunSeepientServerOptions = {
     host,
     ...(port === undefined || port <= 0 ? {} : { port }),
     ...(isNaN(sessionTTL) || sessionTTL <= 0 ? {} : { sessionTTL }),
+    ...(parsedArgs.providersFile ? { providersFile: parsedArgs.providersFile } : {}),
+    ...(parsedArgs.apiKeysFile ? { apiKeysFile: parsedArgs.apiKeysFile } : {}),
   };
 
   process.stdout.write(`[seepient] Starting Seepient server v${version}\n`);

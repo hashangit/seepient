@@ -22,6 +22,7 @@ import { resolveAnalyzerWithFallback } from "./permissions/default-analyzers.js"
 import { makeRegistrationAnalyzer } from "./permissions/registration-dispatch.js";
 import type { ProviderRuntime, TurnSnapshot } from "./providers/provider-runtime.js";
 import type { Purpose, Tier } from "../foundations/contracts/provider-runtime.js";
+import { isGuardNeutralized } from "../foundations/test-seams.js";
 
 // ProviderFactory for per-skill model switching
 export interface ProviderFactory {
@@ -603,7 +604,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
             },
             {
               signal,
-              tenancyMode: options.tenancyMode,
+              ...(isGuardNeutralized("VULN-16") ? {} : { tenancyMode: options.tenancyMode }),
               capabilities: wiredPipeline?.grantedCapabilities ?? wiredPipeline?.activeCapabilities?.capabilities,
             },
           )) {

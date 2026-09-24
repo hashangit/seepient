@@ -7,7 +7,6 @@ import {
   linkSync,
   realpathSync,
   mkdirSync,
-  readFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -112,7 +111,7 @@ describe("Symlink & Read-Plane Security Journeys (FR-002, FR-003, FR-004, FR-013
     expect(execRes.state).toBe("failed");
     if (execRes.state === "failed") {
       expect(execRes.error.code).toBe("PATH_HARDLINK_REFUSED");
-      expect(execRes.error.message).toContain("has another name outside your workspace");
+      expect(execRes.error.message).toContain("more than one name");
     }
   });
 
@@ -122,43 +121,36 @@ describe("Symlink & Read-Plane Security Journeys (FR-002, FR-003, FR-004, FR-013
     const wsImage = join(workspaceDir, "victim.png");
     writeFileSync(wsImage, "WORKSPACE-IMAGE-BYTES", "utf-8");
 
-    // Decoy in cwd
-    const cwdImage = join(process.cwd(), "victim.png");
-    let wroteCwdDecoy = false;
-    if (!readFileSync(wsImage)) {}
+    // No decoy is planted at process.cwd(): if media resolved the relative path
+    // against cwd, the input read would fail ENOENT (nothing at <repo>/victim.png)
+    // and this test would fail. Drive through the real analyzer so the input
+    // carries the authorized absolute path + identity like production.
+    const prepared = await analyzeGenerateImage(
+      { prompt: "variation of this", image_path: "victim.png", mode: "variation" },
+      analysisCtx,
+    );
+    const input = (prepared.operation as any).request.input;
+    expect(input.imagePath).toBe(wsImage);
+    expect(input.imageIdentity).toBeDefined();
 
-    try {
-      // Create a mock provider runtime
-      let capturedImageBytes: string | undefined;
-      const mockRuntime = {
-        async createTurnSnapshot() { return {}; },
-        async resolvePlan() { return { model: "dall-e-3" }; },
-        async executeImage(plan: any, req: any) {
-          capturedImageBytes = req.inputImage?.data;
-          return { images: [{ bytes: Buffer.from("out"), mimeType: "image/png" }] };
-        },
-      };
+    let capturedImageBytes: string | undefined;
+    const mockRuntime = {
+      async createTurnSnapshot() { return {}; },
+      async resolvePlan() { return { model: "dall-e-3" }; },
+      async executeImage(plan: any, req: any) {
+        capturedImageBytes = req.inputImage?.data;
+        return { images: [{ bytes: Buffer.from("out"), mimeType: "image/png" }] };
+      },
+    };
 
-      // Calling generateImageRuntime with relative path "victim.png" and workspaceRoot: workspaceDir
-      await generateImageRuntime(
-        { imagePath: "victim.png", mode: "variation" },
-        mockRuntime,
-        undefined,
-        undefined,
-        {
-          tenancyMode: "multi",
-          capabilities: [],
-          workspaceRoot: workspaceDir,
-        } as any,
-      );
+    await generateImageRuntime(input, mockRuntime as any, undefined, undefined, {
+      tenancyMode: "multi",
+      capabilities: [],
+      workspaceRoot: workspaceDir,
+    } as any);
 
-      // Captured image data should be base64 of WORKSPACE-IMAGE-BYTES
-      expect(capturedImageBytes).toBe(Buffer.from("WORKSPACE-IMAGE-BYTES").toString("base64"));
-    } finally {
-      if (wroteCwdDecoy) {
-        rmSync(cwdImage, { force: true });
-      }
-    }
+    // Captured image data must be base64 of WORKSPACE-IMAGE-BYTES
+    expect(capturedImageBytes).toBe(Buffer.from("WORKSPACE-IMAGE-BYTES").toString("base64"));
   });
 
   it("T026 [US6]: swap-racer cannot exfiltrate host secret between authorization and read", async () => {
@@ -176,7 +168,7 @@ describe("Symlink & Read-Plane Security Journeys (FR-002, FR-003, FR-004, FR-013
     symlinkSync(hostSecret, targetFile);
 
     // 3. Execute: ReadFileExecutor MUST NOT return hostSecret bytes!
-    // It must either fail closed (O_NOFOLLOW / stat mismatch) or return safe content.
+    // It must either fail closed (O_NOFOLLOW / identity mismatch) or return safe content.
     const executor = new ReadFileExecutor();
     const execRes = await executor.execute(prepared, { capabilities: [] } as any, prepared.operation as any, {});
 
@@ -184,6 +176,84 @@ describe("Symlink & Read-Plane Security Journeys (FR-002, FR-003, FR-004, FR-013
       expect((execRes as any).result.output).not.toContain("SUPER-SECRET-HOST-DATA");
     } else {
       expect(execRes.state).toBe("failed");
+      if (execRes.state === "failed") {
+        expect(["SYMLINK_READ_DENIED", "PATH_IDENTITY_MISMATCH"]).toContain(execRes.error.code);
+      }
     }
+  });
+
+  it("P1-1 (pass-10): parent-directory symlink swap between authorization and execution is denied (PATH_IDENTITY_MISMATCH)", async () => {
+    const hostSecretDir = join(hostDir, "ssh");
+    mkdirSync(hostSecretDir);
+    const hostSecret = join(hostSecretDir, "id_rsa");
+    writeFileSync(hostSecret, "HOST-SECRET-KEY-MATERIAL", "utf-8");
+
+    // In-workspace directory containing the file the tenant asks to read.
+    const dirPath = join(workspaceDir, "dir");
+    mkdirSync(dirPath);
+    writeFileSync(join(dirPath, "id_rsa"), "tenant-decoy-bytes", "utf-8");
+
+    // 1. Authorize the in-workspace read (realpath inside ceiling, sensitivity normal).
+    const prepared = await analyzeReadFile({ path: "dir/id_rsa" }, analysisCtx);
+    expect(prepared.operation.kind).toBe("read-file");
+
+    // 2. Approval-window attack: move the real dir aside, replace the PARENT with a
+    //    symlink to the host directory. O_NOFOLLOW only guards the final component,
+    //    so only an authorization-time identity pin can catch this.
+    rmSync(dirPath, { recursive: true });
+    symlinkSync(hostSecretDir, dirPath);
+
+    const executor = new ReadFileExecutor();
+    const execRes = await executor.execute(prepared, { capabilities: [] } as any, prepared.operation as any, {});
+
+    expect(execRes.state).toBe("failed");
+    if (execRes.state === "failed") {
+      expect(execRes.error.code).toBe("PATH_IDENTITY_MISMATCH");
+    }
+    expect(JSON.stringify(execRes)).not.toContain("HOST-SECRET-KEY-MATERIAL");
+  });
+
+  it("P1-1 media (pass-10): parent-dir swap on generate_image input never reaches the vendor", async () => {
+    const { generateImageRuntime } = await import("../../../../capabilities/media/media.js");
+
+    const hostSecretDir = join(hostDir, "img");
+    mkdirSync(hostSecretDir);
+    writeFileSync(join(hostSecretDir, "victim.png"), "HOST-IMAGE-BYTES", "utf-8");
+
+    const dirPath = join(workspaceDir, "assets");
+    mkdirSync(dirPath);
+    writeFileSync(join(dirPath, "victim.png"), "WORKSPACE-IMAGE-BYTES", "utf-8");
+
+    // Authorize through the real analyzer so identity is stamped like production.
+    const prepared = await analyzeGenerateImage(
+      { prompt: "edit this", image_path: "assets/victim.png", mode: "edit" },
+      analysisCtx,
+    );
+    const input = (prepared.operation as any).request.input;
+
+    // Approval-window attack: swap the parent directory to the host dir.
+    rmSync(dirPath, { recursive: true });
+    symlinkSync(hostSecretDir, dirPath);
+
+    let capturedImageBytes: string | undefined;
+    const mockRuntime = {
+      async createTurnSnapshot() { return {}; },
+      async resolvePlan() { return { model: "dall-e-3" }; },
+      async executeImage(plan: any, req: any) {
+        capturedImageBytes = req.inputImage?.data;
+        return { images: [{ bytes: Buffer.from("out"), mimeType: "image/png" }] };
+      },
+    };
+
+    await expect(
+      generateImageRuntime(input, mockRuntime as any, undefined, undefined, {
+        tenancyMode: "multi",
+        capabilities: [],
+        workspaceRoot: workspaceDir,
+      } as any),
+    ).rejects.toSatisfy((err: any) => err?.code === "PATH_IDENTITY_MISMATCH");
+
+    expect(capturedImageBytes).toBeUndefined();
+    expect(JSON.stringify(capturedImageBytes ?? "")).not.toContain(Buffer.from("HOST-IMAGE-BYTES").toString("base64"));
   });
 });

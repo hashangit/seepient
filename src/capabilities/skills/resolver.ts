@@ -14,7 +14,7 @@
  */
 
 import { readFile } from 'fs/promises';
-import { resolve, join } from 'path';
+import { resolve, join, sep } from 'path';
 import { existsSync, statSync } from 'fs';
 import { homedir } from 'os';
 
@@ -71,7 +71,11 @@ function isPathAllowed(resolvedPath: string, projectRoot: string): boolean {
     join(home, '.seepient'),           // Config/skills
   ];
 
-  return allowedPrefixes.some(prefix => resolvedPath.startsWith(prefix));
+  // Segment-aware containment: a bare startsWith would also allow sibling
+  // directories like ~/.seepient-anything (pass-10 P2-10).
+  return allowedPrefixes.some(
+    (prefix) => resolvedPath === prefix || resolvedPath.startsWith(prefix + sep),
+  );
 }
 
 /**
