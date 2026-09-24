@@ -143,6 +143,7 @@ describe("Approval Lifetimes Gate (FR-005, FR-015, T006, T028)", () => {
   });
 
   it("T006 [US0]: direct persistent approval with 'global' in multi mode throws GlobalLifetimeForbiddenError", async () => {
+    let globalAuditStore = new InMemoryAuditStore();
     const targetFile = join(tempDir, "out.txt");
     const action: PreparedToolAction = {
       version: 1,
@@ -193,12 +194,19 @@ describe("Approval Lifetimes Gate (FR-005, FR-015, T006, T028)", () => {
         }),
       },
       executionBoundary: fakeBoundary({ output: "ok", success: true }),
-      auditStore: new InMemoryAuditStore(),
+      auditStore: (globalAuditStore = new InMemoryAuditStore()),
       capabilityLedger: new InMemoryCapabilityLedger(),
       policyStore: new InMemoryPolicyStore(),
     });
 
     // Running an action whose approval selects 'global' in multi mode must throw GlobalLifetimeForbiddenError
     await expect(wired.lifecycle.run(action)).rejects.toThrow(GlobalLifetimeForbiddenError);
+
+    // R3 P2-11 pin: the backstop records a terminal denial before throwing —
+    // the audit trail must not end at awaiting-approval.
+    const terminal = await globalAuditStore.getTerminal(action.actionId);
+    expect(terminal).toBeDefined();
+    expect(terminal?.state).toBe("denied");
+    expect(terminal?.reason).toBe("global-lifetime-forbidden");
   });
 });
