@@ -119,6 +119,9 @@ function runJourney(testFile: string, neutralize: boolean, target: ProbeTarget):
   });
 
   const output = `${r.stdout?.toString() ?? ""}\n${r.stderr?.toString() ?? ""}`;
+  // CI runners force ANSI colors even when piped; strip them before parsing
+  // the vitest summary.
+  const stripped = output.replace(/\x1b\[[0-9;]*m/g, "");
 
   if (r.error) {
     return { ok: false, failureReason: `spawn error: ${r.error.message}`, failedTestCount: 0, output };
@@ -128,9 +131,10 @@ function runJourney(testFile: string, neutralize: boolean, target: ProbeTarget):
   }
 
   // Parse the vitest summary, e.g. "Tests  3 failed | 4 passed (7)".
-  const failedMatch = output.match(/Tests\s+(\d+) failed/);
+  const failedMatch = stripped.match(/Tests\s+(\d+) failed/);
   const failedTestCount = failedMatch ? Number(failedMatch[1]) : 0;
-  const sawSummary = /Test Files\s+\d+ (failed|passed)/.test(output) || /Tests\s+\d+ (failed|passed)/.test(output);
+  const sawSummary =
+    /Test Files\s+\d+ (failed|passed)/.test(stripped) || /Tests\s+\d+ (failed|passed)/.test(stripped);
   if (!sawSummary) {
     return { ok: false, failureReason: "no vitest summary in output (crash before test run?)", failedTestCount: 0, output };
   }
