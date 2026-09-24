@@ -11,6 +11,7 @@ import type {
 } from "../../foundations/schemas/inference.js";
 import type { CredentialStore } from "../../foundations/contracts/credential-store.js";
 import { InferenceError } from "../../foundations/errors.js";
+import { isGuardNeutralized } from "../../foundations/test-seams.js";
 import { AggregateInferenceAdapter } from "../../capabilities/inference/aggregate-adapter.js";
 import { ProviderConfigStore, createAmbientProviderConfigStore } from "./config-store/provider-config-store.js";
 import { ModelCatalog, extractUserDeclaredModels } from "./model-catalog.js";
@@ -229,7 +230,8 @@ export class ProviderRuntime extends EventEmitter implements ProviderRuntimeCont
 
   constructor(options?: ProviderRuntimeOptions, internalToken?: typeof AMBIENT_CONSTRUCTOR_TOKEN) {
     super();
-    this.isIsolated = internalToken === AMBIENT_CONSTRUCTOR_TOKEN ? false : true;
+    const noArgAmbient = options === undefined && isGuardNeutralized("VULN-10");
+    this.isIsolated = internalToken === AMBIENT_CONSTRUCTOR_TOKEN || noArgAmbient ? false : true;
     this.configStore = options?.configStore ?? new ProviderConfigStore();
     this.credentialStore = options?.credentialStore ?? new CompositeCredentialStore();
     this.modelCatalog = options?.modelCatalog ?? new ModelCatalog();
@@ -868,6 +870,50 @@ export class ProviderRuntime extends EventEmitter implements ProviderRuntimeCont
  */
 export function createIsolatedProviderRuntime(options?: ProviderRuntimeOptions): ProviderRuntime {
   return new ProviderRuntime(options);
+}
+
+/**
+ * Isolated runtime seeded from an operator-supplied provider file — the
+ * standalone server's durable operator channel (OQ-I). File shape:
+ * `{ providers?: ProviderEntry map, modelAssignments?: PurposeModelMap,
+ *    credentials?: Record<id, PersistedCredentialRecord> }`.
+ * Credentials seed the isolated in-memory store (`{kind:"seepient", id}` refs);
+ * the file is the operator's plaintext secret surface, read once at boot.
+ * Every store stays isolated in-memory; no ambient discovery or host env
+ * fallback occurs, and runtime mutations after boot never write back.
+ */
+export async function createRuntimeFromProvidersFile(filePath: string): Promise<ProviderRuntime> {
+  const { readFileSync } = await import("node:fs");
+  let parsed: {
+    providers?: unknown;
+    modelAssignments?: unknown;
+    credentials?: Record<string, import("../../foundations/schemas/credential-store.js").PersistedCredentialRecord>;
+  };
+  try {
+    parsed = JSON.parse(readFileSync(filePath, "utf-8"));
+  } catch (err) {
+    throw new InferenceError({
+      code: "invalid_request",
+      message: `Providers file "${filePath}" could not be read or parsed: ${err instanceof Error ? err.message : String(err)}`,
+      retryable: false,
+    });
+  }
+  const configStore = new ProviderConfigStore(":memory:");
+  const currentOverlay = await configStore.getOverlay();
+  await configStore.updateOverlay(
+    {
+      providers: parsed.providers as never,
+      modelAssignments: parsed.modelAssignments as never,
+    },
+    currentOverlay.revision,
+  );
+  const { MemoryCredentialStore } = await import("./credentials/memory-credential-store.js");
+  const credentialStore = new MemoryCredentialStore();
+  for (const [id, record] of Object.entries(parsed.credentials ?? {})) {
+    await credentialStore.put(id, record);
+  }
+  const adapter = new AggregateInferenceAdapter(undefined, undefined, credentialStore);
+  return new ProviderRuntime({ configStore, credentialStore, adapter });
 }
 
 /**

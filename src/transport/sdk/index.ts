@@ -138,6 +138,10 @@ export {
   PrincipalRequiredError,
   TenancyWorkspaceRequiredError,
   CredentialRequiredError,
+  GlobalLifetimeForbiddenError,
+  PathEscapesWorkspaceError,
+  PathHardlinkRefusedError,
+  PathIdentityMismatchError,
   type InferenceErrorCode,
   type InferenceErrorOptions,
 } from "../../foundations/errors.js";
@@ -348,8 +352,12 @@ export async function askSeepient(
   }
   const effectiveSources = computeEffectiveSkillSources(opts.sources, opts.skills);
 
+  // Mirror of seepient.ts: detect injected credentials by store-shape, not
+  // Object.keys (#private-field stores own no enumerable properties).
+  const looksLikeCredentialStore = (v: unknown): boolean =>
+    typeof v === "object" && v !== null && typeof (v as any).resolve === "function";
   const hasInjectedCredentials = Boolean(
-    ((opts as any).credentials && Object.keys((opts as any).credentials).length > 0) ||
+    ((opts as any).credentials && (looksLikeCredentialStore((opts as any).credentials) || Object.keys((opts as any).credentials).length > 0)) ||
     ((opts as any).providers && (Array.isArray((opts as any).providers) ? (opts as any).providers.length > 0 : Object.keys((opts as any).providers).length > 0)),
   );
 

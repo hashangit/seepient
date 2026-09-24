@@ -149,8 +149,13 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   const opts = options ?? {};
   const effectiveSources = computeEffectiveSkillSources(opts.sources, opts.skills);
 
+  // Detect injected credentials by store-shape, not Object.keys: a class with
+  // #private fields has no own enumerable properties and would silently ride
+  // single mode (pass-10 P1-5).
+  const looksLikeCredentialStore = (v: unknown): boolean =>
+    typeof v === "object" && v !== null && typeof (v as any).resolve === "function";
   const hasInjectedCredentials = Boolean(
-    (opts.credentials && Object.keys(opts.credentials).length > 0) ||
+    (opts.credentials && (looksLikeCredentialStore(opts.credentials) || Object.keys(opts.credentials).length > 0)) ||
     (opts.providers && (Array.isArray(opts.providers) ? opts.providers.length > 0 : Object.keys(opts.providers).length > 0)),
   );
 

@@ -289,4 +289,90 @@ describe('docs example import and runtime checks (FR-003)', () => {
     const serverModule = await import('../transport/http/index.js');
     expect(serverModule.runSeepientServer).toBeDefined();
   });
+
+  it('constructs the documented createSeepient persistence examples — bare persist throws PRINCIPAL_REQUIRED (docs truth)', async () => {
+    // Source-level trap gate: every fenced snippet in create-seepient.md that
+    // calls createSeepient with a persist option must pin tenancy: "single".
+    // persist is a multi-upgrade signal; a bare example throws PRINCIPAL_REQUIRED.
+    const createSeepientDoc = fs.readFileSync(path.join(docsSdkDir, 'create-seepient.md'), 'utf8');
+    const fenceRegex = /```(?:ts|typescript)(?:[^\n]*)\n([\s\S]*?)```/g;
+    const barePersistFences: string[] = [];
+    let fenceMatch;
+    while ((fenceMatch = fenceRegex.exec(createSeepientDoc)) !== null) {
+      const code = fenceMatch[1];
+      if (/createSeepient\s*\(/.test(code) && /\bpersist\s*:/.test(code) && !/tenancy\s*:/.test(code)) {
+        const persistLine = code.split('\n').find((l) => l.includes('persist:'));
+        barePersistFences.push(persistLine?.trim() ?? code.slice(0, 60));
+      }
+    }
+    expect(barePersistFences, 'create-seepient.md persist examples must set tenancy: "single"').toEqual([]);
+
+    // Executed constructions, one per documented variant (Session persistence
+    // x3, registered redis config, backend instance). The redis config runs as
+    // its in-memory equivalent (no redis server in CI); the tenancy field — the
+    // trap class under test — stays exactly as documented.
+    const persistDir = path.join(repoRoot, 'tmp-docs-persist-test');
+    const constructed: Array<Awaited<ReturnType<typeof sdkExports.createSeepient>>> = [];
+    try {
+      // Option 1: path string
+      constructed.push(await sdkExports.createSeepient({ tenancy: 'single', persist: persistDir }));
+      // Option 2: in-memory config
+      constructed.push(await sdkExports.createSeepient({ tenancy: 'single', persist: { type: 'memory' } }));
+      // Option 3: explicit file config
+      constructed.push(
+        await sdkExports.createSeepient({ tenancy: 'single', persist: { type: 'file', path: persistDir } })
+      );
+      // Registered backend config (redis in docs; memory equivalent here)
+      constructed.push(await sdkExports.createSeepient({ tenancy: 'single', persist: { type: 'memory' } }));
+      // Backend instance passed directly
+      constructed.push(
+        await sdkExports.createSeepient({
+          tenancy: 'single',
+          persist: {
+            __persistenceBackend: true as const,
+            async save() {},
+            async load() {
+              return null;
+            },
+            async delete() {},
+            async list() {
+              return [];
+            },
+          },
+        })
+      );
+      for (const agent of constructed) {
+        expect(agent).toBeDefined();
+      }
+    } finally {
+      for (const agent of constructed) {
+        await agent.dispose();
+      }
+      if (fs.existsSync(persistDir)) fs.rmSync(persistDir, { recursive: true, force: true });
+    }
+
+    // Red-side pin: the documented-without-tenancy shape really does throw.
+    // If this ever stops throwing, the tenancy contract changed and the docs
+    // examples must be revisited alongside this gate.
+    let bareError: any = null;
+    try {
+      await sdkExports.createSeepient({ persist: { type: 'memory' } });
+    } catch (err: any) {
+      bareError = err;
+    }
+    expect(bareError?.code).toBe('PRINCIPAL_REQUIRED');
+
+    // README is outside loadBearingPages construction; assert the example shape
+    // at the source level instead.
+    const readme = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8');
+    const headingIdx = readme.indexOf('#### Session Persistence');
+    expect(headingIdx, 'README Session Persistence section must exist').toBeGreaterThanOrEqual(0);
+    const section = readme.slice(headingIdx, readme.indexOf('####', headingIdx + 1));
+    const readmeFence = section.match(/```ts\n([\s\S]*?)```/);
+    expect(readmeFence, 'README Session Persistence example must exist').not.toBeNull();
+    expect(
+      readmeFence![1],
+      'README Session Persistence example must set tenancy (bare persist upgrades to multi and throws PRINCIPAL_REQUIRED)'
+    ).toMatch(/tenancy\s*:\s*['"]single['"]/);
+  });
 });

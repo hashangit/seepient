@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [v0.8.0] - Unreleased
 
+### Round 3 — Pass-10 remediation: read-plane identity binding, real mutation probes, operator provider channel (Spec 022-4)
+
+**Security:**
+
+- **Read-plane identity binding (authorize-what-you-open).** `snapshotPath` now records the authorized file's device/inode at analysis time; `ReadFileExecutor` and the `generate_image` input readers open with `O_NOFOLLOW` and verify the pinned fd's `fstat` against that identity, denying with `PATH_IDENTITY_MISMATCH` on mismatch or unverifiable identity. This closes the parent-directory symlink swap between authorization and execution that `O_NOFOLLOW` (final component only) could not see — probe-confirmed in the pass-10 review, now pinned by two new red-first journeys in `symlink-read-journey.test.ts`. The commit-path `oldContent` pre-read and the `edit_file` section re-read are also pinned (no-follow open + link-count gate).
+- **Real mutation probes.** `scripts/verify-mutation-probes.ts` now (1) runs each journey green as a baseline, (2) neutralizes the guard at its **production seam** (`src/foundations/test-seams.ts`, inert unless `NODE_ENV === "test"`), and (3) accepts a red verdict only when the vitest summary shows failed tests — spawn errors, missing files, and timeouts fail the probe. The matrix covers 11 guards, now including the read-plane identity pin, offered-lifetimes truth, and one-bucket CAS. SC-003's zero-write gate asserts the typed `GENERATION_ERROR` response instead of accepting any 400/500.
+- **SDK tenancy signal hardening.** Injected credentials are detected by store shape (`resolve` method), so `#private`-field `CredentialStore` instances no longer silently compose ambient single mode (pinned by a new test); an explicit `tenancy: "single"` with injected stores or runtime now emits a warning.
+
+**Operator channel (OQ-I closed):**
+
+- The standalone server has a durable provider configuration channel: `--providers-file <path>` / `runSeepientServer({ providersFile })` loads an operator-owned JSON file (providers, model assignments, credentials) once at boot into an isolated runtime (`createRuntimeFromProvidersFile`; ambient env is never consulted, the file is never written back). `--api-keys-file <path>` makes the key file explicit on the CLI. `deployment.md` documents the real channel and no longer claims the server reads `.seepient/setting.json`.
+
+**Hardening:**
+
+- WebSocket egress backpressure: `safeSend` enforces a 4 MiB `bufferedAmount` cap and closes slow readers (1013) instead of buffering without bound in the shared process.
+- Worker `RemotePolicyStore.compareAndSet` throws typed `PolicyConflictError` on HTTP 409 so the lifecycle's conflict retry actually fires.
+- `GlobalLifetimeForbiddenError` records a terminal `global-lifetime-forbidden` denial before throwing, so the audit trail no longer ends at `awaiting-approval`.
+- WS `chat.message` is validated as a string at the edge (parity with REST).
+- The skills `@path` allowlist is segment-aware (`~/.seepient-anything` no longer passes a `startsWith` check).
+- `cli-user` joins the reserved sentinel set in the Domain (worker parity).
+- New error classes are exported from the SDK barrel: `GlobalLifetimeForbiddenError`, `PathEscapesWorkspaceError`, `PathHardlinkRefusedError`, `PathIdentityMismatchError`.
+
+**Breaking changes & behavior changes:**
+
+- `PATH_IDENTITY_MISMATCH` is a new read denial: a file that changes identity between authorization and read fails closed with remediation (re-read and retry). Legitimate in-workspace reads are unaffected.
+- `PATH_ESCAPES_WORKSPACE` messages no longer echo the resolved host path (host-path existence oracle removed).
+- `PATH_HARDLINK_REFUSED` text no longer claims the other name is outside the workspace (it may be an in-workspace hardlink).
+- A WS client that stops reading while streaming is disconnected (1013) once its send buffer exceeds 4 MiB.
+
+**Docs truth:**
+
+- README and `create-seepient.md` persistence examples carry `tenancy: "single"` (bare `persist` examples threw `PRINCIPAL_REQUIRED`); the docs-examples gate now constructs them. `migration.md` gained the 022-3/022-4 breaking-change sections. The Round-2 bullet's fictional `buildNeedsApproval` was corrected to `buildApprovalOptions` / `buildApprovalChoices`, and the vocabulary gate now catches provider-name env fictions in docs (the purged env rows are banned identifiers).
+
 ### Round 2 — Authorization truth, symlink plane, and sentinel unification (Spec 022-4)
 
 **Breaking changes & Behavior changes:**
@@ -17,7 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Hardlink Gate (FR-014)**:
   Read targets with link counts `st_nlink > 1` are denied with typed `PathHardlinkRefusedError` (`PATH_HARDLINK_REFUSED`), preventing unauthorized file access through hardlinks created outside the workspace ceiling unless explicitly permitted by an operator opt-in.
 - **Offered-Lifetimes Truth in Multi-Tenant Mode (FR-015)**:
-  `buildNeedsApproval` and `ApprovalBroker` exclude `global` from the offered lifetimes list when `tenancyMode === "multi"`. If `global` lifetime is directly requested in multi-tenant mode, execution fails closed with `GlobalLifetimeForbiddenError` (`GLOBAL_LIFETIME_FORBIDDEN`) rather than a misleading `invalid-approval-response` denial.
+  `buildApprovalOptions` / `buildApprovalChoices` and `ApprovalBroker` exclude `global` from the offered lifetimes list when `tenancyMode === "multi"`. If `global` lifetime is directly requested in multi-tenant mode, execution fails closed with `GlobalLifetimeForbiddenError` (`GLOBAL_LIFETIME_FORBIDDEN`) rather than a misleading `invalid-approval-response` denial.
 - **One-Bucket Unstamped CAS Semantics (FR-016)**:
   Policy compare-and-set reconciliation now partitions capabilities into disjoint sets (`otherPrincipalCaps`, `unstampedCaps`, `currentPrincipalCaps`), merging unstamped capabilities exactly once (`[...otherPrincipalCaps, ...unstampedCaps, ...nextPrincipalCaps]`). This eliminates exponential 2^K capability duplication across sequential approvals while ensuring unstamped capabilities are never silently erased in multi-tenant mode.
 - **Sentinel Unification (FR-017)**:

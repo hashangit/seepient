@@ -115,13 +115,17 @@ describe("J4 Isolated Boot Journey (VULN-9)", () => {
         }),
       });
 
-      expect([502, 500, 400]).toContain(res.status);
-      const resBody = await res.json().catch(() => ({}));
-      expect(resBody).toBeDefined();
+      // Typed denial-generation assertion (pass-10 F5): the request must
+      // traverse auth + body validation and reach the generation phase —
+      // which composes the per-request permission pipeline — before failing
+      // on the empty runtime. A 400/401/403 (rejected before composition)
+      // fails this gate rather than silently re-vacuuming it.
+      const resBody = (await res.json().catch(() => null)) as { error?: { code?: string } } | null;
+      expect(res.status).toBe(500);
+      expect(resBody?.error?.code).toBe("GENERATION_ERROR");
 
-      // On current tree, server defaults to LocalPolicyStore (~/.seepient) and LocalAuditStore (cwd),
-      // which write files to disk.
-      // After FR-008, server defaults to in-memory stores in multi mode, with zero disk touch.
+      // Zero-disk-write: with the in-memory store defaults, a full chat turn
+      // (tools + sessionId) touches nothing under $HOME/.seepient or cwd.
       const seepientHomeExists = existsSync(join(sandboxHome, ".seepient"));
       const cwdFiles = readdirSync(sandboxCwd);
 

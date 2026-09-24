@@ -14,7 +14,7 @@ export type TenancyMode = "single" | "multi";
 
 export const PRINCIPAL_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;
 
-export const SENTINEL_PRINCIPAL_IDS = new Set(["sdk-user", "default", "anonymous"]);
+export const SENTINEL_PRINCIPAL_IDS = new Set(["sdk-user", "default", "anonymous", "cli-user"]);
 
 export interface TenancySignals {
   explicit?: TenancyMode;
@@ -155,6 +155,14 @@ export function validateTenancyCompleteness(
           `Injected: [${present.join(", ")}]. Missing: [${missing.join(", ")}]. ` +
           `Missing stores will fall back to local disk at ~/.seepient or ./.seepient. ` +
           `For fully stateless worker execution, all three permission stores (auditStore, policyStore, capabilityLedger) must be injected.`,
+      );
+    } else if (storeCount === 3 || inputs.runtime) {
+      // Explicit-single with fully injected state is usually a mis-set
+      // tenancy flag: ambient host state (skills, settings, credential
+      // fallback) still composes in single mode (pass-10 P1-5).
+      console.warn(
+        `[seepient] WARNING: State was injected but tenancy mode is explicitly "single" — ambient host state (skills, settings, secrets fallback) still composes. ` +
+          `If this instance serves tenants, pass tenancy: "multi" with a principalId.`,
       );
     }
     return;

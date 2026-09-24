@@ -46,6 +46,7 @@ import type { PolicyEngine } from "./policy-engine.js";
 import { generateId } from "../../foundations/id.js";
 import { idempotencyKey } from "./audit-recorder.js";
 import { PolicyConflictError, GlobalLifetimeForbiddenError } from "../../foundations/errors.js";
+import { isGuardNeutralized } from "../../foundations/test-seams.js";
 import {
   GLOBAL_WORKSPACE_ID,
   scopeGlobalPolicyCapabilities,
@@ -351,6 +352,9 @@ export class ActionLifecycle {
       // name an explicit supported lifetime or be rejected below.
       const lifetimeKind = answer.lifetime;
       if (this.tenancyMode === "multi" && lifetimeKind === "global") {
+        // Typed backstop: record the terminal denial first so the audit trail
+        // does not end at awaiting-approval (pass-10 P2-11), then throw.
+        await this.record(action, "denied", "global-lifetime-forbidden").catch(() => {});
         throw new GlobalLifetimeForbiddenError();
       }
       if (
@@ -582,7 +586,10 @@ export class ActionLifecycle {
                   ...fresh.map((c) => ({ ...c, principalId: c.principalId ?? targetPrincipal })),
                 ];
                 for (const capability of candidates) {
-                  if (!setCovers({ version: 1, capabilities: nextPrincipalCaps }, capability)) {
+                  if (
+                    isGuardNeutralized("R2-CAS-ONE-BUCKET") ||
+                    !setCovers({ version: 1, capabilities: nextPrincipalCaps }, capability)
+                  ) {
                     nextPrincipalCaps.push(capability);
                   }
                 }
@@ -591,7 +598,14 @@ export class ActionLifecycle {
                   rawSnap.version,
                   {
                     version: 1 as const,
-                    capabilities: [...otherPrincipalCaps, ...unstampedCaps, ...nextPrincipalCaps],
+                    capabilities: [
+                      ...otherPrincipalCaps,
+                      ...unstampedCaps,
+                      // Neutralized probes reproduce the pre-R2 double-bucket
+                      // write-back (unstamped re-appended per approval → 2^K).
+                      ...(isGuardNeutralized("R2-CAS-ONE-BUCKET") ? unstampedCaps : []),
+                      ...nextPrincipalCaps,
+                    ],
                   },
                   {
                     kind: "human",

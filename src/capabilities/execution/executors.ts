@@ -29,8 +29,9 @@ import type {
   PreparationArtifactStore,
   EffectBroker,
 } from "../../foundations/contracts/execution-brokers.js";
-import { UnsupportedBackendError, PathHardlinkRefusedError } from "../../foundations/errors.js";
+import { UnsupportedBackendError, PathHardlinkRefusedError, PathIdentityMismatchError } from "../../foundations/errors.js";
 import { isSecurityPath } from "./environment-policy.js";
+import { isGuardNeutralized } from "../../foundations/test-seams.js";
 import { createSetupFailure } from "../../foundations/contracts/setup-failure.js";
 
 /** Read the prepared bytes for a commit operation from the artifact store. */
@@ -93,8 +94,22 @@ export class CommitFilesExecutor implements OperationExecutor {
     // like the legacy hashline handler did.
     let oldContent: string | null = null;
     try {
-      const { readFile: fsReadOld } = await import("node:fs/promises");
-      oldContent = await fsReadOld(operation.commits[0].destination.canonicalPath, "utf-8");
+      // Pinned read (pass-10 P2-4): no-follow open + nlink gate so a swapped
+      // destination cannot put host bytes into step metadata.
+      const [{ open: fsOpenOld }, { constants: fsConstants }] = await Promise.all([
+        import("node:fs/promises"),
+        import("node:fs"),
+      ]);
+      const destPath = operation.commits[0].destination.canonicalPath;
+      const oldHandle = await fsOpenOld(destPath, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+      try {
+        const oldSt = await oldHandle.stat();
+        if (!oldSt.isSymbolicLink() && oldSt.nlink <= 1) {
+          oldContent = await oldHandle.readFile({ encoding: "utf-8" });
+        }
+      } finally {
+        await oldHandle.close();
+      }
     } catch { /* new file or unreadable: metadata degrades, commit proceeds */ }
     try {
       for (const commit of operation.commits) {
@@ -280,6 +295,39 @@ export class ReadFileExecutor implements OperationExecutor {
 
       if (st.nlink > 1 && !this.operatorAllowsHardlinks) {
         const err = new PathHardlinkRefusedError(targetPath);
+        return {
+          state: "failed",
+          error: {
+            code: err.code,
+            message: err.message,
+            retryable: false,
+          },
+          evidence: {
+            backend: "local-native",
+            actionDigest: action.actionDigest,
+            executorId: "read-file-denied",
+            operationKind: "read-file",
+          },
+        };
+      }
+
+      // Authorize-what-you-open identity pin (pass-10 P1-1): the opened file
+      // must be the same file (device/inode) snapshotted at analysis time.
+      // O_NOFOLLOW only guards the final path component; this check catches
+      // parent-directory symlink swaps and rename swaps between authorization
+      // and execution. Unverifiable identity fails closed.
+      const expectedIdentity = operation.expected;
+      const identityEstablished =
+        expectedIdentity?.exists === true &&
+        expectedIdentity.device !== undefined &&
+        expectedIdentity.inode !== undefined;
+      if (
+        !isGuardNeutralized("P1-1-READ-IDENTITY") &&
+        (!identityEstablished ||
+          String(st.dev) !== expectedIdentity!.device ||
+          String(st.ino) !== expectedIdentity!.inode)
+      ) {
+        const err = new PathIdentityMismatchError(targetPath);
         return {
           state: "failed",
           error: {

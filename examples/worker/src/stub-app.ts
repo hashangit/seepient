@@ -20,6 +20,7 @@ import type {
   PermissionRequest,
   PermissionDecision,
 } from "../../../src/transport/sdk/index.js";
+import { isGuardNeutralized } from "../../../src/foundations/test-seams.js";
 
 export const KNOWN_TOKENS: Record<string, string> = {
   "token-tenant-a": "tenant-a",
@@ -209,7 +210,9 @@ export function createStubApp(initialState?: Partial<StubAppState> & { allowDemo
       return;
     }
 
-    const authPrincipal = state.tokenToPrincipal.get(token);
+    const authPrincipal = isGuardNeutralized("VULN-19")
+      ? (state.tokenToPrincipal.get(token) ?? "forged-principal")
+      : state.tokenToPrincipal.get(token);
     if (!authPrincipal) {
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Unauthorized", message: "Invalid or unknown token" }));

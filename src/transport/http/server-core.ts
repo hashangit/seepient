@@ -11,6 +11,7 @@ import type { Middleware } from "../../foundations/contracts/middleware.js";
 import { extractLoopError } from "../sdk/error-surfacing.js";
 import { normalizeHistoryForSend } from "../../domain/sessions/normalize-history.js";
 import { logTransportEvent } from "../logging.js";
+import { isGuardNeutralized } from "../../foundations/test-seams.js";
 import * as crypto from "node:crypto";
 import { initializeSkillRegistry } from "../../capabilities/skills/index.js";
 import { buildSkillCatalog } from "../../domain/skills/skill-catalog.js";
@@ -79,7 +80,7 @@ export async function serverGenerateText(
 
   // Resolve tools
   const isMulti = (options as any).tenancyMode === "multi";
-  const toolDefs = options.tools ? resolveTools(options.tools, registry) : ((isMulti && !(options as any).builtInTools) ? [] : registry.definitions());
+  const toolDefs = options.tools ? resolveTools(options.tools, registry) : ((isMulti && !(options as any).builtInTools && !isGuardNeutralized("VULN-17")) ? [] : registry.definitions());
 
   // Hooks
   const hooks = createHookExecutor();
@@ -189,7 +190,7 @@ export async function handleAgentChatStream(
   const runtime = opts.runtime ?? createIsolatedProviderRuntime();
   const registry = opts.toolRegistry ?? new ToolRegistry();
   const isMulti = (opts as any).tenancyMode === "multi";
-  const toolDefs = opts.tools ? resolveTools(opts.tools, registry) : ((isMulti && !(opts as any).builtInTools) ? [] : registry.definitions());
+  const toolDefs = opts.tools ? resolveTools(opts.tools, registry) : ((isMulti && !(opts as any).builtInTools && !isGuardNeutralized("VULN-17")) ? [] : registry.definitions());
   const hooks = createHookExecutor();
 
   // Load session or create initial message list

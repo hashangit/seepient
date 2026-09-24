@@ -161,12 +161,27 @@ export function snapshotPath(target: CanonicalPathTarget): FileSnapshot | undefi
     const st = fs_lstatSync(target.canonicalPath);
     return {
       exists: true,
+      device: String(st.dev),
+      inode: String(st.ino),
       size: st.size,
       modifiedNs: String(st.mtimeMs * 1e6),
     };
   } catch {
     return { exists: false };
   }
+}
+
+/**
+ * Device/inode identity of a snapshotted file, used to pin reads against
+ * mid-path symlink swaps between authorization and execution.
+ */
+export function identityOfSnapshot(
+  snapshot: FileSnapshot | undefined,
+): { dev: number; ino: number } | undefined {
+  if (!snapshot || !snapshot.exists || snapshot.device === undefined || snapshot.inode === undefined) {
+    return undefined;
+  }
+  return { dev: Number(snapshot.device), ino: Number(snapshot.inode) };
 }
 
 /** Sensitivity classification for read sources. */
@@ -361,10 +376,29 @@ export async function analyzeEditFile(
   // dispatch with `expected` snapshots — the capability envelope is finally
   // checked on the write that actually happens.
   const { applySectionsToSnapshot } = await import("../../foundations/hashline/patcher.js");
-  const { readFile: fsReadFile } = await import("node:fs/promises");
+  const [{ open: fsOpenSection }, { constants: fsConstants }] = await Promise.all([
+    import("node:fs/promises"),
+    import("node:fs"),
+  ]);
   const sections = await applySectionsToSnapshot(
     patchStr,
-    (p) => fsReadFile(path.isAbsolute(p) ? p : path.resolve(cwd, p), "utf-8"),
+    async (p) => {
+      // Pinned read (pass-10 P3): no-follow open + nlink gate so a swapped
+      // section file cannot feed host bytes into the merge.
+      const abs = path.isAbsolute(p) ? p : path.resolve(cwd, p);
+      const handle = await fsOpenSection(abs, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+      try {
+        const st = await handle.stat();
+        if (st.isSymbolicLink() || st.nlink > 1) {
+          throw new Error(
+            `Refusing edit source: ${abs} is a symbolic link or hardlink; edit the resolved real file`,
+          );
+        }
+        return await handle.readFile({ encoding: "utf-8" });
+      } finally {
+        await handle.close();
+      }
+    },
     ctx.snapshotStore,
   );
 
@@ -890,6 +924,16 @@ export async function analyzeGenerateImage(
 
   const inputTargets = [imageTarget, maskTarget].filter((t): t is CanonicalPathTarget => !!t);
 
+  // Identity pins captured at authorization time (authorize-what-you-open):
+  // the media executor verifies the opened input against these device/inode
+  // pairs so a parent-directory symlink swap cannot redirect the read.
+  const imageIdentity = imageTarget
+    ? identityOfSnapshot(snapshotPath(imageTarget))
+    : undefined;
+  const maskIdentity = maskTarget
+    ? identityOfSnapshot(snapshotPath(maskTarget))
+    : undefined;
+
   // Resolve save destination: output_path takes precedence over output_dir, defaulting to workspace root
   const count = typeof args.n === "number" && args.n > 0 ? Math.floor(args.n) : 1;
   const promptDigest = createHash("sha256").update(prompt || generateId()).digest("hex").slice(0, 12);
@@ -973,10 +1017,14 @@ export async function analyzeGenerateImage(
   const inputObj: Record<string, import("../../foundations/contracts/tool-effects.js").JsonValue> = {};
   if (args.prompt !== undefined) inputObj.prompt = args.prompt;
   if (outputCommit) inputObj.outputPath = outputCommit.destination.canonicalPath;
-  if (imageTarget) inputObj.imagePath = imageTarget.canonicalPath;
-  else if (args.image_path !== undefined) inputObj.imagePath = args.image_path;
-  if (maskTarget) inputObj.maskPath = maskTarget.canonicalPath;
-  else if (args.mask_path !== undefined) inputObj.maskPath = args.mask_path;
+  if (imageTarget) {
+    inputObj.imagePath = imageTarget.canonicalPath;
+    if (imageIdentity) inputObj.imageIdentity = imageIdentity;
+  } else if (args.image_path !== undefined) inputObj.imagePath = args.image_path;
+  if (maskTarget) {
+    inputObj.maskPath = maskTarget.canonicalPath;
+    if (maskIdentity) inputObj.maskIdentity = maskIdentity;
+  } else if (args.mask_path !== undefined) inputObj.maskPath = args.mask_path;
   if (args.mode !== undefined) inputObj.mode = args.mode;
   if (args.model !== undefined) inputObj.model = args.model;
   if (args.n !== undefined) inputObj.n = args.n;

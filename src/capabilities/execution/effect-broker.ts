@@ -31,6 +31,7 @@ import { createHash } from "node:crypto";
 import { PersistedReplayLedger, type ReplayLedger } from "./persisted-replay-ledger.js";
 import { InMemoryReplayLedger } from "./in-memory-replay-ledger.js";
 import { resolveSecretRef } from "../../foundations/security/credential-resolver.js";
+import { isGuardNeutralized } from "../../foundations/test-seams.js";
 import { createSetupFailure } from "../../foundations/contracts/setup-failure.js";
 import { isMetadataIp, isPrivateIp } from "../../foundations/network/ip-classifier.js";
 import { safeSsrfFetch } from "../../foundations/network/ssrf-fetch.js";
@@ -167,7 +168,7 @@ export class EffectBroker implements EffectBrokerContract {
     this.tenancyMode = opts.tenancyMode ?? "single";
     this.replayLedger =
       opts.replayLedger ??
-      (this.tenancyMode === "multi"
+      (this.tenancyMode === "multi" && !isGuardNeutralized("VULN-5")
         ? new InMemoryReplayLedger()
         : new PersistedReplayLedger());
     this.externalSendHandler = opts.externalSendHandler;
@@ -180,7 +181,7 @@ export class EffectBroker implements EffectBrokerContract {
       const val = this.secretResolver(ref);
       if (val !== undefined) return val;
     }
-    if (this.tenancyMode === "multi") {
+    if (this.tenancyMode === "multi" && !isGuardNeutralized("VULN-1")) {
       return undefined;
     }
     return resolveSecretRef(ref);

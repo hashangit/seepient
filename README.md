@@ -363,6 +363,7 @@ const seepient = await createSeepient({
   provider: 'anthropic',
   sessionId: 'my-session',        // Session identifier
   persist: './sessions',          // Directory path or custom PersistenceBackend
+  tenancy: 'single',              // single-user mode; bare persist otherwise upgrades to multi and requires principalId
 });
 ```
 

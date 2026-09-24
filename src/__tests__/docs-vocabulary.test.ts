@@ -116,7 +116,10 @@ describe('docs vocabulary gate (FR-002)', () => {
       }
     }
 
-    const docEnvRegex = /\b(SEEPIENT_[A-Z0-9_]+|[A-Z][A-Z0-9_]*_(?:API_KEY|BASE_URL|MODEL)|SMTP_[A-Z0-9_]+)\b/g;
+    // Suffix alternation must cover every purged env-name family: *_PROVIDER is
+    // included so a reintroduced `LLM_PROVIDER`-style name fails the gate, not
+    // just *_API_KEY / *_BASE_URL / *_MODEL / SMTP_* shapes.
+    const docEnvRegex = /\b(SEEPIENT_[A-Z0-9_]+|[A-Z][A-Z0-9_]*_(?:API_KEY|BASE_URL|MODEL|PROVIDER)|SMTP_[A-Z0-9_]+)\b/g;
     for (const file of envScanFiles) {
       if (!fs.existsSync(file)) continue;
       const relPath = path.relative(repoRoot, file);
@@ -340,6 +343,11 @@ describe('docs vocabulary gate (FR-002)', () => {
       'getDefaultProviderRuntime',
       'TENANCY_EDGE_VALIDATION_FAILED',
       'seepient/types',
+      // Purged env-var names: env-key synthesis was demolished; these must not
+      // creep back into any consumer-facing page or the changelog.
+      'LLM_PROVIDER',
+      'LLM_MODEL',
+      'OPENAI_COMPAT_MODEL',
     ];
 
     const violations: string[] = [];

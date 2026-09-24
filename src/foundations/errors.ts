@@ -491,12 +491,16 @@ export class GlobalLifetimeForbiddenError extends PermissionError {
 
 /**
  * Thrown when a file path resolves outside the tenant workspace boundary.
+ * The resolved host path is kept on `resolvedPath` for internal logging but is
+ * deliberately omitted from the message: tenants must not get a host-path
+ * existence/canonicalization oracle.
  */
 export class PathEscapesWorkspaceError extends ToolError {
   readonly resolvedPath: string;
   constructor(resolvedPath: string, message?: string) {
     super(
-      message ?? `PATH_ESCAPES_WORKSPACE: ${resolvedPath} resolves outside your workspace; ask your operator or work on a copy`,
+      message ??
+        "PATH_ESCAPES_WORKSPACE: this path resolves outside your workspace; ask your operator for access or work on a copy inside the workspace",
     );
     this.name = "PathEscapesWorkspaceError";
     this.code = "PATH_ESCAPES_WORKSPACE";
@@ -512,10 +516,30 @@ export class PathHardlinkRefusedError extends ToolError {
   readonly targetPath: string;
   constructor(targetPath: string, message?: string) {
     super(
-      message ?? `PATH_HARDLINK_REFUSED: Reads of hardlinked files (link count > 1) are prohibited: ${targetPath} has another name outside your workspace`,
+      message ??
+        `PATH_HARDLINK_REFUSED: reads of files with more than one name on this filesystem are prohibited: ${targetPath}. Use a regular file inside your workspace`,
     );
     this.name = "PathHardlinkRefusedError";
     this.code = "PATH_HARDLINK_REFUSED";
+    this.retryable = false;
+    this.targetPath = targetPath;
+  }
+}
+
+/**
+ * Thrown when the file opened for reading is not the same file (device/inode)
+ * that was authorized at analysis time. Catches mid-path (parent-directory)
+ * symlink swaps and rename swaps that O_NOFOLLOW cannot see.
+ */
+export class PathIdentityMismatchError extends ToolError {
+  readonly targetPath: string;
+  constructor(targetPath: string, message?: string) {
+    super(
+      message ??
+        `PATH_IDENTITY_MISMATCH: the file at ${targetPath} changed between authorization and read (device/inode mismatch); re-read the file and retry`,
+    );
+    this.name = "PathIdentityMismatchError";
+    this.code = "PATH_IDENTITY_MISMATCH";
     this.retryable = false;
     this.targetPath = targetPath;
   }
