@@ -254,7 +254,7 @@ export class ReadFileExecutor implements OperationExecutor {
       const { constants } = await import("node:fs");
 
       try {
-        handle = await open(targetPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+        handle = await open(targetPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
       } catch (err: any) {
         if (err?.code === "ELOOP" || err?.code === "EMLINK") {
           return {
