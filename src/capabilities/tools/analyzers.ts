@@ -383,15 +383,24 @@ export async function analyzeEditFile(
   const sections = await applySectionsToSnapshot(
     patchStr,
     async (p) => {
-      // Pinned read (pass-10 P3): no-follow open + nlink gate so a swapped
-      // section file cannot feed host bytes into the merge.
+      // FR-003: the section read is a real read — it clears the workspace
+      // ceiling like every other model-influenced read before the pinned
+      // open. Outside-ceiling targets (existing or dangling) deny identically,
+      // closing the existence/hash oracle.
       const abs = path.isAbsolute(p) ? p : path.resolve(cwd, p);
-      const handle = await fsOpenSection(abs, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+      const real = authorizeReadTargetPath(abs, cwd, {
+        canonicalPath: abs,
+        canonicalParent: path.dirname(abs),
+        basename: path.basename(abs),
+        exists: true,
+        finalSymlink: false,
+      });
+      const handle = await fsOpenSection(real, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
       try {
         const st = await handle.stat();
         if (st.isSymbolicLink() || st.nlink > 1) {
           throw new Error(
-            `Refusing edit source: ${abs} is a symbolic link or hardlink; edit the resolved real file`,
+            `Refusing edit source: ${real} is a symbolic link or hardlink; edit the resolved real file`,
           );
         }
         return await handle.readFile({ encoding: "utf-8" });

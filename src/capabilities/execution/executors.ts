@@ -226,9 +226,24 @@ export class ReadFileExecutor implements OperationExecutor {
     action: PreparedToolAction,
     _envelope: CapabilityEnvelope,
     operation: Extract<PreparedToolAction["operation"], { kind: "read-file" }>,
-    _opts: { signal?: AbortSignal; onUpdate?: (u: ToolProgress) => void },
+    opts: { signal?: AbortSignal; onUpdate?: (u: ToolProgress) => void },
   ): Promise<ExecutionResult> {
     const targetPath = operation.target.canonicalPath;
+
+    // FR-004: the abort signal must interrupt the read. Checked before the
+    // open and threaded into the read below.
+    if (opts.signal?.aborted) {
+      return {
+        state: "failed",
+        error: { code: "READ_ABORTED", message: "Read aborted before open", retryable: true },
+        evidence: {
+          backend: "local-native",
+          actionDigest: action.actionDigest,
+          executorId: "read-file-denied",
+          operationKind: "read-file",
+        },
+      };
+    }
 
     // T108a: deny reads of the security directory
     if (isSecurityPath(targetPath)) {
@@ -254,7 +269,12 @@ export class ReadFileExecutor implements OperationExecutor {
       const { constants } = await import("node:fs");
 
       try {
-        handle = await open(targetPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+        // O_NONBLOCK bounds the open: on a FIFO with no writer a blocking
+        // open would park a threadpool thread forever. Regular files ignore it.
+        handle = await open(
+          targetPath,
+          constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
+        );
       } catch (err: any) {
         if (err?.code === "ELOOP" || err?.code === "EMLINK") {
           return {
@@ -282,6 +302,25 @@ export class ReadFileExecutor implements OperationExecutor {
           error: {
             code: "SYMLINK_READ_DENIED",
             message: `Reads of symbolic links are prohibited: ${targetPath}`,
+            retryable: false,
+          },
+          evidence: {
+            backend: "local-native",
+            actionDigest: action.actionDigest,
+            executorId: "read-file-denied",
+            operationKind: "read-file",
+          },
+        };
+      }
+
+      // FR-004: only regular files. A FIFO that passed the non-blocking open
+      // would otherwise tie the turn to a writer that may never come.
+      if (!st.isFile()) {
+        return {
+          state: "failed",
+          error: {
+            code: "READ_NOT_REGULAR_FILE",
+            message: `Reads are restricted to regular files: ${targetPath}`,
             retryable: false,
           },
           evidence: {
@@ -344,7 +383,7 @@ export class ReadFileExecutor implements OperationExecutor {
         };
       }
 
-      const content = await handle.readFile({ encoding: "utf-8" });
+      const content = await handle.readFile({ encoding: "utf-8", signal: opts.signal });
       const tag = this.snapshotStore?.record(targetPath, content);
       const output = tag ? `${content}\n\n[content-tag:${tag}]` : content;
       return {
