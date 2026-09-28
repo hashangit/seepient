@@ -71,25 +71,9 @@ const result = await askSeepient("Explain recursion", {
 
 Seepient Agent automatically detects API keys from environment variables.
 
-### Provider-specific keys
+### Provider credentials
 
-| Environment Variable  | Provider   |
-| --------------------- | ---------- |
-| `OPENAI_API_KEY`      | OpenAI     |
-| `ANTHROPIC_API_KEY`   | Anthropic  |
-| `GLM_API_KEY`         | GLM        |
-| `OPENAI_COMPAT_API_KEY` | OpenAI-compatible (Ollama, vLLM, Together AI, etc.) |
-
-### OpenAI-compatible settings
-
-| Environment Variable    | Purpose                                      |
-| ----------------------- | -------------------------------------------- |
-| `OPENAI_COMPAT_BASE_URL` | Base URL for the OpenAI-compatible provider (required when using that provider) |
-
-```bash
-# Use Anthropic with its own key
-export ANTHROPIC_API_KEY=sk-ant-...
-```
+Credentials are stored through provider management (setup wizard, TUI dock, `seepient auth login`), never read from the environment. Embedders can inject their own `CredentialStore` (see below).
 
 ---
 
@@ -116,7 +100,7 @@ console.log(`Found ${catalog.length} available models across providers:`, provid
 await seepient.addProvider({
   accountId: "team_anthropic",
   upstreamProvider: "anthropic",
-  credential: { mode: "paste", keyValue: process.env.ANTHROPIC_API_KEY! },
+  credential: { mode: "paste", keyValue: process.env.MY_COMPANY_ANTHROPIC_KEY! }, // embedder-owned env is fine — Seepient never reads it
 });
 ```
 
@@ -179,25 +163,7 @@ console.log(r3.text);
 
 ## OpenAI-compatible provider
 
-Connect to any LLM API that exposes an OpenAI-compatible endpoint (Ollama, vLLM, Together AI, local models, self-hosted LLMs, third-party proxies):
-
-```typescript
-import { askSeepient } from "seepient";
-
-const result = await askSeepient("Hello from local model", {
-  model: "llama-3.3-70b",
-  config: {
-    openaiCompatBaseUrl: process.env.OPENAI_COMPAT_BASE_URL,
-    openaiCompatApiKey: process.env.OPENAI_COMPAT_API_KEY,
-  },
-});
-```
-
-::: warning
-The `OPENAI_COMPAT_BASE_URL` is required for the `openai-compatible` provider.
-:::
-
----
+OpenAI-compatible endpoints (Ollama, vLLM, Together AI, local models, self-hosted LLMs, third-party proxies) are configured like any other provider: add an account with a base URL through provider management, with a stored key or `none` for keyless local servers.
 
 ## Related APIs
 

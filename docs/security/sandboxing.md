@@ -32,7 +32,7 @@ Even inside an OS sandbox, an agent might attempt to curl an external server wit
 
 The **Egress Gate** inspects outgoing network requests and tool arguments:
 1. **SSRF protection**: Rejects network requests targeting cloud metadata IP addresses (such as `169.254.169.254` for AWS/GCP instance credentials) and internal loopback addresses unless explicitly allowed.
-2. **Credential redaction**: Automatically redacts environment variable secrets (such as strings matching `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`) from tool stdout and stderr before they return to the model or display in the UI.
+2. **Credential redaction**: Automatically strips known provider API-key variables (and any variable whose name matches the provider-key patterns) from the sandbox environment, so their values cannot reach tool output or the model.
 
 ---
 

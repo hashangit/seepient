@@ -79,7 +79,6 @@ export async function handleGetProviders(
       ...(acc.ssrfAllowPrivate !== undefined ? { ssrfAllowPrivate: acc.ssrfAllowPrivate } : {}),
       credential: {
         kind: acc.credential?.kind ?? "none",
-        ...(acc.credential?.kind === "env" ? { name: (acc.credential as any).name } : {}),
       },
     };
   }
@@ -134,8 +133,10 @@ export async function handlePutProvider(
   let credInput: any = { mode: "preserve" };
   if (body.credential) {
     if (body.credential.kind === "env" || body.credential.mode === "env") {
-      credInput = { mode: "env", varName: body.credential.name ?? body.credential.varName ?? body.credential.envVar };
-    } else if (body.credential.kind === "none" || body.credential.mode === "none") {
+      sendJSON(res, 400, { error: "invalid_request", message: "Environment-variable credentials are not supported — store the key via provider management (paste) or inject a credential store." });
+      return;
+    }
+    if (body.credential.kind === "none" || body.credential.mode === "none") {
       credInput = { mode: "none" };
     } else if (body.credential.kind === "api_key" || body.credential.mode === "paste" || body.credential.keyValue || body.credential.key) {
       credInput = { mode: "paste", keyValue: body.credential.keyValue ?? body.credential.key ?? body.credential.value };

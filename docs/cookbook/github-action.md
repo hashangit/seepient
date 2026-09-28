@@ -43,9 +43,11 @@ jobs:
           sudo apt-get update && sudo apt-get install -y bubblewrap
           npm install -g seepient
 
+      - name: Configure Seepient credential
+        run: seepient auth login anthropic --key "${{ secrets.ANTHROPIC_KEY }}"
+
       - name: Run Seepient Review
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SEEPIENT_CONSENT_MODE: autonomous
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

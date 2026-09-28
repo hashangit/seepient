@@ -36,6 +36,10 @@ const envExamplePath = path.join(repoRoot, '.env.example');
 
 const allMdFiles = [...getAllMarkdownFiles(docsDir), readmePath];
 
+function isChangelogHistory(relPath: string): boolean {
+  return relPath === 'CHANGELOG.md';
+}
+
 describe('docs vocabulary gate (FR-002)', () => {
   it('checks 1-5: consent modes, env vars, CLI flags, subcommands, and SDK imports match code truth', async () => {
     const report: DocsVocabularyReport = {
@@ -350,6 +354,9 @@ describe('docs vocabulary gate (FR-002)', () => {
       'OPENAI_COMPAT_MODEL',
     ];
 
+    // 022-5 FR-005: the inference API-key names are banned everywhere except
+    // CHANGELOG history (past releases stay as written).
+    const bannedEverywhere = [...bannedIdentifiers, 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GLM_API_KEY', 'OPENAI_COMPAT_API_KEY', 'OPENAI_COMPAT_BASE_URL'];
     const violations: string[] = [];
     const filesToScan = [
       ...getAllMarkdownFiles(docsDir),
@@ -365,7 +372,8 @@ describe('docs vocabulary gate (FR-002)', () => {
       const lines = content.split('\n');
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
-        for (const banned of bannedIdentifiers) {
+        for (const banned of bannedEverywhere) {
+          if (isChangelogHistory(relPath) && !bannedIdentifiers.includes(banned)) continue;
           if (line.includes(banned)) {
             violations.push(`${relPath}:${i + 1} contains banned identifier "${banned}"`);
           }

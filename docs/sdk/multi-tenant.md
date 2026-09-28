@@ -252,7 +252,7 @@ Single-use capabilities consumed by Tenant A do not mark digests as expired for 
 
 ### Environment Credentials (M10)
 
-Environment variables (e.g. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) are classified as operator-scoped:
+Host provider API-key environment variables are classified as operator-scoped (and are never read for inference — 022-5 demolition):
 - In `single` mode, default runtimes read these variables directly for developer convenience.
 - In `multi` mode, Seepient never falls back to ambient environment credentials. Each tenant's model calls are governed strictly by credentials in the injected `ProviderRuntime`.
 

@@ -48,19 +48,9 @@ Configuration files (`setting.json`) use standard JSON format. Below is an annot
 }
 ```
 
-Provider credentials and model routing can be configured interactively via `seepient setup`, in the TUI Model & Provider Dock (`Ctrl+M` or `/models`), via CLI commands (`seepient auth login`, `seepient providers add`), or using environment variables.
+Provider credentials and model routing are configured interactively via `seepient setup`, in the TUI Model & Provider Dock (`Ctrl+M` or `/models`), or via CLI commands (`seepient auth login`, `seepient providers add`). Seepient never reads provider API keys from the environment; embedders can inject a custom credential store through the SDK.
 
 ## Environment variables
-
-### LLM providers (auto-detected at boot)
-
-| Variable | Provider | Purpose |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | Anthropic | API key for Claude models |
-| `OPENAI_API_KEY` | OpenAI | API key for GPT models |
-| `GLM_API_KEY` | Zhipu GLM | API key for GLM models |
-| `OPENAI_COMPAT_API_KEY` | OpenAI-Compatible | API key for custom or local endpoints |
-| `OPENAI_COMPAT_BASE_URL` | OpenAI-Compatible | Base URL (e.g. `http://127.0.0.1:11434/v1` for Ollama) |
 
 ### Tool integrations
 

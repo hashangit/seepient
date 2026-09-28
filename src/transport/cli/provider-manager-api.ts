@@ -71,7 +71,6 @@ export interface AccountInput {
   upstreamProvider?: string;
   credential:
     | { mode: "paste"; keyValue?: string; keyText?: string }
-    | { mode: "env"; varName: string }
     | { mode: "none" }
     | { mode: "preserve" };
   baseUrl?: string | null;
@@ -542,13 +541,6 @@ export function createProviderManagerApi(
       };
     }
 
-    if (input.credential.mode === "env" && (!input.credential.varName || input.credential.varName.trim() === "")) {
-      return {
-        ok: false,
-        error: { code: "validation_failed", message: "Environment variable name cannot be empty." },
-      };
-    }
-
     let ref: CredentialRef;
     let credentialWritten = false;
     if (input.credential.mode === "paste") {
@@ -563,8 +555,6 @@ export function createProviderManagerApi(
       } catch (err) {
         return { ok: false, error: mapError(err) };
       }
-    } else if (input.credential.mode === "env") {
-      ref = { kind: "env", name: input.credential.varName };
     } else if (input.credential.mode === "none") {
       ref = { kind: "none" };
     } else if (input.credential.mode === "preserve") {
@@ -901,7 +891,7 @@ export function createProviderManagerApi(
         ok: false,
         error: {
           code: "oauth_flow_failed",
-          message: `OAuth sign-in requires an interactive terminal. Use "seepient auth login --env-var" or configure credentials via "seepient providers add --credential env:NAME".`,
+          message: `OAuth sign-in requires an interactive terminal. Configure credentials via "seepient auth login <id> --key <key>" instead.`,
         },
       };
     }

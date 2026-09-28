@@ -11,13 +11,11 @@ import type {
   CredentialMeta,
 } from "../../../foundations/schemas/credential-store.js";
 import { SeepientError, CredentialRequiredError } from "../../../foundations/errors.js";
-import { EnvCredentialStore } from "./env-credential-store.js";
 import { FileCredentialStore } from "./file-credential-store.js";
 import { KeychainCredentialStore } from "./keychain-credential-store.js";
 import { MemoryCredentialStore } from "./memory-credential-store.js";
 
 export interface CompositeCredentialStoreOptions {
-  env?: EnvCredentialStore;
   file?: FileCredentialStore;
   keychain?: KeychainCredentialStore;
   memory?: MemoryCredentialStore;
@@ -28,12 +26,12 @@ export interface CompositeCredentialStoreOptions {
 
 /**
  * Composite CredentialStore that chains multiple backends with fallback logic.
- * Reads fallback: File -> Keychain -> Env.
+ * Reads fallback: File -> Keychain -> Memory. Env is not a credential source
+ * (022-5 FR-005): env-kind refs fail closed in every mode.
  * Writes route to primary write store (File by default in ambient, Memory by default in isolated).
  */
 export class CompositeCredentialStore implements CredentialStore {
   readonly isIsolated: boolean;
-  readonly envStore: EnvCredentialStore;
   readonly fileStore: FileCredentialStore;
   readonly keychainStore: KeychainCredentialStore;
   readonly memoryStore: MemoryCredentialStore;
@@ -45,7 +43,6 @@ export class CompositeCredentialStore implements CredentialStore {
     } else {
       this.isIsolated = customStores?.isIsolated ?? true;
     }
-    this.envStore = customStores?.env ?? new EnvCredentialStore();
     this.fileStore = customStores?.file ?? new FileCredentialStore();
     this.keychainStore = customStores?.keychain ?? new KeychainCredentialStore();
     this.memoryStore = customStores?.memory ?? new MemoryCredentialStore({ isIsolated: this.isIsolated });
@@ -85,22 +82,22 @@ export class CompositeCredentialStore implements CredentialStore {
     }
 
     if (ref.kind === "env") {
-      if (this.isIsolated) {
-        return {
-          id: `env:${ref.name}`,
-          ref,
-          activeLeaseCount: 0,
-          async isResolvable() {
-            return false;
-          },
-          acquireLease(): CredentialLease {
-            throw new CredentialRequiredError(
-              `CREDENTIAL_REQUIRED: Environment variable credential "${ref.name}" cannot be resolved in isolated multi-tenant mode without explicit credential injection.`,
-            );
-          },
-        };
-      }
-      return this.envStore.resolve(ref);
+      // 022-5 FR-005: env is not an inference credential source in any mode.
+      // Seepient code never reads process.env for keys; embedders wanting env
+      // wiring inject a custom CredentialStore.
+      return {
+        id: `env:${ref.name}`,
+        ref,
+        activeLeaseCount: 0,
+        async isResolvable() {
+          return false;
+        },
+        acquireLease(): CredentialLease {
+          throw new CredentialRequiredError(
+            `CREDENTIAL_REQUIRED: Environment variable credential "${ref.name}" is not supported — configure the provider through provider management or inject a credential store.`,
+          );
+        },
+      };
     }
 
     if (ref.kind === "seepient") {
@@ -207,7 +204,7 @@ export class CompositeCredentialStore implements CredentialStore {
 
 /**
  * Factory for creating an ambient CompositeCredentialStore (Profile A single-user mode).
- * Reads and writes through to ~/.seepient/credentials, keychain, and process.env.
+ * Reads and writes through to ~/.seepient/credentials and the keychain.
  */
 export function createAmbientCompositeCredentialStore(
   options?: Omit<CompositeCredentialStoreOptions, "isIsolated">,

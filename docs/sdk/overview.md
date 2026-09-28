@@ -93,7 +93,7 @@ console.log(result.text);
 console.log(result.usage.totalTokens);
 ```
 
-When called without options, Seepient resolves the provider and model automatically from your environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GLM_API_KEY`, `OPENAI_COMPAT_API_KEY`) or your persisted configuration overlay at `~/.seepient/providers-overlay.json`. It also registers all 15 built-in tools.
+When called without options, Seepient resolves the provider and model automatically from your persisted provider-management configuration (setup wizard, TUI dock, `seepient auth login`, or an injected credential store) at `~/.seepient/providers-overlay.json`. It never reads provider API keys from the environment. It also registers all 15 built-in tools.
 
 To run pure text completions without tool execution, pass `tools: []`. To specify a model or restrict tools, pass configuration options. See [askSeepient](/sdk/ask-seepient) for the complete resolution order and reference.
 

@@ -3,7 +3,6 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import {
-  EnvCredentialStore,
   FileCredentialStore,
   KeychainCredentialStore,
   MemoryCredentialStore,
@@ -13,56 +12,6 @@ import {
 import { SeepientError } from "../../../../foundations/errors.js";
 
 describe("CredentialStore implementations (QS-P4.1)", () => {
-  describe("EnvCredentialStore", () => {
-    const origEnv = process.env.TEST_PROVIDER_KEY;
-
-    afterEach(() => {
-      if (origEnv !== undefined) {
-        process.env.TEST_PROVIDER_KEY = origEnv;
-      } else {
-        delete process.env.TEST_PROVIDER_KEY;
-      }
-    });
-
-    it("resolves valid env var to a handle and yields raw secret on lease.secret()", async () => {
-      process.env.TEST_PROVIDER_KEY = "sk-env-123";
-      const store = new EnvCredentialStore();
-      const handle = await store.resolve({ kind: "env", name: "TEST_PROVIDER_KEY" });
-
-      expect(await handle.isResolvable()).toBe(true);
-      expect(handle.activeLeaseCount).toBe(0);
-
-      const lease = handle.acquireLease();
-      expect(handle.activeLeaseCount).toBe(1);
-
-      const secret = await lease.secret();
-      expect(secret).toEqual({ kind: "api_key", value: "sk-env-123" });
-
-      // Idempotent release
-      await lease.release();
-      expect(handle.activeLeaseCount).toBe(0);
-      await lease.release();
-      expect(handle.activeLeaseCount).toBe(0);
-
-      // secret() throws if called after release
-      await expect(lease.secret()).rejects.toThrow(SeepientError);
-    });
-
-    it("reflects rotated env var value on next lease.secret() call without subscription", async () => {
-      process.env.TEST_PROVIDER_KEY = "sk-env-initial";
-      const store = new EnvCredentialStore();
-      const handle = await store.resolve({ kind: "env", name: "TEST_PROVIDER_KEY" });
-
-      const lease = handle.acquireLease();
-      expect(await lease.secret()).toEqual({ kind: "api_key", value: "sk-env-initial" });
-
-      // Rotate env var
-      process.env.TEST_PROVIDER_KEY = "sk-env-rotated";
-      expect(await lease.secret()).toEqual({ kind: "api_key", value: "sk-env-rotated" });
-      await lease.release();
-    });
-  });
-
   describe("MemoryCredentialStore", () => {
     it("stores, retrieves, lists, and deletes records", async () => {
       const store = new MemoryCredentialStore();
@@ -191,11 +140,10 @@ describe("CredentialStore implementations (QS-P4.1)", () => {
       process.env.COMPOSITE_TEST_KEY = "sk-composite-env";
       const composite = createAmbientCompositeCredentialStore();
 
-      // 1. Env
+      // 1. Env — fail closed in ambient mode too (022-5 FR-005 demolition)
       const envHandle = await composite.resolve({ kind: "env", name: "COMPOSITE_TEST_KEY" });
-      const envLease = envHandle.acquireLease();
-      expect(await envLease.secret()).toEqual({ kind: "api_key", value: "sk-composite-env" });
-      await envLease.release();
+      expect(await envHandle.isResolvable()).toBe(false);
+      expect(() => envHandle.acquireLease()).toThrow(/CREDENTIAL_REQUIRED/);
 
       // 2. None
       const noneHandle = await composite.resolve({ kind: "none" });

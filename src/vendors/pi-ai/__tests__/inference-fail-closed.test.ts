@@ -1,10 +1,11 @@
 /**
  * J6 Adversarial Journey — VULN-16: pi-ai ambient auth fallback and baseUrl exfiltration.
  *
- * Verifies that in multi-tenant mode, Seepient's raw inference wrappers (text and image)
- * throw CREDENTIAL_REQUIRED before any vendor call when secret kind is none/undefined,
- * preventing pi-ai from falling back to host process.env keys and exfiltrating them
- * via attacker-controlled baseUrls.
+ * Verifies the 022-5 FR-007 credential discipline (tenancy-invariant): raw inference
+ * wrappers throw CREDENTIAL_REQUIRED for valueless/undefined secrets, and map
+ * kind:"none" to the explicit "unused" sentinel so the vendored pi-ai layer never
+ * falls back to host process.env keys (37 env names) — no decoy key can reach any
+ * wire, even toward an attacker-controlled baseUrl.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -55,24 +56,30 @@ describe("J6 Inference Fail-Closed Journey (VULN-16)", () => {
       },
     };
 
-    // In fixed implementation: resolveSecretApiKey / raw throws CREDENTIAL_REQUIRED in multi mode
-    // On baseline (0b7fe4e): Returns undefined apiKey, leading to pi-ai reading process.env.OPENAI_API_KEY!
-    let threw = false;
+    // 022-5: kind "none" maps to the "unused" sentinel (tenancy-invariant), so the
+    // credential gate PASSES; the request proceeds to the target baseUrl. Point it
+    // at an unroutable loopback port: the call must fail as a network error — never
+    // CREDENTIAL_REQUIRED, and never carrying the host decoy key.
+    target.baseUrl = "http://127.0.0.1:9/v1";
+    const seen: string[] = [];
     try {
       const generator = raw.chatStream(target, {
         messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
       }, {
         tenancyMode: "multi",
+        capabilities: [{ kind: "network-destination", scheme: "http", host: "127.0.0.1", port: 9 }],
       } as any);
-      for await (const _event of generator) {
-        // should not yield any events
+      for await (const event of generator) {
+        seen.push(JSON.stringify(event));
       }
     } catch (err: any) {
-      threw = true;
-      expect(err.message || err.code).toMatch(/CREDENTIAL_REQUIRED/);
+      seen.push(String(err?.message ?? err?.code));
     }
-
-    expect(threw).toBe(true);
+    // The sink failure may surface as a thrown error or an error event; either
+    // way the sentinel passed the credential gate and no decoy can appear.
+    const transcript = seen.join("\n");
+    expect(transcript).not.toMatch(/CREDENTIAL_REQUIRED/);
+    expect(transcript).not.toContain("sk-host-operator-decoy-token");
     guard.assertGuardedPathExecuted(1);
   });
 
@@ -103,16 +110,22 @@ describe("J6 Inference Fail-Closed Journey (VULN-16)", () => {
       },
     };
 
+    // 022-5: sentinel semantics (see the text case above) — the gate passes for
+    // kind "none" and the egress assert still applies to the account baseUrl.
+    target.baseUrl = "http://127.0.0.1:9/v1";
     let threw = false;
     try {
       await imageRaw.generate(target, {
         prompt: "A test prompt",
       }, {
         tenancyMode: "multi",
+        capabilities: [{ kind: "network-destination", scheme: "http", host: "127.0.0.1", port: 9 }],
       } as any);
     } catch (err: any) {
       threw = true;
-      expect(err.message || err.code).toMatch(/CREDENTIAL_REQUIRED/);
+      const text = `${err.message ?? err.code}`;
+      expect(text).not.toMatch(/CREDENTIAL_REQUIRED/);
+      expect(text).not.toContain("sk-host-operator-decoy-token");
     }
 
     expect(threw).toBe(true);
@@ -331,6 +344,9 @@ describe("J6 Inference Fail-Closed Journey (VULN-16)", () => {
     }
 
     expect(events.length).toBeGreaterThan(0);
-    expect(capturedStreamOptions.apiKey).toBeUndefined();
+    // 022-5 FR-007 (tenancy-invariant): single mode maps kind "none" to the
+    // "unused" sentinel too — the vendored layer must never receive undefined
+    // (it would fall back to host process.env).
+    expect(capturedStreamOptions.apiKey).toBe("unused");
   });
 });

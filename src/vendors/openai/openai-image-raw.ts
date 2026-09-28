@@ -41,30 +41,23 @@ export class OpenAIImageRaw implements ImageBackend {
         });
       }
 
-      const secret = await lease.secret();
-      if (opts?.tenancyMode === "multi") {
-        if (!secret || secret.kind !== "api_key" || !secret.value) {
-          throw new InferenceError({
-            code: "auth",
-            message: `CREDENTIAL_REQUIRED: Multi-tenant image inference requires an explicit api_key credential for provider "${target.upstreamProvider}".`,
-            providerAccount: target.providerAccount,
-            model: target.model,
-            retryable: false,
-          });
-        }
-        if (target.baseUrl) {
-          assertBaseUrlEgressAllowed(target.baseUrl, opts.capabilities, target);
-        }
-      }
-
-      if (secret.kind !== "api_key") {
+      const rawSecret = await lease.secret();
+      // 022-5 FR-007 (tenancy-invariant): undefined/empty keys must never
+      // reach the vendored client — the OpenAI SDK falls back to host
+      // process.env when apiKey is undefined. kind:"none" maps to the
+      // explicit "unused" sentinel (no-auth endpoint).
+      const secret = rawSecret?.kind === "none" ? { kind: "api_key" as const, value: "unused" } : rawSecret;
+      if (!secret || secret.kind !== "api_key" || !secret.value) {
         throw new InferenceError({
           code: "auth",
-          message: `OpenAI image backend requires an api_key credential, received kind "${secret.kind}"`,
+          message: `CREDENTIAL_REQUIRED: Image inference requires an explicit api_key credential for provider "${target.upstreamProvider}" — configure it through provider management.`,
           providerAccount: target.providerAccount,
           model: target.model,
           retryable: false,
         });
+      }
+      if (opts?.tenancyMode === "multi" && target.baseUrl) {
+        assertBaseUrlEgressAllowed(target.baseUrl, opts.capabilities, target);
       }
 
       const client =

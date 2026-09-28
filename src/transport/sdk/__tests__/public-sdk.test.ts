@@ -92,7 +92,7 @@ describe("Public SDK Instance Contract (QS-P6.6)", () => {
     const addRes = await seepient.addProvider({
       accountId: "anthropic-acc",
       upstreamProvider: "anthropic",
-      credential: { mode: "env", varName: "ANTHROPIC_API_KEY" },
+      credential: { mode: "paste", keyValue: "sk-test-ant-key" },
     });
     expect(addRes.ok).toBe(true);
 
