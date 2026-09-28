@@ -69,6 +69,57 @@ export interface StructuredImageResult {
 }
 
 /**
+ * Pinned input read shared by the image and mask paths (022-5 FR-002/FR-004b):
+ * no-follow, non-blocking open (bounds a FIFO open instead of freezing the
+ * event loop), regular-file gate, hardlink gate, and the authorization-time
+ * identity pin. Exported for the identity-discipline tests.
+ */
+export async function readPinnedImage(
+  resolvedPath: string,
+  identity: { dev: number; ino: number } | undefined,
+  label: string,
+  operatorAllowsHardlinks: boolean | undefined,
+  signal?: AbortSignal,
+): Promise<{ type: "image"; mediaType: "image/png"; data: string }> {
+  if (signal?.aborted) throw new Error(`Refusing ${label}: aborted before open`);
+  const handle = await fs.promises.open(
+    resolvedPath,
+    fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0),
+  );
+  try {
+    const st = await handle.stat();
+    if (st.isSymbolicLink()) {
+      throw new Error(`Refusing ${label}: ${resolvedPath} is a symbolic link`);
+    }
+    if (!st.isFile()) {
+      throw new Error(`Refusing ${label}: ${resolvedPath} is not a regular file`);
+    }
+    if (st.nlink > 1 && !operatorAllowsHardlinks) {
+      throw new PathHardlinkRefusedError(resolvedPath);
+    }
+    // Authorization-time identity pin: without it O_NOFOLLOW only guards the
+    // final component, so a parent-directory swap redirects this read.
+    if (
+      !isGuardNeutralized("P1-1-READ-IDENTITY") &&
+      (!identity ||
+        String(st.dev) !== String(identity.dev) ||
+        String(st.ino) !== String(identity.ino))
+    ) {
+      throw new PathIdentityMismatchError(resolvedPath);
+    }
+    const data = await handle.readFile();
+    return { type: "image" as const, mediaType: "image/png" as const, data: data.toString("base64") };
+  } catch (err: any) {
+    if (err?.code === "ELOOP" || err?.code === "EMLINK") {
+      throw new Error(`Refusing ${label}: ${resolvedPath} is a symbolic link`);
+    }
+    throw err;
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
  * Execute image generation via ProviderRuntime without performing filesystem writes.
  * Used by the effect broker / vendorOperationHandler for pipeline-managed exact commits.
  */
@@ -122,74 +173,24 @@ export async function generateImageRuntime(
 
   let inputImage: any;
   if (resolvedImagePath && fs.existsSync(resolvedImagePath)) {
-    let fd: number | undefined;
-    try {
-      fd = fs.openSync(resolvedImagePath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
-      const st = fs.fstatSync(fd);
-      if (st.isSymbolicLink()) {
-        throw new Error(`Refusing image input: ${resolvedImagePath} is a symbolic link`);
-      }
-      if (st.nlink > 1 && !opts?.operatorAllowsHardlinks) {
-        throw new PathHardlinkRefusedError(resolvedImagePath);
-      }
-      // Authorization-time identity pin: without it O_NOFOLLOW only guards the
-      // final component, so a parent-directory swap redirects this read.
-      if (
-        !isGuardNeutralized("P1-1-READ-IDENTITY") &&
-        (!req.imageIdentity ||
-          String(st.dev) !== String(req.imageIdentity.dev) ||
-          String(st.ino) !== String(req.imageIdentity.ino))
-      ) {
-        throw new PathIdentityMismatchError(resolvedImagePath);
-      }
-      inputImage = {
-        type: "image" as const,
-        mediaType: "image/png" as const,
-        data: fs.readFileSync(fd).toString("base64"),
-      };
-    } catch (err: any) {
-      if (err?.code === "ELOOP" || err?.code === "EMLINK") {
-        throw new Error(`Refusing image input: ${resolvedImagePath} is a symbolic link`);
-      }
-      throw err;
-    } finally {
-      if (fd !== undefined) fs.closeSync(fd);
-    }
+    inputImage = await readPinnedImage(
+      resolvedImagePath,
+      req.imageIdentity,
+      "image input",
+      opts?.operatorAllowsHardlinks,
+      signal,
+    );
   }
 
   let mask: any;
   if (resolvedMaskPath && fs.existsSync(resolvedMaskPath)) {
-    let fd: number | undefined;
-    try {
-      fd = fs.openSync(resolvedMaskPath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
-      const st = fs.fstatSync(fd);
-      if (st.isSymbolicLink()) {
-        throw new Error(`Refusing image mask: ${resolvedMaskPath} is a symbolic link`);
-      }
-      if (st.nlink > 1 && !opts?.operatorAllowsHardlinks) {
-        throw new PathHardlinkRefusedError(resolvedMaskPath);
-      }
-      if (
-        !isGuardNeutralized("P1-1-READ-IDENTITY") &&
-        (!req.maskIdentity ||
-          String(st.dev) !== String(req.maskIdentity.dev) ||
-          String(st.ino) !== String(req.maskIdentity.ino))
-      ) {
-        throw new PathIdentityMismatchError(resolvedMaskPath);
-      }
-      mask = {
-        type: "image" as const,
-        mediaType: "image/png" as const,
-        data: fs.readFileSync(fd).toString("base64"),
-      };
-    } catch (err: any) {
-      if (err?.code === "ELOOP" || err?.code === "EMLINK") {
-        throw new Error(`Refusing image mask: ${resolvedMaskPath} is a symbolic link`);
-      }
-      throw err;
-    } finally {
-      if (fd !== undefined) fs.closeSync(fd);
-    }
+    mask = await readPinnedImage(
+      resolvedMaskPath,
+      req.maskIdentity,
+      "image mask",
+      opts?.operatorAllowsHardlinks,
+      signal,
+    );
   }
 
   const result = await runtime.executeImage(
