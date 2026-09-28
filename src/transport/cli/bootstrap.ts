@@ -109,7 +109,7 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
     console.log(chalk.yellow("No provider configuration found."));
 
     if (isNonInteractive()) {
-      console.error(chalk.red("No provider configured. Set supported API key env vars (OPENAI_API_KEY / ANTHROPIC_API_KEY / GLM_API_KEY / OPENAI_COMPAT_API_KEY) or configure via `seepient providers add <id> --credential env:VAR_NAME`."));
+      console.error(chalk.red("No provider configured. Run `seepient` to start the setup wizard, or add a key via `seepient auth login <id> --key <key>` (or inject a custom credential store from the SDK)."));
       process.exit(1);
     } else {
       const rl = readline.createInterface({ input: process.stdin, output: process.stdout });

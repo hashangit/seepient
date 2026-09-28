@@ -12,9 +12,14 @@ export class GoogleDiscoverySource implements DiscoverySource {
   async discover(account: ProviderAccountContext): Promise<DiscoveryResult> {
     const lease = account.credential.acquireLease();
     try {
-      const secret = await lease.secret();
-      if (secret.kind !== "api_key") {
-        return { modelIds: [], error: `Google discovery requires an api_key credential, received kind "${secret.kind}"` };
+      const rawSecret = await lease.secret();
+      // 022-5 FR-006: value-present gate (parity with the OpenAI source).
+      const secret = rawSecret.kind === "none" ? { kind: "api_key" as const, value: "unused" } : rawSecret;
+      if (secret.kind !== "api_key" || !secret.value) {
+        return {
+          modelIds: [],
+          error: `CREDENTIAL_REQUIRED: Google discovery requires a value-present api_key credential, received kind "${secret.kind}"${secret.kind === "api_key" ? " with an empty value" : ""}`,
+        };
       }
 
       const url = "https://generativelanguage.googleapis.com/v1beta/models";

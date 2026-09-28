@@ -107,23 +107,26 @@ export class PiImageRaw implements ImageBackend {
         });
       }
 
-      const secret = await lease.secret();
-      if (opts?.tenancyMode === "multi") {
-        if (!secret || secret.kind !== "api_key" || !secret.value) {
-          throw new InferenceError({
-            code: "auth",
-            message: `CREDENTIAL_REQUIRED: Multi-tenant image inference requires an explicit api_key credential for provider "${target.upstreamProvider}".`,
-            providerAccount: target.providerAccount,
-            model: target.model,
-            retryable: false,
-          });
-        }
-        if (target.baseUrl) {
-          assertBaseUrlEgressAllowed(target.baseUrl, opts.capabilities, target);
-        }
+      const rawSecret = await lease.secret();
+      // 022-5 FR-007 (tenancy-invariant): undefined/empty keys must never
+      // reach the vendored layer — it falls back to host environment keys.
+      // kind:"none" maps to the explicit "unused" sentinel (no-auth endpoint),
+      // which satisfies the vendored hasExplicitApiKey check.
+      const secret = rawSecret?.kind === "none" ? { kind: "api_key" as const, value: "unused" } : rawSecret;
+      if (!secret || secret.kind !== "api_key" || !secret.value) {
+        throw new InferenceError({
+          code: "auth",
+          message: `CREDENTIAL_REQUIRED: Image inference requires an explicit api_key credential for provider "${target.upstreamProvider}" — configure it through provider management.`,
+          providerAccount: target.providerAccount,
+          model: target.model,
+          retryable: false,
+        });
+      }
+      if (opts?.tenancyMode === "multi" && target.baseUrl) {
+        assertBaseUrlEgressAllowed(target.baseUrl, opts.capabilities, target);
       }
 
-      const apiKey = secret?.kind === "api_key" ? secret.value : undefined;
+      const apiKey = secret.value;
 
       const providerName = target.upstreamProvider;
       let model = this.imageModels.getModel(providerName, target.model) as

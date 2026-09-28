@@ -42,12 +42,11 @@ When you select **Add or configure an LLM provider**, Seepient lists supported p
 
 ### Credential storage modes
 
-The wizard supports four ways to store and reference credentials:
+The wizard supports three ways to store credentials:
 
-1. **Environment variable reference (recommended)**: Links the provider to an existing environment variable name (for example, `ANTHROPIC_API_KEY`). Seepient resolves the secret from your environment at runtime, keeping credentials out of config files.
+1. **Paste the key (default)**: The key is stored through provider management (encrypted credential file, or the OS keychain when available) — never read back from the environment at runtime.
 2. **Keychain storage**: On macOS and supported Linux desktops, Seepient encrypts the API key and writes it directly to your operating system keychain.
-3. **Plaintext configuration**: Writes the API key to `~/.seepient/setting.json` with `0600` permissions. Use this mode on headless servers without an OS keychain daemon.
-4. **Keyless / local**: Configures local models (like Ollama on `http://127.0.0.1:11434`) that require no authentication tokens.
+3. **Keyless / local**: Configures local models (like Ollama on `http://127.0.0.1:11434`) that require no authentication tokens.
 
 ---
 

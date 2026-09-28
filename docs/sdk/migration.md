@@ -20,7 +20,7 @@ In v0.8.0, all no-argument constructors are **isolated in-memory by default** an
 ```typescript no-check
 import { ProviderRuntime } from "seepient";
 
-// Implicitly read OPENAI_API_KEY from process.env and ~/.seepient
+// Implicitly read host env provider keys and ~/.seepient
 const runtime = new ProviderRuntime();
 ```
 
@@ -231,11 +231,11 @@ const agent = await createSeepient({
 ## 7. Inference Fail-Closed Credentials & Egress
 
 ### Summary
-In multi-tenant mode, omitting provider credentials throws `CredentialRequiredError` (`CREDENTIAL_REQUIRED`). Inference calls never fall back to ambient host environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.) inside vendor libraries. Custom `baseUrl` routing requires an explicit network capability grant (`model-egress` / `network-egress`), preventing Bearer-key exfiltration.
+Omitting provider credentials throws `CredentialRequiredError` (`CREDENTIAL_REQUIRED`) in every mode: inference never falls back to ambient host environment variables — not in Seepient's wrappers and not inside the vendored libraries. Custom `baseUrl` routing in multi-tenant mode requires an explicit network capability grant (`model-egress` / `network-egress`), preventing Bearer-key exfiltration.
 
 ### Before (v0.7.x)
 ```typescript no-check
-// In v0.7.x, omitting credentials fell back to process.env.OPENAI_API_KEY
+// In v0.7.x, omitting credentials fell back to host env provider keys
 const agent = await createSeepient({
   tenancy: "multi",
   principalId: "tenant_1",
@@ -276,15 +276,15 @@ const agent = await createSeepient({
 ## 8. Isolated Credential Store Refusal of Environment References
 
 ### Summary
-`MemoryCredentialStore` stamped `isIsolated: true` refuses to resolve ambient `{ kind: "env" }` references. In isolated mode, attempting to lease an env-backed credential throws `CredentialRequiredError` rather than reading host `process.env`. In multi-tenant setups, inject static `{ kind: "api_key", keyValue: ... }` credentials.
+Env-kind credential references are refused in every mode (022-5 demolition): leasing one throws `CredentialRequiredError` rather than reading host `process.env`, and `put` rejects env-kind records outright. Inject static `{ kind: "api_key", keyValue: ... }` credentials instead.
 
 ### Before (v0.7.x)
 ```typescript no-check
-// In v0.7.x, MemoryCredentialStore resolved env vars from host process.env
+// Env-kind records are rejected outright (022-5 demolition)
 const credentialStore = new MemoryCredentialStore();
 await credentialStore.put("openai", {
-  kind: "env",
-  name: "OPENAI_API_KEY",
+  kind: "api_key",
+  keyValue: "sk-...", // resolved value only — never an env reference
 });
 ```
 

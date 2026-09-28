@@ -607,14 +607,9 @@ Seepient routes model requests across upstream providers with automatic catalog 
 
 You can configure providers in three ways:
 
-#### 1. Zero-config auto-discovery
-If you have standard provider API keys in your environment or `.env`, Seepient detects them automatically at boot:
-- `OPENAI_API_KEY` (OpenAI)
-- `ANTHROPIC_API_KEY` (Anthropic Claude)
-- `GLM_API_KEY` (Zhipu GLM)
-- `OPENAI_COMPAT_API_KEY` / `OPENAI_COMPAT_BASE_URL` (OpenAI-compatible endpoints, e.g. Ollama)
+#### 1. Guided setup (the only path)
 
-Additional providers and models (Google Gemini, DeepSeek, Groq, etc.) can be configured via `seepient setup` or `seepient auth login`.
+Seepient reads no API keys from the environment. Configure providers through the setup wizard (`seepient setup`), the TUI dock (`/models`), or `seepient auth login <id> --key <key>`. Embedders can inject a custom credential store through the SDK.
 
 #### 2. Guided wizard and interactive TUI dock
 - Run `seepient setup` for the first-run interactive onboarding wizard.
@@ -649,7 +644,6 @@ Credentials are never stored in plaintext within version-controlled repositories
 |:---|:---|:---|
 | **OS Keychain** | `keychain` | Encrypted via macOS Keychain or Linux Secret Service. No plaintext keys touch disk. |
 | **OAuth / Session** | `seepient` | Secure token storage with automatic token refresh for subscription sign-ins. |
-| **Environment pointer** | `env` | Stores only the variable name (e.g. `OPENAI_API_KEY`). The secret stays in your shell environment. |
 | **None** | `none` | For local inference endpoints that do not require authentication (e.g. Ollama, LM Studio). |
 
 ### Configuration shape (`setting.json`)
@@ -662,12 +656,12 @@ When saved to `~/.seepient/setting.json` or `.seepient/setting.json`, your provi
     "openai": {
       "adapter": "pi-ai",
       "upstreamProvider": "openai",
-      "credential": { "kind": "env", "name": "OPENAI_API_KEY" }
+      "credential": { "kind": "seepient", "id": "openai" }
     },
     "anthropic": {
       "adapter": "pi-ai",
       "upstreamProvider": "anthropic",
-      "credential": { "kind": "env", "name": "ANTHROPIC_API_KEY" }
+      "credential": { "kind": "keychain", "account": "anthropic" }
     },
     "ollama-local": {
       "adapter": "pi-ai",

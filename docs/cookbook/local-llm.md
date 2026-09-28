@@ -24,23 +24,18 @@ Confirm Ollama is serving on `http://127.0.0.1:11434`.
 
 ## 2. Configure Seepient
 
-You can configure Seepient to use your local Ollama instance in two ways:
+### Option A: Interactive setup or CLI (Recommended)
 
-### Option A: Environment variables (Recommended)
-
-Set the OpenAI-compatible base URL in your shell environment or `.env`:
-
-```bash
-export OPENAI_COMPAT_BASE_URL="http://127.0.0.1:11434/v1"
-export OPENAI_COMPAT_API_KEY="ollama"
-```
-
-### Option B: Interactive setup or CLI
-
-Run the interactive setup wizard to configure the provider and choose default models:
+Run the interactive setup wizard, choose "Custom / local endpoint", and point it at Ollama (keyless — no authentication token needed):
 
 ```bash
 seepient setup
+```
+
+Or add the account directly:
+
+```bash
+seepient providers add ollama --base-url http://127.0.0.1:11434/v1 --credential none
 ```
 
 Or configure via the CLI:

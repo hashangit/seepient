@@ -14,8 +14,6 @@ import {
 } from "../../../foundations/schemas/provider-config.js";
 import { SeepientError } from "../../../foundations/errors.js";
 import { applyDeepPatch, mergePatches } from "./deep-patch.js";
-import { resolveDefaultModelForProvider } from "../../../foundations/models-catalog.js";
-import { getSyncBuiltinCatalog } from "../model-catalog.js";
 
 function isProcessAlive(pid: number): boolean {
   try {
@@ -468,78 +466,18 @@ export function createAmbientProviderConfigStore(): ProviderConfigStore {
   return new ProviderConfigStore({ overlayPath, isIsolated: false });
 }
 
-/**
- * Synthesizes default v2 configuration from environment variables.
- */
 const baseConfigCache = new Map<string, ProviderEffectiveConfig>();
 
 export function clearBaseConfigCache(): void {
   baseConfigCache.clear();
 }
 
-export function synthesizeEnvProviders(): Record<string, any> {
-  const providers: Record<string, any> = {};
-
-  if (process.env.OPENAI_API_KEY) {
-    providers["openai"] = {
-      adapter: "pi-ai",
-      upstreamProvider: "openai",
-      credential: { kind: "env", name: "OPENAI_API_KEY" },
-    };
-  }
-
-  if (process.env.ANTHROPIC_API_KEY) {
-    providers["anthropic"] = {
-      adapter: "pi-ai",
-      upstreamProvider: "anthropic",
-      credential: { kind: "env", name: "ANTHROPIC_API_KEY" },
-    };
-  }
-
-  if (process.env.GLM_API_KEY) {
-    providers["glm"] = {
-      adapter: "pi-ai",
-      upstreamProvider: "glm",
-      credential: { kind: "env", name: "GLM_API_KEY" },
-    };
-  }
-
-  if (process.env.OPENAI_COMPAT_API_KEY || process.env.OPENAI_COMPAT_BASE_URL) {
-    providers["openai-compatible"] = {
-      adapter: "pi-ai",
-      upstreamProvider: "openai-compatible",
-      baseUrl: process.env.OPENAI_COMPAT_BASE_URL || "https://api.openai.com/v1",
-      credential: { kind: "env", name: "OPENAI_COMPAT_API_KEY" },
-    };
-  }
-
-  return providers;
-}
-
 export function synthesizeBaseConfig(): ProviderEffectiveConfig {
-  const providers = synthesizeEnvProviders();
+  // 022-5 FR-005: env-derived provider synthesis is demolished — inference
+  // credentials resolve only from provider management. A fresh install starts
+  // with zero providers and the setup flow (or an injected store) adds them.
+  const providers: Record<string, any> = {};
   const modelAssignments: any = { text: {} };
-
-  const catalog = getSyncBuiltinCatalog();
-  const firstAccount = Object.keys(providers)[0];
-  if (firstAccount) {
-    try {
-      const defaultModel = resolveDefaultModelForProvider(
-        catalog,
-        providers[firstAccount].upstreamProvider || firstAccount,
-        "standard",
-      );
-      modelAssignments.text.standard = {
-        providerAccount: firstAccount,
-        model: defaultModel,
-      };
-    } catch {
-      modelAssignments.text.standard = {
-        providerAccount: firstAccount,
-        model: "default",
-      };
-    }
-  }
 
   return {
     schemaVersion: 2,

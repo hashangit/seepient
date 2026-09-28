@@ -12,20 +12,11 @@ import { createAmbientProviderRuntime } from "../../../domain/providers/provider
 import { createProviderManagerApi, type AccountInput } from "../provider-manager-api.js";
 
 function parseCredentialMode(raw?: string): AccountInput["credential"] {
-  if (!raw || raw === "none") {
-    return { mode: "none" };
-  }
-  if (raw.startsWith("env:")) {
-    const varName = raw.slice(4).trim();
-    if (!varName) {
-      console.error(chalk.red('Error: Missing environment variable name in --credential env:VAR_NAME'));
-      process.exit(1);
-    }
-    return { mode: "env", varName };
-  }
-  console.error(chalk.red(`Error: Invalid credential mode "${raw}". Expected "env:VAR_NAME" or "none".`));
+  if (raw === "none") return { mode: "none" };
+  console.error(chalk.red(`Error: Invalid credential mode "${raw}". Expected "none" (env credentials were removed in 022-5; use provider management or the setup flow to store a key).`));
   process.exit(1);
 }
+
 
 export function registerProvidersCommands(program: Command): void {
   const providersCmd = program.command("providers").description("Manage configured provider accounts and credentials");
@@ -98,7 +89,7 @@ export function registerProvidersCommands(program: Command): void {
     .command("add <id>")
     .description("Add a new provider account")
     .requiredOption("--upstream <provider>", "Upstream provider (e.g. openai, anthropic, google, ollama)")
-    .option("--credential <mode>", "Credential mode: env:VAR_NAME or none", "none")
+    .option("--credential <mode>", "Credential mode: none (keys are stored via the setup flow or auth login)", "none")
     .option("--url <baseUrl>", "Custom base URL endpoint")
     .option("--allow-private", "Allow connecting to private / localhost IP addresses (for Ollama/vLLM)")
     .option("--compat <compat>", "Wire protocol compatibility (openai | anthropic | google | openai-responses)")

@@ -192,7 +192,7 @@ pm2 startup
 | `SEEPIENT_RATE_LIMIT_RPM` | Per-key requests-per-minute cap for REST and WebSocket traffic (default: 300). Set to `0` to disable | No |
 
 ::: warning Server provider isolation
-The standalone server binary boots with an isolated empty provider runtime by default. Host environment provider keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.) are not automatically inherited to prevent ambient credential leakage. There are exactly two ways to give the server durable providers:
+The standalone server binary boots with an isolated empty provider runtime by default, and never reads provider keys from the host environment (022-5 demolition). There are exactly two ways to give the server durable providers:
 
 1. **`--providers-file <path>`** (or `runSeepientServer({ providersFile })`) — an operator-owned JSON file read once at boot into the isolated runtime. It carries provider accounts, model assignments, and credentials (the file is the operator's plaintext secret surface — mount it read-only and keep it out of tenant-visible volumes; `chmod 600`):
    ```json

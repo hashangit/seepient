@@ -824,6 +824,22 @@ export class ProviderRuntime extends EventEmitter implements ProviderRuntimeCont
     }
 
     const discoveryCache = this.modelCatalog.getDiscoveryCache();
+    // 022-5 FR-006: parity with the provider-management probe route — an
+    // account baseUrl is endpoint-validated before any discovery traffic,
+    // and discovery failures are recorded, not silently swallowed.
+    if (acc.baseUrl) {
+      const { validateEndpointUrl } = await import("../../foundations/network/ssrf-fetch.js");
+      const val = await validateEndpointUrl(acc.baseUrl, { ssrfAllowPrivate: acc.ssrfAllowPrivate === true });
+      if (!val.valid) {
+        throw new InferenceError({
+          code: "invalid_request",
+          message: `refreshModels: account baseUrl failed endpoint validation (${val.error ?? "SSRF blocked"})`,
+          providerAccount,
+          retryable: false,
+        });
+      }
+    }
+    const discoveryErrors: string[] = [];
     try {
       const credHandle = await this.credentialStore.resolve(acc.credential);
       const context = {
@@ -836,13 +852,18 @@ export class ProviderRuntime extends EventEmitter implements ProviderRuntimeCont
 
       if (acc.upstreamProvider === "openai" || acc.upstreamProvider === "openai-compatible") {
         const { OpenAIDiscoverySource } = await import("../../vendors/openai/openai-discovery-source.js");
-        await discoveryCache.refreshAccount(context, new OpenAIDiscoverySource());
+        const result = await discoveryCache.refreshAccount(context, new OpenAIDiscoverySource());
+        if (result?.lastRefreshError) discoveryErrors.push(result.lastRefreshError);
       } else if (acc.upstreamProvider === "google") {
         const { GoogleDiscoverySource } = await import("../../vendors/google/google-discovery-source.js");
-        await discoveryCache.refreshAccount(context, new GoogleDiscoverySource());
+        const result = await discoveryCache.refreshAccount(context, new GoogleDiscoverySource());
+        if (result?.lastRefreshError) discoveryErrors.push(result.lastRefreshError);
       }
-    } catch {
-      // Failure-safe discovery
+    } catch (err) {
+      discoveryErrors.push(err instanceof Error ? err.message : String(err));
+    }
+    if (discoveryErrors.length > 0) {
+      console.error(`[refreshModels] discovery errors for "${providerAccount}":`, discoveryErrors.join("; "));
     }
 
     const userDeclared = extractUserDeclaredModels(config);

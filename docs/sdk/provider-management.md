@@ -78,7 +78,7 @@ const saveRes = await agent.addProvider({
   upstreamProvider: "anthropic",
   credential: {
     mode: "paste",
-    keyValue: process.env.ANTHROPIC_API_KEY!,
+    keyValue: process.env.MY_COMPANY_ANTHROPIC_KEY!, // embedder-owned env — Seepient never reads it
   },
 });
 
@@ -167,7 +167,8 @@ const agent = await createSeepient({
     isolated_openai: {
       adapter: "pi-ai",
       upstreamProvider: "openai",
-      credential: { kind: "env", name: "OPENAI_API_KEY" },
+      // Embedder-owned credential material — Seepient never reads env itself.
+      credential: { kind: "seepient", id: "isolated_openai" },
     },
   },
 

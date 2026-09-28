@@ -81,8 +81,8 @@ In single-user mode, Seepient automatically wires an ambient provider runtime (o
    │ Matches modelAssignments.text.standard
    │
    ▼ (if no overlay or assignment found)
-3. Environment variables (OPENAI_API_KEY, ANTHROPIC_API_KEY, GLM_API_KEY, OPENAI_COMPAT_*)
-   │ Picks the first provider with an active key
+3. Persisted provider accounts (setup wizard, TUI dock, `seepient auth login`)
+   │ Picks the account assigned to the purpose
    │
    ▼ (maps provider to standard model)
 4. Built-in model catalog
@@ -94,14 +94,9 @@ Throws InferenceError (code: unconfigured_purpose)
 
 1. **Explicit options take priority.** If you specify `model` or `provider` in the options object, the runtime uses those values directly.
 2. **Persisted overlay configuration.** If you configured providers using `seepient setup`, the terminal UI dock, or the settings API, Seepient reads `~/.seepient/providers-overlay.json`. It looks up the assignment for `modelAssignments.text.standard`.
-3. **Environment variable detection.** If you have not created an overlay, Seepient inspects environment variables in this order:
-   - `OPENAI_API_KEY` (selects `openai`)
-   - `ANTHROPIC_API_KEY` (selects `anthropic`)
-   - `GLM_API_KEY` (selects `glm`)
-   - `OPENAI_COMPAT_API_KEY` or `OPENAI_COMPAT_BASE_URL` (selects `openai-compatible`)
-   The runtime assigns the first provider with an active key to `text.standard`.
+3. **Persisted provider accounts.** Seepient never reads provider API keys from the environment — accounts come from provider management only (setup wizard, TUI dock, `seepient auth login`, or an injected credential store).
 4. **Built-in model catalog lookup.** Seepient looks up the recommended `standard` model for the selected provider in its catalog. For OpenAI, it defaults to `gpt-5.4`. For Anthropic, it defaults to `claude-sonnet-4-6-20260320`.
-5. **Missing credentials.** If no provider accounts exist and no environment keys are present, the runtime throws an `InferenceError` with code `unconfigured_purpose`.
+5. **Missing credentials.** If no provider accounts are configured, the runtime throws an `InferenceError` with code `unconfigured_purpose` — run `seepient setup` or inject a credential store.
 
 ### Purpose and tier routing
 

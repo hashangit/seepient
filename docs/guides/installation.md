@@ -54,8 +54,8 @@ docker build -t seepient .
 # Run Seepient interactively
 docker run -it --rm \
   -v "$(pwd):/workspace" \
+  -v seepient-home:/home/appuser/.seepient \
   -w /workspace \
-  -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
   seepient seepient
 ```
 
@@ -70,7 +70,6 @@ docker run -d \
   --name seepient-server \
   -p 7337:7337 \
   -v seepient-data:/home/appuser/.seepient \
-  -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
   seepient
 ```
 

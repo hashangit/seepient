@@ -106,18 +106,27 @@ async function resolveSecretApiKey(
   signal?: AbortSignal,
   tenancyMode?: "single" | "multi",
 ): Promise<string | undefined> {
-  if (tenancyMode === "multi") {
-    if (!secret || secret.kind !== "api_key" || !secret.value) {
-      throw new InferenceError({
-        code: "auth",
-        message: `CREDENTIAL_REQUIRED: Multi-tenant inference requires an explicit api_key credential for provider "${target.upstreamProvider}".`,
-        providerAccount: target.providerAccount,
-        model: target.model,
-        retryable: false,
-      });
-    }
+  // 022-5 FR-007 (tenancy-invariant): the vendored pi-ai layer falls back to
+  // host environment keys whenever apiKey is undefined or empty — an
+  // unresolvable credential may never degrade to undefined here.
+  if (secret?.kind === "none") {
+    // No-auth endpoint: explicit sentinel satisfies the vendored
+    // hasExplicitApiKey check so withEnvApiKey never reads the environment.
+    return "unused";
   }
-  if (!secret) return undefined;
+  const isOAuthSecret = secret?.kind === "pi_oauth" || secret?.kind === "oauth";
+  if (!isOAuthSecret && (!secret || secret.kind !== "api_key" || !secret.value)) {
+    // 022-5 FR-007 (tenancy-invariant): undefined or empty keys must never
+    // degrade further — the vendored layer would read host process.env.
+    // OAuth secrets skip this gate; the branches below handle them.
+    throw new InferenceError({
+      code: "auth",
+      message: `CREDENTIAL_REQUIRED: Inference requires an explicit api_key credential for provider "${target.upstreamProvider}" — configure it through provider management.`,
+      providerAccount: target.providerAccount,
+      model: target.model,
+      retryable: false,
+    });
+  }
   if (secret.kind === "api_key") {
     return secret.value;
   }
@@ -348,7 +357,7 @@ export class PiLanguageRaw implements LanguageBackend {
       }
 
       const secret = await lease.secret();
-      const apiKey = await resolveSecretApiKey(secret, target, this.credentialStore, signal, opts?.tenancyMode);
+      const apiKey = await resolveSecretApiKey(secret, target, this.credentialStore, signal);
 
       const { model, context, streamOptions } = this.prepareInvocation(
         target,
@@ -619,7 +628,7 @@ export class PiLanguageRaw implements LanguageBackend {
       }
 
       const secret = await lease.secret();
-      const apiKey = await resolveSecretApiKey(secret, target, this.credentialStore, signal, opts?.tenancyMode);
+      const apiKey = await resolveSecretApiKey(secret, target, this.credentialStore, signal);
 
       const { model, context, streamOptions } = this.prepareInvocation(
         target,

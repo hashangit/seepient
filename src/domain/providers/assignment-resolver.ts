@@ -105,7 +105,7 @@ export async function resolveInvocationPlan(
   if (!mainAcc) {
     throw new InferenceError({
       code: "unconfigured_provider",
-      message: `Provider account "${effectiveAccount}" is not configured`,
+      message: `Provider account "${effectiveAccount}" is not configured — run the provider setup flow (seepient setup) or inject a custom credential store.`,
       providerAccount: effectiveAccount,
       model: effectiveModel,
       retryable: false,

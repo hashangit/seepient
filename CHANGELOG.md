@@ -43,6 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Round 2 — Authorization truth, symlink plane, and sentinel unification (Spec 022-4)
 
 **Breaking changes & Behavior changes:**
+- **Inference Env-Key Demolition (022-5 FR-005, Breaking)**: Seepient no longer synthesizes provider accounts from environment variables, and the env credential mode is removed from the CLI (`--credential env:`), TUI add-account, REST accounts API, and `auth login --env-var`. Credentials resolve only from provider management (setup flow, `seepient auth login --key`, or an injected custom credential store — embedder-owned env remains the embedder's seam). Migration: run `seepient setup` (or `seepient auth login <id> --key <key>`), or inject a credential store from the SDK.
+
 - **In-Workspace Symlinks Allowed via Authorize-What-You-Open (FR-013, Behavior Change)**:
   Permissions now apply to the target file's canonical realpath rather than the intermediate reference name. In-workspace symbolic links pointing to real paths inside the workspace ceiling are now fully allowed (superseding the earlier static refusal). Symbolic links whose realpath escapes the workspace ceiling are denied with typed `PathEscapesWorkspaceError` (`PATH_ESCAPES_WORKSPACE`).
 - **Atomic FD-Pinned Reads & TOCTOU Elimination (FR-013)**:

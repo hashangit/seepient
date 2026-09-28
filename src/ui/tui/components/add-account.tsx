@@ -23,7 +23,7 @@ export interface AddAccountProps {
 }
 
 type Phase =
-  | "choose" | "id" | "credential" | "paste" | "env"
+  | "choose" | "id" | "credential" | "paste"
   | "baseUrl" | "localConfirm" | "compat" | "done";
 
 const CUSTOM_LABEL = "+ Custom / local endpoint (OpenAI-compatible, Ollama, vLLM, LM Studio…)";
@@ -46,7 +46,7 @@ export function AddAccount({
 
   const [upstream, setUpstream] = useState<string>("");       // chosen catalog upstream or "custom"
   const [accountId, setAccountId] = useState<string>("");
-  const [credentialMode, setCredentialMode] = useState<"paste" | "env" | "none">("none");
+  const [credentialMode, setCredentialMode] = useState<"paste" | "none">("none");
   const [secret, setSecret] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [allowPrivate, setAllowPrivate] = useState(false);
@@ -75,10 +75,7 @@ export function AddAccount({
       const input: AccountInput = {
         accountId: finalId,
         upstreamProvider: upstream === "custom" ? "openai-compatible" : upstream,
-        credential:
-          credentialMode === "paste" ? { mode: "paste", keyValue: secret }
-          : credentialMode === "env" ? { mode: "env", varName: secret }
-          : { mode: "none" },
+        credential: credentialMode === "paste" ? { mode: "paste", keyValue: secret } : { mode: "none" },
         ...(upstream === "custom" && baseUrl ? { baseUrl } : {}),
         ...(upstream === "custom" && COMPAT_OPTIONS[compatIdx] !== "none" ? { compat: COMPAT_OPTIONS[compatIdx] as any } : {}),
         ...(upstream === "custom" && allowPrivate ? { allowPrivate: true } : {}),
@@ -157,16 +154,14 @@ export function AddAccount({
       case "credential": {
         if (key.escape) { setPhase(upstream === "custom" ? "id" : "id"); return; }
         if (input === "1") { setCredentialMode("paste"); setSecret(""); setPhase("paste"); return; }
-        if (input === "2") { setCredentialMode("env"); setSecret(""); setPhase("env"); return; }
-        if (input === "3") { setCredentialMode("none"); void save(); return; }
-        if (input === "4" && canSignIn && onSignIn && upstream !== "custom" && canSignIn(upstream)) {
+        if (input === "2") { setCredentialMode("none"); void save(); return; }
+        if (input === "3" && canSignIn && onSignIn && upstream !== "custom" && canSignIn(upstream)) {
           onSignIn(upstream);
           return;
         }
         return;
       }
-      case "paste":
-      case "env": {
+      case "paste": {
         if (key.escape) { setSecret(""); setPhase("credential"); return; }
         if (key.return) { void save(); return; }
         if (key.backspace || key.delete) { setSecret((s) => s.slice(0, -1)); return; }
@@ -268,9 +263,8 @@ export function AddAccount({
       <Box flexDirection="column" borderStyle="round" borderColor={theme.cyan} paddingLeft={1} paddingRight={1}>
         <Text color={theme.cyan} bold>Credential for {accountId || defaultId} ({upstream === "custom" ? "custom endpoint" : upstream})</Text>
         <Text> [1] Paste API key (masked)</Text>
-        <Text> [2] Use an environment variable</Text>
-        <Text> [3] No key (keyless / local endpoint)</Text>
-        {signIn ? <Text> [4] Sign in with provider</Text> : null}
+        <Text> [2] No key (keyless / local endpoint)</Text>
+        {signIn ? <Text> [3] Sign in with provider</Text> : null}
         <Text color={theme.fgDim}>
           {feedback.kind === "error" ? feedback.message : "number to choose · Esc back"}
         </Text>
@@ -278,12 +272,11 @@ export function AddAccount({
     );
   }
 
-  if (phase === "paste" || phase === "env") {
+  if (phase === "paste") {
     return (
       <Box flexDirection="column" borderStyle="round" borderColor={theme.cyan} paddingLeft={1} paddingRight={1}>
-        <Text color={theme.cyan} bold>{phase === "paste" ? "API key (masked)" : "Environment variable name"}</Text>
-        <Text>{`> ${phase === "paste" ? "*".repeat(secret.length) : secret}▏`}</Text>
-        {phase === "env" ? <Text color={theme.fgDim}>The variable NAME — its value is read at runtime, never stored here.</Text> : null}
+        <Text color={theme.cyan} bold>API key (masked)</Text>
+        <Text>{`> ${"*".repeat(secret.length)}`}▏</Text>
         <Text color={feedback.kind === "error" ? theme.red : theme.fgDim}>
           {feedback.kind === "error" ? feedback.message : "Enter submit · Esc back"}
         </Text>

@@ -45,7 +45,7 @@ The server delegates all LLM interaction directly to the core `runAgentLoop`, by
 
 ```bash [Docker]
 docker run -d -p 7337:7337 \
-  -e ANTHROPIC_API_KEY=sk-... \
+  --providers-file /config/providers.json \
   -v ~/.seepient:/home/appuser/.seepient \
   seepient-server
 ```
@@ -54,7 +54,7 @@ docker run -d -p 7337:7337 \
 gcloud run deploy seepient \
   --image seepient-server \
   --port 7337 \
-  --set-env-vars "ANTHROPIC_API_KEY=sk-..."
+  --args="--providers-file=/config/providers.json"
 ```
 
 ```bash [npx]
@@ -143,11 +143,6 @@ When an injected `ProviderRuntimeContract` does not implement configuration muta
 |---|---|---|
 | `SEEPIENT_PORT` / `PORT` | Server listen port | `7337` |
 | `SEEPIENT_HOST` | Server host interface (`0.0.0.0` for all interfaces) | `127.0.0.1` |
-| `OPENAI_API_KEY` | OpenAI provider key | -- |
-| `ANTHROPIC_API_KEY` | Anthropic provider key | -- |
-| `GLM_API_KEY` | GLM provider key | -- |
-| `OPENAI_COMPAT_API_KEY` | API key for OpenAI-compatible provider | -- |
-| `OPENAI_COMPAT_BASE_URL` | Base URL for OpenAI-compatible provider | -- |
 | `SEEPIENT_SESSION_DIR` | Directory for session files | `./.seepient/sessions` |
 | `SEEPIENT_SESSION_TTL` | Session TTL in seconds | `86400` (24 hours) |
 | `SEEPIENT_SKILLS_PATH` | Colon-separated paths to skill directories | -- |
