@@ -25,6 +25,8 @@ export interface PendingApprovalRecord {
   continuationId: string;
   tenantId: string;
   sessionId: string;
+  /** Owning principal, bound at create() and asserted on every CAS (022-5 FR-013). */
+  principalId?: string;
   request: PermissionRequest;
   version: number;
   status: "pending" | "approved" | "denied" | "cancelled" | "expired";
@@ -164,6 +166,7 @@ export class DurableApprovalStore {
       continuationId: input.continuationId,
       tenantId: input.tenantId,
       sessionId: input.sessionId,
+      principalId: input.request.principalId,
       request: input.request,
       version: 1,
       status: "pending",
@@ -197,10 +200,19 @@ export class DurableApprovalStore {
       void this.persist();
       return { status: "expired", record: rec };
     }
+    // 022-5 FR-013: the CAS is principal-bound — a decision whose actor does
+    // not own the pending approval is rejected without mutating anything.
+    // (Expiry is checked first: it is a property of the record, not of the
+    // actor, and transitioning pending->expired leaks nothing.)
+    if (rec.principalId && decision.actorId && decision.actorId !== rec.principalId) {
+      return { status: "stale" };
+    }
     rec.status = decision.approved ? "approved" : "denied";
     rec.decision = decision;
     rec.version += 1;
-    this.records.set(continuationId, rec as any);
+    // records stays keyed by requestId (022-5 FR-013) — the continuation map
+    // already holds this record; writing it here under the continuation id
+    // polluted the requestId namespace.
     void this.resolveRequest(decision);
     void this.persist();
     return { status: "transitioned", record: rec };

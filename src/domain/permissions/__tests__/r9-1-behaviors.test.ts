@@ -499,6 +499,54 @@ describe("R9.1 Integration Wiring Verification", () => {
     const duplicateCas = await store.cas("cont-1", 1, decision);
     expect(duplicateCas.status).toBe("duplicate");
   });
+
+  it("casSync is principal-bound: a foreign actor's CAS is rejected without mutating (022-5 FR-013 / SC-010)", async () => {
+    const { DurableApprovalStore } = await import("../durable-approval-store.js");
+    const store = new DurableApprovalStore({ root: tmpDir });
+    await store.load();
+
+    const req: import("../../../foundations/contracts/permission-policy.js").PermissionRequest = {
+      requestId: "req-fp",
+      principalId: "tenant-a",
+      runId: "r-fp",
+      toolCallId: "tc-fp",
+      actionDigest: "ad-fp",
+      action: { title: "T", summary: "T", canonicalTargets: [], effects: [] },
+      requestedCapabilities: [],
+      approvalOptions: [],
+      approvalChoices: [],
+      offeredLifetimes: ["action"],
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 60000,
+    };
+    store.create({ request: req, tenantId: "t1", sessionId: "s1", continuationId: "cont-fp" });
+
+    const foreignDecision: import("../../../foundations/contracts/permission-policy.js").PermissionDecision = {
+      approved: true,
+      requestId: "req-fp",
+      actionDigest: "ad-fp",
+      optionId: "opt-1",
+      lifetime: "action",
+      actorId: "tenant-b",
+      decidedAt: Date.now(),
+    };
+    const rejected = store.casSync("cont-fp", 1, foreignDecision);
+    expect(rejected.status).toBe("stale");
+
+    // Nothing mutated: the record is still pending at version 1, and the
+    // owner can still decide it.
+    const after = store.get("cont-fp");
+    expect(after?.status).toBe("pending");
+    expect(after?.version).toBe(1);
+
+    const ownerDecision: import("../../../foundations/contracts/permission-policy.js").PermissionDecision = {
+      ...foreignDecision,
+      actorId: "tenant-a",
+    };
+    const owned = store.casSync("cont-fp", 1, ownerDecision);
+    expect(owned.status).toBe("transitioned");
+  });
+
   it("DockerWorkerScheduler rejects forged signature and nonce replay (P4)", async () => {
     const { DockerWorkerScheduler } = await import("../../../capabilities/execution/docker-worker-scheduler.js");
     const { signDispatchPayload } = await import("../../../foundations/contracts/worker-protocol.js");

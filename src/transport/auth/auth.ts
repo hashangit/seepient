@@ -50,11 +50,12 @@ export function hashKey(rawKey: string): string {
 
 interface CachedFileEntry {
   mtimeMs: number;
+  size: number;
+  ino: number;
   keys: Map<string, ApiKeyEntry>;
 }
 
 let cachedKeys: Map<string, CachedFileEntry> | null = null;
-let cacheMtimeMs: number = 0;
 
 // ── Key store I/O ──────────────────────────────────────────────────────
 
@@ -101,7 +102,6 @@ function writeStore(store: KeyStore, filePath: string): void {
 
 function invalidateCache(): void {
   cachedKeys = null;
-  cacheMtimeMs = 0;
 }
 
 function loadCache(filePath: string): Map<string, ApiKeyEntry> {
@@ -109,17 +109,49 @@ function loadCache(filePath: string): Map<string, ApiKeyEntry> {
     cachedKeys = new Map<string, CachedFileEntry>();
   }
 
-  const cached = cachedKeys.get(filePath);
+  // FR-010: stat -> read -> stat, publish only when the file is unchanged
+  // across the read. The old read-then-stat order published {newMtime,
+  // oldKeys} when an external atomic rename landed between the two, pinning
+  // a revoked key until the NEXT file change.
+  const identity = (s: fs.Stats | undefined) => (s ? `${s.mtimeMs}:${s.size}:${s.ino}` : "missing");
+
+  let pre: fs.Stats | undefined;
   try {
-    const stat = fs.statSync(filePath);
-    if (cached && stat.mtimeMs === cached.mtimeMs) {
-      cacheMtimeMs = stat.mtimeMs;
-      return cached.keys;
-    }
+    pre = fs.statSync(filePath);
   } catch {
     // File may not exist yet
   }
+  const cached = cachedKeys.get(filePath);
+  if (cached && pre && identity(pre) === `${cached.mtimeMs}:${cached.size}:${cached.ino}`) {
+    return cached.keys;
+  }
 
+  // Bounded retry: an external writer racing the read is rare; three passes
+  // cover it without spinning against a hot writer.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const store = readStore(filePath);
+    const map = new Map<string, ApiKeyEntry>();
+    for (const entry of store.keys) {
+      if (entry.keyHash) {
+        map.set(entry.keyHash, entry);
+      }
+    }
+
+    let post: fs.Stats | undefined;
+    try {
+      post = fs.statSync(filePath);
+    } catch {
+      post = undefined;
+    }
+    if (post && pre && identity(post) === identity(pre)) {
+      cachedKeys.set(filePath, { mtimeMs: post.mtimeMs, size: post.size, ino: post.ino, keys: map });
+      return map;
+    }
+    pre = post;
+  }
+
+  // Unstable across all attempts: serve the last read uncached so a revoked
+  // key is never pinned by a stale entry.
   const store = readStore(filePath);
   const map = new Map<string, ApiKeyEntry>();
   for (const entry of store.keys) {
@@ -127,16 +159,6 @@ function loadCache(filePath: string): Map<string, ApiKeyEntry> {
       map.set(entry.keyHash, entry);
     }
   }
-
-  let mtime = 0;
-  try {
-    mtime = fs.statSync(filePath).mtimeMs;
-  } catch {
-    mtime = 0;
-  }
-  cacheMtimeMs = mtime;
-  cachedKeys.set(filePath, { mtimeMs: mtime, keys: map });
-
   return map;
 }
 

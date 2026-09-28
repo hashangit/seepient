@@ -139,6 +139,29 @@ describe("J4 Isolated Boot Journey (VULN-9)", () => {
     }
   });
 
+  it("default multi boot composes in-memory audit and policy stores (022-5 FR-008 seam probe)", async () => {
+    const keysDir = mkdtempSync(join(tmpdir(), "seepient-server-stores-keys-"));
+    const keysFile = join(keysDir, "server-keys.json");
+    process.env.SEEPIENT_API_KEYS_FILE = keysFile;
+
+    try {
+      const server = await runSeepientServer({ port: 0, host: "127.0.0.1" });
+      runningServer = server;
+
+      const { isLocalAuditStore } = await import("../../../foundations/contracts/execution-brokers.js");
+      const auditStore = (server as any).auditStore;
+      const policyStore = (server as any).policyStore;
+      expect(auditStore).toBeDefined();
+      expect(policyStore).toBeDefined();
+      // The VULN-9 seam swaps these defaults for ambient Local stores — with
+      // the guard live they must be the in-memory implementations.
+      expect(isLocalAuditStore(auditStore)).toBe(false);
+      expect(policyStore.constructor.name).not.toBe("LocalPolicyStore");
+    } finally {
+      rmSync(keysDir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects runSeepientServer with ambient runtime (isIsolated !== true)", async () => {
     const { createAmbientProviderRuntime } = await import("../../../domain/providers/provider-runtime.js");
     const { TenancyRuntimeRequiredError } = await import("../../../domain/tenancy/tenancy-mode.js");

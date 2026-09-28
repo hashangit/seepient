@@ -314,7 +314,7 @@ describe("Providers tab", () => {
     await vi.waitFor(() => {
       expect(inst.lastFrame() ?? "").toContain("[1] Paste API key");
     }, { timeout: 3000 });
-    await type(inst, "3"); // keyless
+    await type(inst, "2"); // keyless
     await vi.waitFor(() => {
       expect(ctx.state.accounts.length).toBe(3);
     }, { timeout: 5000 });

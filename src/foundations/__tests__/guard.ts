@@ -13,15 +13,15 @@ export function createSecurityGuard(findingId: string): SecurityGuard {
   let count = 0;
   const tags: string[] = [];
 
-  const envKey = `NEUTRALIZE_${findingId.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
-  const isNeutralized =
-    process.env[envKey] === "1" ||
-    process.env.NEUTRALIZE_GUARD === findingId;
-
+  // 022-5 FR-008 (de-confound): this counter ALWAYS counts. It must never
+  // read NEUTRALIZE_* env — under mutation-probe neutralization the RED must
+  // come from the journey's security assertion failing because the production
+  // guard is disabled, never from a ZERO_HITS throw here. (The old env read
+  // made 8/11 probe targets flip red from the counter alone, so the matrix
+  // could not detect an orphaned production seam.)
   return {
     findingId,
     recordHit(tag?: string) {
-      if (isNeutralized) return;
       count++;
       if (tag) tags.push(tag);
     },

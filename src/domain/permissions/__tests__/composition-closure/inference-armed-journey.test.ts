@@ -88,17 +88,20 @@ describe("FR-002: Inference Boundary Armed Journey (VULN-16)", () => {
       });
     } catch (err: any) {
       error = err;
-      if (/CREDENTIAL_REQUIRED/.test(err?.message || err?.code)) {
+      if (/CREDENTIAL_REQUIRED|EGRESS_REQUIRED/.test(err?.message || err?.code)) {
         guard.recordHit("inference.fail_closed");
       }
     }
 
-    // On current tree (unarmed), tenancyMode is not passed by agent-loop.ts, so:
-    // 1. CREDENTIAL_REQUIRED is not thrown
-    // 2. pi-ai falls back to process.env.OPENAI_API_KEY and calls fetch!
-    // We assert fail-closed: error must be CREDENTIAL_REQUIRED and fetchCalls must be empty.
+    // 022-5 FR-007: the credential gate is tenancy-invariant, so a no-auth
+    // tenant credential maps to the "unused" sentinel and the request
+    // proceeds to the egress check — which denies the ungranted attacker
+    // baseUrl with EGRESS_REQUIRED. A valueless/undefined credential still
+    // denies CREDENTIAL_REQUIRED. Either typed denial is fail-closed; the
+    // security core is that ZERO requests leave the process (on the unarmed
+    // tree, pi-ai fell back to process.env.OPENAI_API_KEY and called fetch).
     expect(error).toBeDefined();
-    expect(error?.message || error?.code).toMatch(/CREDENTIAL_REQUIRED/);
+    expect(error?.message || error?.code).toMatch(/CREDENTIAL_REQUIRED|EGRESS_REQUIRED/);
     expect(fetchCalls).toHaveLength(0);
     guard.assertGuardedPathExecuted(1);
   });

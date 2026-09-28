@@ -268,6 +268,12 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
   }
   const getServerRuntime = () => serverRuntime;
 
+  // Composed store handles, exposed on the returned server object (022-5:
+  // the isolated-boot journey asserts the defaults are in-memory, which is
+  // what makes the VULN-9 seam observable).
+  let composedAuditStore: unknown;
+  let composedPolicyStore: unknown;
+
   if (serverPermissionPipelineEnabled) {
     const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
     const { NoneApprovalBroker } = await import("../approval-brokers.js");
@@ -293,12 +299,14 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
         ? new (await import("../../domain/permissions/audit-recorder.js")).LocalAuditStore()
         : new InMemoryAuditStore());
     const isLocalStore = isLocalAuditStore(serverAuditStore);
+    composedAuditStore = serverAuditStore;
 
     const serverPolicyStore =
       options?.policyStore ??
       (isGuardNeutralized("VULN-9")
         ? new (await import("../../domain/permissions/policy-store.js")).LocalPolicyStore()
         : new InMemoryPolicyStore());
+    composedPolicyStore = serverPolicyStore;
     const serverCapabilityLedger = options?.capabilityLedger ?? new InMemoryCapabilityLedger();
     // The outbox MUST be backed by the SAME LocalAuditStore the per-request
     // lifecycles use, otherwise the flush timer + recovery operate on a
@@ -717,6 +725,8 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
   (server as any).runtime = serverRuntime;
   (server as any).getRuntime = () => serverRuntime;
   (server as any).toolRegistry = serverToolRegistry;
+  (server as any).auditStore = composedAuditStore;
+  (server as any).policyStore = composedPolicyStore;
 
   return server as SeepientHttpServer;
 }

@@ -101,7 +101,7 @@ describe("SetupWizard — fresh flow (T021)", () => {
     await vi.waitFor(() => {
       expect(inst.lastFrame() ?? "").toContain("[1] Paste API key");
     }, { timeout: 5000 });
-    await type(inst, "3");            // keyless → done
+    await type(inst, "2");            // keyless → done
     await vi.waitFor(() => {
       expect(inst.lastFrame() ?? "").toContain("Account saved");
     }, { timeout: 3000 });

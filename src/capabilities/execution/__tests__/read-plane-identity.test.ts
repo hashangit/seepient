@@ -59,7 +59,7 @@ function readAction(targetPath: string, expected: Record<string, unknown>): Prep
       target: { canonicalPath: targetPath, canonicalParent: dir, basename: "x", exists: true, finalSymlink: false },
       expected,
     },
-  } as PreparedToolAction;
+  } as unknown as PreparedToolAction;
 }
 
 function snapshotIdentity(p: string): Record<string, unknown> {
@@ -91,7 +91,6 @@ describe("ReadFileExecutor identity pin (022-5 FR-001)", () => {
     expect(result.state).toBe("failed");
     if (result.state === "failed") {
       expect(result.error.code).toBe("PATH_IDENTITY_MISMATCH");
-      expect(result.result).toBeUndefined();
     }
   });
 

@@ -85,7 +85,8 @@ describe("edit_file section-read ceiling (022-5 FR-003)", () => {
     try {
       const existing = join(outsideDir, "host2.txt");
       writeFileSync(existing, "OUTSIDE-CONTENT-MARKER");
-      const tag = ctx.snapshotStore!.record(existing, "prior read\n").tag;
+      ctx.snapshotStore!.record(existing, "prior read\n");
+      const tag = ctx.snapshotStore!.resolvePath(existing)!.tag;
       // A resolved action would mean the analyzer read outside bytes and
       // prepared commits from them — that is the oracle this FR closes.
       const outcome = await analyzeEditFile({ patch: `[${existing}#${tag}]\nINS.TAIL:\n+x` }, ctx).then(
@@ -93,7 +94,9 @@ describe("edit_file section-read ceiling (022-5 FR-003)", () => {
         (e: unknown) => ({ resolved: false as const, e: e as Error }),
       );
       expect(outcome.resolved).toBe(false);
-      expect(outcome.e.message).not.toContain("OUTSIDE-CONTENT-MARKER");
+      if (!outcome.resolved) {
+        expect(outcome.e.message).not.toContain("OUTSIDE-CONTENT-MARKER");
+      }
     } finally {
       rmSync(outsideDir, { recursive: true, force: true });
     }
