@@ -20,7 +20,7 @@ import type {
   PermissionRequest,
   PermissionDecision,
 } from "../../../src/transport/sdk/index.js";
-import { isGuardNeutralized } from "../../../src/foundations/test-seams.js";
+import { isGuardNeutralized, warnIfTestEnvAtHostedBoot } from "../../../src/foundations/test-seams.js";
 
 export const KNOWN_TOKENS: Record<string, string> = {
   "token-tenant-a": "tenant-a",
@@ -131,8 +131,24 @@ export function createStubApp(initialState?: Partial<StubAppState> & { allowDemo
     tokenToPrincipal: initialTokens,
   };
 
+  warnIfTestEnvAtHostedBoot("seepient reference worker");
+  if (!(globalThis as any).__seepientWorkerRejectionGuard) {
+    (globalThis as any).__seepientWorkerRejectionGuard = true;
+    process.on("unhandledRejection", (reason) => {
+      console.error("[worker] unhandled rejection:", reason instanceof Error ? reason.stack : String(reason));
+    });
+  }
   const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    // FR-015: parse failures are a 400, not a process kill — one malformed
+    // unauthenticated packet must never take the control plane down.
+    let url: URL;
+    try {
+      url = new URL(req.url ?? "/", "http://127.0.0.1");
+    } catch {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "BadRequest", message: "Malformed request URL" }));
+      return;
+    }
     const MAX_BODY_BYTES = 1024 * 1024; // 1MB body limit (NEW-2)
     let body = "";
     let tooLarge = false;
@@ -140,13 +156,18 @@ export function createStubApp(initialState?: Partial<StubAppState> & { allowDemo
       body += chunk;
       if (body.length > MAX_BODY_BYTES) {
         tooLarge = true;
-        req.destroy();
       }
     });
-    await new Promise<void>((resolve) => req.on("end", () => resolve()));
+    // FR-015: resolve on close as well as end — after a destroy() the end
+    // event never fires and a 413 written here would be unreachable.
+    await new Promise<void>((resolve) => {
+      req.on("end", () => resolve());
+      req.on("close", () => resolve());
+    });
     if (tooLarge) {
       res.writeHead(413, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "PayloadTooLarge", message: "Request body exceeds 1MB limit" }));
+      req.destroy(); // shed the rest of the body only after the response is out
       return;
     }
 
@@ -306,6 +327,17 @@ export function createStubApp(initialState?: Partial<StubAppState> & { allowDemo
           res.writeHead(403, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: "Forbidden", message: `Wildcard ${cap.kind} is forbidden in multi-tenant policy` }));
           return;
+        }
+        // 022-5 FR-015 fold-in: non-wildcard path roots live inside the
+        // tenant workspace mount — `/etc`-style grants are refused (the
+        // engine ceiling clamps regardless; the stub must not advertise them).
+        if ((cap.kind === "write-root" || cap.kind === "read-root") && typeof cap.root === "string") {
+          const WORKSPACE_ROOT = "/data"; // the example's tenant-data mount
+          if (cap.root !== WORKSPACE_ROOT && !cap.root.startsWith(`${WORKSPACE_ROOT}/`)) {
+            res.writeHead(403, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "Forbidden", message: `Path root "${cap.root}" is outside the tenant workspace` }));
+            return;
+          }
         }
       }
       const updated: PolicySnapshot = {

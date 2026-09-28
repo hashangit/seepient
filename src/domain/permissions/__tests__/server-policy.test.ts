@@ -146,7 +146,7 @@ describe("PendingApprovalStore (T407/T408, QS-4.5)", () => {
       actionDigest: "d1",
       optionId: "opt-1",
       lifetime: "action" as const,
-      actorId: "u",
+      actorId: "user-1", // the record's principal (022-5 FR-013 binding)
       decidedAt: Date.now(),
     };
     const first = store.cas("cont-1", rec.version, decision);

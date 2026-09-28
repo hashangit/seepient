@@ -45,7 +45,7 @@ import type { ToolResult } from "../../foundations/types.js";
 import type { PolicyEngine } from "./policy-engine.js";
 import { generateId } from "../../foundations/id.js";
 import { idempotencyKey } from "./audit-recorder.js";
-import { PolicyConflictError, GlobalLifetimeForbiddenError } from "../../foundations/errors.js";
+import { PolicyConflictError } from "../../foundations/errors.js";
 import { isGuardNeutralized } from "../../foundations/test-seams.js";
 import {
   GLOBAL_WORKSPACE_ID,
@@ -353,9 +353,22 @@ export class ActionLifecycle {
       const lifetimeKind = answer.lifetime;
       if (this.tenancyMode === "multi" && lifetimeKind === "global") {
         // Typed backstop: record the terminal denial first so the audit trail
-        // does not end at awaiting-approval (pass-10 P2-11), then throw.
+        // does not end at awaiting-approval (pass-10 P2-11), then return the
+        // typed denial — run() never throws for a broker answer (022-5 FR-012).
         await this.record(action, "denied", "global-lifetime-forbidden").catch(() => {});
-        throw new GlobalLifetimeForbiddenError();
+        const outcome = this.toOutcome(action, "denied", undefined, "invalid-approval-response");
+        return {
+          decision,
+          approval: answer,
+          outcome,
+          toolResult: {
+            output: denialOutput(
+              "invalid-approval-response",
+              "The 'global' approval lifetime is not available in multi-tenant mode",
+            ),
+            success: false,
+          },
+        };
       }
       if (
         !option.supportedLifetimes.includes(lifetimeKind) ||
@@ -457,7 +470,20 @@ export class ActionLifecycle {
         // Exact capabilities only: the choice projection never offers a
         // bounded persistent choice.
         if (this.tenancyMode === "multi" && lifetimeKind === "global") {
-          throw new GlobalLifetimeForbiddenError();
+          await this.record(action, "denied", "global-lifetime-forbidden").catch(() => {});
+          const outcome = this.toOutcome(action, "denied", undefined, "invalid-approval-response");
+          return {
+            decision,
+            approval: answer,
+            outcome,
+            toolResult: {
+              output: denialOutput(
+                "invalid-approval-response",
+                "The 'global' approval lifetime is not available in multi-tenant mode",
+              ),
+              success: false,
+            },
+          };
         }
 
         const targetWorkspaceId =
@@ -566,8 +592,12 @@ export class ActionLifecycle {
                 const otherPrincipalCaps = rawSnap.policy.capabilities.filter(
                   (c) => Boolean(c.principalId && c.principalId !== targetPrincipal),
                 );
+                // 022-5 FR-011: the multi merge strips the whole universal-root
+                // class ("*", "/", and the corrupt "") — each shape grants every
+                // path, so none may survive a tenant merge.
+                const UNIVERSAL_ROOTS = new Set(["*", "/", ""]);
                 const unstampedCaps = rawSnap.policy.capabilities.filter(
-                  (c) => !c.principalId && (!isMulti || !((c.kind === "write-root" || c.kind === "read-root") && (c as any).root === "*")),
+                  (c) => !c.principalId && (!isMulti || !((c.kind === "write-root" || c.kind === "read-root") && UNIVERSAL_ROOTS.has((c as any).root))),
                 );
                 const currentPrincipalCaps = rawSnap.policy.capabilities.filter(
                   (c) => c.principalId === targetPrincipal,

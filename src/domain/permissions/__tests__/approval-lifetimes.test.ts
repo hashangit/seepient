@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { PolicyEngine } from "../policy-engine.js";
 import { buildActionLifecycle } from "../action-lifecycle-factory.js";
 import { InMemoryPolicyStore, InMemoryAuditStore, InMemoryCapabilityLedger } from "../in-memory-stores.js";
-import { GlobalLifetimeForbiddenError } from "../../../foundations/errors.js";
 import type {
   PermissionDecision,
   PermissionRequest,
@@ -199,8 +198,11 @@ describe("Approval Lifetimes Gate (FR-005, FR-015, T006, T028)", () => {
       policyStore: new InMemoryPolicyStore(),
     });
 
-    // Running an action whose approval selects 'global' in multi mode must throw GlobalLifetimeForbiddenError
-    await expect(wired.lifecycle.run(action)).rejects.toThrow(GlobalLifetimeForbiddenError);
+    // 022-5 FR-012: run() never throws for a broker answer — the global
+    // lifetime yields the typed invalid-approval-response denial instead.
+    const result = await wired.lifecycle.run(action);
+    expect(result.outcome.denial).toBe("invalid-approval-response");
+    expect(result.outcome.state).toBe("denied");
 
     // R3 P2-11 pin: the backstop records a terminal denial before throwing —
     // the audit trail must not end at awaiting-approval.

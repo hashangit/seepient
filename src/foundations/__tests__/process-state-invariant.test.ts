@@ -32,7 +32,6 @@ export const PINNED_ACCEPTED_STATE: readonly string[] = Object.freeze([
   "domain/providers/config-store/provider-config-store.ts:baseConfigCache",
   "domain/tenancy/tenancy-mode.ts:noticePrinted",
   "transport/auth/auth.ts:cachedKeys",
-  "transport/auth/auth.ts:cacheMtimeMs",
   "transport/sdk/settings.ts:manager",
   "capabilities/skills/skill-sources-helper.ts:multiZeroSourcesNoticed",
   "transport/http/provider-management/oauth.ts:pendingOAuthAttempts",

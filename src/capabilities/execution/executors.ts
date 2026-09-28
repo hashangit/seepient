@@ -436,9 +436,15 @@ function capBrokerOutput(text: string): string {
  * readable page text, not markup: strip script/style/head blocks, turn
  * block-level closings into newlines, drop remaining tags, decode common
  * entities. A full parser dependency is not warranted for this.
+ * FR-016: the input is capped BEFORE the regex passes — converting an
+ * unbounded page burns the event loop on catastrophic backtracking-prone
+ * patterns; the output cap downstream cannot help with that.
  */
-function htmlToText(html: string): string {
-  return html
+const MAX_HTML_INPUT_BYTES = 1024 * 1024;
+
+export function htmlToText(html: string): string {
+  const capped = html.length > MAX_HTML_INPUT_BYTES ? `${html.slice(0, MAX_HTML_INPUT_BYTES)}\n…[input truncated at ${MAX_HTML_INPUT_BYTES} bytes]` : html;
+  return capped
     .replace(/<!--[\s\S]*?-->/g, " ")
     .replace(/<(script|style|noscript|svg|head|template)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
     .replace(/<br\b[^>]*\/?>/gi, "\n")

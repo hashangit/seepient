@@ -11,8 +11,22 @@
  *      not "red" verdicts.
  *
  * Neutralization disables the guard at its PRODUCTION seam
- * (src/foundations/test-seams.ts, inert unless NODE_ENV === "test"), so a red
- * verdict proves the guard is load-bearing for that journey.
+ * (src/foundations/test-seams.ts, two-factor: NODE_ENV=test AND a vitest
+ * worker), so a red verdict proves the guard is load-bearing for that journey.
+ * A red verdict additionally requires the journey's EXPECTED SECURITY MESSAGE
+ * to appear in the failure output — an unrelated failure is not evidence.
+ *
+ * Orphan detection (022-5 FR-008): since the journeys' ZERO_HITS counter no
+ * longer reads NEUTRALIZE_* (022-5 de-confound), a deleted production seam
+ * leaves its journey green under neutralization and the probe FAILS. Two
+ * registration lints make the wiring explicit up front:
+ *   - SEAM COVERAGE: every registered guardId must have >= 1 production
+ *     isGuardNeutralized("<id>") call site, and every production seam id must
+ *     be registered (this is the "deleted guard turns the matrix red"
+ *     dogfood, enforced structurally).
+ *   - REGISTRATION: every journey importing createSecurityGuard must appear
+ *     in PROBE_TARGETS or in COUNTER_ONLY_JOURNEYS (journeys whose guard is
+ *     an anti-vacuity counter with no production seam to mutate).
  *
  * Usage:
  *   pnpm tsx scripts/verify-mutation-probes.ts
@@ -25,7 +39,32 @@ interface ProbeTarget {
   description: string;
   testFile: string;
   neutralizeEnv: string;
+  /** Marker that must appear in the neutralized failure output — the
+   *  journey's security assertion, not just any failed test. */
+  expectedMessage: string;
 }
+
+/** Journeys that use createSecurityGuard as an anti-vacuity counter but have
+ *  no production seam to neutralize. Every guard-using journey must appear
+ *  here or in PROBE_TARGETS — nothing escapes the register silently. */
+const COUNTER_ONLY_JOURNEYS: { testFile: string; reason: string }[] = [
+  {
+    testFile: "src/domain/permissions/__tests__/composition-closure/identity-validation.test.ts",
+    reason: "VULN-2 counter: the identity validator denies by construction; no seam to mutate",
+  },
+  {
+    testFile: "src/transport/http/__tests__/session-partition.test.ts",
+    reason: "VULN-3 counter: session lookup keys are structural, not a branch to disable",
+  },
+  {
+    testFile: "src/transport/http/__tests__/tools-edge.test.ts",
+    reason: "VULN-22 counter: tools-edge validation is an allowlist, not a removable branch",
+  },
+  {
+    testFile: "src/vendors/pi-ai/__tests__/inference-fail-closed.test.ts",
+    reason: "drives PiLanguageRaw directly (not agent-loop), so the VULN-16 producer seam in agent-loop does not apply; the armed-journey target covers that seam",
+  },
+];
 
 const SPAWN_TIMEOUT_MS = 180_000;
 
@@ -35,66 +74,77 @@ const PROBE_TARGETS: ProbeTarget[] = [
     description: "EffectBroker multi-mode ambient-secret fail-closed (resolveSecret)",
     testFile: "src/domain/permissions/__tests__/composition-closure/tenant-secret-journey.test.ts",
     neutralizeEnv: "NEUTRALIZE_VULN_1",
+    expectedMessage: "does not leak host env",
   },
   {
     guardId: "VULN-1-BROKER",
     description: "EffectBroker multi-mode ambient process.env key exfiltration",
     testFile: "src/domain/permissions/__tests__/composition-closure/exfil-journey.test.ts",
     neutralizeEnv: "NEUTRALIZE_VULN_1",
+    expectedMessage: "fails closed with CREDENTIAL_REQUIRED on unresolved secretRef",
   },
   {
     guardId: "VULN-5",
     description: "InMemoryReplayLedger default in multi (brokered zero-disk-write)",
     testFile: "src/domain/permissions/__tests__/composition-closure/zero-write-brokered.test.ts",
     neutralizeEnv: "NEUTRALIZE_VULN_5",
+    expectedMessage: "performs zero writes under $HOME/.seepient",
   },
   {
     guardId: "VULN-9",
     description: "Server multi-mode in-memory store defaults (isolated boot zero-write)",
     testFile: "src/transport/http/__tests__/isolated-boot.test.ts",
     neutralizeEnv: "NEUTRALIZE_VULN_9",
+    expectedMessage: "default multi boot composes in-memory audit and policy stores",
   },
   {
     guardId: "VULN-10",
     description: "ProviderRuntime no-arg isolated construction stamp",
     testFile: "src/domain/providers/__tests__/isolated-defaults.test.ts",
     neutralizeEnv: "NEUTRALIZE_VULN_10",
+    expectedMessage: "composes zero ambient providers and has isIsolated",
   },
   {
     guardId: "VULN-16",
     description: "Inference tenancy arming threaded into executeLanguage call options",
     testFile: "src/domain/permissions/__tests__/composition-closure/inference-armed-journey.test.ts",
     neutralizeEnv: "NEUTRALIZE_VULN_16",
+    expectedMessage: "CREDENTIAL_REQUIRED|EGRESS_REQUIRED",
   },
   {
     guardId: "VULN-17",
     description: "Built-in tool defs default-off on the multi server (tools gate)",
     testFile: "src/transport/http/__tests__/gateway-default-off.test.ts",
     neutralizeEnv: "NEUTRALIZE_VULN_17",
+    expectedMessage: "never composes registry definitions into tenant context when tools are omitted",
   },
   {
     guardId: "VULN-19",
     description: "Worker control plane token-derived principal authentication",
     testFile: "examples/worker/src/__tests__/control-plane.test.ts",
     neutralizeEnv: "NEUTRALIZE_VULN_19",
+    expectedMessage: "rejects unissued/forged tokens with 401",
   },
   {
     guardId: "P1-1-READ-IDENTITY",
     description: "Read-plane authorization-time dev+ino identity pin (parent-dir swap)",
     testFile: "src/domain/permissions/__tests__/composition-closure/symlink-read-journey.test.ts",
     neutralizeEnv: "NEUTRALIZE_P1_1_READ_IDENTITY",
+    expectedMessage: "parent-directory symlink swap between authorization and execution is denied",
   },
   {
     guardId: "R2-LIFETIME-TRUTH",
     description: "Offered lifetimes exclude global in multi-tenant mode",
     testFile: "src/domain/permissions/__tests__/approval-lifetimes.test.ts",
     neutralizeEnv: "NEUTRALIZE_R2_LIFETIME_TRUTH",
+    expectedMessage: "multi mode never offers 'global' in approval options",
   },
   {
     guardId: "R2-CAS-ONE-BUCKET",
     description: "One-bucket unstamped capability CAS dedup (no 2^K growth)",
     testFile: "src/domain/permissions/__tests__/cas-unstamped.test.ts",
     neutralizeEnv: "NEUTRALIZE_R2_CAS_ONE_BUCKET",
+    expectedMessage: "unstamped capability appears exactly once after K sequential persistent approvals",
   },
 ];
 
@@ -176,7 +226,16 @@ async function main() {
       );
       process.exit(1);
     }
-    console.log(`  ✓ turned RED under neutralization (${neutralized.failedTestCount} test(s) failed)\n`);
+    // 022-5 FR-008: the red must be the SECURITY assertion, not an unrelated
+    // failure. The journey's expected failure marker must appear in the output.
+    const strippedNeutral = neutralized.output.replace(/\x1b\[[0-9;]*m/g, "");
+    if (!strippedNeutral.includes(t.expectedMessage)) {
+      console.error(
+        `FAIL: ${t.guardId}: neutralized run failed ${neutralized.failedTestCount} test(s) but none carried the expected security marker "${t.expectedMessage}" — the red is not evidence (wrong test failing?)`,
+      );
+      process.exit(1);
+    }
+    console.log(`  ✓ turned RED under neutralization with the expected security marker (${neutralized.failedTestCount} test(s) failed)\n`);
     verified++;
   }
 

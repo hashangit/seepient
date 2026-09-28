@@ -6,10 +6,37 @@
  * tool definitions should appear in tenant context without explicit opt-in.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { runSeepientServer } from "../index.js";
 import { createSecurityGuard } from "../../../domain/permissions/__tests__/composition-closure/_guard.js";
 import type { Server } from "node:http";
+
+it("multi chat path never composes registry definitions into tenant context when tools are omitted (022-5 FR-008 seam probe)", async () => {
+  const guard = createSecurityGuard("VULN-17");
+  const { serverGenerateText } = await import("../server-core.js");
+  const { createIsolatedProviderRuntime } = await import("../../../domain/providers/provider-runtime.js");
+
+  const definitions = vi.fn(() => [
+    { type: "function", function: { name: "read_file", description: "builtin", parameters: { type: "object", properties: {} } } },
+  ]);
+  const registry = { list: () => [], definitions, resolve: () => undefined, register: () => {}, registerMany: () => {} } as never;
+
+  try {
+    await serverGenerateText(
+      { messages: [{ id: "m1", role: "user", content: "hi", timestamp: Date.now() }], tenancyMode: "multi", runtime: createIsolatedProviderRuntime(), toolRegistry: registry } as never,
+    );
+  } catch {
+    /* generation fails on the empty runtime — the assertion is whether the
+       registry's definitions were ever consulted for the tenant context. */
+  }
+
+  // With the VULN-17 guard live, toolDefs default to [] in multi when the
+  // caller omits tools — definitions() must never be consulted. A neutralized
+  // seam re-adds registry.definitions() and this expectation fails.
+  expect(definitions).not.toHaveBeenCalled();
+  guard.recordHit("vuln-17.defs_not_consulted");
+  guard.assertGuardedPathExecuted(1);
+});
 
 describe("J8 Gateway Default-Off Journey (VULN-17)", () => {
   let runningServer: Server | null = null;
@@ -42,7 +69,11 @@ describe("J8 Gateway Default-Off Journey (VULN-17)", () => {
     );
 
     expect(gatewayTools).toHaveLength(0);
-    if (gatewayTools.length === 0) {
+    // 022-5 FR-008: built-in tool defs are default-off in multi too — the
+    // whole tenant registry is empty when no tools are requested. (Without
+    // this line a neutralized VULN-17 seam that re-adds built-ins stays green.)
+    expect(registeredTools).toHaveLength(0);
+    if (gatewayTools.length === 0 && registeredTools.length === 0) {
       guard.recordHit("gateway.tools_omitted");
     }
 

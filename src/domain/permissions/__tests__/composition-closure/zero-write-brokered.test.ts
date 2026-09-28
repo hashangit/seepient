@@ -50,6 +50,14 @@ describe("J7 De-vacuumed Zero-Write Journey (VULN-5)", () => {
 
     // On baseline (0b7fe4e): EffectBroker defaults to `new PersistedReplayLedger()` which
     // immediately creates `$HOME/.seepient/security/replay/ledger.ndjson`.
+    // 022-5 FR-008: the replay ledger prefers SEEPIENT_SECURITY_DIR (the test
+    // setup points it at a scratch dir) — snapshot it so a neutralized
+    // PersistedReplayLedger write is observable on the surface it actually
+    // uses, alongside $HOME/.seepient.
+    const secDirBefore = process.env.SEEPIENT_SECURITY_DIR
+      ? readdirSync(process.env.SEEPIENT_SECURITY_DIR).sort()
+      : [];
+
     const broker = new EffectBroker({
       artifacts: new InMemoryArtifactStore(),
       network: mockNetwork,
@@ -96,8 +104,13 @@ describe("J7 De-vacuumed Zero-Write Journey (VULN-5)", () => {
     const result = await broker.execute(request, envelope, auth);
     expect(result.status).toBe("succeeded");
 
-    // De-vacuumed assertion: verify $HOME/.seepient was NEVER created
+    // De-vacuumed assertion: verify $HOME/.seepient was NEVER created AND the
+    // security-dir scratch surface gained no replay-ledger files.
     const seepientExists = existsSync(join(sandboxHome, ".seepient"));
+    const secDirAfter = process.env.SEEPIENT_SECURITY_DIR
+      ? readdirSync(process.env.SEEPIENT_SECURITY_DIR).sort()
+      : [];
+    expect(secDirAfter).toEqual(secDirBefore);
     const files = readdirSync(sandboxHome);
     expect(seepientExists).toBe(false);
     expect(files).toEqual([]);

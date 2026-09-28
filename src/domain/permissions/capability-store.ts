@@ -74,6 +74,9 @@ function normalizePathForComparison(p: string): string {
 function pathContains(parent: string, child: string): boolean {
   const normParent = normalizePathForComparison(parent);
   const normChild = normalizePathForComparison(child);
+  // 022-5 FR-011: an empty root is a corrupt shape, not a universal grant —
+  // it must never contain anything (fail closed).
+  if (!normParent) return false;
   if (normChild === normParent) return true;
   if (normParent === "/") return normChild.startsWith("/");
   const prefix = normParent.endsWith("/") ? normParent : normParent + "/";

@@ -39,9 +39,19 @@ describe("Image Inference Boundary Armed Journey (OpenAI & Google)", () => {
         },
       };
 
-      await expect(
-        raw.generate(target, { prompt: "test image" }, { tenancyMode: "multi" }),
-      ).rejects.toThrow(/CREDENTIAL_REQUIRED/);
+      // 022-5 FR-007: kind "none" maps to the "unused" sentinel (tenancy-
+      // invariant), so the credential gate passes and the vendor call runs —
+      // failing on the fake key, never on credentials, and never leaking the
+      // host decoy.
+      let openaiErr: any;
+      await raw
+        .generate(target, { prompt: "test image" }, { tenancyMode: "multi" })
+        .catch((e: unknown) => {
+          openaiErr = e;
+        });
+      expect(openaiErr).toBeDefined();
+      expect(String(openaiErr?.message)).not.toMatch(/CREDENTIAL_REQUIRED/);
+      expect(String(openaiErr?.message)).not.toContain("sk-host-decoy-openai-key");
     });
 
     it("fails closed with EGRESS_REQUIRED when custom baseUrl lacks network-destination capability in multi mode", async () => {
@@ -78,12 +88,15 @@ describe("Image Inference Boundary Armed Journey (OpenAI & Google)", () => {
   });
 
   describe("GoogleImageRaw", () => {
-    it("fails closed with CREDENTIAL_REQUIRED when credentials are none/empty in multi mode", async () => {
+    it("kind none maps to the sentinel; the vendor error never carries the host decoy (022-5 FR-007)", async () => {
       const raw = new GoogleImageRaw();
       const target: InferenceTarget = {
         providerAccount: "tenant-account-1",
         upstreamProvider: "google",
         model: "imagen-3.0-generate-002",
+        // Loopback sink: the sentinel proceeds, the call fails locally —
+        // no real vendor traffic, no CREDENTIAL_REQUIRED, no decoy.
+        baseUrl: "http://127.0.0.1:9/v1beta",
         credential: {
           id: "cred-none",
           ref: { kind: "none" } as any,
@@ -100,9 +113,15 @@ describe("Image Inference Boundary Armed Journey (OpenAI & Google)", () => {
         },
       };
 
-      await expect(
-        raw.generate(target, { prompt: "test image" }, { tenancyMode: "multi" }),
-      ).rejects.toThrow(/CREDENTIAL_REQUIRED/);
+      let err: any;
+      await raw
+        .generate(target, { prompt: "test image" }, { tenancyMode: "multi", capabilities: [{ kind: "network-destination", scheme: "http", host: "127.0.0.1", port: 9 }] } as never)
+        .catch((e: unknown) => {
+          err = e;
+        });
+      expect(err).toBeDefined();
+      expect(String(err?.message)).not.toMatch(/CREDENTIAL_REQUIRED/);
+      expect(String(err?.message)).not.toContain("host-decoy-gemini-key");
     });
 
     it("fails closed with EGRESS_REQUIRED when custom baseUrl lacks network-destination capability in multi mode", async () => {
