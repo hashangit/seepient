@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [v0.8.0] - Unreleased
 
+### Claims corrections (022-5 FR-009)
+
+Three claims shipped in earlier 022-4 Round-2 notes were false against the code as they stood; the corrections below state what was actually true and which change made each claim true:
+
+- **"Atomic FD-Pinned Reads & TOCTOU Elimination"** — at the time of that note, only the final path component was race-protected (`O_NOFOLLOW`); a parent-directory symlink swap between authorization and execution still read outside files (pass-10 PoC). Made true by the Round-3 read-plane identity binding (authorize-time `dev`/`ino` verified against the pinned fd, `PATH_IDENTITY_MISMATCH`).
+- **"Executable Mutation-Probe CI Step"** — at the time of that note, the probe neutralized only the journeys' own hit counter and any non-zero exit counted as red. Made true across three rounds: Round 3 moved neutralization into real production seams; 022-5 de-confounded the counter (a deleted production seam now fails its probe — the matrix detects orphaned seams), pinned each probe to the journey's expected security-assertion message, added registration lints (every security journey is either probed or explicitly counter-only; every production seam is registered), and made the seam two-factor (`NODE_ENV=test` AND a vitest worker).
+- The Round-2 note "guard self-tests have been deleted" was also inaccurate — the anti-vacuity counter self-test exists and remains.
+
+**Security (022-5):**
+
+
+
 ### Round 3 — Pass-10 remediation: read-plane identity binding, real mutation probes, operator provider channel (Spec 022-4)
 
 **Security:**
