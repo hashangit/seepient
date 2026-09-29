@@ -8,7 +8,7 @@
  * the REAL vendored client against a loopback server and asserts the wire
  * Authorization header.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
@@ -219,6 +219,57 @@ describe("022-5 US2: inference credentials, provider management only", () => {
       expect(seen.length).toBeGreaterThan(0);
       expect(seen[0]).toBe("Bearer sk-real-resolved-key-123");
       expect(seen.join("\n")).not.toContain("sk-DECOY");
+    } finally {
+      server.close();
+    }
+  });
+
+  it("google discovery decoy pin: the stored key rides x-goog-api-key, decoys never do (post-genai-major)", async () => {
+    const headers: string[] = [];
+    const server = createServer((req, res) => {
+      headers.push(String(req.headers["x-goog-api-key"] ?? ""));
+      res.writeHead(500);
+      res.end("{}");
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as { port: number }).port;
+    try {
+      const { GoogleDiscoverySource } = await import("../../../vendors/google/google-discovery-source.js");
+      const source = new GoogleDiscoverySource();
+      // The discovery URL is upstream-fixed for google — point the account at
+      // nothing; the source builds its own URL, so assert via its returned
+      // error path with a captured outbound? The source fetches google's
+      // fixed URL, so this pin runs the REAL source against a decoy env and
+      // asserts no decoy reaches any outbound request via the fetch spy.
+      const fetchSpy2 = vi.spyOn(globalThis, "fetch");
+      try {
+        const store = new MemoryCredentialStore();
+        await store.put("g", { kind: "api_key", keyValue: "sk-real-google-key" });
+        const result = await source.discover({
+          providerAccount: "g",
+          upstreamProvider: "google",
+          credential: {
+            id: "g",
+            ref: { kind: "seepient", id: "g" },
+            activeLeaseCount: 0,
+            isResolvable: async () => true,
+            acquireLease: () => ({
+              leaseId: "l",
+              isReleased: false,
+              secret: async () => ({ kind: "api_key", value: "sk-real-google-key" }),
+              release: async () => {},
+            }),
+          } as never,
+          baseUrl: `http://127.0.0.1:${port}`,
+        } as never);
+        void result;
+        const outbound = fetchSpy2.mock.calls.map((c) => JSON.stringify(c[1] ?? {}));
+        const combined = outbound.join("\n") + headers.join("\n");
+        expect(combined).toContain("sk-real-google-key");
+        expect(combined).not.toContain("sk-DECOY");
+      } finally {
+        fetchSpy2.mockRestore();
+      }
     } finally {
       server.close();
     }
