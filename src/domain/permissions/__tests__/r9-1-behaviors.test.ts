@@ -549,8 +549,20 @@ describe("R9.1 Integration Wiring Verification", () => {
 
   it("casSync binding matrix (022-5-WO1 T011): owner falls back to the request; actor-less is stale; legacy owner-less accepts any actor", async () => {
     const { DurableApprovalStore } = await import("../durable-approval-store.js");
-    const mkReq = (principalId: string | undefined) => ({
-      requestId: "r-x",
+    const { mkdtempSync } = await import("node:fs");
+    const { tmpdir: osTmp } = await import("node:os");
+    // Each store gets its OWN root and requestId — a shared root plus shared
+    // requestId makes the stores see each other's persisted records
+    // (persist-flush timing turned this into an order-dependent failure).
+    const mkStore = (() => {
+      let n = 0;
+      return () => {
+        n += 1;
+        return { store: new DurableApprovalStore({ root: mkdtempSync(join(osTmp(), `r91-matrix-${n}-`)) }), n };
+      };
+    })();
+    const mkReq = (principalId: string | undefined, requestId: string) => ({
+      requestId,
       principalId,
       runId: "r",
       toolCallId: "c",
@@ -563,9 +575,9 @@ describe("R9.1 Integration Wiring Verification", () => {
       createdAt: Date.now(),
       expiresAt: Date.now() + 60_000,
     });
-    const decision = (actorId?: string): import("../../../foundations/contracts/permission-policy.js").PermissionDecision => ({
+    const decision = (requestId: string, actorId?: string): import("../../../foundations/contracts/permission-policy.js").PermissionDecision => ({
       approved: true,
-      requestId: "r-x",
+      requestId,
       actionDigest: "ad",
       optionId: "opt",
       lifetime: "action",
@@ -575,25 +587,25 @@ describe("R9.1 Integration Wiring Verification", () => {
 
     // Owner resolves rec.principalId ?? request.principalId: a record with an
     // unstamped principal but a principal-bearing request is still bound.
-    const viaRequest = new DurableApprovalStore({ root: tmpDir });
+    const { store: viaRequest } = mkStore();
     await viaRequest.load();
-    viaRequest.create({ request: mkReq("tenant-a") as never, tenantId: "t", sessionId: "s", continuationId: "cont-vr" });
-    expect(viaRequest.casSync("cont-vr", 1, decision("tenant-b")).status).toBe("stale");
-    expect(viaRequest.casSync("cont-vr", 1, decision("tenant-a")).status).toBe("transitioned");
+    viaRequest.create({ request: mkReq("tenant-a", "r-vr") as never, tenantId: "t", sessionId: "s", continuationId: "cont-vr" });
+    expect(viaRequest.casSync("cont-vr", 1, decision("r-vr", "tenant-b")).status).toBe("stale");
+    expect(viaRequest.casSync("cont-vr", 1, decision("r-vr", "tenant-a")).status).toBe("transitioned");
 
     // An owned record with an actor-LESS decision is stale, not transitioned.
-    const actorLess = new DurableApprovalStore({ root: tmpDir });
+    const { store: actorLess } = mkStore();
     await actorLess.load();
-    actorLess.create({ request: mkReq("tenant-a") as never, tenantId: "t", sessionId: "s", continuationId: "cont-al" });
-    expect(actorLess.casSync("cont-al", 1, decision(undefined)).status).toBe("stale");
+    actorLess.create({ request: mkReq("tenant-a", "r-al") as never, tenantId: "t", sessionId: "s", continuationId: "cont-al" });
+    expect(actorLess.casSync("cont-al", 1, decision("r-al", undefined)).status).toBe("stale");
     expect(actorLess.get("cont-al")?.status).toBe("pending");
 
     // Legacy owner-less record (no principal anywhere) keeps accepting any
     // actor and expiring naturally — no migration cliff.
-    const legacy = new DurableApprovalStore({ root: tmpDir });
+    const { store: legacy } = mkStore();
     await legacy.load();
-    legacy.create({ request: mkReq(undefined) as never, tenantId: "t", sessionId: "s", continuationId: "cont-lg" });
-    expect(legacy.casSync("cont-lg", 1, decision("whoever")).status).toBe("transitioned");
+    legacy.create({ request: mkReq(undefined, "r-lg") as never, tenantId: "t", sessionId: "s", continuationId: "cont-lg" });
+    expect(legacy.casSync("cont-lg", 1, decision("r-lg", "whoever")).status).toBe("transitioned");
   });
 
   it("getDecision resolves via requestId only, never a continuationId (022-5-WO1 T012 / SC-010)", async () => {

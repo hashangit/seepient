@@ -71,10 +71,13 @@ describe("commit old-content identity pin is load-bearing (022-5-WO2 T010 deleti
       snapshotStore: createSnapshotStore(),
     };
     const action = await analyzedEditAction(file, ctx);
-    const inodeBefore = statSync(file).ino;
-    rmSync(file);
-    writeFileSync(file, "RACED-BYTES");
-    expect(statSync(file).ino).not.toBe(inodeBefore);
+    // Deterministic swap: the replacement is created while the original is
+    // alive (distinct inode guaranteed), then renamed over the path. Linux
+    // reuses a freed inode immediately, so rm+recreate is NOT deterministic.
+    const replacement = join(dir, "replacement.tmp");
+    writeFileSync(replacement, "RACED-BYTES");
+    const { renameSync } = await import("node:fs");
+    renameSync(replacement, file);
 
     const executor = new CommitFilesExecutor({ commitHelper: fakeHelper } as never);
     const result = await executor.execute(action, envelope(file), action.operation as never, {});
@@ -96,8 +99,10 @@ describe("commit old-content identity pin is load-bearing (022-5-WO2 T010 deleti
       snapshotStore: createSnapshotStore(),
     };
     const action = await analyzedEditAction(file, ctx);
-    rmSync(file);
-    writeFileSync(file, "RACED-BYTES");
+    const replacement = join(dir, "replacement2.tmp");
+    writeFileSync(replacement, "RACED-BYTES");
+    const { renameSync } = await import("node:fs");
+    renameSync(replacement, file);
 
     const executor = new CommitFilesExecutor({ commitHelper: fakeHelper } as never);
     const result = await executor.execute(action, envelope(file), action.operation as never, {});
