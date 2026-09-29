@@ -15,8 +15,8 @@ describe("SC-012 worker pins (022-5-WO2 T005)", () => {
     const port = await app.listen();
     try {
       const originalGet = app.state.sessions.get.bind(app.state.sessions);
-      (app.state.sessions as unknown as { get: () => never }).get = () => {
-        throw new Error("internal blowup");
+      (app.state.sessions as unknown as { get: (key: string) => never }).get = () => {
+        throw new Error("internal blowup") as never;
       };
       const res = await fetch(`http://127.0.0.1:${port}/api/sessions?sessionId=s1`, {
         headers: { authorization: "Bearer tok" },
@@ -25,7 +25,7 @@ describe("SC-012 worker pins (022-5-WO2 T005)", () => {
       const body = (await res.json()) as { error?: string };
       expect(body.error).toBeDefined();
       // The process is alive: restore and hit the route again.
-      (app.state.sessions as unknown as { get: () => never }).get = originalGet;
+      (app.state.sessions as unknown as Record<string, unknown>).get = originalGet;
       const again = await fetch(`http://127.0.0.1:${port}/api/sessions?sessionId=s1`, {
         headers: { authorization: "Bearer tok" },
       });

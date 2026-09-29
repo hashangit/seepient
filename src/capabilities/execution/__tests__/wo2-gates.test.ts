@@ -16,7 +16,7 @@
  * laundering to MEDIA_GENERATION_FAILED).
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, realpathSync, writeFileSync, statSync, mkfifoSync } from "node:fs";
+import { mkdtempSync, rmSync, realpathSync, writeFileSync, statSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
