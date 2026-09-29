@@ -786,6 +786,19 @@ export class EffectBroker implements EffectBrokerContract {
 
 /** Default Node.js network adapter for EffectBroker. */
 export class NodeNetworkAdapter implements BrokerNetworkAdapter {
+  private readonly maxResponseBytes: number;
+  private readonly timeoutMs: number;
+
+  constructor(opts?: { maxResponseBytes?: number; timeoutMs?: number }) {
+    // 022-5-WO2 T007 (pass-12 P1-1): the streaming cap MUST be armed here —
+    // pinnedFetch only enforces `maxResponseBytes` while streaming, and the
+    // broker's post-response cap runs after the body has already been
+    // buffered (lead-reproduced: 300 MiB in 237 ms). Defaults match the
+    // broker's own limits.
+    this.maxResponseBytes = opts?.maxResponseBytes ?? 10 * 1024 * 1024;
+    this.timeoutMs = opts?.timeoutMs ?? 30_000;
+  }
+
   async resolve(host: string): Promise<string[]> {
     try {
       const dns = await import("node:dns/promises");
@@ -820,6 +833,8 @@ export class NodeNetworkAdapter implements BrokerNetworkAdapter {
       headers: init.headers,
       body: init.body,
       signal: init.signal,
+      maxResponseBytes: this.maxResponseBytes,
+      timeoutMs: this.timeoutMs,
     });
 
     return {

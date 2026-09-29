@@ -290,8 +290,10 @@ export function createRestHandler(ctx: RestHandlerContext) {
 
       const getRuntime = async () => {
         if (ctx.runtime) return ctx.runtime;
+        // 022-5-WO2 T008: the fallback runtime serves the same multi server
+        // surface — arm it to match the boot-time composition.
         const { createIsolatedProviderRuntime } = await import("../../domain/providers/provider-runtime.js");
-        return createIsolatedProviderRuntime();
+        return createIsolatedProviderRuntime({ tenancyMode: "multi" });
       };
 
       switch (route.handler) {

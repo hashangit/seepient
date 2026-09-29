@@ -36,6 +36,10 @@ export interface BuildLocalBoundaryResult {
  */
 export async function buildLocalBoundary(opts?: {
   artifacts?: InMemoryArtifactStore;
+  /** Streaming cap for the brokered network path (022-5-WO2 T007). Default 10 MiB. */
+  networkMaxResponseBytes?: number;
+  /** Deadline for the brokered network path. Default 30 s. */
+  networkDeadlineMs?: number;
   /**
    * Host-callback map for `trusted-host` tools. The composition root (which
    * may import Domain) supplies it; Capabilities must not import Domain
@@ -91,13 +95,22 @@ export async function buildLocalBoundary(opts?: {
     ? new UncontainedSandbox()
     : await createNativeProcessSandbox();
 
-  // Effect broker for network egress and external calls
+  // Effect broker for network egress and external calls. The adapter is
+  // constructed with the same streaming limits as the broker (022-5-WO2
+  // T007) — the broker's post-response cap cannot help once the body is
+  // buffered, so the adapter's pinnedFetch cap is the real enforcement.
+  const networkAdapter = opts?.network ?? new NodeNetworkAdapter({
+    maxResponseBytes: opts?.networkMaxResponseBytes,
+    timeoutMs: opts?.networkDeadlineMs,
+  });
   const effectBroker = new EffectBroker({
     artifacts,
-    network: opts?.network ?? new NodeNetworkAdapter(),
+    network: networkAdapter,
     vendorOperationHandler: opts?.vendorOperationHandler,
     tenancyMode: opts?.tenancyMode,
     secretResolver: opts?.secretResolver,
+    maxResponseBytes: opts?.networkMaxResponseBytes,
+    deadlineMs: opts?.networkDeadlineMs,
   });
 
   // Host callbacks map for built-in and custom tools (consulted by the
