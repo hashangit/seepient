@@ -268,6 +268,17 @@ export class ProviderRuntime extends EventEmitter implements ProviderRuntimeCont
     return this.capabilities;
   }
 
+  /**
+   * Multi-tenant egress assert for server surfaces (022-5-WO2 T008/D2) —
+   * the domain-side wrapper so transport layers never touch the vendor
+   * module directly.
+   */
+  async assertAccountEgressAllowed(baseUrl: string, providerAccount: string): Promise<void> {
+    if (this.tenancyMode !== "multi") return;
+    const { assertBaseUrlEgressAllowed } = await import("../../vendors/egress-check.js");
+    assertBaseUrlEgressAllowed(baseUrl, this.capabilities, { providerAccount } as never);
+  }
+
   getConfigStore(): ProviderConfigStore {
     return this.configStore;
   }
