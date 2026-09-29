@@ -200,11 +200,15 @@ export class DurableApprovalStore {
       void this.persist();
       return { status: "expired", record: rec };
     }
-    // 022-5 FR-013: the CAS is principal-bound — a decision whose actor does
-    // not own the pending approval is rejected without mutating anything.
+    // 022-5 FR-013 + WO1 T011: the CAS is principal-bound — the record's
+    // owner is its stamped principalId, falling back to the request's. When
+    // an owner exists, a decision whose actorId is absent OR mismatched is
+    // stale (no mutation). Legacy records with no owner anywhere keep
+    // accepting any actor and expiring naturally.
     // (Expiry is checked first: it is a property of the record, not of the
     // actor, and transitioning pending->expired leaks nothing.)
-    if (rec.principalId && decision.actorId && decision.actorId !== rec.principalId) {
+    const owner = rec.principalId ?? rec.request.principalId;
+    if (owner && (!decision.actorId || decision.actorId !== owner)) {
       return { status: "stale" };
     }
     rec.status = decision.approved ? "approved" : "denied";
