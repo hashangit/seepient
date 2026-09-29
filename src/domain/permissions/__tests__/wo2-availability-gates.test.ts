@@ -76,11 +76,12 @@ describe("edit commit destination swap (022-5-WO2 T004)", () => {
     expect(prepared.operation.kind).toBe("commit-files");
     if (prepared.operation.kind !== "commit-files") return;
 
-    // 2. Swap the destination inode after analysis (same path, new file).
-    const inodeBefore = statSync(file).ino;
-    rmSync(file);
-    writeFileSync(file, "RACED-BYTES");
-    expect(statSync(file).ino).not.toBe(inodeBefore);
+    // 2. Swap the destination inode after analysis — deterministic: the
+    // replacement is created while the original is alive, then renamed over.
+    const replacement = join(dir, "replacement.tmp");
+    writeFileSync(replacement, "RACED-BYTES");
+    const { renameSync } = await import("node:fs");
+    renameSync(replacement, file);
 
     // 3. Execute: the old-content pin must deny the swap before reading.
     const executor = new CommitFilesExecutor({
