@@ -32,6 +32,10 @@ export function createConnectionRegistry(opts?: ConnectionRegistryOptions): WsCo
     ws: WebSocket;
     toolName: string;
     createdAt: number;
+    /** Authenticated principal captured at create time (022-5-WO1 D1) —
+     *  becomes the CAS decision's actorId so an authenticated tenant's
+     *  approval matches its own record. */
+    principalId?: string;
   }>();
   const durableApprovalStore =
     opts?.durableApprovalStore ??

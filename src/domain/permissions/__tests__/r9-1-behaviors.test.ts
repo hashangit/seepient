@@ -547,6 +547,84 @@ describe("R9.1 Integration Wiring Verification", () => {
     expect(owned.status).toBe("transitioned");
   });
 
+  it("casSync binding matrix (022-5-WO1 T011): owner falls back to the request; actor-less is stale; legacy owner-less accepts any actor", async () => {
+    const { DurableApprovalStore } = await import("../durable-approval-store.js");
+    const mkReq = (principalId: string | undefined) => ({
+      requestId: "r-x",
+      principalId,
+      runId: "r",
+      toolCallId: "c",
+      actionDigest: "ad",
+      action: { title: "t", summary: "s", canonicalTargets: [], effects: [] },
+      requestedCapabilities: [],
+      approvalOptions: [],
+      approvalChoices: [],
+      offeredLifetimes: ["action"],
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 60_000,
+    });
+    const decision = (actorId?: string) => ({
+      approved: true,
+      requestId: "r-x",
+      actionDigest: "ad",
+      optionId: "opt",
+      lifetime: "action" as const,
+      actorId,
+      decidedAt: Date.now(),
+    });
+
+    // Owner resolves rec.principalId ?? request.principalId: a record with an
+    // unstamped principal but a principal-bearing request is still bound.
+    const viaRequest = new DurableApprovalStore({ root: tmpDir });
+    await viaRequest.load();
+    viaRequest.create({ request: mkReq("tenant-a") as never, tenantId: "t", sessionId: "s", continuationId: "cont-vr" });
+    expect(viaRequest.casSync("cont-vr", 1, decision("tenant-b")).status).toBe("stale");
+    expect(viaRequest.casSync("cont-vr", 1, decision("tenant-a")).status).toBe("transitioned");
+
+    // An owned record with an actor-LESS decision is stale, not transitioned.
+    const actorLess = new DurableApprovalStore({ root: tmpDir });
+    await actorLess.load();
+    actorLess.create({ request: mkReq("tenant-a") as never, tenantId: "t", sessionId: "s", continuationId: "cont-al" });
+    expect(actorLess.casSync("cont-al", 1, decision(undefined)).status).toBe("stale");
+    expect(actorLess.get("cont-al")?.status).toBe("pending");
+
+    // Legacy owner-less record (no principal anywhere) keeps accepting any
+    // actor and expiring naturally — no migration cliff.
+    const legacy = new DurableApprovalStore({ root: tmpDir });
+    await legacy.load();
+    legacy.create({ request: mkReq(undefined) as never, tenantId: "t", sessionId: "s", continuationId: "cont-lg" });
+    expect(legacy.casSync("cont-lg", 1, decision("whoever")).status).toBe("transitioned");
+  });
+
+  it("getDecision resolves via requestId only, never a continuationId (022-5-WO1 T012 / SC-010)", async () => {
+    const { DurableApprovalStore } = await import("../durable-approval-store.js");
+    const store = new DurableApprovalStore({ root: tmpDir });
+    await store.load();
+    const req = {
+      requestId: "req-fp2",
+      principalId: "tenant-a",
+      runId: "r",
+      toolCallId: "c",
+      actionDigest: "ad",
+      action: { title: "t", summary: "s", canonicalTargets: [], effects: [] },
+      requestedCapabilities: [],
+      approvalOptions: [],
+      approvalChoices: [],
+      offeredLifetimes: ["action"],
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 60_000,
+    } as never;
+    store.create({ request: req, tenantId: "t", sessionId: "s", continuationId: "cont-fp2" });
+    store.casSync("cont-fp2", 1, {
+      approved: true, requestId: "req-fp2", actionDigest: "ad",
+      optionId: "opt", lifetime: "action" as const, actorId: "tenant-a", decidedAt: Date.now(),
+    } as never);
+    // The decision lives under the requestId; the continuation id is
+    // connection-scoped and never aliases into the decision map.
+    expect(await store.getDecision("req-fp2")).toBeDefined();
+    expect(await store.getDecision("cont-fp2")).toBeUndefined();
+  });
+
   it("DockerWorkerScheduler rejects forged signature and nonce replay (P4)", async () => {
     const { DockerWorkerScheduler } = await import("../../../capabilities/execution/docker-worker-scheduler.js");
     const { signDispatchPayload } = await import("../../../foundations/contracts/worker-protocol.js");
