@@ -36,7 +36,8 @@ function classifyMediaError(
       code === "PATH_IDENTITY_MISMATCH" ||
       code === "PATH_HARDLINK_REFUSED" ||
       code === "SYMLINK_READ_DENIED" ||
-      code === "PATH_ESCAPES_WORKSPACE"
+      code === "PATH_ESCAPES_WORKSPACE" ||
+      code === "MEDIA_INPUT_NOT_REGULAR_FILE"
     ) {
       return { code, message: rawMessage, retryable: false };
     }

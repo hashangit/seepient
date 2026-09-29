@@ -44,6 +44,45 @@ function isChangelogHistory(relPath: string): boolean {
  *  quote past findings verbatim — treated like CHANGELOG history for the
  *  API-key NAME bans. The env-MODE pattern and LLM_* names stay banned
  *  there (a living reintroduction must never slip). */
+/** The AGENTS.md vault-map section: the fenced code block that follows the
+ *  layout heading. The map's own annotations quote past registers verbatim;
+ *  everything outside the fence (Architecture, Key Files, Tools, ...) is
+ *  swept like any page. */
+function inAgentsVaultMap(lines: string[], index: number): boolean {
+  // The speckit-managed plan block is also tool-written history.
+  let speckitStart = -1;
+  let speckitEnd = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].includes('<!-- SPECKIT START -->')) speckitStart = i;
+    if (lines[i].includes('<!-- SPECKIT END -->')) speckitEnd = i;
+  }
+  if (speckitStart !== -1 && speckitEnd !== -1 && index > speckitStart && index < speckitEnd) {
+    return true;
+  }
+  let start = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].includes('Current layout of the Obsidian vault')) {
+      start = i;
+      break;
+    }
+  }
+  if (start === -1 || index <= start) return false;
+  // The map lives in the fence that opens right after the heading; the
+  // CLOSING fence ends the exemption. (The first fence after the heading is
+  // the opening one.)
+  let opened = false;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (lines[i].trim() === '```') {
+      if (!opened) {
+        opened = true;
+        continue;
+      }
+      return index < i;
+    }
+  }
+  return false;
+}
+
 function isHistoricalNameContext(relPath: string): boolean {
   return relPath === 'CHANGELOG.md' || relPath === 'AGENTS.md';
 }
@@ -385,16 +424,21 @@ describe('docs vocabulary gate (FR-002)', () => {
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const lower = line.toLowerCase();
+        // 022-5-WO2 T016 (D3): the AGENTS.md exemption is scoped to the
+        // vault-map section (whose annotations quote past registers
+        // verbatim) — the file's LIVING sections are swept like any page.
+        const inVaultMapSection = relPath === 'AGENTS.md' && inAgentsVaultMap(lines, i);
         for (const banned of bannedEverywhere) {
-          if (relPath === 'AGENTS.md') continue; // historical map/plan annotations, quoted verbatim
+          if (inVaultMapSection) continue;
           if (isHistoricalNameContext(relPath) && !bannedIdentifiers.includes(banned)) continue;
           if (lower.includes(banned.toLowerCase())) {
             violations.push(`${relPath}:${i + 1} contains banned identifier "${banned}"`);
           }
         }
-        if (!isHistoricalNameContext(relPath) && /--credential\s+env:/i.test(line)) {
+        if (relPath === 'AGENTS.md' && !inVaultMapSection && /--credential\s+env:/i.test(line)) {
           violations.push(`${relPath}:${i + 1} teaches the demolished env credential mode (--credential env:)`);
         }
+
       }
     }
 

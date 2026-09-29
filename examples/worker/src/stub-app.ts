@@ -139,7 +139,10 @@ export function createStubApp(initialState?: Partial<StubAppState> & { allowDemo
       console.error("[worker] unhandled rejection:", reason instanceof Error ? reason.stack : String(reason));
     });
   }
-  const server = http.createServer(async (req, res) => {
+  // SC-012 (022-5-WO2 T013): the routing logic lives in a named handler the
+  // thin createServer callback supervises — an internal throw becomes a 500
+  // response and the process stays alive (the pass-12 SC-012a closure).
+  async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     // FR-015: parse failures are a 400, not a process kill — one malformed
     // unauthenticated packet must never take the control plane down.
     let url: URL;
@@ -497,6 +500,20 @@ export function createStubApp(initialState?: Partial<StubAppState> & { allowDemo
 
     res.writeHead(404);
     res.end();
+  }
+
+  const server = http.createServer((req, res) => {
+    void handleRequest(req, res).catch((err: unknown) => {
+      console.error("[worker] internal handler error:", err instanceof Error ? err.stack : String(err));
+      try {
+        if (!res.headersSent) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+        }
+        res.end(JSON.stringify({ error: "InternalError", message: "Internal handler error" }));
+      } catch {
+        /* socket already gone */
+      }
+    });
   });
 
   return {
