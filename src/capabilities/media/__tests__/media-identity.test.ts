@@ -55,6 +55,21 @@ describe("readPinnedImage (022-5 FR-002/FR-004)", () => {
     );
   });
 
+  it("symlink and FIFO refusals carry their refusal reason in the message (022-5-WO1 T016)", async () => {
+    const link = join(dir, "link.png");
+    const outside = join(dir, "outside.png");
+    writeFileSync(outside, "outside");
+    execSync(`ln -s ${JSON.stringify(outside)} ${JSON.stringify(link)}`);
+    await expect(readPinnedImage(link, undefined, "image input", false)).rejects.toThrow(
+      /symbolic link/i,
+    );
+    const fifo = join(dir, "pipe2.png");
+    mkfifo(fifo);
+    await expect(readPinnedImage(fifo, identityOf(fifo), "image input", false)).rejects.toThrow(
+      /not a regular file/i,
+    );
+  });
+
   it("rejects a FIFO input within the test timeout instead of freezing the event loop", async () => {
     const fifo = join(dir, "pipe.png");
     mkfifo(fifo);

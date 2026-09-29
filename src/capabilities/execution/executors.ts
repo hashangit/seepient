@@ -67,8 +67,22 @@ export class CommitFilesExecutor implements OperationExecutor {
     action: PreparedToolAction,
     envelope: CapabilityEnvelope,
     operation: Extract<PreparedToolAction["operation"], { kind: "commit-files" }>,
-    _opts: { signal?: AbortSignal; onUpdate?: (u: ToolProgress) => void },
+    opts: { signal?: AbortSignal; onUpdate?: (u: ToolProgress) => void },
   ): Promise<ExecutionResult> {
+    // 022-5-WO1 T014: the abort signal is observed before any filesystem
+    // work — a pre-aborted commit must not touch the read plane at all.
+    if (opts.signal?.aborted) {
+      return {
+        state: "failed",
+        error: { code: "COMMIT_ABORTED", message: "Commit aborted before execution", retryable: true },
+        evidence: {
+          backend: "local-native",
+          actionDigest: action.actionDigest,
+          executorId: "commit-files-denied",
+          operationKind: "commit-files",
+        },
+      };
+    }
     // T108a: deny any target under ~/.seepient/security/
     for (const commit of operation.commits) {
       if (isSecurityPath(commit.destination.canonicalPath)) {
@@ -101,11 +115,52 @@ export class CommitFilesExecutor implements OperationExecutor {
         import("node:fs"),
       ]);
       const destPath = operation.commits[0].destination.canonicalPath;
-      const oldHandle = await fsOpenOld(destPath, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+      // 022-5-WO1 T014: O_NONBLOCK bounds the open (a FIFO destination
+      // cannot wedge the turn); the pinned fd must be a regular file; and
+      // when the commit carries an expected identity, the opened file must
+      // be the one that was authorized.
+      const oldHandle = await fsOpenOld(
+        destPath,
+        fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0),
+      );
       try {
         const oldSt = await oldHandle.stat();
-        if (!oldSt.isSymbolicLink() && oldSt.nlink <= 1) {
-          oldContent = await oldHandle.readFile({ encoding: "utf-8" });
+        if (!oldSt.isFile()) {
+          return {
+            state: "failed",
+            error: {
+              code: "COMMIT_DEST_NOT_REGULAR_FILE",
+              message: `Commit destination is not a regular file: ${destPath}`,
+              retryable: false,
+            },
+            evidence: {
+              backend: "local-native",
+              actionDigest: action.actionDigest,
+              executorId: "commit-files-denied",
+              operationKind: "commit-files",
+            },
+          };
+        }
+        const expectedIdentity = operation.commits[0].expected as { device?: string; inode?: string } | undefined;
+        if (
+          !isGuardNeutralized("P1-1-READ-IDENTITY") &&
+          expectedIdentity?.device !== undefined &&
+          expectedIdentity.inode !== undefined &&
+          (String(oldSt.dev) !== expectedIdentity.device || String(oldSt.ino) !== expectedIdentity.inode)
+        ) {
+          return {
+            state: "failed",
+            error: { code: "PATH_IDENTITY_MISMATCH", message: `Commit destination changed since authorization: ${destPath}`, retryable: false },
+            evidence: {
+              backend: "local-native",
+              actionDigest: action.actionDigest,
+              executorId: "commit-files-denied",
+              operationKind: "commit-files",
+            },
+          };
+        }
+        if (oldSt.nlink <= 1) {
+          oldContent = await oldHandle.readFile({ encoding: "utf-8", signal: opts.signal });
         }
       } finally {
         await oldHandle.close();
@@ -436,30 +491,97 @@ function capBrokerOutput(text: string): string {
  * readable page text, not markup: strip script/style/head blocks, turn
  * block-level closings into newlines, drop remaining tags, decode common
  * entities. A full parser dependency is not warranted for this.
- * FR-016: the input is capped BEFORE the regex passes — converting an
- * unbounded page burns the event loop on catastrophic backtracking-prone
- * patterns; the output cap downstream cannot help with that.
+ *
+ * 022-5-WO1 T013 (pass-11 P1-2): the structural pass is a single linear
+ * scan, not regexes — `<[^>]+>` and friends are quadratic on adversarial
+ * input (25 s at 256 KiB of "<"), and read_website content is attacker-
+ * controlled. Every indexOf advances; there is no backtracking anywhere.
  */
 const MAX_HTML_INPUT_BYTES = 1024 * 1024;
 
+const SKIP_BLOCK_TAGS = new Set(["script", "style", "noscript", "svg", "head", "template"]);
+const BLOCK_CLOSE_NEWLINE = new Set([
+  "p", "div", "li", "ul", "ol", "h1", "h2", "h3", "h4", "h5", "h6",
+  "tr", "table", "section", "article", "header", "footer", "blockquote", "pre",
+]);
+
+function htmlStructureToText(html: string): string {
+  let out = "";
+  let i = 0;
+  const n = html.length;
+  while (i < n) {
+    const lt = html.indexOf("<", i);
+    if (lt === -1) {
+      out += html.slice(i);
+      break;
+    }
+    out += html.slice(i, lt);
+    if (html.startsWith("<!--", lt)) {
+      const end = html.indexOf("-->", lt + 4);
+      i = end === -1 ? n : end + 3;
+      continue;
+    }
+    const gt = html.indexOf(">", lt + 1);
+    if (gt === -1) break; // unterminated tag: drop the bounded tail
+    const inner = html.slice(lt + 1, gt);
+    i = gt + 1;
+    const closing = inner.startsWith("/");
+    const name = (/^\/?\s*([a-zA-Z][a-zA-Z0-9-]*)/.exec(inner))?.[1]?.toLowerCase() ?? "";
+    if (!closing && name === "br") {
+      out += "\n";
+      continue;
+    }
+    if (closing && BLOCK_CLOSE_NEWLINE.has(name)) {
+      out += "\n";
+      continue;
+    }
+    if (!closing && SKIP_BLOCK_TAGS.has(name)) {
+      const closeIdx = html.indexOf(`</${name}`, gt);
+      if (closeIdx === -1) {
+        i = n;
+        continue;
+      }
+      const closeGt = html.indexOf(">", closeIdx);
+      i = closeGt === -1 ? n : closeGt + 1;
+      continue;
+    }
+    out += " ";
+  }
+  return out;
+}
+
+function decodeEntitySafe(cp: number): string {
+  try {
+    return String.fromCodePoint(cp);
+  } catch {
+    return ""; // out-of-range entity: skip it, keep scanning
+  }
+}
+
 export function htmlToText(html: string): string {
-  const capped = html.length > MAX_HTML_INPUT_BYTES ? `${html.slice(0, MAX_HTML_INPUT_BYTES)}\n…[input truncated at ${MAX_HTML_INPUT_BYTES} bytes]` : html;
-  return capped
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<(script|style|noscript|svg|head|template)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<br\b[^>]*\/?>/gi, "\n")
-    .replace(/<\/(p|div|li|ul|ol|h[1-6]|tr|table|section|article|header|footer|blockquote|pre)\s*>/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
+  let truncationNote = "";
+  let capped = html;
+  if (html.length > MAX_HTML_INPUT_BYTES) {
+    capped = html.slice(0, MAX_HTML_INPUT_BYTES);
+    // Never split a surrogate pair on the cap boundary.
+    const last = capped.charCodeAt(capped.length - 1);
+    if (last >= 0xd800 && last <= 0xdbff) capped = capped.slice(0, -1);
+    truncationNote = `\n…[input truncated at ${MAX_HTML_INPUT_BYTES} bytes]`;
+  }
+  // The note is appended after the structural pass — inside a capped
+  // unterminated tag it would be swallowed by the tag-dropping scan.
+  return (
+    htmlStructureToText(capped)
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
     .replace(/&quot;/gi, '"')
-    .replace(/&(#[0-9]+|apos);/g, (m, d: string) => (d.startsWith("#") ? String.fromCodePoint(Number(d.slice(1))) : "'"))
-    .replace(/&#x([0-9a-f]+);/gi, (_, d: string) => String.fromCodePoint(parseInt(d, 16)))
+    .replace(/&(#[0-9]+|apos);/g, (m, d: string) => (d.startsWith("#") ? decodeEntitySafe(Number(d.slice(1))) : "'"))
+    .replace(/&#x([0-9a-f]+);/gi, (_, d: string) => decodeEntitySafe(parseInt(d, 16)))
     .replace(/[ \t]+/g, " ")
     .replace(/\n{3,}/g, "\n\n")
-    .trim();
+    .trim() + truncationNote);
 }
 
 /**

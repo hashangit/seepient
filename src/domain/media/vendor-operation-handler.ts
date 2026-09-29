@@ -29,6 +29,17 @@ function classifyMediaError(
         : String(err);
 
   if (typeof code === "string") {
+    // 022-5-WO1 T016: the read-plane typed denials survive as themselves —
+    // the user asked to read/generate from a specific file, and "which guard
+    // refused it" is exactly what they need to see.
+    if (
+      code === "PATH_IDENTITY_MISMATCH" ||
+      code === "PATH_HARDLINK_REFUSED" ||
+      code === "SYMLINK_READ_DENIED" ||
+      code === "PATH_ESCAPES_WORKSPACE"
+    ) {
+      return { code, message: rawMessage, retryable: false };
+    }
     if (code === "unconfigured_purpose" || code === "unconfigured_provider") {
       const setup = createSetupFailure(
         operation,

@@ -24,7 +24,8 @@ import type {
 import type { PreparationArtifactStore } from "../../foundations/contracts/execution-brokers.js";
 import type { ToolAnalysisContext } from "../../foundations/contracts/custom-tools.js";
 import { generateId } from "../../foundations/id.js";
-import { PathEscapesWorkspaceError } from "../../foundations/errors.js";
+import { isGuardNeutralized } from "../../foundations/test-seams.js";
+import { PathEscapesWorkspaceError, PathIdentityMismatchError } from "../../foundations/errors.js";
 
 /**
  * Authorizes a read target path against the tenant's workspace ceiling (FR-002, FR-003).
@@ -395,13 +396,31 @@ export async function analyzeEditFile(
         exists: true,
         finalSymlink: false,
       });
-      const handle = await fsOpenSection(real, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+      // 022-5-WO1 T015: O_NONBLOCK bounds the open (a FIFO swapped in for a
+      // tagged path cannot wedge the ANALYSIS phase pre-approval), the pinned
+      // fd must be a regular file, and its dev/ino must match the snapshot
+      // identity taken right after authorization — a parent swap between
+      // authorize and read feeds host bytes into the in-workspace merge.
+      const snap = snapshotPath({ canonicalPath: real, canonicalParent: path.dirname(real), basename: path.basename(real), exists: true, finalSymlink: false });
+      const handle = await fsOpenSection(real, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0));
       try {
         const st = await handle.stat();
         if (st.isSymbolicLink() || st.nlink > 1) {
           throw new Error(
             `Refusing edit source: ${real} is a symbolic link or hardlink; edit the resolved real file`,
           );
+        }
+        if (!st.isFile()) {
+          throw new Error(`Refusing edit source: ${real} is not a regular file`);
+        }
+        if (
+          !isGuardNeutralized("P1-1-READ-IDENTITY") &&
+          snap?.device !== undefined &&
+          snap.inode !== undefined &&
+          (String(st.dev) !== snap.device || String(st.ino) !== snap.inode)
+        ) {
+          const err = new PathIdentityMismatchError(real);
+          throw new Error(err.message);
         }
         return await handle.readFile({ encoding: "utf-8" });
       } finally {
