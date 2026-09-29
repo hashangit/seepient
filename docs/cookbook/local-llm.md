@@ -35,12 +35,6 @@ seepient setup
 Or add the account directly:
 
 ```bash
-seepient providers add ollama --base-url http://127.0.0.1:11434/v1 --credential none
-```
-
-Or configure via the CLI:
-
-```bash
 seepient providers add local-ollama \
   --upstream ollama \
   --url http://127.0.0.1:11434/v1 \

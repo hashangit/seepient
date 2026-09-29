@@ -76,8 +76,9 @@ seepient providers list
 # Register a local Ollama endpoint
 seepient providers add local-ollama --upstream ollama --url http://127.0.0.1:11434/v1 --allow-private
 
-# Register a custom OpenAI-compatible endpoint with an API key
-seepient providers add custom-ai --upstream openai --url https://api.example.com/v1 --credential env:CUSTOM_API_KEY
+# Register a custom OpenAI-compatible endpoint (keyless; store a key via auth login)
+seepient providers add custom-ai --upstream openai --url https://api.example.com/v1
+seepient auth login custom-ai --key sk-...
 ```
 
 ### `seepient models`

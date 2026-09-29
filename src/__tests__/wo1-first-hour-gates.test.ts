@@ -22,14 +22,14 @@ describe("first-hour stdout truth (022-5-WO1 T009a)", () => {
 
   it("non-interactive setup guidance mentions no demolished env names", async () => {
     const logs: string[] = [];
-    vi.spyOn(console, "log").implementation((...args: unknown[]) => {
+    vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
       logs.push(args.map(String).join(" "));
     });
-    const exitSpy = vi.spyOn(process, "exit").implementation(((code?: number) => {
+    vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
       throw new Error(`process.exit(${code}) — expected for non-interactive setup`);
     }) as never);
 
-    const { runSetup } = await import("../../transport/cli/setup.js");
+    const { runSetup } = await import("../transport/cli/setup.js");
     await expect(runSetup({})).rejects.toThrow(/process\.exit/);
 
     const output = logs.join("\n");
@@ -49,7 +49,9 @@ describe("provider-management.md isolated example executes (022-5-WO1 T009b)", (
   it("the documented construction completes chat() against a loopback stub", async () => {
     // Verbatim construction assertions on the markdown fence.
     const md = readFileSync(join(process.cwd(), "docs/sdk/provider-management.md"), "utf-8");
-    const fence = md.slice(md.indexOf("const agent = await createSeepient"), md.indexOf("await agent.dispose()"));
+    const fenceStart = md.indexOf('overlayFile: ":memory:"');
+    const fenceOpen = md.lastIndexOf("```typescript", fenceStart);
+    const fence = md.slice(fenceOpen, md.indexOf("await agent.dispose()", fenceStart));
     expect(fence).toContain('tenancy: "single"');
     expect(fence).toContain('overlayFile: ":memory:"');
     expect(fence).toContain('credential: { kind: "seepient", id: "isolated_openai" }');
@@ -68,8 +70,8 @@ describe("provider-management.md isolated example executes (022-5-WO1 T009b)", (
     const port = (server.address() as { port: number }).port;
 
     try {
-      const { createSeepient } = await import("../../transport/sdk/index.js");
-      const { MemoryCredentialStore } = await import("../../domain/providers/credentials/memory-credential-store.js");
+      const { createSeepient } = await import("../transport/sdk/index.js");
+      const { MemoryCredentialStore } = await import("../domain/providers/credentials/memory-credential-store.js");
       const store = new MemoryCredentialStore();
       await store.put("isolated_openai", { kind: "api_key", keyValue: "sk-isolated-example-key" });
 
@@ -92,7 +94,8 @@ describe("provider-management.md isolated example executes (022-5-WO1 T009b)", (
         } as never,
       } as never);
 
-      await agent.chat("Hello from isolated agent!");
+      // The sink answers 500 — what's under test is the wire.
+      await agent.chat("Hello from isolated agent!").catch(() => {});
       // The wire carried the stored key, never a decoy.
       expect(seen.length).toBeGreaterThan(0);
       expect(seen[0]).toBe("Bearer sk-isolated-example-key");

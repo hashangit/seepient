@@ -63,9 +63,10 @@ program
     // Setup wizard cannot run in non-interactive mode
     if (isNonInteractive()) {
       console.log(chalk.yellow('Setup wizard requires an interactive terminal.'));
-      console.log(chalk.dim('Set API keys via environment variables instead:'));
-      console.log(chalk.dim('  OPENAI_API_KEY, ANTHROPIC_API_KEY, GLM_API_KEY, OPENAI_COMPAT_API_KEY'));
-      console.log(chalk.dim('Or configure ~/.seepient/setting.json'));
+      console.log(chalk.dim('Configure a provider headlessly instead:'));
+      console.log(chalk.dim('  seepient auth login <id> --key <key>'));
+      console.log(chalk.dim('Or configure model assignments:'));
+      console.log(chalk.dim('  seepient models set text.standard <account>/<model>'));
       process.exit(1);
     }
     await runSetup(options);

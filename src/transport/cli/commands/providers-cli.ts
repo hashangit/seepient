@@ -127,7 +127,7 @@ export function registerProvidersCommands(program: Command): void {
     .command("edit <id>")
     .description("Edit an existing provider account")
     .option("--upstream <provider>", "Upstream provider")
-    .option("--credential <mode>", "Credential mode: env:VAR_NAME or none")
+    .option("--credential <mode>", "Credential mode: none (keys are stored via auth login or the setup flow)")
     .option("--url <baseUrl>", "Custom base URL endpoint")
     .option("--allow-private", "Allow connecting to private / localhost IP addresses")
     .option("--no-allow-private", "Disallow connecting to private / localhost IP addresses")
