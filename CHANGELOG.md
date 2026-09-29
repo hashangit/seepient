@@ -23,7 +23,7 @@ Three claims shipped in earlier 022-4 Round-2 notes were false against the code 
 - **Guard-surface residuals.** Auth key cache publishes only when the file is unchanged across the read (cross-process revocation observed within one re-read); universal roots (`"/"`, `"*"`, `""`) never survive the multi merge; `ActionLifecycle.run` returns the typed `invalid-approval-response` denial for a global lifetime in multi instead of throwing; `DurableApprovalStore.casSync` is principal-bound; sandboxed process groups are killed on normal settle (no daemons); `htmlToText` converts in linear time with the input capped.
 - **Credential demolition tripwires.** `refreshModels` asserts account baseUrls against granted capabilities in multi before any network activity and records failures on an `onDiscoveryError` surface; producer enumeration is a source scan over every vendored import site; the resolved-key wire journey runs in single and multi mode.
 
-### Round 3 — Pass-10 remediation: read-plane identity binding, real mutation probes, operator provider channel (Spec 022-4) — Pass-10 remediation: read-plane identity binding, real mutation probes, operator provider channel (Spec 022-4)
+### Round 3 — Pass-10 remediation: read-plane identity binding, real mutation probes, operator provider channel (Spec 022-4)
 
 **Security:**
 
@@ -60,6 +60,7 @@ Three claims shipped in earlier 022-4 Round-2 notes were false against the code 
 
 **Breaking changes & Behavior changes:**
 - **Inference Env-Key Demolition (022-5 FR-005, Breaking)**: Seepient no longer synthesizes provider accounts from environment variables, and the env credential mode is removed from the CLI (`--credential env:`), TUI add-account, REST accounts API, and `auth login --env-var`. Credentials resolve only from provider management (setup flow, `seepient auth login --key`, or an injected custom credential store — embedder-owned env remains the embedder's seam). Migration: run `seepient setup` (or `seepient auth login <id> --key <key>`), or inject a credential store from the SDK.
+
 
 - **In-Workspace Symlinks Allowed via Authorize-What-You-Open (FR-013, Behavior Change)**:
   Permissions now apply to the target file's canonical realpath rather than the intermediate reference name. In-workspace symbolic links pointing to real paths inside the workspace ceiling are now fully allowed (superseding the earlier static refusal). Symbolic links whose realpath escapes the workspace ceiling are denied with typed `PathEscapesWorkspaceError` (`PATH_ESCAPES_WORKSPACE`).
