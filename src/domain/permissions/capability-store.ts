@@ -71,7 +71,7 @@ function normalizePathForComparison(p: string): string {
   return p;
 }
 
-function pathContains(parent: string, child: string): boolean {
+export function pathContains(parent: string, child: string): boolean {
   const normParent = normalizePathForComparison(parent);
   const normChild = normalizePathForComparison(child);
   // 022-5 FR-011: an empty root is a corrupt shape, not a universal grant —

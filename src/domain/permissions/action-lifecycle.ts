@@ -259,6 +259,26 @@ export class ActionLifecycle {
         };
       }
 
+      // SC-009 (022-5-WO1 T037): ANY broker answer shape flows to the typed
+      // denial — a broker resolving literal null/undefined must never throw.
+      if (
+        typeof answer !== "object" ||
+        answer === null ||
+        typeof (answer as PermissionDecision).approved !== "boolean"
+      ) {
+        const outcome = this.toOutcome(action, "denied", undefined, "invalid-approval-response");
+        await this.record(action, "denied", "invalid-approval-response");
+        return {
+          decision,
+          approval: answer,
+          outcome,
+          toolResult: {
+            output: denialOutput("invalid-approval-response", "Approval broker returned an invalid response"),
+            success: false,
+          },
+        };
+      }
+
       // Validate the response matches the request.
       if (!validFor(answer, action.actionDigest, decision.request.requestId)) {
         const outcome = this.toOutcome(

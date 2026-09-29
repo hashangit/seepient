@@ -624,7 +624,9 @@ export function validFor(
   expectedActionDigest: string,
   expectedRequestId: string,
 ): boolean {
-  if (!answer.approved) return true;
+  // 022-5-WO1 T037 (SC-009): any broker answer shape — including literal
+  // null/undefined — must flow to the typed denial, never throw here.
+  if (!answer?.approved) return true;
   return (
     answer.actionDigest === expectedActionDigest &&
     answer.requestId === expectedRequestId
