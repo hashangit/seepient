@@ -257,6 +257,17 @@ export class ProviderRuntime extends EventEmitter implements ProviderRuntimeCont
     this.discoveryErrorListeners.push(cb);
   }
 
+  /** The runtime's tenancy signal (022-5-WO2 T008) — server surfaces read
+   *  it to apply the same egress rules refreshModels uses. */
+  get tenancySignal(): "single" | "multi" {
+    return this.tenancyMode;
+  }
+
+  /** The granted capabilities backing the multi egress assert. */
+  get grantedCapabilities(): import("../../foundations/contracts/permission-policy.js").Capability[] | undefined {
+    return this.capabilities;
+  }
+
   getConfigStore(): ProviderConfigStore {
     return this.configStore;
   }
@@ -940,7 +951,10 @@ export function createIsolatedProviderRuntime(options?: ProviderRuntimeOptions):
  * Every store stays isolated in-memory; no ambient discovery or host env
  * fallback occurs, and runtime mutations after boot never write back.
  */
-export async function createRuntimeFromProvidersFile(filePath: string): Promise<ProviderRuntime> {
+export async function createRuntimeFromProvidersFile(
+  filePath: string,
+  opts?: { tenancyMode?: "single" | "multi"; capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[] },
+): Promise<ProviderRuntime> {
   const { readFileSync } = await import("node:fs");
   let parsed: {
     providers?: unknown;
@@ -971,7 +985,7 @@ export async function createRuntimeFromProvidersFile(filePath: string): Promise<
     await credentialStore.put(id, record);
   }
   const adapter = new AggregateInferenceAdapter(undefined, undefined, credentialStore);
-  return new ProviderRuntime({ configStore, credentialStore, adapter });
+  return new ProviderRuntime({ configStore, credentialStore, adapter, tenancyMode: opts?.tenancyMode, capabilities: opts?.capabilities });
 }
 
 /**

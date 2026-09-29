@@ -257,18 +257,37 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     }
     serverRuntime = options.runtime;
   } else if (options?.providersFile) {
+    // 022-5-WO2 T008 (pass-12 P1-2): this IS a multi server — arm the
+    // runtime so refreshModels (and every surface reading the signal)
+    // enforces the operator-baseline egress grants.
+    const baselineCaps = normalizeBaselineCaps(options.operatorBaseline);
     const { createRuntimeFromProvidersFile } = await import("../../domain/providers/provider-runtime.js");
-    serverRuntime = await createRuntimeFromProvidersFile(options.providersFile);
+    serverRuntime = await createRuntimeFromProvidersFile(options.providersFile, {
+      tenancyMode: "multi",
+      capabilities: baselineCaps,
+    });
     process.stderr.write(
-      `[seepient] Notice: server booted with providers loaded from ${options.providersFile} (isolated runtime; file read once at boot).\n`,
+      `[seepient] Notice: server booted with providers loaded from ${options.providersFile} (isolated multi runtime; file read once at boot).\n`,
     );
   } else {
     process.stderr.write("[seepient] Notice: server booted with isolated empty ProviderRuntime.\n");
-    serverRuntime = createIsolatedProviderRuntime();
+    serverRuntime = createIsolatedProviderRuntime({
+      tenancyMode: "multi",
+      capabilities: normalizeBaselineCaps(options?.operatorBaseline),
+    });
   }
   const { warnIfTestEnvAtHostedBoot } = await import("../../foundations/test-seams.js");
   warnIfTestEnvAtHostedBoot("seepient server (runSeepientServer)");
   const getServerRuntime = () => serverRuntime;
+
+  /** Normalize the operator baseline option into a capability list for the
+   *  runtime's multi egress assert (022-5-WO2 T008). */
+  function normalizeBaselineCaps(
+    baseline?: import("../../foundations/contracts/permission-policy.js").CapabilitySet | import("../../foundations/contracts/permission-policy.js").Capability[],
+  ): import("../../foundations/contracts/permission-policy.js").Capability[] | undefined {
+    if (!baseline) return undefined;
+    return Array.isArray(baseline) ? baseline : baseline.capabilities;
+  }
 
   // Composed store handles, exposed on the returned server object (022-5:
   // the isolated-boot journey asserts the defaults are in-memory, which is
