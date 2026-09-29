@@ -47,7 +47,7 @@ describe("SC-009: run() never throws for any broker answer shape", () => {
     const targetFile = join(dir, "out.txt");
     const action = {
       version: 1, actionId: "a", runId: "r", toolCallId: "c", toolName: "read_file",
-      principalId: "u", argsDigest: "x", actionDigest: "d", risk: "read", effects: [],
+      principalId: "u", argsDigest: "x", actionDigest: "d", risk: "read",
       display: { title: "t", summary: targetFile, canonicalTargets: [targetFile], effects: ["filesystem-read"] },
       effects: [{ kind: "filesystem-read", targets: [{ canonicalPath: targetFile, canonicalParent: dir, basename: "out.txt", exists: true, finalSymlink: false }], sensitivity: "normal" }],
       operation: {

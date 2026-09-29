@@ -563,13 +563,13 @@ describe("R9.1 Integration Wiring Verification", () => {
       createdAt: Date.now(),
       expiresAt: Date.now() + 60_000,
     });
-    const decision = (actorId?: string) => ({
+    const decision = (actorId?: string): import("../../../foundations/contracts/permission-policy.js").PermissionDecision => ({
       approved: true,
       requestId: "r-x",
       actionDigest: "ad",
       optionId: "opt",
-      lifetime: "action" as const,
-      actorId,
+      lifetime: "action",
+      actorId: actorId ?? "",
       decidedAt: Date.now(),
     });
 
