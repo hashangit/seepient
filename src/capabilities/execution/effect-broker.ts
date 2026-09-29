@@ -181,7 +181,9 @@ export class EffectBroker implements EffectBrokerContract {
       const val = this.secretResolver(ref);
       if (val !== undefined) return val;
     }
-    if (this.tenancyMode === "multi" && !isGuardNeutralized("VULN-1")) {
+    // Two probe targets share this branch under distinct guard ids
+    // (022-5-WO1 T018): tenant-secret (VULN-1) and exfil (VULN-1-BROKER).
+    if (this.tenancyMode === "multi" && !isGuardNeutralized("VULN-1") && !isGuardNeutralized("VULN-1-BROKER")) {
       return undefined;
     }
     return resolveSecretRef(ref);
