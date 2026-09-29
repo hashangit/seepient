@@ -1,7 +1,9 @@
 /**
  * Vendor quarantine — the only module allowed to import `@earendil-works/pi-ai`.
+ * 022-5-WO1 T024: the barrel re-exports the WRAPPER surface only — a bare
+ * `export *` from the vendored package lets any importer bypass the FR-007
+ * credential gates. Import the package directly here if a new wrapper needs it.
  */
-export * from "@earendil-works/pi-ai";
 export * from "./pi-canonical-converter.js";
 export * from "./pi-catalog-source.js";
 export * from "./pi-discovery-source.js";

@@ -29,7 +29,12 @@ describe("refreshModels multi parity (022-5-WO1 T007)", () => {
     vi.restoreAllMocks();
   });
 
-  async function multiRuntime(baseUrl: string | undefined, credential: Record<string, unknown>): Promise<ProviderRuntime> {
+  async function multiRuntime(
+    baseUrl: string | undefined,
+    credential: Record<string, unknown>,
+    capabilities?: unknown[],
+    credentialStore?: { resolve: (ref: unknown) => Promise<unknown> },
+  ): Promise<ProviderRuntime> {
     const configStore = new ProviderConfigStore(":memory:");
     await configStore.updateOverlay(
       {
@@ -38,6 +43,9 @@ describe("refreshModels multi parity (022-5-WO1 T007)", () => {
             adapter: "pi-ai",
             upstreamProvider: "openai",
             ...(baseUrl ? { baseUrl } : {}),
+            // Loopback discovery targets are private by definition — the
+            // account opts in (operator-owned loopback stubs).
+            ssrfAllowPrivate: true,
             credential,
           } as never,
         },
@@ -45,9 +53,26 @@ describe("refreshModels multi parity (022-5-WO1 T007)", () => {
       },
       0,
     );
-    const creds = new MemoryCredentialStore();
-    return new ProviderRuntime({ configStore, credentialStore: creds, adapter: new AggregateInferenceAdapter() });
+    const creds = credentialStore ?? new MemoryCredentialStore();
+    return new ProviderRuntime({ configStore, credentialStore: creds as never, adapter: new AggregateInferenceAdapter(), tenancyMode: "multi", capabilities: capabilities as never });
   }
+
+  /** Hostile embedder store: resolves anything to a VALUELESS api_key — the
+   *  exact shape the discovery gate exists for. */
+  const hostileStore = {
+    resolve: async () => ({
+      id: "hostile",
+      ref: { kind: "seepient", id: "hostile" },
+      activeLeaseCount: 0,
+      isResolvable: async () => true,
+      acquireLease: () => ({
+        leaseId: "l",
+        isReleased: false,
+        secret: async () => ({ kind: "api_key", value: undefined }),
+        release: async () => {},
+      }),
+    }),
+  };
 
   it("denies typed with zero outbound fetches when the attacker baseUrl has no network-destination grant", async () => {
     const runtime = await multiRuntime("https://attacker.example.com/v1", { kind: "none" });
@@ -55,14 +80,30 @@ describe("refreshModels multi parity (022-5-WO1 T007)", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("a valueless api_key denies CREDENTIAL_REQUIRED before any vendor call", async () => {
-    const runtime = await multiRuntime("https://api.openai.com/v1", { kind: "api_key", keyValue: "" });
-    await expect(runtime.refreshModels("attacker-acct")).rejects.toThrow(/CREDENTIAL_REQUIRED/i);
+  it("a valueless api_key (hostile embedder store) denies CREDENTIAL_REQUIRED before any vendor call", async () => {
+    // The demolition blocks valueless records at the config and memory
+    // stores; the remaining producer of {value: undefined} is a custom
+    // embedder CredentialStore — the exact shape the discovery gate exists
+    // for. Its baseUrl is granted so the credential gate is what's tested.
+    const runtime = await multiRuntime(
+      "https://api.openai.com/v1",
+      { kind: "seepient", id: "valueless" },
+      [{ kind: "network-destination", scheme: "https", host: "api.openai.com" }],
+      hostileStore,
+    );
+    const recorded: string[] = [];
+    runtime.onDiscoveryError((err) => recorded.push(String((err as Error).message)));
+    await runtime.refreshModels("attacker-acct");
+    expect(recorded.join("\n")).toMatch(/CREDENTIAL_REQUIRED/i);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("discovery errors land on a recorded surface, not console.error alone", async () => {
-    const runtime = await multiRuntime("http://127.0.0.1:9/v1", { kind: "none" });
+    // Granted loopback: discovery RUNS and fails locally — the failure must
+    // arrive through the recorded channel.
+    const runtime = await multiRuntime("http://127.0.0.1:9/v1", { kind: "none" }, [
+      { kind: "network-destination", scheme: "http", host: "127.0.0.1", port: 9 },
+    ]);
     const recorded: unknown[] = [];
     // The recorded surface does not exist today — this is the red assertion.
     const anyRuntime = runtime as unknown as { onDiscoveryError?: (cb: (err: unknown) => void) => void };
@@ -93,7 +134,7 @@ export async function unarmedStream(model: unknown, ctx: unknown) {
 }
 `,
     );
-    const { scanVendoredProducerSites } = await import("./producer-scan.js");
+    const { scanVendoredProducerSites } = await import("../producer-scan.js");
     const flagged = scanVendoredProducerSites();
     expect(flagged).toContain("src/vendors/pi-ai/__scan-fixture__.ts");
   });

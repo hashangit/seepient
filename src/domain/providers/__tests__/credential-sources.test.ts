@@ -172,6 +172,58 @@ describe("022-5 US2: inference credentials, provider management only", () => {
     expect(store.resolveSecret("missing")).toBeUndefined();
   });
 
+  it.each([
+    ["single", { tenancyMode: "single" }, "openai-compatible"],
+    // Multi grants the loopback sink explicitly and uses a real upstream
+    // (the openai-compatible synthetic fallback is multi-forbidden) — the
+    // resolved key must be what reaches the wire.
+    ["multi", { tenancyMode: "multi", capabilities: [{ kind: "network-destination", scheme: "http", host: "127.0.0.1" }] }, "openai"],
+  ])("resolved-key wire journey (%s): the REAL stored key goes on the wire, decoys never do", async (_mode, opts, upstream) => {
+    const seen: string[] = [];
+    const server = createServer((req, res) => {
+      seen.push(String(req.headers.authorization ?? ""));
+      res.writeHead(500, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { message: "sink" } }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as { port: number }).port;
+    try {
+      const store = new MemoryCredentialStore();
+      await store.put("real-key-acct", { kind: "api_key", keyValue: "sk-real-resolved-key-123" });
+      const raw = new PiLanguageRaw();
+      const target = {
+        providerAccount: "real-key-acct",
+        upstreamProvider: upstream,
+        model: "test-model",
+        baseUrl: `http://127.0.0.1:${port}/v1`,
+        credential: {
+          id: "real-key-acct",
+          ref: { kind: "seepient", id: "real-key-acct" },
+          activeLeaseCount: 0,
+          isResolvable: async () => true,
+          acquireLease: () => ({
+            leaseId: "l",
+            isReleased: false,
+            secret: async () => ({ kind: "api_key", value: "sk-real-resolved-key-123" }),
+            release: async () => {},
+          }),
+        },
+      } as unknown as InferenceTarget;
+      try {
+        for await (const _ of raw.chatStream(target, { messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }] } as never, opts as never)) {
+          /* sink 500s; the wire is what is under test */
+        }
+      } catch {
+        /* expected */
+      }
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen[0]).toBe("Bearer sk-real-resolved-key-123");
+      expect(seen.join("\n")).not.toContain("sk-DECOY");
+    } finally {
+      server.close();
+    }
+  });
+
   it("composite: env-kind refs fail closed in ambient mode too", async () => {
     process.env.COMPOSITE_AMBIENT_PROBE = "sk-ambient-should-never-resolve";
     const ambient = createAmbientCompositeCredentialStore();

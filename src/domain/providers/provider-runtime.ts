@@ -206,6 +206,10 @@ export interface ProviderRuntimeOptions {
   credentialStore?: CredentialStore;
   modelCatalog?: ModelCatalog;
   adapter?: AggregateInferenceAdapter | InferenceAdapter;
+  /** Tenancy signal for surfaces that need it (refreshModels egress parity, 022-5-WO1 T023). */
+  tenancyMode?: "single" | "multi";
+  /** Granted capabilities (multi): refreshModels asserts account baseUrls against these. */
+  capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[];
 }
 
 export interface CapabilityHealth {
@@ -236,6 +240,21 @@ export class ProviderRuntime extends EventEmitter implements ProviderRuntimeCont
     this.credentialStore = options?.credentialStore ?? new CompositeCredentialStore();
     this.modelCatalog = options?.modelCatalog ?? new ModelCatalog();
     this.adapter = options?.adapter ?? new AggregateInferenceAdapter(undefined, undefined, this.credentialStore);
+    this.tenancyMode = options?.tenancyMode ?? "single";
+    this.capabilities = options?.capabilities;
+  }
+
+  private readonly tenancyMode: "single" | "multi";
+  private readonly capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[];
+  private discoveryErrorListeners: Array<(err: unknown) => void> = [];
+
+  /**
+   * Recorded discovery-error surface (022-5-WO1 T023): refresh failures are
+   * delivered here instead of only console.error. With no listener
+   * registered, the console remains the fallback.
+   */
+  onDiscoveryError(cb: (err: unknown) => void): void {
+    this.discoveryErrorListeners.push(cb);
   }
 
   getConfigStore(): ProviderConfigStore {
@@ -827,6 +846,13 @@ export class ProviderRuntime extends EventEmitter implements ProviderRuntimeCont
     // 022-5 FR-006: parity with the provider-management probe route — an
     // account baseUrl is endpoint-validated before any discovery traffic,
     // and discovery failures are recorded, not silently swallowed.
+    // 022-5-WO1 T023: the multi-tenant capability assert comes FIRST (parity
+    // with the wrapper seams) — DNS resolution in endpoint validation is
+    // itself a network call and must not happen for an ungranted host.
+    if (this.tenancyMode === "multi" && acc.baseUrl) {
+      const { assertBaseUrlEgressAllowed } = await import("../../vendors/egress-check.js");
+      assertBaseUrlEgressAllowed(acc.baseUrl, this.capabilities, acc as never);
+    }
     if (acc.baseUrl) {
       const { validateEndpointUrl } = await import("../../foundations/network/ssrf-fetch.js");
       const val = await validateEndpointUrl(acc.baseUrl, { ssrfAllowPrivate: acc.ssrfAllowPrivate === true });
@@ -863,7 +889,18 @@ export class ProviderRuntime extends EventEmitter implements ProviderRuntimeCont
       discoveryErrors.push(err instanceof Error ? err.message : String(err));
     }
     if (discoveryErrors.length > 0) {
-      console.error(`[refreshModels] discovery errors for "${providerAccount}":`, discoveryErrors.join("; "));
+      const err = new Error(`[refreshModels] discovery errors for "${providerAccount}": ${discoveryErrors.join("; ")}`);
+      if (this.discoveryErrorListeners.length > 0) {
+        for (const cb of this.discoveryErrorListeners) {
+          try {
+            cb(err);
+          } catch {
+            /* listener failures never break refresh */
+          }
+        }
+      } else {
+        console.error(err.message);
+      }
     }
 
     const userDeclared = extractUserDeclaredModels(config);
