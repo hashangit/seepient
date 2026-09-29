@@ -29,7 +29,7 @@ describe("J6 Inference Fail-Closed Journey (VULN-16)", () => {
     process.env = originalEnv;
   });
 
-  it("text inference wrapper throws CREDENTIAL_REQUIRED for none-kind credential in multi mode", async () => {
+  it("text inference wrapper maps kind-none to the unused sentinel in multi mode (no decoy on the wire)", async () => {
     const raw = new PiLanguageRaw();
 
     const target: InferenceTarget = {
@@ -83,7 +83,7 @@ describe("J6 Inference Fail-Closed Journey (VULN-16)", () => {
     guard.assertGuardedPathExecuted(1);
   });
 
-  it("image inference wrapper throws CREDENTIAL_REQUIRED for none-kind credential in multi mode", async () => {
+  it("image inference wrapper maps kind-none to the unused sentinel in multi mode (no decoy on the wire)", async () => {
     const imageRaw = new PiImageRaw();
 
     const target: InferenceTarget = {
@@ -288,7 +288,7 @@ describe("J6 Inference Fail-Closed Journey (VULN-16)", () => {
     expect(capturedStreamOptions.apiKey).not.toBe(process.env.OPENAI_API_KEY);
   });
 
-  it("single-mode env-key inference unchanged (Profile A pin)", async () => {
+  it("single-mode kind-none resolves to the unused sentinel (022-5 tenancy-invariant pin)", async () => {
     let capturedStreamOptions: any;
 
     const mockModels: any = {

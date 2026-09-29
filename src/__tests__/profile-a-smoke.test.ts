@@ -58,5 +58,53 @@ describe("J11 Profile A Smoke Pin (FR-020)", () => {
     expect(agent).toBeDefined();
     expect(typeof agent.chat).toBe("function");
   });
+
+  it("Profile A inference runs end-to-end through provider management (022-5-WO1 T026)", async () => {
+    // The full first-hour flow: memory overlay + one account + a stored key
+    // (the `seepient auth login --key` equivalent store write) + a purpose
+    // assignment — then one real inference against a loopback sink.
+    const seen: string[] = [];
+    const { createServer } = await import("node:http");
+    const server = createServer((req, res) => {
+      seen.push(String(req.headers.authorization ?? ""));
+      res.writeHead(500, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { message: "sink" } }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as { port: number }).port;
+
+    try {
+      const { createSeepient } = await import("../transport/sdk/index.js");
+      const { MemoryCredentialStore } = await import("../domain/providers/credentials/memory-credential-store.js");
+      const store = new MemoryCredentialStore();
+      // The auth-login --key equivalent: the key value lands in the store.
+      await store.put("smoke-acct", { kind: "api_key", keyValue: "sk-profile-a-smoke-key" });
+
+      const agent = await createSeepient({
+        tenancy: "single",
+        overlayFile: ":memory:",
+        credentials: store,
+        providers: {
+          "smoke-acct": {
+            adapter: "pi-ai",
+            upstreamProvider: "openai",
+            baseUrl: `http://127.0.0.1:${port}/v1`,
+            credential: { kind: "seepient", id: "smoke-acct" },
+          } as never,
+        },
+        modelAssignments: {
+          text: { standard: { providerAccount: "smoke-acct", model: "gpt-6-sol" } }, // any catalog-known id; the sink never answers
+        } as never,
+      } as never);
+
+      // The sink answers 500 — the assertion is what reached the wire.
+      await agent.chat("hello profile a").catch(() => {});
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen[0]).toBe("Bearer sk-profile-a-smoke-key");
+      await agent.dispose();
+    } finally {
+      server.close();
+    }
+  });
 });
 
