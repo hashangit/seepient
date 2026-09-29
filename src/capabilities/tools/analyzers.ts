@@ -459,10 +459,18 @@ export async function analyzeEditFile(
     const bytes = Buffer.from(section.applied, "utf8");
     const artifact = await ctx.artifacts.put(bytes, "text/plain");
     if (!expectedByPath.has(target.canonicalPath)) {
+      // 022-5-WO2 T010 (pass-12 P2-1): the commit's expected snapshot carries
+      // the authorization-time identity — the executor's old-content pin
+      // compares fstat(fd) against it, so a swapped-inode destination is
+      // denied before raced bytes reach the metadata surface.
+      const identity = snapshotPath(target);
       expectedByPath.set(target.canonicalPath, {
         exists: true,
         size: Buffer.byteLength(section.current, "utf8"),
         sha256: createHash("sha256").update(section.current, "utf8").digest("hex"),
+        ...(identity?.device !== undefined && identity.inode !== undefined
+          ? { device: identity.device, inode: identity.inode }
+          : {}),
       });
       uniqueTargets.push(target);
     }

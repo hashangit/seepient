@@ -138,4 +138,9 @@ export async function unarmedStream(model: unknown, ctx: unknown) {
     const flagged = scanVendoredProducerSites();
     expect(flagged).toContain("src/vendors/pi-ai/__scan-fixture__.ts");
   });
+
+  it("the committed tree is clean of unarmed producers (022-5-WO2 T012)", async () => {
+    const { scanVendoredProducerSites } = await import("../producer-scan.js");
+    expect(scanVendoredProducerSites()).toEqual([]);
+  });
 });

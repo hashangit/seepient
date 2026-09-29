@@ -23,6 +23,7 @@ export const EXEMPT_NON_PRODUCERS: Record<string, string> = {
   "src/vendors/pi-ai/pi-auth-adapter.ts": "OAuth flow bridge over the CredentialStore — no inference client",
   "src/vendors/pi-ai/pi-catalog-source.ts": "bundled static catalog — no keys, no network, no client",
   "src/vendors/pi-ai/pi-discovery-source.ts": "catalog-only discovery — no credentials involved",
+  "src/vendors/pi-ai/pi-canonical-converter.ts": "pure message-type conversion — no client, no credentials",
   "src/domain/providers/producer-scan.ts": "this scan — matches its own literal by construction",
 };
 

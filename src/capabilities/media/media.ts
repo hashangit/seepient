@@ -92,10 +92,12 @@ export async function readPinnedImage(
     );
     const st = await handle.stat();
     if (st.isSymbolicLink()) {
-      throw new Error(`Refusing ${label}: ${resolvedPath} is a symbolic link`);
+      // 022-5-WO2 T014: the code survives classifyMediaError — the caller
+      // learns WHY, not just "generation failed".
+      throw Object.assign(new Error(`Refusing ${label}: ${resolvedPath} is a symbolic link`), { code: "SYMLINK_READ_DENIED" });
     }
     if (!st.isFile()) {
-      throw new Error(`Refusing ${label}: ${resolvedPath} is not a regular file`);
+      throw Object.assign(new Error(`Refusing ${label}: ${resolvedPath} is not a regular file`), { code: "MEDIA_INPUT_NOT_REGULAR_FILE" });
     }
     if (st.nlink > 1 && !operatorAllowsHardlinks) {
       throw new PathHardlinkRefusedError(resolvedPath);
@@ -114,7 +116,7 @@ export async function readPinnedImage(
     return { type: "image" as const, mediaType: "image/png" as const, data: data.toString("base64") };
   } catch (err: any) {
     if (err?.code === "ELOOP" || err?.code === "EMLINK") {
-      throw new Error(`Refusing ${label}: ${resolvedPath} is a symbolic link`);
+      throw Object.assign(new Error(`Refusing ${label}: ${resolvedPath} is a symbolic link`), { code: "SYMLINK_READ_DENIED" });
     }
     throw err;
   } finally {
