@@ -9,6 +9,7 @@
  * - POST /api/approvals — Interactive tool approval relay
  */
 
+import * as path from "path";
 import * as http from "node:http";
 import * as crypto from "node:crypto";
 import type {
@@ -333,7 +334,13 @@ export function createStubApp(initialState?: Partial<StubAppState> & { allowDemo
         // engine ceiling clamps regardless; the stub must not advertise them).
         if ((cap.kind === "write-root" || cap.kind === "read-root") && typeof cap.root === "string") {
           const WORKSPACE_ROOT = "/data"; // the example's tenant-data mount
-          if (cap.root !== WORKSPACE_ROOT && !cap.root.startsWith(`${WORKSPACE_ROOT}/`)) {
+          // 022-5-WO1 T036: normalize before the prefix check — `/data/../etc`
+          // must not pass a startsWith check; non-absolute roots are refused.
+          const normalized = path.posix.normalize(cap.root);
+          if (
+            !path.posix.isAbsolute(normalized) ||
+            (normalized !== WORKSPACE_ROOT && !normalized.startsWith(`${WORKSPACE_ROOT}/`))
+          ) {
             res.writeHead(403, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ error: "Forbidden", message: `Path root "${cap.root}" is outside the tenant workspace` }));
             return;

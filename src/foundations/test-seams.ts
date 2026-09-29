@@ -23,7 +23,10 @@ export function isGuardNeutralized(findingId: string): boolean {
  * blast radius narrows and probe env vars would be one factor away).
  */
 export function warnIfTestEnvAtHostedBoot(surface: string): void {
-  if (process.env.NODE_ENV === "test") {
+  // Exactly the misconfiguration: NODE_ENV=test on a hosted surface OUTSIDE
+  // a vitest run (journeys legitimately boot servers under vitest — they
+  // must not spam).
+  if (process.env.NODE_ENV === "test" && process.env.VITEST !== "true") {
     console.error(
       `[seepient] WARNING: ${surface} is running with NODE_ENV=test. ` +
         `This is a test-only value; hosted surfaces must run with a production NODE_ENV.`,

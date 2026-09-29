@@ -266,6 +266,8 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     process.stderr.write("[seepient] Notice: server booted with isolated empty ProviderRuntime.\n");
     serverRuntime = createIsolatedProviderRuntime();
   }
+  const { warnIfTestEnvAtHostedBoot } = await import("../../foundations/test-seams.js");
+  warnIfTestEnvAtHostedBoot("seepient server (runSeepientServer)");
   const getServerRuntime = () => serverRuntime;
 
   // Composed store handles, exposed on the returned server object (022-5:

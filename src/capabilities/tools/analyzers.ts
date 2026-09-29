@@ -38,6 +38,21 @@ function authorizeReadTargetPath(rawPath: string, cwd: string, target: Canonical
   try {
     realPath = fs_realpathSync(target.canonicalPath);
   } catch {
+    // 022-5-WO1 T034: realpath failed (dangling symlink or missing path).
+    // Distinguish a DANGLING SYMLINK (its target may sit outside the
+    // ceiling) from a plain missing path: the dangling link is refused with
+    // the same SYMLINK_READ_DENIED shape the executor would produce for an
+    // existing link — no distinguishable outcome either way, so neither
+    // existence nor canonicalization leaks.
+    let st: ReturnType<typeof fs_lstatSync> | undefined;
+    try {
+      st = fs_lstatSync(target.canonicalPath);
+    } catch {
+      st = undefined;
+    }
+    if (st?.isSymbolicLink()) {
+      throw new PathEscapesWorkspaceError(target.canonicalPath);
+    }
     realPath = target.canonicalPath;
   }
   let realWorkspace: string;
