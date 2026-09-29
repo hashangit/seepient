@@ -146,18 +146,13 @@ export async function handlePutProvider(
     // 022-5-WO2 T008/D2: on a multi runtime, a provider account baseUrl must
   // hold an operator-baseline network grant — a provider:admin key cannot
   // PLANT an ungranted host for the operator's stored credentials.
-  const runtimeTenancy = (runtime as unknown as { tenancySignal?: string }).tenancySignal;
-  const runtimeCaps = (runtime as unknown as { grantedCapabilities?: import("../../../foundations/contracts/permission-policy.js").Capability[] }).grantedCapabilities;
-  if (runtimeTenancy === "multi" && typeof credInput === "object" && credInput !== null) {
-    const putBaseUrl = (body as { baseUrl?: string }).baseUrl;
-    if (putBaseUrl) {
-      const { assertBaseUrlEgressAllowed } = await import("../../../vendors/egress-check.js");
-      try {
-        assertBaseUrlEgressAllowed(putBaseUrl, runtimeCaps, { providerAccount: body.providerId ?? String(body.id ?? "") } as never);
-      } catch (err) {
-        sendJSON(res, 400, { error: "EGRESS_REQUIRED", message: (err as Error).message });
-        return;
-      }
+  const putBaseUrl = (body as { baseUrl?: string }).baseUrl;
+  if (putBaseUrl) {
+    try {
+      await runtime.assertAccountEgressAllowed(putBaseUrl, String(body.providerId ?? body.id ?? ""));
+    } catch (err) {
+      sendJSON(res, 400, { error: "EGRESS_REQUIRED", message: (err as Error).message });
+      return;
     }
   }
 
