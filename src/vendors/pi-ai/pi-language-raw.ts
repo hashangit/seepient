@@ -104,7 +104,6 @@ async function resolveSecretApiKey(
   target: InferenceTarget,
   credentialStore?: any,
   signal?: AbortSignal,
-  tenancyMode?: "single" | "multi",
 ): Promise<string | undefined> {
   // 022-5 FR-007 (tenancy-invariant): the vendored pi-ai layer falls back to
   // host environment keys whenever apiKey is undefined or empty — an

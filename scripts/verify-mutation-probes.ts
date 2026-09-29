@@ -205,6 +205,24 @@ function runJourney(testFile: string, neutralize: boolean, target: ProbeTarget):
   return { ok: true, failedTestCount, output };
 }
 
+/** Production isGuardNeutralized("<id>") call sites, by id (fs glue — the
+ *  lint rules live in src/foundations/probe-matrix.ts). */
+function productionSeamIds(): Map<string, string[]> {
+  const byId = new Map<string, string[]>();
+  const out = execSync(
+    `grep -rn 'isGuardNeutralized("' src examples --include='*.ts' | grep -v __tests__ | grep -v test-seams`,
+    { encoding: "utf8" },
+  );
+  for (const line of out.split("\n")) {
+    const file = line.split(":")[0];
+    for (const m of line.matchAll(/isGuardNeutralized\("([^"]+)"\)/g)) {
+      if (!byId.has(m[1])) byId.set(m[1], []);
+      byId.get(m[1])!.push(file);
+    }
+  }
+  return byId;
+}
+
 async function main() {
   console.log("=== Seepient Anti-Vacuity Mutation Probe Matrix ===");
 

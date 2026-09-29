@@ -48,16 +48,16 @@ describe("refreshModels threading (022-5-WO1 T022)", () => {
     const runtime = await multiRuntimeWithAttackerAccount();
     const { handleRefreshModels } = await import("../../../transport/http/provider-management/catalog.js");
     const calls: { status?: number; body?: string } = {};
-    const res = {
+    const res: Record<string, unknown> = {
       statusCode: 0,
       setHeader: vi.fn(),
       end: vi.fn((body?: string) => {
-        calls.status = res.statusCode;
+        calls.status = res.statusCode as number;
         calls.body = body;
       }),
-    } as never;
+    };
     const key = { scopes: ["provider:admin"], keyHash: "h" } as unknown as ApiKeyEntry;
-    await handleRefreshModels({ method: "POST" } as never, res, runtime, key, "attacker-acct");
+    await handleRefreshModels({ method: "POST" } as never, res as never, runtime, key, "attacker-acct");
     expect(calls.status).toBe(400);
     const body = JSON.parse(calls.body ?? "{}");
     expect(body.error?.message).toMatch(/EGRESS_REQUIRED/);

@@ -7,20 +7,20 @@
  * nothing. Product contract: clicking Approve approves.
  */
 import { describe, it, expect, vi } from "vitest";
-import { WebSocket } from "ws";
 import { createServerApproveTool, handleToolApprovalResponse } from "../approvals.js";
 import { createConnectionRegistry } from "../connection-registry.js";
 import type { ToolApprovalResponse } from "../ws-types.js";
 
-function fakeWs(): WebSocket {
-  return { send: vi.fn() } as unknown as WebSocket;
+type FakeSocket = Record<string, unknown>;
+function fakeWs(): FakeSocket {
+  return { send: vi.fn() };
 }
 
 describe("WS multi-approval with an authenticated principal (022-5-WO1 T002)", () => {
   it("an approved response resolves true when the connection is authenticated", async () => {
     const registry = createConnectionRegistry({ inMemory: true });
     const ws = fakeWs();
-    const approveTool = createServerApproveTool(ws, registry, {
+    const approveTool = createServerApproveTool(ws as never, registry, {
       principalId: "sha256:test",
       tenantId: "t1",
       sessionId: "s1",
@@ -35,12 +35,12 @@ describe("WS multi-approval with an authenticated principal (022-5-WO1 T002)", (
     expect(callId).toBeDefined();
 
     const resolvePromise = Promise.race([pending, new Promise<boolean>((r) => setTimeout(() => r(false), 2000))]);
-    await handleToolApprovalResponse(ws, {
+    await handleToolApprovalResponse(ws as never, {
       type: "tool_approval_response",
       callId,
       name: "read_file",
       approved: true,
-    } as ToolApprovalResponse, registry);
+    } as ToolApprovalResponse, registry as never);
 
     const result = await resolvePromise;
     expect(result).toBe(true);

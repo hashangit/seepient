@@ -279,4 +279,3 @@ export class DurableApprovalStore {
   }
 }
 
-export { DurableApprovalStore as PendingApprovalStore };
