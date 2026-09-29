@@ -34,6 +34,17 @@ export interface PendingApprovalRecord {
 }
 export class DurableApprovalStore {
   readonly isIsolated: boolean;
+  /** 022-5-WO1 T031: persistence failures are reported, never silently
+   *  dropped as floating promises (they escaped as unhandled rejections and
+   *  could kill the host process). Defaults to console.error; hosts with an
+   *  error surface should inject it. */
+  onPersistenceError: (err: unknown) => void = (err) => {
+    console.error("[durable-approval-store] persistence failure:", err instanceof Error ? err.stack : String(err));
+  };
+
+  private track(promise: Promise<unknown>): void {
+    promise.catch((err) => this.onPersistenceError(err));
+  }
   private readonly dir: string;
   private readonly inMemory: boolean;
   private records = new Map<string, ApprovalRecord>();
@@ -172,8 +183,8 @@ export class DurableApprovalStore {
       status: "pending",
     };
     this.pendingRecords.set(input.continuationId, rec);
-    void this.saveRequest(input.request);
-    void this.persist();
+    this.track(this.saveRequest(input.request));
+    this.track(this.persist());
     return rec;
   }
 
@@ -197,7 +208,7 @@ export class DurableApprovalStore {
     if (rec.version !== expectedVersion) return { status: "stale" };
     if (rec.request.expiresAt <= now) {
       rec.status = "expired";
-      void this.persist();
+      this.track(this.persist());
       return { status: "expired", record: rec };
     }
     // 022-5 FR-013 + WO1 T011: the CAS is principal-bound — the record's
@@ -217,8 +228,8 @@ export class DurableApprovalStore {
     // records stays keyed by requestId (022-5 FR-013) — the continuation map
     // already holds this record; writing it here under the continuation id
     // polluted the requestId namespace.
-    void this.resolveRequest(decision);
-    void this.persist();
+    this.track(this.resolveRequest(decision));
+    this.track(this.persist());
     return { status: "transitioned", record: rec };
   }
   cas(
@@ -253,7 +264,7 @@ export class DurableApprovalStore {
     const rec = this.pendingRecords.get(continuationId);
     if (rec && rec.status === "pending") {
       rec.status = "cancelled";
-      void this.persist();
+      this.track(this.persist());
     }
   }
 
@@ -263,7 +274,7 @@ export class DurableApprovalStore {
     const isAllowed = typeof allowedInput === "function" ? allowedInput(rec.request) : allowedInput;
     if (!isAllowed) {
       rec.status = "denied";
-      void this.persist();
+      this.track(this.persist());
     }
   }
 }

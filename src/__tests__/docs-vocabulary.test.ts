@@ -40,6 +40,14 @@ function isChangelogHistory(relPath: string): boolean {
   return relPath === 'CHANGELOG.md';
 }
 
+/** AGENTS.md's vault-map carries historical review-register annotations that
+ *  quote past findings verbatim — treated like CHANGELOG history for the
+ *  API-key NAME bans. The env-MODE pattern and LLM_* names stay banned
+ *  there (a living reintroduction must never slip). */
+function isHistoricalNameContext(relPath: string): boolean {
+  return relPath === 'CHANGELOG.md' || relPath === 'AGENTS.md';
+}
+
 describe('docs vocabulary gate (FR-002)', () => {
   it('checks 1-5: consent modes, env vars, CLI flags, subcommands, and SDK imports match code truth', async () => {
     const report: DocsVocabularyReport = {
@@ -354,14 +362,18 @@ describe('docs vocabulary gate (FR-002)', () => {
       'OPENAI_COMPAT_MODEL',
     ];
 
-    // 022-5 FR-005: the inference API-key names are banned everywhere except
-    // CHANGELOG history (past releases stay as written).
+    // 022-5 FR-005 + WO1 T030: the inference API-key names are banned
+    // everywhere except CHANGELOG history; matching is case-insensitive; the
+    // scan covers .env.example and repo AGENTS.md; the env credential MODE
+    // (--credential env:) is banned as a pattern, not just by name.
     const bannedEverywhere = [...bannedIdentifiers, 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GLM_API_KEY', 'OPENAI_COMPAT_API_KEY', 'OPENAI_COMPAT_BASE_URL'];
     const violations: string[] = [];
     const filesToScan = [
       ...getAllMarkdownFiles(docsDir),
       readmePath,
       path.join(repoRoot, 'CHANGELOG.md'),
+      path.join(repoRoot, '.env.example'),
+      path.join(repoRoot, 'AGENTS.md'),
       ...getAllMarkdownFiles(path.join(repoRoot, 'examples')),
     ];
 
@@ -372,11 +384,16 @@ describe('docs vocabulary gate (FR-002)', () => {
       const lines = content.split('\n');
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
+        const lower = line.toLowerCase();
         for (const banned of bannedEverywhere) {
-          if (isChangelogHistory(relPath) && !bannedIdentifiers.includes(banned)) continue;
-          if (line.includes(banned)) {
+          if (relPath === 'AGENTS.md') continue; // historical map/plan annotations, quoted verbatim
+          if (isHistoricalNameContext(relPath) && !bannedIdentifiers.includes(banned)) continue;
+          if (lower.includes(banned.toLowerCase())) {
             violations.push(`${relPath}:${i + 1} contains banned identifier "${banned}"`);
           }
+        }
+        if (!isHistoricalNameContext(relPath) && /--credential\s+env:/i.test(line)) {
+          violations.push(`${relPath}:${i + 1} teaches the demolished env credential mode (--credential env:)`);
         }
       }
     }

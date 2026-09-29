@@ -67,11 +67,9 @@ const result = await askSeepient("Explain recursion", {
 });
 ```
 
-## Environment variable auto-detection
+## Provider credentials
 
-Seepient Agent automatically detects API keys from environment variables.
-
-### Provider credentials
+Credentials live in provider management, never in the environment.
 
 Credentials are stored through provider management (setup wizard, TUI dock, `seepient auth login`), never read from the environment. Embedders can inject their own `CredentialStore` (see below).
 

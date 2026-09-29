@@ -449,7 +449,7 @@ Manage connected provider accounts, credentials, and custom endpoints:
 | Subcommand | Description | Key Options |
 | :--- | :--- | :--- |
 | `providers list` | List all configured provider accounts and their status | `--pool <language\|image>`, `--json` |
-| `providers add <id>` | Add a new provider account | `--upstream <provider>`, `--credential env:VAR\|none`, `--url <url>`, `--allow-private`, `--compat <compat>` |
+| `providers add <id>` | Add a new provider account | `--upstream <provider>`, `--credential none`, `--url <url>`, `--allow-private`, `--compat <compat>` |
 | `providers edit <id>` | Update an existing provider account's configuration | `--upstream`, `--credential`, `--url`, `--allow-private`, `--compat` |
 | `providers remove <id>` | Remove a provider account | `--force` (bypass active slot references), `--json` |
 

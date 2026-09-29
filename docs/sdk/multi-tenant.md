@@ -252,8 +252,8 @@ Single-use capabilities consumed by Tenant A do not mark digests as expired for 
 
 ### Environment Credentials (M10)
 
-Host provider API-key environment variables are classified as operator-scoped (and are never read for inference — 022-5 demolition):
-- In `single` mode, default runtimes read these variables directly for developer convenience.
+Host provider API-key environment variables are classified as operator-scoped — and are never read for inference in ANY mode (022-5 demolition):
+- In `single` mode, credentials come from provider management (setup wizard, `seepient auth login`) or an injected credential store.
 - In `multi` mode, Seepient never falls back to ambient environment credentials. Each tenant's model calls are governed strictly by credentials in the injected `ProviderRuntime`.
 
 ### `settings()` Single-Mode Classification (FR-015)

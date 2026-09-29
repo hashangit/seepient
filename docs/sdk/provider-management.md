@@ -156,18 +156,24 @@ For local test runners or ephemeral developer tasks, bootstrap an agent with an 
 
 ```typescript
 import { createSeepient } from "seepient";
+import { MemoryCredentialStore } from "seepient";
+
+// The credential record the account references — whatever value your
+// integration holds. Seepient never reads your environment itself.
+const credentials = new MemoryCredentialStore();
+await credentials.put("isolated_openai", { kind: "api_key", keyValue: "sk-your-key" });
 
 const agent = await createSeepient({
   tenancy: "single",
   // Use ":memory:" so no files are written to disk
   overlayFile: ":memory:",
-  
+  credentials,
+
   // Provide isolated accounts
   providers: {
     isolated_openai: {
       adapter: "pi-ai",
       upstreamProvider: "openai",
-      // Embedder-owned credential material — Seepient never reads env itself.
       credential: { kind: "seepient", id: "isolated_openai" },
     },
   },
