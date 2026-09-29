@@ -82,11 +82,14 @@ export async function readPinnedImage(
   signal?: AbortSignal,
 ): Promise<{ type: "image"; mediaType: "image/png"; data: string }> {
   if (signal?.aborted) throw new Error(`Refusing ${label}: aborted before open`);
-  const handle = await fs.promises.open(
-    resolvedPath,
-    fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0),
-  );
+  // 022-5-WO1 T016: the open is INSIDE the try — an ELOOP/EMLINK from the
+  // open itself must reach the symlink conversion below (it was dead code).
+  let handle: fs.promises.FileHandle | undefined;
   try {
+    handle = await fs.promises.open(
+      resolvedPath,
+      fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0),
+    );
     const st = await handle.stat();
     if (st.isSymbolicLink()) {
       throw new Error(`Refusing ${label}: ${resolvedPath} is a symbolic link`);
@@ -107,7 +110,7 @@ export async function readPinnedImage(
     ) {
       throw new PathIdentityMismatchError(resolvedPath);
     }
-    const data = await handle.readFile();
+    const data = await handle.readFile({ signal });
     return { type: "image" as const, mediaType: "image/png" as const, data: data.toString("base64") };
   } catch (err: any) {
     if (err?.code === "ELOOP" || err?.code === "EMLINK") {
@@ -115,7 +118,7 @@ export async function readPinnedImage(
     }
     throw err;
   } finally {
-    await handle.close();
+    await handle?.close();
   }
 }
 

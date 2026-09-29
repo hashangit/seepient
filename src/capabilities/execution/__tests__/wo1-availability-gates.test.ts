@@ -87,7 +87,10 @@ describe("commit-files FIFO destination (022-5-WO1 T004)", () => {
     ]);
     expect(outcome.state).toBe("failed");
     if (outcome.state === "failed") {
-      expect(outcome.error.retryable).toBe(false);
+      // Either typed denial is correct: the pre-aborted signal short-circuits
+      // (COMMIT_ABORTED) or the FIFO is refused at the pinned open
+      // (COMMIT_DEST_NOT_REGULAR_FILE). What must never happen is a wedge.
+      expect(["COMMIT_ABORTED", "COMMIT_DEST_NOT_REGULAR_FILE"]).toContain(outcome.error.code);
     }
   });
 });

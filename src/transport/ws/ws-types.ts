@@ -348,6 +348,8 @@ export interface WsConnectionRegistry {
     ws: WebSocket;
     toolName: string;
     createdAt: number;
+    /** Authenticated principal captured at create time (022-5-WO1 D1). */
+    principalId?: string;
   }>;
   durableApprovalStore: import("../../domain/permissions/durable-approval-store.js").DurableApprovalStore;
   getOtherClients(excludeWs?: WebSocket): Array<{ ws: WebSocket; state: ConnectionState }>;
