@@ -14,16 +14,22 @@
  * (src/foundations/test-seams.ts, two-factor: NODE_ENV=test AND a vitest
  * worker), so a red verdict proves the guard is load-bearing for that journey.
  * A red verdict additionally requires the journey's EXPECTED SECURITY MESSAGE
- * to appear in the failure output — an unrelated failure is not evidence.
+ * to appear in the FAIL section (the failing tests' names and assertion
+ * output) — an unrelated failure, or a marker echoed only by a passing
+ * test's stdout, is not evidence. Alternation markers ("A|B") match any
+ * alternative in the FAIL section.
  *
- * Orphan detection (022-5 FR-008): since the journeys' ZERO_HITS counter no
- * longer reads NEUTRALIZE_* (022-5 de-confound), a deleted production seam
- * leaves its journey green under neutralization and the probe FAILS. Two
- * registration lints make the wiring explicit up front:
+ * The matrix enforces its own wiring BEFORE running journeys (022-5-WO1
+ * T018/T019; rules live in src/foundations/probe-matrix.ts, pinned by
+ * src/foundations/__tests__/probe-self-integrity.test.ts):
  *   - SEAM COVERAGE: every registered guardId must have >= 1 production
  *     isGuardNeutralized("<id>") call site, and every production seam id must
- *     be registered (this is the "deleted guard turns the matrix red"
- *     dogfood, enforced structurally).
+ *     be registered. Since the journeys' ZERO_HITS counter no longer reads
+ *     NEUTRALIZE_* (022-5 de-confound), a deleted production seam leaves its
+ *     journey green under neutralization and the probe FAILS — the lint
+ *     catches the same condition before the slow runs. The committed dogfood
+ *     pins (probe-self-integrity.test.ts) prove the lint rejects a
+ *     deleted-seam registration.
  *   - REGISTRATION: every journey importing createSecurityGuard must appear
  *     in PROBE_TARGETS or in COUNTER_ONLY_JOURNEYS (journeys whose guard is
  *     an anti-vacuity counter with no production seam to mutate).
@@ -32,7 +38,14 @@
  *   pnpm tsx scripts/verify-mutation-probes.ts
  */
 
-import { spawnSync } from "node:child_process";
+import { spawnSync, execSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import {
+  assertJourneyRegistration as assertJourneyRegistrationPure,
+  assertSeamCoverage as assertSeamCoveragePure,
+  extractFailSection,
+  markerMatches,
+} from "../src/foundations/probe-matrix.js";
 
 interface ProbeTarget {
   guardId: string;
@@ -194,6 +207,37 @@ function runJourney(testFile: string, neutralize: boolean, target: ProbeTarget):
 
 async function main() {
   console.log("=== Seepient Anti-Vacuity Mutation Probe Matrix ===");
+
+  // WO1 T018/T019: the matrix enforces its own wiring before spending
+  // minutes on journeys.
+  try {
+    const seams = productionSeamIds();
+    assertSeamCoveragePure(PROBE_TARGETS, seams);
+    const guardUsing = execSync(
+      `grep -rln 'createSecurityGuard' src examples --include='*.test.ts' | grep -v _guard`,
+      { encoding: "utf8" },
+    )
+      .split("\n")
+      .filter(Boolean);
+    const violations = assertJourneyRegistrationPure(
+      guardUsing,
+      PROBE_TARGETS.map((t) => t.testFile),
+      COUNTER_ONLY_JOURNEYS.map((c) => c.testFile),
+    );
+    for (const c of COUNTER_ONLY_JOURNEYS) {
+      if (!PROBE_TARGETS.some((t) => t.testFile === c.testFile) && !existsSync(c.testFile)) {
+        violations.push(`COUNTER_ONLY_JOURNEYS entry ${c.testFile} does not exist on disk`);
+      }
+    }
+    if (violations.length > 0) {
+      throw new Error(`REGISTRATION violations:\n  - ${violations.join("\n  - ")}`);
+    }
+  } catch (err) {
+    console.error(String(err instanceof Error ? err.message : err));
+    process.exit(1);
+  }
+  console.log("lints: seam coverage + journey registration verified.\n");
+
   console.log(`Executing ${PROBE_TARGETS.length} mutation probes (green baseline + neutralized red)...\n`);
 
   let verified = 0;
@@ -226,12 +270,15 @@ async function main() {
       );
       process.exit(1);
     }
-    // 022-5 FR-008: the red must be the SECURITY assertion, not an unrelated
-    // failure. The journey's expected failure marker must appear in the output.
-    const strippedNeutral = neutralized.output.replace(/\x1b\[[0-9;]*m/g, "");
-    if (!strippedNeutral.includes(t.expectedMessage)) {
+    // 022-5 FR-008 + WO1 T021: the red must be the SECURITY assertion, not
+    // an unrelated failure. The marker must appear in the FAIL section (the
+    // failing tests' names and assertion output) — a marker echoed only by a
+    // PASSING test's stdout is not evidence. Alternation markers ("A|B")
+    // match when any single alternative appears in the FAIL section.
+    const failSection = extractFailSection(neutralized.output);
+    if (!markerMatches(failSection, t.expectedMessage)) {
       console.error(
-        `FAIL: ${t.guardId}: neutralized run failed ${neutralized.failedTestCount} test(s) but none carried the expected security marker "${t.expectedMessage}" — the red is not evidence (wrong test failing?)`,
+        `FAIL: ${t.guardId}: neutralized run failed ${neutralized.failedTestCount} test(s) but the FAIL section carries none of the expected security marker(s) "${t.expectedMessage}" — the red is not evidence (wrong test failing?)`,
       );
       process.exit(1);
     }
