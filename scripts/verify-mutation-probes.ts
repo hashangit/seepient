@@ -62,6 +62,10 @@ interface ProbeTarget {
  *  here or in PROBE_TARGETS — nothing escapes the register silently. */
 const COUNTER_ONLY_JOURNEYS: { testFile: string; reason: string }[] = [
   {
+    testFile: "src/foundations/__tests__/probe-self-integrity.test.ts",
+    reason: "pins the lint rules themselves (022-5-WO1 T020) — imports createSecurityGuard to prove the counter counts",
+  },
+  {
     testFile: "src/domain/permissions/__tests__/composition-closure/identity-validation.test.ts",
     reason: "VULN-2 counter: the identity validator denies by construction; no seam to mutate",
   },
@@ -210,7 +214,7 @@ function runJourney(testFile: string, neutralize: boolean, target: ProbeTarget):
 function productionSeamIds(): Map<string, string[]> {
   const byId = new Map<string, string[]>();
   const out = execSync(
-    `grep -rn 'isGuardNeutralized("' src examples --include='*.ts' | grep -v __tests__ | grep -v test-seams`,
+    `grep -rn 'isGuardNeutralized("' src examples --include='*.ts' | grep -v __tests__ | grep -v test-seams | grep -v probe-matrix`,
     { encoding: "utf8" },
   );
   for (const line of out.split("\n")) {

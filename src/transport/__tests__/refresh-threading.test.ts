@@ -7,12 +7,12 @@
  * REST catalog route.
  */
 import { describe, it, expect, vi } from "vitest";
-import { ProviderConfigStore } from "../config-store/provider-config-store.js";
-import { MemoryCredentialStore } from "../credentials/memory-credential-store.js";
-import { ProviderRuntime } from "../provider-runtime.js";
-import { AggregateInferenceAdapter } from "../../../capabilities/inference/aggregate-adapter.js";
-import { createProviderManagerApi } from "../../../transport/cli/provider-manager-api.js";
-import type { ApiKeyEntry } from "../../../transport/auth/auth.js";
+import { ProviderConfigStore } from "../../domain/providers/config-store/provider-config-store.js";
+import { MemoryCredentialStore } from "../../domain/providers/credentials/memory-credential-store.js";
+import { ProviderRuntime } from "../../domain/providers/provider-runtime.js";
+import { AggregateInferenceAdapter } from "../../capabilities/inference/aggregate-adapter.js";
+import { createProviderManagerApi } from "../cli/provider-manager-api.js";
+import type { ApiKeyEntry } from "../auth/auth.js";
 
 async function multiRuntimeWithAttackerAccount(): Promise<ProviderRuntime> {
   const configStore = new ProviderConfigStore(":memory:");
@@ -46,7 +46,7 @@ describe("refreshModels threading (022-5-WO1 T022)", () => {
 
   it("REST catalog route: the typed denial surfaces as a 400 with the egress message", async () => {
     const runtime = await multiRuntimeWithAttackerAccount();
-    const { handleRefreshModels } = await import("../../../transport/http/provider-management/catalog.js");
+    const { handleRefreshModels } = await import("../http/provider-management/catalog.js");
     const calls: { status?: number; body?: string } = {};
     const res: Record<string, unknown> = {
       statusCode: 0,
