@@ -20,14 +20,14 @@ import { mkdtempSync, rmSync, realpathSync, writeFileSync, statSync } from "node
 import { execSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CommitFilesExecutor } from "../../../../capabilities/execution/executors.js";
-import { readPinnedImage } from "../../../../capabilities/media/media.js";
-import { createSnapshotStore } from "../../../../foundations/hashline/snapshot-store.js";
-import { InMemoryArtifactStore } from "../../../../capabilities/execution/in-memory-artifact-store.js";
-import { analyzeEditFile } from "../../../../capabilities/tools/analyzers.js";
-import type { PreparedToolAction } from "../../../../foundations/contracts/prepared-action.js";
-import type { CapabilityEnvelope } from "../../../../foundations/contracts/permission-policy.js";
-import type { ToolAnalysisContext } from "../../../../foundations/contracts/custom-tools.js";
+import { CommitFilesExecutor } from "../../../capabilities/execution/executors.js";
+import { readPinnedImage } from "../../../capabilities/media/media.js";
+import { createSnapshotStore } from "../../../foundations/hashline/snapshot-store.js";
+import { InMemoryArtifactStore } from "../../../capabilities/execution/in-memory-artifact-store.js";
+import { analyzeEditFile } from "../../../capabilities/tools/analyzers.js";
+import type { PreparedToolAction } from "../../../foundations/contracts/prepared-action.js";
+import type { CapabilityEnvelope } from "../../../foundations/contracts/permission-policy.js";
+import type { ToolAnalysisContext } from "../../../foundations/contracts/custom-tools.js";
 
 let dir: string;
 beforeEach(() => {
