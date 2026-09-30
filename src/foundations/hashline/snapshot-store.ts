@@ -15,6 +15,12 @@ interface SnapshotEntry {
   path: string;
   content: string;
   tag: string;
+  /** Authorization-time file identity (022-5-WO3 T005): captured when the
+   *  tag is minted — record() runs after the read_file identity pin, so this
+   *  IS the authorized file's dev/ino. Edit-section reads compare their
+   *  pinned fd against it; a post-tag inode swap is denied. */
+  device?: string;
+  inode?: string;
 }
 
 export interface SnapshotStore {
@@ -22,6 +28,8 @@ export interface SnapshotStore {
   record(path: string, content: string): string;
   /** Path-keyed resolution — returns the stored tag + content for this path. */
   resolvePath(path: string): { tag: string; content: string } | null;
+  /** The recorded authorization-time identity for this path, if captured. */
+  identityOf(path: string): { device: string; inode: string } | null;
   /** Return the raw pre-edit content for a path (for stale-anchor reapply). */
   snapshot(path: string): string | null;
   clear(): void;
@@ -47,13 +55,32 @@ export function createSnapshotStore(): SnapshotStore {
         return ''; // empty tag signals "too large" — forces edit_file fallback
       }
       const tag = tagFor(path, content);
-      byPath.set(path, { path, content, tag });
+      // Identity capture is best-effort: a missing file (new-file flow) or a
+      // stat failure simply leaves the entry without identity, and the
+      // section-read pin fails open ONLY for that absent case.
+      let device: string | undefined;
+      let inode: string | undefined;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const st = require('node:fs').lstatSync(path);
+        device = String(st.dev);
+        inode = String(st.ino);
+      } catch {
+        /* new-file or vanished — no identity recorded */
+      }
+      byPath.set(path, { path, content, tag, device, inode });
       return tag;
     },
 
     resolvePath(path: string): { tag: string; content: string } | null {
       const entry = byPath.get(path);
       return entry ? { tag: entry.tag, content: entry.content } : null;
+    },
+
+    identityOf(path: string): { device: string; inode: string } | null {
+      const entry = byPath.get(path);
+      if (!entry?.device || !entry.inode) return null;
+      return { device: entry.device, inode: entry.inode };
     },
 
     snapshot(path: string): string | null {

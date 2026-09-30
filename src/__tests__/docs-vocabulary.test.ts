@@ -404,8 +404,10 @@ describe('docs vocabulary gate (FR-002)', () => {
     // 022-5 FR-005 + WO1 T030: the inference API-key names are banned
     // everywhere except CHANGELOG history; matching is case-insensitive; the
     // scan covers .env.example and repo AGENTS.md; the env credential MODE
-    // (--credential env:) is banned as a pattern, not just by name.
-    const bannedEverywhere = [...bannedIdentifiers, 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GLM_API_KEY', 'OPENAI_COMPAT_API_KEY', 'OPENAI_COMPAT_BASE_URL'];
+    // (--credential env:) is banned as a pattern, not just by name. The
+    // demolished `auth login --env-var` flag is banned the same way (docs
+    // truth sweep 2026-09-30: README still taught it after the demolition).
+    const bannedEverywhere = [...bannedIdentifiers, 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GLM_API_KEY', 'OPENAI_COMPAT_API_KEY', 'OPENAI_COMPAT_BASE_URL', '--env-var'];
     const violations: string[] = [];
     const filesToScan = [
       ...getAllMarkdownFiles(docsDir),

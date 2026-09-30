@@ -411,12 +411,15 @@ export async function analyzeEditFile(
         exists: true,
         finalSymlink: false,
       });
-      // 022-5-WO1 T015: O_NONBLOCK bounds the open (a FIFO swapped in for a
-      // tagged path cannot wedge the ANALYSIS phase pre-approval), the pinned
-      // fd must be a regular file, and its dev/ino must match the snapshot
-      // identity taken right after authorization — a parent swap between
-      // authorize and read feeds host bytes into the in-workspace merge.
-      const snap = snapshotPath({ canonicalPath: real, canonicalParent: path.dirname(real), basename: path.basename(real), exists: true, finalSymlink: false });
+      // 022-5-WO1 T015 + WO3 T005: O_NONBLOCK bounds the open (a FIFO
+      // swapped in for a tagged path cannot wedge the ANALYSIS phase
+      // pre-approval), the pinned fd must be a regular file, and its dev/ino
+      // must match the identity RECORDED WHEN THE TAG WAS MINTED (the store
+      // captures it after read_file's identity pin — pass-13 P3: comparing
+      // against a read-time stat compared the file to itself and could never
+      // fire). A post-tag inode swap is denied before host bytes enter the
+      // merge.
+      const recordedIdentity = ctx.snapshotStore?.identityOf?.(real) ?? null;
       const handle = await fsOpenSection(real, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0));
       try {
         const st = await handle.stat();
@@ -430,12 +433,10 @@ export async function analyzeEditFile(
         }
         if (
           !isGuardNeutralized("P1-1-READ-IDENTITY") &&
-          snap?.device !== undefined &&
-          snap.inode !== undefined &&
-          (String(st.dev) !== snap.device || String(st.ino) !== snap.inode)
+          recordedIdentity &&
+          (String(st.dev) !== recordedIdentity.device || String(st.ino) !== recordedIdentity.inode)
         ) {
-          const err = new PathIdentityMismatchError(real);
-          throw new Error(err.message);
+          throw new PathIdentityMismatchError(real);
         }
         return await handle.readFile({ encoding: "utf-8" });
       } finally {
