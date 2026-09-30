@@ -496,9 +496,12 @@ export function createProviderManagerApi(
       try {
         await runtime.assertAccountEgressAllowed(input.baseUrl, input.accountId);
       } catch (err) {
+        // Trim the message's own EGRESS_REQUIRED prefix — the error code
+        // carries it; double-prefixing confuses client parsers.
+        const msg = (err as Error).message.replace(/^EGRESS_REQUIRED:\s*/, "");
         return {
           ok: false,
-          error: { code: "egress_required", message: (err as Error).message },
+          error: { code: "egress_required", message: msg },
         };
       }
       const check = await validateEndpointUrl(input.baseUrl, {

@@ -54,12 +54,17 @@ export function redactWebhookUrl(url: string): string {
     const parsed = new URL(url);
     return `${parsed.protocol}//${parsed.host}/…`;
   } catch {
+    // Malformed: still never leak path/query. Truncate at the first /, ?, or
+    // # after the host, or fall back to a fixed marker if no scheme exists.
     const schemeEnd = url.indexOf("://");
     if (schemeEnd !== -1) {
       const hostStart = schemeEnd + 3;
-      const pathStart = url.indexOf("/", hostStart);
-      const host = pathStart === -1 ? url.slice(hostStart) : url.slice(hostStart, pathStart);
-      return `${url.slice(0, schemeEnd)}://${host}/…`;
+      let hostEnd = url.length;
+      for (const ch of ["/", "?", "#"]) {
+        const idx = url.indexOf(ch, hostStart);
+        if (idx !== -1 && idx < hostEnd) hostEnd = idx;
+      }
+      return `${url.slice(0, schemeEnd)}://${url.slice(hostStart, hostEnd)}/…`;
     }
     return "…";
   }

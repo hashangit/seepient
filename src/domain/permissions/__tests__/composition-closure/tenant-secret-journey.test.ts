@@ -85,7 +85,7 @@ describe("FR-013: End-to-End Brokered Secret Journey (US4)", () => {
       },
     });
 
-    const runtime = createMockRuntime([
+    const runtime: any = createMockRuntime([
       {
         toolCalls: [
           {
@@ -97,6 +97,7 @@ describe("FR-013: End-to-End Brokered Secret Journey (US4)", () => {
       },
       { content: "Tool call finished." },
     ]);
+    Object.defineProperty(runtime, "tenancySignal", { value: "multi", configurable: true }); // 022-5-WO4 T007
 
     // Inject tenant credential into runtime credential store
     await runtime.credentialStore.put("MY_SECRET", {
@@ -166,7 +167,7 @@ describe("FR-013: End-to-End Brokered Secret Journey (US4)", () => {
     });
 
     // Mock runtime without any injected tenant secret
-    const runtime = createMockRuntime([
+    const runtime: any = createMockRuntime([
       {
         toolCalls: [
           {
@@ -178,6 +179,7 @@ describe("FR-013: End-to-End Brokered Secret Journey (US4)", () => {
       },
       { content: "Tool call finished." },
     ]);
+    Object.defineProperty(runtime, "tenancySignal", { value: "multi", configurable: true }); // 022-5-WO4 T007
 
     const res = await askSeepient("fetch the secure data", {
       cwd: "/tmp/tenant-secret-test",

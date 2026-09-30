@@ -272,19 +272,36 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     // 022-5-WO2 T008 (pass-12 P1-2): this IS a multi server — arm the
     // runtime so refreshModels (and every surface reading the signal)
     // enforces the operator-baseline egress grants.
-    const baselineCaps = normalizeBaselineCaps(options.operatorBaseline);
-    const { createRuntimeFromProvidersFile } = await import("../../domain/providers/provider-runtime.js");
+    // 022-5-WO4 T013 (pass-13 P2-4): explicit and derived baselines UNION —
+    // passing an explicit baseline no longer erases the file accounts' own
+    // implicit grants.
+    const { createRuntimeFromProvidersFile, deriveBaselineFromProviders } = await import("../../domain/providers/provider-runtime.js");
+    const { readFileSync: readPf } = await import("node:fs");
+    let derivedCaps: import("../../foundations/contracts/permission-policy.js").Capability[] = [];
+    try {
+      derivedCaps = deriveBaselineFromProviders(JSON.parse(readPf(options.providersFile, "utf8")).providers);
+    } catch { /* the file factory surfaces its own error */ }
+    const explicitCaps = normalizeBaselineCaps(options.operatorBaseline) ?? [];
+    const seen = new Set<string>();
+    const unionCaps: import("../../foundations/contracts/permission-policy.js").Capability[] = [];
+    for (const c of [...explicitCaps, ...derivedCaps]) {
+      const key = `${(c as any).kind}|${(c as any).scheme}|${(c as any).host}|${(c as any).port ?? ""}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        unionCaps.push(c);
+      }
+    }
     serverRuntime = await createRuntimeFromProvidersFile(options.providersFile, {
       tenancyMode: "multi",
-      capabilities: baselineCaps,
+      capabilities: unionCaps,
     });
-    const derived = (serverRuntime as { grantedCapabilities?: unknown[] }).grantedCapabilities ?? [];
-    const grantedHosts = derived
+    const runtimeCaps = (serverRuntime as { grantedCapabilities?: unknown[] }).grantedCapabilities ?? [];
+    const grantedHosts = runtimeCaps
       .filter((c) => (c as { kind?: string }).kind === "network-destination")
-      .map((c) => `${(c as { scheme?: string }).scheme}://${(c as { host?: string }).host}`);
+      .map((c) => `${(c as { scheme?: string }).scheme}://${(c as { host?: string }).host}${(c as { port?: number }).port ? `:${(c as { port?: number }).port}` : ""}`);
     process.stderr.write(
       `[seepient] Notice: server booted with providers loaded from ${options.providersFile} (isolated multi runtime; file read once at boot).` +
-        ` Derived operator egress grants: ${grantedHosts.length > 0 ? grantedHosts.join(", ") : "none (no account baseUrls)"} — provider-management mutations and refresh are limited to these hosts.\n`,
+        ` Operator egress grants (explicit + derived): ${grantedHosts.length > 0 ? grantedHosts.join(", ") : "none (no account baseUrls)"} — provider-management mutations and refresh are limited to these hosts.\n`,
     );
   } else {
     process.stderr.write("[seepient] Notice: server booted with isolated empty ProviderRuntime.\n");

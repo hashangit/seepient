@@ -143,10 +143,9 @@ export async function handlePutProvider(
     }
   }
 
-    // 022-5-WO3 T008: the egress assert lives in api.saveAccount (one seam —
+  // 022-5-WO3 T008: the egress assert lives in api.saveAccount (one seam —
   // REST, WS set_provider, CLI all inherit it); no inline duplicate here.
-
-const saveRes = await api.saveAccount(
+  const saveRes = await api.saveAccount(
     {
       accountId: providerId,
       upstreamProvider: body.upstreamProvider,
