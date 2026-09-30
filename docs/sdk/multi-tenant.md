@@ -227,7 +227,10 @@ const agent = await createSeepient({
   policyStore,
   operatorBaseline: {
     capabilities: [
-      // Base capabilities available to all tenants without approval prompts
+      // Base capabilities available to all tenants without approval prompts.
+      // On multi servers, a provider account with a `baseUrl` also needs its
+      // host granted here, or refresh/mutations fail with EGRESS_REQUIRED:
+      { kind: "network-destination", scheme: "https", host: "relay.example.com" },
     ],
   },
   // ...

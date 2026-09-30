@@ -489,6 +489,18 @@ export function createProviderManagerApi(
           error: { code: "validation_failed", message: "Cannot save redacted baseUrl into configuration." },
         };
       }
+      // 022-5-WO3 T008 (pass-13 P2-1, D3): ONE seam — every provider-mutation
+      // surface (REST accounts PUT, WS set_provider, CLI) routes through
+      // saveAccount, so the multi egress assert is inherited everywhere. On
+      // a multi runtime, an ungranted host cannot be planted at all.
+      try {
+        await runtime.assertAccountEgressAllowed(input.baseUrl, input.accountId);
+      } catch (err) {
+        return {
+          ok: false,
+          error: { code: "egress_required", message: (err as Error).message },
+        };
+      }
       const check = await validateEndpointUrl(input.baseUrl, {
         ssrfAllowPrivate:
           input.allowPrivate === true ||

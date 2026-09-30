@@ -255,6 +255,18 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
       const { TenancyRuntimeRequiredError } = await import("../../domain/tenancy/tenancy-mode.js");
       throw new TenancyRuntimeRequiredError();
     }
+    // 022-5-WO3 T006 (pass-13 P1-1): the runtime's OWN tenancy stamp is the
+    // egress-enforcement signal — an injected runtime without the multi
+    // stamp would silently no-op every guard. Refuse rather than coerce;
+    // createSeepient stamps its own builds, so the documented embed shape
+    // composes correctly.
+    if (runtimeAny.tenancySignal !== "multi" && runtimeAny.tenancyMode !== "multi") {
+      const err = new Error(
+        "TENANCY_RUNTIME_REQUIRED: an injected runtime on a multi-tenant server must be stamped tenancyMode 'multi' (createSeepient stamps its own builds) — unstamped runtimes would silently disable egress enforcement.",
+      ) as Error & { code: string };
+      err.code = "TENANCY_RUNTIME_REQUIRED";
+      throw err;
+    }
     serverRuntime = options.runtime;
   } else if (options?.providersFile) {
     // 022-5-WO2 T008 (pass-12 P1-2): this IS a multi server — arm the
@@ -266,8 +278,13 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
       tenancyMode: "multi",
       capabilities: baselineCaps,
     });
+    const derived = (serverRuntime as { grantedCapabilities?: unknown[] }).grantedCapabilities ?? [];
+    const grantedHosts = derived
+      .filter((c) => (c as { kind?: string }).kind === "network-destination")
+      .map((c) => `${(c as { scheme?: string }).scheme}://${(c as { host?: string }).host}`);
     process.stderr.write(
-      `[seepient] Notice: server booted with providers loaded from ${options.providersFile} (isolated multi runtime; file read once at boot).\n`,
+      `[seepient] Notice: server booted with providers loaded from ${options.providersFile} (isolated multi runtime; file read once at boot).` +
+        ` Derived operator egress grants: ${grantedHosts.length > 0 ? grantedHosts.join(", ") : "none (no account baseUrls)"} — provider-management mutations and refresh are limited to these hosts.\n`,
     );
   } else {
     process.stderr.write("[seepient] Notice: server booted with isolated empty ProviderRuntime.\n");

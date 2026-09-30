@@ -46,6 +46,25 @@ export function isBrokerDeniedAddress(ip: string): boolean {
   return isPrivateIp(ip) || isMetadataIp(ip);
 }
 
+/** Redact a webhook URL for denial messages: keep scheme+host for
+ *  debuggability, strip path/query/auth (Feishu/DingTalk/WeCom tokens live
+ *  in the query — the broker never echoes raw secrets). */
+export function redactWebhookUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.protocol}//${parsed.host}/…`;
+  } catch {
+    const schemeEnd = url.indexOf("://");
+    if (schemeEnd !== -1) {
+      const hostStart = schemeEnd + 3;
+      const pathStart = url.indexOf("/", hostStart);
+      const host = pathStart === -1 ? url.slice(hostStart) : url.slice(hostStart, pathStart);
+      return `${url.slice(0, schemeEnd)}://${host}/…`;
+    }
+    return "…";
+  }
+}
+
 const DENIED_HOSTS: ReadonlySet<string> = new Set([
   "localhost",
   "metadata.google.internal", // GCP metadata
@@ -425,9 +444,11 @@ export class EffectBroker implements EffectBrokerContract {
         }
       } catch (err: any) {
         if (err?.name === "TypeError") {
+          // 022-5-WO3 T015 (pass-13 P2-3): the URL carries the operator's
+          // auth token in its query — redact everything after the host.
           return this.denied(
             request.requestId,
-            `DESTINATION_DENIED: Webhook URL ${webhookUrl} is malformed`,
+            `DESTINATION_DENIED: Webhook URL ${redactWebhookUrl(webhookUrl)} is malformed`,
             "DESTINATION_DENIED",
           );
         }
@@ -449,7 +470,7 @@ export class EffectBroker implements EffectBrokerContract {
       } catch (err: any) {
         return this.denied(
           request.requestId,
-          `DESTINATION_DENIED: Webhook URL ${webhookUrl} is denied: ${err?.message ?? err}`,
+          `DESTINATION_DENIED: Webhook URL ${redactWebhookUrl(webhookUrl)} is denied: ${err?.message ?? err}`,
           "DESTINATION_DENIED",
         );
       }

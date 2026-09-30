@@ -996,7 +996,38 @@ export async function createRuntimeFromProvidersFile(
     await credentialStore.put(id, record);
   }
   const adapter = new AggregateInferenceAdapter(undefined, undefined, credentialStore);
-  return new ProviderRuntime({ configStore, credentialStore, adapter, tenancyMode: opts?.tenancyMode, capabilities: opts?.capabilities });
+  // 022-5-WO3 T009 (pass-13 P1-2, D1): the operator baseline is DERIVED from
+  // the providers file — each configured account's scheme/host/port is
+  // granted by construction. The file is operator-controlled, so deriving
+  // trust from it is sound, and the first-hour custom-endpoint account keeps
+  // working with zero extra configuration. An explicit capability list (when
+  // supplied) takes precedence.
+  const capabilities = opts?.capabilities ?? deriveBaselineFromProviders(parsed.providers);
+  return new ProviderRuntime({ configStore, credentialStore, adapter, tenancyMode: opts?.tenancyMode, capabilities });
+}
+
+/** Derive operator-baseline network grants from a parsed providers-file
+ *  `providers` map: one network-destination capability per account baseUrl
+ *  (scheme/host/port). Accounts without a baseUrl grant nothing (openai's
+ *  fixed endpoint needs no grant in multi — the wrapper asserts only
+ *  account-supplied baseUrls). */
+export function deriveBaselineFromProviders(providers: unknown): import("../../foundations/contracts/permission-policy.js").Capability[] {
+  const caps: import("../../foundations/contracts/permission-policy.js").Capability[] = [];
+  if (!providers || typeof providers !== "object") return caps;
+  for (const entry of Object.values(providers as Record<string, any>)) {
+    const baseUrl = entry?.baseUrl;
+    if (typeof baseUrl !== "string" || baseUrl.length === 0) continue;
+    try {
+      const url = new URL(baseUrl);
+      const scheme = url.protocol.replace(/:$/, "");
+      if (scheme !== "http" && scheme !== "https") continue;
+      const port = url.port ? parseInt(url.port, 10) : scheme === "https" ? 443 : 80;
+      caps.push({ kind: "network-destination", scheme, host: url.hostname, port } as import("../../foundations/contracts/permission-policy.js").Capability);
+    } catch {
+      /* malformed operator URL — skip, never throw at boot */
+    }
+  }
+  return caps;
 }
 
 /**

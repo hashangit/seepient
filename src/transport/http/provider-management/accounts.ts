@@ -143,18 +143,8 @@ export async function handlePutProvider(
     }
   }
 
-    // 022-5-WO2 T008/D2: on a multi runtime, a provider account baseUrl must
-  // hold an operator-baseline network grant — a provider:admin key cannot
-  // PLANT an ungranted host for the operator's stored credentials.
-  const putBaseUrl = (body as { baseUrl?: string }).baseUrl;
-  if (putBaseUrl) {
-    try {
-      await runtime.assertAccountEgressAllowed(putBaseUrl, String(body.providerId ?? body.id ?? ""));
-    } catch (err) {
-      sendJSON(res, 400, { error: "EGRESS_REQUIRED", message: (err as Error).message });
-      return;
-    }
-  }
+    // 022-5-WO3 T008: the egress assert lives in api.saveAccount (one seam —
+  // REST, WS set_provider, CLI all inherit it); no inline duplicate here.
 
 const saveRes = await api.saveAccount(
     {
