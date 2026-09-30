@@ -299,7 +299,14 @@ export function createFakeRuntime(opts?: {
   credentialStore?: CompositeCredentialStore | MemoryCredentialStore;
 }): ProviderRuntime {
   if (opts?.responses && !opts.configStore && !opts.credentialStore) {
-    return createMockRuntime(opts.responses);
+    // 022-5-WO3: injected runtimes on multi servers must carry the stamp —
+    // the shared fake gets it by default so every server test composes the
+    // documented embed shape.
+    // The getter is read-only on ProviderRuntime; Object.defineProperty
+    // overrides it for the test double.
+    const mock = createMockRuntime(opts.responses);
+    Object.defineProperty(mock, "tenancySignal", { value: "multi", configurable: true });
+    return mock;
   }
 
   const configStore = opts?.configStore ?? new ProviderConfigStore(":memory:");
@@ -343,6 +350,7 @@ export function createFakeRuntime(opts?: {
       credentialStore,
       modelCatalog: mock.modelCatalog,
       adapter: mock.adapter,
+      tenancyMode: "multi", // 022-5-WO3: injected runtimes are multi-stamped
     });
   }
 
@@ -350,5 +358,6 @@ export function createFakeRuntime(opts?: {
     configStore,
     credentialStore,
     modelCatalog: new ModelCatalog([]),
+    tenancyMode: "multi", // 022-5-WO3: injected runtimes are multi-stamped
   });
 }

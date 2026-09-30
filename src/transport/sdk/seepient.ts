@@ -213,6 +213,10 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
         configStore,
         credentialStore,
         adapter,
+        // 022-5-WO3 T007 (D2): the internally-built runtime carries the
+        // embed's tenancy stamp — the natural embed shape is egress-armed by
+        // construction, not silently single-stamped.
+        tenancyMode,
       });
     } else {
       bootstrapRuntime = createAmbientProviderRuntime();

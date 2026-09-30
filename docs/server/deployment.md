@@ -192,7 +192,7 @@ pm2 startup
 | `SEEPIENT_RATE_LIMIT_RPM` | Per-key requests-per-minute cap for REST and WebSocket traffic (default: 300). Set to `0` to disable | No |
 
 ::: warning Server provider isolation
-The standalone server binary boots with an isolated empty provider runtime by default, and never reads provider keys from the host environment (022-5 demolition). There are exactly two ways to give the server durable providers:
+The standalone server binary boots with an isolated empty provider runtime by default, and never reads provider keys from the host environment (022-5 demolition). There are exactly two ways to give the server durable providers (on a multi-tenant server, provider-management mutations and model refresh are limited to each configured account's own host — the operator baseline is derived from the providers file at boot and printed to stderr at startup):
 
 1. **`--providers-file <path>`** (or `runSeepientServer({ providersFile })`) — an operator-owned JSON file read once at boot into the isolated runtime. It carries provider accounts, model assignments, and credentials (the file is the operator's plaintext secret surface — mount it read-only and keep it out of tenant-visible volumes; `chmod 600`):
    ```json
@@ -217,6 +217,25 @@ The standalone server binary boots with an isolated empty provider runtime by de
 2. **Inject a runtime when embedding**: `runSeepientServer({ runtime })` with an isolated `ProviderRuntime` you constructed yourself.
 
 Note: `.seepient/setting.json` in a mounted volume is **not** read for provider configuration — the isolated runtime never reads ambient settings files.
+
+**Egress gating for `baseUrl` accounts (multi-tenant arming).** The server composes its runtime in multi-tenant mode, and every provider account that carries a `baseUrl` must have that host covered by an operator-baseline `network-destination` capability. Without the grant:
+
+- `POST /v1/providers/:id/refresh-models` denies with `EGRESS_REQUIRED` **before any network traffic** (not even DNS resolves).
+- `PUT /v1/providers/:id` with a `baseUrl` denies with `400 EGRESS_REQUIRED` — an ungranted host cannot be planted, even by a `provider:admin` key.
+
+Accounts without a `baseUrl` (default provider endpoints) are unaffected. The standalone CLI has no flag for baselines; embedders grant them at boot:
+
+```typescript
+const server = await runSeepientServer({
+  host: "127.0.0.1",
+  port: 7337,
+  providersFile: "/config/providers.json",
+  operatorBaseline: [
+    // Grant the operator's own relay; port is optional and narrows the grant.
+    { kind: "network-destination", scheme: "https", host: "relay.example.com" },
+  ],
+});
+```
 :::
 
 ## Error codes
@@ -228,6 +247,7 @@ Note: `.seepient/setting.json` in a mounted volume is **not** read for provider 
 | `UNAUTHORIZED` | 401 | No | Invalid or missing API key |
 | `FORBIDDEN` | 403 | No | API key lacks required scope |
 | `BAD_REQUEST` | 400 | No | Invalid request body or missing fields |
+| `EGRESS_REQUIRED` | 400 | No | Provider account `baseUrl` host is not covered by an operator-baseline `network-destination` capability (multi-tenant egress gating) |
 | `NOT_FOUND` | 404 | No | Endpoint or session not found |
 | `PROVIDER_ERROR` | 502 | Yes | LLM provider returned an error |
 | `GENERATION_ERROR` | 500 | Yes | Text generation failed |
