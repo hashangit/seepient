@@ -115,9 +115,32 @@ describe("commit old-content identity pin is load-bearing (022-5-WO2 T010 deleti
 });
 
 describe("edit-section identity pin is load-bearing (022-5-WO2 T011 deletion pin)", () => {
-  it("with the guard live, a swapped section file denies the analysis (the WO1 T015 pin)", async () => {
+  it("with the guard live, a REAL inode swap (content preserved) denies the section read", async () => {
     delete process.env.NEUTRALIZE_P1_1_READ_IDENTITY;
-    const file = join(dir, "sec.txt");
+    const { denyMessage } = await runSectionSwap();
+    // The identity pin fires: the denial is the identity mismatch, not a
+    // stale-anchor artifact (content is identical — only the inode moved).
+    expect(denyMessage).toMatch(/identity|PATH_IDENTITY_MISMATCH/i);
+  });
+
+  it("with the guard neutralized, the same swap is NOT identity-denied (the pin is load-bearing)", async () => {
+    process.env.NEUTRALIZE_P1_1_READ_IDENTITY = "1";
+    try {
+      const { denyMessage } = await runSectionSwap();
+      expect(denyMessage).not.toMatch(/identity|PATH_IDENTITY_MISMATCH/i);
+    } finally {
+      delete process.env.NEUTRALIZE_P1_1_READ_IDENTITY;
+    }
+  });
+
+  /** Real inode swap with IDENTICAL content: create a replacement file with
+   *  the same bytes while the original is alive, rename over the path. The
+   *  stale-anchor path cannot fire (same content, same tag) — the only
+   *  difference from the snapshot is the inode, which is exactly what the
+   *  section-read pin exists to catch. (Pass-13 P3: the old "swap" was an
+   *  in-place write — same inode, pin never fired.) */
+  async function runSectionSwap(): Promise<{ denyMessage: string }> {
+    const file = join(dir, `sec-${Math.random().toString(36).slice(2, 8)}.txt`);
     writeFileSync(file, "one\ntwo\n");
     const ctx: ToolAnalysisContext = {
       principalId: "user", runId: "r", toolCallId: "c",
@@ -128,17 +151,18 @@ describe("edit-section identity pin is load-bearing (022-5-WO2 T011 deletion pin
     ctx.snapshotStore!.record(file, "one\ntwo\n");
     const tag = ctx.snapshotStore!.resolvePath(file)!.tag;
 
-    // Swap content (new inode) between snapshot and analysis.
-    writeFileSync(file, "SWAPPED");
+    const replacement = `${file}.new`;
+    writeFileSync(replacement, "one\ntwo\n"); // identical content, new inode
+    const { renameSync } = await import("node:fs");
+    renameSync(replacement, file);
 
-    const result = await analyzeEditFile({ patch: `[${file}#${tag}]\nINS.TAIL:\n+x` }, ctx).then(
+    const message = await analyzeEditFile({ patch: `[${file}#${tag}]\nINS.TAIL:\n+x` }, ctx).then(
       () => "resolved",
       (e: unknown) => String((e as Error).message),
     );
-    // The stale-tag/merge path may reject on content mismatch — the pin
-    // assertion is that SWAPPED content cannot silently merge: the outcome
-    // must be a rejection mentioning the refusal or stale anchor, and the
-    // identity pin guard is what keeps the direct path denied (T015 block).
-    expect(result).not.toBe("resolved");
-  });
+    if (message === "resolved") {
+      return { denyMessage: "" };
+    }
+    return { denyMessage: message };
+  }
 });
