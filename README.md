@@ -458,9 +458,9 @@ Manage provider credentials and issue server API keys:
 
 | Subcommand | Description | Key Options |
 | :--- | :--- | :--- |
-| `auth login <provider>` | Configure credentials or initiate OAuth sign-in | `--key <apiKey>`, `--env-var <name>`, `--upstream <provider>` |
+| `auth login <provider>` | Configure credentials or initiate OAuth sign-in | `--key <apiKey>`, `--upstream <provider>` |
 | `auth logout <provider>` | Remove stored credentials for an account | `--json` |
-| `auth issue-token` | Generate a scoped server API key token (SHA-256 hashed at rest) | `--scope <agent:run\|agent:read\|provider:admin\|admin>`, `--label <name>` |
+| `auth issue-token` | Generate a scoped server API key token (SHA-256 hashed at rest) | `--scope <agent:run\|agent:read\|provider:read\|provider:admin\|admin>`, `--label <name>` |
 
 ##### Direct Media Generation (`seepient generate`)
 Generate or edit images directly from the command line using your configured image model:
@@ -623,8 +623,8 @@ Add accounts, sign in with OAuth, and map models from the shell:
 seepient auth login openai
 seepient auth login anthropic
 
-# Configure using a custom environment variable or key directly
-seepient auth login my-openai --env-var CUSTOM_OPENAI_KEY
+# Configure accounts with keys directly
+seepient auth login my-openai --key sk-...
 seepient auth login my-claude --key sk-ant-...
 
 # Register a local endpoint (Ollama, LM Studio, vLLM) without credentials
