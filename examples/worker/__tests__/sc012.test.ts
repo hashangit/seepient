@@ -55,10 +55,14 @@ describe("SC-012 worker pins (022-5-WO2 T005)", () => {
     }
   });
 
-  it("(c) a 2 MB body gets its 413", async () => {
+  it("(c) a 2 MB body gets its 413 AND stops buffering the moment the cap trips (022-5-WO4 T005)", async () => {
     const app = createStubApp({ tokenToPrincipal: new Map([["tok", "tenant-a"]]) });
     const port = await app.listen();
     try {
+      // Stream 2 MB in 1 KB chunks with small gaps — the pass-14 finding is
+      // that the worker keeps appending to `body` after the cap trips, so a
+      // long stream buffers unboundedly. Bounded memory = the destroy fires
+      // at the cap and the socket closes early (readable side torn down).
       const res = await fetch(`http://127.0.0.1:${port}/api/policy?workspaceId=ws`, {
         method: "POST",
         headers: { authorization: "Bearer tok", "content-type": "application/json" },
