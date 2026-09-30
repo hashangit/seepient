@@ -258,6 +258,69 @@ describe("022-5 US2: inference credentials, provider management only", () => {
     }
   });
 
+  it("OPENAI_BASE_URL destination pin (022-5-WO4 T004): a default-endpoint openai account never dials the env-supplied host (discovery + image raw)", async () => {
+    const sinkHits: string[] = [];
+    const sink = createServer((req, res) => {
+      sinkHits.push(String(req.headers.authorization ?? ""));
+      res.writeHead(500);
+      res.end("{}");
+    });
+    await new Promise<void>((resolve) => sink.listen(0, "127.0.0.1", resolve));
+    const sinkPort = (sink.address() as { port: number }).port;
+    process.env.OPENAI_BASE_URL = `http://127.0.0.1:${sinkPort}/v1`;
+    try {
+      const { OpenAIDiscoverySource } = await import("../../../vendors/openai/openai-discovery-source.js");
+      const source = new OpenAIDiscoverySource();
+      await source.discover({
+        providerAccount: "openai-default",
+        upstreamProvider: "openai",
+        credential: {
+          id: "cred-ok",
+          ref: { kind: "seepient", id: "cred-ok" },
+          activeLeaseCount: 0,
+          isResolvable: async () => true,
+          acquireLease: () => ({
+            leaseId: "l",
+            isReleased: false,
+            secret: async () => ({ kind: "api_key", value: "sk-real-openai-key" }),
+            release: async () => {},
+          }),
+        } as never,
+        // NO baseUrl — the destructor default arms OPENAI_BASE_URL.
+      } as never);
+      expect(sinkHits, "discovery must not dial the env-supplied host with the stored key").toHaveLength(0);
+
+      const { OpenAIImageRaw } = await import("../../../vendors/openai/openai-image-raw.js");
+      const imageRaw = new OpenAIImageRaw();
+      const imageTarget = {
+        providerAccount: "openai-default",
+        upstreamProvider: "openai",
+        model: "gpt-image-1",
+        credential: {
+          id: "cred-ok",
+          ref: { kind: "seepient", id: "cred-ok" },
+          activeLeaseCount: 0,
+          isResolvable: async () => true,
+          acquireLease: () => ({
+            leaseId: "l2",
+            isReleased: false,
+            secret: async () => ({ kind: "api_key", value: "sk-real-openai-key" }),
+            release: async () => {},
+          }),
+        },
+      } as unknown as InferenceTarget;
+      try {
+        await imageRaw.generate(imageTarget, { prompt: "test" }, { tenancyMode: "single" } as never);
+      } catch {
+        /* expected — the sink 500s or the default endpoint fails */
+      }
+      expect(sinkHits, "image generation must not dial the env-supplied host with the stored key").toHaveLength(0);
+    } finally {
+      delete process.env.OPENAI_BASE_URL;
+      sink.close();
+    }
+  });
+
   it("composite: env-kind refs fail closed in ambient mode too", async () => {
     process.env.COMPOSITE_AMBIENT_PROBE = "sk-ambient-should-never-resolve";
     const ambient = createAmbientCompositeCredentialStore();
