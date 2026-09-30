@@ -224,54 +224,37 @@ describe("022-5 US2: inference credentials, provider management only", () => {
     }
   });
 
-  it("google discovery decoy pin: the stored key rides x-goog-api-key, decoys never do (post-genai-major)", async () => {
-    const headers: string[] = [];
-    const server = createServer((req, res) => {
-      headers.push(String(req.headers["x-goog-api-key"] ?? ""));
-      res.writeHead(500);
-      res.end("{}");
-    });
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const port = (server.address() as { port: number }).port;
+  it("google discovery decoy pin: the stored key rides x-goog-api-key, no live outbound (022-5-WO3 T013)", async () => {
+    // The source fetches its own URL — spy WITHOUT calling through, so the
+    // suite never touches googleapis, and assert on the captured INIT.
+    const fetchSpy2 = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 500 }));
     try {
       const { GoogleDiscoverySource } = await import("../../../vendors/google/google-discovery-source.js");
       const source = new GoogleDiscoverySource();
-      // The discovery URL is upstream-fixed for google — point the account at
-      // nothing; the source builds its own URL, so assert via its returned
-      // error path with a captured outbound? The source fetches google's
-      // fixed URL, so this pin runs the REAL source against a decoy env and
-      // asserts no decoy reaches any outbound request via the fetch spy.
-      const fetchSpy2 = vi.spyOn(globalThis, "fetch");
-      try {
-        const store = new MemoryCredentialStore();
-        await store.put("g", { kind: "api_key", keyValue: "sk-real-google-key" });
-        const result = await source.discover({
-          providerAccount: "g",
-          upstreamProvider: "google",
-          credential: {
-            id: "g",
-            ref: { kind: "seepient", id: "g" },
-            activeLeaseCount: 0,
-            isResolvable: async () => true,
-            acquireLease: () => ({
-              leaseId: "l",
-              isReleased: false,
-              secret: async () => ({ kind: "api_key", value: "sk-real-google-key" }),
-              release: async () => {},
-            }),
-          } as never,
-          baseUrl: `http://127.0.0.1:${port}`,
-        } as never);
-        void result;
-        const outbound = fetchSpy2.mock.calls.map((c) => JSON.stringify(c[1] ?? {}));
-        const combined = outbound.join("\n") + headers.join("\n");
-        expect(combined).toContain("sk-real-google-key");
-        expect(combined).not.toContain("sk-DECOY");
-      } finally {
-        fetchSpy2.mockRestore();
-      }
+      await source.discover({
+        providerAccount: "g",
+        upstreamProvider: "google",
+        credential: {
+          id: "g",
+          ref: { kind: "seepient", id: "g" },
+          activeLeaseCount: 0,
+          isResolvable: async () => true,
+          acquireLease: () => ({
+            leaseId: "l",
+            isReleased: false,
+            secret: async () => ({ kind: "api_key", value: "sk-real-google-key" }),
+            release: async () => {},
+          }),
+        } as never,
+        baseUrl: "https://generativelanguage.googleapis.com",
+      } as never);
+      expect(fetchSpy2).toHaveBeenCalledTimes(1);
+      const init = fetchSpy2.mock.calls[0][1] as { headers?: Record<string, string> };
+      expect(init?.headers).toBeDefined();
+      expect(init.headers!["x-goog-api-key"]).toBe("sk-real-google-key");
+      expect(JSON.stringify(init.headers)).not.toContain("sk-DECOY");
     } finally {
-      server.close();
+      fetchSpy2.mockRestore();
     }
   });
 

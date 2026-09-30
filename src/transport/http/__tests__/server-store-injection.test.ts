@@ -374,7 +374,8 @@ describe("QS-3: Server Store Injection (FR-010)", () => {
     // 022-5-WO3: injected runtimes must carry the multi stamp (the T006
     // refusal) — this fixture stamps it so the test's own subject, the
     // ambient-STORE check, is what fires.
-    const runtime = { ...createFakeRuntime(), tenancySignal: "multi", tenancyMode: "multi" };
+    const runtime = createFakeRuntime();
+    Object.defineProperty(runtime, "tenancySignal", { value: "multi", configurable: true });
     const ambientStore = { isIsolated: false } as any;
 
     await expect(

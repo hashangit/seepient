@@ -554,13 +554,18 @@ describe("R9.1 Integration Wiring Verification", () => {
     // Each store gets its OWN root and requestId — a shared root plus shared
     // requestId makes the stores see each other's persisted records
     // (persist-flush timing turned this into an order-dependent failure).
+    const tempDirs: string[] = [];
     const mkStore = (() => {
       let n = 0;
       return () => {
         n += 1;
-        return { store: new DurableApprovalStore({ root: mkdtempSync(join(osTmp(), `r91-matrix-${n}-`)) }), n };
+        const root = mkdtempSync(join(osTmp(), `r91-matrix-${n}-`));
+        tempDirs.push(root);
+        return { store: new DurableApprovalStore({ root }) };
       };
     })();
+    // Cleanup at the end of the test (tracked persists flush on a live dir;
+    // a late flush after cleanup is routed to onPersistenceError by design).
     const mkReq = (principalId: string | undefined, requestId: string) => ({
       requestId,
       principalId,
@@ -606,6 +611,7 @@ describe("R9.1 Integration Wiring Verification", () => {
     await legacy.load();
     legacy.create({ request: mkReq(undefined, "r-lg") as never, tenantId: "t", sessionId: "s", continuationId: "cont-lg" });
     expect(legacy.casSync("cont-lg", 1, decision("r-lg", "whoever")).status).toBe("transitioned");
+    for (const d of tempDirs) rmSync(d, { recursive: true, force: true });
   });
 
   it("getDecision resolves via requestId only, never a continuationId (022-5-WO1 T012 / SC-010)", async () => {

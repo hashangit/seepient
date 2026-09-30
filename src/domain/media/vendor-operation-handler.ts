@@ -14,7 +14,7 @@ export interface MediaVendorOperationHandlerOptions {
   capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[];
 }
 
-function classifyMediaError(
+export function classifyMediaError(
   err: unknown,
   operation: string,
   defaultCode: string,

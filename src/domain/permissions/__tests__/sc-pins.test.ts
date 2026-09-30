@@ -5,10 +5,10 @@
  * fails closed at coverage.
  * SC-009: ActionLifecycle.run never throws for ANY broker answer shape,
  * including literal null/undefined.
- * SC-011: a settled sandbox exec leaves no live process group (the pin also
- * lives in residual-guards.test.ts; this one drives the abort shape).
  * T034: a dangling symlink at an outside-ceiling target denies with the
- * same shape as an existing escape — no existence oracle.
+ * same shape as an existing escape — no existence oracle. (SC-011's
+ * settled-group and abort pins live in
+ * capabilities/execution/__tests__/residual-guards.test.ts.)
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, realpathSync, writeFileSync, symlinkSync, existsSync } from "node:fs";
