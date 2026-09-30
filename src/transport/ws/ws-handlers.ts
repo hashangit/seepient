@@ -134,7 +134,10 @@ export function handleConnection(
             handleAbort(ws, msg, state);
             break;
           case "tool_approval_response":
-            handleToolApprovalResponse(ws, msg, ctx.registry);
+            // 022-5-WO4 T015 (pass-13 P2-6): awaited — a disk-mode store
+            // rejection must hit the dispatch catch, not escape as an
+            // unhandled rejection.
+            await handleToolApprovalResponse(ws, msg, ctx.registry);
             break;
           case "resume":
             await handleResume(ws, msg, state, ctx);
@@ -143,7 +146,7 @@ export function handleConnection(
             await handleReconnect(ws, msg, state, ctx);
             break;
           case "switch_provider":
-            handleSwitchProvider(ws, msg, state);
+            await handleSwitchProvider(ws, msg, state);
             break;
           case "list_models":
             handleListModels(ws, ctx);

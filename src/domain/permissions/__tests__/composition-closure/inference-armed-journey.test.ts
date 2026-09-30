@@ -52,7 +52,7 @@ describe("FR-002: Inference Boundary Armed Journey (VULN-16)", () => {
       );
     });
 
-    const runtime = createIsolatedProviderRuntime();
+    const runtime = createIsolatedProviderRuntime({ tenancyMode: "multi" });
     await runtime.updateOverlay(
       {
         providers: {

@@ -43,9 +43,19 @@ export function assertBaseUrlEgressAllowed(
   });
 
   if (!allowed) {
+    // 022-5-WO4 T012 (pass-13 P2-3): redact the URL — userinfo/path/query
+    // may carry credentials; scheme//host suffices for debugging.
+    const redacted = (() => {
+      try {
+        const u = new URL(baseUrl);
+        return `${u.protocol}//${u.host}/…`;
+      } catch {
+        return `${scheme}://${host}/…`;
+      }
+    })();
     throw new InferenceError({
       code: "unsupported_capability",
-      message: `EGRESS_REQUIRED: Multi-tenant inference to baseUrl "${baseUrl}" requires an explicit network-destination capability for ${scheme}://${host}.`,
+      message: `EGRESS_REQUIRED: Multi-tenant inference to baseUrl "${redacted}" requires an explicit network-destination capability for ${scheme}://${host}.`,
       providerAccount: target?.providerAccount,
       model: target?.model,
       retryable: false,

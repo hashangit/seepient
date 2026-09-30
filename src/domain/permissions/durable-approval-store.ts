@@ -75,8 +75,12 @@ export class DurableApprovalStore {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
       throw err;
     }
-    this.records = new Map();
-    this.pendingRecords = new Map();
+    // 022-5-WO4 T014 (pass-13 P2-5): merge disk entries OVER live — a live
+    // decision (this process just transitioned a record) wins over a stale
+    // disk snapshot. The old shape REPLACED both maps, so a read racing the
+    // floating persist() could miss the just-decided approval. Disk mode
+    // remains secondary to in-memory for server consumers (the docstring
+    // notes it); the merge guarantees no decided approval is lost.
     for (const line of raw.split("\n")) {
       if (!line.trim()) continue;
       try {
@@ -206,6 +210,12 @@ export class DurableApprovalStore {
     if (!rec) return { status: "stale" };
     if (rec.status !== "pending") return { status: "duplicate", record: rec };
     if (rec.version !== expectedVersion) return { status: "stale" };
+    // 022-5-WO4 T016: a decision for a DIFFERENT requestId must not
+    // transition this record — it would plant the decision under a foreign
+    // key. Fail closed as stale.
+    if (decision.requestId !== rec.request.requestId) {
+      return { status: "stale" };
+    }
     if (rec.request.expiresAt <= now) {
       rec.status = "expired";
       this.track(this.persist());

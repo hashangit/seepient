@@ -285,7 +285,7 @@ export class ProviderRuntime extends EventEmitter implements ProviderRuntimeCont
    * reads `grantedCapabilities` for refresh/saveAccount egress asserts.
    */
   setRuntimeCapabilities(caps: import("../../foundations/contracts/permission-policy.js").Capability[]): void {
-    (this as { capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[] }).capabilities = caps;
+    (this as unknown as { capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[] }).capabilities = caps;
   }
 
   getConfigStore(): ProviderConfigStore {
@@ -1030,6 +1030,9 @@ export function deriveBaselineFromProviders(providers: unknown): import("../../f
       const url = new URL(baseUrl);
       const scheme = url.protocol.replace(/:$/, "");
       if (scheme !== "http" && scheme !== "https") continue;
+      // 022-5-WO4 T016: a literal `https://*/v1` baseUrl would mint a live
+      // host:"*" grant (egress-check honors wildcards) — skip wildcard hosts.
+      if (url.hostname === "*" || url.hostname === "") continue;
       const port = url.port ? parseInt(url.port, 10) : scheme === "https" ? 443 : 80;
       caps.push({ kind: "network-destination", scheme, host: url.hostname, port } as import("../../foundations/contracts/permission-policy.js").Capability);
     } catch {

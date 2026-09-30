@@ -200,7 +200,9 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     // the saveAccount seam enforce egress, not just the permission pipeline.
     // Without this the documented baseline option armed only the pipeline.
     const rt = bootstrapRuntime as unknown as { setRuntimeCapabilities?: (caps: unknown[]) => void };
-    const caps = opts.operatorBaseline;
+    const caps = Array.isArray(opts.operatorBaseline)
+      ? opts.operatorBaseline
+      : opts.operatorBaseline?.capabilities;
     if (caps?.length) {
       if (typeof rt.setRuntimeCapabilities === "function") {
         rt.setRuntimeCapabilities(caps);
