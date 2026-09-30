@@ -27,7 +27,10 @@ export class OpenAIDiscoverySource implements DiscoverySource {
 
       const client = new OpenAI({
         apiKey: secret.value,
-        baseURL: account.baseUrl,
+        // 022-5-WO4 T009 (pass-14 P1-3): an explicit default — the SDK's
+        // destructor default would otherwise arm ambient OPENAI_BASE_URL and
+        // send the stored key to an env-controlled host.
+        baseURL: account.baseUrl ?? "https://api.openai.com/v1",
       });
 
       const list = await client.models.list();

@@ -157,11 +157,16 @@ export function createStubApp(initialState?: Partial<StubAppState> & { allowDemo
     let body = "";
     let tooLarge = false;
     req.on("data", (chunk) => {
+      // 022-5-WO4 T010 (pass-14 P1-4): stop accumulating past the cap — the
+      // old shape appended every chunk until end/close, so a multi-GB stream
+      // OOMed the unauthenticated control plane before auth ran.
+      if (tooLarge) return;
       body += chunk;
       if (body.length > MAX_BODY_BYTES) {
         tooLarge = true;
       }
     });
+
     // FR-015: resolve on close as well as end — after a destroy() the end
     // event never fires and a 413 written here would be unreachable.
     await new Promise<void>((resolve) => {

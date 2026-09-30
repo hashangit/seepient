@@ -202,6 +202,19 @@ export function validateTenancyCompleteness(
       'Do not pass an ambient runtime created with createAmbientProviderRuntime().'
     );
   }
+  // 022-5-WO4 T007 (pass-13/14 P1-1 class, SDK plane): the runtime's OWN
+  // tenancy stamp is the egress-enforcement signal. An injected runtime
+  // without the multi stamp would silently no-op every guard (the pass-14
+  // live probe: accepted → plant 200 → refresh sent the operator's stored
+  // key to the attacker host). Refuse rather than coerce — mirror of the
+  // server's injected-branch refusal.
+  if (runtimeAny.tenancySignal !== undefined && runtimeAny.tenancySignal !== "multi") {
+    throw new TenancyRuntimeRequiredError(
+      'Multi-tenant mode requires an egress-armed ProviderRuntime (tenancyMode "multi"). ' +
+      'The injected runtime is stamped single — construct it with createIsolatedProviderRuntime({ tenancyMode: "multi" }) ' +
+      'or new ProviderRuntime({ ..., tenancyMode: "multi" }).'
+    );
+  }
 
   const missing: string[] = [];
 

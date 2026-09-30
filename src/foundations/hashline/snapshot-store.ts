@@ -10,6 +10,24 @@
  */
 
 import * as crypto from 'crypto';
+import { lstatSync } from 'node:fs';
+
+/** Authorization-time file identity captured by record() when the caller
+ *  does not supply one. */
+export interface FileIdentity {
+  device: string;
+  inode: string;
+}
+
+/** Best-effort lstat — a missing file (new-file flow) simply yields null. */
+function statIdentity(path: string): FileIdentity | null {
+  try {
+    const st = lstatSync(path);
+    return { device: String(st.dev), inode: String(st.ino) };
+  } catch {
+    return null;
+  }
+}
 
 interface SnapshotEntry {
   path: string;
@@ -24,8 +42,12 @@ interface SnapshotEntry {
 }
 
 export interface SnapshotStore {
-  /** Record a snapshot and return its 4-hex tag. Empty string if oversized. */
-  record(path: string, content: string): string;
+  /** Record a snapshot and return its 4-hex tag. Empty string if oversized.
+   *  `identity` threads the executor's ALREADY-VERIFIED fd identity
+   *  (022-5-WO4 T006): when supplied it is authoritative — the mint-time
+   *  lstat race disappears because the fd was pinned and compared before
+   *  the read. When absent, a best-effort lstat is taken. */
+  record(path: string, content: string, identity?: FileIdentity): string;
   /** Path-keyed resolution — returns the stored tag + content for this path. */
   resolvePath(path: string): { tag: string; content: string } | null;
   /** The recorded authorization-time identity for this path, if captured. */
@@ -50,25 +72,20 @@ export function createSnapshotStore(): SnapshotStore {
   const byPath = new Map<string, SnapshotEntry>();
 
   return {
-    record(path: string, content: string): string {
+    record(path: string, content: string, identity?: FileIdentity): string {
       if (Buffer.byteLength(content, 'utf8') > MAX_SNAPSHOT_BYTES) {
         return ''; // empty tag signals "too large" — forces edit_file fallback
       }
       const tag = tagFor(path, content);
-      // Identity capture is best-effort: a missing file (new-file flow) or a
-      // stat failure simply leaves the entry without identity, and the
-      // section-read pin fails open ONLY for that absent case.
-      let device: string | undefined;
-      let inode: string | undefined;
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const st = require('node:fs').lstatSync(path);
-        device = String(st.dev);
-        inode = String(st.ino);
-      } catch {
-        /* new-file or vanished — no identity recorded */
-      }
-      byPath.set(path, { path, content, tag, device, inode });
+      // Caller-supplied identity (the executor's verified fd stat) is
+      // authoritative — the mint-time lstat race disappears when the fd was
+      // pinned and compared before the read. Fallback: best-effort lstat.
+      const resolved = identity ?? statIdentity(path);
+      byPath.set(path, {
+        path, content, tag,
+        device: resolved?.device,
+        inode: resolved?.inode,
+      });
       return tag;
     },
 
