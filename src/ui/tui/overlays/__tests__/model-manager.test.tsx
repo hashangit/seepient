@@ -357,9 +357,14 @@ describe("resilience + feedback", () => {
     await type(inst, ENTER);  // picker
     await type(inst, TAB);    // focus picker action bar
     await type(inst, "2");    // Try for this session
-    await delay(40);
-    expect(ctx.api.switchSessionModel).toHaveBeenCalled();
-    expect(onClose).toHaveBeenCalled();
+    // vi.waitFor instead of a fixed delay — the assertion raced the async
+    // state update under CI parallel load (pass-10 flake class).
+    await vi.waitFor(() => {
+      expect(ctx.api.switchSessionModel).toHaveBeenCalled();
+    });
+    await vi.waitFor(() => {
+      expect(onClose).toHaveBeenCalled();
+    });
   });
 });
 
