@@ -55,6 +55,16 @@ describe("readPinnedImage (022-5 FR-002/FR-004)", () => {
     );
   });
 
+  it("classifyMediaError passes the read-plane codes through (022-5-WO3 T012 deletion pin)", async () => {
+    const { classifyMediaError } = await import("../../../domain/media/vendor-operation-handler.js");
+    const err = new Error("Refusing image input: x is a symbolic link");
+    (err as { code?: string }).code = "SYMLINK_READ_DENIED";
+    expect(classifyMediaError(err, "generate_image", "MEDIA_GENERATION_FAILED").code).toBe("SYMLINK_READ_DENIED");
+    const fifo = new Error("Refusing image input: x is not a regular file");
+    (fifo as { code?: string }).code = "MEDIA_INPUT_NOT_REGULAR_FILE";
+    expect(classifyMediaError(fifo, "generate_image", "MEDIA_GENERATION_FAILED").code).toBe("MEDIA_INPUT_NOT_REGULAR_FILE");
+  });
+
   it("symlink and FIFO refusals carry their refusal reason in the message (022-5-WO1 T016)", async () => {
     const link = join(dir, "link.png");
     const outside = join(dir, "outside.png");

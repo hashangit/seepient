@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, 022-2-composition-closure, 022-5-engine-remediation, 022-5-WO1-remediation, 022-5-WO2-remediation]
+    branches: [main, 022-2-composition-closure, 022-5-WO1-remediation, 022-5-WO2-remediation, 022-5-WO3-remediation]
   pull_request:
-    branches: [main, 022-2-composition-closure, 022-5-engine-remediation, 022-5-WO1-remediation, 022-5-WO2-remediation]
+    branches: [main, 022-2-composition-closure, 022-5-WO1-remediation, 022-5-WO2-remediation, 022-5-WO3-remediation]
 
 jobs:
   build-and-test:

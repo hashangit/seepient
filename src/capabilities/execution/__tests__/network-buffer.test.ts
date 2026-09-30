@@ -37,6 +37,27 @@ describe("NodeNetworkAdapter response cap (022-5-WO2 T002)", () => {
     server.close();
   });
 
+  it("an under-cap response still succeeds (no false-positive direction)", async () => {
+    const small = createServer((req, res) => {
+      res.writeHead(200, { "content-type": "application/octet-stream" });
+      res.end(Buffer.alloc(4 * 1024 * 1024, 0x42)); // 4 MiB < 10 MiB cap
+    });
+    await new Promise<void>((resolve) => small.listen(0, "127.0.0.1", resolve));
+    try {
+      const adapter = new NodeNetworkAdapter();
+      const port = (small.address() as { port: number }).port;
+      const result = await adapter.fetch(
+        { scheme: "http", host: "127.0.0.1", port, pathPrefix: "/small" },
+        { method: "GET", headers: {} },
+        ["127.0.0.1"],
+      );
+      expect(result.status).toBe(200);
+      expect(result.bytes.length).toBe(4 * 1024 * 1024);
+    } finally {
+      small.close();
+    }
+  });
+
   it("rejects when the response streams past the cap instead of buffering it all", async () => {
     const adapter = new NodeNetworkAdapter();
     const destination: NetworkDestination = {

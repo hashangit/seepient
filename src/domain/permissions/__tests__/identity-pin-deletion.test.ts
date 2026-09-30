@@ -5,7 +5,7 @@
  * Deleting either pin block flips its armed journey red.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, realpathSync, writeFileSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {

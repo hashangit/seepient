@@ -17,11 +17,27 @@ Three claims shipped in earlier 022-4 Round-2 notes were false against the code 
 
 **Security (022-5):**
 
+- **Multi-tenant egress arming completed (022-5-WO2/WO3).** The server's every composition root — providers-file boot, isolated-empty boot, REST fallback, and INJECTED runtimes — now requires or carries the multi tenancy stamp; an unstamped injected runtime is refused (`TENANCY_RUNTIME_REQUIRED`) instead of silently composing without egress enforcement, and `createSeepient` stamps its own builds by construction. The write-side egress assert lives in the provider-manager `saveAccount` seam (REST, WS, CLI all inherit it): on a multi runtime, an ungranted host cannot be planted for later credential use. The standalone operator baseline is DERIVED from the providers file (one network-destination grant per configured account's scheme/host/port, printed at boot) — custom-endpoint accounts keep working with zero extra configuration. Webhook denial messages redact the operator webhook URL to scheme//host (Feishu/DingTalk/WeCom tokens live in the query).
+
 - **No daemons by default (022-5-WO1, intended product behavior).** Sandboxed command execution kills the whole process group when the command settles — normally, not only on abort. A tool call that backgrounds children (`server & …`) does not leave them running after the call returns; redirect the child's output and manage long-running processes outside the sandbox boundary if you need them to outlive a call.
 
 - **Read-plane completion.** `edit_file` section reads clear the workspace ceiling before their pinned open (the existence/hash oracle closed); the `PATH_ESCAPES_WORKSPACE` dangling-vs-existing differential is byte-identical; FIFOs deny typed on every read surface (executor, media inputs, commit destinations, edit sections) — no wedged turns; media denials surface their typed codes instead of laundering to `MEDIA_GENERATION_FAILED`.
 - **Guard-surface residuals.** Auth key cache publishes only when the file is unchanged across the read (cross-process revocation observed within one re-read); universal roots (`"/"`, `"*"`, `""`) never survive the multi merge; `ActionLifecycle.run` returns the typed `invalid-approval-response` denial for a global lifetime in multi instead of throwing; `DurableApprovalStore.casSync` is principal-bound; sandboxed process groups are killed on normal settle (no daemons); `htmlToText` converts in linear time with the input capped.
 - **Credential demolition tripwires.** `refreshModels` asserts account baseUrls against granted capabilities in multi before any network activity and records failures on an `onDiscoveryError` surface; producer enumeration is a source scan over every vendored import site; the resolved-key wire journey runs in single and multi mode.
+
+### Multi-armed server runtimes & brokered response caps (022-5-WO2)
+
+**Security:**
+
+- **Server runtimes are multi-armed.** Every `runSeepientServer` boot path (providers file, isolated fallback) composes the runtime with `tenancyMode: "multi"` plus the operator baseline, so the egress assert fires from a production root — previously it existed only on wrapper seams no production root exercised, and a `provider:admin` key could point the operator's stored credential at an attacker host via the accounts PUT and a refresh. The provider accounts `PUT` now denies planting an ungranted host with `400 EGRESS_REQUIRED` before the write lands.
+- **Operator impact (fail-closed):** on a multi server, refresh (`POST /v1/providers/:id/refresh-models`) and `baseUrl` mutations for accounts whose host is not covered by an operator baseline deny with `EGRESS_REQUIRED` before any network traffic, DNS included. Accounts without a `baseUrl` (default provider endpoints) are unaffected. The standalone CLI has no baseline flag; embedders grant hosts via `runSeepientServer({ operatorBaseline })` (see `deployment.md`).
+
+**Hardening:**
+
+- **Brokered network responses are capped mid-stream.** `NodeNetworkAdapter` arms the pinned-fetch streaming cap (10 MiB body / 30 s, matching the broker's own limits). Previously the entire response buffered before the post-response cap ran, so a fast endpoint could exhaust shared-process memory (reproduced at 300 MiB buffered in 237 ms). A brokered tool call such as `read_website` now rejects as soon as the stream passes the cap.
+
+### Inference env-key demolition (022-5, breaking)
+
 
 ### Round 3 — Pass-10 remediation: read-plane identity binding, real mutation probes, operator provider channel (Spec 022-4)
 
@@ -59,9 +75,8 @@ Three claims shipped in earlier 022-4 Round-2 notes were false against the code 
 ### Round 2 — Authorization truth, symlink plane, and sentinel unification (Spec 022-4)
 
 **Breaking changes & Behavior changes:**
+
 - **Inference Env-Key Demolition (022-5 FR-005, Breaking)**: Seepient no longer synthesizes provider accounts from environment variables, and the env credential mode is removed from the CLI (`--credential env:`), TUI add-account, REST accounts API, and `auth login --env-var`. Credentials resolve only from provider management (setup flow, `seepient auth login --key`, or an injected custom credential store — embedder-owned env remains the embedder's seam). Migration: run `seepient setup` (or `seepient auth login <id> --key <key>`), or inject a credential store from the SDK.
-
-
 - **In-Workspace Symlinks Allowed via Authorize-What-You-Open (FR-013, Behavior Change)**:
   Permissions now apply to the target file's canonical realpath rather than the intermediate reference name. In-workspace symbolic links pointing to real paths inside the workspace ceiling are now fully allowed (superseding the earlier static refusal). Symbolic links whose realpath escapes the workspace ceiling are denied with typed `PathEscapesWorkspaceError` (`PATH_ESCAPES_WORKSPACE`).
 - **Atomic FD-Pinned Reads & TOCTOU Elimination (FR-013)**:
