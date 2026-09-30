@@ -184,7 +184,7 @@ describe('docs example import and runtime checks (FR-003)', () => {
       const worker = await createSeepient({
         principalId: 'tenant-123',
         cwd: workerDir,
-        runtime: mockRuntime,
+        runtime: Object.defineProperty(mockRuntime, "tenancySignal", { value: "multi", configurable: true }),
         auditStore: new InMemoryAuditStore(),
         persist: new MemoryPersistenceBackend(),
         policyStore: new InMemoryPolicyStore(),
@@ -222,7 +222,7 @@ describe('docs example import and runtime checks (FR-003)', () => {
       kind: "api_key",
       keyValue: "sk-tenant-key",
     });
-    const tenantRuntime = sdkExports.createIsolatedProviderRuntime({ credentialStore });
+    const tenantRuntime = sdkExports.createIsolatedProviderRuntime({ credentialStore, tenancyMode: "multi" });
     expect(tenantRuntime.isIsolated).toBe(true);
 
     const agentMigration = await sdkExports.createSeepient({
@@ -272,6 +272,7 @@ describe('docs example import and runtime checks (FR-003)', () => {
     // 4. ask-seepient.md
     const mockRuntime = createMockRuntime([{ content: "Summary of invoice" }]);
     (mockRuntime as any).isIsolated = true;
+    Object.defineProperty(mockRuntime, "tenancySignal", { value: "multi", configurable: true });
 
     const askRes = await sdkExports.askSeepient("Summarize today's invoice", {
       tenancy: "multi",
