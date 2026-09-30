@@ -227,7 +227,23 @@ export class DurableApprovalStore {
     rec.version += 1;
     // records stays keyed by requestId (022-5 FR-013) — the continuation map
     // already holds this record; writing it here under the continuation id
-    // polluted the requestId namespace.
+    // polluted the requestId namespace. The decision is written into the
+    // requestId map SYNCHRONOUSLY: resolveRequest alone early-returns when
+    // the floating saveRequest hasn't populated the entry yet, which made
+    // getDecision miss decided approvals (race caught by the T012 pin on CI).
+    const existingRecord = this.records.get(decision.requestId);
+    if (existingRecord) {
+      existingRecord.decision = decision;
+      existingRecord.updatedAt = now;
+      this.records.set(decision.requestId, existingRecord);
+    } else {
+      this.records.set(decision.requestId, {
+        request: rec.request,
+        decision,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
     this.track(this.resolveRequest(decision));
     this.track(this.persist());
     return { status: "transitioned", record: rec };
