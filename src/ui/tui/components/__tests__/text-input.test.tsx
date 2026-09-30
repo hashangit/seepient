@@ -6,7 +6,7 @@
  * ink-testing-library note: setState from useInput renders on the next tick —
  * every stdin write goes through `type()` which awaits a frame.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render } from 'ink-testing-library';
 import React, { useState } from 'react';
 import { TextInput } from '../text-input.js';
@@ -59,6 +59,8 @@ describe('TextInput paste handling', () => {
 
   it('treats solo CR chunks inside a paste as newlines, not Enter (the reported bug)', async () => {
     const { inst, state } = setup();
+    // Wait until the LAST chunk has been processed — a fixed per-write delay
+    // raced the async stdin handler under CI parallel load.
     await type(inst, PASTE_START);
     await type(inst, 'line1');
     await type(inst, '\r');
@@ -66,7 +68,9 @@ describe('TextInput paste handling', () => {
     await type(inst, '\r');
     await type(inst, 'line3');
     await type(inst, PASTE_END);
-    expect(state.value).toBe('line1\nline2\nline3');
+    await vi.waitFor(() => {
+      expect(state.value).toBe('line1\nline2\nline3');
+    });
     expect(state.submits).toEqual([]);
     inst.unmount();
   });
