@@ -439,7 +439,15 @@ export class ReadFileExecutor implements OperationExecutor {
       }
 
       const content = await handle.readFile({ encoding: "utf-8", signal: opts.signal });
-      const tag = this.snapshotStore?.record(targetPath, content);
+      // 022-5-WO4 T006: thread the PINNED fd's identity (already verified
+      // against the authorize-time stamp) into the snapshot record — the
+      // record captures the verified file, not a post-read lstat (pass-14
+      // P1-1/P2-8: the bare require was dead AND the read-time lstat raced).
+      const tag = this.snapshotStore?.record(
+        targetPath,
+        content,
+        { device: String(st.dev), inode: String(st.ino) },
+      );
       const output = tag ? `${content}\n\n[content-tag:${tag}]` : content;
       return {
         state: "succeeded",

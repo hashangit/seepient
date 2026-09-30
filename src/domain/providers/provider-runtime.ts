@@ -279,6 +279,15 @@ export class ProviderRuntime extends EventEmitter implements ProviderRuntimeCont
     assertBaseUrlEgressAllowed(baseUrl, this.capabilities, { providerAccount } as never);
   }
 
+  /**
+   * Post-construction capability arming (022-5-WO4 T008): embedders inject a
+   * runtime and thread their operator baseline afterwards — the SDK plane
+   * reads `grantedCapabilities` for refresh/saveAccount egress asserts.
+   */
+  setRuntimeCapabilities(caps: import("../../foundations/contracts/permission-policy.js").Capability[]): void {
+    (this as { capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[] }).capabilities = caps;
+  }
+
   getConfigStore(): ProviderConfigStore {
     return this.configStore;
   }

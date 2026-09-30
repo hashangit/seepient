@@ -194,6 +194,24 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   // If providers, modelAssignments, or overlay options are passed without an explicit runtime,
   // bootstrap a configured ProviderRuntime
   let bootstrapRuntime: ProviderRuntimeContract | ProviderRuntime | undefined = opts.runtime;
+  if (bootstrapRuntime && tenancyMode === "multi") {
+    // 022-5-WO4 T008 (D2, pass-14 P2-1): the embed's operator baseline feeds
+    // BOTH planes — capabilities land on the runtime so refreshModels and
+    // the saveAccount seam enforce egress, not just the permission pipeline.
+    // Without this the documented baseline option armed only the pipeline.
+    const rt = bootstrapRuntime as unknown as { setRuntimeCapabilities?: (caps: unknown[]) => void };
+    const caps = opts.operatorBaseline;
+    if (caps?.length) {
+      if (typeof rt.setRuntimeCapabilities === "function") {
+        rt.setRuntimeCapabilities(caps);
+      } else {
+        Object.defineProperty(rt, "grantedCapabilities", {
+          value: caps,
+          configurable: true,
+        });
+      }
+    }
+  }
   if (!bootstrapRuntime) {
     if (opts.providers || opts.modelAssignments || opts.credentials || opts.overlayFile || opts.adapter) {
       const configStore = new ProviderConfigStore(opts.overlayFile ?? ":memory:");

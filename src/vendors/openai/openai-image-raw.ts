@@ -64,7 +64,9 @@ export class OpenAIImageRaw implements ImageBackend {
         this.client ??
         new OpenAI({
           apiKey: secret.value,
-          baseURL: target.baseUrl,
+          // 022-5-WO4 T009 (pass-14 P1-3): explicit default — no destructor
+          // fallback to ambient OPENAI_BASE_URL.
+          baseURL: target.baseUrl ?? "https://api.openai.com/v1",
           timeout: opts?.timeoutMs,
         });
 
