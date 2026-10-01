@@ -27,27 +27,22 @@ import type { ToolModule } from '../../foundations/contracts/tool.js';
 import type { GatewayConfig, GatewayHooks } from './types.js';
 
 /**
- * Create and initialize a gateway instance.
+ * Create and initialize a gateway instance and its proxy tools.
  * Returns null if gateway is disabled in settings.
  *
- * The caller creates and owns the GatewaySettingsAdapter.
- *
- * Registration is inverted: the gateway never reaches up into Domain.
- * Callers (composition roots) pass `registerTools` — typically the Domain's
- * tool registration — and the gateway hands its proxy tools downward.
+ * Inverted (Spec 022): returns { gateway, tools }, leaving registration
+ * to the composition root's per-agent ToolRegistry.
  */
 export async function createGateway(
   config: GatewayConfig,
   settingsAdapter: GatewaySettingsAdapter,
   hooks?: GatewayHooks,
-  registerTools?: (tools: ToolModule[]) => void,
-): Promise<MCPGateway | null> {
+): Promise<{ gateway: MCPGateway; tools: ToolModule[] } | null> {
   if (!config.enabled) return null;
 
   const gateway = new MCPGateway(settingsAdapter, config, hooks);
   await gateway.initialize();
 
-  registerTools?.(createGatewayTools(gateway));
-
-  return gateway;
+  const tools = createGatewayTools(gateway);
+  return { gateway, tools };
 }

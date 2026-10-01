@@ -43,7 +43,7 @@ export class AggregateInferenceAdapter {
     credentialStore?: CredentialStore,
   ) {
     this.languageBackend = customBackends?.language ?? new PiLanguageRaw(undefined, credentialStore);
-    this.piImageBackend = customBackends?.piImage ?? new PiImageRaw();
+    this.piImageBackend = customBackends?.piImage ?? new PiImageRaw(undefined, credentialStore);
     this.googleImageBackend = customBackends?.googleImage ?? new GoogleImageRaw();
     this.openaiImageBackend = customBackends?.openaiImage ?? new OpenAIImageRaw();
     this.catalog = catalog ?? [];

@@ -15,19 +15,21 @@ import type {
   PersistenceBackend,
   PersistenceConfig,
   SessionData,
+  SessionSummary,
 } from "../../foundations/types.js";
 
 // ── Session ID validation ───────────────────────────────────────────────
 
 // W154a: `_` is allowed everywhere (transport + SDK already permitted it).
 // W154b: length is capped so bounded bodies cannot inflate Maps and fs names.
-const SESSION_ID_RE = /^[a-zA-Z0-9_-]+$/;
-export const MAX_SESSION_ID_LENGTH = 128;
+// Extended to allow `:` and 256 chars for composite apiKeyHash:sessionId storage keys.
+const SESSION_ID_RE = /^[a-zA-Z0-9_:-]+$/;
+export const MAX_SESSION_ID_LENGTH = 256;
 
 function validateSessionId(sessionId: string): void {
   if (!SESSION_ID_RE.test(sessionId) || sessionId.length > MAX_SESSION_ID_LENGTH) {
     throw new Error(
-      `Invalid session ID "${sessionId}". Only alphanumeric characters, dashes, and underscores are allowed (max ${MAX_SESSION_ID_LENGTH} characters).`,
+      `Invalid session ID "${sessionId}". Only alphanumeric characters, dashes, underscores, and colons are allowed (max ${MAX_SESSION_ID_LENGTH} characters).`,
     );
   }
 }
@@ -57,7 +59,8 @@ export class FilePersistenceBackend implements PersistenceBackend {
   }
 
   private async ensureDir(): Promise<void> {
-    await fs.mkdir(this.basePath, { recursive: true });
+    await fs.mkdir(this.basePath, { recursive: true, mode: 0o700 });
+    try { await fs.chmod(this.basePath, 0o700); } catch { /* best effort */ }
   }
 
   async save(id: string, data: SessionData): Promise<void> {
@@ -66,10 +69,11 @@ export class FilePersistenceBackend implements PersistenceBackend {
 
     const existing = await this.loadFromDisk(id);
     const now = Date.now();
+    const actualId = data.id ?? (id.includes(":") ? id.slice(id.indexOf(":") + 1) : id);
 
     const full: SessionData = existing
       ? {
-          id,
+          id: actualId,
           messages: data.messages,
           createdAt: existing.createdAt,
           updatedAt: now,
@@ -80,7 +84,7 @@ export class FilePersistenceBackend implements PersistenceBackend {
           metadata: data.metadata ?? existing.metadata,
         }
       : {
-          id,
+          id: actualId,
           messages: data.messages,
           createdAt: now,
           updatedAt: now,
@@ -92,10 +96,10 @@ export class FilePersistenceBackend implements PersistenceBackend {
         };
 
     const filePath = this.filePath(id);
-    const tmpPath = filePath + ".tmp." + Date.now();
+    const tmpPath = `${filePath}.tmp.${Date.now()}.${Math.random().toString(36).slice(2)}`;
 
     try {
-      await fs.writeFile(tmpPath, JSON.stringify(full, null, 2), "utf-8");
+      await fs.writeFile(tmpPath, JSON.stringify(full, null, 2), { encoding: "utf-8", mode: 0o600 });
       await fs.rename(tmpPath, filePath);
     } catch (err) {
       // Clean up orphaned temp file on rename failure (e.g. cross-device move)
@@ -118,12 +122,34 @@ export class FilePersistenceBackend implements PersistenceBackend {
     }
   }
 
-  async list(): Promise<string[]> {
+  async list(): Promise<SessionSummary[]> {
     await this.ensureDir();
     const entries = await fs.readdir(this.basePath);
-    return entries
-      .filter((name) => name.endsWith(".json"))
-      .map((name) => name.slice(0, -".json".length));
+    const summaries: SessionSummary[] = [];
+    for (const name of entries) {
+      if (!name.endsWith(".json")) continue;
+      const fileId = name.slice(0, -".json".length);
+      try {
+        const raw = await fs.readFile(this.filePath(fileId), "utf-8");
+        const parsed = JSON.parse(raw);
+        const colonIdx = fileId.indexOf(":");
+        const apiKeyHash = parsed.metadata?.apiKeyHash ?? (colonIdx !== -1 ? fileId.slice(0, colonIdx) : undefined);
+        const actualId = parsed.id ?? (colonIdx !== -1 ? fileId.slice(colonIdx + 1) : fileId);
+        summaries.push({
+          id: actualId,
+          createdAt: parsed.createdAt,
+          updatedAt: parsed.updatedAt ?? parsed.createdAt ?? Date.now(),
+          provider: parsed.provider,
+          model: parsed.model,
+          messageCount: Array.isArray(parsed.messages) ? parsed.messages.length : 0,
+          apiKeyHash,
+          ...(parsed.title || parsed.metadata?.title ? { title: parsed.title ?? parsed.metadata?.title } : {}),
+        });
+      } catch {
+        // Skip unreadable or corrupted files
+      }
+    }
+    return summaries;
   }
 
   private async loadFromDisk(id: string): Promise<SessionData | null> {
@@ -149,9 +175,10 @@ export class MemoryPersistenceBackend implements PersistenceBackend {
     validateSessionId(id);
     const existing = this.store.get(id);
     const now = Date.now();
+    const actualId = data.id ?? (id.includes(":") ? id.slice(id.indexOf(":") + 1) : id);
 
     this.store.set(id, {
-      id,
+      id: actualId,
       messages: data.messages,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,

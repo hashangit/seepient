@@ -115,7 +115,7 @@ export function createServerApproveTool(
         resolve(false); // Timeout → deny
       }, APPROVAL_TIMEOUT_MS);
 
-      registry.pendingApprovals.set(callId, { continuationId, resolve, timer, ws, toolName: call.name, createdAt: Date.now() });
+      registry.pendingApprovals.set(callId, { continuationId, resolve, timer, ws, toolName: call.name, createdAt: Date.now(), principalId });
     });
   };
 }
@@ -147,7 +147,10 @@ export async function handleToolApprovalResponse(
   // narrowest policy-issued option; with no options the approval cannot be
   // represented and is denied as unavailable.
   const rec = registry.durableApprovalStore.get(pending.continuationId);
-  const decision = wsApprovalDecision(msg, rec?.request);
+  // 022-5-WO1 D1: the decision's actor is the authenticated principal the
+  // approval was created under — never a role label. "ws-user" survives only
+  // for unauthenticated legacy contexts.
+  const decision = wsApprovalDecision(msg, rec?.request, Date.now(), pending.principalId);
 
   const result = await registry.durableApprovalStore.cas(pending.continuationId, 1, decision);
   clearTimeout(pending.timer);
@@ -175,8 +178,11 @@ export function wsApprovalDecision(
   msg: ToolApprovalResponse,
   request: PermissionRequest | undefined,
   now = Date.now(),
+  actorId?: string,
 ): PermissionDecision {
   const option = request?.approvalOptions[0];
+  // 022-5-WO1 D1: the actor is the edge-derived authenticated principal.
+  const resolvedActor = actorId ?? "ws-user";
   if (msg.approved && option) {
     return {
       approved: true,
@@ -184,7 +190,7 @@ export function wsApprovalDecision(
       actionDigest: msg.callId,
       optionId: option.optionId,
       lifetime: "action",
-      actorId: "ws-user",
+      actorId: resolvedActor,
       decidedAt: now,
     };
   }
@@ -192,7 +198,7 @@ export function wsApprovalDecision(
     approved: false,
     requestId: msg.callId,
     actionDigest: msg.callId,
-    actorId: "ws-user",
+    actorId: resolvedActor,
     reason: msg.approved
       ? "approval-unavailable: request has no representable option"
       : undefined,

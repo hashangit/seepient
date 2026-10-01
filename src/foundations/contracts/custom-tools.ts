@@ -50,6 +50,10 @@ export interface ToolAnalysisContext {
    * If provided, returns reachable status and remediation reason if unconfigured.
    */
   imageCapabilityProbe?: () => Promise<{ reachable: boolean; reason?: string }>;
+  /**
+   * Optional per-agent connector catalog (spec 022, T007).
+   */
+  connectorCatalog?: Map<string, import("./broker-connectors.js").BrokerConnectorDescriptor>;
 }
 
 export interface WorkspaceSnapshot {

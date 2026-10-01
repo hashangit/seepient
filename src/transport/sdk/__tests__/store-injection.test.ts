@@ -197,6 +197,7 @@ describe("QS-1: Store injection and session round-trip", () => {
       runtime,
       model: "test-model",
       provider: "test-provider",
+      tenancy: "single",
     });
 
     await agent1.switchProvider("mock-account", "test-model");
@@ -220,6 +221,7 @@ describe("QS-1: Store injection and session round-trip", () => {
       persist: backend,
       runtime,
       model: "test-model",
+      tenancy: "single",
     });
 
     expect(agent2.sessionId).toBe(customSessionId);
@@ -254,6 +256,7 @@ describe("QS-1: Store injection and session round-trip", () => {
       runtime,
       cwd: workspaceA,
       model: "mock-model",
+      tenancy: "single",
     });
 
     // Chat and immediately abort
@@ -280,6 +283,7 @@ describe("QS-1: Store injection and session round-trip", () => {
       persist: backend,
       runtime,
       model: "mock-model",
+      tenancy: "single",
     });
 
     await expect(agent.chat("Failing message")).rejects.toThrow(/Upstream rate limit/);
@@ -347,7 +351,7 @@ describe("QS-1: Store injection and session round-trip", () => {
       messages: [{ id: "msg-1", role: "user", content: "Initial message", timestamp: 1000 }],
       createdAt: 1000,
       updatedAt: 1000,
-      principalId: "sdk-user",
+      principalId: "tenant-roundtrip",
       provider: "anthropic",
       providerAccount: "mock-account",
       model: "mock-model",
@@ -357,6 +361,7 @@ describe("QS-1: Store injection and session round-trip", () => {
     // Create agent resuming this session WITHOUT providing provider/providerAccount/model/metadata in options
     const agent = await createSeepient({
       sessionId,
+      principalId: "tenant-roundtrip",
       persist: backend,
       runtime,
       cwd: workspaceA,
@@ -389,6 +394,7 @@ describe("QS-1: Store injection and session round-trip", () => {
     const runtime = createFakeRuntime({ responses: [{ content: "Alpha reply" }] });
 
     const alpha = await createSeepient({
+      cwd: "/tmp/tenant-alpha",
       sessionId: "sess-tenant-isolation",
       principalId: "tenant-alpha",
       auditStore: new FakeAuditStore(),
@@ -408,6 +414,7 @@ describe("QS-1: Store injection and session round-trip", () => {
     // A different principal cannot resume the session — history stays isolated
     await expect(
       createSeepient({
+        cwd: "/tmp/tenant-beta",
         sessionId: "sess-tenant-isolation",
         principalId: "tenant-beta",
         auditStore: new FakeAuditStore(),
@@ -421,6 +428,7 @@ describe("QS-1: Store injection and session round-trip", () => {
 
     // The owning principal still resumes with history intact
     const resumed = await createSeepient({
+      cwd: "/tmp/tenant-alpha",
       sessionId: "sess-tenant-isolation",
       principalId: "tenant-alpha",
       auditStore: new FakeAuditStore(),
@@ -448,7 +456,9 @@ describe("QS-1: Store injection and session round-trip", () => {
 
     await expect(
       createSeepient({
+        cwd: "/tmp/tenant-attacker",
         sessionId,
+        principalId: "tenant-attacker",
         auditStore: new FakeAuditStore(),
         policyStore: new FakePolicyStore(),
         capabilityLedger: new FakeCapabilityLedger(),
@@ -469,6 +479,7 @@ describe("QS-1: Store injection and session round-trip", () => {
       runtime,
       cwd: workspaceA,
       model: "mock-model",
+      tenancy: "single",
     });
 
     expect(warnSpy).toHaveBeenCalledWith(

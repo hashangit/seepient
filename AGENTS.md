@@ -91,6 +91,58 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - **Documenting Breaking Changes**: When introducing breaking changes that require consumers of Seepient to update their code or configuration, document the changes with explicit transition/migration instructions. Consumers should always adapt to the new version rather than relying on legacy fallbacks.
 - **Post-1.0 Stability**: Once Seepient reaches its first stable release (`v1.0.0+`), transition to a standard deprecation policy (e.g. deprecation warning with backward compatibility retained for one minor version release before removal). Until then, bias entirely toward clean, unburdened, in-place upgrades.
 
+## 9. Multi-Tenant Safety & The Dual Operational Profile
+
+**Isolation is guaranteed by construction, ambient leakage is structurally impossible, and quality gates actively test like an attacker.**
+
+### 9.1 The Dual Operational Profile
+Seepient operates under two distinct profiles selected at surface composition roots:
+- **Profile A: Local Operator (Single-User)**: Designed for local CLI, TUI, and quick developer automation scripts. Ambient configuration (`~/.seepient/setting.json`), local `.agents/skills`, host `process.env`, and disk-backed ledgers are permitted convenience features. Identity defaults to implicit sentinels (`cli-user`, `default`).
+- **Profile B: Isolated Runner (Multi-Tenant & Hosted)**: Mandatory for REST/WS servers, multi-tenant SDK instances, and serverless / container workers. All ambient host dotfiles and `process.env` lookups are physically decoupled. State, credentials, and runtime must be explicitly injected.
+
+### 9.2 Zero Ambient Fallback in Hosted Runtimes
+Never write fallback logic that queries `process.env` or `~/.seepient` when an injected parameter or secret is omitted in multi-tenant mode:
+- If a tenant tool requires a secret and the tenant did not supply it, fail closed with `CREDENTIAL_REQUIRED` or `TENANCY_AMBIENT_IO`.
+- Never resolve host operator API keys (e.g. `TAVILY_API_KEY`, `SMTP_PASS`) for a tenant execution turn.
+- Default to in-memory replay ledgers (`InMemoryReplayLedger`) in Profile B to prevent host disk writes and lock contention.
+
+### 9.3 Parse at Ingestion, Don't Validate at Storage
+Never pass unvalidated strings for tenant identities or session identifiers across boundaries:
+- Ingestion parsers at the SDK, HTTP, and WebSocket edges must parse inputs into branded, slug-validated types: `TenantPrincipalId` matching `/^[a-zA-Z0-9_-]{1,128}$/` and `SessionId` matching `/^[a-zA-Z0-9_:-]{1,256}$/`.
+- Sentinels (`default`, `anonymous`, `sdk-user`) must be rejected case-insensitively in multi-tenant mode.
+- Deep storage layers (`LocalAuditStore`, `PersistedCapabilityLedger`) must accept only pre-validated types to ensure path traversal (`../../`) is structurally impossible.
+
+### 9.4 No Flat Maps on Shared Surfaces
+Server surfaces hosting concurrent callers must never maintain un-namespaced global state tables:
+- Index in-memory and persistent collections by composite keys `(tenantScope, resourceId)`.
+- In session managers, the lookup key is structurally `apiKeyHash:sessionId`.
+- Foreign key probes must return standard 404 responses rather than leaking resource existence via 409 conflict errors.
+
+### 9.5 Red-Team Test Discipline
+Every multi-tenant boundary feature must be accompanied by an automated adversarial regression test in CI:
+- Test secret exfiltration: verify that host `process.env` secrets are never forwarded in tenant outbound calls.
+- Test sandbox escape: verify that directory traversal payloads in identity parameters are rejected at the edge.
+- Test noisy neighbors: verify that concurrent tenants generate zero writes under `$HOME/.seepient` and zero file-lock contention.
+- Test session isolation: verify that session IDs cannot be squatted or probed across distinct API keys.
+
+## 10. Talk to Me Like a Human & Use Unslop Always
+
+**Speak like a person, not a language model. Explain things the way you would to a human engineer.**
+
+- **You are talking to a human, not an AI.** The user is a person, not a language model. Never explain things as if prompting, instructing, or briefing another model.
+- **Plain, direct explanations.** Explain concepts, technical tradeoffs, and status the way one engineer explains them to another in the room. Ground explanations in concrete facts and code reality.Also include the product perspective.
+- **Use the `unslop` skill always.** Apply `unslop` across every conversational response, technical explanation, commit message, pull request description, and release note without exception.
+- **Honest voice and readable rhythm.** Have a point of view, keep sentences readable, and say what happened or what needs doing without corporate or assistant theater. Do not write unnecessarily long text. Only as needed to clearly explain your point and the background of it so the human can understand what you are trying to say.
+
+## 11. Release Gate — Nobody Grades Their Own Exam
+
+No work order ships on its own say-so. Between "all tasks ticked" and push/release, the `/release-gate` skill (`.agents/skills/release-gate/SKILL.md`) must run and produce a PASS receipt in `Reviews/` before the release commit lands. Binding rules:
+
+- **The implementer agent never runs the gate on its own work**, and every reviewer runs in a fresh session that has not seen the implementer's reasoning. Every claim is graded against the committed HEAD (`git show`), never the working tree — uncommitted fixes do not exist.
+- **Task truth is checked, not trusted**: every `[x]` in the shipping work order is graded TRUE/PARTIAL/FALSE against the seal. Any FALSE row blocks the release — the release may not claim what is not true. This rule exists because fifteen consecutive review passes (see `Reviews/2026-09-12` through `2026-10-01`) found false checkboxes in every work order, always clustered in the claims/pins tasks nobody re-verified before push.
+- The reviewer fleet (Red Team with demonstrations-not-worries, Code Reviewer reading code not summaries, Scrutinizer walking the product as a user, Repo Auditor reading across, Architect attacking the premise) and the deterministic verdict rules (confirmed P0/P1 → FAIL; unresolvable conflict → BLOCKED, yellow stops the line; max two repair attempts then the owner) are defined in the skill's mandate cards.
+- Deterministic gates (suite, probes, examples, build, CI) always run first and are recorded by the gate, never self-reported by the implementer.
+
 # Documentation Storage
 
 Documentation is split between the **Obsidian vault** (internal) and the **project repo** (consumer-facing). When unsure where a document belongs, default to the vault.
@@ -114,8 +166,30 @@ Current layout of the Obsidian vault (annotated):
 ~/Documents/Obsidian/Seepient/
 ├── README.md                         # Vault overview / index
 ├── Architecture/                     # Cross-cutting architectural references
+│   └── security-posture.md           # AUTHORITATIVE security charter (owner-adopted 2026-09-24; v1.1 product re-alignment): §0 product ground (autonomous multi-purpose agent, outcome statements, autonomy ladder — consent is the bridge, the ceiling is the law), burden rules R1–R5, parties table, profiles + architecture stance, threat actors, boundary inventory + extension trust model (MCP/tools/skills first-class), non-goals + actuation stance, availability stance, severity rubric, guard-surface integrity principle, industry mapping, open decisions OD-1..6, pass-10 ownership ledger — every security disposition is graded against this document
 ├── Reviews/                          # Product review reports
-│   └── 2026-09-06-product-review-017-to-021-4.md # 360° review of 017→021-4 (v0.5.3–v0.7.1): 7 P1s, no P0
+│   ├── 2026-09-06-product-review-017-to-021-4.md # 360° review of 017→021-4 (v0.5.3–v0.7.1): 7 P1s, no P0
+│   ├── 2026-09-07-022-reaudit.md     # Spec 022 pre-implementation boundary re-audit evidence
+│   ├── 2026-09-07-product-readiness-review-021-to-022.md # Readiness review of 021→022 (v0.8.0 staged @ 5f64583): 🔴 not ready; 21 P1s (docs truth rot, first-hour defaults, sdk-user collapse, WS crash); 4 root causes + pre-v0.8.0 fix list
+│   ├── 2026-09-09-product-readiness-review-post-022-1.md # Post-022-1 verification (uncommitted tree @ 5f64583+): 🟡 ready with conditions; 7/11 original P1s closed, tenancy/crash/parity real; 5 remaining P1s (CI gate mispath, config.json myth, session-dir lie, fictional subcommands, consent table cell) + P2 security residuals (pre-017 reconciliation raw-read, covers() suppression)
+│   ├── 2026-09-11-post-remediation-verification.md # Post-remediation spot verification (small follow-up to the 09-11 cut review)
+│   ├── 2026-09-11-product-readiness-review-v0.8.0-cut.md # v0.8.0 cut assessment (4 deep dives + live CI/build/boot evidence): 🔴 not ready to cut; prior 5 P1s all closed but deeper pass found multi-tenant server composing ambient operator skills/stores (guards live in SDK wrappers, not Domain constructors), doc lie families alive on unscanned pages (sessions-and-state.md fiction, providers-add flags, *_MODEL envs, types.md defaults), first-hour dead ends (README WS .text/.delta, Docker invocations, persist resume, consentMode-less flagship examples), and release-train blockers (127 files uncommitted/unpushed, pnpm 12-vs-11 pin conflict breaks CI on commit, pnpm audit red on main, 6 CHANGELOG gaps); ~3-4 day path to green
+│   ├── 2026-09-12-adversarial-multi-tenant-sdk-review.md # Adversarial multi-tenant SDK review, FIVE merged layers @ 0b7fe4e: 🔴 REJECT for multi-tenant hosting; 5 P0-class (VULN-1 ambient host-secret use/exhaustion via execution brokers — exfil needs custom/connector tools; SDK-only, server effect-free; VULN-2 principalId path traversal via injected local stores; VULN-9 default server boot on operator ambient runtime in hardcoded "multi"; VULN-10 presence-vs-composition validation — new ProviderRuntime() trap; VULN-16 pass-4: pi-ai ambient auth fallback on the INFERENCE path — kind:"none"/missing secret → apiKey undefined → vendored library resolves host process.env keys, tenant-set baseUrl converts to Bearer-key exfiltration, defeats even clean injected runtimes) + P1s (composite credential read-through, cwd read-root + shared server policy file, sentinel check wrapper-only, gateway audit/usage cross-principal at agent:read, multi-tenant.md contradictions, session squatting DoS, VULN-17 pass-4: operator gateway tool defs default-on in every tenant's model context on the server, VULN-18 gateway stdio spawn w/ full host process.env + model-callable gateway_register_target arbitrary command — also single-user sandbox escape, VULN-19 reference worker control plane unauthenticated + tenant-unscoped — example contradicts its own README isolation claim) + P2s (policy/ledger stale-lock crash wedges w/ fix pattern already in-repo, per-request buildActionLifecycle global audit scan O(all tenants), tenant tools-object injection unvalidated at both chat edges, MCP SSE + refreshModels SSRF bypasses, floating approval-store promises crash embedder process, server skill sources process-wide shared) + ~30 P2/P3 total; diagnosis converged across all five passes: Domain tenancy is real, everything below/beside it composes ambient operator state — pass 4 shows it reaching INSIDE the vendored inference library; pass 5 (2026-09-13, §11) is a blind independent re-derivation that converged on the full corrected P0 set + P2 register (record stable) and added: Dim 8 zero-write test is VACUOUS for VULN-5 (runs askSeepient("Hello") with no tools — EffectBroker.execute() never fires; fix must extend the gate w/ a brokered tool call), InMemoryReplayLedger does NOT exist in the tree (fix must create it; effect-broker.ts:146 comment falsely claims in-memory fallback), remediation shapes (isIsolated stamp + createIsolatedProviderRuntime factory, explicit operator-runtime opt-in flag, TENANCY_WORKSPACE_REQUIRED); §8.4a + §10.8 list 12 unowned work items (execution-boundary tenancy, replay-ledger injection, principalId charset, session namespacing, isolated-runtime stamp, workspace contract, inference ambient auth, gateway multi-mode composition, worker control-plane auth, stale-lock recovery + unhandledRejection guard, reconciliation off hot path, tools edge validation) — fold into 024/024-2 or 022-2 before cutting v0.8.0; permission plane, prompt/context plane (pass 4), concurrency guards, and input-validation plane strong and test-pinned; ~4-5 days to conditional-ready
+│   └── 2026-09-13-multi-tenant-remediation-plan.md # Adjudicated remediation plan for the 09-12 review (OpenFusion 4-candidate panel + judge over the verified register, cross-checked in-session; product-review framing): D1 fix shape = INVERT construction defaults (no-arg ProviderRuntime/stores isolated in-memory by default; ambient only via createAmbientProviderRuntime() at Profile A roots; stamp kept as backstop; VULN-16 additionally needs wrapper CREDENTIAL_REQUIRED + baseUrl egress capability + image-path credential store — never patch node_modules); D2 RC0 = tenancy as readonly constructor-stamped property, Domain refuses CONSTRUCTION not operation, two typed context constructors make wrong composition unrepresentable (module-level context rejected); D3 release = HOLD v0.8.0 until P0 closure (~5 days, parallel w/ 09-11 train fixes) w/ day-6 fallback = cut single-tenant-labeled + multi flagged experimental; never ship P0s w/ multi claims (label doesn't remove VULN-9/16 on the server binary or VULN-1 on SDK embedders); D4 vehicle = one focused spec 022-2 owning unowned items 1-7+12 (phases 0-4, ~5 days elapsed), item 8 gateway rides 024 amendment, item 9 worker same-branch, items 10-11 to existing owners w/ 2-hour pull-forward contingency; D5 blind spots = type-level tenancy constructors, physical ambient/isolated export split + CredentialResolver vendor-trust boundary + import lint, server effect-free boundary as CI-tested invariant; D6 = 11 red-first adversarial journeys + anti-vacuum discipline (journey-completeness rule, zero-hit security tests fail CI, no-red-no-merge); §3 lists 5 panel corrections (VULN-1 server reachability overstated, V14/V15 phase mis-assignment, V9 boot semantics fixed to isolated-empty-runtime + boot notice + typed per-request failure, dtruss→fs instrumentation, call-site count unverified); OQ-1..4 owner questions (release authority, standalone server operator channel, export-split timing, green-light 022-2 creation)
+│   ├── 2026-09-13-post-022-2-adversarial-verification.md # Post-022-2 three-lens adversarial verification (uncommitted tree @ 0b7fe4e+), WITH same-day one-by-one verification pass over every finding: 🔴 NOT ready for multi claims, ~1 day to close; P0-1 = VULN-16 fix implemented but never armed (tenancyMode never threaded into inference opts — agent-loop.ts:590/media.ts:118 — host-env Bearer exfil via tenant baseUrl still exploitable through runAgentLoop on all surfaces; wrapper-level tests prove the branch works when armed, not that it is) — CONFIRMED verbatim; P0-2 = worker stub-app.ts:115 auto-adopts any Bearer token as principal, AMPLIFIED: POST /api/sessions :253, /api/audit :118, /api/policy :176 also take principalId from the REQUEST BODY (token re-binding — unguessable tokens alone won't fix; derive principal exclusively from the token); P1s (all confirmed) = server root never validates injected runtime stamp nor defaults in-memory stores (ambient LocalAuditStore cwd + LocalPolicyStore ~/.seepient while hardcoding multi), SEEPIENT_UNCONTAINED ungated in multi, gateway opt-in channel unguarded in multi (VULN-17/18 re-exposure), tenant secretResolver unimplemented (fail-closed dead end; buildLocalBoundary has no secretResolver option while EffectBroker accepts one), anti-vacuity harness self-fulfilling in 8/10 guard-using journeys (recordHit never in production seams), J1/J7 layer-skip composition seam, stale docs (getDefaultProviderRuntime still documented as default; multi-tenant.md table mismaps); corrections from the verification pass = auth.baseUrl egress bypass RESCOPED P1→P2-12 (vendor credential shapes carry no baseUrl field; derivation only via provider toAuth/resolve, blocked in armed multi), P2-10 TENANCY_AMBIENT_IO-unpinned sub-claim REFUTED (pinned by two suites), egress port-check wording fixed (scheme-default bypass), LocalAuditStore file ref corrected (audit-recorder.ts), seeded network-destination wildcard noted as satisfying the egress assert for any https baseUrl once P0-1 armed; VULN-1/2/9/10 closures + sessions/tools-edge/CI gates verified solid by attack; no cross-lens duplicate findings (lenses partitioned by layer)
+│   ├── 2026-09-13-post-022-3-adversarial-review.md # Pass-6 review of the implemented 022-3 tree (five lenses + lead re-verification + live worker probe; suite 2054 green): 🔴 NOT ready for multi claims — overturns the 022-3 closure appendix's self-graded 🟢; P0-1 arming GENUINELY CLOSED (verified end-to-end on every multi surface incl. WS/SSE, media/optimize, all four vendor wrappers, public-entry journey with zero-outbound-fetch assert); P0-W1 = worker stub-app.ts:92-99 mints issued-token-<principalId> for ANY principal unauthenticated + deterministic (probe-confirmed full cross-tenant R/W/D — P0-2 closure voided; forged-token journey never mints first); P1-A = SDK action-lifecycle.ts:478/:534 policy re-read drops tenancy opts → one honest "always allow" launders workspace-global caps (write-root *) into the tenant envelope permanently (stub GET :140 serves principal snapshots unfiltered); P1-B = stamp regime hole one layer down — tenancy-mode.ts:186-187 sub-stores still === false while permission stores got !== true, and exported unstamped MemoryCredentialStore resolves env refs from live process.env into api_key secrets that ALSO pass the armed VULN-16 wrapper (two lenses converged independently); P1-C = closure-evidence overclaims (anti-vacuity 6/8 not 8/8 — isolated-defaults + gateway-default-off still self-record; mutation-probe matrix has no artifact; SC-003 has no brokered tool call; tenant-secret guard never asserted); P1-D/E/F/G = worker authority class (policy CAS open KV self-authorize, tenancyMode from query string, ScopedSessionMap suffix poisoning of victim model context, skills cross-tenant R/W); P1-H = gateway VULN-17/18 residues live (storage-only guard, tool defs default-on in tenant context, stdio spawn full host env — owned 024); 13-entry P2 register (composite stamp constructible lie, CREDENTIAL_REQUIRED missing on SMTP/webhook, unbounded in-memory stores OOM, DurableApprovalStore ambient ~/.seepient boot mkdir, shared provider plane pooling OQ, SSE/refreshModels SSRF, 017 approvable-wildcard ceiling × armed egress assert, KNOWN_TOKENS CHANGELOG fiction) + P3s; ~2 days to 🟡; OQ-A..D (worker issuance design, server provider-plane model, ceiling narrowing, worker ships-as-is?)
+│   └── 2026-09-13-post-pass-6-remediation-adversarial-review.md # Pass-7 review of the post-pass-6 remediation round (29 files touched ~2h after pass-6; 3 surviving lens agents + lead first-hand verification; suite 2061 green, test:probes 8/8): 🟡 SDK core conditionally sound / 🔴 "fully multi-tenant" label still not earned — for the FIRST time in seven passes the engine held under attack (every pass-6 SDK-side P0/P1 genuinely closed: P0-W1 minting admin-gated+UUID, P1-A readOpts threaded, P1-B sub-store !==true + MemoryCredentialStore env fail-closed, P1-D/E/F/G worker authority, P2-1/2/4 fixed, journeys conditionally-recorded, mutation-probe artifact exists); blockers now at the edges: NEW-1 P1 multi server serves host operator's ambient ~/.seepient settings to agent:read tenant keys incl. env-var origin inventory (http/index.ts:386-396 + settings-handlers.ts:104); NEW-2 P1(example) pre-auth JSON.parse crash = unauthenticated 1-packet control-plane kill (stub-app.ts:93); NEW-3 P2(P1 shared-store) the P1-A fix itself introduced CAS erasure — principal-filtered re-read feeds full-replace compareAndSet so a persistent approval silently erases other principals' grants in the same snapshot (action-lifecycle.ts:549/:570; reachable via single-mode global workspace CLI vs SDK; factory reconciliation :290-311 has the correct raw-read merge pattern); NEW-4 P1(example) /api/caps cross-principal global read+revoke (probe: B killed A's run; guessable sessionIds); NEW-5 P1(example) minting fix bypassed twice — KNOWN_TOKENS ships 5 committed always-valid tokens + adminSecret falls back to hardcoded "dev-admin-secret" that README itself prints; NEW-6 P2(example) global audit idempotency dedupe silently drops cross-tenant events; NEW-7 P2 default-on 15 built-in tool defs in tenant model context when tools omitted (VULN-17 class for built-ins; execution still denied); NEW-8 P2 MemoryPersistenceBackend suffix-match fallback (P1-F's twin) alive in SDK core session-store.ts:196-204; NEW-9 P2 credentials/providers injection doesn't signal multi (tenants ride ambient single pipeline); NEW-10 P2 unbounded per-session message accumulation; P3 register (settings scope gaps, ?token= query auth, WS no revocation disconnect, cli-user vs sdk-user grant fragmentation, server-root guard weaker than domain validator, keychain null-as-any residual, SC-003 still no brokered call); ~1.5-2 days to defensible label (worker authority round + settings plane + CAS merge-back + tools/credentials defaults); owner items stay disclosed: gateway 024, provider plane OQ-B, ceiling OQ-C, unbounded stores 023/025; OQ-A' demo-vs-reference for the worker, OQ-E settings surface existence; SAME-NIGHT ADDENDUM (completeness sweep, 3 further lenses: execution internals, policy-engine/recovery/single-mode, exports/logging/docs-outside-gate): adds P1 CHANGELOG security fictions (LocalAuditStore/PolicyStore/PersistedCapabilityLedger no-arg are ambient isIsolated:false + SEEPIENT_SECURITY_DIR lookup, not "isolated in-memory"; TENANCY_EDGE_VALIDATION_FAILED nonexistent; CredentialRequiredError/seepient-types export fictions), P1 root README flagship multi-tenant example cannot construct (PrincipalRequiredError-first; README outside docs/ gate), P1 single-mode principal fragmentation regression (CLI cli-user stamps + SDK sdk-user reads → filtered-empty version>0 snapshot treated as stored policy → bare askSeepient loses fresh-install read-root/model-egress → deterministic approval-unavailable in CLI-touched workspaces; factory:261-265/:428-435, transport-unpinned), P2 generate_image image_path sensitivity hardcoded "normal" (in-workspace .env uploads under normal data class; analyzers.ts:905-911), P2 ledger revocation unreachable in production, P2 engine stamps decorative (intersect drops principalId), P2 multi-tenant.md trustedHostTool example doesn't compile + migration.md missing 3 breaking changes + README WS text_delta silent no-op, P3s (read/process executors skip envelope, unwarned ambient exports settings/registerBackend/initializeSkillRegistry, dist/ fully shipped, log vectors); execution plane structure VERIFIED SOLID (per-agent boundary construction, mandatory sandbox in multi w/ env allowlist + home hard-denies, SSRF pin chain, artifact/replay scoping), logging/audit discipline solid, recovery honors 021 contract; RECONCILED with concurrent pass-8: accepted its WS-auth apiKeysFile split as P0-class (websocket.ts:105 + ws-handlers.ts:54 bare authMiddleware vs REST ctx.apiKeysFile → ambient ~/.seepient/server-keys.json on the WS plane), corrected own P1-D grade (worker CAS network-wildcard check is dead code — tests destination/domain fields that don't exist on {scheme,host,port}), accepted mutation-probe script as weaker than graded (npm script, not in CI); OQ-F unify cli-user/sdk-user?, OQ-G revocation surface or delete
+│   ├── 2026-09-13-multi-tenant-adversarial-review-pass-8.md # Pass-8 review of the SAME tree as pass-7 (six independent lenses + lead re-verification, ran concurrently with pass-7; suite 2061 green): 🔴 NOT ready for multi claims — converges with pass-7 on the core register (worker crash/CAS erasure/caps/minting bypass/audit dedupe/default-on tool defs) and ADDS: P0-1 = WS auth plane ignores injected apiKeysFile — websocket.ts:105 + ws-handlers.ts:54 call authMiddleware(req) bare while REST passes ctx.apiKeysFile (rest.ts:275); getKeyPath(undefined) → ambient ~/.seepient/server-keys.json (auth.ts:38); live-probed both directions (ambient key → 101 full access incl. admin update_settings; injected key → 401) — the ambient-operator-state-composes-hosted-surface class surviving on the AUTH plane (standalone CLI covered by env, SDK embedders using the documented option exposed); P1-1 = persistent approval CAS writes back from the FILTERED one-principal view (action-lifecycle.ts:549 nextCapabilities from principal-filtered retried; both stores take next verbatim) → one honest "always allow" durably wipes every other principal's grants incl. the shared GLOBAL store (live multi probe; factory reconciliation :288-311 has the correct raw-read merge shape); P1-5 = worker CAS wildcard ceiling is dead code (checks destination/domain fields that don't exist on {scheme,host}; external-recipient/process/model-egress unchecked; root:"/" bypass) and self-CASed wildcards sit within the default deployment ceiling → effective without approval (probe: covers process /bin/rm -rf); P1-7 claims-truth family (zero-cwd-writes false — one curl with sessionId writes cwd/.seepient/sessions, index.ts:371; "tools string-only" false at SDK edge + TENANCY_EDGE_VALIDATION_FAILED exists nowhere; CredentialRequiredError NOT exported + seepient/types subpath doesn't exist in package.json; README flagship worker example throws PRINCIPAL_REQUIRED verbatim; migration.md teaches fictional createIsolatedProviderRuntime({credentials}) — TS2353); P1-8 = scripts/verify-mutation-probes.ts is vacuous theater (never mutates/runs its PROBE_TARGETS, tests that a counter counts; not in CI) + SC-003 still sends no tools/sessionId so both writers stay cold; P2 register: SMTP broker egress completely unvalidated (nodemailer to resolver-supplied host, probe ECONNREFUSED 127.0.0.1:1 — internal port-scan oracle, one-branch fix via validateEndpointUrl), inference egress shares the tool network-destination namespace, unbounded in-memory stores, DurableApprovalStore class default still disk + void-persist floats + tenantId-ignoring casSync/get, session-store.ts:196-204 suffix fallback (pass-7 NEW-8, verified), settings map at agent:read (pass-7 NEW-1, verified), signal set misses provider-routing options (pass-7 NEW-9 verified as class), skills @path whitelists all of ~/.seepient; corrections to pass-7: CAS erasure is P1 not P2 (multi-mode GLOBAL-store probe), worker CAS "closed" is partial (ceiling dead code), mutation-probe "artifact exists" is vacuous; verified solid: VULN-16 arming re-attacked (12 producers, 34-case egress URL battery all fail-closed), P1-A laundering direction, P1-B stamps, P2-1 composite lie, worker P1-E/F/G, CREDENTIAL_REQUIRED on all four connector kinds, secret hygiene, session partition, journey de-vacuuming genuine; ~2-2.5 days to 🟡; OQ-E (gate global/project lifetimes in multi?), OQ-F (fix session-cwd default or fix the zero-write claim); FOLLOW-UP SWEEP (§Follow-up, blind-spot POVs): F-S1 P1 media-input final-symlink exfil (analyzers.ts:101-111 keeps symlink path, sensitivity hardcoded "normal" :905-911, media.ts:107 raw readFileSync → /etc/passwd bytes base64'd to vendor, probe-confirmed multi+balanced; write side fenced, input side open), F-S2 P1 same laundering on read_file (classifier inspects link name analyzers.ts:141-159, executor follows link executors.ts:232 → ~/.ssh/id_rsa into model context, probe-confirmed), F-S3 P1 createSeepient({credentials,providers}) rides SINGLE mode (seepient.ts:191-212 builds runtime internally so runtimeInjected stays false; providers/credentials/overlayFile/adapter/modelAssignments are not signals at :152-156 → sdk-user sentinel + ambient broker-secret resolution + 017 grants firing) and provider-management.md:155 teaches it under "strict multi-tenant isolation" (VULN-1-class re-exposure via documented pattern), F-S4 P0-1 re-probed independently + amplification (WS update_settings needs only admin scope settings-handlers.ts:294, persists to cwd/.seepient/setting.json or ~/.seepient/setting.json settings-manager.ts:199 → ambient key persists operator-config mutations; CHANGELOG P2-3 bullet advertises exactly the broken apiKeysFile decoupling), F-S5 P2 session files 0755/0644 plaintext shared dir (audit/policy correctly 0700/0600 — session store is the outlier), F-S6 P2 media relative-path authorized-vs-executed divergence (workspace root vs process.cwd()), F-S7 P3 PATCH /v1/settings malformed JSON → 500 + latent rest-gateway.ts:68 ambient-auth copy; SUPPLY CHAIN: pi-ai 0.84.4→0.85.1 SAFE (full dist diff from pnpm store — auth/egress/compat seams byte-identical; lockfile fully accounted; pnpm audit clean) but positive-path VULN-16 mechanism trusted-not-pinned (add real-vendored wire-header journey before v0.8.0); clean: no SSE endpoint, artifacts store content-addressed in-memory, REST/WS JSON robustness passes, marketing pages claim nothing, Profile A gated by profile-a-smoke, TenancyStoreIncompleteError + runtime factories really exported; PASS-7 ADDENDUM CROSS-CHECK: CHANGELOG no-arg inversion bullet fiction for 3-of-4 named classes (LocalAuditStore/LocalPolicyStore/PersistedCapabilityLedger no-arg isIsolated=Boolean(opts?.root)=false + ambient ~/.seepient/security dirs; only InMemory* stamped true — verified directly, 6th item of P1-7 family; runtime-plane inversion verdict stands), single-mode principal fragmentation P1 verified by code read (factory:262-266 version>0 filtered snapshot skips baselines; CLI cli-user agent.ts:309 vs SDK sdk-user seepient.ts:216 → deterministic denials in CLI-touched workspaces); report at Reviews/2026-09-13-multi-tenant-adversarial-review-pass-8.md
+│   ├── 2026-09-13-post-pass-8-verification.md # Post-pass 8 adversarial verification & closure: 🟢 READY; all P0-1/F-S4 (WS injected apiKeysFile), P1-1/P1-2 (approval CAS unfiltered merge + global lifetime gate), P1-3..P1-6 (worker authority & scoping batch), F-S1/S2/S6 (symlink exfiltration on read/media), F-S5 (session file permissions 0700/0600), P1-7 (claims truth & exports), P2-1 (SMTP SSRF check), NEW-8/P2-12 (session exact match), and P1-8/SC-003 (anti-vacuity mutation probes & zero-write server) closed and verified by automated tests; suite 286 files / 2073 tests green, worker 20/20 green, probes 8/8 verified, pack verified 683 files. (Pass-9 note: its §9 P1-8 claim is overclaimed — the probe script still never mutates a guard.)
+│   ├── 2026-09-20-post-022-3-round2-adversarial-review.md # Pass-9 review of the committed tree @ 2f005f9 (022-2 + 022-3 R1+R2 + pass-8 remediation; 5 lenses + lead first-hand verification; suite 291 files / 2088 tests green, probes 8/8, worker 20/20): 🟡 NOT 🟢 — the multi-tenant ENGINE held under the heaviest attack yet (five passes converged: WS/REST key-file threading, CAS merge-back, global gate, worker authority live-probe battery, settings allowlist, tools default-off incl. group expansion, session exact-match + 0700/0600, revocation scoping, static symlink class, supply chain all verified solid); blockers: P1-1 read-side TOCTOU (executors.ts:226-272 lstat → await-import yield → default-flags readFile, no O_NOFOLLOW/fd-pin/expected-enforcement; media.ts same; amplifed by VACUOUS output classifier agent-loop.ts:147-151 that never reads `output` — substring-checks args.path; exploitable via background alternation racer from an approved shell loop; Profile A most exposed), P1-2 hardlink exfiltration undetected (no st_nlink check; static, race-free), P1-3 first-hour doc dead ends (migration.md teaches nonexistent MemoryCredentialStore ctor ×3 sites + env `variable` field + cli-user sentinel fiction; session-persistence.md EVERY example throws PRINCIPAL_REQUIRED via persist-signal upgrade; provider-management.md example same trap; ask-seepient.md multi example missing cwd → TENANCY_WORKSPACE_REQUIRED; deployment.md teaches env keys for a providerless-by-default standalone binary — no operator flag exists), P1-4 mutation-probe CI step still toothless (greps + guard self-test, never mutates/runs; two lenses converged; the 🟢 verification §9 overclaimed it), P1-5 zero end-to-end single-user coverage (roundtrip test is domain-seam with same principal both instances; profile-a-smoke is construction-shape only); P2 register: CAS merge DUPLICATES unstamped caps in single mode (both buckets; 2^k growth → digest/parse fail = permanent policy deny on pre-022 workspaces), multi erases unstamped silently + comment lies ("preserve unstamped"), stub CAS fail-open default (unknown kinds + activate-change-class passes), cli-user/sdk-user fragmentation persists (probed), symlink refusal no allowlist/docs/resolved-path-in-remediation, global lifetime OFFERED in multi then denied with misleading invalid-approval-response, seepient/types export-vs-docs-ban contradiction, SMTP rebinding window + webhook error echo oracle, credentials-signal Object.keys fragility (#private-field stores undetected); P3 register + OQ-I (standalone server provider channel), OQ-F carried, OQ-H (seepient/types); ~1 day to defensible 🟢 (read-plane fd-pinning + honest classifier, docs batch w/ docs-examples extension to the five pages, one-bucket unstamped fix, probe-claim descope, one true surface journey)
+│   ├── 2026-09-24-post-022-4-adversarial-review.md # Pass-10 review of the post-022-4 tree @ 2820f12 (R3 remediation LANDED same day — see 022-4 tasks.md Phase 14; identity pin closes P1-1, probes now mutate production seams, provider channel built) (5 lenses + lead first-hand verification incl. empirical PoC; origin CI all four jobs green at HEAD): 🟡 engine sound, read-plane closure HALF-delivered — P1-1 parent-directory symlink swap between analysis-time realpath authorization and execute-time open-by-path defeats the whole authorize-what-you-open plane (O_NOFOLLOW is final-component-only; PoC-confirmed host-bytes exfil through the exact executor logic on read_file + media inputs; no parent-swap test exists; swap-racer journey is sequential final-component-only); P1-2 the advertised fstat dev+ino verification DOES NOT EXIST anywhere on the read plane (commit message + T031 [x] over-claim; only the Rust WRITE helper does dev+ino); P1-3 mutation probes round 3: executable + CI-wired but neutralize only the journey's own hit-counter (guard.ts recordHit; zero NEUTRALIZE seams in production) + any non-zero exit incl. spawn-ENOENT counts as verified-red + no green baseline + no timeout + the entire R2 register (symlink/hardlink/lifetimes/CAS journeys) sits outside the matrix; SC-003 denial assertion is [502,500,400]+never-failing toBeDefined and the stale LocalPolicyStore comment T018 claimed deleted survives; P1-4 docs traps survive where gates don't scan: README:361 + create-seepient.md ×5 bare-persist examples throw PRINCIPAL_REQUIRED (loadBearingPages page import-checked only), deployment.md:194 swapped env-keys fiction for a NEW .seepient/setting.json fiction (isolated runtime never reads it; provider API restart-ephemeral; no operator flag — OQ-I papered over); P1-5 #private-field CredentialStore defeats the Object.keys multi-upgrade signal (silent single mode → ambient skills/secrets/audit/policy; pin test passes by TS-private accident); P2 register (WS zero egress backpressure, worker plain-Error 409 kills CAS retry, win32 O_NOFOLLOW silently dropped, unpinned oldContent read, CHANGELOG buildNeedsApproval fiction, LLM_PROVIDER regex blind spot, semantic-tools re-adds gateway defs after tools gate [024-owned, verified live], ambient server-keys.json default, @path ~/.seepient startsWith whitelist, GlobalLifetimeForbiddenError skips terminal audit, migration.md missing R2 sections, error classes unexported, PATH_ESCAPES oracle, hardlink text lie) + P3s; confirmed solid: final-component race + hardlink gate + ceiling mechanics + write plane + one-bucket CAS + lifetime choke point + sentinel + worker authority + exports + no prototype pollution/traversal/hijack; ~1–1.5 days to 🟢 (dirfd-walk or auth-time dev+ino pin, production-seam probe contract, docs batch, instance-probe signal)
+│   ├── 2026-09-28-022-5-pre-implementation-red-team.md # Pre-implementation red team of the GREEN-LIT 022-5 artifacts vs actual tree @ eca55dd (4 lens agents + lead first-hand verification of every load-bearing claim incl. vendored pi-ai dist; no repo files modified): 🟡 NOT ready for /speckit-tasks as written — RE-BASELINE FIRST (~0.5d artifact work, impl drops to ~1–1.5d). Core event: 022-5 green-lit ~11:10 against 2820f12, then 533440c (022-4 R3, 17:39 same day) landed ~40% of its register under different names; artifacts never re-baselined. Overlap: FR-001/FR-002 closed by R3 (PATH_IDENTITY_MISMATCH shipped+exported vs spec's READ_IDENTITY_MISMATCH; carrier is operation.expected/imageIdentity vs spec's PreparedAction.readIdentity), FR-003 half-open (pinned read landed, ceiling re-auth missing), FR-008 half-landed (production seams + CI real; ZERO_HITS confound means 8/11 targets cannot detect an orphaned seam — guard.ts:16-19 reads the same env ungated), US2+US4 evidence verified accurate at HEAD. P1 register: stale branch-cut @ 2820f12 would miss R3 and re-open the closed P0; spec-as-written renames shipped public API; demolition misses the vendored pi-ai env fallback (compat.js:142-146 withEnvApiKey, 37 env names incl. GEMINI/ZAI/DEEPSEEK/etc., single-mode undefined pass-through at pi-language-raw.ts:119-123 — FR-007 not pinned tenancy-invariant, SC-002 unachievable as worded); kind:"none" makes FR-007 unsatisfiable (needs sentinel row); env credential is a LIVE product mode (CLI --credential env:, TUI add-account:271, REST accounts.ts:82, auth-cli --env-var) — FR-005 file list misses all of it → dead-end accounts; probe seam design conflict unadjudicated (green-lit D4 rejects env branches; R3 shipped NODE_ENV-gated test-seams.ts; worker stub-app.ts:213 forged-principal under NODE_ENV=test+var); FR-004 understates media openSync event-loop freeze (media.ts:127,:164); NEW live regression: CLI image variation/edit broken at HEAD (models-cli.ts:526 no identity → media.ts:137 unconditional throw). P2s: 3-vs-5 env names (OPENAI_COMPAT_* unlisted, range :480-517), migration surface under-scoped (AGENTS.md:534, bootstrap.ts:112 strings, 16 docs files, vocabulary gate lacks API-key bans, environment-policy.ts strip list must survive), authorize-time realpath→lstat micro-race + vacuous classifier as missing compensating control, trusted-host auto-allowlist footgun (agent-loop.ts:511-521), media denial laundering to MEDIA_GENERATION_FAILED, 8 orphan FRs w/o SCs, ~12-files estimate vs ~30 real. NOBODY items: ambient server-keys default, PATH_ESCAPES dangling-vs-existing remainder, pi-ai wire pin (tasks.md assigns to 022-5, no FR names it). OQ-1..6 (seam adopt-vs-convert, error-code vocab, single-mode demolition extent, env-mode removal, nobody-items, CLI hotfix vs fold-in); re-scope recipe in §5
+│   ├── 2026-09-29-post-022-5-adversarial-review.md # Pass-11 review of the IMPLEMENTED 022-5 tree @ dd4a171 (5 lenses + CodeRabbit over the full diff + lead first-hand verification incl. runtime repro of both headline P1s and a base-worktree run dating the suite regression; probes 11/11 + worker 20/20 + tsc×2 verified green): 🟡 engine core conditionally sound / 🔴 multi-tenant label not earned; NO P0 — for the first time BOTH spec-bet planes held under attack (read-plane identity binding end-to-end on read_file+media incl. real parent-swap/racer/FIFO/hardlink probes; env-key demolition total — lens B live-proved the vendored stream() env fallback fires on undefined apiKey and every producer now sits on the sentinel/typed-throw side, single mode included). P1 register: P1-1 FR-013 regression kills the WS consent plane in multi — chat.ts:329 stamps records with principalId apiKeyHash while approvals.ts:187/:195 hardcode actorId "ws-user", the new casSync guard rejects every legitimate approval as "stale" and approvals.ts:163 resolves approve→false (lead runtime-proven with production shapes; tests blind because unauthenticated contexts default both sides to ws-user — no test joins authenticated principal + decision); P1-2 FR-016's own named threat survives — htmlToText tag-strip regex /<[^>]+>/g is quadratic on the capped input (measured 4×/doubling, 256KiB=24.9s, 1MiB≈400s event-loop freeze; read_website content is attacker-controlled → repeatable noisy-neighbor DoS on all co-tenant requests); P1-3 FIFO wedge class survives on the two surfaces FR-004 didn't name — commit-files old-content open (executors.ts:104 no O_NONBLOCK/isFile, executor _opts:69 discards abort) and edit_file section read (analyzers.ts:398, wedge at ANALYSIS time pre-approval; both probe-confirmed wedged); P1-4 FR-008d/e fiction — registration lints exist only in the script docblock + tasks.md + CHANGELOG:15 (COUNTER_ONLY_JOURNEYS is dead data; a bidirectional lint couldn't even pass — VULN-1-BROKER has no production seam), committed dogfood scenario absent, T004's pass10-red gate file NEVER EXISTED in git; P1-5 pin-scope overclaims — refreshModels has no tenancy threading/egress assert/recording despite T014 [x] (validateEndpointUrl only, console.error), FR-007 enumeration is a fixed 6-file comment-grep that cannot see a new unarmed producer, real-wire pin is sentinel-only/single-mode (resolved-key journey mocked, multi absent); P1-6 first-hour truth — ui/cli/index.ts:67 + setup.ts:36-38 still print the four demolished env names to headless first-run users (T017 1-of-3 true), multi-tenant.md:255 "single mode reads these variables directly" false, providers.md auto-detection heading, reference.md:80 teaches --credential env: (now exits 1), local-llm.md --base-url+missing --upstream dead command, provider-management.md isolated example throws CREDENTIAL_REQUIRED (F-S3 class reborn), providers-cli.ts:130 help advertises env:VAR_NAME, profile-a fixture absent; P1-7 release-gate truth — pnpm test RED at HEAD (4 unhandled DurableApprovalStore rejections from the new FR-013 test tripping pre-existing void persist()/resolveRequest() floats; absent at eca55dd per worktree run; SC-014 false), branch never pushed AND ci.yml:3-7 triggers exclude it (T030/T032 could not have run as checked), FR-009 corrects 4-of-6 claims while adding a fresh false one (the lints) + empty Security (022-5) section (US4 undocumented). P2 register: symlink-mediated dangling-vs-existing oracle falsifies SC-002's letter (analyzers.ts:37-41 fallback untouched — existing target → PATH_ESCAPES at analysis vs dangling → authorized-then-ELOOP downstream, 1-bit existence oracle incl. edit sections + generate_image), edit-section read has NO dev/ino pin (micro-race feeds host bytes into section.current → committed in-workspace content), casSync binding opt-in both sides (old records principalId-less; untyped actorId passes), media denials launder to MEDIA_GENERATION_FAILED (open outside try — ELOOP conversion dead code), FR-014 overreach kills Profile A uncontained backgrounded children (undocumented), stub accepts /data/../etc via unnormalized startsWith (inert downstream), SC-008/011/012 + FR-006/FR-007 pins entirely absent contradicting deviation #1, message pins match test NAMES not assertions (+ VULN-16 literal "A|B" marker matches only the title), warnIfTestEnvAtHostedBoot missing on runSeepientServer, vocabulary gate holes (.env.example invisible, case-sensitive, AGENTS.md unguarded), floating store promises crash-adjacent, commit-files old-content no identity pin vs commit.expected (metadata-only, wire verified clean), entity fromCodePoint RangeError blanks pages, stale fail-closed test titles. P3s incl. dead duplicate PendingApprovalStore (server-policy.ts:106-174, no principal binding — trap). tasks.md false [x]: T004/T014/T017(1-of-3)/T021/T028/T030/T032. Verified-solid: FR-010 key cache genuinely closed (cross-process real), FR-011 coverage layer probed 12 root shapes, probes' red mechanisms live-real, two-factor seam tenant-unreachable, VULN-16 arming intact. Refuted: CR's ask-seepient flag (page already corrected), lens worker-count drift (20/20 true), lens E's FR-003 "implemented" grade (falsified by symlink probe). ~1–1.5 days to label (WS actorId fix + joined test, anchored tag regex + wall-clock pin, O_NONBLOCK/isFile/signal on both remaining opens, real lints or honest descope + dogfood fixture + phantom-gate fix + floating-promise catch + push + CI triggers, refreshModels parity + source-scan enumeration + resolved-key wire single+multi, docs batch). OQ-1 actorId semantics (role labels vs principals — third fragmentation), OQ-2 uncontained kill intended?, OQ-3 lints implement-or-descope, OQ-4 CI branch triggers
+│   ├── 2026-09-29-post-022-5-WO1-adversarial-review.md # Pass-12 review of the IMPLEMENTED 022-5-WO1 tree @ 721925b (4 lenses incl. fresh-eyes re-attack + supply-chain dist-diff + lead verification — re-ran both pass-11 P1 runtime repros and reproduced the new buffering P1 first-hand; gates exit 0 across the board, CI green on the branch): 🟡 engine held, pass-11 P1 register GENUINELY closed — WS approval repro now resolves true, htmlToText adversarial shapes ≤2ms at 1MiB, FIFO wedges closed, lints real and self-catching, pi-ai 0.87.1 auth seams byte-identical — but the label is still not earned on two NEW edge P1s: P1-1 unbounded response buffering BEFORE the size cap on the brokered network path (NodeNetworkAdapter.fetch passes no maxResponseBytes to pinnedFetch whose streaming abort is unarmed; 10MiB broker cap fires only after full buffering; lead-probe: 300MiB in 237ms, RSS 35→975MB, no rejection → tenant-approved read_website OOMs the shared process; the broker's own webhook path threads the cap — the adapter is the odd one out; fix one line); P1-2 refreshModels multi egress assert armed by NO production composition root (factories construct single-mode runtimes; tests hand-thread multi; chain: provider:admin key (grantable scope) PUTs attacker baseUrl w/ credential preserve onto the operator's providers-file account then refresh → operator's real Bearer key to attacker host, no EGRESS_REQUIRED; CHANGELOG claims the protection). P2 register: edit_file commits feed the new old-content identity pin nothing (expected={exists,size,sha256} only — pin requires device/inode; probe-proven raced bytes into oldContent, metadata-only blast), both new identity pins (commit old-content + edit-section) have ZERO tests, producer source-scan works but never asserted-empty (new unarmed producer ships undetected — the exact pass-11 P1-5b case), T020 dogfood is pure-function pins not a spawned matrix, AGENTS.md vocabulary guard vacuous (blanket continue skips every check while the docblock claims otherwise), SC-012 zero-of-four worker pins + unhandledRejection→500 unimplemented (carried from 022-5 T028), T036 verify describes a nonexistent test (fix itself live-proven correct across 8 payloads), media FIFO/symlink refusal codes still launder to MEDIA_GENERATION_FAILED (typed classes survive; plain-Error refusals don't). P3 register incl. duplicate tool_approval_response resolve-once race, overbroad _guard/probe-matrix lint exclusions, VULN-1-BROKER shared-condition, no google wire pin post-genai-major, CHANGELOG heading-dup artifact + env-note still nested, stray undici file, dead ci trigger branch. WO1 task-truth: 30 TRUE / 9 partial-false (T014 edit_file expected, T016 codes half, T020, T022/T023 arming, T024 scan gate, T030, T032 4/5, T036, T037) — no phantoms, every partial has real work behind it. ~0.5–1 day WO2 (buffering one-liner + OOM pin, factory arming + boot pin, edit_file snapshotPath + swap test, the missing pins, claims batch). OQ-1 arming style (factory vs per-request), OQ-2 is provider:admin tenant-grantable by intent?, OQ-3 vocabulary gate vs vault-map self-exemption
+│   ├── 2026-09-29-post-022-5-WO2-adversarial-review.md # Pass-13 FINAL review of the WO2 tree @ 2c6faaa (3 lenses + lead verification — gates exit 0 first-hand [suite 2189/319, probes 11/11 w/ lints, worker 25/25, CI green], both pass-12 P1 repros re-run, every new claim double-verified): 🔴 label not yet — ONE composition line short; P1-1 buffering CLOSED (lead: 300MiB rejects in 11ms/RSS+21MB, under-cap 4MiB succeeds; framing-agnostic, all call sites capped) and the engine's twelve-pass register HELD under the final whole-tree sweep (read plane, credential demolition, consent plane, availability, probe self-enforcement re-attacked; accepted-risk list confirmed unchanged); BUT P1-1 the injected-runtime composition root skips the arming — runSeepientServer({runtime}) validates only isIsolated, never tenancyMode, createSeepient's own multi branch builds exactly the single-stamped shape, and lens-3 live-probed the full pass-12 exfil chain on the documented embed path (deployment.md:216): provider:admin → PUT attacker baseUrl+preserve → 200 → refresh → Bearer sk-operator-real to the attacker sink, no EGRESS_REQUIRED — third composition-root iteration of the same class, falsifies WO2 D2's "cannot plant at all"; P1-2 the arming broke the standalone operator channel — no operatorBaseline CLI/env/file channel exists, so every baseUrl-bearing account on --providers-file denies refresh/mutations with EGRESS_REQUIRED (two-lens live-probed; fail-closed; deployment.md teaches the flag and never mentions the baseline; no WO2 CHANGELOG section at all); P2s: WS set_provider plants ungranted baseUrl (REST-only write-assert; downstream catches it on ARMED boots only — fully open under P1-1), claims cluster in T017/T018 (env-key note NOT moved — diff is a blank line; dead CI trigger NOT dropped; sc-pins header NOT fixed; 13th consecutive pass with false [x] in the claims-truth work order), webhook denial echoes operator credential-bearing URLs into tenant-visible output; P3s incl. edit-section deletion pin vacuous (in-place write, same inode), google decoy spy makes a real outbound request every run, pi-canonical-converter exemption dead data. WO2 task-truth: 15 TRUE / 4 PARTIAL / 2 PARTIAL-FALSE / 1 FALSE pin (T011). ~0.5-day WO3 sketch §7 (multi-stamp requirement on injected runtimes + saveAccount-seam write-assert, derive-or-flag operator baseline, claims batch, redact webhook URL); label defensible-with-caveats after it, caveat list §8. OQ-1 derive baseline vs flag, OQ-2 stamp createSeepient's runtime by construction, OQ-3 delete the WS mutation surface instead
+│   ├── 2026-10-01-post-022-5-WO3-adversarial-review.md # Pass-14 review of the IMPLEMENTED 022-5-WO3 tree @ 0ccd752 (6 lenses + CodeRabbit over the full WO3 diff + lead first-hand verification incl. runtime repros; gates exit 0 first-hand [suite 2197/322 zero-unhandled, probes 11/11 w/ mutation+markers, worker 25/25, build+tsc clean, CI 8/8 run 36752684367]; two inter-lens contradictions adjudicated by direct read): 🔴 label not yet — but the SHAPE changed: the server plane is genuinely closed (every composition root held under attack; T006 stamp check sound incl. forged-stamp-over-ambient-stores rejected; derive-at-boot covers refresh AND mutations; saveAccount one-seam real across REST+WS+CLI; operator channel works end-to-end) and the 13-pass engine register HELD on the compiled dist (read-plane guards all fire under production-shaped ESM loading incl. darwin case/NFD//dev/fd; credential demolition, consent plane, availability re-attacked); the blockers are 4 P1s, 2 of them WO3's own deliverables: P1-1 T005's section-read identity pin is DEAD IN EVERY SHIPPED RUNTIME — snapshot-store.ts:65 uses bare require('node:fs') in the ESM-only package, the ReferenceError is swallowed by its own catch, identityOf() returns null forever on dist/tsx while the vite-node shim arms it under vitest (5-way confirmed: lead dist probe, lens-B analyzer-level swap RESOLVES on dist vs 4/4 denied under vitest, CodeRabbit critical, lens-E tsx, lens-F dist; policy-engine.ts:55 documents the identical round-10 trap; bounded by the stale-anchor gate for different-content swaps; fix = thread the executor's verified fd identity into record()); P1-2 createSeepient multi SILENTLY ACCEPTS a single-stamped injected runtime and T007's stamp is DEAD CODE (tenancy-mode.ts:187 throws for multi-without-runtime BEFORE the bootstrap, so the stamped branch only runs in single; the multi check never validates tenancyMode) — lens-A live-probed the pass-13 exfil chain on the documented embed shape (multi-tenant.md:48): plant passes (assert no-ops), refresh delivers the stored key, and http/index.ts:265's refusal message + CHANGELOG:20 cite the dead "createSeepient stamps its own builds" mechanism; P1-3 OPENAI_BASE_URL env-DESTINATION exfil — the openai SDK's destructor default (client.js:140) arms on baseURL:undefined, both Seepient sites (openai-discovery-source.ts:29, openai-image-raw.ts:66) pass account.baseUrl verbatim, and the egress assert + SSRF gate only on acc.baseUrl, so a host env var redirects the stored key's traffic with zero checks (live-probed at SDK + source level; single mode not exempt); P1-4(example) worker body cap label-only — stub-app.ts:160 keeps buffering past 1MiB until stream end, pre-auth → unauthenticated OOM. P2 register: SDK multi has NO working arming channel (operatorBaseline threads only into the policy plane, seepient.ts:467; multi-tenant.md:229 added in WO3 teaches the inert grant — live-probed), T010 PARTIAL-FALSE (env-note NOT moved — empty heading artifact at CHANGELOG:39, note still :79; WO2 banner erratum never written; 14th consecutive pass), refreshModels denials echo the full stored baseUrl unredacted (T015's sibling), explicit operatorBaseline REPLACES derived grants (deployment.md's own combined example triggers it; boot notice mislabels), casSync sync-write doesn't survive disk mode (getDecision's load() wipes the decision pre-persist; pin passes by ENOENT accident; getDecision has zero production callers), one un-awaited WS dispatch (ws-handlers.ts:139), commit identity pin only on commits[0] + broker drops dev/ino at the helper boundary, T014 2-of-4 sub-claims false (indent, double EGRESS_REQUIRED). P3s incl. redactWebhookUrl malformed-URL fallback leak, https://*/v1 derives a live host:"*" grant, vocabulary-gate name coverage, T002 gate's absent refresh assertion + call-through spy, T006 plain Error not the typed class. WO3 task-truth: 11 TRUE / 4 PARTIAL (T002,T005,T006,T014) / 1 PARTIAL-FALSE (T010) / T007 true-as-written dead-as-meant; follow-ups 816f96a real-but-test-plane-only + unpinned, 14da0d5 + TUI fixes TRUE nothing weakened. Spec fidelity: FR-001..016 all IMPLEMENTED in substance with 3 gaps (FR-003's pin inert in the binary, Migration placement, D2 executed as dead code); SC-001..014 met; accepted-risk register unchanged. ~1-day WO4 sketch §8 (fd-threading + no-bare-require scan pin, SDK-plane stamp mirror + baseline threading + exfil journey, OPENAI_BASE_URL defaults + decoy pin, worker destroy-on-tooLarge, claims batch, redaction reuse, load() merge, await the dispatch); label defensible-with-caveats after. OQ-1 SDK refuse-vs-stamp, OQ-2 one-operatorBaseline-two-planes vs separate option, OQ-3 disk-mode approval stores fix-now-vs-defer
+│   ├── 2026-10-01-post-022-5-WO4-adversarial-review.md # Pass-15 REVIEW-AND-FIX of the IMPLEMENTED 022-5-WO4 tree @ 976bd76 + remediation @ 78c0fb8 (5 lenses + lead verification — one lens rate-limited, its surface covered by the others + lead; both new P1s live-probed; the inverted merge reproduced by two methods pre-fix and pinned post-fix; gates at both SHAs re-run first-hand): WO4's four P1 closures GENUINE (fd-threaded identity fires under tsx OUTSIDE vitest; SDK refusal + baseline threading live-probed end-to-end incl. port-scoped grants; both openai baseURLs explicit; worker accumulation bounded) — but ONE NEW P1 the register missed: google-image-raw passed no httpOptions.baseUrl so @google/genai's getBaseUrl fell back to ambient GOOGLE_GEMINI_BASE_URL/GOOGLE_VERTEX_BASE_URL redirecting the stored key's image traffic (the site's egress assert checked a target.baseUrl the client never received — dead assert; fixed w/ explicit default + decoy gate); T014's merge-preserving load() was INVERTED vs its own comment (disk unconditionally overwrote live — a casSync decision racing its floating persist was wiped by the next getDecision load, 30/30 natural-race repro; stale disk resurrected decided records to pending; T017's deterministic interleave pin that would have caught it was never written — fixed w/ newer-wins merge + 3 pins); T007's correct refusal broke every documented embed example (README worker, migration×2, multi-tenant createTenantAgent + error-remediation snippet + signals table, deployment embed note) and WO4 stamped the TEST fixtures instead of the pages — all pages fixed to teach tenancyMode:'multi'; SDK stamp check was fail-open for signal-less runtimes vs the server's fail-closed (fixed strict); T005's worker gate vacuous (asserted only the 413 the old code produced — replaced w/ a mid-stream held-open gate; destroy-at-cap now real, response flushed before destroy; null-JSON body 400); claims: T017 false 0-of-4 pins (all written), T011's env-note move uncommitted (landed), no WO4 CHANGELOG section despite the breaking SDK refusal (written), .zcodeignore committed, WO2 superseded-pointer, stale tag-mint comments corrected, banner miscount 18-vs-20 (erratum in tasks.md) — 15th consecutive claims-truth pass; P2/P3 fixes: Invalid-baseUrl redaction, redactWebhookUrl userinfo strip, SDK baseline threading unions instead of replacing, typed TenancyRuntimeRequiredError at the http refusal + both messages name the real mechanism, hermetic decoy gates (no real api.openai.com dial), under-cap content assert, refresh-response assertion in the arming gate. Post-fix gates: suite 2206/325 zero-unhandled, probes 11/11, worker 25/25, tsc×2, CI green on the branch. Label: defensible-with-caveats stands, caveat list SHORTER than pass-14's (arming on both planes refuses unstamped; standalone limited to derived hosts; accepted-risk register unchanged); systemic note: the false-[x] cluster lands in claims/pins tasks nobody re-verifies before push — worth its own retro.
+│   └── 2026-10-01-v0.8.0-release-gate.md # RELEASE GATE for v0.8.0 (seal b9a9fa3 on release/v0.8.0; VERDICT: PASS): Phase 0 [suite 2206/325 after adjudicating one ssrf-deadline timing flake (two abort sources race; green isolated + full re-run; CI 36842395339 at seal), probes 11/11, examples 25/25, build ✓]; task truth 18 TRUE / 2 PARTIAL / 0 FALSE with every pass-15 remediation claim a–h verified at the seal; four-lens fleet + Architect — Red Team: all four headline closures + 2 novel chains (saveAccount plant seam, live settings-plane/session-scoping) HELD with live demos, probe self-enforcement genuine, zero P0/P1/P2 (P3 notes: embedder triple-stamp forgery = self-sabotage; worker cap counts UTF-16 units); Scrutinizer: first hour clean except P1 migration.md §2 snippet threw PRINCIPAL_REQUIRED as written (reproduced first-hand; fixed w/ tenancy:"single") + P2 deployment.md checklist env-var self-contradiction (fixed); Repo Auditor: CHANGELOG [v0.8.0] claims-truth audit CLEAN (zero false load-bearing claims — first time in the train), release-notes P1 overclaim (no-arg ambient disk stores called isolated) fixed + breaking list completed; Architect: SHIP-WITH-CAVEATS — label honest, docs-fixture class under-controlled (gate executes ~15–18 of 100 fences) → fence-coverage lint registered; docs-only repair round r1 folded into the release commit; product P2 register carried (health version "0.0.0", streaming zero-frames error-parity, README strict-tsc nits)
 ├── Implementation-Specs/             # One folder per spec: NNN-kebab-name/
 │   ├── 007-tui-parity-upgrade/       # TUI parity & generative widget upgrade
 │   │   ├── spec.md                   # Problem statement, requirements, scope
@@ -232,14 +306,15 @@ Current layout of the Obsidian vault (annotated):
 │       ├── contracts/                # store-contracts, sdk-injection-options, worker-deployment
 │       ├── quickstart.md             # QS-0–QS-4 validation scenarios + production budgets
 │       ├── tasks.md                  # T001–T018 dependency-ordered, US1–US3 story phases, test-first gates
-│       ├── 021-1-skill-sources/      # Sub-spec: injectable skill sources (021-1 — planned, same branch/release)
-│           ├── spec.md               # SkillSource/SkillStore + inline tier; FR-001–FR-009, M1–M6, SC-001–SC-005
-│           ├── plan.md               # P0 contract+composition+inline → P1 write path+016/018 coordination → P2 example+docs
-│           ├── research.md           # Skills-gap design ledger E1–E6 + decisions D1–D7 (2026-08-31)
-│           ├── data-model.md         # SkillRecord, last-wins composition, generated-skill write path
+│       ├── 021-1-skill-sources/      # Sub-spec: injectable skill sources (021-1 — IMPLEMENTED + rounds 1–3 remediation W200–W252 completed)
+│           ├── spec.md               # SkillSource/SkillStore + inline tier; FR-001–FR-010, M1–M7, SC-001–SC-007, checks CB-1–CB-8
+│           ├── plan.md               # P0 reconcile+gate → P1 FsSkillSources+inline → P2 write path+016/018/024 coordination → P3 example+docs
+│           ├── research.md           # 2026-08-31 ledger E1–E6/D1–D7 + 2026-09-07 re-baseline E7–E14/D8–D14 + supersession map
+│           ├── data-model.md         # SkillRecord (source? platform-stamped), tenancy-aware composition, last-store save rule
 │           ├── contracts/            # skill-source-contract, sdk-skill-options
-│           ├── quickstart.md         # QS-S0–QS-S4 validation scenarios + budgets
-│           └── tasks.md              # T001–T013 dependency-ordered, US1–US3 story phases, test-first gates
+│           ├── quickstart.md         # QS-S0–QS-S5 validation scenarios + budgets + release discipline
+│           ├── tasks.md              # T001–T016, US0 reconcile → US1 composition+inline → US2 write path → US3 example+docs; red-first gates
+│           └── remediation/          # Work orders: rounds 2–3 W200–W252 completed (winner-body fix, docs truth, fail-closed server input, multi-tenant closure)
 │       ├── 021-2-review-remediation/ # Sub-spec: consolidated review repairs (021-2 — SHIPPED in v0.7.0 via 021-3)
 │           ├── spec.md               # Release safety + server sessions + transport hardening + docs truth; FR-001–FR-019, M1–M12, SC-001–SC-010
 │           ├── plan.md               # US1 release safety → US2 sessions/WS integrity → US3 type truth ∥ US4 hardening/docs (blast-radius table)
@@ -252,6 +327,95 @@ Current layout of the Obsidian vault (annotated):
 │       │   └── tasks.md              # W001–W041; owner D1 (sessionless chat = no session) + D2 (fallback: mandatory sessionId)
 │       └── 021-4-remediation/        # Work order: rename completion + embedding/security/session repairs (021-4 — SHIPPED in v0.7.0; D1 adopt / D2 fold / D3 send-time normalization)
 │           └── tasks.md              # W100–W172; askSeepient/runSeepientServer truth, WS scopes, broker byte-classifier, D3 send-time history normalization
+├── 022-multi-tenant-isolation/       # Multi-tenant isolation hardening (022 — implemented on 021-1 branch, shipped in v0.8.0)
+│   ├── spec.md                       # FR-001–FR-018, M1–M12, SC-001–SC-005; per-agent registries, tenancy mode, principal-scoped state, regression fence
+│   ├── plan.md                       # P0 registry+contracts → P1 tool-path retarget → P2 tenancy+scoped state → P3 skills/invariant/docs → P4 matrix+re-audit+release
+│   ├── research.md                   # 2026-09-07 full-boundary audit: E1–E20 evidence (2-class findings), D1–D14 decisions
+│   ├── data-model.md                 # ToolRegistry, tenancy decision matrix, stamped Capability, scoped ledger, state classification v2
+│   ├── quickstart.md                 # QS-1–QS-8 validation scenarios (isolation matrix, mutation check, re-audit) + QS-P budgets
+│   ├── tasks.md                      # T001–T035, US1–US5 story phases, test-first gates, per-task runnable self-checks
+│   ├── contracts/                    # tool-registry, tenancy-mode, principal-scoped-state, isolation-harness
+│   ├── 022-1-readiness-remediation/  # Sub-spec: v0.8.0 readiness closure (022-1 — IMPLEMENTED, branch 022-1-readiness-remediation)
+│       ├── spec.md                   # FR-001–FR-041, M1–M12, SC-001–SC-008; closes all P1s from Reviews/2026-09-07-product-readiness-review-021-to-022.md
+│       ├── plan.md                   # P0 red-first gates → P1 front-door truth → P2 first-hour defaults → P3 tenancy closure → P4 server reliability → P5 skills residuals → P6 release gates
+│       ├── research.md               # AUTHORITATIVE disposition ledger R1–R63 (FR-001): every review finding → 022-1 FR or existing owner; D1–D14; S1–S5 holds
+│       ├── data-model.md             # PrincipalRequiredError/PERSIST_CONFIG_INVALID/SESSION_ID_INVALID, literal tenancy signal, list?() backend, server CLI parser, gate reports
+│       ├── quickstart.md             # QS-0–QS-8 automated validation scenarios + production budgets
+│       ├── tasks.md                  # T001–T048, US0 gates → US1..US6 stories, red-first gates (CB-1), [MANUAL]=0
+│       └── contracts/                # docs-truth-gates, server-entry-and-parity, tenancy-closure
+│   ├── 022-2-composition-closure/    # Sub-spec: multi-tenant composition closure (022-2 — plan + tasks complete 2026-09-13; closes the five-pass adversarial review's five P0s)
+│       ├── spec.md                   # FR-001–FR-023, M1–M8, SC-001–SC-006; closes VULN-1/2/9/10/16 + release-blocking P1s per Reviews/2026-09-12-adversarial-multi-tenant-sdk-review.md + 2026-09-13-multi-tenant-remediation-plan.md (adjudicated); artifact review 2026-09-13 fixed SDK single-mode ambient wiring (E28)
+│       ├── plan.md                   # Invert construction defaults (no-arg = isolated, ambient only via createAmbientProviderRuntime at Profile A roots) + stamp backstop; US0 red gates → US1 inversion → US2 identity/sessions → US3 inference/edges → US4 gateway-boot/worker → US5 release truth; ~5 days two-stream; branch cut from 022-1 @ 0b7fe4e
+│       ├── research.md               # Disposition ledger for the twelve unowned items (FR-001, authoritative); DP1–DP12 decisions; E1 = pi-ai override seam verified (explicit options.apiKey defeats stored+ambient — wrapper fix needs no upstream change); E27 = measured migration surface (getDefaultProviderRuntime: 39 refs/16 files — panel estimate 3× low); E28 = single-mode SDK ambient-default hazard + FR-006 wiring; contingencies for items 10/11 (024-2/025, 023)
+│       ├── data-model.md             # isIsolated stamp, createAmbientProviderRuntime + createIsolatedProviderRuntime (options-object constructor shape verified), InMemoryReplayLedger (new), PRINCIPAL_ID_RE + InvalidPrincipalIdError/TenancyWorkspaceRequiredError, secret-resolution matrices (broker + inference wrapper), composite session keys, createTenantAgent (createOperatorAgent deferred to the export-split follow-up — single-mode createSeepient IS the operator path), per-principal server workspaceId
+│       ├── quickstart.md             # QS-0–QS-5 + QS-P; eleven red-first adversarial journeys incl. de-vacuumed zero-write gate; [MANUAL]=0; release owner-gated (OQ-1)
+│       ├── tasks.md                  # T001–T046, US0 red gates → US1 inversion → US2 identity/sessions ∥ US3 inference/edges → US4 gateway/worker → US5 release truth → polish (contingency pull-forward, quickstart run, re-audit); every task carries a runnable self-check; checkpoint tasks flip it.fails journeys green; MVP = T001–T023, release-blocking set through T033; [MANUAL]=0
+│       └── contracts/                # isolated-construction, execution-boundary-tenancy, inference-egress, surface-truth
+│   ├── 022-3-remediation/            # Work order: post-022-2 remediation (022-3 — Round 1 IMPLEMENTED + verified; Round 2 tasks ready 2026-09-13; rides uncommitted 022-2 tree)
+│       ├── spec.md                   # Round 1 FR-001–FR-019 (US1 arming ∥ US2 worker auth → US3 server root → US4 secretResolver → US5 test integrity + docs → US6 P2 batch; SC-001–SC-006) + Round 2 FR-020–FR-041 (US7 WS-auth key-file P0 ∥ US8 worker authority closure → US9 operator surfaces → US10 CAS merge-back + single-mode repair → US11 claims truth beyond docs/ → US12 P2 batch; SC-007–SC-011) sourced from the pass-7 + pass-8 reviews
+│       ├── plan.md                   # P0 red gates (4 journeys red on current tree) → P1 P0 fixes ∥ → P2 server root → P3 secretResolver → P4 tests/docs → P5 P2 batch + release truth; ~1–1.5 days
+│       ├── tasks.md                  # Round 1 T001–T032 COMPLETE (all [X]); Round 2 T033–T073 READY (generated 2026-09-13 via speckit-tasks from the reconciled pass-7/pass-8 register): R2-2 red gates (WS-AUTH-SPLIT, WORKER-CRASH/CAPS/TOKENS/CAS-DEADCODE, SETTINGS-PLANE, SERVER-TOOLS-DEFAULT, CAS-ERASURE, FRESH-INSTALL-LOSS, CLAIMS-TRUTH, SINGLE-MODE-ROUNDTRIP) land failing → MVP = T033–T048 (WS-auth P0) → US8 ∥ US9 ∥ US11 ∥ US12 disjoint-parallel, US10 after gates → polish + SC-011 review re-run; contingency hooks on OQ-E/F/G
+│       ├── research.md               # Evidence E1–E8 (verified review citations) + decisions D1–D9 (arm at producers only; throw-not-warn on ambient runtime; in-memory multi store defaults; fail-closed GATEWAY_ISOLATION_REQUIRED; resolver = sync tenant-store projection; recordHit in mock seams only; code-bearing denials; multi stops seeding 017 wildcards; P2 owner disposition)
+│       ├── data-model.md             # InferenceOptions producers, buildLocalBoundary.secretResolver + UNCONTAINED gate, multi server boot default table, denied(code), worker read-only token→principal, validation tightenings
+│       └── quickstart.md             # QS-0–QS-6 + QS-P; red-first QS-1/2/4; [MANUAL]=0
+│   ├── 022-4-remediation/            # Work order: follow-up-sweep closure (022-4 — Rounds 1+2 LANDED via d27ac91+2f005f9+2820f12; Round 3 LANDED 2026-09-24 closing the pass-10 register: read-plane dev/ino identity binding + PATH_IDENTITY_MISMATCH, production-seam mutation probes (11 targets, green-baseline + evidence-required), SC-003 typed denial, SDK #private-store signal fix, operator provider channel --providers-file/--api-keys-file, WS egress backpressure, worker typed 409, docs truth batch; tasks.md Phase 14 = T047–T053)
+│       ├── spec.md                   # Round 1 FR-001–FR-012 (US0 red gates → US1 symlink plane → US2 global-lifetime gate → US3 integrity → US4 auth/perms → US5 pins; amended product rule AUTHORIZE-WHAT-YOU-READ + FR-008 denial-UX/continuity) + Round 2 FR-013–FR-019 (US6 fd-pinning O_NOFOLLOW + st_nlink hardlink gate; US7 offered-lifetimes truth + one-bucket unstamped CAS + sentinel unification; US8 executable mutation-probe contract + first-hour docs truth; US9 external-verification addendum: push+CI-green gate, SDK store exports, env-fiction batch, hygiene pair); SC-001–SC-010
+│       ├── plan.md                   # R1 P0 red gates → symlinks → lifetime ∥ auth/perms → integrity + pins → release truth (~1d) + R2 swap-racer/hardlink/offered-then-denied/no-growth/roundtrip red gates → read plane → approval truth ∥ builder trust (~1d); errata recorded (hardlink dismissal wrong, TOCTOU documented-not-closed)
+│       ├── research.md               # AUTHORITATIVE disposition ledger pass-8 → owner + evidence E1–E9 (E8 = pass-9 register → R2 FRs) + decisions D1–D13 (D12 export-what-the-CHANGELOG-names; D13 push-first/verify-last; D7 authorize-what-you-read; D8 authorize-what-you-open; D9 hardlink = second name; D10 offered-set truth; D11 one-bucket unstamped) + product-lens owner questions (OQ-G elevated + adopted as FR-017; R2's unlisted 4th breaking change flagged)
+│       ├── data-model.md             # Authorize-the-realpath canonicalization (in-workspace links ALLOWED, ceiling escapes denied w/ remediation), fd-pin contract, st_nlink gate, offered-lifetimes shape, one-bucket merge, sentinel unification, probe spawn contract, 9 invariants
+│       ├── quickstart.md             # QS-0–QS-5 + QS-P; all 5 red-first journeys named; [MANUAL]=0
+│       └── tasks.md                  # T001–T025 (Round 1 — landed via d27ac91+2f005f9, status banner, checkboxes not back-filled) + T026–T046 READY (Round 2 + US9): 5 red gates on the 2f005f9 tree (swap-racer, hardlink, offered-then-denied, no-growth 2^K, CLI→SDK roundtrip) → US6 fd-pinning + hardlink gate → US7 offered-truth ∥ one-bucket ∥ sentinel ∥ US8 executable probes + docs batch [P] → T038–T040 release truth incl. in-workspace-links-now-allowed behavior-change note + pass-10 prep + T041–T046 (US9 addendum: T041 push-first + T046 CI-green gate on all four jobs, SDK in-memory store exports, providers.md/CLI-help env-fiction batch + vocabulary-gate widening + AGENTS.md §9.3 SessionId text, getActiveSessions delete-or-scope, sync-workflow force-with-lease)
+│   ├── 022-5-engine-remediation/     # Engine boundary remediation (022-5 — IMPLEMENTED 2026-09-28 on branch 022-5-engine-remediation [3b03160+2271282+0631eff]; re-baselined per Reviews/2026-09-28-022-5-pre-implementation-red-team.md; VERIFIED 2026-09-29 by pass-11 [Reviews/2026-09-29-post-022-5-adversarial-review.md]: 🟡 engine held, NO P0, but 7 P1s — WS multi approvals dead via FR-013 actorId mismatch, htmlToText quadratic DoS, 2 FIFO wedges, FR-008d/e fiction, pin-scope overclaims, first-hour env-string/doc family, red suite + unpushed/no-CI; several [x] false — remediation sketch §9 there; all 32 tasks done; gates: suite 2136 passed/305 files, probes 11/11 with expected-message markers, worker 20/20, tsc×2 clean [US0 red gates → US1 read-plane ∥ US2 credentials → US3 probes/claims → US4 residuals → polish], implementation via /speckit-implement: FR-001/002 now verify+pins on the landed R3 identity binding [PATH_IDENTITY_MISMATCH adopted, RA-2], FR-003 edit_file ceiling + PATH_ESCAPES differential, FR-004 FIFO/abort incl. media openSync→async + CLI image repair; US2 expanded [five env names, env-mode removal per RA-4, tenancy-invariant FR-007 + kind:"none" sentinel per RA-3 killing the vendored pi-ai env fallback, wire pin single+multi]; US3 delta on the adopted R3 seam [RA-1: two-factor activation, ZERO_HITS de-confound fixing 8/11, message pins, dogfood, registration lint] + six-claim CHANGELOG corrections; US4 unchanged; SC-001..014 pin all FRs; branch-cut eca55dd; ~1–1.5 days): read-plane identity binding (dev/ino on the pinned fd — kills the folder-swap P0; media seam + edit_file oracle + FIFO), inference env-key DEMOLITION (credentials only via pi-ai provider management, owner decision), REAL mutation probes + CHANGELOG claims corrections, P2 guard-surface batch (auth key-cache revocation race, root:"/"∥"" strip, GLOBAL typed denial not throw, casSync principal binding, htmlToText input cap, worker crash/413, racer kill-on-settle); pi-sync auto-release = ACCEPTED RISK (owner 2026-09-24)
+│   └── 022-5-WO1-remediation/        # Work order: post-022-5 remediation (022-5-WO1 — IMPLEMENTED 2026-09-29; VERIFIED same-day by pass-12 [Reviews/2026-09-29-post-022-5-WO1-adversarial-review.md]: 🟡 pass-11 register genuinely closed + engine held, but 2 new P1s (brokered-fetch unbounded buffering OOM, refreshModels multi assert unarmed in production) + 9-of-41 tasks partial-false — WO2 sketch §7 there on branch 022-5-WO1-remediation [1ab51d6..d3092c7]; all 41 tasks done; gates: suite 2173 passed/313 files with zero unhandled errors, probes 11/11 WITH seam-coverage + registration lints live, worker 20/20, tsc×2 clean; pass-11 P1-1..P1-7 closed — WS consent plane repaired, htmlToText linear, FIFO wedges closed, lints real, credential tripwires complete, first-hour truth; tasks READY 2026-09-29, generated via speckit-tasks from Reviews/2026-09-29-post-022-5-adversarial-review.md; branch cut from dd4a171; [MANUAL]=0; owner-question defaults D1-D4 recorded reversible: D1 actorId = edge-derived authenticated principal (apiKeyHash ?? ws-user), D2 keep no-daemons kill-on-settle everywhere + document, D3 implement both probe registration lints for real + fix VULN-1-BROKER seam naming, D4 add WO1 branch to ci.yml triggers): US0 red gates T002-T009 (WS multi-approval resolve(true), htmlToText 256KiB wall-clock, commit-files + edit-section FIFO wedges via Promise.race, suite-exit-0 subprocess gate, refreshModels egress parity, producer source-scan tripwire w/ unarmed fixture, first-hour stdout/docs-example gates) → US1 consent plane T010-T012 (thread principal into wsApprovalDecision actorId via pendingApprovals entry; casSync owner = principalId ?? request.principalId with assert-not-opt-in; SC-010 continuation pin) ∥ US2 availability T013-T016 (anchored tag regex + entity/surrogate guards; commit-files old-content O_NONBLOCK+isFile+expected-identity pin+signal; edit-section identity pin closing the micro-race exfil chain; media typed codes surviving classifyMediaError + signal into readFile) → US3 test integrity T017-T021 (SEAM COVERAGE + REGISTRATION lints wired for real w/ dead COUNTER_ONLY const made executable; committed dogfood scenario deleting a real seam; confound pin; FAIL-section message matching w/ alternation; artifact/banner erratum) → US4 pins T022-T027 (refreshModels tenancy+egress+recorded surface on 3 surfaces; vendored-import source-scan enumeration + barrel narrowing; resolved-key wire journey single+multi w/ decoys; profile-a provider-management fixture; title truth) → US5 first-hour+claims+release T028-T033 (in-binary strings→auth-login guidance; docs batch incl. executable provider-management isolated example + local-llm command + multi-tenant/providers/reference pages; vocabulary gate widening to .env.example/AGENTS.md/case/env-mode; floating store promises caught → suite exit 0; CHANGELOG truth for Security(022-5) section + remaining 2 FR-009 corrections + lint-claim; push + CI trigger) → US6 P2 closure T034-T037 (symlink dangling-vs-existing oracle byte-identical denials; D2 doc+pin; stub root normalize; SC-008/009/011/012 pins) → polish T038-T041 (full gates, PendingApprovalStore dead-duplicate deletion + tenancyMode param, vault map, release commit+push); MVP = T001-T016, release-blocking through T038; every task carries a runnable → verify; refuted findings and owned-elsewhere items explicitly excluded
+│       └── 022-5-WO2-remediation/   # Work order: post-022-5-WO1 remediation (022-5-WO2 — IMPLEMENTED 2026-09-29; VERIFIED same-day by pass-13 [Reviews/2026-09-29-post-022-5-WO2-adversarial-review.md]: 🔴 label one composition line short — buffering CLOSED + engine held, but injected-runtime branch skips the multi arming (pass-12 exfil chain live-probed on the documented embed path) and standalone --providers-file lost operator refresh w/ no baseline channel; 15/21 tasks TRUE, WO3 sketch §7 there on branch 022-5-WO2-remediation; all 21 tasks done; gates: suite 2189 passed/319 files, probes 11/11 with lints, worker 25/25, tsc×2 clean; pass-12 P1-1 closed [NodeNetworkAdapter arms pinnedFetch streaming cap — 1.45GB->76ms bounded rejection], P1-2 closed [server boot roots armed multi + operator-baseline capabilities; D2 write-side assert on the accounts PUT via runtime.assertAccountEgressAllowed]; pi-canonical-converter exemption; AGENTS vocabulary exemption scoped to vault-map fence + speckit block [D3]; generated from Reviews/2026-09-29-post-022-5-WO1-adversarial-review.md §7)
+│           └── 022-5-WO3-remediation/ # Work order: post-022-5-WO2 remediation (022-5-WO3 — IMPLEMENTED 2026-09-29 on branch 022-5-WO3-remediation; all 17 tasks done; gates: suite 2197 passed/322 files, probes 11/11 with lints, worker 25/25, tsc×2 clean, CI 8/8 green at bbbfefa [follow-ups: casSync decision written synchronously into the requestId map — T012 pin caught a real getDecision race; README --env-var sweep finished]; pass-13 P1-1 closed [injected runtimes require the multi stamp — TENANCY_RUNTIME_REQUIRED; createSeepient stamps by construction, D2], P1-2 closed [operator baseline DERIVED from providers-file accounts at boot; standalone refresh works; boot notice + deployment.md], P2-1 folded [egress assert in saveAccount — one seam], webhook denial URL redacted, section-read identity pin re-bound to tag-mint identity [real swap gate both directions]; generated from Reviews/2026-09-29-post-022-5-WO2-adversarial-review.md §7; VERIFIED 2026-10-01 by pass-14 [Reviews/2026-10-01-post-022-5-WO3-adversarial-review.md]: 🔴 label not yet — server plane genuinely closed + 13-pass engine register held on dist, but 4 P1s (T005 pin DEAD in production via bare require() in ESM swallowed by its own catch — vitest shim hides it; createSeepient multi accepts single-stamped runtimes w/ T007 stamp unreachable, pass-13 exfil chain live on the SDK plane; OPENAI_BASE_URL env-destination exfil on both openai-SDK sites; worker pre-auth OOM), T010 PARTIAL-FALSE again, SDK baseline channel inert as documented; task-truth 11/4/1; ~1-day WO4 sketch §8 there)
+│               └── 022-5-WO4-remediation/ # Work order: post-022-5-WO3 remediation (022-5-WO4 — IMPLEMENTED 2026-10-01 on branch 022-5-WO4-remediation; all 18 tasks done; gates: suite 2202 passed/324 files, probes 11/11 with lints, worker 25/25, tsc×2 clean; pass-14 P1-1 closed [bare require gone; fd-threaded identity in record(); source+behavior pin], P1-2 closed [SDK multi stamp refusal + operatorBaseline threads into runtime capabilities], P1-3 closed [explicit baseURL at both openai-SDK sites + decoy-env pin], P1-4 closed [worker stops appending past cap]; D1 refuse D2 one-option D3 merge-preserving load; generated from Reviews/2026-10-01-post-022-5-WO3-adversarial-review.md §8; VERIFIED+REMEDIATED 2026-10-01 by pass-15 [Reviews/2026-10-01-post-022-5-WO4-adversarial-review.md]: the four P1 closures GENUINE under attack, but the register found ONE NEW P1 (google image site wired no httpOptions.baseUrl — GOOGLE_GEMINI_BASE_URL/GOOGLE_VERTEX_BASE_URL env-destination exfil, live-probed; the egress assert checked a target.baseUrl the client never received), an INVERTED merge inside T014 (disk overwrote live — decision wipe 30/30; T017's missing interleave pin is why it shipped), docs dead-ends (every stamped-example page now threw — README/migration×2/multi-tenant×2 — fixtures were stamped instead of the pages), the SDK stamp check fail-open vs the server's fail-closed, T005's gate vacuous, T017 false 0-of-4, T011's fix left uncommitted, no WO4 CHANGELOG section despite the breaking refusal, banner miscount (18 vs 20) — 15th consecutive claims-truth pass; ALL FIXED at 78c0fb8 with pins (google decoy gate, 3-way merge pins, destroy-at-cap mid-stream gate, hermetic decoys, docs stamped, WO4 CHANGELOG + env-note landed); gates post-fix: suite 2206/325 zero-unhandled, probes 11/11, worker 25/25, CI green; task-truth at reviewed HEAD: 11 TRUE / 6 PARTIAL / 2 FALSE (T005, T017))
+│       ├── spec.md                   # US1 read plane ∥ US2 inference credentials ∥ US3 test integrity + claims ∥ US4 residuals; FR-001–FR-016, SC-001–SC-005; five binding owner decisions 2026-09-24 recorded in-header
+│       ├── plan.md                   # P0 red gates → P1 read plane ∥ P2 env demolition → P3 probes + claims → P4 residuals → P5 release truth; ~2–3 days; P1∥P2 disjoint-file split
+│       ├── research.md               # Evidence E1–E12 (pass-10, lead-verified, probe-confirmed where marked) + owner decisions O1–O5 + technical decisions D1–D9 (dev/ino identity token; injected GuardProbe not env branches; stat-verify-publish cache; universal-root strip class)
+│       ├── data-model.md             # ReadIdentity {dev,ino} state machine, credential resolution matrix, GuardProbe contract, KeyCacheEntry shape, strip normalization table, 9 test-pinned invariants
+│       ├── contracts/                # read-identity-binding, inference-credential-sources, mutation-probe-contract
+│       └── quickstart.md             # QS-0–QS-6 + QS-P budgets; all red-first; [MANUAL]=0
+├── 023-seepient-sage/                # Seepient Sage: unified telemetry tracing + full auditing (023 — planned, branch 023-seepient-sage)
+│   ├── spec.md                       # US1–US6, FR-001–FR-023, M1–M13, SC-001–SC-007; two-plane (audit+telemetry) system
+│   ├── plan.md                       # P0 correlation spine → P1 audit enrichment → P2 telemetry plane → P3 gap closure → P4 surfaces → P5 self-consumption
+│   ├── research.md                   # Evidence E1–E19 + decision ledger D1–D13 (architecture options A–D scored/ranked; baselines on 022)
+│   ├── data-model.md                 # SageContext, SpanRecord, RunRecord, AuditQuery/SecurityNotice, RedactionFilter, storage layout
+│   ├── quickstart.md                 # QS-1–QS-8 validation scenarios + QS-P production budgets
+│   ├── tasks.md                      # T001–T049, US1–US6 story phases, test-first gates, per-task self-checks (protocol: grep proofs, micro-probes, UX substring asserts, round-trip probes, byte-fixtures, determinism + negative probes, fail-open/closed drills); five-lens review remediated 2026-09-07 (M13 helper slice, createAgent dropped, filter foundational)
+│   └── contracts/                    # sage-correlation, telemetry-plane, audit-enrichment-and-query, sage-surfaces, self-consumption
+├── 024-security-remediation/         # Security remediation with product-weighted defaults (024 — planned, branch 024-security-remediation)
+│   ├── spec.md                       # US1–US5, FR-001–FR-020, M1–M12 (M4/M6/M8/M9/M12 amended), SC-001–SC-009; re-baselined 2026-09-24 against 2820f12 + Architecture/security-posture.md and product-re-aligned (autonomous multi-purpose agent, extension surfaces first-class) — adds FR-016 output-classifier truth, FR-017 host-persistence deny table (git + shell-init families), FR-018 WS one-shot ticket auth, FR-019 revocation disconnect, FR-020 approval-label scope truth; §Re-baseline records tree drift, charter + product re-grades, external-reviewer adjudication, pass-10 ownership matrix (engine items → 022-5 rec.), gateway amendment elevated to product-critical for the multi-tenant claim; tasks.md regeneration required
+│   ├── plan.md                       # P0 integrity → P1 shell tiers + FR-016 output truth → P2 host-config fence (FR-006/017) + label truth (FR-020) → P3 secret minimization → P4 WS origin + ticket auth/revocation (FR-012/018/019) → P5 skills gate + release; re-aligned 2026-09-24 to FR-016..020 + 022-5 strip-layer sequencing rule
+│   ├── research.md                   # Evidence E1–E14, audit corrections S1–S5, decisions D1–D14 (product-lens deliberation), owner questions Q1–Q3
+│   ├── data-model.md                 # ShellRiskTier/classification, credential filetable, balanced gate matrix, ceiling migration, skill trust record
+│   ├── quickstart.md                 # QS-1–QS-8 validation scenarios + production budgets
+│   ├── tasks.md                      # T001–T028, US1–US5 story phases, test-first gates, per-task self-checks (protocol: gate-matrix/prompt-count/UX-substring/parity/mode-invariance/migration/negative probes)
+│   ├── contracts/                    # shell-risk-classifier, secret-ref-authority, workspace-skill-trust, transport-origin
+│   ├── 024-1-native-approval-parity/ # Sub-spec: native approval parity — REPL/headless/SDK/WS off the legacy bridge (024-1 — planned, after 022/023/024)
+│   │   ├── spec.md                   # US1–US4, FR-001–FR-015, M1–M8, SC-001–SC-006; readline presenter, headless truth, bridge + legacy-type demolition
+│   │   ├── plan.md                   # P0 red gates → P1 readline surface → P2 headless truth + knob demolition → P3 SDK/HTTP/WS retarget + bridge deletion → P4 loop fail-closed + type truth + docs
+│   │   ├── research.md               # Evidence E1–E15 (verified v0.7.2 @ 3595047) + cross-spec coordination (022/023/024/025: zero overlap) + decisions D1–D10
+│   │   ├── data-model.md             # Deleted-type table, ApprovalSelection, presenter model, interaction-mode matrix, seam/option/settings deltas
+│   │   ├── quickstart.md             # QS-1–QS-5 validation scenarios + QS-P production budgets
+│   │   ├── tasks.md                  # T001–T046, US1–US4 story phases, test-first gates, per-task runnable self-checks
+│   │   └── contracts/                # readline-approval-presenter, approval-injection-surface
+│   └── 024-2-product-review-remediation/ # Sub-spec: 2026-09-06 product-review remediation (024-2 — planned, after 022/023/024/024-1)
+│       ├── spec.md                   # US1–US6, FR-001–FR-031, M1–M7, SC-001–SC-007; owns the review remainder after predecessor subtraction
+│       ├── plan.md                   # P0 re-baseline ledger → P1 write integrity → P2 inference pinning → P3 SDK/docs truth → P4 release gates → P5 store hygiene → P6 transport residuals → P7 review re-run
+│       ├── research.md               # Subtraction ledger vs 022/023/024/024-1/025 (finding×spec matrix), E1–E22, D1–D15; owner decisions Q-A–Q-D resolved 2026-09-07
+│       ├── data-model.md             # FileSnapshot sha256, gate condition, error-export table, docs-sync v2, docs-sweep annex (page:line), finding→FR matrix
+│       ├── quickstart.md             # QS-P0 re-baseline + QS-1–QS-7 validation scenarios
+│       └── contracts/                # write-integrity-gating, sdk-surface-and-docs-truth, inference-egress-pinning, release-gates, store-and-transport-hygiene
+├── 025-agent-instance-state/         # Agent-instance state & process-global elimination (025 — planned, branch 025-agent-instance-state)
+│   ├── spec.md                       # US1–US5, FR-001–FR-011, M1–M8, SC-001–SC-005; shrinks 022's FR-017 accepted list
+│   ├── plan.md                       # P0 audit+invariant v3 → P1 SDK surface → P2 cache ownership → P3 server objectification → P4 fence green+docs
+│   ├── research.md                   # Evidence E1–E15 (E1–E4/E12 tagged 022-owned to prevent duplication), consequences C1–C3, decisions D1–D9
+│   ├── data-model.md                 # Disposition table (022 §6 → 025), AgentSettings, ServerState, invariant classification v3
+│   ├── quickstart.md                 # QS-0–QS-7 validation scenarios + QS-P production budgets
+│   ├── tasks.md                      # T001–T024, US1–US5 story phases, test-first gates, self-check protocol (GP/TS/MP/XP/TP/CP/DP/PP; [MANUAL]=0)
+│   ├── checklists/requirements.md    # Specification quality checklist (validated 2026-09-07; 30/30 post-review)
+│   └── contracts/                    # process-state-invariant, sdk-surface-migration, server-state
 ├── 010-provider-management-redesign/ # Provider mgmt redesign: contracts + runtime + purpose/tier routing
 │   ├── spec.md                       # Problem, 5 blockers + 4 gaps, scope decisions, success criteria
 │   ├── plan.md                       # P0-P7 phased plan (contracts → Pi adapter → runtime → resolution → surfaces → reliability)
@@ -387,7 +551,7 @@ Domain orchestrates skill loading via `src/domain/skills/skill-invoker.ts` and `
 
 Multi-layer merge (highest wins): env vars → local `.seepient/setting.json` → global `~/.seepient/setting.json` → defaults. Managed by `src/domain/settings/settings-manager.ts`; schema in `src/foundations/settings-schema.ts`.
 
-Env vars per provider: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GLM_API_KEY`, `OPENAI_COMPAT_API_KEY` + `OPENAI_COMPAT_BASE_URL`.
+Inference credentials resolve only from provider management (setup wizard, `seepient auth login`, injected stores) — 022-5 demolished env-key synthesis; Seepient never reads provider API keys from the environment.
 
 ## Conventions
 
@@ -490,12 +654,423 @@ Keep `CONTEXT.md` under 20 lines total. Do NOT summarize the full conversation �
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-- **ACTIVE PLAN**: `~/Documents/Obsidian/Seepient/Implementation-Specs/021-stateless-sdk-workers/021-1-skill-sources/plan.md`
-  — Injectable `SkillSource`/`SkillStore` + inline-skills tier so skill content
-  joins the store-contract family — serverless light shape gets a working skill
-  system, embedders compose global + tenant-scoped skills from their own DB with
-  last-wins shadowing, and 016's generated-skill writer retargets the store instead
-  of disk (fail-closed without one). tasks.md ready (T001–T013).
+- **JUST IMPLEMENTED (022-5 — branch 022-5-engine-remediation, commits
+  3b03160 + 2271282 + 0631eff, all four gates green 2026-09-28; next:
+  adversarial verification pass before any multi-tenant label)**:
+  `~/Documents/Obsidian/Seepient/Implementation-Specs/022-multi-tenant-isolation/022-5-engine-remediation/plan.md`
+  — Engine boundary remediation (022-5), on the post-Round-3 tree:
+  US1 read-plane completion (identity binding LANDED by 022-4 R3 —
+  adopted verbatim as PATH_IDENTITY_MISMATCH + operation.expected/
+  imageIdentity, RA-2; what remains: edit_file ceiling re-authorization +
+  PATH_ESCAPES dangling-vs-existing closure, FIFO/abort on both read
+  surfaces with media openSync converted to async, absent-identity +
+  raw-fallback pins, and the CLI image variation/edit repair broken by
+  R3). US2 inference env-key DEMOLITION, full scope (five env names
+  incl. OPENAI_COMPAT_* deleted at provider-config-store.ts:480-517;
+  env credential MODE deleted from CLI/TUI/REST/auth-cli per RA-4;
+  discovery fails CREDENTIAL_REQUIRED on valueless keys; refreshModels
+  gains tenancy + egress parity; TENANCY-INVARIANT no-undefined
+  invariant with a kind:"none" "unused" sentinel kills the vendored
+  pi-ai env fallback — compat.js withEnvApiKey, 37 env names — in
+  single mode too, per RA-3; real-vendored wire pin single+multi).
+  US3 honest probe matrix on the ADOPTED R3 seam (RA-1: env seam stays,
+  two-factor activation NODE_ENV=test + vitest marker; guard.ts counter
+  de-confounded so ZERO_HITS is never the red mechanism — fixes 8/11
+  targets; expected-message pins; dogfood gate; registration lint) +
+  CHANGELOG corrections for six false claims. US4 P2 batch unchanged:
+  key-cache revocation race, universal-root strip ("/" and "*" and ""),
+  GLOBAL typed denial not throw, casSync principal binding, htmlToText
+  input cap, worker crash/413/guards, racer kill-on-settle. SC-001..014
+  pin every FR. Branch-cut is eca55dd (NOT 2820f12). Owner decisions
+  2026-09-24 binding; RA-1..6 lead adjudications reversible by owner.
+  Lands before or with 024 (strip-layer rule unchanged); ~1–1.5 days.
+- **PREDECESSOR (Round 1 landed via d27ac91+2f005f9; Round 2 tasks T026–T046 READY 2026-09-20 — closing the pass-9 register + the US9 external-verification addendum)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/022-multi-tenant-isolation/022-4-remediation/plan.md`
+  — Follow-up-sweep closure (022-4): closes the pass-8 register items that
+  022-3 Round 2 (FR-020–FR-041, tasks T033–T073) does NOT own — reconciled
+  by the disposition ledger in 022-4 research.md (every pass-8 finding →
+  exactly one owner; no double implementation). 022-4 owns: the
+  probe-confirmed **symlink exfiltration pair**, closed by the product rule
+  AUTHORIZE-WHAT-YOU-READ — permissions apply to the REAL file, not the name
+  it is reached by: resolved realpath authorized against the tenant ceiling +
+  classified + opened (fd-pinned, O_NOFOLLOW); only ceiling escapes deny
+  (PATH_ESCAPES_WORKSPACE w/ remediation text — in-workspace links ALLOWED,
+  the tenant mental model; supersedes the landed static refusal) +
+  relative-input resolution against the workspace root not process.cwd();
+  **global-lifetime suppression in multi** (OQ-E default: offered lifetimes
+  exclude `global`, direct persistence → GLOBAL_LIFETIME_FORBIDDEN — the
+  shared GLOBAL store stays a per-tenant write hotspot even after R2's
+  FR-029 merge fix); **test-integrity infrastructure** (verify-mutation-probes.ts
+  rewritten to neutralize each guard via a test seam, run its journey, and
+  FAIL unless the journey flips red — wired into CI; SC-003 de-vacuumed with
+  tools+sessionId+asserted response); **auth-plane completion** (path-keyed
+  key cache replacing the single-slot module global + the latent
+  rest-gateway.ts:68 ambient-auth copy — lands after R2's FR-020 threading
+  on the same seam, with a pull-forward contingency if R2 stalls);
+  **session file modes 0700/0600** (the outlier vs audit/policy discipline);
+  and the **supply-chain pins** (real-vendored positive-path VULN-16 journey
+  asserting the wire Authorization equals the tenant key with a decoy env
+  key present — pi-ai 0.85.1's applyAuth seam is currently trusted-not-pinned;
+  + the 34-case egress URL-identity table as regression pins; the bump
+  itself verified safe by full dist diff). US0 red gates (5 journeys) → US1
+  symlink plane → US2 lifetime gate ∥ US4 auth/perms → US3 integrity + pins
+  → release truth; ~1 day; [MANUAL]=0; SC-006 = pass-9 review re-run with
+  the disposition ledger as checklist before any multi-tenant label.
+- **PREDECESSOR (implemented Round 1; Round 2 tasks READY — lands first)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/022-multi-tenant-isolation/022-3-remediation/plan.md`
+  — Post-022-2 remediation work order (022-3): closes the verified findings of
+  the post-implementation adversarial review
+  (`Reviews/2026-09-13-post-022-2-adversarial-verification.md` — three lenses
+  + same-day one-by-one verification pass; every finding re-confirmed,
+  amplified, rescoped, or refuted against code). Two P0s: arm the existing
+  VULN-16 wrapper fix (tenancyMode/capabilities never threaded into inference
+  opts — agent-loop.ts:590/media.ts:118 — host-env Bearer exfil via tenant
+  baseUrl still live through runAgentLoop on all surfaces) + make the worker
+  control plane derive identity exclusively from authenticated tokens
+  (stub-app.ts:115 auto-adopt fallback AND body-principalId re-binding on
+  POST /api/sessions :253, /api/audit :118, /api/policy :176). P1s: server
+  root inside the validation regime (runtime stamp check, in-memory store
+  defaults in multi replacing ~/.seepient/cwd locals, SEEPIENT_UNCONTAINED
+  gated on tenancy, fail-closed GATEWAY_ISOLATION_REQUIRED on ambient gateway
+  opt-in), tenant secretResolver threading through buildLocalBoundary (both
+  ends exist — pure wiring), anti-vacuity recordHit migration into guarded
+  seams (8/10 journeys self-record), the two missing public-entry journeys
+  (loop-level VULN-16 + end-to-end brokered secret), CREDENTIAL_REQUIRED as a
+  machine-readable broker denial code, docs truth (getDefaultProviderRuntime
+  purge ×3 sites, multi-tenant.md guarantee-table re-pointing, banned-
+  identifier vocabulary gate). P2-cheap: LocalAuditStore slug validation,
+  egress scheme-default port resolution, store stamp `!== true` tightening,
+  multi stops seeding 017 wildcard ceilings. US0 red gates → US1 arming ∥ US2
+  worker auth → US3 server root → US4 secretResolver → US5 test integrity +
+  docs → US6 P2 batch; ~1–1.5 days; deferred items keep owners (025, OQ-3,
+  024-2, 024 gateway redesign); release owner-gated; SC-006 = review re-run
+  before any multi-tenant label.
+- **PREDECESSOR (implemented, uncommitted, branch 022-2-composition-closure @ 0b7fe4e+)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/022-multi-tenant-isolation/022-2-composition-closure/plan.md`
+  — Multi-tenant composition closure (022-2): closes the five P0-class holes
+  (VULN-1 ambient broker secrets, VULN-2 principalId traversal, VULN-9
+  default server ambient runtime, VULN-10 presence-vs-composition trap,
+  VULN-16 pi-ai ambient auth on inference) and the release-blocking P1 set
+  of the five-pass adversarial review
+  (`Reviews/2026-09-12-adversarial-multi-tenant-sdk-review.md`, 🔴 REJECT)
+  per the adjudicated remediation plan
+  (`Reviews/2026-09-13-multi-tenant-remediation-plan.md` — OpenFusion panel,
+  cross-checked). Core move: **invert construction defaults** — no-arg
+  ProviderRuntime/ProviderConfigStore/CompositeCredentialStore become
+  isolated in-memory (zero ambient reads); ambient composition only via
+  createAmbientProviderRuntime() at Profile A roots AND the SDK single-mode
+  path (bare local SDK scripts keep host env keys — verified hazard at
+  sdk/index.ts:341 + seepient.ts:189, research E28; getDefaultProviderRuntime
+  deleted across its measured 39-reference/16-file surface, E27, callers
+  migrated in-place); readonly isIsolated stamp asserted by
+  validateTenancyCompleteness in multi as backstop. Then: tenancy input
+  threaded into EffectBroker/BrokerExecutor (multi = no host-resolution path,
+  CREDENTIAL_REQUIRED on missing secrets; new InMemoryReplayLedger as multi
+  default + effect-broker.ts:146 comment-lie fix); principalId slug
+  validation at the Domain factory (one place: charset + case-folded
+  sentinels + no sdk-user fallback); sessions keyed apiKeyHash:sessionId;
+  inference wrappers fail closed BEFORE the vendor call (verified: pi-ai's
+  explicit options.apiKey override branch defeats stored+ambient — no
+  node_modules patch, no upstream dependency; image path gets a credential
+  store; tenant baseUrl requires an egress capability); server boots
+  isolated-empty by default with boot notice (explicit runtime supply = the
+  single sanctioned operator channel, no ambient env switch); no ambient
+  gateway composition in multi boot; TENANCY_WORKSPACE_REQUIRED (multi never
+  defaults workspace to cwd; server workspaceId derives from principal);
+  tools edge = string[]-only; reference worker control plane authenticated +
+  principal-scoped. Eleven red-first adversarial journeys (incl. the
+  de-vacuumed zero-write gate — current Dim 8 runs no tool calls) +
+  anti-vacuity CI discipline (zero-hit security tests fail) + Profile A
+  regression smoke + effect-free-server architecture invariant. research.md
+  carries the authoritative disposition of the twelve unowned review items
+  (owned: 1–7, 12, 8-default-off-slice, 9; left with owners: 10→024-2/025,
+  11→023, both with in-window pull-forward contingencies). US0 gates → US1
+  inversion → US2 identity/sessions → US3 inference/edges → US4
+  gateway/worker → US5 release truth; ~5 days two-stream; release owner-gated
+  (hold v0.8.0 until P0 closure; day-6 single-tenant-labeled fallback is
+  owner-triggered). Breaking (pre-1.0, migration notes): isolated
+  constructor defaults, getDefaultProviderRuntime deletion, workspace
+  requirement in multi.
+- **UPCOMING (plan complete — sequenced after 022/023/024/024-1; sub-spec of 024)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/024-security-remediation/024-2-product-review-remediation/plan.md`
+  — Product-review remediation (024-2): owns the remainder of the 2026-09-06
+  product review (`Reviews/2026-09-06-product-review-017-to-021-4.md`, 🔴
+  verdict, 7 P1s) after verified subtraction of everything 022/023/024/024-1
+  absorb (ledger in research.md — 4 findings fully absorbed, 4 cores closed,
+  the rest is here). Six families, 31 FRs, every one traced to a numbered
+  finding or verified residual: write integrity (sha256-bind write_file
+  replace-mode commits so the helper's snapshot-changed guard finally fires;
+  extend the exact-commit pre-prompt gate to broker ops carrying
+  `outputCommit` so generate_image is refused BEFORE approval/billing on
+  helper-less machines; create-semantics for image destinations; snapshot
+  re-record fixes write-then-edit), inference-egress pinning (pi-ai
+  `ProviderRequestOptions.fetch` injection seam wraps foundations
+  resolve→classify→pinnedFetch per request, honoring per-account
+  ssrfAllowPrivate; ssrf-fetch.ts header stops over-claiming), SDK/docs
+  truth (value-export the 15-class error hierarchy; docs-sync deny-list v2 +
+  README example collision check; purge retired SessionStore from 3 pages;
+  consentMode default truth; allowFallback fiction removed from the security
+  review doc; docs-sweep annex at page:line), release gates
+  (`verifyPack()` actually calls `assertNotPlaceholder` and stops staging
+  placeholders to satisfy itself; release order build→stage→verify→publish;
+  checklist 5-job truth; homebrew propagation retry), store hygiene
+  (stale-lock recovery for LocalPolicyStore; `policy-store-corrupt` notice
+  riding 023's machinery; `PRINCIPAL_REQUIRED` in multi mode closing the
+  sdk-user collapse; approval persist failures surfaced, zero unhandled
+  rejections; dead `PendingApprovalStore`/raw `WriteFileTool` exports
+  demolished; broker-draft destination cross-check; `artifacts.has`
+  implemented), transport residuals + test pins (loopback default bind,
+  adopted; provider-mgmt body cap env-governed; session adopt-or-create
+  unified to the documented D1 on BOTH surfaces — REST's 404 was the
+  divergence; WS client-id validation before spanId use; gateway
+  usage/audit scope = own-principal at agent:read, admin for
+  cross-principal, adopted; sessionId 128-cap + typed persist-shape
+  error; amnesiac resume pinned by a full-history fake; worker
+  load-failure no longer overwrites history; HostToolContext populated so
+  abort reaches host tools). Owner questions resolved up front (Q-A
+  loopback, Q-B gateway scope — adopted 2026-09-07; Q-C stays with 024;
+  vehicle pins at branch cut). P0 re-verifies the whole subtraction ledger
+  against the landed
+  predecessor tree (findings come back if a spec dropped them; 025-aware
+  without depending on it); SC-007 re-runs the review's finding list — zero
+  open P1s is the bar. tasks.md via /speckit-tasks (follow-up).
+- **UPCOMING (plan complete — sequenced after 022/023/024; sub-spec of 024)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/024-security-remediation/024-1-native-approval-parity/plan.md`
+  — Native approval parity (024-1): finishes the native-broker migration on
+  every surface the 008/011/017 upgrades left on `legacy-adapter.ts` —
+  REPL/headless (the primary `seepient -n`/`--docker` path via `runChat`)
+  gets `InlineApprovalBroker` + a readline presenter (exact command + 024
+  FR-004 classification reasons + lifetime choices that persist like the
+  TUI); WS approval wire upgraded both directions (typed request +
+  choices out, `optionId`+`lifetime` back; the synthetic-request
+  duplicate-decision path is deleted — one decision construction);
+  headless stops silently auto-approving (`--headless`/`--docker` no
+  longer set `autoConfirm`; typed `approval-unavailable` denial with
+  remediation; unattended = explicit `--mode autonomous`/`--yes`); SDK/HTTP/
+  WS drop the `approveTool` option for `approvalBroker`-only (WS decision
+  message carries optionId+lifetime — no scope demotion); `legacy-adapter.ts`,
+  `setPipelineApproveTool`, `LegacyPermissionPrompt`, `/permissions` legacy
+  grant subcommands, `agent.autoConfirm`, `SEEPIENT_SHELL_APPROVE`, and the
+  `GrantScope`/`ApprovalScope`/`ApprovalDecision`/`ApprovalContext`/
+  `ApproveToolFn` types are deleted; `runAgentLoop` requires `wiredPipeline`
+  (typed error), killing the Domain→Transport dynamic import; vocabulary +
+  architecture gates make regression visible. Zero overlap with 022/023/025
+  (rebase rules M6/M8); consumes 024's classification vocabulary (M7).
+- **UPCOMING (plan complete — independent of 022/023; recommended vehicle v0.7.3)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/024-security-remediation/plan.md`
+  — Security remediation with product-weighted defaults (024): closes the
+  seven unfixed findings of the 2026-09-07 audit with UX-deliberated fixes
+  rather than maximal-strictness gates. Four-tier shell classifier
+  (`known-safe`/`ordinary`/`workspace-destructive`/`untrusted-code`, new
+  `ToolRiskCategory` member) where `untrusted-code` prompts in balanced mode
+  ONLY when process containment is absent (sandbox already denies network,
+  sanitizes env, protects home paths — prompts land only where the sandbox
+  isn't already holding the risk; research D1/D2); sandbox deny-write on
+  `${workspaceRoot}/.git/hooks` + `.git/config` (the one true escape-to-host
+  path — invisible to normal git, mode-invariant, no new escape);
+  `{kind:"secret-ref", ref:"*"}` removed from the local ceiling + a
+  one-time stored-policy migration strips 017's seeded wildcard, with 017's
+  config-derived grants carrying the out-of-box brokered-tools promise and
+  unknown refs getting one informed "Use the stored secret `ref`?" prompt
+  (the four retained ceiling wildcards — network/recipient/process/
+  model-egress — recorded as accepted risk in M6);
+  WS upgrade origin check (same-host default, corsOrigins allowlist,
+  no-Origin non-browser clients untouched); one shared credential-filename
+  table (.npmrc, .netrc, .git-credentials, .docker/config.json, .kube/config,
+  id_rsa-family, .pfx/.p12) powering both read sensitivity and a conservative
+  shell-operand secret scan (stamps the existing filesystem-read secret
+  effect); VS Code-style one-time per-workspace trust prompt for
+  `<cwd>/.seepient/skills` (headless skips + notices; rides the 021-1
+  SkillSource seam; 018 stays authoritative for injection-time contracts);
+  mechanical fixes: `native/` + `scripts/place-native-helper` join
+  security-kernel in self-evolution classification, scheduler
+  `"default-secret"` replaced by a per-process random signing key.
+  Audit corrections recorded in research S1–S5 (quoted P0-2 pattern wasn't
+  the code — actual set is broader but still binary; WS is token-gated so
+  origin is defense-in-depth; P0-2 severity splits by containment). Owner
+  questions open: contained-network product story for package managers (Q1),
+  network-wildcard accepted-risk confirmation (Q2), v0.7.3 vehicle (Q3).
+  Baseline v0.7.2 @ 3595047; tasks.md ready (T001–T028, US1–US5 story
+  phases, test-first — Phase 1 pins SC-001 prompt-parity green on the
+  untouched tree and lands the classifier/gate-matrix suites red-by-design;
+  every task carries runnable self-checks per the self-check protocol:
+  gate-matrix probes over the full tier × containment × mode table,
+  prompt-count probes (SC-001 = ordinary corpus yields exactly 0 prompts
+  pre/post), UX substring asserts on every user-visible string, parity
+  replays (read_file ≡ cat for the same path), mode-invariance drills
+  (enforcement must not vary across manual/balanced/autonomous/headless),
+  migration probes (strip once, idempotent, byte-stable), negative probes
+  (every detector must be provable to fail), platform-skip discipline,
+  [MANUAL] count = 0). MVP = T001–T014 (US1 shell consent + US2 git fence).
+- **UPCOMING (plan complete — strictly post-022; shrinks 022's process-state fence)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/025-agent-instance-state/plan.md`
+  — Agent-instance state & process-global elimination (025): the completion of
+  "fully scope tool registries to the agent instance, eliminating process-level
+  mutable state" — the registry half is 022 US1 (already baselined; deliberately
+  NOT duplicated here); 025 owns the residual that 022 pinned without
+  disposition in FR-017's accepted list (022 data-model §6) and shrinks it from
+  ~10 undocumented pins to 5 classed entries (1 single-mode-default, 3
+  frozen-memo, 1 ui-runtime). Deletes the public
+  process-mutation surface: the `registerBackend` module registry
+  (session-store.ts:185, re-exported through the domain barrel and the SDK;
+  custom backends become `persist` instances — the option already accepts them,
+  seepient.ts:246) and the `settings()` singleton facade (sdk/settings.ts:25 →
+  per-agent `agent.settings`; two agents no longer observe each other's
+  set/reset writes). Caches gain owners: `baseConfigCache`
+  (provider-config-store.ts:410 — cwd-keyed, unbounded, survives
+  resetDefaultProviderRuntime) becomes a per-store-instance memo. Server
+  lifetime is objectified: one ServerState per runSeepientServer absorbs
+  cachedSkillList, the auth key cache, pendingOAuthAttempts, audit/outbox +
+  approval wiring, the gateway instance + middleware closures, and the WS
+  connection registry — two servers in one process (the natural
+  integration-test shape) get fully independent in-memory state (cwd-derived
+  default paths stay process-shared unless stores are injected). The invariant gains hazard
+  classes (single-mode-default | frozen-memo | ui-runtime) with a same-change
+  amendment rule and extends to src/ui and src/vendors (a frozen-memo pin
+  lives in vendors today, outside 022's scan); `defaultRuntimeInstance` stays (022 M4
+  re-affirmed — de-singletoning rejected as purity theater, D6/D7). Sequencing:
+  implements on the 022-landed tree (it edits 022's T033-pinned list, so it
+  cannot ride the same release); ServerState is the designated absorption seam
+  if 023 lands first (Sage server sinks) — coordinate, don't conflict. Breaking
+  (pre-1.0, documented migrations): deleted SDK exports + `agent.settings`;
+  one-shot config flows through env/setting.json (M9 — no askSeepient override
+  option, owner-confirmed). Review-hardened 2026-09-07 (five-lens pass: 11
+  findings fixed — FR-004 story placement, pin-count drift, src/vendors scan
+  gap, parallel-server overclaim, task completeness; spec quality checklist
+  validated 30/30). READY FOR IMPLEMENTATION.
+  tasks.md ready (T001–T024, US1–US5 story phases, test-first — gates land
+  red first to prove their detectors; every task carries runnable self-checks
+  per the self-check protocol: grep proofs, targeted suites, tsx micro-probes
+  (two-agent settings isolation, reset+rebuild cache freshness), packed-tarball
+  export probes, type-truth probes, error-message/doc substring asserts,
+  drift/mutation probes (8 recorded red runs on the invariant; per-story
+  revert-to-red mutation checks), parity/golden checks; [MANUAL] count = 0).
+  MVP = T001–T010 (foundational gate + US1 SDK surface).
+- **UPCOMING (plan complete — sequenced after 022 lands)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/023-seepient-sage/plan.md`
+  — Seepient Sage (023): unified telemetry tracing + full auditing, one
+  system serving LangSmith-class developer observability and Seepient's
+  security auditing. Two-plane architecture (research D1, options A–D
+  ranked): the 008 fail-closed audit kernel is enriched in place with
+  forensic metadata (`toolName`, `operationKind`, `displaySummary`,
+  `targets`, `sessionId`, `tenantId`, `durationMs`, error) + gains
+  `AuditStore.query()` and fail-open `SecurityNotice`s (model-egress
+  denials, auth key lifecycle, 401s, policy mutations — today silent);
+  a new fire-and-forget telemetry plane records a correlated span tree
+  (turn → llm → tool → broker → skill; StepResult data already exists
+  in memory and is dropped today) with redacted payload summaries
+  (capture levels off/redacted/full, deny-by-default secret masking,
+  process-global in v1 — per-tenant policy is an embedder-sink concern),
+  16 MiB-rotated NDJSON + 7-day sweep on both streams via the shared
+  atomic-write helper (023 lands 016's foundational slice itself — M13,
+  since 016 is unimplemented; ships v0.9.0 with four documented breaking
+  changes); one
+  `SageContext` correlation tuple per turn (W3C traceparent extract,
+  requestId fold-in); one `SageReader` reader behind SDK query methods
+  + injectable live sink (embedders build in-app UIs), REST
+  (`/v1/audit/events`, `/v1/traces/:id`, `/v1/sessions/:id/trace`,
+  `/v1/runs`), CLI (`seepient audit` / `seepient trace` waterfall),
+  OTel adapter (vendor-quarantined, optional dep); gateway in-memory
+  audit ring buffer deleted, `/gateway audit` rerouted; stdout JSON
+  lines byte-stable (021-2 scraper contract); deterministic per-turn
+  `RunRecord` (latency split, tokens, catalog-priced cost, denial/
+  egress/error counts) is the substrate for future self-evaluation/
+  self-healing/self-improvement specs — the intelligence itself and
+  model-facing trace access are explicitly out of scope (M3/D3).
+  Baselines on 022 (tenancy context, principal-stamped stores);
+  server audit root leaves `process.cwd()` for the Seepient home.
+  Phases P0–P5 in plan.md; gates QS-1–QS-8 (SC-001–SC-007).
+- **IMPLEMENTED (2026-09-08, shipped in v0.8.0 on 022-1-readiness-remediation branch)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/022-multi-tenant-isolation/022-1-readiness-remediation/plan.md`
+  — Readiness remediation (022-1): closes every P1 from the 2026-09-07
+  product-readiness review (`Reviews/2026-09-07-product-readiness-review-021-to-022.md`,
+  🔴 verdict, 21 P1s / 4 root causes) before v0.8.0 ships, on branch
+  `022-1-readiness-remediation` cut from `021-1-skill-sources` @ 5f64583.
+  Two halves. Point fixes: docs truth sweep (fictional consent modes on 8+
+  pages, fictional CLI flag table, nonexistent `seepient server` subcommand
+  becomes real with shared --port/--host parsing, dead Docker Hub images →
+  local build, workers.md unwired-scheduler rewrite, SEEPIENT_SHELL_APPROVE
+  purge, SessionStore tier purge + typed PERSIST_CONFIG_INVALID replacing
+  the silent no-op, error-hierarchy value exports, README sweeps);
+  first-hour defaults (SDK consentMode deny-by-default made doc-truth with
+  examples passing consentMode, inline skill literals stop tripping the
+  multi-tenancy upgrade so the 021-1 quickstart runs verbatim, dead
+  temperature/maxTokens/thinkingLevel wired or removed, sessionId 128-cap
+  at entry, --docker/--headless stop setting autoConfirm — minimal slice of
+  024-1); tenancy closure (PRINCIPAL_REQUIRED — no silent sdk-user collapse
+  in multi, server lifecycle threads tenancyMode "multi" completing 022's
+  own claim with operatorBaseline, config-derived operator grants stop
+  auto-inheriting into tenants, example honors principal scoping, matrix
+  dims 5/6 re-pointed at real stores + server dimension 9); server
+  reliability (WS settings crash closed at three layers: safeSend +
+  dispatch catch-all + process guard, REST/WS adopt-or-create unified,
+  WS provider mutations on the injected runtime, loopback default bind,
+  maxSteps clamp + 413 parity + clientMsgId echo, PersistenceBackend
+  list?() so sessions survive restart listing, durability disclosed);
+  skills residuals (strict cross-source last-wins, content-first body
+  precedence, SKILL_BODY_UNAVAILABLE legibility, filter-miss warns,
+  null-registry REPL safety, frontmatter-preserving replace, server
+  listing parity + agent:read scope, 8k body warn restored); release gates
+  (pack:verify calls assertNotPlaceholder, macOS JS CI job, CHANGELOG
+  truth amendments). Root-cause gates (the review's "complete solutions",
+  US0, land RED first): docs vocabulary gate (consent set, SEEPIENT_* env
+  names, CLI flags vs Commander truth, SDK-import fences), docs-example
+  import checks, defaults pin suite, WS crash fence. research.md is the
+  AUTHORITATIVE R1–R63 disposition ledger (FR-001) splitting every finding
+  against 024/024-1/024-2/025 — absorbed items (PRINCIPAL_REQUIRED, error
+  exports, SessionStore docs, adopt-or-create, loopback, pack:verify,
+  sessionId cap, consentMode truth, autoConfirm flag stop) drop from
+  024-2's P0 re-baseline. T001–T048, US0→US6, ~12.5 days; MVP = P0+P1+T023.
+  Open owner questions: OQ-1 literal-tenancy confirmation, OQ-2 Docker
+  registry publishing, OQ-3 release cut timing. Release owner-gated (CB-6),
+  appends to the shipped v0.8.0 block only.
+- **IMPLEMENTED (2026-09-07, shipped in v0.8.0 on 021-1 branch)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/022-multi-tenant-isolation/plan.md`
+  — Multi-tenant isolation hardening (022): closes the 2026-09-07 audit
+  findings that undermine 021's multi-tenant story — per-agent ToolRegistry +
+  connector registries replace the process-global registry (cross-tenant tool
+  visibility, execution wiring, and host-authority pre-approval via the
+  agent-loop.ts:487 allowlist union); `tenancy: "single"|"multi"` mode makes
+  every ambient fallback fail closed in multi mode (shared default
+  runtime/credentials, principal-blind stored grants incl. global.json
+  merges, flat content-keyed capability ledger, ambient skills discovery);
+  grants become principal-stamped/read-filtered, ledger principal-scoped.
+  Acceptance = 8-dimension isolation matrix + FR-017 process-state invariant
+  gate + adversarial re-audit returning zero new findings (owner bar: no more
+  multi-tenant surprises). Baseline v0.7.2 @ 3595047; ships v0.8.0 (breaking
+  SDK surface, pre-1.0 in-place). tasks.md ready (T001–T035; every task carries
+  a runnable self-check — grep proofs, targeted suites, micro-probes, UX-copy
+  assertions; gates land red first to prove their detectors).
+- **IMPLEMENTED (2026-09-07, branch 021-1-skill-sources, shipped in v0.8.0 block)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/021-stateless-sdk-workers/021-1-skill-sources/plan.md`
+  — Injectable skill sources, reconciled onto the seam 022 already landed
+  (its T028 degrade rule absorbed the read side: `sources` option,
+  tenancy-aware `initializeSkillRegistry`, dim-7 matrix). 021-1 now: P0
+  reconciliation — relocate the contract from `capabilities/skills/types.ts`
+  to `foundations/contracts/skill-source.ts` (deleting the dead `load()`
+  parser bypass and decorative `id`/`kind`), fix the two upward type-imports
+  in `foundations/types.ts:178/:263`, and harden the architecture gate
+  red-first so type-only upward imports can't return (its foundations rule
+  scans static imports only — verified blind spot). P1 `FsSkillSources` +
+  unified tenancy-aware composition (single = `[fs, ...sources]` last-wins,
+  multi = sources only, 022 FR-014 frozen) + the inline `SkillLiteral` tier
+  where literals COUNT as injected content for tenancy resolution. P2
+  `SkillStore.save()` behind `saveGeneratedSkill` (016 semantics, fail-closed
+  `SKILL_STORE_UNAVAILABLE`, save destination = last store in the effective
+  list). P3 `DbSkillSource` example + docs (skills.md sources section;
+  corrects the live `skillSources`-vs-`sources` contradiction in
+  ask-seepient.md/create-seepient.md). Checks CB-1–CB-8: hardened
+  architecture gate, legacy-vocabulary grep bans, matrix 8/8 non-regression
+  every story, QS-S0 byte-equivalence golden, docs truth, red-first gates,
+  no-shim rule. Branch `021-1-skill-sources` cut from 022 after it lands;
+  release vehicle is the OWNER's decision — no version bump/tag/cut from
+  this spec, CHANGELOG appends to the shipped v0.8.0 block only. tasks.md
+  ready (T001–T016, US0→US3, every task carries runnable self-checks). 024's
+  per-workspace skill-trust gate rides this seam (M4 coordination note).
+  IMPLEMENTED on `021-1-skill-sources` (T001–T016 + round-1 review fixes
+  @ `65be17e`: empty-filter, per-record warn-skip, helper dedup, loader
+  single-read, SDK exports, saveGeneratedSkill frontmatter preservation;
+  1860 tests green). Round-2 work order COMPLETED (`remediation/tasks.md`,
+  W200–W230): restored lazy-body loading standard via `SkillRecord.filePath?`,
+  deleted verified dead-code (`parseFrontmatter`, `parseSkillFile`, `discoverSkills`,
+  unused `cwd`, dead `basePath`, splitter consolidation into `splitFrontmatter`),
+  un-exported internal helpers, added source-level failure warnings, and verified
+  all regression gates. Round-3 closure work order COMPLETED (same file, W240–W252):
+  P1 composition-winner body bug fixed (rawContentMap deletion on filePath winner),
+  docs truth restored in skills.md, multi-tenant server limitation documented,
+  fail-closed input validation enforced on REST/WS, duplicate order contract recorded,
+  and full gates verified green. Single-user mode verified clean by live probe
+  (lazy bodies, metadata-only catalog). Out of scope: server skills story (owner question
+  pending); NOT releasing yet (owner gates release, CB-6).
 - **SHIPPED (021-3 remediation complete, v0.7.0)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/021-stateless-sdk-workers/021-3-remediation/tasks.md`
   — Work order W001–W033 from the 2026-09-06 architect + second-reviewer
   adjudication: red `pnpm test` gate (12 test-tsconfig errors), Docker
@@ -567,16 +1142,17 @@ shell commands, and other important information, read the current plan:
   Includes server startup parity (http/index.ts:185-242) and a reference
   worker with HTTP-callback stores; Docker scheduler multi-host and kernel
   tier explicitly out (isolation ladder is deployment guidance). P0 ≈5d,
-  P1 ≈3d, P2 ≈2d. Sub-spec 021-1 (`021-1-skill-sources/`, plan + tasks
-  complete — implementation starts after 021-2 lands, T001–T013, same
-  branch/release): injectable `SkillSource`/
-  `SkillStore` + inline-skills tier so skill content joins the store-contract
-  family — serverless light shape gets a working skill system (ambient fs
-  discovery silently no-ops there today), embedders compose global +
-  tenant-scoped skills from their own DB with last-wins shadowing, and 016's
-  generated-skill writer retargets the store instead of disk (fail-closed
-  without one). Consolidated SDK guide covering 020 + 021 + 021-1 is 021
-  task T016 (docs/sdk/). 021-1 ≈1 week.
+  P1 ≈3d, P2 ≈2d. Sub-spec 021-1 (`021-1-skill-sources/`, AMENDED
+  2026-09-07 — ready for implementation on a branch cut from the 022-landed
+  tree, release vehicle owner-decided; T001–T016, US0 reconciliation → US1
+  composition+inline → US2 write path → US3 example+docs): injectable
+  `SkillSource`/`SkillStore` + inline-skills tier reconciled onto 022's
+  landed `sources` seam — serverless light shape gets a working skill
+  system (ambient fs discovery silently no-ops there today), embedders
+  compose global + tenant-scoped skills from their own DB with last-wins
+  shadowing, and 016's generated-skill writer retargets the store instead
+  of disk (fail-closed without one). SDK docs coverage lands as 021-1
+  T012/T013 (docs/sdk/). 021-1 ≈2 weeks with gates.
 - **SHIPPED (spec 020 complete, v0.6.0, branch `020-custom-tool-execution-parity`)**: `~/Documents/Obsidian/Seepient/Implementation-Specs/020-custom-tool-execution-parity/plan.md`
   — Custom-tool execution parity (020): 008's two policy-governed custom-tool
   rungs are contract-only (T005 types + T304 registration shipped; analyzer

@@ -19,6 +19,7 @@ import {
   idempotencyKey,
 } from "../audit-recorder.js";
 import { isLocalAuditStore } from "../../../foundations/contracts/execution-brokers.js";
+import { InvalidPrincipalIdError } from "../../../foundations/errors.js";
 
 let dir: string;
 beforeEach(() => {
@@ -99,6 +100,15 @@ describe("TerminalEventOutbox (T109 fix)", () => {
     const remaining = await outbox.flush();
     expect(remaining).toBe(1);
     expect(outbox.isHealthy()).toBe(false);
+  });
+
+  it("anchors outbox file to store.dir by default, eliminating ambient ~/.seepient writes (P1-3)", () => {
+    const store = new LocalAuditStore({ root: dir });
+    const outbox = new TerminalEventOutbox(store);
+    expect(outbox.outboxFile.startsWith(join(dir, "outbox"))).toBe(true);
+
+    const customOutbox = new TerminalEventOutbox(store, { outboxDir: join(dir, "custom-outbox") });
+    expect(customOutbox.outboxFile.startsWith(join(dir, "custom-outbox"))).toBe(true);
   });
 });
 
@@ -318,5 +328,65 @@ describe("TerminalEventOutbox concurrency (shared outbox safety)", () => {
     expect(remaining).toBe(0);
     const term = await store.getTerminal("a-sibling");
     expect(term?.state).toBe("succeeded");
+  });
+});
+
+describe("LocalAuditStore slug validation (T026 / FR-016)", () => {
+  it("rejects traversal and invalid principalId at the store layer", async () => {
+    const store = new LocalAuditStore({ root: dir });
+
+    const invalidPrincipals = [
+      "../../etc",
+      "../escape",
+      "foo/bar",
+      "tenant$bad",
+      "tenant space",
+      "",
+    ];
+
+    for (const badPrincipal of invalidPrincipals) {
+      await expect(
+        store.append(
+          {
+            eventId: "e1",
+            actionId: "a1",
+            actionDigest: "d1",
+            principalId: badPrincipal,
+            runId: "r1",
+            state: "succeeded",
+            timestamp: Date.now(),
+            policyDigest: "p1",
+          },
+          { idempotencyKey: "a1:succeeded" },
+        ),
+      ).rejects.toThrow(InvalidPrincipalIdError);
+    }
+  });
+
+  it("valid slug round-trips correctly", async () => {
+    const store = new LocalAuditStore({ root: dir });
+    const validPrincipal = "tenant_valid-slug-42";
+
+    const event = {
+      eventId: "e-valid-1",
+      actionId: "a-valid-1",
+      actionDigest: "d-valid-1",
+      principalId: validPrincipal,
+      runId: "r-valid-1",
+      state: "succeeded" as const,
+      timestamp: Date.now(),
+      policyDigest: "p-valid-1",
+    };
+
+    const result = await store.append(event, { idempotencyKey: "a-valid-1:succeeded" });
+    expect(result).toBe("written");
+
+    const terminal = await store.getTerminal("a-valid-1");
+    expect(terminal).toBeDefined();
+    expect(terminal?.principalId).toBe(validPrincipal);
+    expect(terminal?.actionId).toBe("a-valid-1");
+
+    const allEvents = await store.listEvents();
+    expect(allEvents.some((e) => e.actionId === "a-valid-1" && e.principalId === validPrincipal)).toBe(true);
   });
 });

@@ -25,7 +25,7 @@ import {
   serverEffectiveCapabilities,
   serverCapabilityCovers,
 } from "../server-policy.js";
-import { PendingApprovalStore } from "../durable-approval-store.js";
+import { DurableApprovalStore as PendingApprovalStore } from "../durable-approval-store.js";
 import { LocalAuditStore, idempotencyKey } from "../audit-recorder.js";
 import { DockerWorkerScheduler } from "../../../capabilities/execution/docker-worker-scheduler.js";
 import {

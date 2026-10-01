@@ -9,7 +9,9 @@
  * - POST /api/approvals — Interactive tool approval relay
  */
 
+import * as path from "path";
 import * as http from "node:http";
+import * as crypto from "node:crypto";
 import type {
   ActionAuditEvent,
   PolicySnapshot,
@@ -19,24 +21,94 @@ import type {
   PermissionRequest,
   PermissionDecision,
 } from "../../../src/transport/sdk/index.js";
+import { isGuardNeutralized, warnIfTestEnvAtHostedBoot } from "../../../src/foundations/test-seams.js";
+
+export const KNOWN_TOKENS: Record<string, string> = {
+  "token-tenant-a": "tenant-a",
+  "token-tenant-b": "tenant-b",
+  "token-user-123": "user-123",
+  "token-tenant-abc": "tenant-abc",
+};
+
+export class ScopedSessionMap extends Map<string, SessionData> {
+  // Exact match only - suffix matching is removed to prevent cross-principal session context poisoning (P1-F)
+}
 
 export interface StubAppState {
-  auditEvents: { event: ActionAuditEvent; idempotencyKey: string }[];
+  adminSecret: string;
+  auditEvents: { event: ActionAuditEvent; idempotencyKey: string; principalId?: string }[];
   policySnapshots: Map<string, PolicySnapshot>;
   consumedDigests: Set<string>;
-  revocations: RevokeFilter[];
+  revocations: Array<RevokeFilter & { principalId?: string }>;
   sessions: Map<string, SessionData>;
   approvalRequests: PermissionRequest[];
   approvalDecision: boolean;
+  skills: Array<{ id: string; name: string; content: string; tenant_id: string | null; source?: string }>;
+  tokenToPrincipal: Map<string, string>;
 }
 
-export function createStubApp(initialState?: Partial<StubAppState>): {
+export function isForbiddenWildcardCapability(cap: any): boolean {
+  if (!cap || typeof cap !== "object") return true;
+  switch (cap.kind) {
+    case "write-root":
+    case "read-root":
+      return !cap.root || cap.root === "*" || cap.root === "/";
+    case "network-destination":
+      return !cap.host || cap.host === "*" || cap.destination === "*" || cap.domain === "*";
+    case "external-recipient":
+      return (
+        !cap.recipient ||
+        cap.recipient === "*" ||
+        !cap.service ||
+        cap.service === "*" ||
+        cap.domain === "*"
+      );
+    case "process":
+      return (
+        !cap.executable ||
+        cap.executable === "*" ||
+        cap.binary === "*" ||
+        cap.command === "*"
+      );
+    case "secret-ref":
+      return !cap.ref || cap.ref === "*";
+    case "model-egress":
+      return (
+        !cap.providerClass ||
+        cap.providerClass === "*" ||
+        !Array.isArray(cap.dataClasses) ||
+        cap.dataClasses.includes("*") ||
+        cap.dataClasses.includes("secret")
+      );
+    case "read-file":
+    case "commit-file":
+      return !cap.path || cap.path === "*";
+    case "trusted-host":
+      return !cap.registrationId || cap.registrationId === "*";
+    case "activate-change-class":
+      return true;
+    default:
+      return true;
+  }
+}
+
+export function createStubApp(initialState?: Partial<StubAppState> & { allowDemoTokens?: boolean }): {
   server: http.Server;
   state: StubAppState;
   listen: () => Promise<number>;
   close: () => Promise<void>;
 } {
+  const initialTokens = new Map<string, string>(
+    initialState?.allowDemoTokens ? Object.entries(KNOWN_TOKENS) : [],
+  );
+  if (initialState?.tokenToPrincipal) {
+    for (const [t, p] of initialState.tokenToPrincipal.entries()) {
+      initialTokens.set(t, p);
+    }
+  }
+
   const state: StubAppState = {
+    adminSecret: initialState?.adminSecret ?? process.env.CONTROL_PLANE_ADMIN_KEY ?? "",
     auditEvents: [],
     policySnapshots: new Map([
       [
@@ -52,28 +124,168 @@ export function createStubApp(initialState?: Partial<StubAppState>): {
     ]),
     consumedDigests: new Set(),
     revocations: [],
-    sessions: new Map(),
+    sessions: new ScopedSessionMap(),
     approvalRequests: [],
     approvalDecision: true,
+    skills: [],
     ...initialState,
+    tokenToPrincipal: initialTokens,
   };
 
-  const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+  warnIfTestEnvAtHostedBoot("seepient reference worker");
+  if (!(globalThis as any).__seepientWorkerRejectionGuard) {
+    (globalThis as any).__seepientWorkerRejectionGuard = true;
+    process.on("unhandledRejection", (reason) => {
+      console.error("[worker] unhandled rejection:", reason instanceof Error ? reason.stack : String(reason));
+    });
+  }
+  // SC-012 (022-5-WO2 T013): the routing logic lives in a named handler the
+  // thin createServer callback supervises — an internal throw becomes a 500
+  // response and the process stays alive (the pass-12 SC-012a closure).
+  async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    // FR-015: parse failures are a 400, not a process kill — one malformed
+    // unauthenticated packet must never take the control plane down.
+    let url: URL;
+    try {
+      url = new URL(req.url ?? "/", "http://127.0.0.1");
+    } catch {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "BadRequest", message: "Malformed request URL" }));
+      return;
+    }
+    const MAX_BODY_BYTES = 1024 * 1024; // 1MB body limit (NEW-2)
     let body = "";
-    req.on("data", (chunk) => (body += chunk));
-    await new Promise<void>((resolve) => req.on("end", () => resolve()));
+    let tooLarge = false;
+    let responded = false;
+    const respondTooLarge = () => {
+      if (responded) return;
+      responded = true;
+      // 022-5-WO4 T010 + pass-15 fix: respond and shed the MOMENT the cap
+      // trips — waiting for end/close let a slow sender hold the connection
+      // (and its slot) for the full stream / requestTimeout. pause() stops
+      // pulling chunks first; the destroy follows the response flush so the
+      // 413 is actually delivered (FR-015's resolve-on-close keeps the
+      // handler coherent after the teardown).
+      req.pause();
+      if (!res.headersSent) {
+        res.writeHead(413, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "PayloadTooLarge", message: "Request body exceeds 1MB limit" }), () => {
+          req.destroy();
+        });
+      } else {
+        req.destroy();
+      }
+    };
+    req.on("data", (chunk) => {
+      // 022-5-WO4 T010 (pass-14 P1-4): stop accumulating past the cap — the
+      // old shape appended every chunk until end/close, so a multi-GB stream
+      // OOMed the unauthenticated control plane before auth ran.
+      if (tooLarge) return;
+      body += chunk;
+      if (body.length > MAX_BODY_BYTES) {
+        tooLarge = true;
+        respondTooLarge();
+      }
+    });
 
-    const jsonBody = body ? JSON.parse(body) : {};
+    // FR-015: resolve on close as well as end — after a destroy() the end
+    // event never fires and a 413 written here would be unreachable.
+    await new Promise<void>((resolve) => {
+      req.on("end", () => resolve());
+      req.on("close", () => resolve());
+    });
+    if (tooLarge) {
+      respondTooLarge();
+      return;
+    }
+
+    let jsonBody: any = {};
+    if (body) {
+      try {
+        jsonBody = JSON.parse(body);
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "BadRequest", message: "Invalid JSON body" }));
+        return;
+      }
+      // Pass-15 fix (022-5-WO4 T016 claim): JSON.parse("null") yields null —
+      // reject non-object bodies here instead of letting routes deref null
+      // and surface a 500.
+      if (jsonBody === null || typeof jsonBody !== "object") {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "BadRequest", message: "JSON body must be an object" }));
+        return;
+      }
+    }
+
+    // Token issuance endpoint (P0-W1 / NEW-5)
+    if (req.method === "POST" && url.pathname === "/api/auth/token") {
+      if (!state.adminSecret) {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "ServiceUnavailable", message: "CONTROL_PLANE_ADMIN_KEY is not configured; token issuance disabled" }));
+        return;
+      }
+      const adminKey = req.headers["x-admin-key"];
+      const adminKeyBuf = Buffer.from(typeof adminKey === "string" ? adminKey : "");
+      const secretBuf = Buffer.from(state.adminSecret);
+      const authorized = adminKeyBuf.length === secretBuf.length && crypto.timingSafeEqual(adminKeyBuf, secretBuf);
+      if (!authorized) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Forbidden", message: "Admin authorization required for token issuance" }));
+        return;
+      }
+      const principalId = jsonBody.principalId;
+      if (!principalId || typeof principalId !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(principalId)) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "BadRequest", message: "Invalid or missing principalId slug" }));
+        return;
+      }
+      const sentinels = new Set(["default", "anonymous", "sdk-user", "cli-user"]);
+      if (sentinels.has(principalId.toLowerCase())) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "BadRequest", message: "Sentinel principalId cannot be issued" }));
+        return;
+      }
+      const token = "token-" + crypto.randomUUID();
+      state.tokenToPrincipal.set(token, principalId);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ token, principalId }));
+      return;
+    }
+
+    // FR-018 / VULN-19: All control plane endpoints require Bearer authentication
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Unauthorized", message: "Bearer authentication required" }));
+      return;
+    }
+    const token = authHeader.slice(7).trim();
+    if (!token) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Unauthorized", message: "Bearer token required" }));
+      return;
+    }
+
+    const authPrincipal = isGuardNeutralized("VULN-19")
+      ? (state.tokenToPrincipal.get(token) ?? "forged-principal")
+      : state.tokenToPrincipal.get(token);
+    if (!authPrincipal) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Unauthorized", message: "Invalid or unknown token" }));
+      return;
+    }
 
     if (req.method === "POST" && url.pathname === "/api/audit") {
-      const isDuplicate = state.auditEvents.some((e) => e.idempotencyKey === jsonBody.idempotencyKey);
+      const isDuplicate = state.auditEvents.some(
+        (e) => e.principalId === authPrincipal && e.idempotencyKey === jsonBody.idempotencyKey,
+      );
       if (isDuplicate) {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ status: "duplicate" }));
         return;
       }
-      state.auditEvents.push(jsonBody);
+      state.auditEvents.push({ ...jsonBody, principalId: authPrincipal });
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "written" }));
       return;
@@ -81,20 +293,53 @@ export function createStubApp(initialState?: Partial<StubAppState>): {
 
     if (req.method === "GET" && url.pathname === "/api/policy") {
       const workspaceId = url.searchParams.get("workspaceId") ?? "default";
-      const snapshot = state.policySnapshots.get(workspaceId);
-      if (!snapshot) {
-        res.writeHead(404, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "PolicyNotFound" }));
-        return;
+      const principalId = authPrincipal;
+      const key = `${workspaceId}:${principalId}`;
+      let snapshot = state.policySnapshots.get(key);
+      if (!snapshot && principalId) {
+        const wsSnapshot = state.policySnapshots.get(workspaceId);
+        if (wsSnapshot) {
+          // P1-D / P1-E: Never return unstamped workspace wildcards; filter strictly for principalId
+          const filtered = wsSnapshot.policy.capabilities.filter((cap) => {
+            return cap.principalId === principalId;
+          });
+          snapshot = {
+            ...wsSnapshot,
+            policy: {
+              ...wsSnapshot.policy,
+              capabilities: filtered,
+            },
+          };
+        }
       }
+      if (!snapshot) {
+        snapshot = {
+          workspaceId,
+          version: 0,
+          policyDigest: "empty",
+          policy: { version: 1, capabilities: [] },
+          mutationHistory: [],
+        };
+      }
+      // Ensure returned capabilities are strictly scoped to authPrincipal (P1-A / P1-D)
+      const safeCapabilities = snapshot.policy.capabilities.filter((cap) => cap.principalId === principalId);
+      const safeSnapshot: PolicySnapshot = {
+        ...snapshot,
+        policy: {
+          ...snapshot.policy,
+          capabilities: safeCapabilities,
+        },
+      };
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(snapshot));
+      res.end(JSON.stringify(safeSnapshot));
       return;
     }
 
     if (req.method === "POST" && url.pathname === "/api/policy") {
       const { workspaceId, expectedVersion, next, actor, mutation } = jsonBody;
-      const current = state.policySnapshots.get(workspaceId) ?? {
+      const principalId = authPrincipal;
+      const key = `${workspaceId}:${principalId}`;
+      const current = state.policySnapshots.get(key) ?? {
         workspaceId,
         version: 0,
         policyDigest: "empty",
@@ -106,45 +351,90 @@ export function createStubApp(initialState?: Partial<StubAppState>): {
         res.end(JSON.stringify({ error: "VersionConflict", current }));
         return;
       }
+      // P1-D / P1-E: Capabilities must be stamped with authPrincipal; no wildcards
+      const capabilities = Array.isArray(next?.capabilities) ? next.capabilities : [];
+      for (const cap of capabilities) {
+        if (!cap || cap.principalId !== principalId) {
+          res.writeHead(403, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Forbidden", message: "Capabilities must be stamped with authenticated principalId" }));
+          return;
+        }
+        if (isForbiddenWildcardCapability(cap)) {
+          res.writeHead(403, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Forbidden", message: `Wildcard ${cap.kind} is forbidden in multi-tenant policy` }));
+          return;
+        }
+        // 022-5 FR-015 fold-in: non-wildcard path roots live inside the
+        // tenant workspace mount — `/etc`-style grants are refused (the
+        // engine ceiling clamps regardless; the stub must not advertise them).
+        if ((cap.kind === "write-root" || cap.kind === "read-root") && typeof cap.root === "string") {
+          const WORKSPACE_ROOT = "/data"; // the example's tenant-data mount
+          // 022-5-WO1 T036: normalize before the prefix check — `/data/../etc`
+          // must not pass a startsWith check; non-absolute roots are refused.
+          const normalized = path.posix.normalize(cap.root);
+          if (
+            !path.posix.isAbsolute(normalized) ||
+            (normalized !== WORKSPACE_ROOT && !normalized.startsWith(`${WORKSPACE_ROOT}/`))
+          ) {
+            res.writeHead(403, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "Forbidden", message: `Path root "${cap.root}" is outside the tenant workspace` }));
+            return;
+          }
+        }
+      }
       const updated: PolicySnapshot = {
         workspaceId,
         version: expectedVersion + 1,
         policyDigest: `digest-${expectedVersion + 1}`,
-        policy: next,
+        policy: {
+          ...next,
+          capabilities,
+        },
         mutationHistory: [
           ...(current.mutationHistory ?? []),
           ...(mutation ? [{ mutationId: mutation.mutationId, version: expectedVersion + 1 }] : []),
         ],
       };
-      state.policySnapshots.set(workspaceId, updated);
+      state.policySnapshots.set(key, updated);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(updated));
       return;
     }
 
     if (req.method === "GET" && url.pathname === "/api/caps") {
+      const prefix = `${authPrincipal}:`;
+      const tenantDigests = Array.from(state.consumedDigests)
+        .filter((d) => d.startsWith(prefix))
+        .map((d) => d.slice(prefix.length));
+      const tenantRevocations = state.revocations
+        .filter((r) => r.principalId === authPrincipal)
+        .map(({ runId, sessionId }) => ({ runId, sessionId }));
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({
-        consumedDigests: Array.from(state.consumedDigests),
-        revocations: state.revocations,
+        consumedDigests: tenantDigests,
+        revocations: tenantRevocations,
       }));
       return;
     }
 
     if (req.method === "POST" && url.pathname === "/api/caps/consume") {
-      if (state.consumedDigests.has(jsonBody.actionDigest)) {
+      const scopedDigest = `${authPrincipal}:${jsonBody.actionDigest}`;
+      if (state.consumedDigests.has(scopedDigest)) {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: true, consumed: false }));
         return;
       }
-      state.consumedDigests.add(jsonBody.actionDigest);
+      state.consumedDigests.add(scopedDigest);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true, consumed: true }));
       return;
     }
 
     if (req.method === "POST" && url.pathname === "/api/caps/revoke") {
-      state.revocations.push(jsonBody.filter);
+      state.revocations.push({
+        ...(jsonBody.filter ?? {}),
+        principalId: authPrincipal,
+      });
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true }));
       return;
@@ -153,18 +443,33 @@ export function createStubApp(initialState?: Partial<StubAppState>): {
     if (req.method === "GET" && url.pathname === "/api/sessions") {
       const sessionId = url.searchParams.get("sessionId");
       if (sessionId) {
-        const session = state.sessions.get(sessionId) ?? null;
+        const session = state.sessions.get(`${authPrincipal}:${sessionId}`) ?? null;
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(session));
       } else {
+        const prefix = `${authPrincipal}:`;
+        const scopedKeys = Array.from(state.sessions.keys())
+          .filter((k) => k.startsWith(prefix))
+          .map((k) => k.slice(prefix.length));
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify(Array.from(state.sessions.keys())));
+        res.end(JSON.stringify(scopedKeys));
       }
       return;
     }
 
     if (req.method === "POST" && url.pathname === "/api/sessions") {
-      state.sessions.set(jsonBody.id, jsonBody.data);
+      const compositeKey = `${authPrincipal}:${jsonBody.id}`;
+      state.sessions.set(compositeKey, jsonBody.data);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+
+    if (req.method === "DELETE" && url.pathname === "/api/sessions") {
+      const sessionId = url.searchParams.get("sessionId");
+      if (sessionId) {
+        state.sessions.delete(`${authPrincipal}:${sessionId}`);
+      }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true }));
       return;
@@ -195,8 +500,52 @@ export function createStubApp(initialState?: Partial<StubAppState>): {
       return;
     }
 
+    if (req.method === "GET" && url.pathname === "/api/skills") {
+      const tenantId = url.searchParams.get("tenantId");
+      if (tenantId && tenantId !== authPrincipal) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Forbidden", message: "Cannot query skills for other tenants" }));
+        return;
+      }
+      const matched = state.skills.filter((s) =>
+        tenantId ? s.tenant_id === tenantId : s.tenant_id === null,
+      );
+      const records = matched.map((s) => ({
+        name: s.name,
+        content: s.content,
+        source: s.source ?? (tenantId ? `db:tenant:${tenantId}` : "db:global"),
+      }));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ skills: records }));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/skills") {
+      state.skills.push({
+        ...jsonBody,
+        tenant_id: authPrincipal,
+      });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+
     res.writeHead(404);
     res.end();
+  }
+
+  const server = http.createServer((req, res) => {
+    void handleRequest(req, res).catch((err: unknown) => {
+      console.error("[worker] internal handler error:", err instanceof Error ? err.stack : String(err));
+      try {
+        if (!res.headersSent) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+        }
+        res.end(JSON.stringify({ error: "InternalError", message: "Internal handler error" }));
+      } catch {
+        /* socket already gone */
+      }
+    });
   });
 
   return {

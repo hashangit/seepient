@@ -10,7 +10,7 @@ import type {
   PersistedCredentialRecord,
   CredentialMeta,
 } from "../../../foundations/schemas/credential-store.js";
-import { SeepientError } from "../../../foundations/errors.js";
+import { SeepientError, CredentialRequiredError } from "../../../foundations/errors.js";
 
 interface StoredEntry {
   record: PersistedCredentialRecord;
@@ -19,11 +19,20 @@ interface StoredEntry {
   meta?: CredentialMeta;
 }
 
+export interface MemoryCredentialStoreOptions {
+  isIsolated?: boolean;
+}
+
 /**
  * In-memory CredentialStore for testing and SDK host-app embedded modes.
  */
 export class MemoryCredentialStore implements CredentialStore {
+  readonly isIsolated: boolean;
   private entries = new Map<string, StoredEntry>();
+
+  constructor(opts?: MemoryCredentialStoreOptions) {
+    this.isIsolated = opts?.isIsolated ?? true;
+  }
 
   async resolve(ref: CredentialRef): Promise<CredentialHandle> {
     if (ref.kind === "none") {
@@ -48,31 +57,18 @@ export class MemoryCredentialStore implements CredentialStore {
     }
 
     if (ref.kind === "env") {
-      const varName = ref.name;
+      // 022-5 FR-005: env is not an inference credential source in any mode.
       return {
-        id: `env:${varName}`,
+        id: `env:${ref.name}`,
         ref,
         activeLeaseCount: 0,
         async isResolvable() {
-          return Boolean(process.env[varName]);
+          return false;
         },
         acquireLease(): CredentialLease {
-          return {
-            leaseId: `lease-env-${varName}`,
-            isReleased: false,
-            async secret(): Promise<CredentialSecret> {
-              const currentVal = process.env[varName];
-              if (!currentVal) {
-                throw new SeepientError(
-                  `Environment variable "${varName}" is not set`,
-                  "MISSING_ENV_VAR",
-                  false,
-                );
-              }
-              return { kind: "api_key", value: currentVal };
-            },
-            async release() {},
-          };
+          throw new CredentialRequiredError(
+            `CREDENTIAL_REQUIRED: Environment variable credential "${ref.name}" is not supported — configure the provider through provider management or inject a credential store.`,
+          );
         },
       };
     }
@@ -127,6 +123,13 @@ export class MemoryCredentialStore implements CredentialStore {
             if (entry.record.kind === "oauth") {
               return { kind: "pi_oauth", piAuthContext: entry.record };
             }
+            if (entry.record.kind === "api_key" && !entry.record.keyValue) {
+              throw new SeepientError(
+                `Credential "${credId}" has no key value`,
+                "CREDENTIAL_REQUIRED",
+                false,
+              );
+            }
             return { kind: "api_key", value: entry.record.keyValue };
           },
           release: async (): Promise<void> => {
@@ -161,6 +164,23 @@ export class MemoryCredentialStore implements CredentialStore {
   }
 
   async put(id: string, record: PersistedCredentialRecord, meta?: CredentialMeta): Promise<void> {
+    // 022-5 FR-005: an unresolvable credential must never enter the store —
+    // env-kind refs have no source anymore, and a valueless api_key would
+    // otherwise resolve `value: undefined` into a vendored SDK (env fallback).
+    if ((record as { kind?: string }).kind === "env") {
+      throw new SeepientError(
+        `Credential "${id}": environment-variable credentials are not supported — configure the provider through provider management`,
+        "UNRESOLVABLE_CREDENTIAL",
+        false,
+      );
+    }
+    if (record.kind === "api_key" && !record.keyValue) {
+      throw new SeepientError(
+        `Credential "${id}": api_key records require a non-empty keyValue`,
+        "UNRESOLVABLE_CREDENTIAL",
+        false,
+      );
+    }
     const now = new Date().toISOString();
     const existing = this.entries.get(id);
     this.entries.set(id, {
@@ -187,5 +207,24 @@ export class MemoryCredentialStore implements CredentialStore {
 
   async delete(id: string): Promise<void> {
     this.entries.delete(id);
+  }
+
+  resolveSecret(ref: string): string | undefined {
+    const entry = this.entries.get(ref);
+    if (!entry) return undefined;
+    if (entry.record.kind === "api_key") {
+      if (!entry.record.keyValue) {
+        throw new SeepientError(
+          `Credential "${ref}" has no key value`,
+          "CREDENTIAL_REQUIRED",
+          false,
+        );
+      }
+      return entry.record.keyValue;
+    }
+    if (entry.record.kind === "oauth") {
+      return entry.record.access;
+    }
+    return undefined;
   }
 }

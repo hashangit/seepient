@@ -78,7 +78,7 @@ const saveRes = await agent.addProvider({
   upstreamProvider: "anthropic",
   credential: {
     mode: "paste",
-    keyValue: process.env.ANTHROPIC_API_KEY!,
+    keyValue: process.env.MY_COMPANY_ANTHROPIC_KEY!, // embedder-owned env — Seepient never reads it
   },
 });
 
@@ -125,11 +125,11 @@ For multi-tenant management consoles, server routes, or background workers, use 
 ```typescript
 import {
   createProviderManagerApi,
-  getDefaultProviderRuntime,
+  createAmbientProviderRuntime,
   ProviderRuntime,
 } from "seepient";
 
-const runtime = getDefaultProviderRuntime();
+const runtime = createAmbientProviderRuntime();
 const manager = createProviderManagerApi(runtime);
 
 // Retrieve complete state snapshot
@@ -150,27 +150,31 @@ if (refresh.ok) {
 
 ---
 
-## In-Memory Isolated Runtimes
+## In-Memory Ephemeral Runtimes (Single-User)
 
-For test runners, serverless tasks, or strict multi-tenant isolation, bootstrap an agent with an ephemeral in-memory configuration store:
+For local test runners or ephemeral developer tasks, bootstrap an agent with an in-memory configuration store without modifying host dotfiles. (For hosted multi-tenant deployments, see [Multi-Tenant SDK Architecture](./multi-tenant.md) for full isolation guarantees):
 
 ```typescript
-import {
-  createSeepient,
-  ProviderConfigStore,
-  MemoryCredentialStore,
-} from "seepient";
+import { createSeepient } from "seepient";
+import { MemoryCredentialStore } from "seepient";
+
+// The credential record the account references — whatever value your
+// integration holds. Seepient never reads your environment itself.
+const credentials = new MemoryCredentialStore();
+await credentials.put("isolated_openai", { kind: "api_key", keyValue: "sk-your-key" });
 
 const agent = await createSeepient({
+  tenancy: "single",
   // Use ":memory:" so no files are written to disk
   overlayFile: ":memory:",
-  
+  credentials,
+
   // Provide isolated accounts
   providers: {
     isolated_openai: {
       adapter: "pi-ai",
       upstreamProvider: "openai",
-      credential: { kind: "env", name: "OPENAI_API_KEY" },
+      credential: { kind: "seepient", id: "isolated_openai" },
     },
   },
 

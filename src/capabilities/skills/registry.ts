@@ -1,14 +1,19 @@
 import { readFile } from 'fs/promises';
-import { Skill, SkillMetadata, SkillRegistry } from './types.js';
+import { Skill, SkillMetadata, SkillRegistry, getSkillBodyLimits } from './types.js';
+import { splitFrontmatter } from './parser.js';
 
 export class DefaultSkillRegistry implements SkillRegistry {
   private skills: Map<string, Skill>;
   private bodyCache: Map<string, string>;
+  private rawContentMap: Map<string, string>;
+  private warnedBodySkills: Set<string>;
   private readonly maxCacheSize = 5;
 
-  constructor(skills: Skill[]) {
+  constructor(skills: Skill[], rawContentMap?: Map<string, string>) {
     this.skills = new Map(skills.map(s => [s.name, s]));
     this.bodyCache = new Map();
+    this.rawContentMap = rawContentMap ?? new Map();
+    this.warnedBodySkills = new Set();
   }
 
   get(name: string): Skill | undefined {
@@ -37,21 +42,42 @@ export class DefaultSkillRegistry implements SkillRegistry {
     const cached = this.bodyCache.get(name);
     if (cached !== undefined) return cached;
 
-    // Load body lazily from disk
-    try {
-      const content = await readFile(skill.filePath, 'utf-8');
-      const body = extractBody(content);
-      if (body === undefined) return undefined;
-
-      this.setCache(name, body);
-      return body;
-    } catch {
-      // File deleted, moved, or unreadable
-      return undefined;
+    // Check raw content map first (injected sources, inline literals)
+    const raw = this.rawContentMap.get(name);
+    if (raw !== undefined) {
+      const { body } = splitFrontmatter(raw);
+      if (body !== undefined && body.trim().length > 0) {
+        this.setCache(name, body);
+        return body;
+      }
     }
+
+    // Load body lazily from disk if filePath is present
+    if (skill.filePath) {
+      try {
+        const content = await readFile(skill.filePath, 'utf-8');
+        const { body } = splitFrontmatter(content);
+        if (body !== undefined) {
+          this.setCache(name, body);
+          return body;
+        }
+      } catch {
+        // File deleted, moved, or unreadable
+      }
+    }
+
+    return undefined;
   }
 
   private setCache(name: string, body: string): void {
+    const { warnChars } = getSkillBodyLimits();
+    if (body.length > warnChars && !this.warnedBodySkills.has(name)) {
+      this.warnedBodySkills.add(name);
+      console.warn(
+        `[SKILLS] Warning: Skill "${name}" body size (${body.length} chars) exceeds warning threshold (${warnChars} chars).`,
+      );
+    }
+
     this.bodyCache.delete(name); // Remove if exists (moves to end)
     this.bodyCache.set(name, body);
 
@@ -65,21 +91,4 @@ export class DefaultSkillRegistry implements SkillRegistry {
   getNames(): string[] {
     return Array.from(this.skills.keys());
   }
-}
-
-/**
- * Extract the body text after the closing --- delimiter of YAML frontmatter.
- */
-function extractBody(content: string): string | undefined {
-  const trimmed = content.trimStart();
-  if (!trimmed.startsWith('---')) {
-    return content;
-  }
-
-  const endIdx = trimmed.indexOf('---', 3);
-  if (endIdx === -1) {
-    return undefined;
-  }
-
-  return trimmed.slice(endIdx + 3).trimStart() || undefined;
 }

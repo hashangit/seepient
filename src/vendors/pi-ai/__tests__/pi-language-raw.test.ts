@@ -385,7 +385,7 @@ describe("PiLanguageRaw backend (QS-P3.3)", () => {
     const target: InferenceTarget = {
       providerAccount: "my-opencode-account",
       upstreamProvider: "opencode",
-      model: "hy3-free",
+      model: "glm-5",
       credential,
     };
 
@@ -413,7 +413,7 @@ describe("PiLanguageRaw backend (QS-P3.3)", () => {
     }
 
     expect(capturedModel).toBeDefined();
-    expect(capturedModel.id).toBe("hy3-free");
+    expect(capturedModel.id).toBe("glm-5");
     expect(capturedModel.provider).toBe("opencode");
     expect(capturedModel.baseUrl).toBe("https://opencode.ai/zen/v1");
   });

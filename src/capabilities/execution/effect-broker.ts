@@ -24,12 +24,14 @@ import type {
   BrokeredEffectRequest,
   PreparedArtifactRef,
 } from "../../foundations/contracts/prepared-action.js";
-import type { CapabilityEnvelope } from "../../foundations/contracts/permission-policy.js";
+import type { CapabilityEnvelope, Capability } from "../../foundations/contracts/permission-policy.js";
 import type { NetworkDestination } from "../../foundations/contracts/tool-effects.js";
 import type { PreparationArtifactStore } from "../../foundations/contracts/execution-brokers.js";
 import { createHash } from "node:crypto";
-import { PersistedReplayLedger } from "./persisted-replay-ledger.js";
+import { PersistedReplayLedger, type ReplayLedger } from "./persisted-replay-ledger.js";
+import { InMemoryReplayLedger } from "./in-memory-replay-ledger.js";
 import { resolveSecretRef } from "../../foundations/security/credential-resolver.js";
+import { isGuardNeutralized } from "../../foundations/test-seams.js";
 import { createSetupFailure } from "../../foundations/contracts/setup-failure.js";
 import { isMetadataIp, isPrivateIp } from "../../foundations/network/ip-classifier.js";
 import { safeSsrfFetch } from "../../foundations/network/ssrf-fetch.js";
@@ -42,6 +44,35 @@ import { pinnedFetch } from "../../foundations/network/pinned-fetch.js";
  */
 export function isBrokerDeniedAddress(ip: string): boolean {
   return isPrivateIp(ip) || isMetadataIp(ip);
+}
+
+/** Redact a webhook URL for denial messages: keep scheme+host for
+ *  debuggability, strip path/query/auth (Feishu/DingTalk/WeCom tokens live
+ *  in the query — the broker never echoes raw secrets). */
+export function redactWebhookUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.protocol}//${parsed.host}/…`;
+  } catch {
+    // Malformed: still never leak path/query/userinfo. Truncate at the first
+    // /, ?, or # after the host, strip any userinfo (credentials before the
+    // @ survive URL-parse failure — pass-15 probe), and fall back to a fixed
+    // marker if no scheme exists.
+    const schemeEnd = url.indexOf("://");
+    if (schemeEnd !== -1) {
+      const hostStart = schemeEnd + 3;
+      let hostEnd = url.length;
+      for (const ch of ["/", "?", "#"]) {
+        const idx = url.indexOf(ch, hostStart);
+        if (idx !== -1 && idx < hostEnd) hostEnd = idx;
+      }
+      let host = url.slice(hostStart, hostEnd);
+      const at = host.lastIndexOf("@");
+      if (at !== -1) host = host.slice(at + 1);
+      return `${url.slice(0, schemeEnd)}://${host}/…`;
+    }
+    return "…";
+  }
 }
 
 const DENIED_HOSTS: ReadonlySet<string> = new Set([
@@ -117,14 +148,19 @@ export interface EffectBrokerOptions {
   maxResponseBytes?: number;
   /** Hard deadline per request. Default 30s. */
   deadlineMs?: number;
-  /** T210a: Persisted replay ledger. If omitted, falls back to in-memory Set. */
-  replayLedger?: PersistedReplayLedger;
+  /** Replay ledger. Defaults to InMemoryReplayLedger in multi mode, PersistedReplayLedger in single mode. */
+  replayLedger?: ReplayLedger;
   /** Optional handler for external-send (email/chat/notification) requests. */
   externalSendHandler?: (req: Extract<BrokeredEffectRequest, { kind: "external-send" }>) => Promise<BrokeredEffectResult>;
   /** Optional handler for vendor-operation requests. */
-  vendorOperationHandler?: (req: Extract<BrokeredEffectRequest, { kind: "vendor-operation" }>) => Promise<BrokeredEffectResult>;
+  vendorOperationHandler?: (
+    req: Extract<BrokeredEffectRequest, { kind: "vendor-operation" }>,
+    capabilities?: Capability[],
+  ) => Promise<BrokeredEffectResult>;
   /** Optional secret resolver for injecting credentials securely inside the broker. */
   secretResolver?: (ref: string) => string | undefined;
+  /** Tenancy mode: "single" | "multi". Default "single". */
+  tenancyMode?: "single" | "multi";
 }
 
 /**
@@ -133,7 +169,7 @@ export interface EffectBrokerOptions {
  * every redirect; stores the response as an artifact; never returns raw
  * secrets.
  *
- * T210a: replay protection is now durable (PersistedReplayLedger).
+ * T210a: replay protection is now durable (PersistedReplayLedger in single, InMemoryReplayLedger in multi).
  * T210b: IPv6 private/metadata ranges are blocked.
  * T210c: DNS is resolved before connecting; the IP is pinned and verified
  *        at connect time to prevent DNS rebinding races.
@@ -143,18 +179,27 @@ export class EffectBroker implements EffectBrokerContract {
   private readonly network: BrokerNetworkAdapter;
   private readonly maxResponseBytes: number;
   private readonly deadlineMs: number;
-  /** T210a: Durable replay ledger. Falls back to in-memory when not provided. */
-  private readonly replayLedger: PersistedReplayLedger;
+  /** Replay ledger: PersistedReplayLedger in single mode, InMemoryReplayLedger in multi mode. */
+  private readonly replayLedger: ReplayLedger;
   private readonly externalSendHandler?: (req: Extract<BrokeredEffectRequest, { kind: "external-send" }>) => Promise<BrokeredEffectResult>;
-  private readonly vendorOperationHandler?: (req: Extract<BrokeredEffectRequest, { kind: "vendor-operation" }>) => Promise<BrokeredEffectResult>;
+  private readonly vendorOperationHandler?: (
+    req: Extract<BrokeredEffectRequest, { kind: "vendor-operation" }>,
+    capabilities?: Capability[],
+  ) => Promise<BrokeredEffectResult>;
   private readonly secretResolver?: (ref: string) => string | undefined;
+  private readonly tenancyMode: "single" | "multi";
 
   constructor(opts: EffectBrokerOptions) {
     this.artifacts = opts.artifacts;
     this.network = opts.network;
     this.maxResponseBytes = opts.maxResponseBytes ?? 10 * 1024 * 1024;
     this.deadlineMs = opts.deadlineMs ?? 30_000;
-    this.replayLedger = opts.replayLedger ?? new PersistedReplayLedger();
+    this.tenancyMode = opts.tenancyMode ?? "single";
+    this.replayLedger =
+      opts.replayLedger ??
+      (this.tenancyMode === "multi" && !isGuardNeutralized("VULN-5")
+        ? new InMemoryReplayLedger()
+        : new PersistedReplayLedger());
     this.externalSendHandler = opts.externalSendHandler;
     this.vendorOperationHandler = opts.vendorOperationHandler;
     this.secretResolver = opts.secretResolver;
@@ -164,6 +209,11 @@ export class EffectBroker implements EffectBrokerContract {
     if (this.secretResolver) {
       const val = this.secretResolver(ref);
       if (val !== undefined) return val;
+    }
+    // Two probe targets share this branch under distinct guard ids
+    // (022-5-WO1 T018): tenant-secret (VULN-1) and exfil (VULN-1-BROKER).
+    if (this.tenancyMode === "multi" && !isGuardNeutralized("VULN-1") && !isGuardNeutralized("VULN-1-BROKER")) {
+      return undefined;
     }
     return resolveSecretRef(ref);
   }
@@ -273,7 +323,49 @@ export class EffectBroker implements EffectBrokerContract {
       if (!host || !user || !pass) {
         return this.denied(
           request.requestId,
-          "SMTP configuration incomplete (missing smtpHost/smtpUser/smtpPass)",
+          "CREDENTIAL_REQUIRED: SMTP configuration incomplete (missing smtpHost/smtpUser/smtpPass)",
+          "CREDENTIAL_REQUIRED",
+        );
+      }
+
+      const lowerHost = host.toLowerCase().trim();
+      if (DENIED_HOSTS.has(lowerHost)) {
+        return this.denied(
+          request.requestId,
+          `DESTINATION_DENIED: SMTP host ${host} is denied`,
+          "DESTINATION_DENIED",
+        );
+      }
+      if (isBrokerDeniedAddress(lowerHost)) {
+        return this.denied(
+          request.requestId,
+          `DESTINATION_DENIED: SMTP host ${host} resolves to private or metadata IP`,
+          "DESTINATION_DENIED",
+        );
+      }
+      try {
+        const resolvedIps = await this.network.resolve(lowerHost);
+        if (!resolvedIps || resolvedIps.length === 0) {
+          return this.denied(
+            request.requestId,
+            `DNS_RESOLUTION_FAILED: Failed to resolve SMTP host ${host}`,
+            "DNS_RESOLUTION_FAILED",
+          );
+        }
+        for (const ip of resolvedIps) {
+          if (isBrokerDeniedAddress(ip)) {
+            return this.denied(
+              request.requestId,
+              `DESTINATION_DENIED: SMTP host ${host} resolves to denied address ${ip}`,
+              "DESTINATION_DENIED",
+            );
+          }
+        }
+      } catch (err: any) {
+        return this.denied(
+          request.requestId,
+          `DNS_RESOLUTION_FAILED: Failed to resolve SMTP host ${host}`,
+          "DNS_RESOLUTION_FAILED",
         );
       }
 
@@ -289,29 +381,41 @@ export class EffectBroker implements EffectBrokerContract {
         /* payloadText was raw plain text body */
       }
 
-      const nodemailer = (await import("../../vendors/nodemailer.js")).default;
-      const transporter = nodemailer.createTransport({
-        host,
-        port,
-        secure: port === 465,
-        auth: { user, pass },
-      });
+      try {
+        const nodemailer = (await import("../../vendors/nodemailer.js")).default;
+        const transporter = nodemailer.createTransport({
+          host,
+          port,
+          secure: port === 465,
+          auth: { user, pass },
+        });
 
-      const recipient = request.recipients[0]?.recipient ?? "";
-      const info = await transporter.sendMail({
-        from,
-        to: recipient,
-        subject: emailSubject,
-        text: emailBody,
-      });
+        const recipient = request.recipients[0]?.recipient ?? "";
+        const info = await transporter.sendMail({
+          from,
+          to: recipient,
+          subject: emailSubject,
+          text: emailBody,
+        });
 
-      const outputBytes = new TextEncoder().encode(`Email sent successfully. Message ID: ${info.messageId}`);
-      const artifact = await this.artifacts.put(outputBytes, "text/plain");
-      return {
-        requestId: request.requestId,
-        status: "succeeded",
-        output: artifact,
-      };
+        const outputBytes = new TextEncoder().encode(`Email sent successfully. Message ID: ${info.messageId}`);
+        const artifact = await this.artifacts.put(outputBytes, "text/plain");
+        return {
+          requestId: request.requestId,
+          status: "succeeded",
+          output: artifact,
+        };
+      } catch {
+        return {
+          requestId: request.requestId,
+          status: "failed",
+          error: {
+            code: "SMTP_SEND_FAILED",
+            message: "Failed to deliver email through SMTP transport",
+            retryable: false,
+          },
+        };
+      }
     }
 
     if (request.service === "feishu" || request.service === "dingtalk" || request.service === "wecom") {
@@ -321,7 +425,8 @@ export class EffectBroker implements EffectBrokerContract {
       if (!webhookUrl) {
         return this.denied(
           request.requestId,
-          `${request.service} webhook URL is not configured`,
+          `CREDENTIAL_REQUIRED: ${request.service} webhook URL is not configured`,
+          "CREDENTIAL_REQUIRED",
         );
       }
 
@@ -337,17 +442,48 @@ export class EffectBroker implements EffectBrokerContract {
         payload = { msgtype: "text", text: { content } };
       }
 
+      try {
+        const parsed = new URL(webhookUrl);
+        const host = parsed.hostname.toLowerCase();
+        if (DENIED_HOSTS.has(host) || isBrokerDeniedAddress(host)) {
+          return this.denied(
+            request.requestId,
+            `DESTINATION_DENIED: Webhook URL host ${host} is denied`,
+            "DESTINATION_DENIED",
+          );
+        }
+      } catch (err: any) {
+        if (err?.name === "TypeError") {
+          // 022-5-WO3 T015 (pass-13 P2-3): the URL carries the operator's
+          // auth token in its query — redact everything after the host.
+          return this.denied(
+            request.requestId,
+            `DESTINATION_DENIED: Webhook URL ${redactWebhookUrl(webhookUrl)} is malformed`,
+            "DESTINATION_DENIED",
+          );
+        }
+      }
+
       // W183: webhook destinations are operator-configured but still routed
       // through the validated, pinned fetch — no deadline-less unbounded reads.
-      const response = await safeSsrfFetch(
-        webhookUrl,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        },
-        { maxResponseBytes: 1024 * 1024 },
-      );
+      let response: any;
+      try {
+        response = await safeSsrfFetch(
+          webhookUrl,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          },
+          { maxResponseBytes: 1024 * 1024 },
+        );
+      } catch (err: any) {
+        return this.denied(
+          request.requestId,
+          `DESTINATION_DENIED: Webhook URL ${redactWebhookUrl(webhookUrl)} is denied: ${err?.message ?? err}`,
+          "DESTINATION_DENIED",
+        );
+      }
 
       const result: any = await response.json().catch(() => ({}));
       const isSuccess =
@@ -388,7 +524,7 @@ export class EffectBroker implements EffectBrokerContract {
     _auth: BrokerAuthContext,
   ): Promise<BrokeredEffectResult> {
     if (this.vendorOperationHandler) {
-      return await this.vendorOperationHandler(request);
+      return await this.vendorOperationHandler(request, _envelope.capabilities);
     }
     const setup = createSetupFailure(
       request.operation,
@@ -464,14 +600,23 @@ export class EffectBroker implements EffectBrokerContract {
 
     let hasInjectedSecret = false;
 
-    // 2e-ii. Inject authorized secret credentials for verified destinations & secretRefs.
-    // Tavily authenticates via the Authorization Bearer header only (per their
-    // API reference); the key is never duplicated into the request body.
-    if (request.secretRefs && request.secretRefs.length > 0) {
-      for (const ref of request.secretRefs) {
+    const effectiveSecretRefs: string[] = [
+      ...(request.secretRefs ?? []),
+      ...((request as any).secretRef ? [(request as any).secretRef] : []),
+    ];
+
+    if (effectiveSecretRefs.length > 0) {
+      for (const ref of effectiveSecretRefs) {
         const canonical = ref === "tavily" ? "tavilyApiKey" : ref;
         const val = this.resolveSecret(canonical) ?? this.resolveSecret(ref);
         if (!val) {
+          if (this.tenancyMode === "multi") {
+            return this.denied(
+              request.requestId,
+              `CREDENTIAL_REQUIRED: Required secret reference "${ref}" cannot be resolved in multi-tenant mode without explicit secret injection.`,
+              "CREDENTIAL_REQUIRED",
+            );
+          }
           return {
             requestId: request.requestId,
             status: "failed",
@@ -492,6 +637,13 @@ export class EffectBroker implements EffectBrokerContract {
       }
     } else if (dest.host === "api.tavily.com") {
       const tavilyKey = this.resolveSecret("tavilyApiKey") ?? this.resolveSecret("tavily");
+      if (!tavilyKey && this.tenancyMode === "multi") {
+        return this.denied(
+          request.requestId,
+          `CREDENTIAL_REQUIRED: Tavily search requires an explicit secret in multi-tenant mode.`,
+          "CREDENTIAL_REQUIRED",
+        );
+      }
       if (tavilyKey) {
         cleanHeaders["authorization"] = `Bearer ${tavilyKey}`;
         hasInjectedSecret = true;
@@ -654,17 +806,30 @@ export class EffectBroker implements EffectBrokerContract {
     return isBrokerDeniedAddress(ip);
   }
 
-  private denied(requestId: string, message: string): BrokeredEffectResult {
+  private denied(requestId: string, message: string, code = "BROKER_DENIED"): BrokeredEffectResult {
     return {
       requestId,
       status: "denied",
-      error: { code: "BROKER_DENIED", message, retryable: false },
+      error: { code, message, retryable: false },
     };
   }
 }
 
 /** Default Node.js network adapter for EffectBroker. */
 export class NodeNetworkAdapter implements BrokerNetworkAdapter {
+  private readonly maxResponseBytes: number;
+  private readonly timeoutMs: number;
+
+  constructor(opts?: { maxResponseBytes?: number; timeoutMs?: number }) {
+    // 022-5-WO2 T007 (pass-12 P1-1): the streaming cap MUST be armed here —
+    // pinnedFetch only enforces `maxResponseBytes` while streaming, and the
+    // broker's post-response cap runs after the body has already been
+    // buffered (lead-reproduced: 300 MiB in 237 ms). Defaults match the
+    // broker's own limits.
+    this.maxResponseBytes = opts?.maxResponseBytes ?? 10 * 1024 * 1024;
+    this.timeoutMs = opts?.timeoutMs ?? 30_000;
+  }
+
   async resolve(host: string): Promise<string[]> {
     try {
       const dns = await import("node:dns/promises");
@@ -699,6 +864,8 @@ export class NodeNetworkAdapter implements BrokerNetworkAdapter {
       headers: init.headers,
       body: init.body,
       signal: init.signal,
+      maxResponseBytes: this.maxResponseBytes,
+      timeoutMs: this.timeoutMs,
     });
 
     return {

@@ -63,16 +63,16 @@ describe("013 Golden Cross-Surface Parity (FR-039 / T056)", () => {
   it("produces identical outcomes across Controller, SDK, and Server HTTP handlers", async () => {
     // Setup isolated instances for Controller, SDK, and Server
     const configStore1 = new ProviderConfigStore(":memory:");
-    const credStore1 = new MemoryCredentialStore();
+    const credStore1 = new MemoryCredentialStore({ isIsolated: false });
     const runtime1 = new ProviderRuntime({ configStore: configStore1, credentialStore: credStore1 });
     const controller = createProviderManagerApi(runtime1);
 
     const configStore2 = new ProviderConfigStore(":memory:");
-    const credStore2 = new MemoryCredentialStore();
-    const sdk = await createSeepient({ credentials: credStore2 });
+    const credStore2 = new MemoryCredentialStore({ isIsolated: false });
+    const sdk = await createSeepient({ credentials: credStore2, tenancy: "single" });
 
     const configStore3 = new ProviderConfigStore(":memory:");
-    const credStore3 = new MemoryCredentialStore();
+    const credStore3 = new MemoryCredentialStore({ isIsolated: false });
     const runtime3 = new ProviderRuntime({ configStore: configStore3, credentialStore: credStore3 });
     const serverHandler = createRestHandler({
       version: "0.2.2",
@@ -89,7 +89,7 @@ describe("013 Golden Cross-Surface Parity (FR-039 / T056)", () => {
     const cAdd = await controller.saveAccount({
       accountId: "openai-main",
       upstreamProvider: "openai",
-      credential: { mode: "env", varName: "OPENAI_API_KEY" },
+      credential: { mode: "paste", keyValue: "sk-openai-main" },
     });
     expect(cAdd.ok).toBe(true);
 
@@ -97,7 +97,7 @@ describe("013 Golden Cross-Surface Parity (FR-039 / T056)", () => {
     const sAdd = await sdk.addProvider({
       accountId: "openai-main",
       upstreamProvider: "openai",
-      credential: { mode: "env", varName: "OPENAI_API_KEY" },
+      credential: { mode: "paste", keyValue: "sk-openai-main" },
     });
     expect(sAdd.ok).toBe(true);
 
@@ -109,7 +109,7 @@ describe("013 Golden Cross-Surface Parity (FR-039 / T056)", () => {
       JSON.stringify({
         adapter: "pi-ai",
         upstreamProvider: "openai",
-        credential: { kind: "env", name: "OPENAI_API_KEY" },
+        credential: { kind: "api_key", keyValue: "sk-openai-main" },
       }),
     );
     await new Promise<void>((resolve) => { res1.on("finish", () => resolve()); serverHandler(r1, res1); });

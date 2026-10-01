@@ -46,7 +46,7 @@ import type {
 
 const agent = await createSeepient({
   // Injected tenant storage adapters
-  persist: myDatabaseBackend, // PersistenceBackend or SessionStore adapter
+  persist: myDatabaseBackend, // PersistenceBackend
   auditStore: myPostgresAuditStore,
   policyStore: myRedisPolicyStore,
   capabilityLedger: myLedgerStore,
@@ -67,7 +67,7 @@ console.log(result.text)
 ::: warning Store injection completeness
 Stateless operation requires injecting all three permission contracts (`auditStore`, `policyStore`, and `capabilityLedger`) along with `persist`. If 1 or 2 permission stores are injected, the SDK logs a warning (`[seepient] WARNING: Partial state store injection detected...`) and falls back missing stores to writing to `~/.seepient` or `./.seepient` on the local filesystem.
 
-For one-shot execution, `askSeepient()` also accepts `auditStore`, `policyStore`, `capabilityLedger`, `principalId`, and `runtime` to run without disk access.
+For one-shot execution, `askSeepient()` also accepts `auditStore`, `policyStore`, `capabilityLedger`, `principalId`, and `runtime` to run without disk access. For tenant-partitioned or serverless skills, inject external skill sources via `sources` or pass inline literals; see [Skill Sources](/sdk/skills#skill-sources).
 :::
 
 ---
@@ -79,8 +79,10 @@ For one-shot execution, `askSeepient()` also accepts `auditStore`, `policyStore`
 | **Settings** | Worker-local | Environment variables | Ephemeral per-worker configuration. |
 | **Model catalog** | Worker-local | In-memory cache | Cached catalog entries refreshed on startup. |
 | **Sandbox binaries** | Worker-local | Container image | Compiled helper (`fs-commit`) and sandbox (`bwrap`). |
-| **Skill definitions** | Worker-local | Read-only image mount | Bundled skill instructions. |
-| **Session history** | Tenant-scoped | Injected `SessionStore` | Messages and tool invocations saved in database. |
+| **Skill definitions (bundled)** | Worker-local | Read-only image mount | Bundled skill instructions. |
+| **Skill definitions (injected)** | Tenant-scoped | Injected `SkillSource` / DB | Tenant-partitioned skills and inline literals. See [Skill Sources](/sdk/skills#skill-sources). |
+| **Generated skills** | Tenant-scoped | Injected `SkillStore` | Persisted through embedder `SkillStore.save()`. |
+| **Session history** | Tenant-scoped | Injected `PersistenceBackend` | Messages and tool invocations saved in database. |
 | **Audit trail** | Tenant-scoped | Injected `AuditStore` | Tamper-evident execution log entries. |
 | **Grants and policies** | Tenant-scoped | Injected `PolicyStore` | Tenant permission rules and consent levels. |
 | **Credentials** | Tenant-scoped | Injected `ProviderRuntime` | API keys retrieved from tenant secrets vault. |
@@ -101,3 +103,6 @@ When deploying workers in cloud environments (AWS, GCP, Azure, Kubernetes):
    - **Egress segmentation**: Restrict worker egress at the VPC security group or network policy level. Workers executing unconstrained user tools should not have network access to internal control plane services, databases, or cloud provider APIs.
    - **Complementary roles**: Application-layer pinning protects against loopback sidecar exploits and DNS rebinding to internal services; network egress segmentation and IMDSv2 protect against unauthorized external routing and infrastructure credential exfiltration.
 
+## Reference Implementation
+
+For a complete working implementation of an embedder-owned stateless worker with tenant isolation, custom storage backends, and scoped approval brokers, see the [`examples/worker`](https://github.com/hashangit/seepient/tree/main/examples/worker) reference example.

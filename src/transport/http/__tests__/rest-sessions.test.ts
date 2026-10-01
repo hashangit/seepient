@@ -103,15 +103,17 @@ describe("REST Sessions & Chat Resume (Spec 021-2 / FR-005, FR-006)", () => {
 
     expect(res.statusCode).toBe(200);
     const data = JSON.parse(res.body);
-    expect(Array.isArray(data)).toBe(true);
-    expect(data.length).toBe(2);
+    const sessions = Array.isArray(data) ? data : data.sessions;
+    expect(Array.isArray(sessions)).toBe(true);
+    expect(sessions.length).toBe(2);
+    expect(data.source).toBe("memory");
 
-    const ids = data.map((d: any) => d.id);
+    const ids = sessions.map((d: any) => d.id);
     expect(ids).toContain(s1.id);
     expect(ids).toContain(s2.id);
 
     // Assert SessionSummary shape (no message bodies)
-    const summary = data.find((d: any) => d.id === s1.id);
+    const summary = sessions.find((d: any) => d.id === s1.id);
     expect(summary.id).toBe(s1.id);
     expect(summary.messageCount).toBe(1);
     expect(summary.provider).toBe("openai");
@@ -143,7 +145,7 @@ describe("REST Sessions & Chat Resume (Spec 021-2 / FR-005, FR-006)", () => {
     expect(data.text).toBe("Echo: Hello again");
 
     // Check that user and assistant messages were persisted through sessionManager
-    const updated = await sessionManager.getSession(session.id, (sessionManager as any).sessions.get(session.id)!.apiKeyHash);
+    const updated = await sessionManager.getSession(session.id, hashKey(key1));
     expect(updated).not.toBeNull();
     expect(updated!.messages.length).toBe(2);
     expect(updated!.messages[0].role).toBe("user");
@@ -205,10 +207,11 @@ describe("REST Sessions & Chat Resume (Spec 021-2 / FR-005, FR-006)", () => {
     expect(lastGenerateTextOpts.message).toBe("Turn 2 msg");
   });
 
-  it("POST /v1/chat returns 404 for unknown or foreign sessionId", async () => {
+  it("POST /v1/chat adopts or creates on unknown sessionId (FR-026)", async () => {
+    const freshId = "fresh-session-" + Date.now();
     const body = JSON.stringify({
-      message: "Hello",
-      sessionId: "00000000-0000-0000-0000-000000000000",
+      message: "Hello fresh session",
+      sessionId: freshId,
     });
 
     const { req, res } = createMockReqRes("POST", "/v1/chat", {
@@ -221,7 +224,50 @@ describe("REST Sessions & Chat Resume (Spec 021-2 / FR-005, FR-006)", () => {
       handler(req, res);
     });
 
-    expect(res.statusCode).toBe(404);
+    expect(res.statusCode).toBe(200);
+    const data = JSON.parse(res.body);
+    expect(data.sessionId).toBe(freshId);
+
+    // Verify session now exists for key1
+    const session = await sessionManager.getSession(freshId, hashKey(key1));
+    expect(session).not.toBeNull();
+    expect(session!.id).toBe(freshId);
+  });
+
+  it("POST /v1/chat isolates foreign sessionId under caller's partition without squatting (FR-012)", async () => {
+    // Create session owned by key1
+    const s1 = await sessionManager.createSession(key1);
+
+    // key2 attempts to post to key1's session
+    const body = JSON.stringify({
+      message: "Probe foreign session",
+      sessionId: s1.id,
+    });
+
+    const { req, res } = createMockReqRes("POST", "/v1/chat", {
+      authorization: `Bearer ${key2}`,
+      "content-type": "application/json",
+    }, body);
+
+    await new Promise<void>((resolve) => {
+      res.on("finish", resolve);
+      handler(req, res);
+    });
+
+    // Under FR-012: foreign collision is indistinguishable from fresh creation (no 403 existence leak or squatting)
+    expect(res.statusCode).toBe(200);
+    const data = JSON.parse(res.body);
+    expect(data.sessionId).toBe(s1.id);
+
+    // key1's session is untouched
+    const session1 = await sessionManager.getSession(s1.id, hashKey(key1));
+    expect(session1).not.toBeNull();
+    expect(session1!.messages.length).toBe(0);
+
+    // key2 has its own isolated session with that ID
+    const session2 = await sessionManager.getSession(s1.id, hashKey(key2));
+    expect(session2).not.toBeNull();
+    expect(session2!.messages.length).toBe(2);
   });
 
   it("POST /v1/chat without sessionId is stateless (D1): no session created, no 429, no files saved", async () => {
@@ -267,4 +313,30 @@ describe("REST Sessions & Chat Resume (Spec 021-2 / FR-005, FR-006)", () => {
       saveSpy.mockRestore();
     }
   });
+
+  it("W248: POST /v1/chat fails closed with 400 when skills contains non-string elements", async () => {
+    const { req, res } = createMockReqRes(
+      "POST",
+      "/v1/chat",
+      {
+        authorization: `Bearer ${key1}`,
+        "content-type": "application/json",
+      },
+      JSON.stringify({
+        message: "hello",
+        skills: [{ name: "x", content: "y" }],
+      }),
+    );
+
+    await new Promise<void>((resolve) => {
+      res.on("finish", resolve);
+      handler(req, res);
+    });
+
+    expect(res.statusCode).toBe(400);
+    const data = JSON.parse(res.body);
+    expect(data.error?.code).toBe("BAD_REQUEST");
+    expect(data.error?.message).toContain("Field 'skills' must be an array of strings");
+  });
 });
+

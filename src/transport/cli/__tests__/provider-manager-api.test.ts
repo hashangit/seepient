@@ -16,7 +16,6 @@ const ENV_KEYS = [
   "GLM_API_KEY",
   "OPENAI_COMPAT_API_KEY",
   "OPENAI_COMPAT_BASE_URL",
-  "LLM_PROVIDER",
   "SEEPIENT_PROVIDER",
 ];
 
@@ -183,7 +182,7 @@ describe("deleteAccount blocked/force (contract §6.4)", () => {
     const { api, credentialStore, runtime } = makeApi();
     withCatalogModels(runtime, MODELS);
     await api.saveAccount({ accountId: "acme-main", upstreamProvider: "acme", credential: { mode: "paste", keyValue: "k" } });
-    await api.saveAccount({ accountId: "acme-env", upstreamProvider: "other", credential: { mode: "env", varName: "ACME_KEY" } });
+    await api.saveAccount({ accountId: "acme-env", upstreamProvider: "other", credential: { mode: "paste", keyValue: "k-acme" } });
     await api.setAssignment("text", "standard", { providerAccount: "acme-main", model: "model-tool" });
 
     const blocked = await api.deleteAccount("acme-main");
@@ -765,7 +764,7 @@ describe("OAuth sign-in & logout (contract §6.8–6.10)", () => {
     await api.saveAccount({
       accountId: "api-key-acct",
       upstreamProvider: "openai",
-      credential: { mode: "env", varName: "OPENAI_API_KEY" },
+      credential: { mode: "paste", keyValue: "sk-api-key-acct" },
     });
 
     const logoutRes = await api.logoutAccount("api-key-acct");

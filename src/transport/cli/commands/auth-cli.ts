@@ -10,7 +10,7 @@ import chalk from "chalk";
 import * as readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { generateApiKey, KeyScope } from "../../auth/auth.js";
-import { getDefaultProviderRuntime } from "../../../domain/providers/provider-runtime.js";
+import { createAmbientProviderRuntime } from "../../../domain/providers/provider-runtime.js";
 import { createProviderManagerApi } from "../provider-manager-api.js";
 
 export function registerAuthCommands(program: Command): void {
@@ -20,10 +20,9 @@ export function registerAuthCommands(program: Command): void {
     .command("login <provider>")
     .description("Configure credentials for a provider account")
     .option("--key <apiKey>", "API key for the provider")
-    .option("--env-var <name>", "Environment variable name containing the API key")
     .option("--upstream <upstream>", "Upstream provider name (e.g. openai, anthropic, google)")
     .action(async (providerId, opts) => {
-      const runtime = getDefaultProviderRuntime();
+      const runtime = createAmbientProviderRuntime();
       const api = createProviderManagerApi(runtime);
       const state = await api.getState();
       const existing = state.accounts.find((a) => a.id === providerId);
@@ -50,28 +49,10 @@ export function registerAuthCommands(program: Command): void {
         return;
       }
 
-      if (opts.envVar) {
-        const res = await api.saveAccount({
-          accountId: providerId,
-          upstreamProvider,
-          credential: { mode: "env", varName: opts.envVar },
-          baseUrl: rawExisting?.baseUrl,
-          compat: rawExisting?.compat,
-          allowPrivate: rawExisting?.ssrfAllowPrivate,
-        });
-        if (!res.ok) {
-          const hintText = res.error.hint ? ` (${res.error.hint})` : "";
-          console.error(chalk.red(`Error (${res.error.code}): ${res.error.message}${hintText}`));
-          process.exit(1);
-        }
-        console.log(chalk.green(`✓ Successfully configured env credential (${opts.envVar}) for provider account "${providerId}"`));
-        return;
-      }
-
       // Non-interactive guard (FR-032)
       if (!process.stdin.isTTY) {
-        console.error(chalk.red(`Error: --key or --env-var is required in non-interactive mode.`));
-        console.error(chalk.dim(`Usage: seepient auth login <id> --key <key> OR seepient auth login <id> --env-var <NAME>`));
+        console.error(chalk.red(`Error: --key is required in non-interactive mode.`));
+        console.error(chalk.dim(`Usage: seepient auth login <id> --key <key>`));
         process.exit(1);
       }
 
@@ -81,9 +62,8 @@ export function registerAuthCommands(program: Command): void {
 
       console.log(chalk.bold.cyan(`\nAuthenticate provider account "${providerId}":`));
       console.log(`  [1] Paste API key`);
-      console.log(`  [2] Use environment variable`);
       if (hasOAuth) {
-        console.log(`  [3] Sign in with provider (OAuth / subscription)`);
+        console.log(`  [2] Sign in with provider (OAuth / subscription)`);
       }
 
       const rl = readline.createInterface({ input, output });
@@ -109,27 +89,7 @@ export function registerAuthCommands(program: Command): void {
             process.exit(1);
           }
           console.log(chalk.green(`✓ Successfully configured API key for "${providerId}"`));
-        } else if (choice === "2") {
-          const envName = (await rl.question("Environment variable name: ")).trim();
-          if (!envName) {
-            console.error(chalk.red("Error: Environment variable name cannot be empty."));
-            process.exit(1);
-          }
-          const res = await api.saveAccount({
-            accountId: providerId,
-            upstreamProvider,
-            credential: { mode: "env", varName: envName },
-            baseUrl: rawExisting?.baseUrl,
-            compat: rawExisting?.compat,
-            allowPrivate: rawExisting?.ssrfAllowPrivate,
-          });
-          if (!res.ok) {
-            const hintText = res.error.hint ? ` (${res.error.hint})` : "";
-            console.error(chalk.red(`Error (${res.error.code}): ${res.error.message}${hintText}`));
-            process.exit(1);
-          }
-          console.log(chalk.green(`✓ Successfully configured env credential (${envName}) for "${providerId}"`));
-        } else if (choice === "3" && hasOAuth) {
+        } else if (choice === "2" && hasOAuth) {
           console.log(chalk.cyan(`\nInitiating sign-in with ${upstreamProvider}...`));
           const res = await api.signInWithProvider(upstreamProvider, {
             preferredAccountId: providerId,
@@ -169,7 +129,7 @@ export function registerAuthCommands(program: Command): void {
     .description("Remove credentials for a provider account")
     .option("--json", "Output result as JSON")
     .action(async (providerId, opts) => {
-      const runtime = getDefaultProviderRuntime();
+      const runtime = createAmbientProviderRuntime();
       const api = createProviderManagerApi(runtime);
       const res = await api.logoutAccount(providerId);
       if (opts.json) {

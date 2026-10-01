@@ -17,7 +17,9 @@ import {
   RemotePolicyStore,
   RemoteAuditStore,
   RemoteCapabilityLedger,
+  DbSkillSource,
 } from "../src/worker.js";
+import { FsSkillSources } from "../../../src/transport/sdk/index.js";
 import { createStubApp } from "../src/stub-app.js";
 import { createFakeRuntime } from "../../../src/transport/sdk/__tests__/helpers/fake-stores.js";
 import { diskBackedFakeHelper } from "../../../src/capabilities/execution/__tests__/helpers/commit-helper-fakes.js";
@@ -44,6 +46,11 @@ describe("QS-4: Reference Worker End-to-End", () => {
     process.env.SEEPIENT_SECURITY_DIR = secDir;
 
     stubApp = createStubApp();
+    stubApp.state.tokenToPrincipal.set("token-user-123", "user-123");
+    stubApp.state.tokenToPrincipal.set("token-global", "default");
+    stubApp.state.tokenToPrincipal.set("token-tenant-abc", "tenant-abc");
+    stubApp.state.tokenToPrincipal.set("token-tenant-a", "tenant-a");
+    stubApp.state.tokenToPrincipal.set("token-tenant-b", "tenant-b");
     controlPlanePort = await stubApp.listen();
   });
 
@@ -92,6 +99,7 @@ describe("QS-4: Reference Worker End-to-End", () => {
       workspaceDir,
       runtime,
       controlPlaneUrl: `http://127.0.0.1:${controlPlanePort}`,
+      controlPlaneToken: "token-user-123",
       consentMode: "ask-everything",
       commitHelper: diskBackedFakeHelper(),
     });
@@ -110,8 +118,8 @@ describe("QS-4: Reference Worker End-to-End", () => {
     expect(stubApp.state.auditEvents.length).toBeGreaterThan(0);
     expect(stubApp.state.auditEvents[0].event.principalId).toBe("user-123");
 
-    // Verify session persistence in stub control plane app
-    expect(stubApp.state.sessions.has("session-xyz")).toBe(true);
+    // Verify session persistence in stub control plane app (keyed by principal:sessionId)
+    expect(stubApp.state.sessions.has("user-123:session-xyz")).toBe(true);
 
     // Verify capability consumption recorded
     expect(stubApp.state.consumedDigests.size).toBeGreaterThan(0);
@@ -143,7 +151,166 @@ describe("QS-4: Reference Worker End-to-End", () => {
     expect(() => new RemoteCapabilityLedger("")).toThrow(/controlPlaneUrl is required/);
 
     // With unreachable controlPlaneUrl, policy read fails closed with error
-    const offlinePolicyStore = new RemotePolicyStore("http://127.0.0.1:1");
+    const offlinePolicyStore = new RemotePolicyStore("http://127.0.0.1:1", { controlPlaneToken: "offline-token" });
     await expect(offlinePolicyStore.read("default")).rejects.toThrow(/Policy read failed/);
   });
+
+  it("QS-S3: DbSkillSource composes [fs, global, tenant] with tenant-specific shadowing", async () => {
+    // 1. Seed global and tenant skills in stub control plane
+    stubApp.state.skills.push(
+      {
+        id: "s-global-summarize",
+        name: "summarize",
+        content: "---\nname: summarize\ndescription: Global summarize procedure\n---\nGlobal body",
+        tenant_id: null,
+        source: "db:global",
+      },
+      {
+        id: "s-tenant-summarize",
+        name: "summarize",
+        content: "---\nname: summarize\ndescription: Tenant-specific summarize procedure\n---\nTenant body",
+        tenant_id: "tenant-abc",
+        source: "db:tenant:tenant-abc",
+      },
+      {
+        id: "s-global-health",
+        name: "health-check",
+        content: "---\nname: health-check\ndescription: Global health check\n---\nHealth check body",
+        tenant_id: null,
+        source: "db:global",
+      },
+    );
+
+    const globalSource = new DbSkillSource(`http://127.0.0.1:${controlPlanePort}`, { controlPlaneToken: "token-global" });
+    const tenantSource = new DbSkillSource(`http://127.0.0.1:${controlPlanePort}`, { tenantId: "tenant-abc", controlPlaneToken: "token-tenant-abc" });
+
+    let stepCount = 0;
+    const runtime = createFakeRuntime({
+      responses: () => {
+        stepCount++;
+        if (stepCount === 1) {
+          return {
+            toolCalls: [
+              {
+                id: "call-skill-1",
+                name: "use_skill",
+                arguments: { skill_name: "summarize" },
+              },
+            ],
+          };
+        }
+        return { text: "Summarize finished." };
+      },
+    });
+
+    const workerAgent = await createWorkerAgent({
+      tenantId: "tenant-abc",
+      principalId: "user-123",
+      sessionId: "session-skills",
+      workspaceDir,
+      runtime,
+      controlPlaneUrl: `http://127.0.0.1:${controlPlanePort}`,
+      controlPlaneToken: "token-user-123",
+      consentMode: "ask-everything",
+      commitHelper: diskBackedFakeHelper(),
+      sources: [new FsSkillSources(workspaceDir), globalSource, tenantSource],
+    });
+
+    // Verify system prompt catalog composition:
+    // Tenant-specific "summarize" must shadow the global "summarize"
+    const history = workerAgent.getHistory();
+    const sysMsg: any = history.find((m: any) => m.role === "system");
+    const sysText =
+      typeof sysMsg?.content === "string"
+        ? sysMsg.content
+        : Array.isArray(sysMsg?.content)
+          ? sysMsg.content.map((c: any) => c.text ?? "").join("\n")
+          : "";
+
+    expect(sysText).toContain("summarize: Tenant-specific summarize procedure");
+    expect(sysText).not.toContain("Global summarize procedure");
+    expect(sysText).toContain("health-check: Global health check");
+
+    // Execute skill call
+    const response = await workerAgent.chat("Please summarize");
+    expect(response.toolCalls.length).toBe(1);
+
+    const toolMsg = workerAgent.getHistory().find((m: any) => m.role === "tool");
+    expect(toolMsg?.content).toContain("# summarize Skill Activated");
+    expect(toolMsg?.content).toContain("Tenant body");
+
+    await workerAgent.close();
+  });
+
+  it("FR-023: Tenant A's policy grant is invisible to Tenant B on a shared workspace", async () => {
+    const policyStore = new RemotePolicyStore(`http://127.0.0.1:${controlPlanePort}`, {
+      controlPlaneToken: "token-tenant-a",
+      principalId: "tenant-a",
+    });
+    const workspaceId = "shared-workspace-test";
+
+    // Compare and set grant for Tenant A
+    await policyStore.compareAndSet(
+      workspaceId,
+      0,
+      {
+        version: 1,
+        capabilities: [
+          { kind: "write-root", root: "/data/tenant-a", principalId: "tenant-a" },
+        ],
+      },
+      { kind: "service", authorityId: "test", authenticatedBy: "system" },
+    );
+
+    // Read policy as Tenant A in multi-tenant mode
+    const snapA = await policyStore.read(workspaceId, {
+      principalId: "tenant-a",
+      tenancyMode: "multi",
+    });
+    expect(snapA.policy.capabilities).toHaveLength(1);
+    expect(snapA.policy.capabilities[0].principalId).toBe("tenant-a");
+
+    // Read policy as Tenant B on the same shared workspace in multi-tenant mode
+    const snapB = await policyStore.read(workspaceId, {
+      principalId: "tenant-b",
+      tenancyMode: "multi",
+      controlPlaneToken: "token-tenant-b",
+    });
+    // Tenant B must not see Tenant A's capability grant
+    expect(snapB.policy.capabilities.some((c) => c.principalId === "tenant-a")).toBe(false);
+    expect(snapB.policy.capabilities).toHaveLength(0);
+
+    // Also verify when a shared workspace has policies for both principals
+    stubApp.state.policySnapshots.set("shared-workspace-both", {
+      workspaceId: "shared-workspace-both",
+      version: 1,
+      policyDigest: "digest-both",
+      policy: {
+        version: 1,
+        capabilities: [
+          { kind: "write-root", root: "/data/tenant-a", principalId: "tenant-a" },
+          { kind: "write-root", root: "/data/tenant-b", principalId: "tenant-b" },
+        ],
+      },
+      mutationHistory: [],
+    });
+
+    const readB = await policyStore.read("shared-workspace-both", {
+      principalId: "tenant-b",
+      tenancyMode: "multi",
+      controlPlaneToken: "token-tenant-b",
+    });
+    expect(readB.policy.capabilities).toHaveLength(1);
+    expect(readB.policy.capabilities[0].principalId).toBe("tenant-b");
+    expect(readB.policy.capabilities.some((c) => c.principalId === "tenant-a")).toBe(false);
+
+    const readA = await policyStore.read("shared-workspace-both", {
+      principalId: "tenant-a",
+      tenancyMode: "multi",
+    });
+    expect(readA.policy.capabilities).toHaveLength(1);
+    expect(readA.policy.capabilities[0].principalId).toBe("tenant-a");
+    expect(readA.policy.capabilities.some((c) => c.principalId === "tenant-b")).toBe(false);
+  });
 });
+

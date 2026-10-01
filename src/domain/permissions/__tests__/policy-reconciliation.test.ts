@@ -13,6 +13,8 @@ import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import { buildActionLifecycle } from "../action-lifecycle-factory.js";
 import { LocalPolicyStore, computeWorkspaceId, CURRENT_CEILING_VERSION } from "../policy-store.js";
+import { LocalAuditStore } from "../audit-recorder.js";
+import { PersistedCapabilityLedger } from "../persisted-capability-ledger.js";
 import { InMemoryArtifactStore } from "../../../capabilities/execution/in-memory-artifact-store.js";
 import type { ApprovalBroker } from "../../../foundations/contracts/permission-policy.js";
 import type { ExecutionBoundary } from "../../../foundations/contracts/execution-boundary.js";
@@ -185,5 +187,85 @@ describe("stored-policy reconciliation (spec 017, T010 / FR-019)", () => {
     });
 
     expect(wired.policyContext.principalPolicy.capabilities).toHaveLength(0);
+  });
+
+  it("does not adopt unstamped legacy capabilities into a tenant under multi-tenancy mode", async () => {
+    // Write pre-fix snapshot with unstamped custom capabilities
+    await policyStore.compareAndSet(
+      workspaceId,
+      0,
+      {
+        version: 1,
+        capabilities: [
+          { kind: "read-root", root: workspaceRoot },
+          { kind: "commit-file", path: path.join(workspaceRoot, "secret-operator.txt") },
+        ],
+      },
+      { kind: "human", authorityId: "operator", authenticatedBy: "test" },
+    );
+
+    const auditStore = new LocalAuditStore({ root: path.join(tempDir, "audit") });
+    const capabilityLedger = new PersistedCapabilityLedger({ root: path.join(tempDir, "caps") });
+
+    const wired = await buildActionLifecycle({
+      principalId: "tenant-99",
+      tenancyMode: "multi",
+      runId: "run-multi",
+      workspaceRoot,
+      approvalBroker: NOOP_BROKER,
+      executionBoundary: LOCAL_BOUNDARY,
+      policyStore,
+      auditStore,
+      capabilityLedger,
+      artifacts: new InMemoryArtifactStore(),
+    });
+
+    const tenantCaps = wired.policyContext.principalPolicy.capabilities;
+    // Unstamped commit-file should NOT be in tenant-99's policy
+    expect(tenantCaps.some((c) => c.kind === "commit-file" && c.path?.includes("secret-operator.txt"))).toBe(false);
+  });
+
+  it("multi fresh-install lifecycle exposes no secret-ref '*' or network-destination '*' grants (FR-019 / T029)", async () => {
+    const auditStore = new LocalAuditStore({ root: path.join(tempDir, "audit") });
+    const capabilityLedger = new PersistedCapabilityLedger({ root: path.join(tempDir, "caps") });
+
+    // Fresh install: no policy has been written to policyStore
+    const wired = await buildActionLifecycle({
+      principalId: "tenant-fresh",
+      tenancyMode: "multi",
+      runId: "run-multi-fresh",
+      workspaceRoot,
+      approvalBroker: NOOP_BROKER,
+      executionBoundary: LOCAL_BOUNDARY,
+      policyStore,
+      auditStore,
+      capabilityLedger,
+      artifacts: new InMemoryArtifactStore(),
+    });
+
+    const tenantCaps = wired.policyContext.principalPolicy.capabilities;
+    expect(tenantCaps.some((c) => c.kind === "secret-ref" && (c as any).ref === "*")).toBe(false);
+    expect(tenantCaps.some((c) => c.kind === "network-destination" && (c as any).host === "*")).toBe(false);
+    expect(tenantCaps.some((c) => c.kind === "external-recipient" && (c as any).recipient === "*")).toBe(false);
+    // Only scoped workspace roots are granted by default
+    expect(tenantCaps.some((c) => c.kind === "read-root")).toBe(true);
+    expect(tenantCaps.some((c) => c.kind === "write-root")).toBe(true);
+  });
+
+  it("single-mode fresh-install lifecycle preserves default ceiling grants unchanged", async () => {
+    const wired = await buildActionLifecycle({
+      principalId: "single-user",
+      runId: "run-single-fresh",
+      workspaceRoot,
+      approvalBroker: NOOP_BROKER,
+      executionBoundary: LOCAL_BOUNDARY,
+      policyStore,
+      auditRoot: path.join(tempDir, "audit"),
+      artifacts: new InMemoryArtifactStore(),
+    });
+
+    const caps = wired.policyContext.principalPolicy.capabilities;
+    expect(caps.some((c) => c.kind === "secret-ref" && (c as any).ref === "*")).toBe(true);
+    expect(caps.some((c) => c.kind === "network-destination" && (c as any).host === "*")).toBe(true);
   });
 });

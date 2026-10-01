@@ -11,7 +11,7 @@ import {
   serverEffectiveCapabilities,
   serverCapabilityCovers,
 } from "../server-policy.js";
-import { PendingApprovalStore } from "../durable-approval-store.js";
+import { DurableApprovalStore as PendingApprovalStore } from "../durable-approval-store.js";
 import type {
   Capability,
   CapabilitySet,
@@ -95,7 +95,7 @@ describe("serverEffectiveCapabilities (T401, QS-4.1)", () => {
   });
 });
 
-describe("PendingApprovalStore (T407/T408, QS-4.5)", () => {
+describe("DurableApprovalStore CAS semantics (T407/T408, QS-4.5)", () => {
   function req(overrides: Partial<PermissionRequest> = {}): PermissionRequest {
     return {
       requestId: "r1",
@@ -146,7 +146,7 @@ describe("PendingApprovalStore (T407/T408, QS-4.5)", () => {
       actionDigest: "d1",
       optionId: "opt-1",
       lifetime: "action" as const,
-      actorId: "u",
+      actorId: "user-1", // the record's principal (022-5 FR-013 binding)
       decidedAt: Date.now(),
     };
     const first = store.cas("cont-1", rec.version, decision);

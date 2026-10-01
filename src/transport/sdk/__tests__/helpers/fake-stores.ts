@@ -36,6 +36,7 @@ import {
 
 /** In-memory AuditStore with call recording and idempotency dedup. */
 export class FakeAuditStore implements AuditStore {
+  readonly isIsolated = true;
   readonly appends: Array<{ event: ActionAuditEvent; idempotencyKey: string }> = [];
   readonly seenKeys = new Set<string>();
   readonly terminalEvents = new Map<string, ActionAuditEvent>();
@@ -76,6 +77,7 @@ export class FakeAuditStore implements AuditStore {
 
 /** In-memory PolicyStore with compare-and-set version tracking. */
 export class FakePolicyStore implements PolicyStore {
+  readonly isIsolated = true;
   readonly snapshots = new Map<string, PolicySnapshot>();
   readonly calls: Array<{
     type: "read" | "compareAndSet";
@@ -86,18 +88,34 @@ export class FakePolicyStore implements PolicyStore {
     mutation?: { mutationId: string };
   }> = [];
 
-  async read(workspaceId: string): Promise<PolicySnapshot> {
+  async read(
+    workspaceId: string,
+    opts?: { principalId?: string; tenancyMode?: "single" | "multi" },
+  ): Promise<PolicySnapshot> {
     this.calls.push({ type: "read", workspaceId });
     const existing = this.snapshots.get(workspaceId);
-    if (existing) return { ...existing, policy: { ...existing.policy, capabilities: [...existing.policy.capabilities] } };
-    const initial: PolicySnapshot = {
-      workspaceId,
-      version: 0,
-      policyDigest: "fake-digest-0",
-      policy: { version: 1, capabilities: [] },
-      mutationHistory: [],
-    };
-    return initial;
+    let snap: PolicySnapshot;
+    if (existing) {
+      snap = { ...existing, policy: { ...existing.policy, capabilities: [...existing.policy.capabilities] } };
+    } else {
+      snap = {
+        workspaceId,
+        version: 0,
+        policyDigest: "fake-digest-0",
+        policy: { version: 1, capabilities: [] },
+        mutationHistory: [],
+      };
+    }
+    if (opts?.principalId) {
+      const isMulti = opts.tenancyMode === "multi";
+      const isDefaultSingleUser = !isMulti;
+      const filtered = snap.policy.capabilities.filter((cap) => {
+        if (cap.principalId) return cap.principalId === opts.principalId;
+        return isDefaultSingleUser;
+      });
+      return { ...snap, policy: { ...snap.policy, capabilities: filtered } };
+    }
+    return snap;
   }
 
   async compareAndSet(
@@ -143,47 +161,97 @@ export class FakePolicyStore implements PolicyStore {
 
 /** In-memory CapabilityLedger with consumption & revocation tracking. */
 export class FakeCapabilityLedger implements CapabilityLedger {
+  readonly isIsolated = true;
   readonly consumedDigests = new Set<string>();
   readonly consumedEnvelopes = new Set<string>();
   readonly revokedRuns = new Set<string>();
   readonly revokedSessions = new Set<string>();
+  readonly consumedDigestsByPrincipal = new Map<string, Set<string>>();
+  readonly consumedEnvelopesByPrincipal = new Map<string, Set<string>>();
+  readonly revokedRunsByPrincipal = new Map<string, Set<string>>();
+  readonly revokedSessionsByPrincipal = new Map<string, Set<string>>();
   readonly calls: Array<{ method: string; args: unknown[] }> = [];
 
-  async load(): Promise<void> {
-    this.calls.push({ method: "load", args: [] });
+  private getPrincipal(scope?: import("../../../../foundations/contracts/capability-ledger.js").CapabilityLedgerScope): string {
+    return scope?.principalId ?? "default";
   }
 
-  async consume(envelopeId: string, actionDigest: string): Promise<boolean> {
-    this.calls.push({ method: "consume", args: [envelopeId, actionDigest] });
-    if (this.consumedDigests.has(actionDigest)) {
+  private getSet(map: Map<string, Set<string>>, principalId: string): Set<string> {
+    let set = map.get(principalId);
+    if (!set) {
+      set = new Set<string>();
+      map.set(principalId, set);
+    }
+    return set;
+  }
+
+  async load(scope?: import("../../../../foundations/contracts/capability-ledger.js").CapabilityLedgerScope): Promise<void> {
+    this.calls.push({ method: "load", args: [scope] });
+  }
+
+  async consume(
+    envelopeId: string,
+    actionDigest: string,
+    scope?: import("../../../../foundations/contracts/capability-ledger.js").CapabilityLedgerScope,
+  ): Promise<boolean> {
+    this.calls.push({ method: "consume", args: [envelopeId, actionDigest, scope] });
+    const principal = this.getPrincipal(scope);
+    const digests = this.getSet(this.consumedDigestsByPrincipal, principal);
+    const envelopes = this.getSet(this.consumedEnvelopesByPrincipal, principal);
+    if (digests.has(actionDigest)) {
       return false;
     }
+    digests.add(actionDigest);
+    envelopes.add(envelopeId);
     this.consumedDigests.add(actionDigest);
     this.consumedEnvelopes.add(envelopeId);
     return true;
   }
 
-  async revoke(filter: RevokeFilter): Promise<void> {
-    this.calls.push({ method: "revoke", args: [filter] });
-    if (filter.runId) this.revokedRuns.add(filter.runId);
-    if (filter.sessionId) this.revokedSessions.add(filter.sessionId);
+  async revoke(
+    filter: RevokeFilter,
+    scope?: import("../../../../foundations/contracts/capability-ledger.js").CapabilityLedgerScope,
+  ): Promise<void> {
+    this.calls.push({ method: "revoke", args: [filter, scope] });
+    const principal = this.getPrincipal(scope);
+    if (filter.runId) {
+      this.getSet(this.revokedRunsByPrincipal, principal).add(filter.runId);
+      this.revokedRuns.add(filter.runId);
+    }
+    if (filter.sessionId) {
+      this.getSet(this.revokedSessionsByPrincipal, principal).add(filter.sessionId);
+      this.revokedSessions.add(filter.sessionId);
+    }
   }
 
-  isConsumedDigest(actionDigest: string): boolean {
-    return this.consumedDigests.has(actionDigest);
+  isConsumedDigest(
+    actionDigest: string,
+    scope?: import("../../../../foundations/contracts/capability-ledger.js").CapabilityLedgerScope,
+  ): boolean {
+    const principal = this.getPrincipal(scope);
+    return this.getSet(this.consumedDigestsByPrincipal, principal).has(actionDigest);
   }
 
-  isRunRevoked(runId: string): boolean {
-    return this.revokedRuns.has(runId);
+  isRunRevoked(
+    runId: string,
+    scope?: import("../../../../foundations/contracts/capability-ledger.js").CapabilityLedgerScope,
+  ): boolean {
+    const principal = this.getPrincipal(scope);
+    return this.getSet(this.revokedRunsByPrincipal, principal).has(runId);
   }
 
-  isSessionRevoked(sessionId: string): boolean {
-    return this.revokedSessions.has(sessionId);
+  isSessionRevoked(
+    sessionId: string,
+    scope?: import("../../../../foundations/contracts/capability-ledger.js").CapabilityLedgerScope,
+  ): boolean {
+    const principal = this.getPrincipal(scope);
+    return this.getSet(this.revokedSessionsByPrincipal, principal).has(sessionId);
   }
 }
 
 /** Recording in-memory PersistenceBackend tracking save/load/delete calls. */
 export class RecordingPersistenceBackend implements PersistenceBackend {
+  readonly isIsolated = true;
   readonly __persistenceBackend = true as const;
   readonly store = new Map<string, SessionData>();
   readonly saves: Array<{ id: string; data: SessionData }> = [];
@@ -231,7 +299,14 @@ export function createFakeRuntime(opts?: {
   credentialStore?: CompositeCredentialStore | MemoryCredentialStore;
 }): ProviderRuntime {
   if (opts?.responses && !opts.configStore && !opts.credentialStore) {
-    return createMockRuntime(opts.responses);
+    // 022-5-WO3: injected runtimes on multi servers must carry the stamp —
+    // the shared fake gets it by default so every server test composes the
+    // documented embed shape.
+    // The getter is read-only on ProviderRuntime; Object.defineProperty
+    // overrides it for the test double.
+    const mock = createMockRuntime(opts.responses);
+    Object.defineProperty(mock, "tenancySignal", { value: "multi", configurable: true });
+    return mock;
   }
 
   const configStore = opts?.configStore ?? new ProviderConfigStore(":memory:");
@@ -275,6 +350,7 @@ export function createFakeRuntime(opts?: {
       credentialStore,
       modelCatalog: mock.modelCatalog,
       adapter: mock.adapter,
+      tenancyMode: "multi", // 022-5-WO3: injected runtimes are multi-stamped
     });
   }
 
@@ -282,5 +358,6 @@ export function createFakeRuntime(opts?: {
     configStore,
     credentialStore,
     modelCatalog: new ModelCatalog([]),
+    tenancyMode: "multi", // 022-5-WO3: injected runtimes are multi-stamped
   });
 }

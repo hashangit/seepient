@@ -70,7 +70,10 @@ describe("CLI Provider Subcommands Integration (QS-P6.1 & QS-P6.2)", () => {
     const authCmd = program.commands.find((c) => c.name() === "auth");
     const loginCmd = authCmd?.commands.find((c) => c.name() === "login");
     expect(loginCmd).toBeDefined();
-    expect(loginCmd?.options.map((o) => o.long)).toContain("--env-var");
+    // 022-5 FR-005: the env credential mode is demolished — the flag must be
+    // gone and --key the only non-interactive path.
+    expect(loginCmd?.options.map((o) => o.long)).not.toContain("--env-var")
+    expect(loginCmd?.options.map((o) => o.long)).toContain("--key");
   });
 
   it("resolves coding and media.image purposes correctly via ProviderManagerApi (hermetic)", async () => {

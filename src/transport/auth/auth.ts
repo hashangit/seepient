@@ -35,7 +35,11 @@ interface KeyStore {
 }
 
 function getKeyPath(customPath?: string): string {
-  return customPath ?? process.env.SEEPIENT_API_KEYS_FILE ?? path.join(os.homedir(), ".seepient", "server-keys.json");
+  if (customPath) return customPath;
+  if (process.env.SEEPIENT_API_KEYS_FILE) return process.env.SEEPIENT_API_KEYS_FILE;
+  const ambientPath = path.join(os.homedir(), ".seepient", "server-keys.json");
+  console.error(`[seepient] Notice: Falling back to ambient API keys at ${ambientPath}`);
+  return ambientPath;
 }
 
 export function hashKey(rawKey: string): string {
@@ -44,8 +48,14 @@ export function hashKey(rawKey: string): string {
 
 // ── In-memory cache ────────────────────────────────────────────────────
 
-let cachedKeys: Map<string, ApiKeyEntry> | null = null;
-let cacheMtimeMs: number = 0;
+interface CachedFileEntry {
+  mtimeMs: number;
+  size: number;
+  ino: number;
+  keys: Map<string, ApiKeyEntry>;
+}
+
+let cachedKeys: Map<string, CachedFileEntry> | null = null;
 
 // ── Key store I/O ──────────────────────────────────────────────────────
 
@@ -92,19 +102,56 @@ function writeStore(store: KeyStore, filePath: string): void {
 
 function invalidateCache(): void {
   cachedKeys = null;
-  cacheMtimeMs = 0;
 }
 
 function loadCache(filePath: string): Map<string, ApiKeyEntry> {
+  if (!cachedKeys) {
+    cachedKeys = new Map<string, CachedFileEntry>();
+  }
+
+  // FR-010: stat -> read -> stat, publish only when the file is unchanged
+  // across the read. The old read-then-stat order published {newMtime,
+  // oldKeys} when an external atomic rename landed between the two, pinning
+  // a revoked key until the NEXT file change.
+  const identity = (s: fs.Stats | undefined) => (s ? `${s.mtimeMs}:${s.size}:${s.ino}` : "missing");
+
+  let pre: fs.Stats | undefined;
   try {
-    const stat = fs.statSync(filePath);
-    if (cachedKeys && stat.mtimeMs === cacheMtimeMs) {
-      return cachedKeys;
-    }
+    pre = fs.statSync(filePath);
   } catch {
     // File may not exist yet
   }
+  const cached = cachedKeys.get(filePath);
+  if (cached && pre && identity(pre) === `${cached.mtimeMs}:${cached.size}:${cached.ino}`) {
+    return cached.keys;
+  }
 
+  // Bounded retry: an external writer racing the read is rare; three passes
+  // cover it without spinning against a hot writer.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const store = readStore(filePath);
+    const map = new Map<string, ApiKeyEntry>();
+    for (const entry of store.keys) {
+      if (entry.keyHash) {
+        map.set(entry.keyHash, entry);
+      }
+    }
+
+    let post: fs.Stats | undefined;
+    try {
+      post = fs.statSync(filePath);
+    } catch {
+      post = undefined;
+    }
+    if (post && pre && identity(post) === identity(pre)) {
+      cachedKeys.set(filePath, { mtimeMs: post.mtimeMs, size: post.size, ino: post.ino, keys: map });
+      return map;
+    }
+    pre = post;
+  }
+
+  // Unstable across all attempts: serve the last read uncached so a revoked
+  // key is never pinned by a stale entry.
   const store = readStore(filePath);
   const map = new Map<string, ApiKeyEntry>();
   for (const entry of store.keys) {
@@ -112,14 +159,6 @@ function loadCache(filePath: string): Map<string, ApiKeyEntry> {
       map.set(entry.keyHash, entry);
     }
   }
-  cachedKeys = map;
-
-  try {
-    cacheMtimeMs = fs.statSync(filePath).mtimeMs;
-  } catch {
-    cacheMtimeMs = 0;
-  }
-
   return map;
 }
 
@@ -225,10 +264,14 @@ export function extractBearerToken(req: IncomingMessage): string | null {
 /**
  * Authentication middleware helper that extracts and validates the API key.
  */
-export function authMiddleware(req: IncomingMessage): ApiKeyEntry | null {
+export function authMiddleware(
+  req: IncomingMessage,
+  options?: { filePath?: string } | string,
+): ApiKeyEntry | null {
   const token = extractBearerToken(req);
   if (!token) return null;
-  return validateApiKey(token);
+  const filePath = typeof options === "string" ? options : options?.filePath;
+  return validateApiKey(token, filePath ? { filePath } : undefined);
 }
 
 /**

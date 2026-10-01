@@ -640,7 +640,7 @@ describe("ActionLifecycle (T110)", () => {
   it("revoked session denies a session approval with capability-revoked", async () => {
     const ledger = new PersistedCapabilityLedger({ root: dir });
     await ledger.load();
-    await ledger.revoke({ sessionId: "sess-revoked" });
+    await ledger.revoke({ sessionId: "sess-revoked" }, { principalId: "user" });
     const audit = new LocalAuditStore({ root: dir });
     const broker: ApprovalBroker = {
       mode: "inline",
@@ -816,7 +816,7 @@ describe("ActionLifecycle (T110)", () => {
     expect(first.outcome.state).toBe("succeeded");
     expect(requestCount).toBe(1);
 
-    await ledger.revoke({ sessionId: "sess-rev-1" });
+    await ledger.revoke({ sessionId: "sess-rev-1" }, { principalId: "user" });
 
     // A matching later action must fail closed: no repeat prompt, no dispatch.
     const second = await lifecycle.run(writeAction());
@@ -1160,6 +1160,7 @@ describe("persistent approval choices (spec 011 project/global)", () => {
     expect((await store.read(workspaceId)).policy.capabilities).toContainEqual({
       kind: "read-root",
       root: workspace,
+      principalId: "user",
     });
   });
 
@@ -1311,7 +1312,7 @@ describe("persistent approval choices (spec 011 project/global)", () => {
     // The capability landed in the PROJECT protected policy, outside
     // executor roots, via the same CAS flow /permissions approve uses.
     const snap = await store.read("ws-1");
-    expect(snap.policy.capabilities).toEqual([{ kind: "commit-file", path: "/p/a.txt" }]);
+    expect(snap.policy.capabilities).toEqual([{ kind: "commit-file", path: "/p/a.txt", principalId: "user" }]);
     // Retained in the long-lived active set for the rest of the session.
     expect(lifecycle.getActiveCapabilities()).toEqual([{ kind: "commit-file", path: "/p/a.txt" }]);
   });
@@ -1335,7 +1336,7 @@ describe("persistent approval choices (spec 011 project/global)", () => {
     const result = await lifecycle.run(writeAction());
     expect(result.outcome.state).toBe("succeeded");
     const snap = await store.read(GLOBAL_WORKSPACE_ID);
-    expect(snap.policy.capabilities).toEqual([{ kind: "commit-file", path: "/p/a.txt" }]);
+    expect(snap.policy.capabilities).toEqual([{ kind: "commit-file", path: "/p/a.txt", principalId: "user" }]);
     // The project store stays untouched.
     const projectSnap = await store.read("ws-1");
     expect(projectSnap.policy.capabilities).toEqual([]);
@@ -1627,7 +1628,7 @@ describe("persistent grant WAL (round 4 P0 review fix)", () => {
     expect(enqueued).toBe(1);
     expect(result.outcome.state).toBe("succeeded");
     const snap = await store.read("ws-1");
-    expect(snap.policy.capabilities).toEqual([{ kind: "commit-file", path: "/p/a.txt" }]);
+    expect(snap.policy.capabilities).toEqual([{ kind: "commit-file", path: "/p/a.txt", principalId: "user" }]);
   });
 });
 
@@ -1687,7 +1688,7 @@ describe("persistent grant WAL — concurrent flush, CAS failure, recovery (roun
     expect(committed).toHaveLength(1);
     expect(committed[0].policyAfterVersion).toBe(1);
     const snap = await store.read("ws-1");
-    expect(snap.policy.capabilities).toEqual([{ kind: "commit-file", path: "/p/a.txt" }]);
+    expect(snap.policy.capabilities).toEqual([{ kind: "commit-file", path: "/p/a.txt", principalId: "user" }]);
   });
 
   it("a CAS failure leaves a provisional intent and denies with nothing installed", async () => {
@@ -1748,8 +1749,8 @@ describe("persistent grant WAL — concurrent flush, CAS failure, recovery (roun
     expect(result.outcome.state).toBe("succeeded");
     const snap = await store.read("ws-1");
     // The retry must re-add the baseline seed its own grant depends on.
-    expect(snap.policy.capabilities).toContainEqual(baseline);
-    expect(snap.policy.capabilities).toContainEqual({ kind: "commit-file", path: "/p/a.txt" });
+    expect(snap.policy.capabilities).toContainEqual({ ...baseline, principalId: "user" });
+    expect(snap.policy.capabilities).toContainEqual({ kind: "commit-file", path: "/p/a.txt", principalId: "user" });
     // The audit trail matches the full mutation: baseline + grant.
     await outbox.flush();
     const events = await audit.listEvents();
@@ -2211,5 +2212,401 @@ describe("multi-mutation WAL history (round 7 P0)", () => {
         delete process.env.TAVILY_API_KEY;
       }
     }
+  });
+
+  it("P1-A: in multi-tenant mode, persistent approval re-reads policy store with tenancy context and does not launder workspace wildcards", async () => {
+    const { InMemoryCapabilityLedger } = await import("../in-memory-stores.js");
+    const audit = new LocalAuditStore({ root: dir });
+    const ledger = new InMemoryCapabilityLedger();
+    let readOptsReceived: any = undefined;
+    let casCapabilitiesReceived: any = undefined;
+
+    const mockStore: any = {
+      isIsolated: true,
+      read: async (workspaceId: string, opts?: any) => {
+        if (opts) {
+          readOptsReceived = opts;
+          return {
+            workspaceId,
+            version: 1,
+            policyDigest: "d1",
+            policy: {
+              version: 1,
+              capabilities: [
+                { kind: "read-root", root: dir, principalId: opts.principalId },
+              ],
+            },
+            mutationHistory: [],
+          };
+        }
+        // Unscoped / raw read returns workspace-global wildcard and other principal's grants
+        return {
+          workspaceId,
+          version: 1,
+          policyDigest: "d1",
+          policy: {
+            version: 1,
+            capabilities: [
+              { kind: "write-root", root: "*" },
+              { kind: "commit-file", path: join(dir, "b.txt"), principalId: "tenant-b" },
+            ],
+          },
+          mutationHistory: [],
+        };
+      },
+      compareAndSet: async (workspaceId: string, version: number, next: any) => {
+        casCapabilitiesReceived = next.capabilities;
+        return {
+          workspaceId,
+          version: version + 1,
+          policyDigest: "d2",
+          policy: next,
+          mutationHistory: [],
+        };
+      },
+    };
+
+    const targetFile = join(dir, "out.txt");
+    const base = writeAction("d-persist-test");
+    const action: PreparedToolAction = {
+      ...base,
+      principalId: "tenant-a",
+      effects: [
+        {
+          kind: "filesystem-write",
+          targets: [
+            {
+              target: {
+                canonicalPath: targetFile,
+                canonicalParent: dir,
+                basename: "out.txt",
+                exists: false,
+                finalSymlink: false,
+              },
+              mode: "create",
+            },
+          ],
+        },
+      ],
+      display: {
+        ...base.display,
+        summary: targetFile,
+        canonicalTargets: [targetFile],
+      },
+      operation: {
+        kind: "commit-files",
+        commits: [
+          {
+            destination: {
+              canonicalPath: targetFile,
+              canonicalParent: dir,
+              basename: "out.txt",
+              exists: false,
+              finalSymlink: false,
+            },
+            content: {
+              artifactId: "art-1",
+              sha256: "h1",
+              byteLength: 4,
+              mediaType: "text/plain",
+            },
+          },
+        ],
+      },
+    };
+
+    const wired = await buildActionLifecycle({
+      principalId: "tenant-a",
+      tenancyMode: "multi",
+      runId: "r-persist",
+      sessionId: "s-persist",
+      workspaceRoot: dir,
+      approvalBroker: {
+        mode: "inline",
+        request: async (req) => approved(req, "tenant-a", "project"),
+      },
+      executionBoundary: fakeBoundary({ output: "ok", success: true }),
+      auditStore: audit,
+      capabilityLedger: ledger,
+      policyStore: mockStore,
+    });
+
+    const res = await wired.lifecycle.run(action);
+    expect(res.outcome.state).toBe("succeeded");
+
+    // Verify policyStore.read was called with tenancyMode: "multi" and principalId: "tenant-a"
+    expect(readOptsReceived).toBeDefined();
+    expect(readOptsReceived.tenancyMode).toBe("multi");
+    expect(readOptsReceived.principalId).toBe("tenant-a");
+
+    // Verify CAS capabilities did NOT include the workspace wildcard write-root *
+    expect(casCapabilitiesReceived).toBeDefined();
+    const hasWildcard = casCapabilitiesReceived.some((c: any) => c.kind === "write-root" && c.root === "*");
+    expect(hasWildcard).toBe(false);
+    const hasTenantB = casCapabilitiesReceived.some((c: any) => c.kind === "commit-file" && c.principalId === "tenant-b");
+    expect(hasTenantB).toBe(true);
+  });
+
+  it("NEW-3: persistent approval CAS preserves other principals' grants in a shared workspace", async () => {
+    const { InMemoryCapabilityLedger } = await import("../in-memory-stores.js");
+    const audit = new LocalAuditStore({ root: dir });
+    const ledger = new InMemoryCapabilityLedger();
+    let currentCapabilities: Capability[] = [
+      { kind: "read-root", root: join(dir, "cli-scope"), principalId: "cli-user" },
+    ];
+    let casCapabilitiesReceived: any = undefined;
+
+    const mockStore: any = {
+      isIsolated: true,
+      read: async (workspaceId: string, opts?: any) => {
+        if (opts?.principalId) {
+          const isMulti = opts.tenancyMode === "multi";
+          const isDefaultSingleUser = !isMulti;
+          const filtered = currentCapabilities.filter((cap) => {
+            if (cap.principalId) return cap.principalId === opts.principalId;
+            return isDefaultSingleUser;
+          });
+          return {
+            workspaceId,
+            version: 1,
+            policyDigest: "d1",
+            policy: { version: 1, capabilities: filtered },
+            mutationHistory: [],
+          };
+        }
+        return {
+          workspaceId,
+          version: 1,
+          policyDigest: "d1",
+          policy: { version: 1, capabilities: currentCapabilities },
+          mutationHistory: [],
+        };
+      },
+      compareAndSet: async (workspaceId: string, version: number, next: any) => {
+        casCapabilitiesReceived = next.capabilities;
+        currentCapabilities = next.capabilities;
+        return {
+          workspaceId,
+          version: version + 1,
+          policyDigest: "d2",
+          policy: next,
+          mutationHistory: [],
+        };
+      },
+    };
+
+    const targetFile = join(dir, "sdk-out.txt");
+    const base = writeAction("sdk-persist-test");
+    const action: PreparedToolAction = {
+      ...base,
+      principalId: "sdk-user",
+      effects: [
+        {
+          kind: "filesystem-write",
+          targets: [
+            {
+              target: {
+                canonicalPath: targetFile,
+                canonicalParent: dir,
+                basename: "sdk-out.txt",
+                exists: false,
+                finalSymlink: false,
+              },
+              mode: "create",
+            },
+          ],
+        },
+      ],
+      display: {
+        ...base.display,
+        summary: targetFile,
+        canonicalTargets: [targetFile],
+      },
+      operation: {
+        kind: "commit-files",
+        commits: [
+          {
+            destination: {
+              canonicalPath: targetFile,
+              canonicalParent: dir,
+              basename: "sdk-out.txt",
+              exists: false,
+              finalSymlink: false,
+            },
+            content: {
+              artifactId: "art-1",
+              sha256: "h1",
+              byteLength: 4,
+              mediaType: "text/plain",
+            },
+          },
+        ],
+      },
+    };
+
+    const wired = await buildActionLifecycle({
+      principalId: "sdk-user",
+      tenancyMode: "single",
+      runId: "r-persist-sdk",
+      sessionId: "s-persist-sdk",
+      workspaceRoot: dir,
+      approvalBroker: {
+        mode: "inline",
+        request: async (req) => approved(req, "sdk-user", "project"),
+      },
+      executionBoundary: fakeBoundary({ output: "ok", success: true }),
+      auditStore: audit,
+      capabilityLedger: ledger,
+      policyStore: mockStore,
+    });
+
+    const res = await wired.lifecycle.run(action);
+    expect(res.outcome.state).toBe("succeeded");
+
+    // Verify casCapabilitiesReceived retained the pre-existing cli-user capability
+    expect(casCapabilitiesReceived).toBeDefined();
+    const cliCap = casCapabilitiesReceived?.find((c: any) => c.principalId === "cli-user");
+    expect(cliCap).toBeDefined();
+    expect((cliCap as any).root).toBe(join(dir, "cli-scope"));
+
+    // And also has the sdk-user capability
+    const sdkCap = casCapabilitiesReceived?.find((c: any) => c.principalId === "sdk-user");
+    expect(sdkCap).toBeDefined();
+  });
+
+  it("T041: CAS erasure prevention: global grants from distinct principals in same store preserve each other", async () => {
+    const { InMemoryCapabilityLedger } = await import("../in-memory-stores.js");
+    const policyStore = new LocalPolicyStore({ root: join(dir, "policy") });
+    const audit = new LocalAuditStore({ root: dir });
+    const ledger = new InMemoryCapabilityLedger();
+
+    const fileA = join(dir, "out-a.txt");
+    const fileB = join(dir, "out-b.txt");
+
+    const makeWriteAction = (principalId: string, filePath: string): PreparedToolAction => {
+      const base = writeAction(`action-${principalId}`);
+      return {
+        ...base,
+        principalId,
+        effects: [
+          {
+            kind: "filesystem-write",
+            targets: [
+              {
+                target: {
+                  canonicalPath: filePath,
+                  canonicalParent: dir,
+                  basename: filePath.split("/").pop()!,
+                  exists: false,
+                  finalSymlink: false,
+                },
+                mode: "create",
+              },
+            ],
+          },
+        ],
+        display: {
+          ...base.display,
+          summary: filePath,
+          canonicalTargets: [filePath],
+        },
+        operation: {
+          kind: "commit-files",
+          commits: [
+            {
+              destination: {
+                canonicalPath: filePath,
+                canonicalParent: dir,
+                basename: filePath.split("/").pop()!,
+                exists: false,
+                finalSymlink: false,
+              },
+              content: {
+                artifactId: `art-${principalId}`,
+                sha256: "h1",
+                byteLength: 4,
+                mediaType: "text/plain",
+              },
+            },
+          ],
+        },
+      };
+    };
+
+    let promptsA = 0;
+    const brokerA: ApprovalBroker = {
+      mode: "inline",
+      request: async (req) => {
+        promptsA++;
+        return approved(req, "principal-a", "global");
+      },
+    };
+
+    let promptsB = 0;
+    const brokerB: ApprovalBroker = {
+      mode: "inline",
+      request: async (req) => {
+        promptsB++;
+        return approved(req, "principal-b", "global");
+      },
+    };
+
+    // 1. Principal A executes and approves global grant
+    const wiredA1 = await buildActionLifecycle({
+      principalId: "principal-a",
+      tenancyMode: "single",
+      runId: "run-a1",
+      sessionId: "session-a1",
+      workspaceRoot: dir,
+      approvalBroker: brokerA,
+      executionBoundary: fakeBoundary({ output: "ok", success: true }),
+      auditStore: audit,
+      capabilityLedger: ledger,
+      policyStore,
+    });
+    const resA1 = await wiredA1.lifecycle.run(makeWriteAction("principal-a", fileA));
+    expect(resA1.outcome.state).toBe("succeeded");
+    expect(promptsA).toBe(1);
+
+    // 2. Principal B executes and approves different global grant in the same store
+    const wiredB1 = await buildActionLifecycle({
+      principalId: "principal-b",
+      tenancyMode: "single",
+      runId: "run-b1",
+      sessionId: "session-b1",
+      workspaceRoot: dir,
+      approvalBroker: brokerB,
+      executionBoundary: fakeBoundary({ output: "ok", success: true }),
+      auditStore: audit,
+      capabilityLedger: ledger,
+      policyStore,
+    });
+    const resB1 = await wiredB1.lifecycle.run(makeWriteAction("principal-b", fileB));
+    expect(resB1.outcome.state).toBe("succeeded");
+    expect(promptsB).toBe(1);
+
+    // 3. Principal A runs a second action for the same file in a fresh lifecycle instance
+    // A's grant must NOT have been erased by B's CAS write!
+    const brokerA2: ApprovalBroker = {
+      mode: "inline",
+      request: async () => {
+        throw new Error("Broker A2 called! Principal A's grant was erased by Principal B's CAS write.");
+      },
+    };
+    const wiredA2 = await buildActionLifecycle({
+      principalId: "principal-a",
+      tenancyMode: "single",
+      runId: "run-a2",
+      sessionId: "session-a2",
+      workspaceRoot: dir,
+      approvalBroker: brokerA2,
+      executionBoundary: fakeBoundary({ output: "ok", success: true }),
+      auditStore: audit,
+      capabilityLedger: ledger,
+      policyStore,
+    });
+    const resA2 = await wiredA2.lifecycle.run(makeWriteAction("principal-a", fileA));
+    expect(resA2.outcome.state).toBe("succeeded");
+    expect(promptsA).toBe(1); // Not prompted again
   });
 });

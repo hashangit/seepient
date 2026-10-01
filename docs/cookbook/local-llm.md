@@ -24,41 +24,21 @@ Confirm Ollama is serving on `http://127.0.0.1:11434`.
 
 ## 2. Configure Seepient
 
-Edit your `~/.seepient/config.json`:
+### Option A: Interactive setup or CLI (Recommended)
 
-```json
-{
-  "providers": {
-    "local-ollama": {
-      "type": "openai-compatible",
-      "baseUrl": "http://127.0.0.1:11434/v1",
-      "apiKey": "ollama"
-    },
-    "anthropic": {
-      "credentialRef": { "type": "env", "key": "ANTHROPIC_API_KEY" }
-    }
-  },
-  "routing": {
-    "text": {
-      "standard": {
-        "provider": "local-ollama",
-        "model": "llama3.3",
-        "fallbacks": [
-          { "provider": "anthropic", "model": "claude-3-7-sonnet" }
-        ]
-      }
-    },
-    "commit": {
-      "standard": {
-        "provider": "local-ollama",
-        "model": "qwen2.5-coder:14b",
-        "fallbacks": [
-          { "provider": "anthropic", "model": "claude-3-7-sonnet" }
-        ]
-      }
-    }
-  }
-}
+Run the interactive setup wizard, choose "Custom / local endpoint", and point it at Ollama (keyless — no authentication token needed):
+
+```bash
+seepient setup
+```
+
+Or add the account directly:
+
+```bash
+seepient providers add local-ollama \
+  --upstream ollama \
+  --url http://127.0.0.1:11434/v1 \
+  --allow-private
 ```
 
 ---

@@ -470,12 +470,12 @@ export async function runSetupWizard(options: {
   buildApi?: () => ProviderManagerApi;
   buildSettings?: () => SettingsAdapter;
 }): Promise<void> {
-  const { getDefaultProviderRuntime } = await import("../../domain/providers/provider-runtime.js");
+  const { createAmbientProviderRuntime } = await import("../../domain/providers/provider-runtime.js");
   const { createProviderManagerApi } = await import("../../transport/cli/provider-manager-api.js");
   const { SettingsManager } = await import("../../domain/settings/settings-manager.js");
   const { loadMergedConfig, loadJsonConfig, getConfigPaths, applyEnvOverrides } = await import("../../transport/cli/config-loader.js");
 
-  const api = options.buildApi ? options.buildApi() : createProviderManagerApi(getDefaultProviderRuntime());
+  const api = options.buildApi ? options.buildApi() : createProviderManagerApi(createAmbientProviderRuntime());
 
   const paths = getConfigPaths();
   const project = options.project === true;

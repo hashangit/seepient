@@ -1,15 +1,17 @@
 import type { AskSeepientResult, Usage, Message, ApproveToolFn, StepResult } from "../../foundations/types.js";
 import { runAgentLoop } from "../../domain/agent-loop.js";
 import { createHookExecutor } from "../../domain/hooks.js";
-import { resolveTools, getAllToolDefinitions } from "../../domain/tool-executor.js";
+import type { ToolRegistryContract } from "../../foundations/contracts/tool.js";
+import { resolveTools, ToolRegistry } from "../../domain/tool-executor.js";
 import { now } from "../../domain/context/message-convert.js";
 import { generateId } from "../../foundations/id.js";
-import { getDefaultProviderRuntime, type ProviderRuntime } from "../../domain/providers/provider-runtime.js";
+import { createIsolatedProviderRuntime, type ProviderRuntime } from "../../domain/providers/provider-runtime.js";
 import type { ProviderRuntimeContract } from "../../foundations/contracts/provider-runtime.js";
 import type { Middleware } from "../../foundations/contracts/middleware.js";
 import { extractLoopError } from "../sdk/error-surfacing.js";
 import { normalizeHistoryForSend } from "../../domain/sessions/normalize-history.js";
 import { logTransportEvent } from "../logging.js";
+import { isGuardNeutralized } from "../../foundations/test-seams.js";
 import * as crypto from "node:crypto";
 import { initializeSkillRegistry } from "../../capabilities/skills/index.js";
 import { buildSkillCatalog } from "../../domain/skills/skill-catalog.js";
@@ -19,13 +21,24 @@ import { buildSkillCatalog } from "../../domain/skills/skill-catalog.js";
  * prompt with the catalog appended, or undefined when no skills are found.
  * Best-effort: discovery failures are swallowed.
  */
-async function resolveServerSkills(skills?: string[]): Promise<{ skillCatalog?: string; skillRegistry?: import("../../capabilities/skills/types.js").SkillRegistry }> {
+async function resolveServerSkills(
+  skills?: string[],
+  sources?: import("../../foundations/contracts/skill-source.js").SkillSource[],
+): Promise<{ skillCatalog?: string; skillRegistry?: import("../../capabilities/skills/types.js").SkillRegistry }> {
   try {
-    const registry = await initializeSkillRegistry(process.cwd());
+    const registry = await initializeSkillRegistry(process.cwd(), {
+      tenancyMode: "multi",
+      sources: sources ?? [],
+    });
     let metadata = registry.getMetadata();
     if (skills && skills.length > 0) {
       const wanted = new Set(skills);
-      metadata = metadata.filter(s => wanted.has(s.name));
+      const available = new Set(metadata.map((s) => s.name));
+      const missing = Array.from(wanted).filter((name) => !available.has(name));
+      if (missing.length > 0) {
+        console.warn(`[SKILLS] Warning: Skill filter requested unavailable skill(s): ${missing.join(", ")}`);
+      }
+      metadata = metadata.filter((s) => wanted.has(s.name));
     }
     if (metadata.length === 0) return { skillRegistry: registry };
     return { skillCatalog: buildSkillCatalog(metadata), skillRegistry: registry };
@@ -47,23 +60,33 @@ export async function serverGenerateText(
     tools?: string[];
     maxSteps?: number;
     skills?: string[];
+    sources?: import("../../foundations/contracts/skill-source.js").SkillSource[];
     history?: Message[];
     runtime?: ProviderRuntime | ProviderRuntimeContract;
+    toolRegistry?: ToolRegistryContract;
     /** Spec 008 wired pipeline (constructed by createServer). */
     wiredPipeline?: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle;
+    tenancyMode?: "single" | "multi";
+    builtInTools?: boolean;
   },
   middleware?: Middleware[],
 ): Promise<AskSeepientResult> {
-  const runtime = options.runtime ?? getDefaultProviderRuntime();
+  if (options.runtime && (options.runtime as any).isIsolated !== true && options.tenancyMode === "multi") {
+    const { TenancyRuntimeRequiredError } = await import("../../domain/tenancy/tenancy-mode.js");
+    throw new TenancyRuntimeRequiredError();
+  }
+  const runtime = options.runtime ?? createIsolatedProviderRuntime();
+  const registry = options.toolRegistry ?? new ToolRegistry();
 
   // Resolve tools
-  const toolDefs = options.tools ? resolveTools(options.tools) : getAllToolDefinitions();
+  const isMulti = (options as any).tenancyMode === "multi";
+  const toolDefs = options.tools ? resolveTools(options.tools, registry) : ((isMulti && !(options as any).builtInTools && !isGuardNeutralized("VULN-17")) ? [] : registry.definitions());
 
   // Hooks
   const hooks = createHookExecutor();
 
   // Resolve skill catalog
-  const { skillCatalog, skillRegistry } = await resolveServerSkills(options.skills);
+  const { skillCatalog, skillRegistry } = await resolveServerSkills(options.skills, options.sources);
 
   // Build message list
   const messages: Message[] = [];
@@ -92,6 +115,7 @@ export async function serverGenerateText(
   const inputCount = modelMessages.length;
 
   const snapshot = await runtime.createTurnSnapshot();
+  const tenancyMode = options.tenancyMode ?? (options.wiredPipeline ? "multi" : "single");
 
   const result = await runAgentLoop({
     runtime,
@@ -99,12 +123,14 @@ export async function serverGenerateText(
     model: options.model,
     modelOverride: options.model,
     messages: modelMessages,
+    toolRegistry: registry,
     toolDefs,
     maxSteps: options.maxSteps ?? 5,
     hooks,
     middleware,
     config: { agentName: "server", runtime, skills: skillRegistry },
     wiredPipeline: options.wiredPipeline,
+    tenancyMode,
   });
 
   // B6: extract the answer from THIS turn's output only — on abort/max_steps
@@ -138,11 +164,15 @@ export async function handleAgentChatStream(
     tools?: string[];
     maxSteps?: number;
     skills?: string[];
+    sources?: import("../../foundations/contracts/skill-source.js").SkillSource[];
     history?: Message[];
     approveTool?: ApproveToolFn;
     runtime?: ProviderRuntime | ProviderRuntimeContract;
+    toolRegistry?: ToolRegistryContract;
     /** Spec 008 wired pipeline (constructed by createServer). */
     wiredPipeline?: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle;
+    tenancyMode?: "single" | "multi";
+    builtInTools?: boolean;
     onText: (chunk: string) => void;
     onToolCall: (call: { name: string; args: any; callId: string }) => void;
     onToolResult: (result: { callId: string; output: string; success: boolean }) => void;
@@ -153,13 +183,19 @@ export async function handleAgentChatStream(
   },
   middleware?: Middleware[],
 ): Promise<void> {
-  const runtime = opts.runtime ?? getDefaultProviderRuntime();
-  const toolDefs = opts.tools ? resolveTools(opts.tools) : getAllToolDefinitions();
+  if (opts.runtime && (opts.runtime as any).isIsolated !== true && (opts as any).tenancyMode === "multi") {
+    const { TenancyRuntimeRequiredError } = await import("../../domain/tenancy/tenancy-mode.js");
+    throw new TenancyRuntimeRequiredError();
+  }
+  const runtime = opts.runtime ?? createIsolatedProviderRuntime();
+  const registry = opts.toolRegistry ?? new ToolRegistry();
+  const isMulti = (opts as any).tenancyMode === "multi";
+  const toolDefs = opts.tools ? resolveTools(opts.tools, registry) : ((isMulti && !(opts as any).builtInTools && !isGuardNeutralized("VULN-17")) ? [] : registry.definitions());
   const hooks = createHookExecutor();
 
   // Load session or create initial message list
   const messages: Message[] = [];
-  const { skillCatalog, skillRegistry } = await resolveServerSkills(opts.skills);
+  const { skillCatalog, skillRegistry } = await resolveServerSkills(opts.skills, opts.sources);
   if (skillCatalog) {
     messages.push({
       id: generateId(),
@@ -186,6 +222,7 @@ export async function handleAgentChatStream(
 
   try {
     const snapshot = await runtime.createTurnSnapshot();
+    const tenancyMode = opts.tenancyMode ?? (opts.wiredPipeline ? "multi" : "single");
 
     const result = await runAgentLoop({
       runtime,
@@ -193,6 +230,7 @@ export async function handleAgentChatStream(
       model: opts.model,
       modelOverride: opts.model,
       messages: modelMessages,
+      toolRegistry: registry,
       toolDefs,
       maxSteps: opts.maxSteps ?? 5,
       hooks,
@@ -201,6 +239,7 @@ export async function handleAgentChatStream(
       middleware: middleware ?? [],
       config: { agentName: "server", runtime, skills: skillRegistry },
       wiredPipeline: opts.wiredPipeline,
+      tenancyMode,
       onStep: (step) => {
         if ((step.type === "text" || step.type === "text_delta") && step.content) {
           accumulatedText += step.content;

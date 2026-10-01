@@ -67,9 +67,12 @@ type ConsentMode = "ask-everything" | "edit-enabled" | "autonomous";
 
 | Mode | Behavior |
 |---|---|
-| `edit-enabled` | Safe reads, workspace writes, and normal tools auto-execute; prompts for high-risk commands and external communications (default) |
+| `edit-enabled` | Safe reads, workspace writes, and normal tools auto-execute; prompts for high-risk commands and external communications (CLI default) |
 | `ask-everything` | Prompts for human approval on all side-effecting operations |
 | `autonomous` | Automatically approves all operations within the deployment ceiling |
+
+> [!NOTE]
+> When `consentMode` is omitted in programmatic SDK options (`createSeepient` / `askSeepient`), the pipeline operates **deny-by-default**: unpredeclared effectful tools are denied unless pre-granted in policy or an `approvalBroker` is supplied. This fail-closed posture is neither `ask-everything` (which prompts) nor `autonomous` (which auto-approves). In the CLI, the default mode is `edit-enabled`.
 
 ### ToolRiskCategory
 
@@ -197,7 +200,7 @@ interface AskSeepientOptions {
   systemPrompt?: string;
   /** Tools available: string names, group constants, or custom tool registrations. */
   tools?: (string | UserToolDefinition | AnyToolRegistration)[];
-  /** Consent mode controlling tool auto-execution. Default: "edit-enabled". */
+  /** Consent mode controlling tool auto-execution. When omitted, programmatic calls default to deny-by-default for unpredeclared effectful tools. CLI defaults to "edit-enabled". */
   consentMode?: ConsentMode;
   /** Maximum capability ceiling permitted for any execution in this call. */
   deploymentCeiling?: CapabilitySet | Capability[];
@@ -337,7 +340,7 @@ interface CreateSeepientOptions {
   /** Maximum agent loop iterations per call. Default: 10. */
   maxSteps?: number;
   /** Session persistence: path, backend instance, or config object. */
-  persist?: string | PersistenceBackend | PersistenceConfig | SessionStore;
+  persist?: string | PersistenceBackend | PersistenceConfig;
   /** Lifecycle callbacks. */
   hooks?: Hooks;
   /** Extra config passed to tool handlers. */
@@ -350,7 +353,7 @@ interface CreateSeepientOptions {
   approveTool?: ApproveToolFn;
   /** Custom approval broker for permission escalation. */
   approvalBroker?: ApprovalBroker;
-  /** Consent mode controlling tool auto-execution. Default: "edit-enabled". */
+  /** Consent mode controlling tool auto-execution. When omitted, programmatic calls default to deny-by-default for unpredeclared effectful tools. CLI defaults to "edit-enabled". */
   consentMode?: ConsentMode;
   /** Maximum capability ceiling permitted for any execution. */
   deploymentCeiling?: CapabilitySet | Capability[];
@@ -736,18 +739,6 @@ interface SessionData {
   providerAccount?: string;
   model?: string;
   metadata?: Record<string, unknown>;
-}
-```
-
-### SessionStore (legacy adapter)
-
-```typescript
-/** @deprecated Use PersistenceBackend instead */
-interface SessionStore {
-  save(sessionId: string, messages: Message[]): Promise<void>;
-  load(sessionId: string): Promise<Message[] | null>;
-  delete(sessionId: string): Promise<void>;
-  list(): Promise<string[]>;
 }
 ```
 

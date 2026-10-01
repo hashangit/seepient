@@ -63,13 +63,25 @@ program
     // Setup wizard cannot run in non-interactive mode
     if (isNonInteractive()) {
       console.log(chalk.yellow('Setup wizard requires an interactive terminal.'));
-      console.log(chalk.dim('Set API keys via environment variables instead:'));
-      console.log(chalk.dim('  OPENAI_API_KEY, ANTHROPIC_API_KEY, GLM_API_KEY'));
-      console.log(chalk.dim('  LLM_PROVIDER (openai-compatible|openai|anthropic|glm)'));
-      console.log(chalk.dim('Or mount a config file at ~/.seepient/setting.json'));
+      console.log(chalk.dim('Configure a provider headlessly instead:'));
+      console.log(chalk.dim('  seepient auth login <id> --key <key>'));
+      console.log(chalk.dim('Or configure model assignments:'));
+      console.log(chalk.dim('  seepient models set text.standard <account>/<model>'));
       process.exit(1);
     }
     await runSetup(options);
+  });
+
+program
+  .command('server')
+  .description('Start the Seepient HTTP and WebSocket server')
+  .allowUnknownOption(true)
+  .allowExcessArguments(true)
+  .action(async () => {
+    const serverIdx = process.argv.indexOf('server');
+    const rawArgs = serverIdx !== -1 ? process.argv.slice(serverIdx + 1) : [];
+    const { startStandaloneServer } = await import('../../transport/http/standalone.js');
+    await startStandaloneServer(rawArgs);
   });
 
 import { registerAuthCommands } from '../../transport/cli/commands/auth-cli.js';
@@ -103,18 +115,30 @@ if (process.argv.includes('--docker')) {
   process.env.SEEPIENT_NO_INTERACTIVE = 'true';
 }
 
-// Global error containment for async CLI execution
-process.on("unhandledRejection", (reason: any) => {
-  const msg = reason?.message || String(reason);
-  console.error(chalk.red(`Error: ${msg}`));
-  process.exit(1);
-});
+export function getRegisteredCliOptions(): Array<{ flags: string; description: string; long?: string; short?: string }> {
+  return program.options.map((opt) => ({
+    flags: opt.flags,
+    description: opt.description,
+    long: opt.long,
+    short: opt.short,
+  }));
+}
+export { program as cliProgram };
 
-try {
-  await program.parseAsync(process.argv);
-} catch (err: any) {
-  if (err?.code !== "commander.helpDisplayed" && err?.code !== "commander.version" && err?.exitCode !== 0) {
-    console.error(chalk.red(`Error: ${err?.message || String(err)}`));
+if (!process.env.VITEST) {
+  // Global error containment for async CLI execution
+  process.on("unhandledRejection", (reason: any) => {
+    const msg = reason?.message || String(reason);
+    console.error(chalk.red(`Error: ${msg}`));
     process.exit(1);
+  });
+
+  try {
+    await program.parseAsync(process.argv);
+  } catch (err: any) {
+    if (err?.code !== "commander.helpDisplayed" && err?.code !== "commander.version" && err?.exitCode !== 0) {
+      console.error(chalk.red(`Error: ${err?.message || String(err)}`));
+      process.exit(1);
+    }
   }
 }

@@ -43,25 +43,9 @@ Run the interactive setup wizard:
 seepient setup
 ```
 
-The wizard discovers supported models from upstream catalogs, lets you input credentials (pasting an API key, linking an environment variable, or signing in via OAuth), and assigns default models for common tasks.
+The wizard discovers supported models from upstream catalogs, lets you input credentials (pasting an API key or signing in via OAuth), and assigns default models for common tasks.
 
-Alternatively, export your API key in your current shell environment:
-
-::: code-group
-
-```bash [OpenAI]
-export OPENAI_API_KEY="sk-..."
-```
-
-```bash [Anthropic]
-export ANTHROPIC_API_KEY="sk-ant-..."
-```
-
-```bash [Google Gemini]
-export GEMINI_API_KEY="..."
-```
-
-:::
+For other providers (Google Gemini, Ollama, DeepSeek, LocalLLM), run `seepient setup` or configure an OpenAI-compatible endpoint. Seepient never reads API keys from the environment — embedders can inject a custom credential store through the SDK instead.
 
 ## Step 3: Run the interactive TUI
 
@@ -111,6 +95,7 @@ import { createSeepient } from 'seepient'
 const agent = await createSeepient({
   provider: 'anthropic',
   model: 'claude-sonnet-4-6-20260320',
+  consentMode: 'edit-enabled',
 })
 
 const response = await agent.chat('Explain what this repository does based on its README.md')

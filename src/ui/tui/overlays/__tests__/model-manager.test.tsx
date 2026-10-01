@@ -314,7 +314,7 @@ describe("Providers tab", () => {
     await vi.waitFor(() => {
       expect(inst.lastFrame() ?? "").toContain("[1] Paste API key");
     }, { timeout: 3000 });
-    await type(inst, "3"); // keyless
+    await type(inst, "2"); // keyless
     await vi.waitFor(() => {
       expect(ctx.state.accounts.length).toBe(3);
     }, { timeout: 5000 });
@@ -357,9 +357,14 @@ describe("resilience + feedback", () => {
     await type(inst, ENTER);  // picker
     await type(inst, TAB);    // focus picker action bar
     await type(inst, "2");    // Try for this session
-    await delay(40);
-    expect(ctx.api.switchSessionModel).toHaveBeenCalled();
-    expect(onClose).toHaveBeenCalled();
+    // vi.waitFor instead of a fixed delay — the assertion raced the async
+    // state update under CI parallel load (pass-10 flake class).
+    await vi.waitFor(() => {
+      expect(ctx.api.switchSessionModel).toHaveBeenCalled();
+    });
+    await vi.waitFor(() => {
+      expect(onClose).toHaveBeenCalled();
+    });
   });
 });
 

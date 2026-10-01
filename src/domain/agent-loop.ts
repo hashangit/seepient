@@ -12,7 +12,9 @@ import { createHookExecutor } from "./hooks.js";
 import type { Middleware, PipelineContext } from "../foundations/contracts/middleware.js";
 import { compose } from "../foundations/contracts/middleware.js";
 import { extractPattern } from "../foundations/grant-pattern.js";
-import { getAllToolModules } from "./tool-executor.js";
+import { BUILT_IN_TOOL_MODULES } from "./tool-executor.js";
+import type { ToolRegistryContract } from "../foundations/contracts/tool.js";
+import type { ToolModule } from "../foundations/contracts/tool.js";
 import { getModelMeta } from "../foundations/models-catalog.js";
 import type { WiredActionLifecycle } from "./permissions/action-lifecycle-factory.js";
 import type { PermissionRequest } from "../foundations/contracts/permission-policy.js";
@@ -20,6 +22,7 @@ import { resolveAnalyzerWithFallback } from "./permissions/default-analyzers.js"
 import { makeRegistrationAnalyzer } from "./permissions/registration-dispatch.js";
 import type { ProviderRuntime, TurnSnapshot } from "./providers/provider-runtime.js";
 import type { Purpose, Tier } from "../foundations/contracts/provider-runtime.js";
+import { isGuardNeutralized } from "../foundations/test-seams.js";
 
 // ProviderFactory for per-skill model switching
 export interface ProviderFactory {
@@ -42,9 +45,11 @@ export interface AgentLoopOptions {
   onStep?: (step: StepResult) => void;
   providerFactory?: ProviderFactory;
   turnSnapshot?: TurnSnapshot;
-  modelOverride?: string | { model?: string; providerAccount?: string };
+  modelOverride?: string | { model?: string; providerAccount?: string; thinkingLevel?: any };
   purpose?: Purpose;
   tier?: Tier;
+  temperature?: number;
+  maxTokens?: number;
   middleware?: Middleware[];
   approveTool?: ApproveToolFn;
   autoConfirm?: boolean;
@@ -52,9 +57,17 @@ export interface AgentLoopOptions {
    * Spec 008 wired action-lifecycle pipeline.
    */
   wiredPipeline?: WiredActionLifecycle;
+  /** Tool registry or tool modules for building host callbacks (Spec 022, FR-001/005). */
+  toolRegistry?: ToolRegistryContract;
+  toolModules?: readonly ToolModule[];
+  tools?: unknown[];
+  trustedHostAllowlist?: string[];
+  explicitRegistrationIds?: string[];
   /** Allow JS filesystem fallback for file commits when native helper is absent. */
   /** Commit-helper injection for tests/e2e (spec 019): pins the probe. */
   commitHelper?: import("../vendors/native-fs-commit/index.js").NativeCommitHelper;
+  /** Tenancy mode ('single' | 'multi'). When 'multi', wiredPipeline is strictly required. */
+  tenancyMode?: "single" | "multi";
 }
 
 export interface AgentLoopError {
@@ -387,8 +400,11 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     const { legacyApproveToolToBroker } = await import("../transport/legacy-adapter.js");
     const artifacts = new InMemoryArtifactStore();
     const hostCallbacks = new Map<string, (args: unknown) => Promise<unknown>>();
-    const allModules = getAllToolModules();
-    for (const mod of allModules) {
+    const modulesToWire: readonly ToolModule[] =
+      options.toolRegistry?.modules() ??
+      options.toolModules ??
+      BUILT_IN_TOOL_MODULES;
+    for (const mod of modulesToWire) {
       if (mod.handler) {
         hostCallbacks.set(mod.definition.function.name, (args) => mod.handler!(args as any, config));
       }
@@ -400,7 +416,12 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
 
     const { createMediaVendorOperationHandler } = await import("./media/vendor-operation-handler.js");
     const vendorOperationHandler = runtime
-      ? createMediaVendorOperationHandler({ runtime, artifacts, signal })
+      ? createMediaVendorOperationHandler({
+          runtime,
+          artifacts,
+          signal,
+          tenancyMode: options.tenancyMode,
+        })
       : undefined;
 
     const { boundary } = await buildLocalBoundary({
@@ -410,6 +431,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
       snapshotStore,
       commitHelper: options.commitHelper,
       vendorOperationHandler,
+      tenancyMode: options.tenancyMode,
     });
     const broker = approveTool
       ? legacyApproveToolToBroker(approveTool)
@@ -470,21 +492,33 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
         }
       : undefined;
 
+    if (options.tenancyMode === "multi" || (options.config as any)?.tenancyMode === "multi") {
+      throw new SeepientError("wiredPipeline is required in multi-tenant mode", "PIPELINE_NOT_INITIALIZED", false);
+    }
+
     wiredPipeline = await buildActionLifecycle({
-      principalId: "agent-user",
+      principalId: (options.config?.principalId as string) ?? "sdk-user",
       runId: generateId(),
       sessionId: (options.config?.sessionId as string) ?? "default-session",
       workspaceRoot: options.cwd ?? process.cwd(),
       modelProviderClass,
       approvalBroker: broker,
       executionBoundary: boundary,
+      tenancyMode: options.tenancyMode,
       artifacts,
       snapshotStore,
       imageCapabilityProbe,
-      // The wired host callbacks ARE the composition root's operator intent
-      // (spec 019 D8): they join the trusted-host allowlist alongside the
-      // settings default.
-      trustedHostAllowlist: [...(options as { trustedHostAllowlist?: string[] }).trustedHostAllowlist ?? ["use_skill"], ...hostCallbacks.keys()],
+      // Allowlist derivation (Spec 022 FR-005, contracts/tool-registry.md):
+      // effectiveAllowlist = configuredAllowlist ∪ explicitRegistrationIds ∪ hostToolNames(own registry)
+      trustedHostAllowlist: Array.from(
+        new Set([
+          ...(options.trustedHostAllowlist ?? ["use_skill"]),
+          ...(options.explicitRegistrationIds ?? []),
+          ...modulesToWire
+            .filter((m) => Boolean(m.handler))
+            .map((m) => m.definition.function.name),
+        ]),
+      ),
     });
   }
   if (!wiredPipeline) {
@@ -560,7 +594,20 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
           );
           currentModel = plan.selectedTarget.model;
 
-          for await (const event of runtime.executeLanguage(plan, { messages: canonicalMessages, tools: toolDefs as any }, { signal })) {
+          for await (const event of runtime.executeLanguage(
+            plan,
+            {
+              messages: canonicalMessages,
+              tools: toolDefs as any,
+              temperature: options.temperature,
+              maxOutputTokens: options.maxTokens,
+            },
+            {
+              signal,
+              ...(isGuardNeutralized("VULN-16") ? {} : { tenancyMode: options.tenancyMode }),
+              capabilities: wiredPipeline?.grantedCapabilities ?? wiredPipeline?.activeCapabilities?.capabilities,
+            },
+          )) {
             if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
               acc.appendText(event.delta.text);
               const deltaStep: StepResult = { type: "text_delta", content: event.delta.text, timestamp: now() };

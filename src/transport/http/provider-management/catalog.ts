@@ -44,7 +44,6 @@ export async function handleResolveModel(
     bodyText = await parseBody(req);
   } catch (err) {
     if (err instanceof PayloadTooLargeError) throw err;
-    if (err instanceof PayloadTooLargeError) throw err;
     sendError(res, 400, "BAD_REQUEST", "Failed to read request body");
     return;
   }

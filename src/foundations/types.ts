@@ -173,8 +173,9 @@ export interface AskSeepientOptions {
   purpose?: Purpose;
   tier?: Tier;
   systemPrompt?: string;
-  tools?: (string | UserToolDefinition | import("./contracts/custom-tools.js").AnyToolRegistration)[];
-  skills?: string[] | boolean;
+  tools?: (string | UserToolDefinition | import("./contracts/custom-tools.js").AnyToolRegistration | import("./contracts/tool.js").ToolModule)[];
+  skills?: string[] | boolean | import("./contracts/skill-source.js").SkillLiteral[];
+  sources?: import("./contracts/skill-source.js").SkillSource[];
   cwd?: string;
   maxSteps?: number;
   temperature?: number;
@@ -215,6 +216,12 @@ export interface AskSeepientOptions {
   auditStore?: import("./contracts/execution-brokers.js").AuditStore;
   policyStore?: import("./contracts/execution-brokers.js").PolicyStore;
   capabilityLedger?: import("./contracts/capability-ledger.js").CapabilityLedger;
+  /** Spec 022 Operator baseline applied unstamped to all principals */
+  operatorBaseline?: import("./contracts/permission-policy.js").CapabilitySet | import("./contracts/permission-policy.js").Capability[];
+  /** Spec 022 Tenancy mode ("single" | "multi") and stateless declaration */
+  tenancy?: "single" | "multi";
+  stateless?: boolean;
+  sessionId?: string;
 }
 
 export interface AskSeepientResult {
@@ -252,10 +259,13 @@ export interface CreateSeepientOptions {
   adapter?: import("./contracts/backend-ports.js").InferenceAdapter;
   override?: { providerAccount?: string; model?: string; thinkingLevel?: any };
   systemPrompt?: string;
-  tools?: (string | UserToolDefinition | import("./contracts/custom-tools.js").AnyToolRegistration)[];
-  skills?: string[] | boolean;
+  tools?: (string | UserToolDefinition | import("./contracts/custom-tools.js").AnyToolRegistration | import("./contracts/tool.js").ToolModule)[];
+  skills?: string[] | boolean | import("./contracts/skill-source.js").SkillLiteral[];
+  sources?: import("./contracts/skill-source.js").SkillSource[];
   cwd?: string;
   maxSteps?: number;
+  temperature?: number;
+  maxTokens?: number;
   persist?: string | PersistenceBackend | PersistenceConfig;
   hooks?: Hooks;
   config?: Record<string, unknown>;
@@ -278,6 +288,11 @@ export interface CreateSeepientOptions {
   auditStore?: import("./contracts/execution-brokers.js").AuditStore;
   policyStore?: import("./contracts/execution-brokers.js").PolicyStore;
   capabilityLedger?: import("./contracts/capability-ledger.js").CapabilityLedger;
+  /** Spec 022 Operator baseline applied unstamped to all principals */
+  operatorBaseline?: import("./contracts/permission-policy.js").CapabilitySet | import("./contracts/permission-policy.js").Capability[];
+  /** Spec 022 Tenancy mode ("single" | "multi") and stateless declaration */
+  tenancy?: "single" | "multi";
+  stateless?: boolean;
 }
 
 export interface Seepient {
@@ -288,12 +303,18 @@ export interface Seepient {
   switchProvider(accountOrModel: string, model?: string): Promise<void>;
   setSystemPrompt(prompt: string): void;
   setTools(tools: string[]): void;
+  getToolDefinitions(): import("./contracts/tool.js").ToolDefinition[];
+  getToolRegistry(): import("./contracts/tool.js").ToolRegistryContract;
   abort(): void;
   clear(): void;
   getHistory(): Message[];
   getUsage(): CumulativeUsage;
   /** Flush any pending terminal audit events (T109a durability lifecycle). */
   flushAudit(): Promise<number>;
+  /** Revoke capabilities for a specific run (FR-041). */
+  revokeRun(runId: string): Promise<void>;
+  /** Revoke capabilities for a specific session (FR-041). */
+  revokeSession(sessionId: string): Promise<void>;
   /** Close agent and flush remaining audit records. */
   close(): Promise<void>;
 
@@ -323,13 +344,24 @@ export interface AgentResponse {
  * (file system, Redis, SQLite, etc.). Server-specific metadata (TTL,
  * apiKeyHash) flows through the `metadata` field on `SessionData`.
  */
+export interface SessionSummary {
+  id: string;
+  updatedAt: number;
+  messageCount: number;
+  title?: string;
+  createdAt?: number;
+  provider?: string;
+  model?: string;
+  apiKeyHash?: string;
+}
+
 export interface PersistenceBackend {
   /** Brand discriminator distinguishing PersistenceBackend from older shapes */
   __persistenceBackend: true;
   save(id: string, data: SessionData): Promise<void>;
   load(id: string): Promise<SessionData | null>;
-  delete(id: string): Promise<void>;
-  list(): Promise<string[]>;
+  delete?(id: string): Promise<void>;
+  list?(): Promise<SessionSummary[] | string[]>;
 }
 
 /**
@@ -365,7 +397,7 @@ export interface SessionData {
 export interface RunSeepientServerOptions {
   /** Port to listen on (default: SEEPIENT_PORT, PORT, or 7337) */
   port?: number;
-  /** Host to bind to (default: "0.0.0.0") */
+  /** Host to bind to (default: "127.0.0.1") */
   host?: string;
   /** Enable CORS headers (default: true) */
   cors?: boolean;
@@ -373,6 +405,12 @@ export interface RunSeepientServerOptions {
   sessionTTL?: number;
   /** Injected ProviderRuntime */
   runtime?: import("./contracts/provider-runtime.js").ProviderRuntimeContract;
+  /**
+   * Operator provider config file (standalone server's durable provider
+   * channel). Overlay shape ({ providers, modelAssignments }); loaded once at
+   * boot into an isolated runtime. Ignored when `runtime` is injected.
+   */
+  providersFile?: string;
   /** Injected session persistence backend */
   persist?: PersistenceBackend;
   /** Injected tenant audit store */
@@ -383,11 +421,27 @@ export interface RunSeepientServerOptions {
   capabilityLedger?: import("./contracts/capability-ledger.js").CapabilityLedger;
   /** Injected settings manager (structural contract; the concrete SettingsManager satisfies it) */
   settingsManager?: import("./contracts/settings-manager-like.js").SettingsManagerLike;
+  /** Injected per-server or per-agent ToolRegistry (Spec 022) */
+  toolRegistry?: import("./contracts/tool.js").ToolRegistryContract;
+  /** Explicit opt-in to built-in tools on multi-tenant server (FR-027) */
+  builtInTools?: boolean;
+  /** Injected operator baseline capabilities applying unstamped to all server principals (FR-021) */
+  operatorBaseline?: import("./contracts/permission-policy.js").CapabilitySet | import("./contracts/permission-policy.js").Capability[];
+  /** Injected skill sources for multi-tenant server skill resolution */
+  sources?: import("./contracts/skill-source.js").SkillSource[];
+  /**
+   * Explicit gateway opt-in (FR-017).
+   * In multi-tenant server boot, the operator's ambient gateway is default-off.
+   * Supplying explicit `gateway` is the only composition channel until a per-principal surface exists.
+   */
+  gateway?: boolean | { enabled?: boolean; semanticTopK?: number; defaultRateLimitPerMin?: number; maxAuditLogsInMemory?: number; storageDir?: string };
   /**
    * Whether to start listening immediately.
    * Default: true. Set to false to create the configured http.Server without listening.
    */
   listen?: boolean;
+  /** Custom API keys file path (overrides SEEPIENT_API_KEYS_FILE and ambient ~/.seepient/server-keys.json) */
+  apiKeysFile?: string;
 }
 
 export interface SkillMetadata {

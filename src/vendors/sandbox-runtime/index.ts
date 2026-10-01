@@ -513,6 +513,17 @@ function spawnProcessTree(args: {
     if (settled) return;
     settled = true;
     args.signal?.removeEventListener("abort", onAbort);
+    // FR-014: kill the detached group on normal settle too, not only on
+    // abort — a settled exec must not leave daemons behind. The group was
+    // spawned for this one command; nothing it backgrounded survives the
+    // tool call. (kill on an already-exited pid throws ESRCH — ignored.)
+    if (child.pid !== undefined) {
+      try {
+        process.kill(-child.pid, "SIGTERM");
+      } catch {
+        /* group already gone */
+      }
+    }
     resolve(result);
   };
   const child = spawn(args.argv[0], args.argv.slice(1), {

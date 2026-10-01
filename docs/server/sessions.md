@@ -19,12 +19,12 @@ Sessions enable multi-turn conversations by persisting message history between r
 
 Sessions are stored as individual JSON files on disk:
 
-- 📁 `.seepient/sessions/`
+- 📁 `./.seepient/sessions/`
   - 📄 `550e8400-e29b-41d4-a716-446655440000.json`
   - 📄 `660f9511-f3ac-52e5-b827-557766551111.json`
   - 📄 `...`
 
-The session directory defaults to `./.seepient/sessions/` relative to the working directory, and can be overridden with the `SEEPIENT_SESSION_DIR` environment variable.
+The session directory defaults to `./.seepient/sessions/` in the working directory from which the server is started, and can be overridden with the `SEEPIENT_SESSION_DIR` environment variable.
 
 ### Session file format
 
@@ -213,10 +213,9 @@ If the session has expired or does not exist:
 Use `reconnect` when you know the last message you received and only need the delta. Use `resume` when you need the full conversation history (e.g., page refresh).
 :::
 
-## Persistence behavior
+## Durability & Persistence Guarantees
 
-- Sessions are persisted to disk after every message
-- The server loads sessions from disk on demand (lazy loading)
-- **Writes are atomic** (v0.2.2+): data is written to a temporary file first, then renamed into place. A crash mid-write never leaves a corrupt session file.
-- Persistence is best-effort -- write failures do not crash the server
-- In-memory sessions are rebuilt from disk on server restart
+- **Audit writes are durable**: Security and audit log entries perform fsync before committing, guaranteeing durability across crashes.
+- **Chat history persistence is best-effort**: Chat turn persistence is asynchronous and fire-and-forget; answered is not persisted immediately on disk before the HTTP response or WebSocket done frame is sent. In the event of an immediate process crash or power loss, the final turn may not be persisted.
+- **Atomic writes**: File persistence uses atomic temporary file writes and rename operations. A crash mid-write never leaves a corrupt session file.
+- **Restart survival**: The server enumerates durable sessions across server restarts via `FilePersistenceBackend.list()`. When using in-memory storage, `GET /v1/sessions` reports `source: "memory"` to explicitly document why historical sessions are absent after restart.

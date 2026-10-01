@@ -32,9 +32,8 @@ export async function runSetup(options: { project?: boolean } = {}): Promise<voi
   // Guard: setup wizard requires interactive TTY
   if (isNonInteractive()) {
     console.log(chalk.yellow('Setup wizard requires an interactive terminal.'));
-    console.log(chalk.dim('Set API keys via environment variables instead:'));
-    console.log(chalk.dim('  OPENAI_API_KEY, ANTHROPIC_API_KEY, GLM_API_KEY, OPENAI_COMPAT_API_KEY'));
-    console.log(chalk.dim('  (or configure custom env vars via `seepient providers add <id> --credential env:VAR_NAME`)'));
+    console.log(chalk.dim('Configure a provider headlessly instead:'));
+    console.log(chalk.dim('  seepient auth login <id> --key <key>'));
     console.log(chalk.dim('Or configure model assignments headlessly:'));
     console.log(chalk.dim('  seepient models set text.standard <account>/<model>'));
     process.exit(1);

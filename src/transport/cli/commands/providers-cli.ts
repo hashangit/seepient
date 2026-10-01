@@ -8,24 +8,15 @@
 
 import { Command } from "commander";
 import chalk from "chalk";
-import { getDefaultProviderRuntime } from "../../../domain/providers/provider-runtime.js";
+import { createAmbientProviderRuntime } from "../../../domain/providers/provider-runtime.js";
 import { createProviderManagerApi, type AccountInput } from "../provider-manager-api.js";
 
 function parseCredentialMode(raw?: string): AccountInput["credential"] {
-  if (!raw || raw === "none") {
-    return { mode: "none" };
-  }
-  if (raw.startsWith("env:")) {
-    const varName = raw.slice(4).trim();
-    if (!varName) {
-      console.error(chalk.red('Error: Missing environment variable name in --credential env:VAR_NAME'));
-      process.exit(1);
-    }
-    return { mode: "env", varName };
-  }
-  console.error(chalk.red(`Error: Invalid credential mode "${raw}". Expected "env:VAR_NAME" or "none".`));
+  if (raw === "none") return { mode: "none" };
+  console.error(chalk.red(`Error: Invalid credential mode "${raw}". Expected "none" (env credentials were removed in 022-5; use provider management or the setup flow to store a key).`));
   process.exit(1);
 }
+
 
 export function registerProvidersCommands(program: Command): void {
   const providersCmd = program.command("providers").description("Manage configured provider accounts and credentials");
@@ -36,7 +27,7 @@ export function registerProvidersCommands(program: Command): void {
     .option("--pool <pool>", "Filter by capability pool: language | image")
     .option("--json", "Output provider accounts as JSON")
     .action(async (opts) => {
-      const runtime = getDefaultProviderRuntime();
+      const runtime = createAmbientProviderRuntime();
       const api = createProviderManagerApi(runtime);
       const state = await api.getState();
 
@@ -98,13 +89,13 @@ export function registerProvidersCommands(program: Command): void {
     .command("add <id>")
     .description("Add a new provider account")
     .requiredOption("--upstream <provider>", "Upstream provider (e.g. openai, anthropic, google, ollama)")
-    .option("--credential <mode>", "Credential mode: env:VAR_NAME or none", "none")
+    .option("--credential <mode>", "Credential mode: none (keys are stored via the setup flow or auth login)", "none")
     .option("--url <baseUrl>", "Custom base URL endpoint")
     .option("--allow-private", "Allow connecting to private / localhost IP addresses (for Ollama/vLLM)")
     .option("--compat <compat>", "Wire protocol compatibility (openai | anthropic | google | openai-responses)")
     .option("--json", "Output result as JSON")
     .action(async (id, opts) => {
-      const runtime = getDefaultProviderRuntime();
+      const runtime = createAmbientProviderRuntime();
       const api = createProviderManagerApi(runtime);
 
       const credential = parseCredentialMode(opts.credential);
@@ -136,14 +127,14 @@ export function registerProvidersCommands(program: Command): void {
     .command("edit <id>")
     .description("Edit an existing provider account")
     .option("--upstream <provider>", "Upstream provider")
-    .option("--credential <mode>", "Credential mode: env:VAR_NAME or none")
+    .option("--credential <mode>", "Credential mode: none (keys are stored via auth login or the setup flow)")
     .option("--url <baseUrl>", "Custom base URL endpoint")
     .option("--allow-private", "Allow connecting to private / localhost IP addresses")
     .option("--no-allow-private", "Disallow connecting to private / localhost IP addresses")
     .option("--compat <compat>", "Wire protocol compatibility")
     .option("--json", "Output result as JSON")
     .action(async (id, opts) => {
-      const runtime = getDefaultProviderRuntime();
+      const runtime = createAmbientProviderRuntime();
       const api = createProviderManagerApi(runtime);
       const state = await api.getState();
       const existing = state.accounts.find((a) => a.id === id);
@@ -189,7 +180,7 @@ export function registerProvidersCommands(program: Command): void {
     .option("--force", "Force remove even if referenced by active model slots")
     .option("--json", "Output result as JSON")
     .action(async (id, opts) => {
-      const runtime = getDefaultProviderRuntime();
+      const runtime = createAmbientProviderRuntime();
       const api = createProviderManagerApi(runtime);
 
       const res = await api.deleteAccount(id, { force: !!opts.force });

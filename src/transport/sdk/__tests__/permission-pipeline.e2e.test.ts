@@ -128,6 +128,7 @@ describe("QS-0.6: trustedHostTool through createSeepient", () => {
       tools: [registration] as never,
       cwd: dir,
       approveTool: async () => true,
+      tenancy: "single",
     } as never);
 
     const response = await agent.chat("run sdk_custom_probe");

@@ -33,7 +33,7 @@ import type { ToolEffectKind } from "./tool-effects.js";
  * lifetime are independent: a longer lifetime never widens an exact target
  * into a root or glob.
  */
-export type Capability =
+export type Capability = (
   | { kind: "read-root"; root: string }
   | { kind: "read-file"; path: string }
   | { kind: "write-root"; root: string }
@@ -60,7 +60,11 @@ export type Capability =
   | { kind: "secret-ref"; ref: string }
   | { kind: "model-egress"; providerClass: string; dataClasses: string[] }
   | { kind: "activate-change-class"; changeClass: import("./self-evolution.js").SelfEvolutionChangeClass }
-  | { kind: "trusted-host"; registrationId?: string };
+  | { kind: "trusted-host"; registrationId?: string }
+) & {
+  /** Spec 022: Principal ownership stamp (absent = legacy single-user entry). */
+  principalId?: string;
+};
 /** When a capability is valid. Action-scoped caps are never persisted. */
 export type CapabilityLifetime =
   | { kind: "action"; actionDigest: string; consumeOnce: true }
@@ -147,6 +151,8 @@ export interface PolicyContext {
    * are recorded through `PolicyStore.compareAndSet`, never grants files.
    */
   workspaceId?: string;
+  /** Spec 022-4: Tenancy mode for scoping approvals. Global lifetime is forbidden in multi mode. */
+  tenancyMode?: "single" | "multi";
 }
 
 export interface PolicyTrace {
@@ -188,7 +194,8 @@ export type PermissionDenyReason =
   | "capability-revoked"
   /** Spec 019 FR-002: the backend cannot enforce exact commits and the
    *  interim JS fallback was not opted into — denied before any prompt. */
-  | "exact-commit-unavailable";
+  | "exact-commit-unavailable"
+  | "global-lifetime-forbidden";
 
 /**
  * Closed decision union. `needs-approval` carries the immutable request and

@@ -14,8 +14,6 @@ import {
 } from "../../../foundations/schemas/provider-config.js";
 import { SeepientError } from "../../../foundations/errors.js";
 import { applyDeepPatch, mergePatches } from "./deep-patch.js";
-import { resolveDefaultModelForProvider } from "../../../foundations/models-catalog.js";
-import { getSyncBuiltinCatalog } from "../model-catalog.js";
 
 function isProcessAlive(pid: number): boolean {
   try {
@@ -32,6 +30,11 @@ export interface ConfigViolation {
   value?: unknown;
 }
 
+export interface ProviderConfigStoreOptions {
+  overlayPath?: string;
+  isIsolated?: boolean;
+}
+
 /**
  * Manages the runtime provider configuration store with optimistic concurrency locking (If-Match),
  * cross-process file locking (O_EXCL), fsync durability, and deep-patch overlay persistence.
@@ -39,15 +42,24 @@ export interface ConfigViolation {
 export class ProviderConfigStore {
   private overlayPath?: string;
   private currentOverlay: OverlayDocument;
+  readonly isIsolated: boolean;
 
-  constructor(customOverlayPath?: string) {
-    if (customOverlayPath === ":memory:") {
-      this.overlayPath = undefined;
+  constructor(customOverlayPathOrOptions?: string | ProviderConfigStoreOptions) {
+    if (typeof customOverlayPathOrOptions === "object" && customOverlayPathOrOptions !== null) {
+      this.overlayPath = customOverlayPathOrOptions.overlayPath;
+      this.isIsolated = customOverlayPathOrOptions.isIsolated ?? (this.overlayPath === undefined);
+    } else if (typeof customOverlayPathOrOptions === "string") {
+      if (customOverlayPathOrOptions === ":memory:") {
+        this.overlayPath = undefined;
+        this.isIsolated = true;
+      } else {
+        this.overlayPath = customOverlayPathOrOptions;
+        this.isIsolated = false;
+      }
     } else {
-      this.overlayPath =
-        customOverlayPath ??
-        process.env.SEEPIENT_OVERLAY_PATH ??
-        path.join(os.homedir(), ".seepient", "providers-overlay.json");
+      // Inverted default (FR-005): no-arg construction is isolated in-memory
+      this.overlayPath = undefined;
+      this.isIsolated = true;
     }
 
     this.currentOverlay = {
@@ -244,6 +256,18 @@ export class ProviderConfigStore {
     return [];
   }
 
+  async addProvider(id: string, provider: any): Promise<OverlayDocument> {
+    const current = await this.getOverlay();
+    return this.updateOverlay(
+      {
+        providers: {
+          [id]: provider,
+        },
+      },
+      current.revision,
+    );
+  }
+
   /**
    * Applies a deep patch to the overlay document with mandatory optimistic concurrency check (If-Match).
    */
@@ -365,18 +389,31 @@ export class ProviderConfigStore {
     customCwd?: string,
   ): Promise<ProviderEffectiveConfig> {
     let defaults: ProviderEffectiveConfig;
-    if (baseDefaultsOrCreds && "providers" in baseDefaultsOrCreds) {
-      const standardDefaults = await getDefaultBaseConfigAsync(undefined, customCwd);
-      defaults = {
-        ...standardDefaults,
-        ...baseDefaultsOrCreds,
-        providers: baseDefaultsOrCreds.providers ?? standardDefaults.providers,
-      };
+    if (this.isIsolated) {
+      const emptyBase = createEmptyBaseConfig();
+      if (baseDefaultsOrCreds && "providers" in baseDefaultsOrCreds) {
+        defaults = {
+          ...emptyBase,
+          ...baseDefaultsOrCreds,
+          providers: baseDefaultsOrCreds.providers ?? emptyBase.providers,
+        };
+      } else {
+        defaults = emptyBase;
+      }
     } else {
-      defaults = await getDefaultBaseConfigAsync(
-        baseDefaultsOrCreds as { put: (id: string, record: any, meta?: any) => Promise<void> } | undefined,
-        customCwd,
-      );
+      if (baseDefaultsOrCreds && "providers" in baseDefaultsOrCreds) {
+        const standardDefaults = await getDefaultBaseConfigAsync(undefined, customCwd);
+        defaults = {
+          ...standardDefaults,
+          ...baseDefaultsOrCreds,
+          providers: baseDefaultsOrCreds.providers ?? standardDefaults.providers,
+        };
+      } else {
+        defaults = await getDefaultBaseConfigAsync(
+          baseDefaultsOrCreds as { put: (id: string, record: any, meta?: any) => Promise<void> } | undefined,
+          customCwd,
+        );
+      }
     }
     const overlay = await this.getOverlay();
     const patch = overlay.patch;
@@ -405,77 +442,42 @@ export class ProviderConfigStore {
 }
 
 /**
- * Synthesizes default v2 configuration from environment variables.
+ * Creates an empty base configuration for isolated in-memory stores (zero env synthesis).
  */
+export function createEmptyBaseConfig(): ProviderEffectiveConfig {
+  return {
+    schemaVersion: 2,
+    revision: 0,
+    updatedAt: new Date().toISOString(),
+    providers: {},
+    modelAssignments: { text: {} },
+    retryPolicy: DEFAULT_RETRY_POLICY,
+  };
+}
+
+/**
+ * Creates an ambient ProviderConfigStore wired to ~/.seepient/providers-overlay.json
+ * and host environment variable synthesis (Profile A composition roots only).
+ */
+export function createAmbientProviderConfigStore(): ProviderConfigStore {
+  const overlayPath =
+    process.env.SEEPIENT_OVERLAY_PATH ??
+    path.join(os.homedir(), ".seepient", "providers-overlay.json");
+  return new ProviderConfigStore({ overlayPath, isIsolated: false });
+}
+
 const baseConfigCache = new Map<string, ProviderEffectiveConfig>();
 
 export function clearBaseConfigCache(): void {
   baseConfigCache.clear();
 }
 
-export function synthesizeEnvProviders(): Record<string, any> {
-  const providers: Record<string, any> = {};
-
-  if (process.env.OPENAI_API_KEY) {
-    providers["openai"] = {
-      adapter: "pi-ai",
-      upstreamProvider: "openai",
-      credential: { kind: "env", name: "OPENAI_API_KEY" },
-    };
-  }
-
-  if (process.env.ANTHROPIC_API_KEY) {
-    providers["anthropic"] = {
-      adapter: "pi-ai",
-      upstreamProvider: "anthropic",
-      credential: { kind: "env", name: "ANTHROPIC_API_KEY" },
-    };
-  }
-
-  if (process.env.GLM_API_KEY) {
-    providers["glm"] = {
-      adapter: "pi-ai",
-      upstreamProvider: "glm",
-      credential: { kind: "env", name: "GLM_API_KEY" },
-    };
-  }
-
-  if (process.env.OPENAI_COMPAT_API_KEY || process.env.OPENAI_COMPAT_BASE_URL) {
-    providers["openai-compatible"] = {
-      adapter: "pi-ai",
-      upstreamProvider: "openai-compatible",
-      baseUrl: process.env.OPENAI_COMPAT_BASE_URL || "https://api.openai.com/v1",
-      credential: { kind: "env", name: "OPENAI_COMPAT_API_KEY" },
-    };
-  }
-
-  return providers;
-}
-
 export function synthesizeBaseConfig(): ProviderEffectiveConfig {
-  const providers = synthesizeEnvProviders();
+  // 022-5 FR-005: env-derived provider synthesis is demolished — inference
+  // credentials resolve only from provider management. A fresh install starts
+  // with zero providers and the setup flow (or an injected store) adds them.
+  const providers: Record<string, any> = {};
   const modelAssignments: any = { text: {} };
-
-  const catalog = getSyncBuiltinCatalog();
-  const firstAccount = Object.keys(providers)[0];
-  if (firstAccount) {
-    try {
-      const defaultModel = resolveDefaultModelForProvider(
-        catalog,
-        providers[firstAccount].upstreamProvider || firstAccount,
-        "standard",
-      );
-      modelAssignments.text.standard = {
-        providerAccount: firstAccount,
-        model: defaultModel,
-      };
-    } catch {
-      modelAssignments.text.standard = {
-        providerAccount: firstAccount,
-        model: "default",
-      };
-    }
-  }
 
   return {
     schemaVersion: 2,

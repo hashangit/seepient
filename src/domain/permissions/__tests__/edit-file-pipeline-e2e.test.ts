@@ -27,7 +27,7 @@ import { createSnapshotStore, tagFor } from "../../../foundations/hashline/snaps
 void tagFor;
 import { createHookExecutor } from "../../hooks.js";
 import { createMockRuntime } from "../../__tests__/test-doubles.js";
-import { getAllToolDefinitions } from "../../tool-executor.js";
+import { ToolRegistry } from "../../tool-executor.js";
 import { fakeCommitEnvelope, fakeHelper, diskBackedFakeHelper } from "../../../capabilities/execution/__tests__/helpers/commit-helper-fakes.js";
 import type { ToolAnalysisContext } from "../../../foundations/contracts/custom-tools.js";
 import type { ApprovalBroker, CapabilityEnvelope } from "../../../foundations/contracts/permission-policy.js";
@@ -139,7 +139,7 @@ describe("edit_file through the commit broker (spec 019)", () => {
     const result = await runAgentLoop({
       messages: [{ id: "m1", role: "user", content: "edit code.txt", timestamp: Date.now() }],
       systemPrompt: "You are a test agent.",
-      toolDefs: getAllToolDefinitions(),
+      toolDefs: new ToolRegistry().definitions(),
       config: { autoConfirm: true, snapshotStore: store },
       runtime,
       hooks: createHookExecutor({}),
@@ -299,7 +299,7 @@ describe("edit_file through the commit broker (spec 019)", () => {
     const result = await runAgentLoop({
       messages: [{ id: "m1", role: "user", content: "edit loop.txt", timestamp: Date.now() }],
       systemPrompt: "You are a test agent.",
-      toolDefs: getAllToolDefinitions(),
+      toolDefs: new ToolRegistry().definitions(),
       config: { autoConfirm: true, snapshotStore: store },
       runtime,
       hooks: createHookExecutor({}),

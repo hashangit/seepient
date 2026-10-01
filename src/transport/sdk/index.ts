@@ -15,12 +15,15 @@ import type {
   Usage,
   SeepientError,
 } from "../../foundations/types.js";
-import { getDefaultProviderRuntime, type ProviderRuntime } from "../../domain/providers/provider-runtime.js";
+import { createAmbientProviderRuntime, createIsolatedProviderRuntime, type ProviderRuntime } from "../../domain/providers/provider-runtime.js";
 import { createHookExecutor } from "../../domain/hooks.js";
 import { StreamManager } from "../../domain/streaming/stream-manager.js";
-import { resolveTools, getAllToolDefinitions, extractHostCallbacks, extractRegistrations, DEFAULT_TRUSTED_HOST_ALLOWLIST } from "./tools.js";
+import { resolveTools, extractHostCallbacks, extractRegistrations, DEFAULT_TRUSTED_HOST_ALLOWLIST } from "./tools.js";
+import { ToolRegistry } from "../../domain/tool-executor.js";
+import type { ToolModule } from "../../foundations/contracts/tool.js";
 import { runAgentLoop } from "../../domain/agent-loop.js";
 import { initializeSkillRegistry } from "../../capabilities/skills/index.js";
+import { validateSessionId } from "./seepient.js";
 import { buildSkillCatalog } from "../../domain/skills/skill-catalog.js";
 import {
   now,
@@ -34,8 +37,13 @@ import * as path from 'path';
 
 // ── Re-exports ───────────────────────────────────────────────────────────
 
-export { createSeepient } from "./seepient.js";
-import { warnIfPartialStoreInjection } from "./seepient.js";
+export {
+  createSeepient,
+  createTenantAgent,
+  validateSessionId,
+  MAX_SESSION_ID_LENGTH,
+  type CreateTenantAgentOptions,
+} from "./seepient.js";
 export type {
   Seepient,
   CreateSeepientOptions,
@@ -65,15 +73,92 @@ export {
   type LegacyHostToolRegistration,
   type HostToolContext,
 } from "./custom-tools.js";
+/**
+ * @warning Profile A only. Ambient configuration access reading from ~/.seepient/setting.json.
+ * Do not use in multi-tenant environments.
+ */
 export { settings, SettingsError } from "./settings.js";
-export { getDefaultProviderRuntime, ProviderRuntime } from "../../domain/providers/provider-runtime.js";
+/**
+ * @warning Profile A only. Ambient operator provider runtime reading process.env credentials and host dotfiles.
+ * For multi-tenant hosting, use createIsolatedProviderRuntime() or new ProviderRuntime() instead.
+ */
+export { createAmbientProviderRuntime, createIsolatedProviderRuntime, ProviderRuntime } from "../../domain/providers/provider-runtime.js";
 export { ProviderConfigStore } from "../../domain/providers/config-store/provider-config-store.js";
 export { MemoryCredentialStore } from "../../domain/providers/credentials/memory-credential-store.js";
+export {
+  InMemoryAuditStore,
+  InMemoryPolicyStore,
+  InMemoryCapabilityLedger,
+} from "../../domain/permissions/in-memory-stores.js";
+export { InMemoryReplayLedger } from "../../capabilities/execution/in-memory-replay-ledger.js";
 export type { AuditStore, PolicyStore, ActionAuditEvent, PolicySnapshot } from "../../foundations/contracts/execution-brokers.js";
 export type { CapabilityLedger, RevokeFilter } from "../../foundations/contracts/capability-ledger.js";
 export type { CapabilitySet, DecisionAuthority, ApprovalBroker, PermissionRequest, PermissionDecision } from "../../foundations/contracts/permission-policy.js";
 export type { ProviderRuntimeContract } from "../../foundations/contracts/provider-runtime.js";
 export type { ConsentMode } from "../../foundations/settings-schema.js";
+export type {
+  SkillRecord,
+  SkillSource,
+  SkillStore,
+  SkillLiteral,
+} from "../../foundations/contracts/skill-source.js";
+export { FsSkillSources } from "../../capabilities/skills/fs-skill-sources.js";
+/**
+ * @warning Profile A only. Ambient skill registry initialization discovering skills from host dotfiles and local directories.
+ * In multi-tenant mode, inject explicit SkillSource instances instead.
+ */
+export { initializeSkillRegistry } from "../../capabilities/skills/index.js";
+export {
+  saveGeneratedSkill,
+  type SaveGeneratedSkillParams,
+  type SaveGeneratedSkillResult,
+} from "../../domain/skills/generated-skill-save.js";
+export {
+  SeepientError,
+  InferenceError,
+  ProviderError,
+  ToolError,
+  MaxStepsError,
+  AbortedError,
+  GatewayError,
+  WidgetError,
+  HashlineError,
+  PermissionError,
+  ApprovalBrokerError,
+  AuditError,
+  PolicyConflictError,
+  WorkerSchedulerError,
+  UnsupportedBackendError,
+  SkillStoreUnavailableError,
+  SkillCollisionError,
+  SkillBodyUnavailableError,
+  SkillBodyRequiredError,
+  PersistConfigInvalidError,
+  SessionIdInvalidError,
+  PrincipalRequiredError,
+  TenancyWorkspaceRequiredError,
+  CredentialRequiredError,
+  GlobalLifetimeForbiddenError,
+  PathEscapesWorkspaceError,
+  PathHardlinkRefusedError,
+  PathIdentityMismatchError,
+  type InferenceErrorCode,
+  type InferenceErrorOptions,
+} from "../../foundations/errors.js";
+
+// Spec 022 Tenancy exports
+export {
+  resolveTenancyMode,
+  validateTenancyCompleteness,
+  emitTenancyNoticeOnce,
+  emitCredentialsSingleUserWarningOnce,
+  TenancyRuntimeRequiredError,
+  TenancyStoreIncompleteError,
+  TenancyAmbientIoError,
+  type TenancyMode,
+  type TenancySignals,
+  type TenancyResolution,
+} from "../../domain/tenancy/tenancy-mode.js";
 
 // Re-export middleware pipeline
 export {
@@ -85,20 +170,40 @@ export {
   authMiddleware,
 } from "../../domain/index.js";
 
+export { GatewaySettingsAdapter } from "../../capabilities/gateway/settings-adapter.js";
 import type { GatewayConfig } from "../../capabilities/gateway/types.js";
 import type { GatewaySettingsAdapter } from "../../capabilities/gateway/settings-adapter.js";
+import {
+  resolveTenancyMode,
+  validateTenancyCompleteness,
+  emitTenancyNoticeOnce,
+  emitCredentialsSingleUserWarningOnce,
+  type TenancyMode,
+  type TenancySignals,
+} from "../../domain/tenancy/tenancy-mode.js";
+import { TenancyWorkspaceRequiredError } from "../../foundations/errors.js";
 
-// Gateway (lazy — only loaded when used)
+// Gateway (lazy — only loaded when used; Spec 022 returns { gateway, tools }, no global registration)
 export const gateway = {
-  async createGateway(config: GatewayConfig, settingsAdapter?: GatewaySettingsAdapter) {
+  async createGateway(
+    config: GatewayConfig,
+    settingsAdapter?: GatewaySettingsAdapter,
+    options?: { tenancy?: TenancyMode },
+  ) {
     const { createGateway } = await import('../../capabilities/gateway/index.js');
     const { GatewaySettingsAdapter: Adapter } = await import('../../capabilities/gateway/settings-adapter.js');
-    const adapter = settingsAdapter ?? new Adapter(
-      process.env.SEEPIENT_GATEWAY_DIR ?? path.join(homedir(), '.seepient')
-    );
+    const mode = options?.tenancy ?? config.tenancy;
+    if (mode === "multi" && !settingsAdapter) {
+      const { TenancyAmbientIoError } = await import('../../domain/tenancy/tenancy-mode.js');
+      throw new TenancyAmbientIoError(
+        path.join(homedir(), '.seepient'),
+        'Ambient gateway adapter default at "~/.seepient" is forbidden in multi-tenant mode. Pass an explicit GatewaySettingsAdapter.',
+      );
+    }
+    const storageDir = process.env.SEEPIENT_GATEWAY_DIR ?? path.join(homedir(), '.seepient');
+    const adapter = settingsAdapter ?? new Adapter(storageDir);
     if (!settingsAdapter) await adapter.initialize();
-    const { registerTool } = await import('../../domain/tool-executor.js');
-    return createGateway(config, adapter, undefined, (tools) => tools.forEach(registerTool));
+    return createGateway(config, adapter);
   },
 };
 
@@ -121,7 +226,6 @@ export type {
   PersistenceBackend,
   PersistenceConfig,
   SkillMetadata,
-  SeepientError,
   ToolRiskCategory,
   Purpose,
   Tier,
@@ -137,12 +241,18 @@ function toCapabilitySet(cap: import("../../foundations/contracts/permission-pol
 
 export {
   createPersistenceBackend,
+  /**
+   * @warning Profile A only. Modifies process-wide persistence backend registry.
+   * In multi-tenant environments, pass instanced PersistenceBackend implementations directly.
+   */
   registerBackend,
 } from "../../domain/sessions/session-store.js";
 
 
 
 // ── askSeepient ──────────────────────────────────────────────────────────
+
+import { computeEffectiveSkillSources, emitMultiZeroSourcesNoticeOnce } from "./skill-sources-helper.js";
 
 /**
  * Resolve the skill catalog for a one-shot SDK call. Returns the system prompt
@@ -152,16 +262,33 @@ export {
  */
 async function resolveSkills(
   systemPrompt: string | undefined,
-  skills: string[] | boolean | undefined,
+  skills: string[] | boolean | import("../../foundations/contracts/skill-source.js").SkillLiteral[] | undefined,
   cwd?: string,
+  tenancyMode?: TenancyMode,
+  sources?: import("../../foundations/contracts/skill-source.js").SkillSource[],
 ): Promise<{ systemPrompt: string | undefined; skillRegistry?: import("../../capabilities/skills/types.js").SkillRegistry }> {
   if (skills === false) return { systemPrompt };
+  const effectiveSources = computeEffectiveSkillSources(sources, skills);
+  if (tenancyMode === "multi" && effectiveSources.length === 0) {
+    emitMultiZeroSourcesNoticeOnce();
+    return { systemPrompt };
+  }
   try {
-    const skillRegistry = await initializeSkillRegistry(cwd ?? process.cwd());
+    const skillRegistry = await initializeSkillRegistry(cwd ?? process.cwd(), { sources: effectiveSources, tenancyMode });
     let metadata = skillRegistry.getMetadata();
-    if (Array.isArray(skills)) {
-      const wanted = new Set(skills);
-      metadata = metadata.filter(s => wanted.has(s.name));
+    const isLiteralList =
+      Array.isArray(skills) &&
+      skills.some(
+        (s) => typeof s === "object" && s !== null && "content" in s,
+      );
+    if (Array.isArray(skills) && !isLiteralList) {
+      const wanted = new Set(skills.filter((s): s is string => typeof s === "string"));
+      const available = new Set(metadata.map((s) => s.name));
+      const missing = Array.from(wanted).filter((name) => !available.has(name));
+      if (missing.length > 0) {
+        console.warn(`[SKILLS] Warning: Skill filter requested unavailable skill(s): ${missing.join(", ")}`);
+      }
+      metadata = metadata.filter((s) => wanted.has(s.name));
     }
     if (metadata.length === 0) return { systemPrompt, skillRegistry };
     const catalog = buildSkillCatalog(metadata);
@@ -169,7 +296,8 @@ async function resolveSkills(
       systemPrompt: systemPrompt ? systemPrompt + "\n\n" + catalog : catalog,
       skillRegistry,
     };
-  } catch {
+  } catch (err: any) {
+    console.warn(`[SKILLS] Warning: Failed to resolve skills: ${err?.message ?? err}`);
     return { systemPrompt };
   }
 }
@@ -219,8 +347,49 @@ export async function askSeepient(
   options?: AskSeepientOptions,
 ): Promise<AskSeepientResult | AskSeepientStreamResult> {
   const opts = options ?? {};
+  if (opts.sessionId !== undefined) {
+    validateSessionId(opts.sessionId);
+  }
+  const effectiveSources = computeEffectiveSkillSources(opts.sources, opts.skills);
+
+  // Mirror of seepient.ts: detect injected credentials by store-shape, not
+  // Object.keys (#private-field stores own no enumerable properties).
+  const looksLikeCredentialStore = (v: unknown): boolean =>
+    typeof v === "object" && v !== null && typeof (v as any).resolve === "function";
+  const hasInjectedCredentials = Boolean(
+    ((opts as any).credentials && (looksLikeCredentialStore((opts as any).credentials) || Object.keys((opts as any).credentials).length > 0)) ||
+    ((opts as any).providers && (Array.isArray((opts as any).providers) ? (opts as any).providers.length > 0 : Object.keys((opts as any).providers).length > 0)),
+  );
+
+  const tenancySignals: TenancySignals = {
+    explicit: opts.tenancy,
+    principalIdSet: Boolean(opts.principalId && opts.principalId !== "default" && opts.principalId !== "sdk-user"),
+    anyStoreInjected: Boolean(opts.auditStore || opts.policyStore || opts.capabilityLedger),
+    runtimeInjected: Boolean(opts.runtime),
+    persistInjected: false,
+    skillSourcesInjected: Boolean(opts.sources && opts.sources.length > 0),
+    credentialsInjected: hasInjectedCredentials,
+  };
+  const { mode: tenancyMode, upgraded } = resolveTenancyMode(tenancySignals);
+  emitTenancyNoticeOnce(upgraded);
+
+  // Validate tenancy completeness before any runtime defaulting or I/O
+  validateTenancyCompleteness(tenancyMode, {
+    runtime: opts.runtime,
+    auditStore: opts.auditStore,
+    policyStore: opts.policyStore,
+    capabilityLedger: opts.capabilityLedger,
+    stateless: opts.stateless,
+    isSessionful: false,
+    principalId: opts.principalId,
+  });
+
+  if (tenancyMode === "multi" && (!opts.cwd || typeof opts.cwd !== "string" || opts.cwd.trim().length === 0)) {
+    throw new TenancyWorkspaceRequiredError();
+  }
+
   const maxSteps = opts.maxSteps ?? 10;
-  const runtime = opts.runtime ?? getDefaultProviderRuntime();
+  const runtime = opts.runtime ?? createAmbientProviderRuntime();
 
   // One abort controller per call: bridges the caller's signal and drives the
   // agent loop AND media vendor operations in both modes, so `stream.abort()`
@@ -243,13 +412,37 @@ export async function askSeepient(
   }
 
   // Resolve skill catalog and append to the system prompt
-  const { systemPrompt, skillRegistry } = await resolveSkills(opts.systemPrompt, opts.skills, opts.cwd);
+  const { systemPrompt, skillRegistry } = await resolveSkills(
+    opts.systemPrompt,
+    opts.skills,
+    opts.cwd,
+    tenancyMode,
+    opts.sources,
+  );
+
+  // Construct per-call ToolRegistry (Spec 022)
+  const toolRegistry = new ToolRegistry();
+  for (const item of opts.tools ?? []) {
+    if (
+      item &&
+      typeof item === "object" &&
+      "definition" in item &&
+      typeof (item as { definition?: any }).definition?.function?.name === "string" &&
+      typeof (item as { handler?: any }).handler === "function" &&
+      !("trust" in item)
+    ) {
+      toolRegistry.register(item as unknown as ToolModule);
+    }
+  }
 
   // Resolve tools
-  const toolDefs = opts.tools ? resolveTools(opts.tools) : getAllToolDefinitions();
+  const toolDefs = opts.tools ? resolveTools(opts.tools, toolRegistry) : toolRegistry.definitions();
   // spec 019 FR-006: explicit trustedHostTool registrations wire into the
   // boundary's host-callback map and join the operator allowlist.
-  const { callbacks: hostCallbacks, registrationIds } = extractHostCallbacks(opts.tools, { skills: skillRegistry });
+  const { callbacks: hostCallbacks, registrationIds } = extractHostCallbacks(opts.tools, {
+    skills: skillRegistry,
+    registry: toolRegistry,
+  });
   // spec 020 FR-001: custom preparedTool and brokerConnector registrations
   const registrations = extractRegistrations(opts.tools);
 
@@ -274,7 +467,15 @@ export async function askSeepient(
     runtime,
     artifacts: sharedArtifacts,
     signal: abortController.signal,
+    tenancyMode,
   });
+  const secretResolver =
+    tenancyMode === "multi"
+      ? (ref: string) => {
+          const store = (runtime as any).credentialStore ?? (runtime as any).getCredentialStore?.();
+          return store?.resolveSecret?.(ref) ?? undefined;
+        }
+      : undefined;
   const { boundary } = await buildLocalBoundary({
     artifacts: sharedArtifacts,
     workspaceRoot: opts.cwd ?? process.cwd(),
@@ -283,12 +484,12 @@ export async function askSeepient(
     vendorOperationHandler,
     commitHelper: opts.commitHelper,
     network: opts.network,
+    tenancyMode,
+    secretResolver,
   });
   const approvalMode = opts.consentMode
     ? (opts.consentMode === "autonomous" ? "autonomous" : opts.consentMode === "ask-everything" ? "manual" : "balanced")
     : (opts.approvalBroker || opts.approveTool ? "manual" : "never");
-
-  warnIfPartialStoreInjection(opts);
 
   const wiredPipeline = await buildActionLifecycle({
     principalId: opts.principalId ?? "sdk-user",
@@ -307,6 +508,8 @@ export async function askSeepient(
     auditStore: opts.auditStore,
     policyStore: opts.policyStore,
     capabilityLedger: opts.capabilityLedger,
+    operatorBaseline: toCapabilitySet(opts.operatorBaseline),
+    tenancyMode,
   });
 
   if (opts.stream) {
@@ -330,11 +533,15 @@ export async function askSeepient(
             : undefined,
           purpose: opts.purpose,
           tier: opts.tier,
+          temperature: opts.temperature,
+          maxTokens: opts.maxTokens,
           messages,
+          toolRegistry,
           toolDefs,
           systemPrompt,
           maxSteps,
           hooks,
+          tenancyMode,
           signal: abortController.signal,
           config: { ...opts.config, runtime, skills: skillRegistry },
           metadata: opts.metadata,
@@ -446,7 +653,10 @@ export async function askSeepient(
       : undefined,
     purpose: opts.purpose,
     tier: opts.tier,
+    temperature: opts.temperature,
+    maxTokens: opts.maxTokens,
     messages,
+    toolRegistry,
     toolDefs,
     systemPrompt,
     maxSteps,
@@ -457,6 +667,7 @@ export async function askSeepient(
     middleware: opts.middleware,
     approveTool: opts.approveTool,
     wiredPipeline,
+    tenancyMode,
     onStep: opts.onStep || opts.onText || opts.onToolCall || opts.onToolResult ? (step: StepResult) => {
       if (opts.onStep) opts.onStep(step);
       if ((step.type === "text" || step.type === "text_delta") && step.content) {

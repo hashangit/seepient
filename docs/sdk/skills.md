@@ -13,20 +13,20 @@ Skills follow a two-phase lifecycle: **discovery** at startup, then **activation
 
 ### Phase 1: Discovery (at startup)
 
-When the application starts, `discoverSkills(cwd)` scans configured skill directories. For each `SKILL.md` file found:
+When the application starts, `initializeSkillRegistry()` queries configured skill sources (built-in filesystem paths or injected `sources`). For each skill found:
 
-1. `parseFrontmatter()` reads **only the YAML header** -- the body is discarded immediately.
-2. A `Skill` object is created with metadata plus the `filePath` for later lazy loading.
-3. Skills with duplicate names are resolved by `priority` (higher wins).
+1. Skill frontmatter is parsed to extract metadata (name, description, tags, model preference) — the body is loaded lazily on demand.
+2. A `SkillRecord` is created with metadata and source provenance.
+3. Skills with duplicate names are resolved with explicit source-ordered precedence.
 
-After discovery, `buildSkillCatalog(metadata)` generates a compact text block listing every skill's name, description, and tags. This catalog is injected into the system prompt via the `skillCatalog` option on `AgentLoopOptions`, so the LLM always knows what skills are available.
+After discovery, `buildSkillCatalog(metadata)` generates a compact text block listing every skill's name, description, and tags. This catalog is composed into the system prompt, so the LLM always knows what skills are available.
 
 <DiagramFlow
   :steps="[
-    { title: 'discoverSkills(cwd)' },
-    { title: 'parseFrontmatter() for each SKILL.md', desc: 'Yields Skill objects without bodies' },
+    { title: 'initializeSkillRegistry(options)' },
+    { title: 'Frontmatter parsed for each skill', desc: 'Yields SkillRecord objects without bodies' },
     { title: 'buildSkillCatalog(metadata)', desc: 'Produces catalog lines such as \u0022- docker-ops: Docker container management [docker, deployment]\u0022' },
-    { title: 'Catalog appended to the system prompt' }
+    { title: 'Catalog composed into system prompt' }
   ]"
 />
 
@@ -50,7 +50,7 @@ import { askSeepient } from "seepient";
 
 const result = await askSeepient("Deploy the staging environment", {
   skills: ["docker-ops"],
-  tools: ["core"],
+  tools: ["core", "comm", "advanced"],
 });
 ```
 
@@ -66,6 +66,145 @@ const agent = await createSeepient({
 
 const reply = await agent.chat("Review my latest commit");
 ```
+
+## Skill sources
+
+In addition to ambient filesystem discovery, Seepient allows embedders to inject external skill sources via the `sources` option on `askSeepient()` and `createSeepient()`, or pass inline skill definitions via the `skills` option. This enables serverless execution, multi-tenant skill partitioning, and remote database catalogs.
+
+### The `SkillSource` and `SkillStore` contracts
+
+```typescript
+import type { SkillRecord, SkillSource, SkillStore, SkillLiteral } from "seepient";
+
+// Any object implementing list() satisfies SkillSource
+const dbSource: SkillSource = {
+  async list(): Promise<SkillRecord[]> {
+    return [
+      {
+        name: "customer-lookup",
+        content: "---\nname: customer-lookup\ndescription: Query customer CRM\n---\nProcedure...",
+        source: "crm-db", // Attribution label
+      },
+    ];
+  },
+};
+```
+
+### Inline skill literals
+
+For serverless functions, tests, or zero-infrastructure workflows, you can pass skill literals directly using `skills`:
+
+```typescript
+import { askSeepient } from "seepient";
+
+const result = await askSeepient("Summarize the latest report", {
+  skills: [
+    {
+      name: "summarize",
+      content: "---\nname: summarize\ndescription: Summarize text succinctly\n---\nSummary instructions...",
+    },
+  ],
+});
+```
+
+Inline literals are automatically synthesized into a source attributed as `"inline"` and appended after any explicit `sources`. They always shadow skills of the same name.
+
+### Composition semantics
+
+When constructing the agent's skill catalog, sources are composed in order with **last-wins** shadowing:
+
+| Tenancy Mode | Composition Pipeline | Behavior |
+|--------------|----------------------|----------|
+| `single` (default) | `[new FsSkillSources(cwd), ...(sources ?? []), inline?]` | Built-in filesystem layers load first. Injected `sources` override filesystem skills of the same name. Inline literals shadow everything. Note: Passing `sources` without explicitly setting `tenancy: "single"` automatically upgrades tenancy mode to `multi`; pass `tenancy: "single"` explicitly to preserve ambient filesystem discovery alongside injected sources. Passing inline `skills` literals alone does not upgrade tenancy mode to `multi`. |
+| `multi` | `[...(sources ?? []), inline?]` | Ambient filesystem discovery is **never** invoked. Skills originate solely from injected `sources` and inline literals. Explicitly passing `sources` automatically upgrades tenancy mode to `multi`. |
+
+Example composing filesystem, organization-wide, and tenant-specific sources:
+
+```typescript
+import { createSeepient, FsSkillSources } from "seepient";
+
+const agent = await createSeepient({
+  sources: [
+    new FsSkillSources(process.cwd()), // Local filesystem layers
+    globalDbSource,                    // Shared company-wide skills
+    tenantDbSource,                    // Tenant-specific overrides (shadows global)
+  ],
+});
+```
+
+:::warning Path reference resolution in injected skills
+`@path` references inside injected/inline skill bodies are NOT resolved on the `use_skill` tool path (slash-command path only, resolved against `process.cwd()`); injected skills should avoid `@path` until 018's invocation rework.
+:::
+
+### Serverless and bundling disclosures
+
+:::warning Serverless filesystem discovery fails silently
+In serverless execution environments (AWS Lambda, Vercel Functions, Cloudflare Workers), filesystem-based ambient discovery typically finds no skills directories and produces an empty catalog **silently**. In serverless deployments, always inject explicit `sources` or pass inline skill literals (`skills: [...]`).
+:::
+
+:::warning Source failure partial fail-open
+If an injected skill source's `list()` throws an error, Seepient logs a warning naming the source label and continues composing the remaining sources rather than halting agent startup (partial fail-open).
+:::
+
+:::tip Bundling skills in serverless packages
+If your serverless deployment relies on filesystem-bundled skills, ensure your framework bundler is configured to trace the skills directory into the output artifact. For example, in Next.js, declare `outputFileTracingIncludes` in `next.config.js`:
+
+```javascript
+// next.config.js
+module.exports = {
+  outputFileTracingIncludes: {
+    '/api/**': ['./skills/**/*'],
+  },
+};
+```
+:::
+
+### Saving generated skills
+
+When Seepient generates a new skill at runtime (e.g. via Spec 016 workflows), or when saving skills programmatically, it saves the skill to the **last** `SkillStore` present in the effective sources list:
+
+```typescript
+import {
+  createSeepient,
+  saveGeneratedSkill,
+  type SkillStore,
+  type SkillRecord,
+  SkillStoreUnavailableError,
+  SkillCollisionError,
+} from "seepient";
+
+class TenantSkillStore implements SkillStore {
+  async list(): Promise<SkillRecord[]> {
+    return [];
+  }
+  async save(record: SkillRecord): Promise<void> {
+    // Persist to tenant database
+  }
+}
+
+const store = new TenantSkillStore();
+
+// Programmatic skill generation save:
+const result = await saveGeneratedSkill({
+  name: "summarize-meeting",
+  description: "Summarizes meeting notes into action items",
+  body: "# Summarize Meeting\nFollow these steps to extract action items...",
+  tags: ["productivity", "meetings"],
+  sources: [store],
+});
+
+console.log(`Saved v${result.version} to store`);
+
+const agent = await createSeepient({
+  sources: [store],
+});
+```
+
+Key semantics for `saveGeneratedSkill`:
+- **Store destination**: Saves to the last `SkillStore` in `sources`.
+- **Collision refusal**: If a skill with the same name exists in any configured source, saving refuses with a `SkillCollisionError` unless `replace: true` is set.
+- **Version bump**: When `replace: true` is set, the version number automatically increments (e.g. `v1 -> v2`) and the changelog records the update.
+- **Fails closed**: If no `SkillStore` is present in `sources`, skill generation fails closed with `SkillStoreUnavailableError` (`SKILL_STORE_UNAVAILABLE`) rather than writing uncontained files to the local disk.
 
 ## `initializeSkillRegistry()`
 
@@ -89,7 +228,9 @@ Seepient Agent searches for skills in the following locations, in priority order
 | 1        | `SEEPIENT_SKILLS_PATH` env var     | Colon-separated custom paths  |
 | 2        | `.seepient/skills/`                | Project-level skills          |
 | 3        | `/mnt/skills/`                  | Docker volume mount           |
-| 4        | Bundled `skills/` directory     | Shipped with Seepient Agent            |
+| 4        | `~/.seepient/skills/`           | Global user skills            |
+| 5        | `~/.agents/skills/`             | Cross-agent shared skills     |
+| 6        | Bundled `skills/` directory     | Shipped with Seepient Agent   |
 
 Higher-priority paths override skills with the same name from lower-priority paths.
 
@@ -111,11 +252,20 @@ Seepient ships skills in the bundled `skills/` directory. They are discovered au
 
 | Skill | Purpose |
 | -------- | --------------------------------------------- |
-| `design` | Entry point for **all** design work. A router that classifies the request, fetches the matching skill from the upstream [OpenDesign](https://github.com/nexu-io/open-design/tree/main/skills) catalogue, maps its tools to Seepient's, and follows it. Use for UI/UX, mockups, prototypes, branding, slides/decks, image generation/editing, video/motion, design systems, Figma work, and design review. |
+| `debug-mantra` | Four-mantra debugging discipline (reproduce, trace, falsify, cross-reference) |
+| `design` | Entry point for all design work via upstream OpenDesign catalog |
 | `docker-ops` | Docker container and image operations |
+| `how` | Procedural implementation step-by-step guidance |
 | `k8s-deploy` | Kubernetes deployment operations |
 | `log-analyzer` | Log file analysis and triage |
+| `management-talk` | Translate engineering content for leadership and management |
+| `post-mortem` | Canonical post-mortem root cause analysis writeup |
+| `repo-review-ultra-deep` | Comprehensive, evidence-backed codebase and PR audit |
+| `repo-review-ultra-deep-lite` | Token-efficient fast repository and PR review |
+| `scrutinize` | Outsider-perspective architectural and change scrutiny |
 | `speckit-*` | SpecKit spec-driven workflow (`analyze`, `checklist`, `clarify`, `constitution`, `implement`, `plan`, `specify`, `tasks`, `taskstoissues`) |
+| `unslop` | Remove AI tells, filler, and repetitive prose patterns |
+| `why` | Architectural rationale and purpose investigation |
 
 Activate any of them by name:
 
@@ -343,16 +493,7 @@ The first invocation of any skill incurs a ~1--5 ms disk read, which is negligib
 
 After discovery, `buildSkillCatalog(metadata)` generates a compact text block from `SkillMetadata[]`. Each skill gets one line in the format `- name: description [tags]`, typically 40--80 characters.
 
-The catalog is injected into the system prompt via the `skillCatalog` option on `AgentLoopOptions`. Inside `runAgentLoop`, it is appended to the existing system message:
-
-```typescript
-// In agent-loop.ts
-if (skillCatalog && messages[0]?.role === 'system') {
-  messages[0] = { ...messages[0], content: messages[0].content + '\n\n' + skillCatalog };
-}
-```
-
-This works across all adapters (CLI, SDK, Server). Example of what the LLM sees:
+The catalog is composed into the system prompt when constructing the agent context. Across all surfaces (CLI, SDK, Server), it is included in the available skills block of the system context:
 
 ```
 AVAILABLE SKILLS (activate with use_skill tool):
@@ -367,7 +508,7 @@ Skill bodies are guarded by a three-layer defense against oversized context inje
 
 ### Layer 1: Load-time warning (8K chars / ~2K tokens)
 
-`parseFrontmatter()` in `parser.ts` checks the body length after extraction. If it exceeds the warning threshold, a `console.warn` is emitted. This is informational only -- the body is not modified.
+When a skill body is read into memory, its length is checked against `SEEPIENT_SKILL_BODY_WARN_CHARS` (default 8000). If it exceeds the threshold, a warning is emitted:
 
 ```
 [SKILLS] Warning: Skill "docker-ops" body is 12450 chars (~3113 tokens).
@@ -398,7 +539,7 @@ interface TruncationResult {
 
 ### Layer 3: Cumulative @path cap (2 MB total)
 
-The `@path` resolver stops inlining files when the cumulative resolved content would exceed 2 MB. Remaining references are replaced with a skip marker.
+In interactive CLI mode, the `@path` resolver inlines file contents passed as arguments in slash command queries. It stops inlining when cumulative resolved content reaches 2 MB; remaining references are replaced with a skip marker.
 
 ### Configurable thresholds
 
@@ -408,7 +549,7 @@ The `@path` resolver stops inlining files when the cumulative resolved content w
 | `SEEPIENT_SKILL_BODY_WARN_CHARS`     | `8000`   | Soft warning threshold       |
 
 :::tip
-If a skill is being truncated, split it into multiple smaller skills or use `@path` references to load instructions from separate files instead of embedding everything in the body.
+If a skill body exceeds the size limit, break it down into modular skills or delegate detailed instructions to specialized sub-skills. Note that `@path` references are resolved for CLI invocation arguments, not inside skill bodies.
 :::
 
 ## Provider switching
@@ -425,22 +566,17 @@ model:
 ---
 ```
 
-When a skill with a `model.provider` field is invoked, `createSkillProviderSwitcher()` in `src/core/skill-invoker.ts` handles the temporary switch:
+When a skill with a `model.provider` field is invoked on the interactive slash-command path (REPL, TUI), `createRuntimeSkillProviderSwitcher()` in `src/domain/skills/skill-invoker.ts` handles the temporary switch:
 
 1. Captures the current provider and model.
-2. Creates a new provider instance if the skill specifies a different one.
+2. Creates an override for the provider runtime if the skill specifies a different one.
 3. After the skill execution completes, restores the original provider in a `finally` block.
 
 ```typescript
-import { createSkillProviderSwitcher } from "seepient";
+// Conceptual: internal domain runtime usage (interactive slash-command path):
+// import { createRuntimeSkillProviderSwitcher } from "./domain/skills/skill-invoker.js";
 
-const switcher = createSkillProviderSwitcher({
-  provider: currentProvider,
-  model: 'gpt-4',
-  models: config.models,  // Available provider configs with API keys
-});
-
-// Switch if the skill requires a different provider
+const switcher = createRuntimeSkillProviderSwitcher(runtime);
 const switched = await switcher.switchIfNeeded(skillResult);
 
 try {
@@ -450,13 +586,15 @@ try {
 }
 ```
 
-:::info
-Provider switching works across all adapters (CLI, SDK, Server), not just the CLI. If the required provider's API key is not configured, the switch is silently skipped and the default provider is used instead.
+:::note Scope and limitations
+- **Interactive slash-command path only**: Provider switching is scoped to the interactive slash-command path (REPL, TUI). The LLM-initiated `use_skill` tool path executes within the agent's active model without switching providers.
+- **Provider account mapping**: The frontmatter `model.provider` field maps directly to `providerAccount` in `ModelAssignmentOverride` (`skill-invoker.ts:183`). `assignment-resolver.ts:104` looks up the configured account by ID; in single-account setups this matches the vendor name (e.g. `anthropic`), but in multi-account configurations it requires the exact configured account ID.
+- **Internal API**: `createRuntimeSkillProviderSwitcher` is an internal domain-layer orchestrator and is not exported from the public `seepient` SDK entry.
 :::
 
 ## Two invocation paths
 
-Skills can be activated in two ways: via CLI slash commands or via the `use_skill` tool. Both paths share the same argument substitution, @path resolution, and body size limits, but differ in how the result is delivered.
+Skills can be activated in two ways: via CLI slash commands or via the `use_skill` tool. Both paths share argument substitution and body size limits, but differ in reference resolution and provider switching: `@path` resolution and per-skill provider switching apply to the slash-command path only.
 
 ### Path A: CLI slash command
 
@@ -477,7 +615,7 @@ Step-by-step flow:
 4. **Substitute args**: `substituteArgs(body, args)` replaces `$1`, `$ALL`, etc.
 5. **Resolve references**: `resolveReferences(body)` inlines `@path` files.
 6. **Enforce limits**: `limitSkillBody(body)` truncates if over 32K chars.
-7. **Switch provider**: `createSkillProviderSwitcher()` switches provider if the skill specifies `model.provider`.
+7. **Switch provider**: `createRuntimeSkillProviderSwitcher()` switches provider if the skill specifies `model.provider`.
 8. **Construct prompt**: The body becomes a user message.
    ```
    [Skill: docker-ops activated]
@@ -526,4 +664,5 @@ The `use_skill` tool path does **not** perform provider switching or `@path` res
 - [askSeepient()](/sdk/ask-seepient) -- One-shot execution with skills
 - [createSeepient()](/sdk/create-seepient) -- Stateful agent with skill support
 - [Custom Tools](/sdk/custom-tools) -- Build custom tools
+- [Worker Example](https://github.com/hashangit/seepient/tree/main/examples/worker) -- Full multi-tenant worker with custom skill sources and storage
 - [Types](/sdk/types) -- Full TypeScript type reference

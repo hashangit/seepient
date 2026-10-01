@@ -23,20 +23,17 @@ describe("Acceptance Tests: B-2, B-3, S-1, S-2", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  describe("B-2: Environment Variable Projection & Overlay Precedence", () => {
-    it("projects LLM_PROVIDER=anthropic and ANTHROPIC_API_KEY into effective config", async () => {
-      vi.stubEnv("LLM_PROVIDER", "anthropic");
+  describe("B-2: Base config is providerless (022-5 FR-005) & Overlay Precedence", () => {
+    it("does not project env keys into effective config (env synthesis demolished)", async () => {
       vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-api-test-key-123456");
 
       const store = new ProviderConfigStore(overlayPath);
       const effective = await store.getEffectiveConfig();
 
-      expect(effective.providers["anthropic"]).toBeDefined();
-      expect(effective.modelAssignments.text!.standard!.providerAccount).toBe("anthropic");
+      expect(effective.providers["anthropic"]).toBeUndefined();
     });
 
-    it("overlay patch takes precedence over environment variable projection", async () => {
-      vi.stubEnv("LLM_PROVIDER", "anthropic");
+    it("overlay patch takes precedence over the providerless base config", async () => {
       vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-api-test-key-123456");
 
       const store = new ProviderConfigStore(overlayPath);

@@ -14,12 +14,15 @@ export interface LanguageRequest {
   messages: CanonicalMessage[];
   thinkingLevel?: ThinkingLevel;
   maxOutputTokens?: number;
+  temperature?: number;
   tools?: ToolDefinition[];
 }
 
 export interface InferenceOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
+  tenancyMode?: "single" | "multi";
+  capabilities?: import("./permission-policy.js").Capability[];
 }
 
 export interface InferenceTarget {

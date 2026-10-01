@@ -12,6 +12,7 @@ import type { WebSocket, ConnectionState } from '../ws/ws-types.js';
 import type { ApiKeyEntry, KeyScope } from '../auth/auth.js';
 import { hasScope } from '../auth/auth.js';
 import { parseBody } from './body.js';
+import { safeSend } from '../ws/connection-registry.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -21,7 +22,15 @@ export interface SettingsHandlerContext {
   maxBodyBytes?: number;
   /** Get all connected WS clients (excluding sender) */
   getOtherClients: (excludeWs?: WebSocket) => Array<{ ws: WebSocket; state: ConnectionState }>;
+  runtime?: import('../../foundations/contracts/provider-runtime.js').ProviderRuntimeContract | import('../../domain/providers/provider-runtime.js').ProviderRuntime;
+  tenancyMode?: "single" | "multi";
 }
+
+export const SERVER_SETTINGS_ALLOWLIST = new Set([
+  "server.corsOrigins",
+  "server.maxBodyBytes",
+  "server.rateLimitRpm",
+]);
 
 // ── Mutex ─────────────────────────────────────────────────────────────────
 
@@ -101,46 +110,72 @@ export async function handleGetSettings(
   const apiKey = (req as any).apiKey as ApiKeyEntry | undefined;
   if (!requireScope(res, apiKey, 'agent:read')) return;
 
+  const isMulti = ctx.tenancyMode === "multi";
+
   if (category) {
+    if (isMulti && category !== 'server') {
+      sendError(res, 404, 'NOT_FOUND', `Unknown category: ${category}`);
+      return;
+    }
     if (!VALID_CATEGORIES.has(category)) {
       sendError(res, 404, 'NOT_FOUND', `Unknown category: ${category}`);
       return;
     }
     const all = ctx.settingsManager.listByCategory();
-    sendJSON(res, 200, { [category]: all[category] ?? [] });
+    let entries = all[category] ?? [];
+    if (isMulti) {
+      entries = entries
+        .filter((e) => SERVER_SETTINGS_ALLOWLIST.has(e.dotKey))
+        .map(({ origin, ...rest }) => ({ ...rest, origin: "server" }));
+    }
+    sendJSON(res, 200, { [category]: entries });
     return;
   }
 
   const all = ctx.settingsManager.listByCategory();
+  if (isMulti) {
+    const serverEntries = (all['server'] ?? [])
+      .filter((e) => SERVER_SETTINGS_ALLOWLIST.has(e.dotKey))
+      .map(({ origin, ...rest }) => ({ ...rest, origin: "server" }));
+    sendJSON(res, 200, { server: serverEntries });
+    return;
+  }
+
   sendJSON(res, 200, all);
 }
 
 export async function handleGetSettingsSchema(
   req: IncomingMessage,
   res: ServerResponse,
-  _ctx: SettingsHandlerContext,
+  ctx: SettingsHandlerContext,
 ): Promise<void> {
   const apiKey = (req as any).apiKey as ApiKeyEntry | undefined;
   if (!requireScope(res, apiKey, 'agent:read')) return;
 
-  const categories = SETTINGS_CATEGORIES.map(c => ({
-    key: c.key,
-    label: c.label,
-    description: c.description,
-  }));
+  const isMulti = ctx.tenancyMode === "multi";
 
-  const settings = Array.from(SETTINGS_SCHEMA.entries()).map(([dotKey, entry]) => ({
-    dotKey,
-    category: SETTINGS_MAP.get(dotKey)?.category ?? 'general',
-    label: SETTINGS_MAP.get(dotKey)?.label ?? dotKey,
-    type: entry.type,
-    defaultValue: entry.default,
-    enumValues: entry.enumValues,
-    min: entry.min,
-    max: entry.max,
-    secret: entry.secret ?? false,
-    restartRequired: entry.restartRequired ?? false,
-  }));
+  const categories = SETTINGS_CATEGORIES
+    .filter((c) => !isMulti || c.key === 'server')
+    .map(c => ({
+      key: c.key,
+      label: c.label,
+      description: c.description,
+    }));
+
+  const settings = Array.from(SETTINGS_SCHEMA.entries())
+    .filter(([dotKey]) => !isMulti || SERVER_SETTINGS_ALLOWLIST.has(dotKey))
+    .map(([dotKey, entry]) => ({
+      dotKey,
+      category: SETTINGS_MAP.get(dotKey)?.category ?? 'general',
+      label: SETTINGS_MAP.get(dotKey)?.label ?? dotKey,
+      type: entry.type,
+      defaultValue: entry.default,
+      enumValues: entry.enumValues,
+      min: entry.min,
+      max: entry.max,
+      secret: entry.secret ?? false,
+      restartRequired: entry.restartRequired ?? false,
+    }));
 
   sendJSON(res, 200, { categories, settings });
 }
@@ -154,8 +189,28 @@ export async function handlePatchSettings(
   const apiKey = (req as any).apiKey as ApiKeyEntry | undefined;
   if (!requireScope(res, apiKey, 'admin')) return;
 
+  const isMulti = ctx.tenancyMode === "multi";
   const body = await readBody(req, ctx.maxBodyBytes);
   const updates = category ? { [category]: body } : body;
+
+  if (isMulti) {
+    for (const [cat, fields] of Object.entries(updates)) {
+      if (typeof fields !== 'object' || fields === null) continue;
+      for (const [key] of Object.entries(fields as Record<string, any>)) {
+        const dotKey = category ? `${category}.${key}` : `${cat}.${key}`;
+        if (!SERVER_SETTINGS_ALLOWLIST.has(dotKey)) {
+          sendJSON(res, 403, {
+            error: {
+              code: 'FORBIDDEN',
+              message: `Setting "${dotKey}" cannot be modified in multi-tenant mode`,
+            },
+          });
+          return;
+        }
+      }
+    }
+  }
+
   const applied: Record<string, any> = {};
   const errors: Array<{ field: string; message: string }> = [];
   let requiresRestart = false;
@@ -206,14 +261,28 @@ export function handleWsGetSettings(
   ctx: SettingsHandlerContext,
 ): void {
   if (!requireWsScope(state, 'agent:read')) {
-    ws.send(JSON.stringify({ type: 'settings', id: msg.id, error: { code: 'FORBIDDEN', message: 'Requires agent:read scope' } }));
+    safeSend(ws, { type: 'settings', id: msg.id, error: { code: 'FORBIDDEN', message: 'Requires agent:read scope' } });
     return;
   }
 
+  const isMulti = ctx.tenancyMode === "multi";
   const all = ctx.settingsManager.listByCategory();
-  const filtered = msg.category ? { [msg.category]: all[msg.category] ?? [] } : all;
 
-  ws.send(JSON.stringify({ type: 'settings', id: msg.id, settings: filtered }));
+  if (isMulti) {
+    if (msg.category && msg.category !== 'server') {
+      safeSend(ws, { type: 'settings', id: msg.id, settings: { [msg.category]: [] } });
+      return;
+    }
+    const serverEntries = (all['server'] ?? [])
+      .filter((e) => SERVER_SETTINGS_ALLOWLIST.has(e.dotKey))
+      .map(({ origin, ...rest }) => ({ ...rest, origin: "server" }));
+    const filtered = msg.category ? { server: serverEntries } : { server: serverEntries };
+    safeSend(ws, { type: 'settings', id: msg.id, settings: filtered });
+    return;
+  }
+
+  const filtered = msg.category ? { [msg.category]: all[msg.category] ?? [] } : all;
+  safeSend(ws, { type: 'settings', id: msg.id, settings: filtered });
 }
 
 export async function handleWsUpdateSettings(
@@ -223,11 +292,32 @@ export async function handleWsUpdateSettings(
   ctx: SettingsHandlerContext,
 ): Promise<void> {
   if (!requireWsScope(state, 'admin')) {
-    ws.send(JSON.stringify({ type: 'settings_updated', id: msg.id, error: { code: 'FORBIDDEN', message: 'Requires admin scope' } }));
+    safeSend(ws, { type: 'settings_updated', id: msg.id, error: { code: 'FORBIDDEN', message: 'Requires admin scope' } });
     return;
   }
 
+  const isMulti = ctx.tenancyMode === "multi";
   const settings = msg.settings ?? {};
+
+  if (isMulti) {
+    for (const [cat, fields] of Object.entries(settings)) {
+      if (typeof fields !== 'object' || fields === null) continue;
+      for (const [key] of Object.entries(fields as Record<string, any>)) {
+        const dotKey = `${cat}.${key}`;
+        if (!SERVER_SETTINGS_ALLOWLIST.has(dotKey)) {
+          safeSend(ws, {
+            type: 'settings_updated',
+            id: msg.id,
+            error: {
+              code: 'FORBIDDEN',
+              message: `Setting "${dotKey}" cannot be modified in multi-tenant mode`,
+            },
+          });
+          return;
+        }
+      }
+    }
+  }
   const applied: Record<string, any> = {};
   const changedFields: string[] = [];
   const errors: Array<{ field: string; message: string }> = [];
@@ -260,15 +350,15 @@ export async function handleWsUpdateSettings(
   }
 
   if (errors.length > 0) {
-    ws.send(JSON.stringify({
+    safeSend(ws, {
       type: 'settings_updated', id: msg.id,
       error: { code: 'VALIDATION_ERROR', message: `${errors.length} field(s) failed validation`, details: errors },
-    }));
+    });
     return;
   }
 
   // Respond to sender
-  ws.send(JSON.stringify({ type: 'settings_updated', id: msg.id, applied, requiresRestart, restartAffected }));
+  safeSend(ws, { type: 'settings_updated', id: msg.id, applied, requiresRestart, restartAffected });
 
   // Broadcast to others
   broadcastSettingsChange(ctx, changedFields, requiresRestart, restartAffected, ws);
@@ -284,16 +374,16 @@ function broadcastSettingsChange(
   excludeWs?: WebSocket,
 ): void {
   const categories = new Set(changedFields.map(f => f.split('.')[0]));
-  const message = JSON.stringify({
+  const payload = {
     type: 'settings_changed',
     changedCategories: [...categories],
     changedFields,
     requiresRestart,
     restartAffected,
     timestamp: new Date().toISOString(),
-  });
+  };
 
   for (const client of ctx.getOtherClients(excludeWs)) {
-    try { client.ws.send(message); } catch { /* best-effort */ }
+    safeSend(client.ws, payload);
   }
 }

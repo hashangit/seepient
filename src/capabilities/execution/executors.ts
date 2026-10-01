@@ -29,8 +29,9 @@ import type {
   PreparationArtifactStore,
   EffectBroker,
 } from "../../foundations/contracts/execution-brokers.js";
-import { UnsupportedBackendError } from "../../foundations/errors.js";
+import { UnsupportedBackendError, PathHardlinkRefusedError, PathIdentityMismatchError } from "../../foundations/errors.js";
 import { isSecurityPath } from "./environment-policy.js";
+import { isGuardNeutralized } from "../../foundations/test-seams.js";
 import { createSetupFailure } from "../../foundations/contracts/setup-failure.js";
 
 /** Read the prepared bytes for a commit operation from the artifact store. */
@@ -43,15 +44,12 @@ async function readContent(
 
 /**
  * Commit-files executor. Validates every target via the FileCommitBroker
- * (which delegates to the native helper when available). When the native
- * helper is absent (exactCommit:false), falls back to an atomic temp+rename
- * write — the SAME mechanism the legacy write_file tool uses. The fallback
- * is less safe (no TOCTOU protection), but:
+ * (which delegates to the native helper). When the native helper is absent
+ * (useNative: false), file commits fail closed with EXACT_COMMIT_UNAVAILABLE
+ * (FR-007) rather than performing unverified filesystem mutations:
  *  1. The write uses the PREPARED bytes and destination (not model args).
- *  2. The capability envelope is still checked.
- *  3. Policy and audit still govern the call.
- * The boundary honestly advertises exactCommit:false so policy and the user
- * know the exact-commit guarantee isn't available.
+ *  2. The capability envelope is verified before commit.
+ *  3. Policy and audit strictly govern the operation.
  */
 export class CommitFilesExecutor implements OperationExecutor {
   readonly kind = "commit-files" as const;
@@ -69,8 +67,22 @@ export class CommitFilesExecutor implements OperationExecutor {
     action: PreparedToolAction,
     envelope: CapabilityEnvelope,
     operation: Extract<PreparedToolAction["operation"], { kind: "commit-files" }>,
-    _opts: { signal?: AbortSignal; onUpdate?: (u: ToolProgress) => void },
+    opts: { signal?: AbortSignal; onUpdate?: (u: ToolProgress) => void },
   ): Promise<ExecutionResult> {
+    // 022-5-WO1 T014: the abort signal is observed before any filesystem
+    // work — a pre-aborted commit must not touch the read plane at all.
+    if (opts.signal?.aborted) {
+      return {
+        state: "failed",
+        error: { code: "COMMIT_ABORTED", message: "Commit aborted before execution", retryable: true },
+        evidence: {
+          backend: "local-native",
+          actionDigest: action.actionDigest,
+          executorId: "commit-files-denied",
+          operationKind: "commit-files",
+        },
+      };
+    }
     // T108a: deny any target under ~/.seepient/security/
     for (const commit of operation.commits) {
       if (isSecurityPath(commit.destination.canonicalPath)) {
@@ -96,8 +108,63 @@ export class CommitFilesExecutor implements OperationExecutor {
     // like the legacy hashline handler did.
     let oldContent: string | null = null;
     try {
-      const { readFile: fsReadOld } = await import("node:fs/promises");
-      oldContent = await fsReadOld(operation.commits[0].destination.canonicalPath, "utf-8");
+      // Pinned read (pass-10 P2-4): no-follow open + nlink gate so a swapped
+      // destination cannot put host bytes into step metadata.
+      const [{ open: fsOpenOld }, { constants: fsConstants }] = await Promise.all([
+        import("node:fs/promises"),
+        import("node:fs"),
+      ]);
+      const destPath = operation.commits[0].destination.canonicalPath;
+      // 022-5-WO1 T014: O_NONBLOCK bounds the open (a FIFO destination
+      // cannot wedge the turn); the pinned fd must be a regular file; and
+      // when the commit carries an expected identity, the opened file must
+      // be the one that was authorized.
+      const oldHandle = await fsOpenOld(
+        destPath,
+        fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0),
+      );
+      try {
+        const oldSt = await oldHandle.stat();
+        if (!oldSt.isFile()) {
+          return {
+            state: "failed",
+            error: {
+              code: "COMMIT_DEST_NOT_REGULAR_FILE",
+              message: `Commit destination is not a regular file: ${destPath}`,
+              retryable: false,
+            },
+            evidence: {
+              backend: "local-native",
+              actionDigest: action.actionDigest,
+              executorId: "commit-files-denied",
+              operationKind: "commit-files",
+            },
+          };
+        }
+        const expectedIdentity = operation.commits[0].expected as { device?: string; inode?: string } | undefined;
+        if (
+          !isGuardNeutralized("P1-1-READ-IDENTITY") &&
+          expectedIdentity?.device !== undefined &&
+          expectedIdentity.inode !== undefined &&
+          (String(oldSt.dev) !== expectedIdentity.device || String(oldSt.ino) !== expectedIdentity.inode)
+        ) {
+          return {
+            state: "failed",
+            error: { code: "PATH_IDENTITY_MISMATCH", message: `Commit destination changed since authorization: ${destPath}`, retryable: false },
+            evidence: {
+              backend: "local-native",
+              actionDigest: action.actionDigest,
+              executorId: "commit-files-denied",
+              operationKind: "commit-files",
+            },
+          };
+        }
+        if (oldSt.nlink <= 1) {
+          oldContent = await oldHandle.readFile({ encoding: "utf-8", signal: opts.signal });
+        }
+      } finally {
+        await oldHandle.close();
+      }
     } catch { /* new file or unreadable: metadata degrades, commit proceeds */ }
     try {
       for (const commit of operation.commits) {
@@ -198,25 +265,48 @@ export class ReadFileExecutor implements OperationExecutor {
   readonly kind = "read-file" as const;
   private readonly artifacts?: PreparationArtifactStore;
   private readonly snapshotStore?: SnapshotStore;
+  private readonly operatorAllowsHardlinks: boolean;
 
-  constructor(opts?: { artifacts?: PreparationArtifactStore; snapshotStore?: SnapshotStore }) {
+  constructor(opts?: {
+    artifacts?: PreparationArtifactStore;
+    snapshotStore?: SnapshotStore;
+    operatorAllowsHardlinks?: boolean;
+  }) {
     this.artifacts = opts?.artifacts;
     this.snapshotStore = opts?.snapshotStore;
+    this.operatorAllowsHardlinks = opts?.operatorAllowsHardlinks ?? false;
   }
 
   async execute(
     action: PreparedToolAction,
     _envelope: CapabilityEnvelope,
     operation: Extract<PreparedToolAction["operation"], { kind: "read-file" }>,
-    _opts: { signal?: AbortSignal; onUpdate?: (u: ToolProgress) => void },
+    opts: { signal?: AbortSignal; onUpdate?: (u: ToolProgress) => void },
   ): Promise<ExecutionResult> {
+    const targetPath = operation.target.canonicalPath;
+
+    // FR-004: the abort signal must interrupt the read. Checked before the
+    // open and threaded into the read below.
+    if (opts.signal?.aborted) {
+      return {
+        state: "failed",
+        error: { code: "READ_ABORTED", message: "Read aborted before open", retryable: true },
+        evidence: {
+          backend: "local-native",
+          actionDigest: action.actionDigest,
+          executorId: "read-file-denied",
+          operationKind: "read-file",
+        },
+      };
+    }
+
     // T108a: deny reads of the security directory
-    if (isSecurityPath(operation.target.canonicalPath)) {
+    if (isSecurityPath(targetPath)) {
       return {
         state: "failed",
         error: {
           code: "SECURITY_PATH_DENIED",
-          message: `Reads of the security directory are prohibited: ${operation.target.canonicalPath}`,
+          message: `Reads of the security directory are prohibited: ${targetPath}`,
           retryable: false,
         },
         evidence: {
@@ -227,10 +317,137 @@ export class ReadFileExecutor implements OperationExecutor {
         },
       };
     }
+
+    let handle: import("node:fs/promises").FileHandle | undefined;
     try {
-      const { readFile } = await import("node:fs/promises");
-      const content = await readFile(operation.target.canonicalPath, "utf-8");
-      const tag = this.snapshotStore?.record(operation.target.canonicalPath, content);
+      const { open } = await import("node:fs/promises");
+      const { constants } = await import("node:fs");
+
+      try {
+        // O_NONBLOCK bounds the open: on a FIFO with no writer a blocking
+        // open would park a threadpool thread forever. Regular files ignore it.
+        handle = await open(
+          targetPath,
+          constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
+        );
+      } catch (err: any) {
+        if (err?.code === "ELOOP" || err?.code === "EMLINK") {
+          return {
+            state: "failed",
+            error: {
+              code: "SYMLINK_READ_DENIED",
+              message: `Reads of symbolic links are prohibited: ${targetPath}`,
+              retryable: false,
+            },
+            evidence: {
+              backend: "local-native",
+              actionDigest: action.actionDigest,
+              executorId: "read-file-denied",
+              operationKind: "read-file",
+            },
+          };
+        }
+        throw err;
+      }
+
+      const st = await handle.stat();
+      if (st.isSymbolicLink()) {
+        return {
+          state: "failed",
+          error: {
+            code: "SYMLINK_READ_DENIED",
+            message: `Reads of symbolic links are prohibited: ${targetPath}`,
+            retryable: false,
+          },
+          evidence: {
+            backend: "local-native",
+            actionDigest: action.actionDigest,
+            executorId: "read-file-denied",
+            operationKind: "read-file",
+          },
+        };
+      }
+
+      // FR-004: only regular files. A FIFO that passed the non-blocking open
+      // would otherwise tie the turn to a writer that may never come.
+      if (!st.isFile()) {
+        return {
+          state: "failed",
+          error: {
+            code: "READ_NOT_REGULAR_FILE",
+            message: `Reads are restricted to regular files: ${targetPath}`,
+            retryable: false,
+          },
+          evidence: {
+            backend: "local-native",
+            actionDigest: action.actionDigest,
+            executorId: "read-file-denied",
+            operationKind: "read-file",
+          },
+        };
+      }
+
+      if (st.nlink > 1 && !this.operatorAllowsHardlinks) {
+        const err = new PathHardlinkRefusedError(targetPath);
+        return {
+          state: "failed",
+          error: {
+            code: err.code,
+            message: err.message,
+            retryable: false,
+          },
+          evidence: {
+            backend: "local-native",
+            actionDigest: action.actionDigest,
+            executorId: "read-file-denied",
+            operationKind: "read-file",
+          },
+        };
+      }
+
+      // Authorize-what-you-open identity pin (pass-10 P1-1): the opened file
+      // must be the same file (device/inode) snapshotted at analysis time.
+      // O_NOFOLLOW only guards the final path component; this check catches
+      // parent-directory symlink swaps and rename swaps between authorization
+      // and execution. Unverifiable identity fails closed.
+      const expectedIdentity = operation.expected;
+      const identityEstablished =
+        expectedIdentity?.exists === true &&
+        expectedIdentity.device !== undefined &&
+        expectedIdentity.inode !== undefined;
+      if (
+        !isGuardNeutralized("P1-1-READ-IDENTITY") &&
+        (!identityEstablished ||
+          String(st.dev) !== expectedIdentity!.device ||
+          String(st.ino) !== expectedIdentity!.inode)
+      ) {
+        const err = new PathIdentityMismatchError(targetPath);
+        return {
+          state: "failed",
+          error: {
+            code: err.code,
+            message: err.message,
+            retryable: false,
+          },
+          evidence: {
+            backend: "local-native",
+            actionDigest: action.actionDigest,
+            executorId: "read-file-denied",
+            operationKind: "read-file",
+          },
+        };
+      }
+
+      const content = await handle.readFile({ encoding: "utf-8", signal: opts.signal });
+      // 022-5-WO4 T006: thread the PINNED fd's identity (already verified
+      // against the authorize-time stamp) into the snapshot record — the
+      // record captures the verified file, not a post-read lstat (pass-14
+      // P1-1/P2-8: the bare require was dead AND the read-time lstat raced).
+      const tag = this.snapshotStore?.record(
+        targetPath,
+        content,
+        { device: String(st.dev), inode: String(st.ino) },
+      );
       const output = tag ? `${content}\n\n[content-tag:${tag}]` : content;
       return {
         state: "succeeded",
@@ -240,14 +457,14 @@ export class ReadFileExecutor implements OperationExecutor {
           actionDigest: action.actionDigest,
           executorId: "read-file",
           operationKind: "read-file",
-          committedTargets: [operation.target.canonicalPath],
+          committedTargets: [targetPath],
         },
       };
-    } catch (err) {
+    } catch (err: any) {
       return {
         state: "failed",
         error: {
-          code: "READ_FAILED",
+          code: err?.code ?? "READ_FAILED",
           message: err instanceof Error ? err.message : String(err),
           retryable: false,
         },
@@ -258,6 +475,8 @@ export class ReadFileExecutor implements OperationExecutor {
           operationKind: "read-file",
         },
       };
+    } finally {
+      await handle?.close();
     }
   }
 }
@@ -280,24 +499,97 @@ function capBrokerOutput(text: string): string {
  * readable page text, not markup: strip script/style/head blocks, turn
  * block-level closings into newlines, drop remaining tags, decode common
  * entities. A full parser dependency is not warranted for this.
+ *
+ * 022-5-WO1 T013 (pass-11 P1-2): the structural pass is a single linear
+ * scan, not regexes — `<[^>]+>` and friends are quadratic on adversarial
+ * input (25 s at 256 KiB of "<"), and read_website content is attacker-
+ * controlled. Every indexOf advances; there is no backtracking anywhere.
  */
-function htmlToText(html: string): string {
-  return html
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<(script|style|noscript|svg|head|template)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<br\b[^>]*\/?>/gi, "\n")
-    .replace(/<\/(p|div|li|ul|ol|h[1-6]|tr|table|section|article|header|footer|blockquote|pre)\s*>/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
+const MAX_HTML_INPUT_BYTES = 1024 * 1024;
+
+const SKIP_BLOCK_TAGS = new Set(["script", "style", "noscript", "svg", "head", "template"]);
+const BLOCK_CLOSE_NEWLINE = new Set([
+  "p", "div", "li", "ul", "ol", "h1", "h2", "h3", "h4", "h5", "h6",
+  "tr", "table", "section", "article", "header", "footer", "blockquote", "pre",
+]);
+
+function htmlStructureToText(html: string): string {
+  let out = "";
+  let i = 0;
+  const n = html.length;
+  while (i < n) {
+    const lt = html.indexOf("<", i);
+    if (lt === -1) {
+      out += html.slice(i);
+      break;
+    }
+    out += html.slice(i, lt);
+    if (html.startsWith("<!--", lt)) {
+      const end = html.indexOf("-->", lt + 4);
+      i = end === -1 ? n : end + 3;
+      continue;
+    }
+    const gt = html.indexOf(">", lt + 1);
+    if (gt === -1) break; // unterminated tag: drop the bounded tail
+    const inner = html.slice(lt + 1, gt);
+    i = gt + 1;
+    const closing = inner.startsWith("/");
+    const name = (/^\/?\s*([a-zA-Z][a-zA-Z0-9-]*)/.exec(inner))?.[1]?.toLowerCase() ?? "";
+    if (!closing && name === "br") {
+      out += "\n";
+      continue;
+    }
+    if (closing && BLOCK_CLOSE_NEWLINE.has(name)) {
+      out += "\n";
+      continue;
+    }
+    if (!closing && SKIP_BLOCK_TAGS.has(name)) {
+      const closeIdx = html.indexOf(`</${name}`, gt);
+      if (closeIdx === -1) {
+        i = n;
+        continue;
+      }
+      const closeGt = html.indexOf(">", closeIdx);
+      i = closeGt === -1 ? n : closeGt + 1;
+      continue;
+    }
+    out += " ";
+  }
+  return out;
+}
+
+function decodeEntitySafe(cp: number): string {
+  try {
+    return String.fromCodePoint(cp);
+  } catch {
+    return ""; // out-of-range entity: skip it, keep scanning
+  }
+}
+
+export function htmlToText(html: string): string {
+  let truncationNote = "";
+  let capped = html;
+  if (html.length > MAX_HTML_INPUT_BYTES) {
+    capped = html.slice(0, MAX_HTML_INPUT_BYTES);
+    // Never split a surrogate pair on the cap boundary.
+    const last = capped.charCodeAt(capped.length - 1);
+    if (last >= 0xd800 && last <= 0xdbff) capped = capped.slice(0, -1);
+    truncationNote = `\n…[input truncated at ${MAX_HTML_INPUT_BYTES} bytes]`;
+  }
+  // The note is appended after the structural pass — inside a capped
+  // unterminated tag it would be swallowed by the tag-dropping scan.
+  return (
+    htmlStructureToText(capped)
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
     .replace(/&quot;/gi, '"')
-    .replace(/&(#[0-9]+|apos);/g, (m, d: string) => (d.startsWith("#") ? String.fromCodePoint(Number(d.slice(1))) : "'"))
-    .replace(/&#x([0-9a-f]+);/gi, (_, d: string) => String.fromCodePoint(parseInt(d, 16)))
+    .replace(/&(#[0-9]+|apos);/g, (m, d: string) => (d.startsWith("#") ? decodeEntitySafe(Number(d.slice(1))) : "'"))
+    .replace(/&#x([0-9a-f]+);/gi, (_, d: string) => decodeEntitySafe(parseInt(d, 16)))
     .replace(/[ \t]+/g, " ")
     .replace(/\n{3,}/g, "\n\n")
-    .trim();
+    .trim() + truncationNote);
 }
 
 /**
@@ -342,6 +634,7 @@ export class BrokerExecutor implements OperationExecutor {
   private readonly artifacts?: PreparationArtifactStore;
   private readonly workspaceRoot?: string;
   private readonly commitBroker?: FileCommitBroker;
+  private readonly tenancyMode: "single" | "multi";
 
   constructor(opts: {
     broker: EffectBroker;
@@ -349,11 +642,13 @@ export class BrokerExecutor implements OperationExecutor {
     workspaceRoot?: string;
     /** spec 019 FR-011: for outputCommit handoff after a successful fetch. */
     commitBroker?: FileCommitBroker;
+    tenancyMode?: "single" | "multi";
   }) {
     this.broker = opts.broker;
     this.artifacts = opts.artifacts;
     this.workspaceRoot = opts.workspaceRoot;
     this.commitBroker = opts.commitBroker;
+    this.tenancyMode = opts.tenancyMode ?? "single";
   }
   async execute(
     action: PreparedToolAction,
@@ -361,77 +656,15 @@ export class BrokerExecutor implements OperationExecutor {
     operation: Extract<PreparedToolAction["operation"], { kind: "broker" }>,
     _opts: { signal?: AbortSignal; onUpdate?: (u: ToolProgress) => void },
   ): Promise<ExecutionResult> {
-    // Preflight credential checks (spec 017, T014; spec 020, T015)
-    const { resolveCredentials } = await import("../../foundations/security/credential-resolver.js");
-    const creds = resolveCredentials(undefined, this.workspaceRoot);
+    // In multi mode, skip ambient credential resolution completely (FR-008).
+    // Broker handles explicit secret resolution via secretResolver and fails closed with CREDENTIAL_REQUIRED.
+    if (this.tenancyMode !== "multi") {
+      // Preflight credential checks (spec 017, T014; spec 020, T015)
+      const { resolveCredentials } = await import("../../foundations/security/credential-resolver.js");
+      const creds = resolveCredentials(undefined, this.workspaceRoot);
 
-    if (action.toolName === "web_search" && !creds.tavilyApiKey) {
-      const failure = createSetupFailure("web_search", "Tavily API key", "TAVILY_API_KEY / search.tavilyApiKey");
-      return {
-        state: "failed",
-        error: {
-          code: "SETUP_REQUIRED",
-          message: failure.message,
-          retryable: false,
-        },
-        evidence: {
-          backend: "local-native",
-          actionDigest: action.actionDigest,
-          executorId: "broker-preflight",
-          operationKind: "broker",
-        },
-      };
-    }
-
-    if (action.toolName !== "web_search" && operation.request.secretRefs && operation.request.secretRefs.length > 0) {
-      for (const ref of operation.request.secretRefs) {
-        const canonicalRef = ref === "tavily" ? "tavilyApiKey" : ref;
-        const resolvedVal = (creds as unknown as Record<string, unknown>)[canonicalRef] ?? (creds as unknown as Record<string, unknown>)[ref];
-        if (!resolvedVal) {
-          return {
-            state: "failed",
-            error: {
-              code: "CONNECTOR_SECRET_UNRESOLVED",
-              message: `Required secret reference "${ref}" cannot be resolved. Configure ${ref} in environment or credentials store.`,
-              retryable: false,
-            },
-            evidence: {
-              backend: "local-native",
-              actionDigest: action.actionDigest,
-              executorId: "broker-secret-preflight",
-              operationKind: "broker",
-            },
-          };
-        }
-      }
-    }
-    if (action.toolName === "send_email" && (!creds.smtpHost || !creds.smtpUser || !creds.smtpPass)) {
-      const failure = createSetupFailure("send_email", "SMTP configuration", "SMTP_HOST / smtp.host");
-      return {
-        state: "failed",
-        error: {
-          code: "SETUP_REQUIRED",
-          message: failure.message,
-          retryable: false,
-        },
-        evidence: {
-          backend: "local-native",
-          actionDigest: action.actionDigest,
-          executorId: "broker-preflight",
-          operationKind: "broker",
-        },
-      };
-    }
-    if (action.toolName === "send_notification") {
-      const platform = (operation.request as any)?.service ?? "feishu";
-      const platformWebhook =
-        platform === "feishu" ? creds.feishuWebhook :
-        platform === "dingtalk" ? creds.dingtalkWebhook :
-        platform === "wecom" ? creds.wecomWebhook :
-        undefined;
-      if (!platformWebhook) {
-        const envKey = `${String(platform).toUpperCase()}_WEBHOOK`;
-        const failure = createSetupFailure("send_notification", `${platform} webhook URL`, `${envKey} / notifications.${platform}.webhook`);
+      if (action.toolName === "web_search" && !creds.tavilyApiKey) {
+        const failure = createSetupFailure("web_search", "Tavily API key", "TAVILY_API_KEY / search.tavilyApiKey");
         return {
           state: "failed",
           error: {
@@ -446,6 +679,73 @@ export class BrokerExecutor implements OperationExecutor {
             operationKind: "broker",
           },
         };
+      }
+
+      if (action.toolName !== "web_search" && operation.request.secretRefs && operation.request.secretRefs.length > 0) {
+        for (const ref of operation.request.secretRefs) {
+          const canonicalRef = ref === "tavily" ? "tavilyApiKey" : ref;
+          const resolvedVal = (creds as unknown as Record<string, unknown>)[canonicalRef] ?? (creds as unknown as Record<string, unknown>)[ref];
+          if (!resolvedVal) {
+            return {
+              state: "failed",
+              error: {
+                code: "CONNECTOR_SECRET_UNRESOLVED",
+                message: `Required secret reference "${ref}" cannot be resolved. Configure ${ref} in environment or credentials store.`,
+                retryable: false,
+              },
+              evidence: {
+                backend: "local-native",
+                actionDigest: action.actionDigest,
+                executorId: "broker-secret-preflight",
+                operationKind: "broker",
+              },
+            };
+          }
+        }
+      }
+
+      if (action.toolName === "send_email" && (!creds.smtpHost || !creds.smtpUser || !creds.smtpPass)) {
+        const failure = createSetupFailure("send_email", "SMTP configuration", "SMTP_HOST / smtp.host");
+        return {
+          state: "failed",
+          error: {
+            code: "SETUP_REQUIRED",
+            message: failure.message,
+            retryable: false,
+          },
+          evidence: {
+            backend: "local-native",
+            actionDigest: action.actionDigest,
+            executorId: "broker-preflight",
+            operationKind: "broker",
+          },
+        };
+      }
+      if (action.toolName === "send_notification") {
+        const platform = (operation.request as any)?.service ?? "feishu";
+        const platformWebhook =
+          platform === "feishu" ? creds.feishuWebhook :
+          platform === "dingtalk" ? creds.dingtalkWebhook :
+          platform === "wecom" ? creds.wecomWebhook :
+          undefined;
+        if (!platformWebhook) {
+          const envKey = `${String(platform).toUpperCase()}_WEBHOOK`;
+          const failure = createSetupFailure("send_notification", `${platform} webhook URL`, `${envKey} / notifications.${platform}.webhook`);
+          return {
+            state: "failed",
+            error: {
+              code: "SETUP_REQUIRED",
+              message: failure.message,
+              retryable: false,
+            },
+            evidence: {
+              backend: "local-native",
+              actionDigest: action.actionDigest,
+              executorId: "broker-preflight",
+              operationKind: "broker",
+            },
+          };
+        }
       }
     }
 

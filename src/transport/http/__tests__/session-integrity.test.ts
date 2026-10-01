@@ -123,7 +123,7 @@ describe("W151 — resolved-error turns persist no assistant row (REST)", () => 
     expect(res.statusCode).toBe(502);
 
     // No assistant row: only the persisted user message exists
-    const stored = await backend.load("w151-rest-session") as unknown as SessionData;
+    const stored = (await backend.load(`${hashKey(ownerRawKey)}:w151-rest-session`) ?? await backend.load("w151-rest-session")) as unknown as SessionData;
     const roles = stored.messages.map((m) => m.role);
     expect(roles).toEqual(["user"]);
   });
@@ -160,7 +160,7 @@ describe("W151 — resolved-error turns persist no assistant row (REST)", () => 
     );
 
     expect(res.statusCode).toBe(200);
-    const stored = await backend.load("w151-rest-ok") as unknown as SessionData;
+    const stored = (await backend.load(`${hashKey(ownerRawKey)}:w151-rest-ok`) ?? await backend.load("w151-rest-ok")) as unknown as SessionData;
     const roles = stored.messages.map((m) => m.role);
     expect(roles).toEqual(["user", "assistant"]);
   });
@@ -242,12 +242,14 @@ describe("W153 — denied probes must not cache the victim's session", () => {
     const probingManager = new ServerSessionManager({ backend });
     const denied = await probingManager.getSession("w153-victim", FOREIGN_HASH);
     expect(denied).toBeNull();
-    expect(probingManager.getActiveSessions()).toHaveLength(0);
+    expect(probingManager.getActiveSessions(FOREIGN_HASH)).toHaveLength(0);
+    expect(probingManager.getActiveSessions(OWNER_HASH)).toHaveLength(0);
 
     // The owner's probe succeeds and only then takes up residency
     const owned = await probingManager.getSession("w153-victim", OWNER_HASH);
     expect(owned).not.toBeNull();
-    expect(probingManager.getActiveSessions()).toHaveLength(1);
+    expect(probingManager.getActiveSessions(OWNER_HASH)).toHaveLength(1);
+    expect(probingManager.getActiveSessions(FOREIGN_HASH)).toHaveLength(0);
   });
 });
 

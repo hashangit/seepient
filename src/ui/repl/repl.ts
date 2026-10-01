@@ -76,16 +76,8 @@ export function setupInterrupt(agent: Agent): InterruptHandle {
 
 // ── Shell approval mode ──────────────────────────────────────────────
 
-function getShellApprovalMode(config: any, newPermissionSystemActive?: boolean): 'auto' | 'prompt' | 'deny' {
+function getShellApprovalMode(config: any): 'auto' | 'prompt' | 'deny' {
   if (config?.autoConfirm) return 'auto';
-
-  // When the new permission system is active, ignore the legacy SEEPIENT_SHELL_APPROVE env var
-  // so it cannot bypass the permission matrix.
-  if (!newPermissionSystemActive) {
-    const envMode = process.env.SEEPIENT_SHELL_APPROVE;
-    if (envMode === 'auto' || envMode === 'true' || envMode === '1') return 'auto';
-    if (envMode === 'deny' || envMode === 'false' || envMode === '0') return 'deny';
-  }
 
   if (process.stdin.isTTY) return 'prompt';
 
@@ -108,11 +100,11 @@ export function createCliApproveTool(
       console.log(chalk.yellow(`\nAI wants to use tool: `) + chalk.bold(call.name));
     }
 
-    const mode = getShellApprovalMode(config, true);
+    const mode = getShellApprovalMode(config);
 
     if (mode === 'deny') {
       console.log(chalk.red('Command denied (non-interactive mode).'));
-      console.log(chalk.dim('Set SEEPIENT_SHELL_APPROVE=auto to auto-approve, or use --yes flag.'));
+      console.log(chalk.dim('Pass --mode autonomous or --yes to auto-approve.'));
       return false;
     }
 
@@ -138,7 +130,7 @@ export function createCliApproveTool(
     }
 
     // Auto-approved
-    console.log(chalk.gray(`(Auto-approved: ${config?.autoConfirm ? '--yes flag' : 'SEEPIENT_SHELL_APPROVE=auto'})`));
+    console.log(chalk.gray('(Auto-approved: --mode autonomous / --yes)'));
     return true;
   };
 }
@@ -240,7 +232,22 @@ export async function runChat(queryParts: string[], options: any) {
           if (status === 'handled') continue;
 
           // 'fallthrough' — try skill invocation
-          const skillResult = await invokeSkill({ input: userInput, registry: agent.getSkillRegistry()! });
+          const registry = agent.getSkillRegistry();
+          if (!registry) {
+            console.log(chalk.yellow("skills unavailable"));
+            continue;
+          }
+
+          let skillResult: any;
+          try {
+            skillResult = await invokeSkill({ input: userInput, registry });
+          } catch (err: any) {
+            if (err?.code === "SKILL_BODY_UNAVAILABLE") {
+              console.log(chalk.red(err.message));
+              continue;
+            }
+            throw err;
+          }
 
           if (skillResult) {
             console.log(chalk.cyan(`Loading skill: ${skillResult.skill.name}`));

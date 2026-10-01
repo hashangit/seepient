@@ -262,7 +262,11 @@ export interface PolicySnapshot {
  * version.
  */
 export interface PolicyStore {
-  read(workspaceId: string): Promise<PolicySnapshot>;
+  readonly isIsolated?: boolean;
+  read(
+    workspaceId: string,
+    opts?: { principalId?: string; tenancyMode?: "single" | "multi" },
+  ): Promise<PolicySnapshot>;
   compareAndSet(
     workspaceId: string,
     expectedVersion: number,
@@ -345,6 +349,7 @@ export interface AuditStore {
    * or `false` / omitted for remote / distributed / in-memory stores.
    */
   readonly isLocal?: boolean;
+  readonly isIsolated?: boolean;
   append(
     event: ActionAuditEvent,
     opts: { idempotencyKey: string },
