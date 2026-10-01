@@ -19,9 +19,26 @@ export default defineConfig({
   title: 'Seepient',
   description: 'An autonomous AI agent species: full spectrum of deployment surfaces across CLI, TUI, SDK, server, and container workers',
   base: '/',
+  sitemap: {
+    hostname: 'https://seepient.zyntopia.com'
+  },
   appearance: false,
   head: [
-    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/logo.svg' }]
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/logo.svg' }],
+    [
+      'script',
+      {
+        src: 'https://analytics.zyntopia.com/sdk.js',
+        defer: '',
+        onload:
+          "window.smolanalytics ? window.smolanalytics.init('7948c26a8e21b761a67923155301b7e1', { host: 'https://analytics.zyntopia.com' }) : null"
+      }
+    ],
+    [
+      'script',
+      {},
+      "window.addEventListener('DOMContentLoaded', function() { if (window.smolanalytics) { window.smolanalytics.init('7948c26a8e21b761a67923155301b7e1', { host: 'https://analytics.zyntopia.com' }); } });"
+    ]
   ],
 
   markdown: {
