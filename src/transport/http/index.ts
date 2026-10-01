@@ -255,17 +255,19 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
       const { TenancyRuntimeRequiredError } = await import("../../domain/tenancy/tenancy-mode.js");
       throw new TenancyRuntimeRequiredError();
     }
-    // 022-5-WO3 T006 (pass-13 P1-1): the runtime's OWN tenancy stamp is the
-    // egress-enforcement signal — an injected runtime without the multi
-    // stamp would silently no-op every guard. Refuse rather than coerce;
-    // createSeepient stamps its own builds, so the documented embed shape
-    // composes correctly.
+    // 022-5-WO3 T006 (pass-13 P1-1) + pass-15 fix: the runtime's OWN tenancy
+    // stamp is the egress-enforcement signal — an injected runtime without
+    // the multi stamp would silently no-op every guard. Refuse rather than
+    // coerce. Multi embeds must construct the runtime stamped
+    // (createIsolatedProviderRuntime({ tenancyMode: "multi" })); the SDK
+    // plane refuses unstamped runtimes with the same rule
+    // (validateTenancyCompleteness, 022-5-WO4 T007).
     if (runtimeAny.tenancySignal !== "multi" && runtimeAny.tenancyMode !== "multi") {
-      const err = new Error(
-        "TENANCY_RUNTIME_REQUIRED: an injected runtime on a multi-tenant server must be stamped tenancyMode 'multi' (createSeepient stamps its own builds) — unstamped runtimes would silently disable egress enforcement.",
-      ) as Error & { code: string };
-      err.code = "TENANCY_RUNTIME_REQUIRED";
-      throw err;
+      const { TenancyRuntimeRequiredError } = await import("../../domain/tenancy/tenancy-mode.js");
+      throw new TenancyRuntimeRequiredError(
+        "TENANCY_RUNTIME_REQUIRED: an injected runtime on a multi-tenant server must be stamped tenancyMode 'multi' " +
+        "(createIsolatedProviderRuntime({ tenancyMode: 'multi' })) — unstamped runtimes would silently disable egress enforcement.",
+      );
     }
     serverRuntime = options.runtime;
   } else if (options?.providersFile) {

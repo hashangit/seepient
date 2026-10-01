@@ -564,7 +564,7 @@ import { RemoteAuditStore, RedisPersistence, PostgresPolicyStore, RemoteCapabili
 const worker = await createSeepient({
   principalId: tenantId,
   cwd: `/tmp/workspace-${tenantId}`,
-  runtime: createIsolatedProviderRuntime(),
+  runtime: createIsolatedProviderRuntime({ tenancyMode: "multi" }),
   auditStore: new RemoteAuditStore(tenantId),
   persist: new RedisPersistence(sessionId),
   policyStore: new PostgresPolicyStore(tenantId),

@@ -214,7 +214,7 @@ The standalone server binary boots with an isolated empty provider runtime by de
    ```
    The file is never written back to; runtime mutations via the provider management API stay in-memory and are lost on restart.
 
-2. **Inject a runtime when embedding**: `runSeepientServer({ runtime })` with an isolated `ProviderRuntime` you constructed yourself.
+2. **Inject a runtime when embedding**: `runSeepientServer({ runtime })` with an isolated `ProviderRuntime` you constructed yourself, stamped `tenancyMode: "multi"` (e.g. `createIsolatedProviderRuntime({ tenancyMode: "multi", ... })`) — an unstamped runtime is refused at boot with `TENANCY_RUNTIME_REQUIRED` rather than silently composing without egress enforcement.
 
 Note: `.seepient/setting.json` in a mounted volume is **not** read for provider configuration — the isolated runtime never reads ambient settings files.
 

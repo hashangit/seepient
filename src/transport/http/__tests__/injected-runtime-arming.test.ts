@@ -23,6 +23,7 @@ import { generateApiKey } from "../../../transport/auth/auth.js";
 describe("injected-runtime multi arming (022-5-WO3 T002)", () => {
   let dir: string;
   let server: Server | null = null;
+  const realFetch = globalThis.fetch; // captured BEFORE the spy — the passthrough target
   const fetchSpy = vi.spyOn(globalThis, "fetch");
 
   beforeEach(() => {
@@ -76,6 +77,18 @@ describe("injected-runtime multi arming (022-5-WO3 T002)", () => {
     await new Promise<void>((r) => attackerSink.listen(0, "127.0.0.1", r));
     const attackerPort = (attackerSink.address() as { port: number }).port;
 
+    // Pass-15 fix (WO4 T017 claim): the spy used to call through, so the
+    // refresh leg dialed operator.example for real. Loopback traffic (the
+    // local server + attacker sink) still goes to the wire; everything else
+    // gets a stub response — no external DNS from this suite.
+    fetchSpy.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const u = String(input);
+      if (u.includes("operator.example")) {
+        return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return realFetch(input, init);
+    });
+
     const configStore = new ProviderConfigStore(":memory:");
     await configStore.updateOverlay(
       {
@@ -126,7 +139,15 @@ describe("injected-runtime multi arming (022-5-WO3 T002)", () => {
     });
     expect(putRes.status, "the plant must be denied on the stamped runtime too").toBe(400);
 
-    await fetch(`${base}/v1/providers/operator-acct/refresh-models`, { method: "POST", headers: auth });
+    // The refresh leg: the planted attacker baseUrl never landed (the plant
+    // was denied above), and the account's own operator.example refresh is
+    // asserted rather than fire-and-forgotten. On this fixture the baseline
+    // GRANTS operator.example, so the egress assert passes and the refresh
+    // dies at endpoint validation (the fake domain does not resolve) — a
+    // deterministic 400. The load-bearing properties: the assert did not
+    // block the granted host, and the attacker sink/URLs received nothing.
+    const refreshRes = await fetch(`${base}/v1/providers/operator-acct/refresh-models`, { method: "POST", headers: auth });
+    expect(refreshRes.status).toBe(400);
     expect(attackerHits.filter((a) => a.includes("sk-operator-real-key"))).toHaveLength(0);
     const attackerFetches = fetchSpy.mock.calls.filter((u) => String(u[0]).includes(`:${attackerPort}`));
     expect(attackerFetches.length).toBe(0);

@@ -55,20 +55,42 @@ describe("SC-012 worker pins (022-5-WO2 T005)", () => {
     }
   });
 
-  it("(c) a 2 MB body gets its 413 AND stops buffering the moment the cap trips (022-5-WO4 T005)", async () => {
+  it("(c) an oversized body is destroyed at the cap — the 413 lands MID-STREAM, not at end (022-5-WO4 T005, made real in pass-15)", async () => {
     const app = createStubApp({ tokenToPrincipal: new Map([["tok", "tenant-a"]]) });
     const port = await app.listen();
     try {
-      // Stream 2 MB in 1 KB chunks with small gaps — the pass-14 finding is
-      // that the worker keeps appending to `body` after the cap trips, so a
-      // long stream buffers unboundedly. Bounded memory = the destroy fires
-      // at the cap and the socket closes early (readable side torn down).
-      const res = await fetch(`http://127.0.0.1:${port}/api/policy?workspaceId=ws`, {
-        method: "POST",
-        headers: { authorization: "Bearer tok", "content-type": "application/json" },
-        body: "x".repeat(2 * 1024 * 1024),
+      // Stream slowly and HOLD the connection open past the cap: the old
+      // shape waited for end/close (a held stream never ends — the 413 would
+      // only arrive at requestTimeout), the fixed shape responds + destroys
+      // the moment the cap trips. The gate fails on any shape that needs the
+      // stream to finish.
+      const status = await new Promise<number>((resolve) => {
+        let settled = false;
+        const settle = (code: number) => {
+          if (!settled) { settled = true; resolve(code); }
+        };
+        const req = httpRequest(
+          {
+            host: "127.0.0.1", port, path: "/api/policy?workspaceId=ws", method: "POST",
+            headers: { authorization: "Bearer tok", "content-type": "application/json" },
+          },
+          (res) => { settle(res.statusCode ?? 0); res.resume(); },
+        );
+        req.on("error", () => settle(413)); // destroyed-after-flush is the expected teardown
+        const chunk = "x".repeat(64 * 1024);
+        let sent = 0;
+        const timer = setInterval(() => {
+          sent += chunk.length;
+          req.write(chunk);
+          // Cross the 1 MiB cap, then deliberately never end the stream.
+        }, 5);
+        const giveUp = setTimeout(() => { clearInterval(timer); settle(0); }, 8_000);
+        giveUp.unref?.();
+        void giveUp;
+        req.on("close", () => { clearInterval(timer); });
+        void sent;
       });
-      expect(res.status).toBe(413);
+      expect(status).toBe(413);
     } finally {
       await app.close();
     }

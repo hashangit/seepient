@@ -42,7 +42,7 @@ await credentialStore.put("openai", {
   kind: "api_key",
   keyValue: "sk-tenant-key",
 });
-const tenantRuntime = createIsolatedProviderRuntime({ credentialStore });
+const tenantRuntime = createIsolatedProviderRuntime({ tenancyMode: "multi", credentialStore });
 ```
 
 ---
@@ -264,7 +264,7 @@ const agent = await createSeepient({
   tenancy: "multi",
   principalId: "tenant_1",
   cwd: "/workspaces/t1",
-  runtime: createIsolatedProviderRuntime({ credentialStore }),
+  runtime: createIsolatedProviderRuntime({ tenancyMode: "multi", credentialStore }),
   auditStore: new InMemoryAuditStore(),
   policyStore: new InMemoryPolicyStore(),
   capabilityLedger: new InMemoryCapabilityLedger(),

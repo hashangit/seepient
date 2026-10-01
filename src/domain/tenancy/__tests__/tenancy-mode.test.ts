@@ -122,7 +122,7 @@ describe("Tenancy Completeness Validation & UX Errors (T008)", () => {
     try {
       validateTenancyCompleteness("multi", {
         principalId: "tenant-1",
-        runtime: { isIsolated: true },
+        runtime: { isIsolated: true, tenancySignal: "multi" },
         auditStore: { isIsolated: true },
         policyStore: undefined,
         capabilityLedger: { isIsolated: true },
@@ -169,7 +169,7 @@ describe("Tenancy Completeness Validation & UX Errors (T008)", () => {
     expect(() =>
       validateTenancyCompleteness("multi", {
         principalId: "tenant-1",
-        runtime: { isIsolated: true },
+        runtime: { isIsolated: true, tenancySignal: "multi" },
         auditStore: { isIsolated: false },
         policyStore: { isIsolated: true },
         capabilityLedger: { isIsolated: true },
@@ -181,7 +181,7 @@ describe("Tenancy Completeness Validation & UX Errors (T008)", () => {
     expect(() =>
       validateTenancyCompleteness("multi", {
         principalId: "tenant-1",
-        runtime: { isIsolated: true },
+        runtime: { isIsolated: true, tenancySignal: "multi" },
         auditStore: {}, // stamp-less
         policyStore: { isIsolated: true },
         capabilityLedger: { isIsolated: true },
@@ -193,7 +193,7 @@ describe("Tenancy Completeness Validation & UX Errors (T008)", () => {
     expect(() =>
       validateTenancyCompleteness("multi", {
         principalId: "tenant-1",
-        runtime: { isIsolated: true },
+        runtime: { isIsolated: true, tenancySignal: "multi" },
         auditStore: { isIsolated: true },
         policyStore: { isIsolated: true },
         capabilityLedger: { isIsolated: true },
@@ -206,7 +206,7 @@ describe("Tenancy Completeness Validation & UX Errors (T008)", () => {
     expect(() =>
       validateTenancyCompleteness("multi", {
         principalId: "tenant-1",
-        runtime: { isIsolated: true },
+        runtime: { isIsolated: true, tenancySignal: "multi" },
         auditStore: { isIsolated: true },
         policyStore: { isIsolated: true },
         capabilityLedger: { isIsolated: true },
@@ -220,7 +220,7 @@ describe("Tenancy Completeness Validation & UX Errors (T008)", () => {
     expect(() =>
       validateTenancyCompleteness("multi", {
         principalId: "tenant-1",
-        runtime: { isIsolated: true },
+        runtime: { isIsolated: true, tenancySignal: "multi" },
         isSessionful: false,
         stateless: true,
       }),
@@ -231,7 +231,7 @@ describe("Tenancy Completeness Validation & UX Errors (T008)", () => {
     expect(() =>
       validateTenancyCompleteness("multi", {
         principalId: "tenant-1",
-        runtime: { isIsolated: true },
+        runtime: { isIsolated: true, tenancySignal: "multi" },
         auditStore: { isIsolated: true },
         policyStore: { isIsolated: true },
         capabilityLedger: { isIsolated: true },
@@ -262,7 +262,7 @@ describe("Tenancy Completeness Validation & UX Errors (T008)", () => {
     expect(() =>
       validateTenancyCompleteness("multi", {
         ...baseStores,
-        runtime: { isIsolated: true, configStore: {} },
+        runtime: { isIsolated: true, tenancySignal: "multi", configStore: {} },
       }),
     ).toThrow(TenancyRuntimeRequiredError);
 
@@ -296,6 +296,7 @@ describe("Tenancy Completeness Validation & UX Errors (T008)", () => {
         ...baseStores,
         runtime: {
           isIsolated: true,
+          tenancySignal: "multi",
           configStore: { isIsolated: true },
           credentialStore: { isIsolated: true },
         },

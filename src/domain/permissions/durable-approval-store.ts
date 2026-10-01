@@ -75,22 +75,40 @@ export class DurableApprovalStore {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
       throw err;
     }
-    // 022-5-WO4 T014 (pass-13 P2-5): merge disk entries OVER live — a live
-    // decision (this process just transitioned a record) wins over a stale
-    // disk snapshot. The old shape REPLACED both maps, so a read racing the
-    // floating persist() could miss the just-decided approval. Disk mode
-    // remains secondary to in-memory for server consumers (the docstring
-    // notes it); the merge guarantees no decided approval is lost.
+    // 022-5-WO4 T014 + pass-15 fix: merge disk entries UNDER live — a live
+    // decision (this process just transitioned a record via casSync) wins
+    // over a stale disk snapshot whose floating persist() hasn't landed.
+    // The old shape REPLACED both maps (decision wipe); the first WO4 shape
+    // merged but let disk overwrite live (same wipe, inverted comment). The
+    // rule now: on collision the NEWER entry wins (records by updatedAt with
+    // decided-beats-undecided as the tie-break; pending by version with
+    // non-pending-beats-pending), so a read racing persist() can neither
+    // lose a live decision nor resurrect a decided record to pending, while
+    // a genuinely newer cross-process decision still loads.
     for (const line of raw.split("\n")) {
       if (!line.trim()) continue;
       try {
         const obj = JSON.parse(line);
         if (obj.kind === "pending" || obj.continuationId) {
           const rec = obj as PendingApprovalRecord;
-          this.pendingRecords.set(rec.continuationId, rec);
+          const live = this.pendingRecords.get(rec.continuationId);
+          const diskWins =
+            !live ||
+            rec.version > live.version ||
+            (rec.version === live.version && live.status === "pending" && rec.status !== "pending");
+          if (diskWins) {
+            this.pendingRecords.set(rec.continuationId, rec);
+          }
         } else if (obj.request?.requestId) {
           const rec = obj as ApprovalRecord;
-          this.records.set(rec.request.requestId, rec);
+          const live = this.records.get(rec.request.requestId);
+          const diskWins =
+            !live ||
+            rec.updatedAt > live.updatedAt ||
+            (rec.updatedAt === live.updatedAt && live.decision === undefined && rec.decision !== undefined);
+          if (diskWins) {
+            this.records.set(rec.request.requestId, rec);
+          }
         }
       } catch {
         /* skip malformed lines */

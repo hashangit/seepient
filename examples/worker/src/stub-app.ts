@@ -156,6 +156,26 @@ export function createStubApp(initialState?: Partial<StubAppState> & { allowDemo
     const MAX_BODY_BYTES = 1024 * 1024; // 1MB body limit (NEW-2)
     let body = "";
     let tooLarge = false;
+    let responded = false;
+    const respondTooLarge = () => {
+      if (responded) return;
+      responded = true;
+      // 022-5-WO4 T010 + pass-15 fix: respond and shed the MOMENT the cap
+      // trips — waiting for end/close let a slow sender hold the connection
+      // (and its slot) for the full stream / requestTimeout. pause() stops
+      // pulling chunks first; the destroy follows the response flush so the
+      // 413 is actually delivered (FR-015's resolve-on-close keeps the
+      // handler coherent after the teardown).
+      req.pause();
+      if (!res.headersSent) {
+        res.writeHead(413, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "PayloadTooLarge", message: "Request body exceeds 1MB limit" }), () => {
+          req.destroy();
+        });
+      } else {
+        req.destroy();
+      }
+    };
     req.on("data", (chunk) => {
       // 022-5-WO4 T010 (pass-14 P1-4): stop accumulating past the cap — the
       // old shape appended every chunk until end/close, so a multi-GB stream
@@ -164,6 +184,7 @@ export function createStubApp(initialState?: Partial<StubAppState> & { allowDemo
       body += chunk;
       if (body.length > MAX_BODY_BYTES) {
         tooLarge = true;
+        respondTooLarge();
       }
     });
 
@@ -174,9 +195,7 @@ export function createStubApp(initialState?: Partial<StubAppState> & { allowDemo
       req.on("close", () => resolve());
     });
     if (tooLarge) {
-      res.writeHead(413, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "PayloadTooLarge", message: "Request body exceeds 1MB limit" }));
-      req.destroy(); // shed the rest of the body only after the response is out
+      respondTooLarge();
       return;
     }
 
@@ -187,6 +206,14 @@ export function createStubApp(initialState?: Partial<StubAppState> & { allowDemo
       } catch {
         res.writeHead(400, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "BadRequest", message: "Invalid JSON body" }));
+        return;
+      }
+      // Pass-15 fix (022-5-WO4 T016 claim): JSON.parse("null") yields null —
+      // reject non-object bodies here instead of letting routes deref null
+      // and surface a 500.
+      if (jsonBody === null || typeof jsonBody !== "object") {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "BadRequest", message: "JSON body must be an object" }));
         return;
       }
     }

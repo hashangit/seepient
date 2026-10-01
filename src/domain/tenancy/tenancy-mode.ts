@@ -38,8 +38,8 @@ export interface TenancyResolution {
 export class TenancyRuntimeRequiredError extends SeepientError {
   constructor(message?: string) {
     const defaultMessage =
-      'Multi-tenant mode requires an isolated ProviderRuntime (isIsolated: true). ' +
-      'Construct your runtime with createIsolatedProviderRuntime() or default new ProviderRuntime(). ' +
+      'Multi-tenant mode requires an isolated ProviderRuntime (isIsolated: true) stamped tenancyMode "multi". ' +
+      'Construct your runtime with createIsolatedProviderRuntime({ tenancyMode: "multi" }) or new ProviderRuntime({ tenancyMode: "multi", ... }). ' +
       'Do not pass an ambient runtime created with createAmbientProviderRuntime(). ' +
       'Or set tenancy: "single" if running in a single-user environment.';
     super(message ?? defaultMessage, "TENANCY_RUNTIME_REQUIRED", false);
@@ -202,16 +202,20 @@ export function validateTenancyCompleteness(
       'Do not pass an ambient runtime created with createAmbientProviderRuntime().'
     );
   }
-  // 022-5-WO4 T007 (pass-13/14 P1-1 class, SDK plane): the runtime's OWN
-  // tenancy stamp is the egress-enforcement signal. An injected runtime
-  // without the multi stamp would silently no-op every guard (the pass-14
+  // 022-5-WO4 T007 (pass-13/14 P1-1 class, SDK plane) + pass-15 fix: the
+  // runtime's OWN tenancy stamp is the egress-enforcement signal. An injected
+  // runtime without the multi stamp would silently no-op every guard (the pass-14
   // live probe: accepted → plant 200 → refresh sent the operator's stored
   // key to the attacker host). Refuse rather than coerce — mirror of the
-  // server's injected-branch refusal.
-  if (runtimeAny.tenancySignal !== undefined && runtimeAny.tenancySignal !== "multi") {
+  // server's injected-branch refusal, INCLUDING its strictness: a runtime
+  // with NO tenancy signal at all is also refused (fail-closed, same shape
+  // as http/index.ts) — real ProviderRuntime instances always carry the
+  // getter, so this only rejects hand-rolled objects that cannot arm the
+  // guards.
+  if (runtimeAny.tenancySignal !== "multi" && runtimeAny.tenancyMode !== "multi") {
     throw new TenancyRuntimeRequiredError(
       'Multi-tenant mode requires an egress-armed ProviderRuntime (tenancyMode "multi"). ' +
-      'The injected runtime is stamped single — construct it with createIsolatedProviderRuntime({ tenancyMode: "multi" }) ' +
+      'The injected runtime is unstamped or stamped single — construct it with createIsolatedProviderRuntime({ tenancyMode: "multi" }) ' +
       'or new ProviderRuntime({ ..., tenancyMode: "multi" }).'
     );
   }

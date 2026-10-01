@@ -411,14 +411,13 @@ export async function analyzeEditFile(
         exists: true,
         finalSymlink: false,
       });
-      // 022-5-WO1 T015 + WO3 T005: O_NONBLOCK bounds the open (a FIFO
+      // 022-5-WO1 T015 + WO4 T006: O_NONBLOCK bounds the open (a FIFO
       // swapped in for a tagged path cannot wedge the ANALYSIS phase
       // pre-approval), the pinned fd must be a regular file, and its dev/ino
-      // must match the identity RECORDED WHEN THE TAG WAS MINTED (the store
-      // captures it after read_file's identity pin — pass-13 P3: comparing
-      // against a read-time stat compared the file to itself and could never
-      // fire). A post-tag inode swap is denied before host bytes enter the
-      // merge.
+      // must match the identity the read_file executor RECORDED AT MINT TIME
+      // from its already-verified fd stat (WO3's read-time self-comparison
+      // could never fire; WO4 threads the verified identity). A post-tag
+      // inode swap is denied before host bytes enter the merge.
       const recordedIdentity = ctx.snapshotStore?.identityOf?.(real) ?? null;
       const handle = await fsOpenSection(real, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0));
       try {
