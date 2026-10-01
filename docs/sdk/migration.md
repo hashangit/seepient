@@ -69,9 +69,10 @@ import { createAmbientProviderRuntime, askSeepient } from "seepient";
 // Single-user scripts can omit runtime entirely (automatically uses ambient runtime):
 const result = await askSeepient("Hello");
 
-// Or explicitly provide ambient runtime:
+// Or explicitly provide ambient runtime. Runtime injection upgrades tenancy
+// to multi, so a single-user script must declare its mode explicitly:
 const runtime = createAmbientProviderRuntime();
-const customResult = await askSeepient("Hello", { runtime });
+const customResult = await askSeepient("Hello", { runtime, tenancy: "single" });
 ```
 
 ---

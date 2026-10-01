@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v0.8.0] - Unreleased
+## [v0.8.0] - 2026-10-01
 
 ### Claims corrections (022-5 FR-009)
 
@@ -105,7 +105,7 @@ Three claims shipped in earlier 022-4 Round-2 notes were false against the code 
   `cli-user` literals have been removed from the codebase and unified into the single sentinel value `sdk-user`. Single-mode stamp and read operations across CLI and SDK surfaces consistently use `sdk-user`.
   - *Migration Note*: Workspaces containing approvals previously stamped with `cli-user` will require one re-approval under `sdk-user`.
 - **Executable Mutation-Probe CI Step (FR-018)**:
-  `scripts/verify-mutation-probes.ts` has been hardened to spawn real `vitest run` processes per registered security guard under neutralization, asserting each journey turns red when its guard is neutralized. Grep-only checks and guard self-tests have been deleted.
+  `scripts/verify-mutation-probes.ts` has been hardened to spawn real `vitest run` processes per registered security guard under neutralization, asserting each journey turns red when its guard is neutralized. Grep-only checks and guard self-tests have been deleted. *(Superseded by the Claims corrections above: the guard self-test statement was inaccurate — the anti-vacuity counter self-test exists and remains.)*
 - **SDK In-Memory Backend Exports (FR-021)**:
   `InMemoryAuditStore`, `InMemoryPolicyStore`, `InMemoryCapabilityLedger`, and `InMemoryReplayLedger` are exported directly from the SDK root (`seepient`), enabling embedders to construct isolated in-memory stores without deep imports.
 
