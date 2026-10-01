@@ -156,7 +156,11 @@ removes the signal handlers too:
 server.dispose();   // un-registers handlers + closes the server
 // or simply:
 server.close();     // close event detaches the signal handlers as well
-Express or Fastify app, a CLI, or a test harness). Each call creates its own
+```
+
+**Multiple servers per process.** `runSeepientServer` can be called more than
+once in the same process (for example, to serve from an Express or Fastify
+app, a CLI, or a test harness). Each call creates its own
 isolated HTTP server and WebSocket server instances.
 
 However, ambient operator state (`~/.seepient/setting.json` and
@@ -302,14 +306,14 @@ Response:
 ```json
 {
   "status": "ok",
-  "version": "0.1.1",
+  "version": "0.8.0",
   "uptime": 3600
 }
 ```
 
 ## Production checklist
 
-- [ ] Set at least one provider API key via environment variable
+- [ ] Configure at least one provider account via `--providers-file` (the server never reads provider API keys from the host environment; configured accounts' hosts form the derived egress baseline)
 - [ ] Generate API keys with minimal required scopes
 - [ ] Verify `~/.seepient/server-keys.json` permissions are `0600`
 - [ ] Mount a persistent volume for `./.seepient/sessions/` (or `SEEPIENT_SESSION_DIR`) if using sessions
