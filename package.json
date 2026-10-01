@@ -88,14 +88,14 @@
     "url": "https://github.com/hashangit/seepient/issues"
   },
   "homepage": "https://seepient.zyntopia.com",
-  "description": "Seepient \u2014 your AI person. A skill-driven AI agent with CLI, SDK, and server adapters; multi-provider LLM support and Docker-native deployment. Coding is one of the things she does.",
+  "description": "Seepient — your AI person. A skill-driven AI agent with CLI, SDK, and server adapters; multi-provider LLM support and Docker-native deployment. Coding is one of the things she does.",
   "engines": {
     "node": ">=22.19"
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.67",
     "@anthropic-ai/sdk": "^0.52.0",
-    "@earendil-works/pi-ai": "0.87.1",
+    "@earendil-works/pi-ai": "0.99.2",
     "@google/genai": "2.15.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@mozilla/readability": "^0.6.0",
