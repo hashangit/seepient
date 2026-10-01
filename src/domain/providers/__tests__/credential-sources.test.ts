@@ -268,6 +268,15 @@ describe("022-5 US2: inference credentials, provider management only", () => {
     await new Promise<void>((resolve) => sink.listen(0, "127.0.0.1", resolve));
     const sinkPort = (sink.address() as { port: number }).port;
     process.env.OPENAI_BASE_URL = `http://127.0.0.1:${sinkPort}/v1`;
+    // Hermetic (pass-15): without this stub the green path dials real
+    // api.openai.com with a fake key — external dependency in the suite.
+    // Loopback (the sink) stays on the wire; everything else gets a stub.
+    const realFetch = globalThis.fetch;
+    const stub = vi.spyOn(globalThis, "fetch").mockImplementation(async (input: any, init?: any) => {
+      const u = String(input);
+      if (u.includes("127.0.0.1")) return realFetch(input, init);
+      return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } });
+    });
     try {
       const { OpenAIDiscoverySource } = await import("../../../vendors/openai/openai-discovery-source.js");
       const source = new OpenAIDiscoverySource();
@@ -316,7 +325,64 @@ describe("022-5 US2: inference credentials, provider management only", () => {
       }
       expect(sinkHits, "image generation must not dial the env-supplied host with the stored key").toHaveLength(0);
     } finally {
+      stub.mockRestore();
       delete process.env.OPENAI_BASE_URL;
+      sink.close();
+    }
+  });
+
+  it("GOOGLE_GEMINI_BASE_URL destination pin (pass-15, lens A): a default-endpoint google image account never dials the env-supplied host", async () => {
+    const sinkHits: string[] = [];
+    const sink = createServer((req, res) => {
+      sinkHits.push(String(req.headers.authorization ?? ""));
+      res.writeHead(500);
+      res.end("{}");
+    });
+    await new Promise<void>((resolve) => sink.listen(0, "127.0.0.1", resolve));
+    const sinkPort = (sink.address() as { port: number }).port;
+    process.env.GOOGLE_GEMINI_BASE_URL = `http://127.0.0.1:${sinkPort}/v1`;
+    // Hermetic: the @google/genai SDK pulls node's fetch through
+    // cross-fetch-style wiring — stub the global so the real
+    // generativelanguage.googleapis.com is never dialed; loopback stays live.
+    const realFetch = globalThis.fetch;
+    const stub = vi.spyOn(globalThis, "fetch").mockImplementation(async (input: any, init?: any) => {
+      const u = String(input);
+      if (u.includes("127.0.0.1")) return realFetch(input, init);
+      return new Response(JSON.stringify({ error: { message: "stub" } }), { status: 400, headers: { "content-type": "application/json" } });
+    });
+    try {
+      const { GoogleImageRaw } = await import("../../../vendors/google/google-image-raw.js");
+      const imageRaw = new GoogleImageRaw();
+      const target = {
+        providerAccount: "google-default",
+        upstreamProvider: "google",
+        model: "gemini-2.5-flash-image",
+        credential: {
+          id: "cred-ok",
+          ref: { kind: "seepient", id: "cred-ok" },
+          activeLeaseCount: 0,
+          isResolvable: async () => true,
+          acquireLease: () => ({
+            leaseId: "l",
+            isReleased: false,
+            secret: async () => ({ kind: "api_key", value: "sk-real-google-key" }),
+            release: async () => {},
+          }),
+        },
+      } as unknown as InferenceTarget;
+      try {
+        await imageRaw.generate(target, { prompt: "test" } as never, { tenancyMode: "single" } as never);
+      } catch {
+        /* expected — the stub 400s */
+      }
+      expect(sinkHits, "google image generation must not dial the env-supplied host with the stored key").toHaveLength(0);
+      // The explicit default must be where the request went instead.
+      const dialed = stub.mock.calls.map((c: unknown[]) => String(c[0]));
+      expect(dialed.some((u) => u.includes("generativelanguage.googleapis.com"))).toBe(true);
+      expect(dialed.some((u) => u.includes(`127.0.0.1:${sinkPort}`))).toBe(false);
+    } finally {
+      stub.mockRestore();
+      delete process.env.GOOGLE_GEMINI_BASE_URL;
       sink.close();
     }
   });

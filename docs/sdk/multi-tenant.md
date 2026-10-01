@@ -45,7 +45,9 @@ import { createTenantAgent, createIsolatedProviderRuntime } from "seepient";
 const agent = await createTenantAgent({
   principalId: "tenant_corp_123",
   cwd: "/var/workspaces/tenant_corp_123",
-  runtime: createIsolatedProviderRuntime({ /* tenant credentials */ }),
+  // The runtime must carry the multi stamp — an unstamped runtime would
+  // silently disable egress enforcement and is refused (TENANCY_RUNTIME_REQUIRED).
+  runtime: createIsolatedProviderRuntime({ tenancyMode: "multi" /* + tenant credentials */ }),
   auditStore: tenantAuditStore,
   policyStore: tenantPolicyStore,
   capabilityLedger: tenantLedgerStore,
@@ -74,7 +76,7 @@ In `multi` mode, Seepient enforces a strict injection checklist at construction 
 
 | Dependency | Parameter | Requirement | Error on Omission |
 |------------|-----------|-------------|-------------------|
-| **Isolated Runtime** | `runtime` | Required: isolated `ProviderRuntime` instance (`isIsolated: true`) | `TENANCY_RUNTIME_REQUIRED` |
+| **Isolated Runtime** | `runtime` | Required: isolated `ProviderRuntime` instance (`isIsolated: true`, stamped `tenancyMode: "multi"`) | `TENANCY_RUNTIME_REQUIRED` |
 | **Workspace Root** | `cwd` | Required: explicit tenant workspace directory to prevent cross-tenant disk leaks | `TENANCY_WORKSPACE_REQUIRED` |
 | **Audit Store** | `auditStore` | Required: embedder `AuditStore` adapter | `TENANCY_STORE_INCOMPLETE` |
 | **Policy Store** | `policyStore` | Required: embedder `PolicyStore` adapter | `TENANCY_STORE_INCOMPLETE` |
@@ -126,7 +128,7 @@ Every multi-tenant security guarantee is pinned by an automated CI regression te
   const agent = await createSeepient({
     tenancy: "multi",
     cwd: "/var/workspaces/tenant-1",
-    runtime: createIsolatedProviderRuntime({ /* credentials */ }),
+    runtime: createIsolatedProviderRuntime({ tenancyMode: "multi" /* + credentials */ }),
     // ...
   });
   ```

@@ -52,7 +52,11 @@ describe("NodeNetworkAdapter response cap (022-5-WO2 T002)", () => {
         ["127.0.0.1"],
       );
       expect(result.status).toBe(200);
+      // Content integrity, not just length (pass-15, WO4 T017): the server
+      // fills 0x42 — a mid-stream truncation or corruption that still
+      // produced 4 MiB of bytes would pass a length-only assert.
       expect(result.bytes.length).toBe(4 * 1024 * 1024);
+      expect(result.bytes.every((b: number) => b === 0x42)).toBe(true);
     } finally {
       small.close();
     }

@@ -33,10 +33,12 @@ interface SnapshotEntry {
   path: string;
   content: string;
   tag: string;
-  /** Authorization-time file identity (022-5-WO3 T005): captured when the
-   *  tag is minted — record() runs after the read_file identity pin, so this
-   *  IS the authorized file's dev/ino. Edit-section reads compare their
-   *  pinned fd against it; a post-tag inode swap is denied. */
+  /** Authorization-time file identity (022-5-WO4 T006): when the read_file
+   *  executor mints the tag it threads its ALREADY-VERIFIED fd stat here
+   *  (compared against the authorize-time stamp before any byte was read) —
+   *  callers without a pinned fd fall back to a best-effort lstat.
+   *  Edit-section reads compare their pinned fd against it; a post-tag
+   *  inode swap is denied. */
   device?: string;
   inode?: string;
 }

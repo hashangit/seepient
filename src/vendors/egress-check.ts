@@ -14,9 +14,15 @@ export function assertBaseUrlEgressAllowed(
   try {
     parsed = new URL(baseUrl);
   } catch {
+    // Pass-15 fix: the raw value may carry userinfo/path/query credentials —
+    // echo at most scheme//host, never the full unparseable string.
+    const schemeGuess = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(baseUrl)?.[1];
+    const hostGuess = schemeGuess
+      ? baseUrl.slice(baseUrl.indexOf("://") + 3).split(/[/?#]/)[0]?.replace(/^[^@]*@/, "")
+      : undefined;
     throw new InferenceError({
       code: "invalid_request",
-      message: `Invalid baseUrl "${baseUrl}"`,
+      message: `Invalid baseUrl "${hostGuess ? `${schemeGuess}://${hostGuess}/…` : "…"}"`,
       providerAccount: target?.providerAccount,
       model: target?.model,
       retryable: false,

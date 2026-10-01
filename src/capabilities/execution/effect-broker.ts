@@ -54,8 +54,10 @@ export function redactWebhookUrl(url: string): string {
     const parsed = new URL(url);
     return `${parsed.protocol}//${parsed.host}/…`;
   } catch {
-    // Malformed: still never leak path/query. Truncate at the first /, ?, or
-    // # after the host, or fall back to a fixed marker if no scheme exists.
+    // Malformed: still never leak path/query/userinfo. Truncate at the first
+    // /, ?, or # after the host, strip any userinfo (credentials before the
+    // @ survive URL-parse failure — pass-15 probe), and fall back to a fixed
+    // marker if no scheme exists.
     const schemeEnd = url.indexOf("://");
     if (schemeEnd !== -1) {
       const hostStart = schemeEnd + 3;
@@ -64,7 +66,10 @@ export function redactWebhookUrl(url: string): string {
         const idx = url.indexOf(ch, hostStart);
         if (idx !== -1 && idx < hostEnd) hostEnd = idx;
       }
-      return `${url.slice(0, schemeEnd)}://${url.slice(hostStart, hostEnd)}/…`;
+      let host = url.slice(hostStart, hostEnd);
+      const at = host.lastIndexOf("@");
+      if (at !== -1) host = host.slice(at + 1);
+      return `${url.slice(0, schemeEnd)}://${host}/…`;
     }
     return "…";
   }

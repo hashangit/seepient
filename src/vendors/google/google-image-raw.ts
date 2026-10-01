@@ -54,6 +54,12 @@ export class GoogleImageRaw implements ImageBackend {
         this.client ??
         new GoogleGenAI({
           apiKey: secret.value,
+          // 022-5-WO4 follow-up (pass-15 lens A): an explicit baseUrl — the
+          // SDK's getBaseUrl falls back to ambient GOOGLE_GEMINI_BASE_URL /
+          // GOOGLE_VERTEX_BASE_URL when httpOptions.baseUrl is absent, which
+          // redirects the stored credential's traffic with zero checks. The
+          // explicit default matches the SDK's own (dist:13656) byte-for-byte.
+          httpOptions: { baseUrl: target.baseUrl ?? "https://generativelanguage.googleapis.com/" },
         });
 
       if (opts?.signal?.aborted) {

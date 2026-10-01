@@ -17,7 +17,7 @@ Three claims shipped in earlier 022-4 Round-2 notes were false against the code 
 
 **Security (022-5):**
 
-- **Multi-tenant egress arming completed (022-5-WO2/WO3).** The server's every composition root — providers-file boot, isolated-empty boot, REST fallback, and INJECTED runtimes — now requires or carries the multi tenancy stamp; an unstamped injected runtime is refused (`TENANCY_RUNTIME_REQUIRED`) instead of silently composing without egress enforcement, and `createSeepient` stamps its own builds by construction. The write-side egress assert lives in the provider-manager `saveAccount` seam (REST, WS, CLI all inherit it): on a multi runtime, an ungranted host cannot be planted for later credential use. The standalone operator baseline is DERIVED from the providers file (one network-destination grant per configured account's scheme/host/port, printed at boot) — custom-endpoint accounts keep working with zero extra configuration. Webhook denial messages redact the operator webhook URL to scheme//host (Feishu/DingTalk/WeCom tokens live in the query).
+- **Multi-tenant egress arming completed (022-5-WO2/WO3).** The server's every composition root — providers-file boot, isolated-empty boot, REST fallback, and INJECTED runtimes — now requires or carries the multi tenancy stamp; an unstamped injected runtime is refused (`TENANCY_RUNTIME_REQUIRED`) instead of silently composing without egress enforcement — on BOTH the server boundary and the SDK itself (`createSeepient`/`createTenantAgent` refuse unstamped runtimes in multi; 022-5-WO4). The write-side egress assert lives in the provider-manager `saveAccount` seam (REST, WS, CLI all inherit it): on a multi runtime, an ungranted host cannot be planted for later credential use. The standalone operator baseline is DERIVED from the providers file (one network-destination grant per configured account's scheme/host/port, printed at boot) — custom-endpoint accounts keep working with zero extra configuration. Webhook denial messages redact the operator webhook URL to scheme//host (Feishu/DingTalk/WeCom tokens live in the query).
 
 - **No daemons by default (022-5-WO1, intended product behavior).** Sandboxed command execution kills the whole process group when the command settles — normally, not only on abort. A tool call that backgrounds children (`server & …`) does not leave them running after the call returns; redirect the child's output and manage long-running processes outside the sandbox boundary if you need them to outlive a call.
 
@@ -30,13 +30,28 @@ Three claims shipped in earlier 022-4 Round-2 notes were false against the code 
 **Security:**
 
 - **Server runtimes are multi-armed.** Every `runSeepientServer` boot path (providers file, isolated fallback) composes the runtime with `tenancyMode: "multi"` plus the operator baseline, so the egress assert fires from a production root — previously it existed only on wrapper seams no production root exercised, and a `provider:admin` key could point the operator's stored credential at an attacker host via the accounts PUT and a refresh. The provider accounts `PUT` now denies planting an ungranted host with `400 EGRESS_REQUIRED` before the write lands.
-- **Operator impact (fail-closed):** on a multi server, refresh (`POST /v1/providers/:id/refresh-models`) and `baseUrl` mutations for accounts whose host is not covered by an operator baseline deny with `EGRESS_REQUIRED` before any network traffic, DNS included. Accounts without a `baseUrl` (default provider endpoints) are unaffected. The standalone CLI has no baseline flag; embedders grant hosts via `runSeepientServer({ operatorBaseline })` (see `deployment.md`).
+- **Operator impact (fail-closed):** on a multi server, refresh (`POST /v1/providers/:id/refresh-models`) and `baseUrl` mutations for accounts whose host is not covered by an operator baseline deny with `EGRESS_REQUIRED` before any network traffic, DNS included. Accounts without a `baseUrl` (default provider endpoints) are unaffected. The standalone CLI has no baseline flag; embedders grant hosts via `runSeepientServer({ operatorBaseline })` (see `deployment.md`). *(Superseded by 022-5-WO3/WO4: the standalone baseline is now DERIVED from the providers file at boot, and explicit + derived baselines union.)*
 
 **Hardening:**
 
 - **Brokered network responses are capped mid-stream.** `NodeNetworkAdapter` arms the pinned-fetch streaming cap (10 MiB body / 30 s, matching the broker's own limits). Previously the entire response buffered before the post-response cap ran, so a fast endpoint could exhaust shared-process memory (reproduced at 300 MiB buffered in 237 ms). A brokered tool call such as `read_website` now rejects as soon as the stream passes the cap.
 
+### SDK multi arming & env-destination closure (022-5-WO4)
+
+**Breaking:**
+
+- **Multi embeds must construct egress-armed runtimes.** `createSeepient`/`createTenantAgent` in multi mode now REFUSE an injected runtime without the `tenancyMode: "multi"` stamp (`TENANCY_RUNTIME_REQUIRED`) — previously such a runtime silently disabled every egress guard on the SDK plane (the pass-14 live-probed plant + refresh chain). Construct with `createIsolatedProviderRuntime({ tenancyMode: "multi", ... })`. The `operatorBaseline` option now arms BOTH planes (permission pipeline and runtime egress asserts) and UNIONS with any capabilities the runtime already carries — mirroring the server's explicit+derived baseline union.
+
+**Security:**
+
+- **Env-destination exfiltration closed at every vendored client site.** The OpenAI SDK constructor defaults `baseURL` from ambient `OPENAI_BASE_URL` and the Google GenAI SDK defaults its endpoint from `GOOGLE_GEMINI_BASE_URL`/`GOOGLE_VERTEX_BASE_URL` — a set host env var redirected the stored credential's traffic with zero checks on default-endpoint accounts, in single and multi mode. Both openai sites and the google image site now pass an explicit baseUrl (the account's, or the vendor default), killing the destructor fallback; decoy-env gates pin each site (the sink receives zero requests with the key).
+- **Worker body cap enforced at the cap, not at stream end.** The reference worker's 1 MiB request-body limit now responds `413` and destroys the connection the moment the cap trips (previously accumulation stopped but the response waited for end/close — a slow sender held the connection and slot for the full stream).
+- **`DurableApprovalStore.load()` is merge-preserving in the correct direction.** A live decision (just transitioned by `casSync`) survives a read racing the floating persist; a genuinely newer cross-process decision on disk still loads; a decided record can no longer be resurrected to `pending` by a stale snapshot. `casSync` additionally rejects a decision whose `requestId` does not match the record.
+- **Denial-message redaction gaps.** Egress denials redact the stored baseUrl at the seam (the `Invalid baseUrl` variant included); the webhook-URL redactor strips userinfo in its malformed-URL fallback.
+
 ### Inference env-key demolition (022-5, breaking)
+
+- **Inference Env-Key Demolition (022-5 FR-005, Breaking)**: Seepient no longer synthesizes provider accounts from environment variables, and the env credential mode is removed from the CLI (`--credential env:`), TUI add-account, REST accounts API, and `auth login --env-var`. Credentials resolve only from provider management (setup flow, `seepient auth login --key`, or an injected custom credential store — embedder-owned env remains the embedder's seam). Migration: run `seepient setup` (or `seepient auth login <id> --key <key>`), or inject a credential store from the SDK.
 
 
 ### Round 3 — Pass-10 remediation: read-plane identity binding, real mutation probes, operator provider channel (Spec 022-4)
@@ -76,7 +91,6 @@ Three claims shipped in earlier 022-4 Round-2 notes were false against the code 
 
 **Breaking changes & Behavior changes:**
 
-- **Inference Env-Key Demolition (022-5 FR-005, Breaking)**: Seepient no longer synthesizes provider accounts from environment variables, and the env credential mode is removed from the CLI (`--credential env:`), TUI add-account, REST accounts API, and `auth login --env-var`. Credentials resolve only from provider management (setup flow, `seepient auth login --key`, or an injected custom credential store — embedder-owned env remains the embedder's seam). Migration: run `seepient setup` (or `seepient auth login <id> --key <key>`), or inject a credential store from the SDK.
 - **In-Workspace Symlinks Allowed via Authorize-What-You-Open (FR-013, Behavior Change)**:
   Permissions now apply to the target file's canonical realpath rather than the intermediate reference name. In-workspace symbolic links pointing to real paths inside the workspace ceiling are now fully allowed (superseding the earlier static refusal). Symbolic links whose realpath escapes the workspace ceiling are denied with typed `PathEscapesWorkspaceError` (`PATH_ESCAPES_WORKSPACE`).
 - **Atomic FD-Pinned Reads & TOCTOU Elimination (FR-013)**:

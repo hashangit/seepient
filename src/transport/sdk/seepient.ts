@@ -195,20 +195,40 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   // bootstrap a configured ProviderRuntime
   let bootstrapRuntime: ProviderRuntimeContract | ProviderRuntime | undefined = opts.runtime;
   if (bootstrapRuntime && tenancyMode === "multi") {
-    // 022-5-WO4 T008 (D2, pass-14 P2-1): the embed's operator baseline feeds
-    // BOTH planes — capabilities land on the runtime so refreshModels and
-    // the saveAccount seam enforce egress, not just the permission pipeline.
-    // Without this the documented baseline option armed only the pipeline.
-    const rt = bootstrapRuntime as unknown as { setRuntimeCapabilities?: (caps: unknown[]) => void };
+    // 022-5-WO4 T008 (D2, pass-14 P2-1) + pass-15 fix: the embed's operator
+    // baseline feeds BOTH planes — capabilities land on the runtime so
+    // refreshModels and the saveAccount seam enforce egress, not just the
+    // permission pipeline. The threading UNIONS with any capabilities the
+    // runtime already carries (same semantics as the server's T013 union):
+    // an explicit baseline must not erase grants the runtime was constructed
+    // with (e.g. createRuntimeFromProvidersFile's derived baseline).
+    const rt = bootstrapRuntime as unknown as {
+      setRuntimeCapabilities?: (caps: unknown[]) => void;
+      grantedCapabilities?: unknown[];
+    };
     const caps = Array.isArray(opts.operatorBaseline)
       ? opts.operatorBaseline
       : opts.operatorBaseline?.capabilities;
     if (caps?.length) {
+      const existing = Array.isArray(rt.grantedCapabilities) ? rt.grantedCapabilities : [];
+      const seen = new Set<string>();
+      const union: unknown[] = [];
+      for (const c of [...caps, ...existing]) {
+        const key = `${(c as { kind?: string }).kind}|${(c as { scheme?: string }).scheme}|${(c as { host?: string }).host}|${(c as { port?: number }).port ?? ""}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          union.push(c);
+        }
+      }
       if (typeof rt.setRuntimeCapabilities === "function") {
-        rt.setRuntimeCapabilities(caps);
+        rt.setRuntimeCapabilities(union);
       } else {
+        // Foreign runtime without the setter: shadow the getter for surfaces
+        // that read grantedCapabilities (the server boot notice). The egress
+        // asserts live inside ProviderRuntime methods, which such runtimes
+        // don't run — their own contract governs them.
         Object.defineProperty(rt, "grantedCapabilities", {
-          value: caps,
+          value: union,
           configurable: true,
         });
       }
