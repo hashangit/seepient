@@ -134,6 +134,15 @@ Every multi-tenant boundary feature must be accompanied by an automated adversar
 - **Use the `unslop` skill always.** Apply `unslop` across every conversational response, technical explanation, commit message, pull request description, and release note without exception.
 - **Honest voice and readable rhythm.** Have a point of view, keep sentences readable, and say what happened or what needs doing without corporate or assistant theater. Do not write unnecessarily long text. Only as needed to clearly explain your point and the background of it so the human can understand what you are trying to say.
 
+## 11. Release Gate — Nobody Grades Their Own Exam
+
+No work order ships on its own say-so. Between "all tasks ticked" and push/release, the `/release-gate` skill (`.agents/skills/release-gate/SKILL.md`) must run and produce a PASS receipt in `Reviews/` before the release commit lands. Binding rules:
+
+- **The implementer agent never runs the gate on its own work**, and every reviewer runs in a fresh session that has not seen the implementer's reasoning. Every claim is graded against the committed HEAD (`git show`), never the working tree — uncommitted fixes do not exist.
+- **Task truth is checked, not trusted**: every `[x]` in the shipping work order is graded TRUE/PARTIAL/FALSE against the seal. Any FALSE row blocks the release — the release may not claim what is not true. This rule exists because fifteen consecutive review passes (see `Reviews/2026-09-12` through `2026-10-01`) found false checkboxes in every work order, always clustered in the claims/pins tasks nobody re-verified before push.
+- The reviewer fleet (Red Team with demonstrations-not-worries, Code Reviewer reading code not summaries, Scrutinizer walking the product as a user, Repo Auditor reading across, Architect attacking the premise) and the deterministic verdict rules (confirmed P0/P1 → FAIL; unresolvable conflict → BLOCKED, yellow stops the line; max two repair attempts then the owner) are defined in the skill's mandate cards.
+- Deterministic gates (suite, probes, examples, build, CI) always run first and are recorded by the gate, never self-reported by the implementer.
+
 # Documentation Storage
 
 Documentation is split between the **Obsidian vault** (internal) and the **project repo** (consumer-facing). When unsure where a document belongs, default to the vault.
