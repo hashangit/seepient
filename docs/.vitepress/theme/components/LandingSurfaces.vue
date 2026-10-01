@@ -2,31 +2,45 @@
 const surfaces = [
   {
     idx: '01',
-    name: 'Terminal UI',
-    cmd: 'seepient',
-    body: 'Full-screen Ink interface with streaming output, live widgets, inline diff review and slash commands.',
-    link: '/tui/overview',
-  },
-  {
-    idx: '02',
     name: 'CLI',
-    cmd: 'git diff | seepient "review for regressions"',
-    body: 'One-shot prompts, Unix pipes and non-interactive -y runs for scripts, cron jobs and CI.',
+    cmd: 'git diff | seepient "review for regressions" -y',
+    body: 'One-shot prompts, Unix pipes, and non-interactive runs for scripts, cron jobs, and CI/CD pipelines.',
     link: '/cli/overview',
   },
   {
+    idx: '02',
+    name: 'TUI',
+    cmd: 'seepient',
+    body: 'Full-screen Ink interface with streaming output, live interactive widgets, inline diff review, and slash commands.',
+    link: '/tui/overview',
+  },
+  {
     idx: '03',
-    name: 'TypeScript SDK',
-    cmd: "const agent = createSeepient({ stores })",
-    body: 'generateText and streamText with injectable storage, custom tools, hooks and purpose routing.',
+    name: 'Embedded SDK',
+    cmd: "const agent = await createSeepient({ provider: 'anthropic' })",
+    body: 'Direct programmatic embedding in Node.js applications with custom tools, hooks, and purpose routing.',
     link: '/sdk/overview',
   },
   {
     idx: '04',
-    name: 'Server',
+    name: 'Programmatic Server',
+    cmd: 'const server = await runSeepientServer({ persist, auditStore })',
+    body: 'Embeddable server runtime with custom runtime options, pluggable persistence, and external store injection.',
+    link: '/sdk/stateless-workers',
+  },
+  {
+    idx: '05',
+    name: 'REST / WS Server',
     cmd: 'seepient-server --port 7337',
-    body: 'REST and WebSocket surface with scoped API keys, session persistence and an mTLS worker scheduler.',
+    body: 'Standalone daemon exposing authenticated REST v2 endpoints and streaming WebSockets with session persistence.',
     link: '/server/overview',
+  },
+  {
+    idx: '06',
+    name: 'Container Workers',
+    cmd: 'docker run -e SEEPIENT_SESSION_DIR=... seepient',
+    body: 'Ephemeral, stateless containerized workers with externalized storage and zero local disk footprint for cloud swarms.',
+    link: '/server/workers',
   },
 ]
 </script>
@@ -34,13 +48,13 @@ const surfaces = [
 <template>
   <section class="lp-section surfaces">
     <header class="surfaces-head" v-reveal>
-      <span class="lp-kicker">Surfaces</span>
+      <span class="lp-kicker">Deployment Surfaces</span>
       <h2 class="lp-h2">
-        <span class="soft">Four ways in.</span> One runtime.
+        <span class="soft">Full spectrum of surfaces.</span> One runtime.
       </h2>
       <p class="lp-lede surfaces-lede">
-        Pick the surface that fits the job. Each one resolves the same config,
-        asks the same policy engine, and writes the same audit trail.
+        From local developer shells to cloud container swarms, pick the surface that fits the job.
+        Each one resolves the same config, asks the same policy engine, and writes the same audit trail.
       </p>
     </header>
 
@@ -77,7 +91,7 @@ const surfaces = [
 
 .surfaces-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 16px;
   margin-top: 56px;
 }
@@ -153,7 +167,7 @@ const surfaces = [
   transform: translateX(3px);
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 960px) {
   .surfaces-grid {
     grid-template-columns: repeat(2, 1fr);
   }

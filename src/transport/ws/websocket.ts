@@ -102,7 +102,7 @@ export async function setupWebSocket(
     }
 
     // Authenticate the upgrade request
-    const key = authMiddleware(req);
+    const key = authMiddleware(req, ctx.apiKeysFile);
     if (!key) {
       socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
       socket.destroy();

@@ -93,6 +93,10 @@ console.log(result.text);
 console.log(result.usage.totalTokens);
 ```
 
+When called without options, Seepient resolves the provider and model automatically from your persisted provider-management configuration (setup wizard, TUI dock, `seepient auth login`, or an injected credential store) at `~/.seepient/providers-overlay.json`. It never reads provider API keys from the environment. It also registers all 15 built-in tools.
+
+To run pure text completions without tool execution, pass `tools: []`. To specify a model or restrict tools, pass configuration options. See [askSeepient](/sdk/ask-seepient) for the complete resolution order and reference.
+
 ### Streaming
 
 ```typescript
@@ -212,4 +216,5 @@ Pass tool names as strings, or use group names (`"core"`, `"comm"`, `"advanced"`
 | [Hooks and Middleware](/sdk/hooks) | Lifecycle callbacks and request/response pipelines |
 | [Session Persistence](/sdk/session-persistence) | Built-in atomic files, in-memory, and custom storage backends |
 | [Stateless Workers](/sdk/stateless-workers) | Zero-disk multi-tenant embedding and storage contracts |
+| [Multi-Tenant Isolation](/sdk/multi-tenant) | Fail-closed multi-tenancy, store injection, and per-agent tool registries |
 | [Types Reference](/sdk/types) | Complete TypeScript types reference |

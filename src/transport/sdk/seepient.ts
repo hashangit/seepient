@@ -7,7 +7,7 @@
  */
 
 import {
-  getDefaultProviderRuntime,
+  createAmbientProviderRuntime,
   ProviderRuntime,
 } from "../../domain/providers/provider-runtime.js";
 import type { ProviderRuntimeContract } from "../../foundations/contracts/provider-runtime.js";
@@ -16,7 +16,8 @@ import { MemoryCredentialStore } from "../../domain/providers/credentials/memory
 import { AggregateInferenceAdapter } from "../../capabilities/inference/aggregate-adapter.js";
 import { runAgentLoop } from "../../domain/agent-loop.js";
 import { createHookExecutor } from "../../domain/hooks.js";
-import { resolveTools, getAllToolDefinitions } from "../../domain/tool-executor.js";
+import { resolveTools, ToolRegistry } from "../../domain/tool-executor.js";
+import type { ToolModule } from "../../foundations/contracts/tool.js";
 import {
   DEFAULT_TRUSTED_HOST_ALLOWLIST,
   extractHostCallbacks,
@@ -60,16 +61,18 @@ import {
 import { normalizeHistoryForSend } from "../../domain/sessions/normalize-history.js";
 import { generateId } from "../../foundations/id.js";
 import { surfaceLoopError, extractLoopError } from "./error-surfacing.js";
-import { SeepientError } from "../../foundations/errors.js";
+import { SeepientError, PersistConfigInvalidError, SessionIdInvalidError } from "../../foundations/errors.js";
 
 // ── Session persistence helpers ──────────────────────────────────────────
 
+export const MAX_SESSION_ID_LENGTH = 128;
 const SESSION_ID_RE = /^[a-zA-Z0-9_-]+$/;
 
-function validateSessionId(sessionId: string): void {
-  if (!sessionId || !SESSION_ID_RE.test(sessionId)) {
-    throw new Error(
-      `Invalid session ID "${sessionId}". Only alphanumeric characters, dashes, and underscores are allowed.`,
+export function validateSessionId(sessionId: string): void {
+  if (!sessionId || !SESSION_ID_RE.test(sessionId) || sessionId.length > MAX_SESSION_ID_LENGTH) {
+    throw new SessionIdInvalidError(
+      sessionId,
+      `SESSION_ID_INVALID: Invalid session ID "${sessionId}". Only alphanumeric characters, dashes, and underscores are allowed (max ${MAX_SESSION_ID_LENGTH} characters).`,
     );
   }
 }
@@ -114,39 +117,23 @@ function toCapabilitySet(
   return cap;
 }
 
-/**
- * Warn when an embedder injects some but not all permission state stores.
- * Stateless workers require all stores to be injected; missing stores fall back to local disk.
- */
-export function warnIfPartialStoreInjection(opts: {
-  auditStore?: unknown;
-  policyStore?: unknown;
-  capabilityLedger?: unknown;
-}): void {
-  const injectedStores = {
-    auditStore: Boolean(opts.auditStore),
-    policyStore: Boolean(opts.policyStore),
-    capabilityLedger: Boolean(opts.capabilityLedger),
-  };
-  const storeCount =
-    Number(injectedStores.auditStore) +
-    Number(injectedStores.policyStore) +
-    Number(injectedStores.capabilityLedger);
-  if (storeCount > 0 && storeCount < 3) {
-    const missing = Object.entries(injectedStores)
-      .filter(([_, present]) => !present)
-      .map(([name]) => name);
-    const present = Object.entries(injectedStores)
-      .filter(([_, present]) => present)
-      .map(([name]) => name);
-    console.warn(
-      `[seepient] WARNING: Partial state store injection detected. ` +
-        `Injected: [${present.join(", ")}]. Missing: [${missing.join(", ")}]. ` +
-        `Missing stores will fall back to local disk at ~/.seepient or ./.seepient. ` +
-        `For fully stateless worker execution, all three permission stores (auditStore, policyStore, capabilityLedger) must be injected.`,
-    );
-  }
-}
+import {
+  resolveTenancyMode,
+  validateTenancyCompleteness,
+  emitTenancyNoticeOnce,
+  emitCredentialsSingleUserWarningOnce,
+  PRINCIPAL_ID_RE,
+  SENTINEL_PRINCIPAL_IDS,
+  type TenancySignals,
+} from "../../domain/tenancy/tenancy-mode.js";
+import {
+  TenancyWorkspaceRequiredError,
+  PrincipalRequiredError,
+  InvalidPrincipalIdError,
+} from "../../foundations/errors.js";
+import type { AuditStore, PolicyStore } from "../../foundations/contracts/execution-brokers.js";
+import type { CapabilityLedger } from "../../foundations/contracts/capability-ledger.js";
+
 
 // ── Primary Factory: createSeepient ──────────────────────────────────────
 
@@ -156,12 +143,97 @@ export function warnIfPartialStoreInjection(opts: {
  * Supports single-turn chat, multi-turn conversations, streaming responses,
  * model switching, tool execution, session persistence, and provider management.
  */
+import { computeEffectiveSkillSources, emitMultiZeroSourcesNoticeOnce } from "./skill-sources-helper.js";
+
 export async function createSeepient(options?: CreateSeepientOptions): Promise<Seepient> {
   const opts = options ?? {};
+  const effectiveSources = computeEffectiveSkillSources(opts.sources, opts.skills);
+
+  // Detect injected credentials by store-shape, not Object.keys: a class with
+  // #private fields has no own enumerable properties and would silently ride
+  // single mode (pass-10 P1-5).
+  const looksLikeCredentialStore = (v: unknown): boolean =>
+    typeof v === "object" && v !== null && typeof (v as any).resolve === "function";
+  const hasInjectedCredentials = Boolean(
+    (opts.credentials && (looksLikeCredentialStore(opts.credentials) || Object.keys(opts.credentials).length > 0)) ||
+    (opts.providers && (Array.isArray(opts.providers) ? opts.providers.length > 0 : Object.keys(opts.providers).length > 0)),
+  );
+
+  const tenancySignals: TenancySignals = {
+    explicit: opts.tenancy,
+    principalIdSet: Boolean(opts.principalId && opts.principalId !== "default" && opts.principalId !== "sdk-user"),
+    anyStoreInjected: Boolean(opts.auditStore || opts.policyStore || opts.capabilityLedger),
+    runtimeInjected: Boolean(opts.runtime),
+    persistInjected: Boolean(opts.persist),
+    skillSourcesInjected: Boolean(opts.sources && opts.sources.length > 0),
+    credentialsInjected: hasInjectedCredentials,
+  };
+  const { mode: tenancyMode, upgraded } = resolveTenancyMode(tenancySignals);
+  emitTenancyNoticeOnce(upgraded);
+
+  if (tenancyMode === "single" && hasInjectedCredentials) {
+    emitCredentialsSingleUserWarningOnce();
+  }
+
+  // Validate tenancy completeness before any runtime bootstrapping or ambient I/O
+  validateTenancyCompleteness(tenancyMode, {
+    runtime: opts.runtime,
+    auditStore: opts.auditStore,
+    policyStore: opts.policyStore,
+    capabilityLedger: opts.capabilityLedger,
+    persist: opts.persist,
+    stateless: opts.stateless,
+    isSessionful: Boolean(opts.sessionId || opts.persist),
+    principalId: opts.principalId,
+  });
+
+  if (tenancyMode === "multi" && (!opts.cwd || typeof opts.cwd !== "string" || opts.cwd.trim().length === 0)) {
+    throw new TenancyWorkspaceRequiredError();
+  }
 
   // If providers, modelAssignments, or overlay options are passed without an explicit runtime,
   // bootstrap a configured ProviderRuntime
   let bootstrapRuntime: ProviderRuntimeContract | ProviderRuntime | undefined = opts.runtime;
+  if (bootstrapRuntime && tenancyMode === "multi") {
+    // 022-5-WO4 T008 (D2, pass-14 P2-1) + pass-15 fix: the embed's operator
+    // baseline feeds BOTH planes — capabilities land on the runtime so
+    // refreshModels and the saveAccount seam enforce egress, not just the
+    // permission pipeline. The threading UNIONS with any capabilities the
+    // runtime already carries (same semantics as the server's T013 union):
+    // an explicit baseline must not erase grants the runtime was constructed
+    // with (e.g. createRuntimeFromProvidersFile's derived baseline).
+    const rt = bootstrapRuntime as unknown as {
+      setRuntimeCapabilities?: (caps: unknown[]) => void;
+      grantedCapabilities?: unknown[];
+    };
+    const caps = Array.isArray(opts.operatorBaseline)
+      ? opts.operatorBaseline
+      : opts.operatorBaseline?.capabilities;
+    if (caps?.length) {
+      const existing = Array.isArray(rt.grantedCapabilities) ? rt.grantedCapabilities : [];
+      const seen = new Set<string>();
+      const union: unknown[] = [];
+      for (const c of [...caps, ...existing]) {
+        const key = `${(c as { kind?: string }).kind}|${(c as { scheme?: string }).scheme}|${(c as { host?: string }).host}|${(c as { port?: number }).port ?? ""}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          union.push(c);
+        }
+      }
+      if (typeof rt.setRuntimeCapabilities === "function") {
+        rt.setRuntimeCapabilities(union);
+      } else {
+        // Foreign runtime without the setter: shadow the getter for surfaces
+        // that read grantedCapabilities (the server boot notice). The egress
+        // asserts live inside ProviderRuntime methods, which such runtimes
+        // don't run — their own contract governs them.
+        Object.defineProperty(rt, "grantedCapabilities", {
+          value: union,
+          configurable: true,
+        });
+      }
+    }
+  }
   if (!bootstrapRuntime) {
     if (opts.providers || opts.modelAssignments || opts.credentials || opts.overlayFile || opts.adapter) {
       const configStore = new ProviderConfigStore(opts.overlayFile ?? ":memory:");
@@ -181,9 +253,13 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
         configStore,
         credentialStore,
         adapter,
+        // 022-5-WO3 T007 (D2): the internally-built runtime carries the
+        // embed's tenancy stamp — the natural embed shape is egress-armed by
+        // construction, not silently single-stamped.
+        tenancyMode,
       });
     } else {
-      bootstrapRuntime = getDefaultProviderRuntime();
+      bootstrapRuntime = createAmbientProviderRuntime();
     }
   }
   const runtime: ProviderRuntimeContract | ProviderRuntime = bootstrapRuntime;
@@ -195,6 +271,9 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   let provider = opts.provider;
   let providerAccount = opts.providerAccount ?? opts.override?.providerAccount;
   let model = opts.model ?? opts.override?.model ?? "";
+  let thinkingLevel = opts.override?.thinkingLevel;
+  let temperature = opts.temperature;
+  let maxTokens = opts.maxTokens;
   let purpose = opts.purpose;
   let tier = opts.tier;
   let metadata = opts.metadata;
@@ -206,28 +285,59 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   let skillCatalog = "";
   let skillRegistry: import("../../capabilities/skills/types.js").SkillRegistry | undefined;
   if (opts.skills !== false) {
-    try {
-      skillRegistry = await initializeSkillRegistry(opts.cwd ?? process.cwd());
-      let meta = skillRegistry.getMetadata();
-      if (Array.isArray(opts.skills)) {
-        const wanted = new Set(opts.skills);
-        meta = meta.filter((s) => wanted.has(s.name));
+    if (tenancyMode === "multi" && effectiveSources.length === 0) {
+      // In multi-tenant mode without injected sources, ambient discovery is skipped
+      emitMultiZeroSourcesNoticeOnce();
+    } else {
+      try {
+        skillRegistry = await initializeSkillRegistry(opts.cwd ?? process.cwd(), { sources: effectiveSources, tenancyMode });
+        let meta = skillRegistry.getMetadata();
+        const isLiteralList =
+          Array.isArray(opts.skills) &&
+          opts.skills.some(
+            (s) => typeof s === "object" && s !== null && "content" in s,
+          );
+        if (Array.isArray(opts.skills) && !isLiteralList) {
+          const wanted = new Set(opts.skills.filter((s): s is string => typeof s === "string"));
+          const available = new Set(meta.map((s) => s.name));
+          const missing = Array.from(wanted).filter((name) => !available.has(name));
+          if (missing.length > 0) {
+            console.warn(`[SKILLS] Warning: Skill filter requested unavailable skill(s): ${missing.join(", ")}`);
+          }
+          meta = meta.filter((s) => wanted.has(s.name));
+        }
+        if (meta.length > 0) {
+          skillCatalog = buildSkillCatalog(meta);
+        }
+      } catch (err: any) {
+        /* skill init is best-effort — don't block creation */
+        console.warn(`[SKILLS] Warning: Failed to resolve skills: ${err?.message ?? err}`);
       }
-      if (meta.length > 0) {
-        skillCatalog = buildSkillCatalog(meta);
-      }
-    } catch {
-      /* skill init is best-effort — don't block creation */
     }
   }
 
   const composeSystem = () =>
     skillCatalog ? systemPrompt + "\n\n" + skillCatalog : systemPrompt;
 
-  // Tools
-  let toolDefs = opts.tools ? resolveTools(opts.tools) : getAllToolDefinitions();
+  // Tools — per-agent registry (Spec 022)
+  const toolRegistry = new ToolRegistry();
+  for (const item of opts.tools ?? []) {
+    if (
+      item &&
+      typeof item === "object" &&
+      "definition" in item &&
+      typeof (item as { definition?: any }).definition?.function?.name === "string" &&
+      typeof (item as { handler?: any }).handler === "function" &&
+      !("trust" in item)
+    ) {
+      toolRegistry.register(item as unknown as ToolModule);
+    }
+  }
+
+  let toolDefs = opts.tools ? resolveTools(opts.tools, toolRegistry) : toolRegistry.definitions();
   const { callbacks: hostCallbacks, registrationIds } = extractHostCallbacks(opts.tools, {
     skills: skillRegistry,
+    registry: toolRegistry,
   });
   const registrations = extractRegistrations(opts.tools);
 
@@ -241,10 +351,21 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   if (opts.persist) {
     if (typeof opts.persist === "string") {
       backend = createPersistenceBackend({ type: "file", path: opts.persist });
-    } else if ("type" in opts.persist && typeof opts.persist.type === "string") {
+    } else if (
+      typeof opts.persist === "object" &&
+      opts.persist !== null &&
+      "type" in opts.persist &&
+      typeof (opts.persist as any).type === "string"
+    ) {
       backend = createPersistenceBackend(opts.persist as PersistenceConfig);
-    } else if ("__persistenceBackend" in opts.persist) {
+    } else if (
+      typeof opts.persist === "object" &&
+      opts.persist !== null &&
+      "__persistenceBackend" in opts.persist
+    ) {
       backend = opts.persist as PersistenceBackend;
+    } else {
+      throw new PersistConfigInvalidError();
     }
 
     if (backend) {
@@ -295,8 +416,6 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     recoverIndeterminateActions,
   } = await import("../../domain/permissions/audit-recorder.js");
 
-  warnIfPartialStoreInjection(opts);
-
   let auditOutbox:
     | import("../../domain/permissions/audit-recorder.js").TerminalEventOutbox
     | undefined;
@@ -334,10 +453,18 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   let currentVendorHandler = createMediaVendorOperationHandler({
     runtime,
     artifacts: sharedArtifacts,
+    tenancyMode,
   });
   const vendorOperationHandler = (
     req: Parameters<typeof currentVendorHandler>[0],
   ) => currentVendorHandler(req);
+  const secretResolver =
+    tenancyMode === "multi"
+      ? (ref: string) => {
+          const store = (runtime as any).credentialStore ?? (runtime as any).getCredentialStore?.();
+          return store?.resolveSecret?.(ref) ?? undefined;
+        }
+      : undefined;
   const { boundary } = await buildLocalBoundary({
     artifacts: sharedArtifacts,
     workspaceRoot: opts.cwd ?? process.cwd(),
@@ -346,6 +473,8 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     vendorOperationHandler,
     commitHelper: opts.commitHelper,
     network: opts.network,
+    tenancyMode,
+    secretResolver,
   });
   const approvalMode = opts.consentMode
     ? opts.consentMode === "autonomous"
@@ -375,6 +504,8 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     auditStore,
     policyStore: opts.policyStore,
     capabilityLedger: opts.capabilityLedger,
+    operatorBaseline: toCapabilitySet(opts.operatorBaseline),
+    tenancyMode,
     terminalOutbox: auditOutbox,
   });
 
@@ -417,9 +548,9 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     }
   }
 
-  function currentModelOverride(): { model?: string; providerAccount?: string } | undefined {
-    return providerAccount || model
-      ? { model: model || undefined, providerAccount }
+  function currentModelOverride(): { model?: string; providerAccount?: string; thinkingLevel?: any } | undefined {
+    return providerAccount || model || thinkingLevel
+      ? { model: model || undefined, providerAccount, thinkingLevel }
       : undefined;
   }
 
@@ -448,6 +579,8 @@ async function chat(userMessage: string): Promise<AgentResponse> {
         runtime,
         artifacts: sharedArtifacts,
         signal: activeAbortController.signal,
+        tenancyMode,
+        capabilities: wiredPipeline.activeCapabilities?.capabilities,
       });
 
       resolveTrailingUserDraft(messages);
@@ -476,7 +609,10 @@ async function chat(userMessage: string): Promise<AgentResponse> {
         modelOverride: currentModelOverride(),
         purpose,
         tier,
+        temperature,
+        maxTokens,
         messages: modelMessages,
+        toolRegistry,
         toolDefs,
         systemPrompt: systemPrompt,
         maxSteps,
@@ -487,6 +623,7 @@ async function chat(userMessage: string): Promise<AgentResponse> {
         middleware: opts.middleware,
         approveTool: opts.approveTool,
         wiredPipeline,
+        tenancyMode,
       });
       // W151/A1: on a resolved error, skip a contentless assistant — but keep
       // one carrying tool calls (dropping it would orphan its tool result).
@@ -549,6 +686,8 @@ async function chat(userMessage: string): Promise<AgentResponse> {
         runtime,
         artifacts: sharedArtifacts,
         signal: streamAbort.signal,
+        tenancyMode,
+        capabilities: wiredPipeline.activeCapabilities?.capabilities,
       });
       const mergedHooks = {
         ...opts.hooks,
@@ -583,7 +722,10 @@ async function chat(userMessage: string): Promise<AgentResponse> {
             modelOverride: currentModelOverride(),
             purpose: streamOptions?.purpose ?? purpose,
             tier: streamOptions?.tier ?? tier,
+            temperature: streamOptions?.temperature ?? temperature,
+            maxTokens: streamOptions?.maxTokens ?? maxTokens,
             messages: modelMessages,
+            toolRegistry,
             toolDefs,
             systemPrompt: systemPrompt,
             maxSteps,
@@ -594,6 +736,7 @@ async function chat(userMessage: string): Promise<AgentResponse> {
             middleware: opts.middleware,
             approveTool: opts.approveTool,
             wiredPipeline,
+            tenancyMode,
             onStep: (step) => {
               if (streamOptions?.onStep) streamOptions.onStep(step);
               if (
@@ -745,7 +888,7 @@ async function chat(userMessage: string): Promise<AgentResponse> {
   }
 
   function setTools(tools: string[]): void {
-    toolDefs = resolveTools(tools);
+    toolDefs = resolveTools(tools, toolRegistry);
   }
 
   function abort(): void {
@@ -777,6 +920,20 @@ async function chat(userMessage: string): Promise<AgentResponse> {
       return auditOutbox.flush();
     }
     return 0;
+  }
+
+  async function revokeRun(runId: string): Promise<void> {
+    const ledger = wiredPipeline.capabilityLedger;
+    if (ledger) {
+      await ledger.revoke({ runId }, { principalId });
+    }
+  }
+
+  async function revokeSession(targetSessionId: string): Promise<void> {
+    const ledger = wiredPipeline.capabilityLedger;
+    if (ledger) {
+      await ledger.revoke({ sessionId: targetSessionId }, { principalId });
+    }
   }
 
   async function close(): Promise<void> {
@@ -937,11 +1094,15 @@ async function chat(userMessage: string): Promise<AgentResponse> {
     switchProvider,
     setSystemPrompt,
     setTools,
+    getToolDefinitions: () => toolDefs,
+    getToolRegistry: () => toolRegistry,
     abort,
     clear,
     getHistory,
     getUsage,
     flushAudit,
+    revokeRun,
+    revokeSession,
     close,
 
     // Provider management
@@ -956,4 +1117,56 @@ async function chat(userMessage: string): Promise<AgentResponse> {
     resolve,
     dispose,
   };
+}
+
+/**
+ * Parameter options for createTenantAgent (DP10).
+ * Types strictly require an isolated ProviderRuntimeContract, all three stores, and explicit cwd.
+ */
+export interface CreateTenantAgentOptions
+  extends Omit<
+    CreateSeepientOptions,
+    | "tenancy"
+    | "runtime"
+    | "auditStore"
+    | "policyStore"
+    | "capabilityLedger"
+    | "cwd"
+    | "principalId"
+  > {
+  principalId: string;
+  runtime: ProviderRuntimeContract;
+  auditStore: AuditStore;
+  policyStore: PolicyStore;
+  capabilityLedger: CapabilityLedger;
+  cwd: string;
+}
+
+/**
+ * Typed factory for creating an isolated multi-tenant Seepient agent (DP10).
+ * Validates principalId format at entry and guarantees zero ambient fallback.
+ */
+export async function createTenantAgent(
+  options: CreateTenantAgentOptions,
+): Promise<Seepient> {
+  const rawPrincipal = options.principalId;
+  if (!rawPrincipal || typeof rawPrincipal !== "string" || rawPrincipal.trim().length === 0) {
+    throw new PrincipalRequiredError();
+  }
+  const trimmed = rawPrincipal.trim();
+  if (SENTINEL_PRINCIPAL_IDS.has(trimmed.toLowerCase())) {
+    throw new InvalidPrincipalIdError(
+      `INVALID_PRINCIPAL_ID: principalId "${trimmed}" is a reserved sentinel value. Use an explicit tenant principal.`,
+    );
+  }
+  if (!PRINCIPAL_ID_RE.test(trimmed)) {
+    throw new InvalidPrincipalIdError(
+      `INVALID_PRINCIPAL_ID: principalId "${trimmed}" must match /^[a-zA-Z0-9_-]{1,128}$/.`,
+    );
+  }
+
+  return createSeepient({
+    ...options,
+    tenancy: "multi",
+  });
 }

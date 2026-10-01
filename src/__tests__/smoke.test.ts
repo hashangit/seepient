@@ -34,9 +34,9 @@ describe("Seepient smoke test — module resolution", () => {
   });
 
   it("skill modules import without error", async () => {
-    const { parseFrontmatter } = await import("../capabilities/skills/parser.js");
+    const { parseSkillContent } = await import("../capabilities/skills/parser.js");
     const { parseInvocation, substituteArgs } = await import("../capabilities/skills/args.js");
-    expect(typeof parseFrontmatter).toBe("function");
+    expect(typeof parseSkillContent).toBe("function");
     expect(typeof parseInvocation).toBe("function");
     expect(typeof substituteArgs).toBe("function");
   });

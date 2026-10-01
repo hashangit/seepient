@@ -5,6 +5,225 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.8.0] - 2026-10-01
+
+### Claims corrections (022-5 FR-009)
+
+Three claims shipped in earlier 022-4 Round-2 notes were false against the code as they stood; the corrections below state what was actually true and which change made each claim true:
+
+- **"Atomic FD-Pinned Reads & TOCTOU Elimination"** — at the time of that note, only the final path component was race-protected (`O_NOFOLLOW`); a parent-directory symlink swap between authorization and execution still read outside files (pass-10 PoC). Made true by the Round-3 read-plane identity binding (authorize-time `dev`/`ino` verified against the pinned fd, `PATH_IDENTITY_MISMATCH`).
+- **"Executable Mutation-Probe CI Step"** — at the time of that note, the probe neutralized only the journeys' own hit counter and any non-zero exit counted as red. Made true across three rounds: Round 3 moved neutralization into real production seams; 022-5 de-confounded the counter (a deleted production seam now fails its probe — the matrix detects orphaned seams), pinned each probe to the journey's expected security-assertion message, added registration lints (every security journey is either probed or explicitly counter-only; every production seam is registered), and made the seam two-factor (`NODE_ENV=test` AND a vitest worker).
+- The Round-2 note "guard self-tests have been deleted" was also inaccurate — the anti-vacuity counter self-test exists and remains.
+
+**Security (022-5):**
+
+- **Multi-tenant egress arming completed (022-5-WO2/WO3).** The server's every composition root — providers-file boot, isolated-empty boot, REST fallback, and INJECTED runtimes — now requires or carries the multi tenancy stamp; an unstamped injected runtime is refused (`TENANCY_RUNTIME_REQUIRED`) instead of silently composing without egress enforcement — on BOTH the server boundary and the SDK itself (`createSeepient`/`createTenantAgent` refuse unstamped runtimes in multi; 022-5-WO4). The write-side egress assert lives in the provider-manager `saveAccount` seam (REST, WS, CLI all inherit it): on a multi runtime, an ungranted host cannot be planted for later credential use. The standalone operator baseline is DERIVED from the providers file (one network-destination grant per configured account's scheme/host/port, printed at boot) — custom-endpoint accounts keep working with zero extra configuration. Webhook denial messages redact the operator webhook URL to scheme//host (Feishu/DingTalk/WeCom tokens live in the query).
+
+- **No daemons by default (022-5-WO1, intended product behavior).** Sandboxed command execution kills the whole process group when the command settles — normally, not only on abort. A tool call that backgrounds children (`server & …`) does not leave them running after the call returns; redirect the child's output and manage long-running processes outside the sandbox boundary if you need them to outlive a call.
+
+- **Read-plane completion.** `edit_file` section reads clear the workspace ceiling before their pinned open (the existence/hash oracle closed); the `PATH_ESCAPES_WORKSPACE` dangling-vs-existing differential is byte-identical; FIFOs deny typed on every read surface (executor, media inputs, commit destinations, edit sections) — no wedged turns; media denials surface their typed codes instead of laundering to `MEDIA_GENERATION_FAILED`.
+- **Guard-surface residuals.** Auth key cache publishes only when the file is unchanged across the read (cross-process revocation observed within one re-read); universal roots (`"/"`, `"*"`, `""`) never survive the multi merge; `ActionLifecycle.run` returns the typed `invalid-approval-response` denial for a global lifetime in multi instead of throwing; `DurableApprovalStore.casSync` is principal-bound; sandboxed process groups are killed on normal settle (no daemons); `htmlToText` converts in linear time with the input capped.
+- **Credential demolition tripwires.** `refreshModels` asserts account baseUrls against granted capabilities in multi before any network activity and records failures on an `onDiscoveryError` surface; producer enumeration is a source scan over every vendored import site; the resolved-key wire journey runs in single and multi mode.
+
+### Multi-armed server runtimes & brokered response caps (022-5-WO2)
+
+**Security:**
+
+- **Server runtimes are multi-armed.** Every `runSeepientServer` boot path (providers file, isolated fallback) composes the runtime with `tenancyMode: "multi"` plus the operator baseline, so the egress assert fires from a production root — previously it existed only on wrapper seams no production root exercised, and a `provider:admin` key could point the operator's stored credential at an attacker host via the accounts PUT and a refresh. The provider accounts `PUT` now denies planting an ungranted host with `400 EGRESS_REQUIRED` before the write lands.
+- **Operator impact (fail-closed):** on a multi server, refresh (`POST /v1/providers/:id/refresh-models`) and `baseUrl` mutations for accounts whose host is not covered by an operator baseline deny with `EGRESS_REQUIRED` before any network traffic, DNS included. Accounts without a `baseUrl` (default provider endpoints) are unaffected. The standalone CLI has no baseline flag; embedders grant hosts via `runSeepientServer({ operatorBaseline })` (see `deployment.md`). *(Superseded by 022-5-WO3/WO4: the standalone baseline is now DERIVED from the providers file at boot, and explicit + derived baselines union.)*
+
+**Hardening:**
+
+- **Brokered network responses are capped mid-stream.** `NodeNetworkAdapter` arms the pinned-fetch streaming cap (10 MiB body / 30 s, matching the broker's own limits). Previously the entire response buffered before the post-response cap ran, so a fast endpoint could exhaust shared-process memory (reproduced at 300 MiB buffered in 237 ms). A brokered tool call such as `read_website` now rejects as soon as the stream passes the cap.
+
+### SDK multi arming & env-destination closure (022-5-WO4)
+
+**Breaking:**
+
+- **Multi embeds must construct egress-armed runtimes.** `createSeepient`/`createTenantAgent` in multi mode now REFUSE an injected runtime without the `tenancyMode: "multi"` stamp (`TENANCY_RUNTIME_REQUIRED`) — previously such a runtime silently disabled every egress guard on the SDK plane (the pass-14 live-probed plant + refresh chain). Construct with `createIsolatedProviderRuntime({ tenancyMode: "multi", ... })`. The `operatorBaseline` option now arms BOTH planes (permission pipeline and runtime egress asserts) and UNIONS with any capabilities the runtime already carries — mirroring the server's explicit+derived baseline union.
+
+**Security:**
+
+- **Env-destination exfiltration closed at every vendored client site.** The OpenAI SDK constructor defaults `baseURL` from ambient `OPENAI_BASE_URL` and the Google GenAI SDK defaults its endpoint from `GOOGLE_GEMINI_BASE_URL`/`GOOGLE_VERTEX_BASE_URL` — a set host env var redirected the stored credential's traffic with zero checks on default-endpoint accounts, in single and multi mode. Both openai sites and the google image site now pass an explicit baseUrl (the account's, or the vendor default), killing the destructor fallback; decoy-env gates pin each site (the sink receives zero requests with the key).
+- **Worker body cap enforced at the cap, not at stream end.** The reference worker's 1 MiB request-body limit now responds `413` and destroys the connection the moment the cap trips (previously accumulation stopped but the response waited for end/close — a slow sender held the connection and slot for the full stream).
+- **`DurableApprovalStore.load()` is merge-preserving in the correct direction.** A live decision (just transitioned by `casSync`) survives a read racing the floating persist; a genuinely newer cross-process decision on disk still loads; a decided record can no longer be resurrected to `pending` by a stale snapshot. `casSync` additionally rejects a decision whose `requestId` does not match the record.
+- **Denial-message redaction gaps.** Egress denials redact the stored baseUrl at the seam (the `Invalid baseUrl` variant included); the webhook-URL redactor strips userinfo in its malformed-URL fallback.
+
+### Inference env-key demolition (022-5, breaking)
+
+- **Inference Env-Key Demolition (022-5 FR-005, Breaking)**: Seepient no longer synthesizes provider accounts from environment variables, and the env credential mode is removed from the CLI (`--credential env:`), TUI add-account, REST accounts API, and `auth login --env-var`. Credentials resolve only from provider management (setup flow, `seepient auth login --key`, or an injected custom credential store — embedder-owned env remains the embedder's seam). Migration: run `seepient setup` (or `seepient auth login <id> --key <key>`), or inject a credential store from the SDK.
+
+
+### Round 3 — Pass-10 remediation: read-plane identity binding, real mutation probes, operator provider channel (Spec 022-4)
+
+**Security:**
+
+- **Read-plane identity binding (authorize-what-you-open).** `snapshotPath` now records the authorized file's device/inode at analysis time; `ReadFileExecutor` and the `generate_image` input readers open with `O_NOFOLLOW` and verify the pinned fd's `fstat` against that identity, denying with `PATH_IDENTITY_MISMATCH` on mismatch or unverifiable identity. This closes the parent-directory symlink swap between authorization and execution that `O_NOFOLLOW` (final component only) could not see — probe-confirmed in the pass-10 review, now pinned by two new red-first journeys in `symlink-read-journey.test.ts`. The commit-path `oldContent` pre-read and the `edit_file` section re-read are also pinned (no-follow open + link-count gate).
+- **Real mutation probes.** `scripts/verify-mutation-probes.ts` now (1) runs each journey green as a baseline, (2) neutralizes the guard at its **production seam** (`src/foundations/test-seams.ts`, inert unless `NODE_ENV === "test"`), and (3) accepts a red verdict only when the vitest summary shows failed tests — spawn errors, missing files, and timeouts fail the probe. The matrix covers 11 probe targets over 10 distinct production guards (completed in 022-5-WO1: registration lints tie every probe guardId to a production seam and every security journey to a target or an explicit counter-only list; red verdicts must carry the journey's expected security assertion in the vitest FAIL section). SC-003's zero-write gate asserts the typed `GENERATION_ERROR` response instead of accepting any 400/500.
+- **SDK tenancy signal hardening.** Injected credentials are detected by store shape (`resolve` method), so `#private`-field `CredentialStore` instances no longer silently compose ambient single mode (pinned by a new test); an explicit `tenancy: "single"` with injected stores or runtime now emits a warning.
+
+**Operator channel (OQ-I closed):**
+
+- The standalone server has a durable provider configuration channel: `--providers-file <path>` / `runSeepientServer({ providersFile })` loads an operator-owned JSON file (providers, model assignments, credentials) once at boot into an isolated runtime (`createRuntimeFromProvidersFile`; ambient env is never consulted, the file is never written back). `--api-keys-file <path>` makes the key file explicit on the CLI. `deployment.md` documents the real channel and no longer claims the server reads `.seepient/setting.json`.
+
+**Hardening:**
+
+- WebSocket egress backpressure: `safeSend` enforces a 4 MiB `bufferedAmount` cap and closes slow readers (1013) instead of buffering without bound in the shared process.
+- Worker `RemotePolicyStore.compareAndSet` throws typed `PolicyConflictError` on HTTP 409 so the lifecycle's conflict retry actually fires.
+- `GlobalLifetimeForbiddenError` records a terminal `global-lifetime-forbidden` denial before throwing, so the audit trail no longer ends at `awaiting-approval`.
+- WS `chat.message` is validated as a string at the edge (parity with REST).
+- The skills `@path` allowlist is segment-aware (`~/.seepient-anything` no longer passes a `startsWith` check).
+- `cli-user` joins the reserved sentinel set in the Domain (worker parity).
+- New error classes are exported from the SDK barrel: `GlobalLifetimeForbiddenError`, `PathEscapesWorkspaceError`, `PathHardlinkRefusedError`, `PathIdentityMismatchError`.
+
+**Breaking changes & behavior changes:**
+
+- `PATH_IDENTITY_MISMATCH` is a new read denial: a file that changes identity between authorization and read fails closed with remediation (re-read and retry). Legitimate in-workspace reads are unaffected.
+- `PATH_ESCAPES_WORKSPACE` messages no longer echo the resolved host path (host-path existence oracle removed).
+- `PATH_HARDLINK_REFUSED` text no longer claims the other name is outside the workspace (it may be an in-workspace hardlink).
+- A WS client that stops reading while streaming is disconnected (1013) once its send buffer exceeds 4 MiB.
+
+**Docs truth:**
+
+- README and `create-seepient.md` persistence examples carry `tenancy: "single"` (bare `persist` examples threw `PRINCIPAL_REQUIRED`); the docs-examples gate now constructs them. `migration.md` gained the 022-3/022-4 breaking-change sections. The Round-2 bullet's fictional `buildNeedsApproval` was corrected to `buildApprovalOptions` / `buildApprovalChoices`, and the vocabulary gate now catches provider-name env fictions in docs (the purged env rows are banned identifiers).
+
+### Round 2 — Authorization truth, symlink plane, and sentinel unification (Spec 022-4)
+
+**Breaking changes & Behavior changes:**
+
+- **In-Workspace Symlinks Allowed via Authorize-What-You-Open (FR-013, Behavior Change)**:
+  Permissions now apply to the target file's canonical realpath rather than the intermediate reference name. In-workspace symbolic links pointing to real paths inside the workspace ceiling are now fully allowed (superseding the earlier static refusal). Symbolic links whose realpath escapes the workspace ceiling are denied with typed `PathEscapesWorkspaceError` (`PATH_ESCAPES_WORKSPACE`).
+- **Atomic FD-Pinned Reads & TOCTOU Elimination (FR-013)**:
+  `ReadFileExecutor` and media image/mask analyzers now atomically open target files using `O_RDONLY | O_NOFOLLOW` and read directly from the pinned file descriptor. The previously separate `lstat` followed by `readFile(path)` TOCTOU window is eliminated. *(Correction, 022-5-WO1: at the time of this note only the final path component was race-protected — a parent-directory swap still read outside files. Made true by the Round-3 identity binding.)*
+- **Hardlink Gate (FR-014)**:
+  Read targets with link counts `st_nlink > 1` are denied with typed `PathHardlinkRefusedError` (`PATH_HARDLINK_REFUSED`), preventing unauthorized file access through hardlinks created outside the workspace ceiling unless explicitly permitted by an operator opt-in.
+- **Offered-Lifetimes Truth in Multi-Tenant Mode (FR-015)**:
+  `buildApprovalOptions` / `buildApprovalChoices` and `ApprovalBroker` exclude `global` from the offered lifetimes list when `tenancyMode === "multi"`. If `global` lifetime is directly requested in multi-tenant mode, execution fails closed with `GlobalLifetimeForbiddenError` (`GLOBAL_LIFETIME_FORBIDDEN`) rather than a misleading `invalid-approval-response` denial.
+- **One-Bucket Unstamped CAS Semantics (FR-016)**:
+  Policy compare-and-set reconciliation now partitions capabilities into disjoint sets (`otherPrincipalCaps`, `unstampedCaps`, `currentPrincipalCaps`), merging unstamped capabilities exactly once (`[...otherPrincipalCaps, ...unstampedCaps, ...nextPrincipalCaps]`). This eliminates exponential 2^K capability duplication across sequential approvals while ensuring unstamped capabilities are never silently erased in multi-tenant mode.
+- **Sentinel Unification (FR-017)**:
+  `cli-user` literals have been removed from the codebase and unified into the single sentinel value `sdk-user`. Single-mode stamp and read operations across CLI and SDK surfaces consistently use `sdk-user`.
+  - *Migration Note*: Workspaces containing approvals previously stamped with `cli-user` will require one re-approval under `sdk-user`.
+- **Executable Mutation-Probe CI Step (FR-018)**:
+  `scripts/verify-mutation-probes.ts` has been hardened to spawn real `vitest run` processes per registered security guard under neutralization, asserting each journey turns red when its guard is neutralized. Grep-only checks and guard self-tests have been deleted. *(Superseded by the Claims corrections above: the guard self-test statement was inaccurate — the anti-vacuity counter self-test exists and remains.)*
+- **SDK In-Memory Backend Exports (FR-021)**:
+  `InMemoryAuditStore`, `InMemoryPolicyStore`, `InMemoryCapabilityLedger`, and `InMemoryReplayLedger` are exported directly from the SDK root (`seepient`), enabling embedders to construct isolated in-memory stores without deep imports.
+
+### Multi-tenant composition closure & isolated construction defaults (Spec 022-2)
+
+**Breaking changes:**
+- **Inverted Construction Defaults (FR-004, FR-005, FR-006)**:
+  `ProviderRuntime` default constructor (`new ProviderRuntime()`) is now isolated in-memory by default (`isIsolated: true`, empty config/credentials). For multi-tenant permission storage, explicit in-memory backends (`InMemoryAuditStore`, `InMemoryPolicyStore`, `InMemoryCapabilityLedger`, `InMemoryReplayLedger`) are provided and carry `isIsolated: true` by default. Ambient disk stores (`LocalPolicyStore`, `LocalAuditStore`, `PersistedCapabilityLedger`) remain ambient single-user stores (`isIsolated: false`). The legacy default provider runtime export has been removed with zero compatibility shims. For single-user Profile A scripts requiring host dotfiles and ambient credentials, call `createAmbientProviderRuntime()` explicitly or use bare SDK single-mode defaults.
+  - *Transition guidance*: See [docs/sdk/migration.md](docs/sdk/migration.md) for before/after migration examples.
+- **SDK & Transport `tools` Option String-Only (FR-011)**:
+  REST `POST /v1/chat` and WebSocket `chat` now accept only tool names (`string[]`). Passing arbitrary tool object definitions or non-string items is rejected at the boundary with HTTP 400 `BAD_REQUEST` ("Field 'tools' must be an array of strings") or WebSocket `VALIDATION_ERROR`.
+- **Mandatory Workspace in Multi-Tenant Mode (FR-010)**:
+  Calling `createSeepient` or `askSeepient` with `tenancy: "multi"` without an explicit non-empty `cwd` throws `TenancyWorkspaceRequiredError` (`TENANCY_WORKSPACE_REQUIRED`). Multi-tenant agents never inherit `process.cwd()`.
+- **Inference Egress & Fail-Closed Credentials (FR-014, FR-015, VULN-16)**:
+  In multi-tenant mode, omitting provider credentials throws `CredentialRequiredError` (`CREDENTIAL_REQUIRED`); inference calls never fall back to host environment variables in vendor libraries. Furthermore, directing inference requests to a custom `baseUrl` requires an explicit network capability grant (`model-egress` / `network-egress`), preventing Bearer-token exfiltration.
+- **Server Default In-Memory Stores & Runtime Guard (FR-007, FR-008, P1)**:
+  `runSeepientServer` and `seepient-server` in multi-tenant mode now default all storage backends (`auditStore`, `policyStore`, `capabilityLedger`, `replayLedger`) to isolated in-memory stores (`InMemoryAuditStore`, `InMemoryPolicyStore`, `InMemoryCapabilityLedger`, `InMemoryReplayLedger`) with zero writes to host `$HOME/.seepient` or `process.cwd()`. Injected stores must carry `isIsolated: true`. Passing an ambient runtime (`isIsolated !== true`) throws `TenancyRuntimeRequiredError`.
+- **Gateway Opt-In Guard on Server Multi Boot (FR-017, VULN-17)**:
+  `runSeepientServer` and `seepient-server` in multi-tenant mode no longer compose ambient operator gateway tools into tenant model contexts by default. Composed only when explicitly opted in via `gateway: true` with an explicit isolated storage directory (`gatewayOptions.storageDir`); omitting isolated storage throws `GATEWAY_ISOLATION_REQUIRED`.
+- **Worker Control Plane Token Derivation & Isolation (FR-018, P0-2, P0-W1, VULN-19)**:
+  The reference worker example control plane requires an authenticated per-tenant Bearer token on every request, deriving the caller's tenant principal exclusively from the token mapping (`KNOWN_TOKENS` dictionary or unguessable random tokens minted via `POST /api/auth/token` with `x-admin-key`). Any `principalId` field passed in request bodies (`POST /api/sessions`, `POST /api/audit`, `POST /api/policy`) is ignored to prevent token re-binding. Endpoints are partitioned by composite `principal:resource` keys; cross-tenant session enumeration returns empty lists; unauthenticated requests return 401.
+- **Sub-Store Stamp Regime & Credential Isolation (P1-B, P2-1, P2-10)**:
+  `validateTenancyCompleteness` and the HTTP server boot validator now require `isIsolated: true` on `runtime.configStore` and `runtime.credentialStore`. `MemoryCredentialStore` is stamped `isIsolated: true` and refuses to resolve ambient `{ kind: "env" }` references in isolated mode, throwing typed `CredentialRequiredError` upon lease acquisition instead of reading live `process.env`. `CompositeCredentialStore` sets `isIsolated = false` if configured with `primaryWriteStore: "file"`.
+- **SDK Tenancy Context Threading on Approval CAS Re-Read (P1-A)**:
+  `ActionLifecycle` now threads tenant `principalId` and `tenancyMode` into `policyStore.read(...)` during approval persistence and retries, preventing workspace-global capabilities (e.g. `write-root *`) from leaking into tenant execution envelopes.
+- **Server In-Memory Durable Approval Store (P2-4)**:
+  `createConnectionRegistry` and `DurableApprovalStore` support `inMemory: true` by default, eliminating ambient directory creation under `~/.seepient/security/approvals` on server boot.
+- **Machine-Readable CREDENTIAL_REQUIRED Code Across Connectors (P2-2)**:
+  `EffectBroker` missing-secret denials now consistently return typed `CREDENTIAL_REQUIRED` across http, Tavily, SMTP, and webhook connectors.
+- **Tenant Secret Resolution in Brokered Boundaries (FR-011, FR-013, FR-014)**:
+  Multi-tenant execution boundaries wired with `secretResolver` resolve tenant-injected secrets for brokered connector tools without host `process.env` fallback. Brokered tools requiring secrets fail closed with `CREDENTIAL_REQUIRED` if omitted by the tenant.
+- **Principal ID & Session Key Hardening (FR-008, FR-009, VULN-2)**:
+  `principalId` is validated against `/^[a-zA-Z0-9_-]{1,128}$/` at ingestion, eliminating path traversal (`../`). Session keys are compositely namespaced (`apiKeyHash:sessionId`), preventing session squatting across API keys.
+- **Injected Store Stamp Tightening (FR-005, P2-8)**:
+  In multi-tenant mode (`tenancy: "multi"`), all injected permission stores (`auditStore`, `policyStore`, `capabilityLedger`) must strictly carry `isIsolated: true`. Stamp-less custom store objects (`isIsolated === undefined`) or ambient stores (`isIsolated: false`) are rejected at construction with `TenancyStoreIncompleteError` (`TENANCY_STORE_INCOMPLETE`). Built-in in-memory stores carry this stamp automatically. See [docs/sdk/migration.md](docs/sdk/migration.md).
+- **Multi Policy Wildcard Ceilings Removed (FR-019, P2-5)**:
+  In multi-tenant mode, policy stores and fresh-install lifecycles no longer seed per-principal wildcard capabilities (`secret-ref "*"`, `network-destination https "*"`, `external-recipient "*"`). Stored policy reconciliation from Spec 017 is restricted to single-user mode. *Owner Decision on Tenant baseUrl Egress*: Custom `baseUrl` destinations in multi-tenant mode require an explicit `network-destination` or `model-egress` capability in the tenant's policy rather than inheriting an ambient wildcard. This prevents arbitrary egress while ensuring tenant credential routing is strictly governed.
+
+- **Cross-Tenant Session Disk Isolation & Lock Partitioning (Spec 022-3)**:
+  Persistence storage keys are now strictly composited as `apiKeyHash:sessionId`, isolating session files on disk (`${apiKeyHash}:${sessionId}.json`) and in backend storage. Turn writer locks (`inFlightTurns`) are strictly keyed by composite keys, ensuring concurrent turns across tenants sharing session IDs never block each other. Session deletion by one tenant never affects another tenant's session in memory or on disk.
+- **Image Inference Egress & Credential Hardening (OpenAI & Google Image Generation)**:
+  `OpenAIImageRaw` and `GoogleImageRaw` now strictly enforce multi-tenant isolation: omitting provider credentials fails closed with `CredentialRequiredError` (`CREDENTIAL_REQUIRED`), eliminating host environment key fallback (`OPENAI_API_KEY`, `GEMINI_API_KEY`). Directing image inference to custom `baseUrl` destinations requires explicit egress capability validation via quarantine-compliant `assertBaseUrlEgressAllowed`.
+- **Post-022-3 Security Remediation & Store Isolation Closure**:
+  - **Server Injected Store Isolation Assertion (P1-2)**: `runSeepientServer` verifies `isIsolated: true` on injected `auditStore`, `policyStore`, and `capabilityLedger` before booting, throwing `TenancyStoreIncompleteError` on ambient stores.
+  - **Outbox Directory Store Anchoring (P1-3)**: `TerminalEventOutbox` automatically anchors its pending outbox file to `store.dir/outbox`, eliminating ambient host writes to `~/.seepient/security/outbox`.
+  - **Media Vendor Operation Capability Forwarding (P1-4)**: `EffectBroker` forwards envelope capabilities through `vendorOperationHandler` to `generateImageRuntime`, enabling authorized custom `baseUrl` egress when granted `network-destination` capabilities.
+  - **LocalPolicyStore Slug Validation & Traversal Defense (P1-5)**: `LocalPolicyStore` enforces strict slug validation (`PRINCIPAL_ID_RE`) on `workspaceId`, throwing `InvalidPrincipalIdError` on directory traversal attempts.
+  - **Gateway Cross-Tenant Log Scoping (P1-6)**: `GET /v1/gateway/audit` and `GET /v1/gateway/usage` now strictly require `admin` scope instead of `agent:read`.
+  - **RateLimiter Bounded Memory & Eviction (P2-1)**: `RateLimiter` enforces bounded capacity (`MAX_BUCKETS = 10_000`) with idle bucket pruning (> 5 minutes) and LRU eviction under memory pressure.
+  - **Anti-Vacuity Security Guard Verification (P2-2)**: Pinned `guard.assertGuardedPathExecuted(1)` in inference-armed journeys to ensure fail-closed execution paths are guaranteed non-vacuous.
+  - **Server Custom `apiKeysFile` Decoupling (P2-3)**: `RunSeepientServerOptions` supports `apiKeysFile?: string;` to decouple containerized server deployments from ambient host `~/.seepient/server-keys.json`.
+
+**Added:**
+- **Shared Vendor Egress Assertion (`src/vendors/egress-check.ts`)**: Quarantine-compliant network egress validator usable across vendor image and language providers without violating internal architecture boundaries.
+- **`createIsolatedProviderRuntime()` & `createAmbientProviderRuntime()` Factories**: Explicit construction paths for isolated in-memory runtimes and ambient operator runtimes.
+- **`InMemoryReplayLedger`**: High-performance in-memory replay ledger for isolated multi-tenant execution, eliminating host disk contention and file locks.
+- **Typed Error Classes**: Exported `CredentialRequiredError` and `TenancyWorkspaceRequiredError` from `seepient`.
+- **Architecture Boundary Gates (FR-021)**: Structural assertions in CI preventing `createAmbientProviderRuntime` in `src/transport/http/**`, pi-ai auth imports outside vendor quarantine, and effect-executor imports reachable from the server composition root.
+- **Adversarial Regression Test Suite (FR-002, FR-003, FR-020)**: Journeys J1–J11 covering all 5 P0 vulnerability classes with anti-vacuity guard verification.
+
+### Multi-tenant isolation hardening & readiness remediation (Specs 022 & 022-1)
+
+**Breaking changes:**
+- **Migration from Deleted Exports**:
+  The following legacy global exports have been removed:
+  - Legacy global tool registration: **Deleted**. Pass `tools: [tool]` into `createSeepient` or `askSeepient`.
+  - Legacy global tool execution: **Deleted**. Tool execution is now private to the agent loop and governed execution boundary.
+  - Connector catalog mutators (`unregisterConnector`, `getRegisteredConnectors`, `resetConnectors`): **Deleted**. Connector registries are now instanced per agent via `createConnectorRegistry()`.
+- **`gateway.createGateway` signature inversion**: `createGateway(config, adapter)` now returns `{ gateway, tools }` instead of implicitly registering tools into a shared global registry. Pass returned `tools` explicitly into `createSeepient({ tools: gwResult.tools })` or `askSeepient({ tools: gwResult.tools })`.
+- **`CapabilityLedger` contract scoping**: `CapabilityLedger` methods (`load`, `consume`, `revoke`) now accept a `scope: { principalId: string }` parameter. Local storage layout is namespaced under `caps/<principalId>/ledger.ndjson` with principal-scoped locks and consumed-digest tracking.
+- **Fail-closed multi-tenancy validation**:
+  - Omitting `runtime` in multi-tenant mode throws `TENANCY_RUNTIME_REQUIRED`.
+  - Missing any required storage backends (`auditStore`, `policyStore`, `capabilityLedger`, or `persist`) without `stateless: true` throws `TENANCY_STORE_INCOMPLETE`.
+  - Writing outside injected stores in multi-tenant mode throws `TENANCY_AMBIENT_IO`.
+- **SDK `consentMode` defaults to deny-by-default**: When `consentMode` is omitted in `createSeepient` or `askSeepient`, execution defaults to deny-by-default (unpredeclared effectful tools are denied with typed explanation unless predeclared or an `approvalBroker` is supplied). This replaces obsolete defaults; effectful scripts must specify an explicit `consentMode` (e.g. `edit-enabled` or `autonomous`) or attach an `approvalBroker`.
+- **Session ID Length & Format Validation**: `sessionId` inputs now enforce a 128-character cap and alphanumeric/dash/underscore format validation; invalid session IDs throw `SessionIdInvalidError` (`SESSION_ID_INVALID`).
+- **Strict Persist Configuration Validation**: Passing invalid or unparseable `persist` configurations now throws `PersistConfigInvalidError` (`PERSIST_CONFIG_INVALID`) at construction rather than failing silently or causing downstream runtime errors.
+- **Environment Variable Cleanup**: Removed obsolete and unread `OPENAI_BASE_URL` and `OPENAI_MODEL` from `.env.example`. Model assignments should be configured via `seepient setup`, `seepient models set`, or `.seepient/setting.json`.
+- **Server Tenancy Threading (FR-021)**: HTTP server agent lifecycles now build with `tenancyMode: "multi"` scoped to the API key principal (`apiKeyHash`). Ambient unstamped legacy grants in the policy store are now invisible to server principals (policy reads run principal-filtered).
+  - *Transition guidance*: Operators should re-approve needed capabilities per API key, or seed per-principal stamped grants in the policy store. Foundational capabilities can be passed via `operatorBaseline`.
+- **Explicit `principalId` Required in Multi-Tenant Mode (FR-020)**: Setting `tenancy: "multi"` (explicit or upgraded) without providing an explicit `principalId` now throws a typed `PrincipalRequiredError` (`PRINCIPAL_REQUIRED`) at construction. The default `"sdk-user"` identity is restricted to single-user mode.
+  - *Transition guidance*: When configuring multi-tenant agents, pass a stable per-tenant identifier (e.g. `principalId: tenantId`).
+- **Server Loopback Default (FR-028)**: The HTTP/WebSocket server (`seepient-server`, `seepient server`, and `runSeepientServer`) now defaults to binding `127.0.0.1` (loopback) instead of `0.0.0.0` for local security.
+  - *Transition guidance*: To expose the server across all network interfaces, pass `--host 0.0.0.0`, set environment variable `SEEPIENT_HOST=0.0.0.0`, or specify `host: "0.0.0.0"` in `runSeepientServer` options. Official Docker images set `ENV SEEPIENT_HOST=0.0.0.0` out of the box.
+- **Docker and Headless Consent Mode Defaults (FR-019)**: The `--docker` and `--headless` (or `-n`) CLI flags no longer implicitly enable `autoConfirm: true` (which previously auto-approved all tool actions). Non-interactive and containerized environments now adhere to the standard deployment ceiling and consent boundaries; effectful tools requiring confirmation will fail with permission denials rather than executing automatically.
+  - *Transition guidance*: To run unattended or automated batch workflows requiring tool execution, pass `-y` / `--yes` or `--mode autonomous`, or configure `permissions.consentMode: "autonomous"` in `.seepient/setting.json`.
+- **Strict Cross-Source Skill Composition Order (FR-032)**: Skill `priority:` declarations in frontmatter now apply strictly *within* an individual source rather than globally across sources. Cross-source composition is strictly last-wins (injected sources override earlier filesystem sources, and inline skill literals override injected sources), guaranteeing predictable tenant shadowing.
+  - *Transition guidance*: If relying on high numeric `priority:` values to override downstream injected sources or inline literals, structure the injected `SkillSource` array in desired last-wins order or use inline literals.
+
+**Added:**
+- **`seepient server` CLI subcommand**: First-class command under the primary `seepient` binary with `--port`, `--host`, and `--generate-api-key` options, mirroring the standalone `seepient-server` binary.
+- **Typed Error Class Value Exports**: Exported `PersistConfigInvalidError`, `SessionIdInvalidError`, `PrincipalRequiredError`, `TenancyStoreIncompleteError`, and `TenancyRuntimeRequiredError` directly from `seepient`.
+- **Per-agent `ToolRegistry`**: Instanced tool registry providing private tool resolution, registration, and duplicate-name conflict prevention (`TOOL_NAME_CONFLICT`).
+- **Tenancy mode resolution & inference**: Explicit `tenancy: "single" | "multi"` option on `createSeepient` and `askSeepient`, with automatic upgrade to `multi` upon detection of multi-tenant injection signals (stores, runtime, principalId, skill sources, persist). Emits a one-time upgrade notice per process.
+- **Principal-scoped permission state**: All persisted capabilities stamped with `principalId` on write; `PolicyStore.read` filters by `principalId` in multi mode. Added `operatorBaseline` lifecycle input for unprompted foundational permissions across all tenants.
+- **Skills scoping on 021-1 seam**: In multi-tenant mode, ambient skill discovery under `$HOME/.seepient/skills` is disabled; agents load strictly injected `SkillSource`s.
+- **Regression fences**: FR-017 process-state invariant gate (`src/foundations/__tests__/process-state-invariant.test.ts`) with bidirectional drift detection, and the multi-tenant isolation matrix (`src/domain/permissions/__tests__/multi-tenant-isolation.test.ts`) covering all 8 isolation dimensions.
+- **Session adopt-or-create parity (FR-026)**: REST `POST /v1/chat` unifies session creation behavior with WebSocket chat: passing an unknown `sessionId` creates and adopts the session with the authenticated principal's ownership, eliminating cross-transport drift. `GET /v1/sessions/:id` continues returning 404 for nonexistent sessions.
+- **Durable server session enumeration (FR-030)**: Added optional `list?(filter)` method to `PersistenceBackend` contract and implemented on `FilePersistenceBackend`. `GET /v1/sessions` enumerates persisted sessions across server restarts.
+- **Server crash prevention & safe WebSocket messaging (FR-025)**: Replaced raw `ws.send` calls with `safeSend` across settings and session-control handlers; wrapped message dispatching in catch-all error handler echoing `clientMsgId`; added unhandled rejection handlers preventing process exits on client disconnects.
+- **Runtime injection parity across transports (FR-027)**: WebSocket provider mutation handlers now resolve and target the injected `ProviderRuntime`, achieving full parity with REST handlers.
+- **Request caps & payload enforcement (FR-029)**: Clamped `maxSteps` with server settings/env configuration and response echoing; unified HTTP 413 `PAYLOAD_TOO_LARGE` handling on provider management endpoints without abrupt socket destruction.
+- **Skills residuals & failure legibility (FR-032–FR-038)**: Enforced strict cross-source last-wins order independent of internal priority declarations; implemented content-first body precedence; introduced `SkillBodyUnavailableError` (`SKILL_BODY_UNAVAILABLE`) with typed error handling across REPL and TUI; protected REPL/TUI against null skill registry crashes; preserved unknown frontmatter during generated skill save; enforced `agent:read` scope on REST and WS skill listings with dynamic per-turn reflection; restored body size warnings honoring `SEEPIENT_SKILL_BODY_WARN_CHARS`.
+- **Release verification gate & platform testing (FR-039, FR-040)**: `pack:verify` now enforces `assertNotPlaceholder()`, refusing publication of placeholder native binaries on local and CI paths alike; added macOS test runner matrix in CI and release workflows for cross-platform JavaScript and native parity.
+
+### Injectable skill sources and inline tier (Spec 021-1)
+
+**Added:**
+- **Foundations-placed skill source contracts**: Relocated `SkillRecord`, `SkillSource`, `SkillStore`, and `SkillLiteral` to `src/foundations/contracts/skill-source.ts`. String-only and self-contained; zero upward layer imports. Exported from SDK entry (`seepient`).
+- **Unified tenancy-aware skill composition**: Single parse-and-last-wins composition pipeline in `initializeSkillRegistry`. Single mode composes `[new FsSkillSources(cwd), ...(sources ?? []), inline?]` (defaults byte-equivalent); multi mode composes `[...(sources ?? []), inline?]` with ambient discovery strictly disabled (022 invariant).
+- **Inline skill literals**: `skills` option on `askSeepient` and `createSeepient` accepts `SkillLiteral[]` (`{ name, content }[]`) for serverless functions, tests, and zero-infrastructure execution without requiring custom classes. Synthesized into an inline source attributed as `"inline"`, shadowing injected sources.
+- **`FsSkillSources` built-in**: First-class `SkillSource` surfacing the five filesystem discovery layers as raw records with source labels. Exported from SDK entry (`seepient`).
+- **Generated-skill write path (`saveGeneratedSkill`)**: New hook in `src/domain/skills/generated-skill-save.ts` targeting embedder-supplied `SkillStore`s with Spec 016 semantics (collision refusal with guidance, version and changelog increments, `kind: "generated"` stamp). Destination is the last `SkillStore` in the effective source list. Fails closed with `SKILL_STORE_UNAVAILABLE` on SDK paths with no store (zero disk writes).
+- **Reference `DbSkillSource` example**: Complete implementation in `examples/worker/` demonstrating remote database-backed global (`tenant_id is null`) and tenant (`= $1`) queries with shadowing against a stub control plane.
+- **Docs & disclosures**: "Skill sources" section added to `docs/sdk/skills.md` documenting the inline tier, composition matrix, silent-empty disclosure for serverless functions, and `outputFileTracingIncludes` Next.js packaging requirements; cross-linked in `docs/sdk/stateless-workers.md`.
+- **Review remediation & lazy loading restoration**: Fixed empty `skills: []` filter catalog leakage; enforced per-record warn-and-skip parsing; restored filesystem lazy-body loading and body cache; exported `saveGeneratedSkill`, `initializeSkillRegistry`, and typed error classes from SDK root; eliminated dead loader/parser code and consolidated frontmatter splitting into `splitFrontmatter`.
+- **Round 3 closure & input validation**: Fixed composition-winner body bug where rawContentMap retained shadowed content over later filesystem winners; enforced fail-closed input validation on REST (`/v1/chat`) and WS (`chat`) rejecting non-string skills arrays with 400/`VALIDATION_ERROR`; restored docs truth regarding runtime provider switcher, slash-path scope, and `@path` resolution.
+
 ## [v0.7.2] - 2026-09-06
 
 ### Model contract enforcement, resilient JSON parsing & TUI status truth

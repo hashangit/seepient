@@ -1,10 +1,10 @@
-import { readdir } from 'fs/promises';
+import { readdir, readFile } from 'fs/promises';
 import { join, dirname } from 'path';
 import { existsSync } from 'fs';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
-import { parseFrontmatter } from './parser.js';
-import { Skill } from './types.js';
+import { parseSkillContent } from './parser.js';
+import type { SkillRecord } from '../../foundations/contracts/skill-source.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -40,12 +40,15 @@ export function getSkillPaths(cwd: string): string[] {
   return paths;
 }
 
-export async function discoverSkills(cwd: string): Promise<Skill[]> {
+
+export async function discoverSkillRecords(cwd: string): Promise<SkillRecord[]> {
   const paths = getSkillPaths(cwd);
-  const skills = new Map<string, Skill>();
+  const records = new Map<string, { record: SkillRecord; priority: number; sourceIndex: number }>();
 
   // Load in reverse priority order so higher priority overwrites
-  for (const searchPath of [...paths].reverse()) {
+  const reversed = [...paths].reverse();
+  for (let sourceIndex = 0; sourceIndex < reversed.length; sourceIndex++) {
+    const searchPath = reversed[sourceIndex];
     if (!existsSync(searchPath)) continue;
 
     try {
@@ -56,13 +59,26 @@ export async function discoverSkills(cwd: string): Promise<Skill[]> {
         if (!existsSync(skillFile)) continue;
 
         try {
-          const skill = await parseFrontmatter(skillFile);
-          skill.basePath = join(searchPath, entry.name);
-          skill.source = searchPath;
+          const content = await readFile(skillFile, 'utf-8');
+          const skill = parseSkillContent(content, searchPath, skillFile);
+          const priority = skill.priority || 0;
 
-          const existing = skills.get(skill.name);
-          if (!existing || skill.priority >= existing.priority) {
-            skills.set(skill.name, skill);
+          const existing = records.get(skill.name);
+          if (
+            !existing ||
+            sourceIndex > existing.sourceIndex ||
+            (sourceIndex === existing.sourceIndex && priority >= existing.priority)
+          ) {
+            records.set(skill.name, {
+              record: {
+                name: skill.name,
+                content,
+                source: searchPath,
+                filePath: skillFile,
+              },
+              priority,
+              sourceIndex,
+            });
           }
         } catch (error: any) {
           console.warn(`Warning: Failed to load skill from ${skillFile}: ${error.message}`);
@@ -73,5 +89,5 @@ export async function discoverSkills(cwd: string): Promise<Skill[]> {
     }
   }
 
-  return Array.from(skills.values());
+  return Array.from(records.values()).map((r) => r.record);
 }

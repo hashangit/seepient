@@ -45,6 +45,7 @@ import {
 } from "./capability-store.js";
 import type { CapabilityLedger } from "../../foundations/contracts/capability-ledger.js";
 import { buildApprovalChoices, buildApprovalOptions } from "./approval-options.js";
+import { isGuardNeutralized } from "../../foundations/test-seams.js";
 import { realpathSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
@@ -174,7 +175,11 @@ function buildPermissionRequest(
       "action",
       "run",
       ...(sessionId ? (["session"] as const) : []),
-      ...(workspaceId ? (["project", "global"] as const) : []),
+      ...(workspaceId
+        ? (context.tenancyMode === "multi"
+            ? (isGuardNeutralized("R2-LIFETIME-TRUTH") ? (["project", "global"] as const) : (["project"] as const))
+            : (["project", "global"] as const))
+        : []),
     ],
     createdAt: now,
     expiresAt: now + deadlineMs,
@@ -270,7 +275,7 @@ export class PolicyEngine implements PolicyEngineContract {
     const opEffects = operationEffects(action.operation);
     for (const effect of opEffects) {
       const rule = isDeniedByRule(
-        context.immutableDenies,
+        context.immutableDenies ?? [],
         effect,
         this.firstTargetForEffect(action, effect),
       );
@@ -485,7 +490,7 @@ export class PolicyEngine implements PolicyEngineContract {
       pushLayer(trace, "backend", "deny");
       return deny(
         "approval-unavailable",
-        `Headless run: ${spec} is not predeclared. Pass consentMode (e.g. "autonomous") or provide an approval callback (approveTool).`,
+        `Headless run: ${spec} is not predeclared. Pass consentMode (e.g. "autonomous" or "edit-enabled") or provide an approval callback (approveTool). See docs/sdk/ask-seepient.md#permissions-and-consent-mode`,
         trace,
       );
     }
@@ -494,7 +499,7 @@ export class PolicyEngine implements PolicyEngineContract {
       pushLayer(trace, "backend", "deny");
       return deny(
         "approval-unavailable",
-        `Approval mode is 'never' and ${spec} is not predeclared. Pass consentMode (e.g. "autonomous") or provide an approval callback (approveTool).`,
+        `Approval mode is 'never' and ${spec} is not predeclared. Pass consentMode (e.g. "autonomous" or "edit-enabled") or provide an approval callback (approveTool). See docs/sdk/ask-seepient.md#permissions-and-consent-mode`,
         trace,
       );
     }
@@ -507,7 +512,9 @@ export class PolicyEngine implements PolicyEngineContract {
       "action",
       "run",
       ...(sessionId ? (["session"] as const) : []),
-      ...(context.workspaceId ? (["project", "global"] as const) : []),
+      ...(context.workspaceId
+        ? (context.tenancyMode === "multi" ? (["project"] as const) : (["project", "global"] as const))
+        : []),
     ];
     const approvalOptions = buildApprovalOptions({
       action,

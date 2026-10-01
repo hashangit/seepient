@@ -4,7 +4,7 @@ import * as os from "os";
 import * as path from "path";
 import { runAgentLoop } from "../agent-loop.js";
 import { createHookExecutor } from "../hooks.js";
-import { registerTool } from "../tool-executor.js";
+import { ToolRegistry } from "../tool-executor.js";
 import type { ToolDefinition } from "../../foundations/contracts/tool.js";
 import type { Message } from "../../foundations/types.js";
 import { createMockRuntime } from "./test-doubles.js";
@@ -24,7 +24,8 @@ const toolDef: ToolDefinition = {
 describe("tool-result metadata channel", () => {
   it("attaches metadata to the step but keeps it out of message history", async () => {
     // Register a tool that returns structured metadata (as write_file does).
-    registerTool({
+    const toolRegistry = new ToolRegistry([]);
+    toolRegistry.register({
       name: "Metadata Probe",
       risk: "safe",
       definition: toolDef,
@@ -55,6 +56,7 @@ describe("tool-result metadata channel", () => {
       model: "test",
       messages: [userMsg("run it")],
       toolDefs: [toolDef],
+      toolRegistry,
       maxSteps: 5,
       hooks: createHookExecutor(),
       autoConfirm: true,

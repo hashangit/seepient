@@ -64,6 +64,7 @@ describe("W151 — chatStream never persists an empty assistant on resolved erro
       persist: backend,
       tools: ["get_current_datetime"],
       skills: false,
+      tenancy: "single",
     });
 
     await expect(agent.chat("what time is it")).rejects.toThrow(/call failed after tool/);
@@ -90,6 +91,7 @@ describe("W151 — chatStream never persists an empty assistant on resolved erro
       persist: backend,
       tools: [],
       skills: false,
+      tenancy: "single",
     });
 
     const stream = await agent.chatStream("turn that fails");
@@ -114,6 +116,7 @@ describe("W151 — chatStream never persists an empty assistant on resolved erro
       persist: backend,
       tools: [],
       skills: false,
+      tenancy: "single",
     });
 
     const failing = await agent.chatStream("turn that fails");

@@ -11,10 +11,10 @@ Review this checklist before deploying Seepient in production environments.
 
 ## Security and permissions
 
-- [ ] **Consent mode configured**: Set `SEEPIENT_CONSENT_MODE` to `autonomous-trusted` for automated workers, or `always-ask` when an interactive operator is present.
+- [ ] **Consent mode configured**: Set `SEEPIENT_CONSENT_MODE` to `autonomous` for automated workers, `edit-enabled` (default) for standard development, or `ask-everything` when full human oversight is required.
 - [ ] **Sandboxing enabled**: Ensure `bubblewrap` is installed on Linux hosts (`bwrap --version`), or run inside isolated Docker worker containers.
 - [ ] **Exact commit enforcement active**: Confirm the native helper (`seepient-fs-commit`) is compiled and present in your deployment image. Do not disable pre-image hash verification.
-- [ ] **Audit log persisted**: Ensure `~/.seepient/audit.log` (or your custom `SEEPIENT_AUDIT_LOG` path) mounts to a persistent volume with `0600` permissions.
+- [ ] **Audit log persisted**: Ensure `~/.seepient/audit.log` (or your custom `SEEPIENT_AUDIT_LOG_PATH` path) mounts to a persistent volume with `0600` permissions.
 - [ ] **Secret isolation**: Verify that container worker environments do not inherit provider API keys or cloud metadata instance credentials.
 - [ ] **Network egress restrictions**: Block outbound access to cloud metadata IP (`169.254.169.254`) and internal control-plane ports.
 
@@ -22,7 +22,7 @@ Review this checklist before deploying Seepient in production environments.
 
 ## Storage and persistence
 
-- [ ] **Stateless mode verified**: If running in serverless or multi-tenant containers, inject all required store contracts (`sessionStore`, `auditStore`, `policyStore`, `capabilityLedger`) to guarantee zero local disk writes.
+- [ ] **Stateless mode verified**: If running in serverless or multi-tenant containers, inject all required store contracts (`persist`, `auditStore`, `policyStore`, `capabilityLedger`) to guarantee zero local disk writes.
 - [ ] **Session retention schedule**: Configure expiration or archival policies for completed session histories in your database.
 - [ ] **File-lock concurrency**: If sharing session directories across processes, confirm the filesystem supports POSIX file locks (`fcntl`).
 

@@ -25,21 +25,40 @@ export interface PendingApprovalRecord {
   continuationId: string;
   tenantId: string;
   sessionId: string;
+  /** Owning principal, bound at create() and asserted on every CAS (022-5 FR-013). */
+  principalId?: string;
   request: PermissionRequest;
   version: number;
   status: "pending" | "approved" | "denied" | "cancelled" | "expired";
   decision?: PermissionDecision;
 }
 export class DurableApprovalStore {
+  readonly isIsolated: boolean;
+  /** 022-5-WO1 T031: persistence failures are reported, never silently
+   *  dropped as floating promises (they escaped as unhandled rejections and
+   *  could kill the host process). Defaults to console.error; hosts with an
+   *  error surface should inject it. */
+  onPersistenceError: (err: unknown) => void = (err) => {
+    console.error("[durable-approval-store] persistence failure:", err instanceof Error ? err.stack : String(err));
+  };
+
+  private track(promise: Promise<unknown>): void {
+    promise.catch((err) => this.onPersistenceError(err));
+  }
   private readonly dir: string;
+  private readonly inMemory: boolean;
   private records = new Map<string, ApprovalRecord>();
   private pendingRecords = new Map<string, PendingApprovalRecord>();
-  constructor(opts?: { root?: string }) {
-    this.dir =
-      opts?.root ??
-      (process.env.SEEPIENT_SECURITY_DIR
-        ? path.join(process.env.SEEPIENT_SECURITY_DIR, "approvals")
-        : path.join(os.homedir(), ".seepient", "security", "approvals"));
+
+  constructor(opts?: { root?: string; inMemory?: boolean }) {
+    this.inMemory = opts?.inMemory ?? false;
+    this.isIsolated = this.inMemory;
+    this.dir = this.inMemory
+      ? ""
+      : (opts?.root ??
+          (process.env.SEEPIENT_SECURITY_DIR
+            ? path.join(process.env.SEEPIENT_SECURITY_DIR, "approvals")
+            : path.join(os.homedir(), ".seepient", "security", "approvals")));
   }
 
   private get file(): string {
@@ -47,6 +66,7 @@ export class DurableApprovalStore {
   }
 
   async load(): Promise<void> {
+    if (this.inMemory) return;
     await this.ensureDir();
     let raw: string;
     try {
@@ -55,18 +75,40 @@ export class DurableApprovalStore {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
       throw err;
     }
-    this.records = new Map();
-    this.pendingRecords = new Map();
+    // 022-5-WO4 T014 + pass-15 fix: merge disk entries UNDER live — a live
+    // decision (this process just transitioned a record via casSync) wins
+    // over a stale disk snapshot whose floating persist() hasn't landed.
+    // The old shape REPLACED both maps (decision wipe); the first WO4 shape
+    // merged but let disk overwrite live (same wipe, inverted comment). The
+    // rule now: on collision the NEWER entry wins (records by updatedAt with
+    // decided-beats-undecided as the tie-break; pending by version with
+    // non-pending-beats-pending), so a read racing persist() can neither
+    // lose a live decision nor resurrect a decided record to pending, while
+    // a genuinely newer cross-process decision still loads.
     for (const line of raw.split("\n")) {
       if (!line.trim()) continue;
       try {
         const obj = JSON.parse(line);
         if (obj.kind === "pending" || obj.continuationId) {
           const rec = obj as PendingApprovalRecord;
-          this.pendingRecords.set(rec.continuationId, rec);
+          const live = this.pendingRecords.get(rec.continuationId);
+          const diskWins =
+            !live ||
+            rec.version > live.version ||
+            (rec.version === live.version && live.status === "pending" && rec.status !== "pending");
+          if (diskWins) {
+            this.pendingRecords.set(rec.continuationId, rec);
+          }
         } else if (obj.request?.requestId) {
           const rec = obj as ApprovalRecord;
-          this.records.set(rec.request.requestId, rec);
+          const live = this.records.get(rec.request.requestId);
+          const diskWins =
+            !live ||
+            rec.updatedAt > live.updatedAt ||
+            (rec.updatedAt === live.updatedAt && live.decision === undefined && rec.decision !== undefined);
+          if (diskWins) {
+            this.records.set(rec.request.requestId, rec);
+          }
         }
       } catch {
         /* skip malformed lines */
@@ -98,7 +140,9 @@ export class DurableApprovalStore {
   }
 
   async getRequest(requestId: string): Promise<PermissionRequest | undefined> {
-    await this.load();
+    if (!this.inMemory) {
+      await this.load();
+    }
     const rec = this.records.get(requestId);
     if (!rec) return undefined;
     if (rec.request.expiresAt < Date.now()) return undefined; // expired
@@ -106,11 +150,14 @@ export class DurableApprovalStore {
   }
 
   async getDecision(requestId: string): Promise<PermissionDecision | undefined> {
-    await this.load();
+    if (!this.inMemory) {
+      await this.load();
+    }
     return this.records.get(requestId)?.decision;
   }
 
   private async ensureDir(): Promise<void> {
+    if (this.inMemory) return;
     await fs.mkdir(this.dir, { recursive: true, mode: 0o700 });
     try {
       await fs.chmod(this.dir, 0o700);
@@ -118,6 +165,7 @@ export class DurableApprovalStore {
   }
 
   private async persist(): Promise<void> {
+    if (this.inMemory) return;
     await this.ensureDir();
     const reqLines = [...this.records.values()].map((r) => JSON.stringify({ kind: "request", ...r }));
     const pendingLines = [...this.pendingRecords.values()].map((r) => JSON.stringify({ kind: "pending", ...r }));
@@ -151,13 +199,14 @@ export class DurableApprovalStore {
       continuationId: input.continuationId,
       tenantId: input.tenantId,
       sessionId: input.sessionId,
+      principalId: input.request.principalId,
       request: input.request,
       version: 1,
       status: "pending",
     };
     this.pendingRecords.set(input.continuationId, rec);
-    void this.saveRequest(input.request);
-    void this.persist();
+    this.track(this.saveRequest(input.request));
+    this.track(this.persist());
     return rec;
   }
 
@@ -179,17 +228,52 @@ export class DurableApprovalStore {
     if (!rec) return { status: "stale" };
     if (rec.status !== "pending") return { status: "duplicate", record: rec };
     if (rec.version !== expectedVersion) return { status: "stale" };
+    // 022-5-WO4 T016: a decision for a DIFFERENT requestId must not
+    // transition this record — it would plant the decision under a foreign
+    // key. Fail closed as stale.
+    if (decision.requestId !== rec.request.requestId) {
+      return { status: "stale" };
+    }
     if (rec.request.expiresAt <= now) {
       rec.status = "expired";
-      void this.persist();
+      this.track(this.persist());
       return { status: "expired", record: rec };
+    }
+    // 022-5 FR-013 + WO1 T011: the CAS is principal-bound — the record's
+    // owner is its stamped principalId, falling back to the request's. When
+    // an owner exists, a decision whose actorId is absent OR mismatched is
+    // stale (no mutation). Legacy records with no owner anywhere keep
+    // accepting any actor and expiring naturally.
+    // (Expiry is checked first: it is a property of the record, not of the
+    // actor, and transitioning pending->expired leaks nothing.)
+    const owner = rec.principalId ?? rec.request.principalId;
+    if (owner && (!decision.actorId || decision.actorId !== owner)) {
+      return { status: "stale" };
     }
     rec.status = decision.approved ? "approved" : "denied";
     rec.decision = decision;
     rec.version += 1;
-    this.records.set(continuationId, rec as any);
-    void this.resolveRequest(decision);
-    void this.persist();
+    // records stays keyed by requestId (022-5 FR-013) — the continuation map
+    // already holds this record; writing it here under the continuation id
+    // polluted the requestId namespace. The decision is written into the
+    // requestId map SYNCHRONOUSLY: resolveRequest alone early-returns when
+    // the floating saveRequest hasn't populated the entry yet, which made
+    // getDecision miss decided approvals (race caught by the T012 pin on CI).
+    const existingRecord = this.records.get(decision.requestId);
+    if (existingRecord) {
+      existingRecord.decision = decision;
+      existingRecord.updatedAt = now;
+      this.records.set(decision.requestId, existingRecord);
+    } else {
+      this.records.set(decision.requestId, {
+        request: rec.request,
+        decision,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    this.track(this.resolveRequest(decision));
+    this.track(this.persist());
     return { status: "transitioned", record: rec };
   }
   cas(
@@ -224,7 +308,7 @@ export class DurableApprovalStore {
     const rec = this.pendingRecords.get(continuationId);
     if (rec && rec.status === "pending") {
       rec.status = "cancelled";
-      void this.persist();
+      this.track(this.persist());
     }
   }
 
@@ -234,9 +318,8 @@ export class DurableApprovalStore {
     const isAllowed = typeof allowedInput === "function" ? allowedInput(rec.request) : allowedInput;
     if (!isAllowed) {
       rec.status = "denied";
-      void this.persist();
+      this.track(this.persist());
     }
   }
 }
 
-export { DurableApprovalStore as PendingApprovalStore };

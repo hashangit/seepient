@@ -40,14 +40,15 @@ console.log(agent.getUsage());
 
 ## Parameters
 
-::: tip Stateless Embedding
-For multi-tenant workers and cloud functions requiring full state injection (audit, policy, capability ledger, sessions), use `createSeepient` or `askSeepient`. See [Stateless Workers](/sdk/stateless-workers) for full architecture details.
+::: tip Stateless Embedding & Multi-Tenancy
+For multi-tenant workers and cloud functions requiring full state injection (audit, policy, capability ledger, sessions), use `createSeepient` or `askSeepient`. See [Stateless Workers](/sdk/stateless-workers) and [Multi-Tenant Isolation](/sdk/multi-tenant) for architecture, tenancy modes, and fail-closed rules.
 :::
 
 ### `options` (optional)
 
 | Name            | Type                                     | Default                    | Description |
 |-----------------|------------------------------------------|----------------------------|-------------|
+| `tenancy`       | `"single" \| "multi"`                    | `"single"` (auto-upgraded to `"multi"` if tenant signals detected) | Tenancy mode. `"multi"` enforces fail-closed storage and runtime injection |
 | `model`         | `string`                                 | Provider default           | Model identifier, e.g. `"gpt-5.4"`, `"claude-sonnet-4-6-20260320"` |
 | `provider`      | `string`                                 | `"openai"`                 | Feeds the permission pipeline's `modelProviderClass` audit label |
 | `purpose`       | `Purpose`                                | `"text"`                   | Purpose routing hint (see [Purpose reference](/sdk/types#purpose) for all 15 supported values) |
@@ -59,7 +60,7 @@ For multi-tenant workers and cloud functions requiring full state injection (aud
 | `overlayFile`   | `string`                                 | *(none)*                   | Config overlay file path, or `":memory:"` for zero-disk ephemeral agents |
 | `adapter`       | `InferenceAdapter`                       | `AggregateInferenceAdapter`| Custom inference adapter or test double |
 | `override`      | `{ providerAccount?, model?, thinkingLevel? }` | *(none)*             | Per-instance model and account override |
-| `runtime`       | `ProviderRuntime`                        | `getDefaultProviderRuntime()` | Provider runtime instance managing credentials, configurations, and inference adapters |
+| `runtime`       | `ProviderRuntime`                        | `createAmbientProviderRuntime()` in single-mode; required isolated runtime in multi-mode | Provider runtime instance managing credentials, configurations, and inference adapters |
 | `principalId`   | `string`                                 | `"sdk-user"`               | Identity of the calling principal/user, threaded into audit events and capability grants |
 | `sessionId`     | `string`                                 | Auto-generated UUID        | Explicit session ID (`^[a-zA-Z0-9_-]+$`) for tracking and persistence |
 | `auditStore`    | `AuditStore`                             | Local file audit store     | Injected audit store for recording action lifecycle events |
@@ -67,7 +68,7 @@ For multi-tenant workers and cloud functions requiring full state injection (aud
 | `capabilityLedger` | `CapabilityLedger`                    | Local file capability ledger | Injected ledger for capability lease consumption and revocations |
 | `systemPrompt`  | `string`                                 | `"You are a helpful assistant."` | System prompt prepended to every conversation |
 | `tools`         | `(string \| UserToolDefinition \| AnyToolRegistration)[]` | All built-in               | Tool names, group constants, or custom tool registrations (`trustedHostTool`, `preparedTool`, `brokerConnector`) |
-| `consentMode`   | `ConsentMode`                            | `"edit-enabled"`           | Permission consent mode (`"ask-everything"`, `"edit-enabled"`, `"autonomous"`) |
+| `consentMode`   | `ConsentMode`                            | deny-by-default            | Permission consent mode (`"ask-everything"`, `"edit-enabled"`, `"autonomous"`). When omitted, unpredeclared effectful tools are denied unless pre-granted in policy or an `approvalBroker` is supplied |
 | `deploymentCeiling` | `CapabilitySet \| Capability[]`      | *(none)*                   | Maximum capability lease permitted for any execution |
 | `principalPolicy` | `CapabilitySet \| Capability[]`        | *(none)*                   | Pre-granted capabilities for the calling principal |
 | `approveTool`   | `ApproveToolFn`                          | *(none)*                   | Interactive tool approval callback |
@@ -76,6 +77,7 @@ For multi-tenant workers and cloud functions requiring full state injection (aud
 | `network`       | `BrokerNetworkAdapter`                   | Standard adapter           | Custom broker network adapter with SSRF / IP pinning rules |
 | `cwd`           | `string`                                 | `process.cwd()`            | Workspace directory for file operations and skill discovery |
 | `skills`        | `string[] \| boolean`                    | `true`                     | Specific skill names, `true` for all, or `false` to disable skill scanning and catalog injection |
+| `sources`       | `SkillSource[]`                          | *(none)*                   | Injected skill sources for multi-tenant skill scoping. Disables ambient skill discovery in `multi` mode |
 | `maxSteps`      | `number`                                 | `10`                       | Maximum agent loop iterations per call |
 | `persist`       | `string \| PersistenceBackend \| PersistenceConfig` | *(none)*          | Directory path, backend instance, or config object (e.g. `{ type: "memory" }`). File persistence writes are **atomic** (tmp + rename). |
 | `hooks`         | `Hooks`                                  | *(none)*                   | Lifecycle callbacks |
@@ -236,25 +238,32 @@ import { createSeepient } from "seepient";
 
 // Option 1: File-based persistence (just pass a path)
 const agent = await createSeepient({
+  tenancy: "single",
   persist: "./sessions/my-agent",
 });
 
 // Option 2: In-memory persistence (great for testing)
 const agent2 = await createSeepient({
+  tenancy: "single",
   persist: { type: "memory" },
 });
 
 // Option 3: Explicit file config
 const agent3 = await createSeepient({
+  tenancy: "single",
   persist: { type: "file", path: "/var/data/sessions" },
 });
 
 await agent.chat("My name is Alice");
 await agent.chat("I'm working on a React project");
 
-// In a new process, recreate the agent with the same persist path:
-// const agent2 = await createSeepient({ persist: "./sessions/my-agent" });
-// The conversation history will be loaded automatically.
+// In a new process, recreate the agent with the same persist path and sessionId:
+// const agent2 = await createSeepient({
+//   tenancy: "single",
+//   sessionId: "my-session-id",
+//   persist: "./sessions",
+// });
+// To resume a previous conversation, the caller must supply the same sessionId.
 ```
 
 #### Custom persistence backends
@@ -290,6 +299,7 @@ registerBackend("redis", (config) => new RedisBackend(config.url as string));
 
 // Then use by type name
 const agent = await createSeepient({
+  tenancy: "single",
   persist: { type: "redis", url: "redis://localhost:6379" },
 });
 ```
@@ -305,7 +315,7 @@ const myBackend: PersistenceBackend = {
   async list() { return []; },
 };
 
-const agent = await createSeepient({ persist: myBackend });
+const agent = await createSeepient({ tenancy: "single", persist: myBackend });
 ```
 
 ### Dynamic tools

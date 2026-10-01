@@ -144,7 +144,7 @@ describe("F1 (REST) — draft resolution at the session store", () => {
 
     expect(res.statusCode).toBe(200);
     // Store: exactly ONE user row (deduped), no back-to-back user bubbles
-    const stored = await backend.load("f1-dedupe") as unknown as { messages: Message[] };
+    const stored = (await backend.load(`${keyHash}:f1-dedupe`) ?? await backend.load("f1-dedupe")) as unknown as { messages: Message[] };
     expect(stored.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
     expect(stored.messages.filter((m) => m.content === "What is the capital of France?")).toHaveLength(1);
     void seenMessages;
@@ -188,7 +188,7 @@ describe("F1 (REST) — draft resolution at the session store", () => {
     // History captured AFTER resolution: the stale draft is gone
     expect(capturedHistory.map((m) => m.role)).toEqual([]);
     // Store: the new prompt replaced the draft — one user row, one assistant row
-    const stored = await backend.load("f1-supersede") as unknown as { messages: Message[] };
+    const stored = (await backend.load(`${keyHash}:f1-supersede`) ?? await backend.load("f1-supersede")) as unknown as { messages: Message[] };
     expect(stored.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
     expect(stored.messages[0].content).toBe("Why did the deploy fail?");
   });
@@ -198,6 +198,7 @@ describe("F1 (SDK) — draft resolution in createSeepient", () => {
   it("an identical retry dedupes; the model input alternates with the text once", async () => {
     const { runtime, seenMessages } = recordingRuntime(1);
     const agent = await createSeepient({
+      tenancy: "single",
       runtime: runtime as any,
       persist: new MemoryPersistenceBackend(),
       tools: [],
@@ -220,6 +221,7 @@ describe("F1 (SDK) — draft resolution in createSeepient", () => {
   it("a different follow-up supersedes the failed draft", async () => {
     const { runtime, seenMessages } = recordingRuntime(1);
     const agent = await createSeepient({
+      tenancy: "single",
       runtime: runtime as any,
       persist: new MemoryPersistenceBackend(),
       tools: [],
@@ -250,6 +252,7 @@ describe("F1 (SDK) — draft resolution in createSeepient", () => {
 
     const { runtime, seenMessages } = recordingRuntime(0);
     const agent = await createSeepient({
+      tenancy: "single",
       runtime: runtime as any,
       persist: backend,
       sessionId: "legacy-pair",

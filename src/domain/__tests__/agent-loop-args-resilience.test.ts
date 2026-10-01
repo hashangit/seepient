@@ -7,7 +7,7 @@ import {
   parseToolArguments,
 } from "../agent-loop.js";
 import { createMockRuntime } from "./test-doubles.js";
-import { getAllToolDefinitions } from "../tool-executor.js";
+import { ToolRegistry } from "../tool-executor.js";
 import { diskBackedFakeHelper } from "../../capabilities/execution/__tests__/helpers/commit-helper-fakes.js";
 
 describe("Tool Argument Resilience & Contract Enforcement", () => {
@@ -89,11 +89,13 @@ describe("Tool Argument Resilience & Contract Enforcement", () => {
       ]);
 
       const steps: any[] = [];
+      const toolRegistry = new ToolRegistry();
       await runAgentLoop({
         runtime,
         model: "mock-model",
         messages: [{ id: "1", role: "user", content: "Write analysis", timestamp: Date.now() }],
-        toolDefs: getAllToolDefinitions(),
+        toolDefs: toolRegistry.definitions(),
+        toolRegistry,
         maxSteps: 5,
         cwd: tempDir,
         autoConfirm: true,
@@ -126,11 +128,13 @@ describe("Tool Argument Resilience & Contract Enforcement", () => {
       ]);
 
       const steps: any[] = [];
+      const toolRegistry = new ToolRegistry();
       await runAgentLoop({
         runtime,
         model: "mock-model",
         messages: [{ id: "1", role: "user", content: "Write broken file", timestamp: Date.now() }],
-        toolDefs: getAllToolDefinitions(),
+        toolDefs: toolRegistry.definitions(),
+        toolRegistry,
         maxSteps: 5,
         cwd: tempDir,
         autoConfirm: true,

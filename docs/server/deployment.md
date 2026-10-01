@@ -11,33 +11,30 @@ Seepient Agent Server is a stateless Node.js process that can be deployed as a D
 
 ### Build and run
 
+Build the Docker container image locally from the repository root:
+
 ```bash
-docker run -d -p 7337:7337 \
-  -e ANTHROPIC_API_KEY=sk-ant-... \
-  -v ~/.seepient:/root/.seepient \
-  seepient-server
+git clone https://github.com/seepient/seepient.git
+cd seepient
+docker build -t seepient .
 ```
 
-### With multiple providers
+Run the server with an API key and persistent storage volume for the non-root `appuser`:
 
 ```bash
 docker run -d -p 7337:7337 \
-  -e OPENAI_API_KEY=sk-... \
-  -e ANTHROPIC_API_KEY=sk-ant-... \
-  -e GLM_API_KEY=... \
-  -e LLM_PROVIDER=anthropic \
-  -v ~/.seepient:/root/.seepient \
-  seepient-server
+  -v seepient-data:/home/appuser/.seepient \
+  seepient
 ```
 
 ### With custom session directory
 
 ```bash
 docker run -d -p 7337:7337 \
-  -e ANTHROPIC_API_KEY=sk-ant-... \
   -e SEEPIENT_SESSION_DIR=/data/sessions \
   -v session-data:/data/sessions \
-  seepient-server
+  -v seepient-data:/home/appuser/.seepient \
+  seepient
 ```
 
 ### Docker Compose
@@ -45,23 +42,23 @@ docker run -d -p 7337:7337 \
 ```yaml
 services:
   seepient:
-    image: seepient-server
+    image: seepient
     build: .
     ports:
       - "7337:7337"
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - LLM_PROVIDER=anthropic
       - SEEPIENT_SESSION_TTL=86400
     volumes:
-      - ./data/.seepient:/root/.seepient
+      - seepient-data:/home/appuser/.seepient
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7337/v1/health"]
       interval: 30s
       timeout: 5s
       retries: 3
+
+volumes:
+  seepient-data:
 ```
 
 ## Google Cloud Run
@@ -73,7 +70,7 @@ gcloud run deploy seepient \
   --min-instances 1 \
   --max-instances 10 \
   --timeout 3600 \
-  --set-env-vars "ANTHROPIC_API_KEY=sk-ant-..."
+  --set-env-vars "SEEPIENT_SESSION_TTL=86400"
 ```
 
 ### Cloud Run WebSocket considerations
@@ -95,7 +92,7 @@ gcloud run deploy seepient \
   --min-instances 1 \
   --max-instances 10 \
   --timeout 3600 \
-  --set-secrets "ANTHROPIC_API_KEY=anthropic-key:latest"
+  --set-env-vars "SEEPIENT_SESSION_TTL=86400"
 ```
 
 ## Bare metal / Node.js
@@ -106,8 +103,8 @@ gcloud run deploy seepient \
 # Install
 npm install -g seepient
 
-# Run with environment
-ANTHROPIC_API_KEY=sk-ant-... seepient server
+# Run server
+seepient server
 ```
 
 ### Programmatic
@@ -161,11 +158,12 @@ server.dispose();   // un-registers handlers + closes the server
 server.close();     // close event detaches the signal handlers as well
 ```
 
-**Multiple servers per process.** Each `runSeepientServer()` call creates a
-fully independent HTTP + WebSocket stack (per-instance WebSocket server,
-connection registry, approval store). Closing one server never closes another
-server's connections. One caveat: default on-disk state (sessions under
-`./.seepient/sessions`, the local audit store, durable approvals under
+**Multiple servers per process.** `runSeepientServer` can be called more than
+once in the same process (for example, to serve from an Express or Fastify
+app, a CLI, or a test harness). Each call creates its own
+isolated HTTP server and WebSocket server instances.
+
+However, ambient operator state (`~/.seepient/setting.json` and
 `~/.seepient`) is process-wide by default — when embedding multiple servers,
 inject per-server `persist`, `auditStore`, `policyStore`, and
 `capabilityLedger` contracts to keep their state separated (see
@@ -177,35 +175,71 @@ inject per-server `persist`, `auditStore`, `policyStore`, and
 npm install -g pm2 seepient
 
 # Start with PM2
-ANTHROPIC_API_KEY=sk-ant-... pm2 start "seepient server" --name seepient
+pm2 start "seepient server" --name seepient
 
 # Save for auto-restart
 pm2 save
 pm2 startup
 ```
 
-## Provider environment variables
+## Server environment variables
 
 | Variable | Description | Required |
 |---|---|---|
-| `OPENAI_API_KEY` | OpenAI API key | For OpenAI provider |
-| `OPENAI_MODEL` | Default OpenAI model (default: `gpt-5.4`) | No |
-| `ANTHROPIC_API_KEY` | Anthropic API key | For Anthropic provider |
-| `ANTHROPIC_MODEL` | Default Anthropic model (default: `claude-sonnet-4-6-20260320`) | No |
-| `GLM_API_KEY` | GLM API key | For GLM provider |
-| `GLM_MODEL` | Default GLM model (default: `glm-5.1`) | No |
-| `OPENAI_COMPAT_API_KEY` | API key for OpenAI-compatible provider | For compatible provider |
-| `OPENAI_COMPAT_BASE_URL` | Base URL for OpenAI-compatible provider | For compatible provider |
-| `LLM_MODEL` | Default model for OpenAI-compatible provider (default: `gpt-5.4`) | No |
-| `LLM_PROVIDER` | Default provider (auto-detected if not set) | No |
+| `SEEPIENT_API_KEYS_FILE` | Path to server API keys JSON file | No |
+| `SEEPIENT_SESSION_DIR` | Directory for file-backed sessions | No |
+| `SEEPIENT_SESSION_TTL` | Session TTL in seconds (default: 86400) | No |
 | `SEEPIENT_SKILLS_PATH` | Colon-separated paths to skill directories | No |
 | `SEEPIENT_MAX_BODY_BYTES` | Request body size cap in bytes across all REST routes — chat, settings, gateway, and provider management (default: 10485760). Set to `0` for an unlimited body size | No |
 | `SEEPIENT_CORS_ORIGINS` | Comma-separated CORS origin allowlist, or `*` to reflect any origin (default: no CORS headers at all) | No |
 | `SEEPIENT_WS_MAX_CONNECTIONS_PER_KEY` | Per-key WebSocket connection cap (default: 50); dead peers are terminated by a 30s heartbeat sweep and release their slot | No |
 | `SEEPIENT_RATE_LIMIT_RPM` | Per-key requests-per-minute cap for REST and WebSocket traffic (default: 300). Set to `0` to disable | No |
 
-::: tip Provider auto-detection
-If `LLM_PROVIDER` is not set, the server uses the first configured provider. If `OPENAI_API_KEY` is set, OpenAI becomes the default. Otherwise, the first provider with a configured API key is used.
+::: warning Server provider isolation
+The standalone server binary boots with an isolated empty provider runtime by default, and never reads provider keys from the host environment (022-5 demolition). There are exactly two ways to give the server durable providers (on a multi-tenant server, provider-management mutations and model refresh are limited to each configured account's own host — the operator baseline is derived from the providers file at boot and printed to stderr at startup):
+
+1. **`--providers-file <path>`** (or `runSeepientServer({ providersFile })`) — an operator-owned JSON file read once at boot into the isolated runtime. It carries provider accounts, model assignments, and credentials (the file is the operator's plaintext secret surface — mount it read-only and keep it out of tenant-visible volumes; `chmod 600`):
+   ```json
+   {
+     "providers": {
+       "openai-main": {
+         "adapter": "pi-ai",
+         "upstreamProvider": "openai",
+         "credential": { "kind": "seepient", "id": "openai-main-key" }
+       }
+     },
+     "modelAssignments": {
+       "text": { "standard": { "providerAccount": "openai-main", "model": "gpt-5-nano" } }
+     },
+     "credentials": {
+       "openai-main-key": { "kind": "api_key", "keyValue": "sk-..." }
+     }
+   }
+   ```
+   The file is never written back to; runtime mutations via the provider management API stay in-memory and are lost on restart.
+
+2. **Inject a runtime when embedding**: `runSeepientServer({ runtime })` with an isolated `ProviderRuntime` you constructed yourself, stamped `tenancyMode: "multi"` (e.g. `createIsolatedProviderRuntime({ tenancyMode: "multi", ... })`) — an unstamped runtime is refused at boot with `TENANCY_RUNTIME_REQUIRED` rather than silently composing without egress enforcement.
+
+Note: `.seepient/setting.json` in a mounted volume is **not** read for provider configuration — the isolated runtime never reads ambient settings files.
+
+**Egress gating for `baseUrl` accounts (multi-tenant arming).** The server composes its runtime in multi-tenant mode, and every provider account that carries a `baseUrl` must have that host covered by an operator-baseline `network-destination` capability. Without the grant:
+
+- `POST /v1/providers/:id/refresh-models` denies with `EGRESS_REQUIRED` **before any network traffic** (not even DNS resolves).
+- `PUT /v1/providers/:id` with a `baseUrl` denies with `400 EGRESS_REQUIRED` — an ungranted host cannot be planted, even by a `provider:admin` key.
+
+Accounts without a `baseUrl` (default provider endpoints) are unaffected. The standalone CLI has no flag for baselines; embedders grant them at boot:
+
+```typescript
+const server = await runSeepientServer({
+  host: "127.0.0.1",
+  port: 7337,
+  providersFile: "/config/providers.json",
+  operatorBaseline: [
+    // Grant the operator's own relay; port is optional and narrows the grant.
+    { kind: "network-destination", scheme: "https", host: "relay.example.com" },
+  ],
+});
+```
 :::
 
 ## Error codes
@@ -217,6 +251,7 @@ If `LLM_PROVIDER` is not set, the server uses the first configured provider. If 
 | `UNAUTHORIZED` | 401 | No | Invalid or missing API key |
 | `FORBIDDEN` | 403 | No | API key lacks required scope |
 | `BAD_REQUEST` | 400 | No | Invalid request body or missing fields |
+| `EGRESS_REQUIRED` | 400 | No | Provider account `baseUrl` host is not covered by an operator-baseline `network-destination` capability (multi-tenant egress gating) |
 | `NOT_FOUND` | 404 | No | Endpoint or session not found |
 | `PROVIDER_ERROR` | 502 | Yes | LLM provider returned an error |
 | `GENERATION_ERROR` | 500 | Yes | Text generation failed |
@@ -271,17 +306,17 @@ Response:
 ```json
 {
   "status": "ok",
-  "version": "0.1.1",
+  "version": "0.8.0",
   "uptime": 3600
 }
 ```
 
 ## Production checklist
 
-- [ ] Set at least one provider API key via environment variable
+- [ ] Configure at least one provider account via `--providers-file` (the server never reads provider API keys from the host environment; configured accounts' hosts form the derived egress baseline)
 - [ ] Generate API keys with minimal required scopes
 - [ ] Verify `~/.seepient/server-keys.json` permissions are `0600`
-- [ ] Mount a persistent volume for `./.seepient/sessions/` if using sessions
+- [ ] Mount a persistent volume for `./.seepient/sessions/` (or `SEEPIENT_SESSION_DIR`) if using sessions
 - [ ] Configure health check against `/v1/health`
 - [ ] Set `SEEPIENT_SESSION_TTL` appropriate for your use case
 - [ ] Enable WebSocket heartbeat (ping/pong every 30s) for Cloud Run deployments

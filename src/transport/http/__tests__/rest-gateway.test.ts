@@ -184,6 +184,30 @@ describe('REST gateway handler', () => {
     expect(res._statusCode).toBe(403);
   });
 
+  it('admin scope required for audit logs (P1-6)', async () => {
+    (hasScope as ReturnType<typeof vi.fn>).mockImplementation(
+      (_entry: any, scope: string) => scope === 'agent:read',
+    );
+    const { handler } = createHandler();
+    const req = mockReq('GET', '/v1/gateway/audit');
+    const res = mockRes();
+    await handler(req, res, '/v1/gateway/audit', 'GET');
+    expect(res._statusCode).toBe(403);
+    expect(res._json().error.code).toBe('FORBIDDEN');
+  });
+
+  it('admin scope required for usage summary (P1-6)', async () => {
+    (hasScope as ReturnType<typeof vi.fn>).mockImplementation(
+      (_entry: any, scope: string) => scope === 'agent:read',
+    );
+    const { handler } = createHandler();
+    const req = mockReq('GET', '/v1/gateway/usage');
+    const res = mockRes();
+    await handler(req, res, '/v1/gateway/usage', 'GET');
+    expect(res._statusCode).toBe(403);
+    expect(res._json().error.code).toBe('FORBIDDEN');
+  });
+
   // ── Management endpoints (body needed) ────────────────────────────
 
   it('PATCH toggle target → 200 on success', async () => {

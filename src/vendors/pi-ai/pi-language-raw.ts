@@ -30,6 +30,7 @@ import {
   canonicalToPiMessages,
   canonicalToPiTools,
 } from "./pi-canonical-converter.js";
+import { assertBaseUrlEgressAllowed } from "../egress-check.js";
 
 type AssistantContentBlock = TextBlock | ReasoningBlock | ToolUseBlock;
 
@@ -104,7 +105,27 @@ async function resolveSecretApiKey(
   credentialStore?: any,
   signal?: AbortSignal,
 ): Promise<string | undefined> {
-  if (!secret) return undefined;
+  // 022-5 FR-007 (tenancy-invariant): the vendored pi-ai layer falls back to
+  // host environment keys whenever apiKey is undefined or empty — an
+  // unresolvable credential may never degrade to undefined here.
+  if (secret?.kind === "none") {
+    // No-auth endpoint: explicit sentinel satisfies the vendored
+    // hasExplicitApiKey check so withEnvApiKey never reads the environment.
+    return "unused";
+  }
+  const isOAuthSecret = secret?.kind === "pi_oauth" || secret?.kind === "oauth";
+  if (!isOAuthSecret && (!secret || secret.kind !== "api_key" || !secret.value)) {
+    // 022-5 FR-007 (tenancy-invariant): undefined or empty keys must never
+    // degrade further — the vendored layer would read host process.env.
+    // OAuth secrets skip this gate; the branches below handle them.
+    throw new InferenceError({
+      code: "auth",
+      message: `CREDENTIAL_REQUIRED: Inference requires an explicit api_key credential for provider "${target.upstreamProvider}" — configure it through provider management.`,
+      providerAccount: target.providerAccount,
+      model: target.model,
+      retryable: false,
+    });
+  }
   if (secret.kind === "api_key") {
     return secret.value;
   }
@@ -232,7 +253,20 @@ export class PiLanguageRaw implements LanguageBackend {
         this.models.getProviders().some((p) => p.id === providerName));
     const piProvider = model ? (model.provider || providerName) : (isKnown ? providerName : "openai");
 
-    if (!isKnown && !target.baseUrl) {
+    if (opts?.tenancyMode === "multi") {
+      if (!isKnown) {
+        throw new InferenceError({
+          code: "invalid_request",
+          message: `Custom or unknown upstream provider "${target.upstreamProvider}" synthetic fallback to "openai" is forbidden in multi-tenant mode.`,
+          providerAccount: target.providerAccount,
+          model: target.model,
+          retryable: false,
+        });
+      }
+      if (target.baseUrl) {
+        assertBaseUrlEgressAllowed(target.baseUrl, opts.capabilities, target);
+      }
+    } else if (!isKnown && !target.baseUrl) {
       throw new InferenceError({
         code: "invalid_request",
         message: `Custom or unknown upstream provider "${target.upstreamProvider}" requires a baseUrl`,
@@ -287,6 +321,7 @@ export class PiLanguageRaw implements LanguageBackend {
       signal,
       apiKey,
       maxTokens: req.maxOutputTokens,
+      temperature: req.temperature,
       timeoutMs: opts?.timeoutMs,
     };
 

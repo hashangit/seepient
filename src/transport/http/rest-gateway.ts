@@ -64,8 +64,9 @@ function requireAuth(
   req: IncomingMessage,
   res: ServerResponse,
   scope: "agent:read" | "admin",
+  apiKeysFile?: string,
 ): boolean {
-  const key = authMiddleware(req);
+  const key = (req as any).apiKey ?? authMiddleware(req, apiKeysFile);
   if (!key) {
     sendError(res, 401, "UNAUTHORIZED", "Missing or invalid API key");
     return false;
@@ -141,9 +142,13 @@ export function createGatewayRestHandler(ctx: {
   importOpenApiSpec: ImportOpenApiSpec;
   /** B5: the operator-configured body cap (server.maxBodyBytes). */
   maxBodyBytes?: number;
+  apiKeysFile?: string;
 }): (req: IncomingMessage, res: ServerResponse, path: string, method: string) => Promise<void> {
-  const { gateway, settingsAdapter, importOpenApiSpec } = ctx;
+  const { gateway, settingsAdapter, importOpenApiSpec, apiKeysFile } = ctx;
   const maxBodyBytes = ctx.maxBodyBytes;
+
+  const auth = (req: IncomingMessage, res: ServerResponse, scope: "agent:read" | "admin") =>
+    requireAuth(req, res, scope, apiKeysFile);
 
   return async function handleGatewayRoute(
     req: IncomingMessage,
@@ -161,22 +166,22 @@ export function createGatewayRestHandler(ctx: {
     try {
       switch (route.handler) {
         case "list_targets": {
-          if (!requireAuth(req, res, "agent:read")) return;
+          if (!auth(req, res, "agent:read")) return;
           sendJSON(res, 200, { targets: gateway.getTargets() });
           break;
         }
         case "audit": {
-          if (!requireAuth(req, res, "agent:read")) return;
+          if (!auth(req, res, "admin")) return;
           sendJSON(res, 200, { logs: gateway.getAuditLogs() });
           break;
         }
         case "usage": {
-          if (!requireAuth(req, res, "agent:read")) return;
+          if (!auth(req, res, "admin")) return;
           sendJSON(res, 200, { usage: gateway.getUsageSummary() });
           break;
         }
         case "register_target": {
-          if (!requireAuth(req, res, "admin")) return;
+          if (!auth(req, res, "admin")) return;
           const body = await parseJsonBody<{ name: string; target: import("../../capabilities/gateway/types.js").Target }>(req, res, maxBodyBytes);
           if (!body) return;
           if (!body.name || !body.target) {
@@ -188,7 +193,7 @@ export function createGatewayRestHandler(ctx: {
           break;
         }
         case "toggle_target": {
-          if (!requireAuth(req, res, "admin")) return;
+          if (!auth(req, res, "admin")) return;
           const body = await parseJsonBody<{ enabled: boolean }>(req, res, maxBodyBytes);
           if (!body) return;
           if (typeof body.enabled !== "boolean") {
@@ -204,7 +209,7 @@ export function createGatewayRestHandler(ctx: {
           break;
         }
         case "unregister_target": {
-          if (!requireAuth(req, res, "admin")) return;
+          if (!auth(req, res, "admin")) return;
           const deleted = await gateway.unregisterTarget(route.name);
           if (!deleted) {
             sendError(res, 404, "NOT_FOUND", `Target '${route.name}' not found`);
@@ -214,12 +219,12 @@ export function createGatewayRestHandler(ctx: {
           break;
         }
         case "get_credentials": {
-          if (!requireAuth(req, res, "admin")) return;
+          if (!auth(req, res, "admin")) return;
           sendJSON(res, 200, { keys: settingsAdapter.listCredentialKeys() });
           break;
         }
         case "put_credential": {
-          if (!requireAuth(req, res, "admin")) return;
+          if (!auth(req, res, "admin")) return;
           const body = await parseJsonBody<{ value: string }>(req, res, maxBodyBytes);
           if (!body) return;
           if (!body.value) {
@@ -231,7 +236,7 @@ export function createGatewayRestHandler(ctx: {
           break;
         }
         case "add_route": {
-          if (!requireAuth(req, res, "admin")) return;
+          if (!auth(req, res, "admin")) return;
           const body = await parseJsonBody<{ pattern: string; target: string; priority?: number }>(req, res, maxBodyBytes);
           if (!body) return;
           if (!body.pattern || !body.target) {
@@ -243,7 +248,7 @@ export function createGatewayRestHandler(ctx: {
           break;
         }
         case "import_openapi": {
-          if (!requireAuth(req, res, "admin")) return;
+          if (!auth(req, res, "admin")) return;
           const body = await parseJsonBody<{ name: string; specUrl: string; baseUrl?: string }>(req, res, maxBodyBytes);
           if (!body) return;
           if (!body.name || !body.specUrl) {

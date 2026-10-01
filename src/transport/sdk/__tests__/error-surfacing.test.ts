@@ -33,6 +33,7 @@ describe("Centralized Loop Error Surfacing (Task 1.2)", () => {
       askSeepient("Hello", {
         runtime: runtime as any,
         model: "mock-model",
+        tenancy: "single",
       }),
     ).rejects.toThrowError(SeepientError);
 
@@ -40,6 +41,7 @@ describe("Centralized Loop Error Surfacing (Task 1.2)", () => {
       await askSeepient("Hello", {
         runtime: runtime as any,
         model: "mock-model",
+        tenancy: "single",
       });
     } catch (err: any) {
       expect(err).toBeInstanceOf(SeepientError);
@@ -54,6 +56,7 @@ describe("Centralized Loop Error Surfacing (Task 1.2)", () => {
     const agent = await createSeepient({
       runtime: runtime as any,
       model: "mock-model",
+      tenancy: "single",
     });
 
     await expect(agent.chat("Hello")).rejects.toThrowError(SeepientError);
@@ -75,6 +78,7 @@ describe("Centralized Loop Error Surfacing (Task 1.2)", () => {
       runtime: runtime as any,
       model: "mock-model",
       onError,
+      tenancy: "single",
     });
 
     const finish = await stream.finishReason;
@@ -91,6 +95,7 @@ describe("Centralized Loop Error Surfacing (Task 1.2)", () => {
     const agent = await createSeepient({
       runtime: runtime as any,
       model: "mock-model",
+      tenancy: "single",
     });
 
     const onError = vi.fn();
@@ -168,6 +173,7 @@ describe("Centralized Loop Error Surfacing (Task 1.2)", () => {
       model: "mock-model",
       signal: controller.signal,
       onError,
+      tenancy: "single",
     });
 
     const finish = await stream.finishReason;

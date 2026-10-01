@@ -11,10 +11,11 @@ import type {
 } from "../../foundations/schemas/inference.js";
 import type { CredentialStore } from "../../foundations/contracts/credential-store.js";
 import { InferenceError } from "../../foundations/errors.js";
+import { isGuardNeutralized } from "../../foundations/test-seams.js";
 import { AggregateInferenceAdapter } from "../../capabilities/inference/aggregate-adapter.js";
-import { ProviderConfigStore } from "./config-store/provider-config-store.js";
+import { ProviderConfigStore, createAmbientProviderConfigStore } from "./config-store/provider-config-store.js";
 import { ModelCatalog, extractUserDeclaredModels } from "./model-catalog.js";
-import { CompositeCredentialStore } from "./credentials/composite-credential-store.js";
+import { CompositeCredentialStore, createAmbientCompositeCredentialStore } from "./credentials/composite-credential-store.js";
 import {
   type TurnSnapshot,
   type InvocationPlan,
@@ -205,6 +206,10 @@ export interface ProviderRuntimeOptions {
   credentialStore?: CredentialStore;
   modelCatalog?: ModelCatalog;
   adapter?: AggregateInferenceAdapter | InferenceAdapter;
+  /** Tenancy signal for surfaces that need it (refreshModels egress parity, 022-5-WO1 T023). */
+  tenancyMode?: "single" | "multi";
+  /** Granted capabilities (multi): refreshModels asserts account baseUrls against these. */
+  capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[];
 }
 
 export interface CapabilityHealth {
@@ -212,11 +217,14 @@ export interface CapabilityHealth {
   cooldownUntil?: number;
 }
 
+const AMBIENT_CONSTRUCTOR_TOKEN = Symbol("AMBIENT_CONSTRUCTOR_TOKEN");
+
 /**
  * Central ProviderRuntime managing turn snapshots, plan resolution, execution dispatch,
  * and multi-target retries with cooldown tracking and dynamic catalog synchronization.
  */
 export class ProviderRuntime extends EventEmitter implements ProviderRuntimeContract {
+  readonly isIsolated: boolean;
   readonly configStore: ProviderConfigStore;
   readonly credentialStore: CredentialStore;
   readonly modelCatalog: ModelCatalog;
@@ -224,16 +232,68 @@ export class ProviderRuntime extends EventEmitter implements ProviderRuntimeCont
 
   private healthMap = new Map<string, CapabilityHealth>();
 
-  constructor(options?: ProviderRuntimeOptions) {
+  constructor(options?: ProviderRuntimeOptions, internalToken?: typeof AMBIENT_CONSTRUCTOR_TOKEN) {
     super();
+    const noArgAmbient = options === undefined && isGuardNeutralized("VULN-10");
+    this.isIsolated = internalToken === AMBIENT_CONSTRUCTOR_TOKEN || noArgAmbient ? false : true;
     this.configStore = options?.configStore ?? new ProviderConfigStore();
     this.credentialStore = options?.credentialStore ?? new CompositeCredentialStore();
     this.modelCatalog = options?.modelCatalog ?? new ModelCatalog();
     this.adapter = options?.adapter ?? new AggregateInferenceAdapter(undefined, undefined, this.credentialStore);
+    this.tenancyMode = options?.tenancyMode ?? "single";
+    this.capabilities = options?.capabilities;
+  }
+
+  private readonly tenancyMode: "single" | "multi";
+  private readonly capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[];
+  private discoveryErrorListeners: Array<(err: unknown) => void> = [];
+
+  /**
+   * Recorded discovery-error surface (022-5-WO1 T023): refresh failures are
+   * delivered here instead of only console.error. With no listener
+   * registered, the console remains the fallback.
+   */
+  onDiscoveryError(cb: (err: unknown) => void): void {
+    this.discoveryErrorListeners.push(cb);
+  }
+
+  /** The runtime's tenancy signal (022-5-WO2 T008) — server surfaces read
+   *  it to apply the same egress rules refreshModels uses. */
+  get tenancySignal(): "single" | "multi" {
+    return this.tenancyMode;
+  }
+
+  /** The granted capabilities backing the multi egress assert. */
+  get grantedCapabilities(): import("../../foundations/contracts/permission-policy.js").Capability[] | undefined {
+    return this.capabilities;
+  }
+
+  /**
+   * Multi-tenant egress assert for server surfaces (022-5-WO2 T008/D2) —
+   * the domain-side wrapper so transport layers never touch the vendor
+   * module directly.
+   */
+  async assertAccountEgressAllowed(baseUrl: string, providerAccount: string): Promise<void> {
+    if (this.tenancyMode !== "multi") return;
+    const { assertBaseUrlEgressAllowed } = await import("../../vendors/egress-check.js");
+    assertBaseUrlEgressAllowed(baseUrl, this.capabilities, { providerAccount } as never);
+  }
+
+  /**
+   * Post-construction capability arming (022-5-WO4 T008): embedders inject a
+   * runtime and thread their operator baseline afterwards — the SDK plane
+   * reads `grantedCapabilities` for refresh/saveAccount egress asserts.
+   */
+  setRuntimeCapabilities(caps: import("../../foundations/contracts/permission-policy.js").Capability[]): void {
+    (this as unknown as { capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[] }).capabilities = caps;
   }
 
   getConfigStore(): ProviderConfigStore {
     return this.configStore;
+  }
+
+  async getConfig() {
+    return this.configStore.getEffectiveConfig();
   }
 
   getCredentialStore(): CredentialStore {
@@ -814,6 +874,29 @@ export class ProviderRuntime extends EventEmitter implements ProviderRuntimeCont
     }
 
     const discoveryCache = this.modelCatalog.getDiscoveryCache();
+    // 022-5 FR-006: parity with the provider-management probe route — an
+    // account baseUrl is endpoint-validated before any discovery traffic,
+    // and discovery failures are recorded, not silently swallowed.
+    // 022-5-WO1 T023: the multi-tenant capability assert comes FIRST (parity
+    // with the wrapper seams) — DNS resolution in endpoint validation is
+    // itself a network call and must not happen for an ungranted host.
+    if (this.tenancyMode === "multi" && acc.baseUrl) {
+      const { assertBaseUrlEgressAllowed } = await import("../../vendors/egress-check.js");
+      assertBaseUrlEgressAllowed(acc.baseUrl, this.capabilities, acc as never);
+    }
+    if (acc.baseUrl) {
+      const { validateEndpointUrl } = await import("../../foundations/network/ssrf-fetch.js");
+      const val = await validateEndpointUrl(acc.baseUrl, { ssrfAllowPrivate: acc.ssrfAllowPrivate === true });
+      if (!val.valid) {
+        throw new InferenceError({
+          code: "invalid_request",
+          message: `refreshModels: account baseUrl failed endpoint validation (${val.error ?? "SSRF blocked"})`,
+          providerAccount,
+          retryable: false,
+        });
+      }
+    }
+    const discoveryErrors: string[] = [];
     try {
       const credHandle = await this.credentialStore.resolve(acc.credential);
       const context = {
@@ -826,13 +909,29 @@ export class ProviderRuntime extends EventEmitter implements ProviderRuntimeCont
 
       if (acc.upstreamProvider === "openai" || acc.upstreamProvider === "openai-compatible") {
         const { OpenAIDiscoverySource } = await import("../../vendors/openai/openai-discovery-source.js");
-        await discoveryCache.refreshAccount(context, new OpenAIDiscoverySource());
+        const result = await discoveryCache.refreshAccount(context, new OpenAIDiscoverySource());
+        if (result?.lastRefreshError) discoveryErrors.push(result.lastRefreshError);
       } else if (acc.upstreamProvider === "google") {
         const { GoogleDiscoverySource } = await import("../../vendors/google/google-discovery-source.js");
-        await discoveryCache.refreshAccount(context, new GoogleDiscoverySource());
+        const result = await discoveryCache.refreshAccount(context, new GoogleDiscoverySource());
+        if (result?.lastRefreshError) discoveryErrors.push(result.lastRefreshError);
       }
-    } catch {
-      // Failure-safe discovery
+    } catch (err) {
+      discoveryErrors.push(err instanceof Error ? err.message : String(err));
+    }
+    if (discoveryErrors.length > 0) {
+      const err = new Error(`[refreshModels] discovery errors for "${providerAccount}": ${discoveryErrors.join("; ")}`);
+      if (this.discoveryErrorListeners.length > 0) {
+        for (const cb of this.discoveryErrorListeners) {
+          try {
+            cb(err);
+          } catch {
+            /* listener failures never break refresh */
+          }
+        }
+      } else {
+        console.error(err.message);
+      }
     }
 
     const userDeclared = extractUserDeclaredModels(config);
@@ -854,21 +953,107 @@ export class ProviderRuntime extends EventEmitter implements ProviderRuntimeCont
   }
 }
 
-let defaultRuntimeInstance: ProviderRuntime | undefined;
-
 /**
- * Returns the default global ProviderRuntime instance for composition root wiring.
+ * Explicit isolated construction with optional injectable stores.
+ * Every defaulted store is isolated in-memory.
  */
-export function getDefaultProviderRuntime(): ProviderRuntime {
-  if (!defaultRuntimeInstance) {
-    defaultRuntimeInstance = new ProviderRuntime();
-  }
-  return defaultRuntimeInstance;
+export function createIsolatedProviderRuntime(options?: ProviderRuntimeOptions): ProviderRuntime {
+  return new ProviderRuntime(options);
 }
 
 /**
- * Resets the default global ProviderRuntime instance (used in tests).
+ * Isolated runtime seeded from an operator-supplied provider file — the
+ * standalone server's durable operator channel (OQ-I). File shape:
+ * `{ providers?: ProviderEntry map, modelAssignments?: PurposeModelMap,
+ *    credentials?: Record<id, PersistedCredentialRecord> }`.
+ * Credentials seed the isolated in-memory store (`{kind:"seepient", id}` refs);
+ * the file is the operator's plaintext secret surface, read once at boot.
+ * Every store stays isolated in-memory; no ambient discovery or host env
+ * fallback occurs, and runtime mutations after boot never write back.
  */
-export function resetDefaultProviderRuntime(): void {
-  defaultRuntimeInstance = undefined;
+export async function createRuntimeFromProvidersFile(
+  filePath: string,
+  opts?: { tenancyMode?: "single" | "multi"; capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[] },
+): Promise<ProviderRuntime> {
+  const { readFileSync } = await import("node:fs");
+  let parsed: {
+    providers?: unknown;
+    modelAssignments?: unknown;
+    credentials?: Record<string, import("../../foundations/schemas/credential-store.js").PersistedCredentialRecord>;
+  };
+  try {
+    parsed = JSON.parse(readFileSync(filePath, "utf-8"));
+  } catch (err) {
+    throw new InferenceError({
+      code: "invalid_request",
+      message: `Providers file "${filePath}" could not be read or parsed: ${err instanceof Error ? err.message : String(err)}`,
+      retryable: false,
+    });
+  }
+  const configStore = new ProviderConfigStore(":memory:");
+  const currentOverlay = await configStore.getOverlay();
+  await configStore.updateOverlay(
+    {
+      providers: parsed.providers as never,
+      modelAssignments: parsed.modelAssignments as never,
+    },
+    currentOverlay.revision,
+  );
+  const { MemoryCredentialStore } = await import("./credentials/memory-credential-store.js");
+  const credentialStore = new MemoryCredentialStore();
+  for (const [id, record] of Object.entries(parsed.credentials ?? {})) {
+    await credentialStore.put(id, record);
+  }
+  const adapter = new AggregateInferenceAdapter(undefined, undefined, credentialStore);
+  // 022-5-WO3 T009 (pass-13 P1-2, D1): the operator baseline is DERIVED from
+  // the providers file — each configured account's scheme/host/port is
+  // granted by construction. The file is operator-controlled, so deriving
+  // trust from it is sound, and the first-hour custom-endpoint account keeps
+  // working with zero extra configuration. An explicit capability list (when
+  // supplied) takes precedence.
+  const capabilities = opts?.capabilities ?? deriveBaselineFromProviders(parsed.providers);
+  return new ProviderRuntime({ configStore, credentialStore, adapter, tenancyMode: opts?.tenancyMode, capabilities });
+}
+
+/** Derive operator-baseline network grants from a parsed providers-file
+ *  `providers` map: one network-destination capability per account baseUrl
+ *  (scheme/host/port). Accounts without a baseUrl grant nothing (openai's
+ *  fixed endpoint needs no grant in multi — the wrapper asserts only
+ *  account-supplied baseUrls). */
+export function deriveBaselineFromProviders(providers: unknown): import("../../foundations/contracts/permission-policy.js").Capability[] {
+  const caps: import("../../foundations/contracts/permission-policy.js").Capability[] = [];
+  if (!providers || typeof providers !== "object") return caps;
+  for (const entry of Object.values(providers as Record<string, any>)) {
+    const baseUrl = entry?.baseUrl;
+    if (typeof baseUrl !== "string" || baseUrl.length === 0) continue;
+    try {
+      const url = new URL(baseUrl);
+      const scheme = url.protocol.replace(/:$/, "");
+      if (scheme !== "http" && scheme !== "https") continue;
+      // 022-5-WO4 T016: a literal `https://*/v1` baseUrl would mint a live
+      // host:"*" grant (egress-check honors wildcards) — skip wildcard hosts.
+      if (url.hostname === "*" || url.hostname === "") continue;
+      const port = url.port ? parseInt(url.port, 10) : scheme === "https" ? 443 : 80;
+      caps.push({ kind: "network-destination", scheme, host: url.hostname, port } as import("../../foundations/contracts/permission-policy.js").Capability);
+    } catch {
+      /* malformed operator URL — skip, never throw at boot */
+    }
+  }
+  return caps;
+}
+
+/**
+ * The ONLY sanctioned ambient composition (Profile A roots + the SDK single-mode path — FR-006).
+ * Wires ambient ProviderConfigStore and CompositeCredentialStore.
+ */
+export function createAmbientProviderRuntime(): ProviderRuntime {
+  const configStore = createAmbientProviderConfigStore();
+  const credentialStore = createAmbientCompositeCredentialStore();
+  return new ProviderRuntime(
+    {
+      configStore,
+      credentialStore,
+    },
+    AMBIENT_CONSTRUCTOR_TOKEN,
+  );
 }

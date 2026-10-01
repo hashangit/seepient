@@ -13,19 +13,19 @@ The permission system governs when Seepient asks for human confirmation and how 
 
 Seepient defines three consent modes:
 
-### 1. `always-ask` (default)
+### 1. `ask-everything`
 Every action that causes external side effects requires explicit user confirmation.
 - Read-only operations (`read_file`, `web_search`, `get_current_datetime`) run automatically.
 - Shell commands (`execute_shell_command`), file writes (`write_file`, `edit_file`), emails, and notifications require approval.
-- Recommended for daily interactive development and sensitive environments.
+- Recommended for sensitive environments where full human oversight is needed.
 
-### 2. `ask-untrusted`
-Permits routine, low-risk tools within the project root while prompting for external or unusual commands.
-- Standard build commands (such as `pnpm test` or `git status`) run automatically if matched by configured rule templates.
-- Unrecognized binaries, network requests, and modifications outside the workspace root prompt for confirmation.
-- Recommended for experienced developers wanting reduced prompts during local coding sessions.
+### 2. `edit-enabled` (default)
+Permits routine workspace edits, reads, and normal development tools within the project root while prompting for external or high-risk actions.
+- Standard file reads, writes, edits, and workspace commands run without prompts.
+- Destructive operations, network requests outside the boundary, and modifications outside the workspace root prompt for confirmation.
+- Recommended for daily interactive development and local coding sessions.
 
-### 3. `autonomous-trusted`
+### 3. `autonomous`
 Permits all actions within the workspace boundary without prompting.
 - Unattended CI/CD runners, container swarms, and batch automation scripts run in this mode.
 - Safe operations are contained by the operating system sandbox (macOS Seatbelt or Linux Bubblewrap).
@@ -46,14 +46,14 @@ When you approve an action, you choose both its **scope** and **lifetime**:
 - **One-shot**: Valid only for the immediate tool execution. Once executed, the capability expires.
 - **Turn-scoped**: Valid for subsequent tool calls within the current conversational turn.
 - **Session-scoped**: Valid for the remainder of the active session. Expires when Seepient exits.
-- **Persistent grant**: Written to workspace configuration (`.seepient/config.json`), remaining active across sessions.
+- **Persistent grant**: Written to the workspace policy store (`~/.seepient/security/policies/<workspaceId>.json`), remaining active across sessions.
 
 ---
 
-## Durable approval store
+## Durable policy store
 
-Approval states are stored in a file-locked store on disk (`~/.seepient/approvals.json`).
+Policy grants and approval records are stored in a file-locked, tamper-evident store on disk (`~/.seepient/security/policies/<workspaceId>.json`, or `$SEEPIENT_SECURITY_DIR/policies/`).
 
-Because approvals are written using atomic fsync operations:
-- If the terminal crashes, power drops, or the server restarts while an approval is pending, the pending request survives.
+Because policy records are written using atomic fsync operations:
+- If the terminal crashes, power drops, or the server restarts while an approval is pending, the policy state survives.
 - Multi-client architectures (such as the TUI and a web client connected to the same server) observe a consistent approval state without race conditions.

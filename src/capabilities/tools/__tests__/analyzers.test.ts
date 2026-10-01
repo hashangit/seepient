@@ -73,6 +73,32 @@ describe("generate_image destination effects (spec 019 FR-011)", () => {
     expect(request.outputCommit?.destination.canonicalPath).toContain(dir);
     expect(action.effects.some((e) => e.kind === "filesystem-write")).toBe(true);
   });
+
+  it("T063: generate_image with .env target as image_path classifies read and egress as secret sensitivity (FR-035)", async () => {
+    const { writeFileSync } = await import("node:fs");
+    const secretPath = join(dir, ".env");
+    writeFileSync(secretPath, "SECRET_TOKEN=xyz\n");
+    const dest = join(dir, "out.png");
+
+    const action = await analyzeGenerateImage({
+      prompt: "edit image",
+      image_path: secretPath,
+      output_path: dest,
+    }, ctx);
+
+    const readEffect = action.effects.find((e) => e.kind === "filesystem-read");
+    expect(readEffect).toBeDefined();
+    if (readEffect && readEffect.kind === "filesystem-read") {
+      expect(readEffect.sensitivity).toBe("secret");
+      expect(readEffect.targets[0].canonicalPath).toBe(secretPath);
+    }
+
+    const egressEffect = action.effects.find((e) => e.kind === "model-egress");
+    expect(egressEffect).toBeDefined();
+    if (egressEffect && egressEffect.kind === "model-egress") {
+      expect(egressEffect.dataClasses).toContain("secret");
+    }
+  });
 });
 
 describe("execute_shell_command syntax validation (Fix 2)", () => {

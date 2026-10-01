@@ -241,22 +241,33 @@ export function TuiApp({
     } else if (result.status === 'fallthrough') {
       try {
         const registry = agent.getSkillRegistry();
-        if (registry) {
-          const { invokeSkill, createRuntimeSkillProviderSwitcher } = await import('../../domain/skills/skill-invoker.js');
-          const skillResult = await invokeSkill({ input: raw, registry });
-          if (skillResult) {
-            feed.appendEntry({ kind: 'info', content: `Loading skill: ${skillResult.skill.name}` });
-            const switcher = createRuntimeSkillProviderSwitcher(agent.getProviderRuntime());
-            const switched = await switcher.switchIfNeeded(skillResult);
-            try {
-              await submit(skillResult.prompt, switched ? switcher : undefined);
-            } finally {
-              if (switched) {
-                switcher.restore();
-              }
-            }
+        if (!registry) {
+          feed.appendEntry({ kind: 'info', content: 'skills unavailable' });
+          return;
+        }
+        const { invokeSkill, createRuntimeSkillProviderSwitcher } = await import('../../domain/skills/skill-invoker.js');
+        let skillResult: any;
+        try {
+          skillResult = await invokeSkill({ input: raw, registry });
+        } catch (err: any) {
+          if (err?.code === 'SKILL_BODY_UNAVAILABLE') {
+            feed.appendEntry({ kind: 'error', message: err.message });
             return;
           }
+          throw err;
+        }
+        if (skillResult) {
+          feed.appendEntry({ kind: 'info', content: `Loading skill: ${skillResult.skill.name}` });
+          const switcher = createRuntimeSkillProviderSwitcher(agent.getProviderRuntime());
+          const switched = await switcher.switchIfNeeded(skillResult);
+          try {
+            await submit(skillResult.prompt, switched ? switcher : undefined);
+          } finally {
+            if (switched) {
+              switcher.restore();
+            }
+          }
+          return;
         }
         feed.appendEntry({ kind: 'info', content: `Unknown command: ${name}. Type /? for help.` });
       } catch (err) {

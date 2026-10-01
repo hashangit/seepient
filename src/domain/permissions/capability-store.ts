@@ -66,13 +66,17 @@ type CapKind = Capability["kind"];
  * `/project/data` match `/project/database`.
  */
 function normalizePathForComparison(p: string): string {
+  if (!p || typeof p !== "string") return "";
   if (p.startsWith("/private/")) return p.slice(8);
   return p;
 }
 
-function pathContains(parent: string, child: string): boolean {
+export function pathContains(parent: string, child: string): boolean {
   const normParent = normalizePathForComparison(parent);
   const normChild = normalizePathForComparison(child);
+  // 022-5 FR-011: an empty root is a corrupt shape, not a universal grant —
+  // it must never contain anything (fail closed).
+  if (!normParent) return false;
   if (normChild === normParent) return true;
   if (normParent === "/") return normChild.startsWith("/");
   const prefix = normParent.endsWith("/") ? normParent : normParent + "/";
@@ -90,6 +94,10 @@ function pathContains(parent: string, child: string): boolean {
  * pass a matching outer shape. This function is strict by default.
  */
 export function covers(outer: Capability, inner: Capability): boolean {
+  // Principal scoping: a capability stamped for one principal cannot cover another principal
+  if (outer.principalId && inner.principalId && outer.principalId !== inner.principalId) {
+    return false;
+  }
   // A deny on a kind can never cover anything.
   if (outer.kind !== inner.kind) {
     // Cross-kind coverage: a root-shaped capability can cover a more specific

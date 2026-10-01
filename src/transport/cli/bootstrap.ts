@@ -19,8 +19,9 @@ import * as os from 'os';
 import * as readline from 'readline/promises';
 
 import { Agent } from './agent.js';
+import { ToolRegistry } from '../../domain/tool-executor.js';
 import { resolveLaunchMode, selectSystemPrompt } from '../../domain/prompts/system-prompts.js';
-import { getDefaultProviderRuntime } from '../../domain/providers/provider-runtime.js';
+import { createAmbientProviderRuntime } from '../../domain/providers/provider-runtime.js';
 import {
   loadJsonConfig,
   applyEnvOverrides,
@@ -30,6 +31,7 @@ import {
 import { runSetup } from './setup.js';
 import { isNonInteractive } from '../../foundations/environment.js';
 import { type ConsentMode, consentModeToApprovalMode } from '../../foundations/settings-schema.js';
+import { VALID_CONSENT_MODES } from '../../foundations/config.js';
 import type { PersistenceBackend } from '../../foundations/types.js';
 import { createPersistenceBackend } from '../../domain/sessions/session-store.js';
 import { SettingsManager } from '../../domain/settings/settings-manager.js';
@@ -43,6 +45,35 @@ export interface CliSessionContext {
   consentMode: ConsentMode;
   gatewayInstance: any;
   persistence: PersistenceBackend;
+}
+
+export function resolveRuntimeFlags(
+  options: any = {},
+  baseConfig: any = {},
+): { autoConfirm: boolean; consentMode: ConsentMode } {
+  // FR-019: --docker and --headless stop setting autoConfirm; only options.yes sets autoConfirm
+  const autoConfirm = Boolean(options.yes);
+
+  const rawConsentMode =
+    (options.yes ? 'autonomous' : undefined) ||
+    options.mode ||
+    options.consentMode ||
+    process.env.SEEPIENT_CONSENT_MODE ||
+    baseConfig.consentMode;
+  if (process.env.SEEPIENT_CONSENT_MODE && !VALID_CONSENT_MODES.includes(process.env.SEEPIENT_CONSENT_MODE as ConsentMode)) {
+    console.warn(
+      `[seepient] Warning: Unrecognized SEEPIENT_CONSENT_MODE "${process.env.SEEPIENT_CONSENT_MODE}". Valid options: ask-everything, edit-enabled, autonomous. Falling back to edit-enabled.`,
+    );
+  } else if (rawConsentMode && !VALID_CONSENT_MODES.includes(rawConsentMode)) {
+    console.warn(
+      `[seepient] Warning: Unrecognized consent mode "${rawConsentMode}". Valid options: ask-everything, edit-enabled, autonomous. Falling back to edit-enabled.`,
+    );
+  }
+  const consentMode: ConsentMode = VALID_CONSENT_MODES.includes(rawConsentMode)
+    ? (rawConsentMode as ConsentMode)
+    : 'edit-enabled';
+
+  return { autoConfirm, consentMode };
 }
 
 export async function bootstrapCliSession(options: any): Promise<CliSessionContext> {
@@ -63,25 +94,14 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
   (fullConfig as any).snapshotStore = snapshotStore;
 
   // 2. Inject runtime flags
-  fullConfig.autoConfirm = options.yes || options.headless || options.docker || false;
-
-  // 2b. Resolve consent mode from CLI flags, env var, and config
-  const rawConsentMode =
-    (options.yes ? 'autonomous' : undefined) ||
-    options.mode ||
-    options.consentMode ||
-    process.env.SEEPIENT_CONSENT_MODE ||
-    fullConfig.consentMode;
-  const validModes = ['ask-everything', 'edit-enabled', 'autonomous'];
-  const consentMode: ConsentMode = validModes.includes(rawConsentMode)
-    ? rawConsentMode
-    : 'edit-enabled';
+  const { autoConfirm, consentMode } = resolveRuntimeFlags(options, fullConfig);
+  fullConfig.autoConfirm = autoConfirm;
 
   // 3. Apply env var overrides for tool settings
   fullConfig = applyEnvOverrides(fullConfig);
 
   // 5. Load provider config via ProviderRuntime
-  const runtime = getDefaultProviderRuntime();
+  const runtime = createAmbientProviderRuntime();
   let effectiveConfig = await runtime.getConfigStore().getEffectiveConfig();
   let hasProviders = Object.keys(effectiveConfig.providers || {}).length > 0;
 
@@ -89,7 +109,7 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
     console.log(chalk.yellow("No provider configuration found."));
 
     if (isNonInteractive()) {
-      console.error(chalk.red("No provider configured. Set supported API key env vars (OPENAI_API_KEY / ANTHROPIC_API_KEY / GLM_API_KEY / OPENAI_COMPAT_API_KEY) or configure via `seepient providers add <id> --credential env:VAR_NAME`."));
+      console.error(chalk.red("No provider configured. Run `seepient` to start the setup wizard, or add a key via `seepient auth login <id> --key <key>` (or inject a custom credential store from the SDK)."));
       process.exit(1);
     } else {
       const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -148,9 +168,51 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
   // defaultSessionPath()). Disabled backends can be added via registerBackend().
   fullConfig.hasExplicitModel = Boolean(options.model);
   const persistence = createPersistenceBackend({ type: 'file' });
-  const agent = new Agent(runtime, options.model ?? resolvedModel, fullConfig, systemPrompt, persistence, activeProviderType);
+  const toolRegistry = new ToolRegistry();
+  const agent = new Agent(runtime, options.model ?? resolvedModel, fullConfig, systemPrompt, persistence, activeProviderType, toolRegistry);
   if (cliProvider) {
     agent.switchProvider(cliProvider, options.model ?? resolvedModel);
+  }
+
+  // Initialize skills system
+  await agent.initializeSkills();
+
+  // Initialize gateway (if enabled) — register returned tools into per-agent registry (Spec 022)
+  let gatewayInstance: any = null;
+  try {
+    const settingsManager = new SettingsManager({
+      config: applyEnvOverrides(loadMergedConfig()),
+      projectConfigPath: LOCAL_CONFIG_FILE,
+      globalConfigPath: GLOBAL_CONFIG_FILE,
+    });
+    const gwEnabled = settingsManager.get('gateway.enabled').value as boolean;
+    if (gwEnabled) {
+      const gatewayConfig = {
+        enabled: true,
+        semanticTopK: settingsManager.get('gateway.semanticTopK').value as number,
+        defaultRateLimitPerMin: settingsManager.get('gateway.defaultRateLimitPerMin').value as number,
+        maxAuditLogsInMemory: settingsManager.get('gateway.maxAuditLogs').value as number,
+      };
+      const { GatewaySettingsAdapter } = await import('../../capabilities/gateway/settings-adapter.js');
+      const gwStorageDir = process.env.SEEPIENT_GATEWAY_DIR ?? path.join(os.homedir(), '.seepient');
+      const gwSettingsAdapter = new GatewaySettingsAdapter(gwStorageDir);
+      await gwSettingsAdapter.initialize();
+
+      const { createGateway } = await import('../../capabilities/gateway/index.js');
+      const gwResult = await createGateway(gatewayConfig, gwSettingsAdapter);
+
+      if (gwResult) {
+        gatewayInstance = gwResult.gateway;
+        agent.registerManyTools(gwResult.tools);
+        const { semanticToolInjectionMiddleware } = await import('../../domain/middleware/semantic-tools.js');
+        agent.setMiddleware([semanticToolInjectionMiddleware(gatewayInstance, gatewayConfig.semanticTopK)]);
+        if (options.interactive) {
+          console.log(chalk.green('Gateway initialized'));
+        }
+      }
+    }
+  } catch (e) {
+    console.warn(chalk.yellow(`Gateway initialization skipped: ${e instanceof Error ? e.message : String(e)}`));
   }
 
   // Spec 008 / 017: attach the protected PolicyStore. Active policy lives
@@ -182,12 +244,20 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
     const approvalDeadlineMs = Number.isFinite(rawDeadline)
       ? Math.min(Math.max(rawDeadline, 10_000), 3_600_000)
       : 600_000;
-    const effectiveConsentMode: ConsentMode =
-      (options.mode || options.consentMode)
-        ? consentMode
-        : (validModes.includes(String(deadlineSettings.get('permissions.consentMode')?.value))
-            ? (deadlineSettings.get('permissions.consentMode')?.value as ConsentMode)
-            : consentMode);
+    let effectiveConsentMode: ConsentMode = consentMode;
+    if (!options.yes && !options.mode && !options.consentMode) {
+      const settingVal = deadlineSettings.get('permissions.consentMode')?.value;
+      if (settingVal != null && settingVal !== '') {
+        const strVal = String(settingVal);
+        if (VALID_CONSENT_MODES.includes(strVal as ConsentMode)) {
+          effectiveConsentMode = strVal as ConsentMode;
+        } else {
+          console.warn(
+            `[seepient] Warning: Unrecognized consent mode "${strVal}" in settings. Valid options: ask-everything, edit-enabled, autonomous. Falling back to edit-enabled.`,
+          );
+        }
+      }
+    }
 
     const approvalMode = consentModeToApprovalMode(effectiveConsentMode);
 
@@ -233,46 +303,6 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
     }
   } catch { /* best-effort — never block startup on audit recovery */ }
 
-  // Initialize skills system
-  await agent.initializeSkills();
-
-  // Initialize gateway (if enabled)
-  let gatewayInstance: any = null;
-  try {
-    const settingsManager = new SettingsManager({
-      config: applyEnvOverrides(loadMergedConfig()),
-      projectConfigPath: LOCAL_CONFIG_FILE,
-      globalConfigPath: GLOBAL_CONFIG_FILE,
-    });
-    const gwEnabled = settingsManager.get('gateway.enabled').value as boolean;
-    if (gwEnabled) {
-      const gatewayConfig = {
-        enabled: true,
-        semanticTopK: settingsManager.get('gateway.semanticTopK').value as number,
-        defaultRateLimitPerMin: settingsManager.get('gateway.defaultRateLimitPerMin').value as number,
-        maxAuditLogsInMemory: settingsManager.get('gateway.maxAuditLogs').value as number,
-      };
-      const { GatewaySettingsAdapter } = await import('../../capabilities/gateway/settings-adapter.js');
-      const gwStorageDir = process.env.SEEPIENT_GATEWAY_DIR ?? path.join(os.homedir(), '.seepient');
-      const gwSettingsAdapter = new GatewaySettingsAdapter(gwStorageDir);
-      await gwSettingsAdapter.initialize();
-
-      const { createGateway } = await import('../../capabilities/gateway/index.js');
-      const { registerTool } = await import('../../domain/tool-executor.js');
-      gatewayInstance = await createGateway(gatewayConfig, gwSettingsAdapter, undefined, (tools) => tools.forEach(registerTool));
-
-      if (gatewayInstance) {
-        const { semanticToolInjectionMiddleware } = await import('../../domain/middleware/semantic-tools.js');
-        agent.setMiddleware([semanticToolInjectionMiddleware(gatewayInstance, gatewayConfig.semanticTopK)]);
-        if (options.interactive) {
-          console.log(chalk.green('Gateway initialized'));
-        }
-      }
-    }
-  } catch (e) {
-    console.warn(chalk.yellow(`Gateway initialization skipped: ${e instanceof Error ? e.message : String(e)}`));
-  }
-
   // Ensure ~/seepient_documents exists
   const docsDir = path.join(os.homedir(), 'seepient_documents');
   if (!fs.existsSync(docsDir)) {
@@ -294,10 +324,11 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
     if (maxAgeDays && maxAgeDays > 0) {
       const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000;
       const cutoff = Date.now() - maxAgeMs;
-      const ids = await persistence.list();
+      const rawList = await persistence.list?.() ?? [];
+      const ids = rawList.map((item: any) => typeof item === "string" ? item : item.id);
       await Promise.all(ids.map(async (id) => {
         const data = await persistence.load(id);
-        if (data && data.updatedAt < cutoff) await persistence.delete(id);
+        if (data && data.updatedAt < cutoff) await persistence.delete?.(id);
       }));
     }
   } catch { /* best-effort — never block startup on cleanup */ }
@@ -306,7 +337,8 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
   if (options.resume) {
     let resumeId = options.resume as string;
     if (resumeId === 'last') {
-      const ids = await persistence.list();
+      const rawList = await persistence.list?.() ?? [];
+      const ids = rawList.map((item: any) => typeof item === "string" ? item : item.id);
       if (ids.length === 0) {
         console.error(chalk.red('No saved sessions to resume.'));
         process.exit(1);

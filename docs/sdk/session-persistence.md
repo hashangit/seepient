@@ -12,29 +12,30 @@ Seepient Agent agents can persist conversation history across process restarts u
 ```typescript
 import { createSeepient } from "seepient";
 
-// File-based persistence -- sessions stored as JSON files
+// File-based persistence in single-user mode (specify tenancy: "single")
 const agent = await createSeepient({
+  tenancy: "single",
   persist: "./sessions/my-agent",
 });
 
 await agent.chat("My name is Alice");
 await agent.chat("I am working on a React project");
 
-// Explicit Session ID & Multi-Turn Resumption (Spec 021)
+// Explicit Session ID & Multi-Turn Resumption in Single-User Mode
 const agent1 = await createSeepient({
+  tenancy: "single",
   sessionId: "user-alice-session",
-  providerAccount: "team-anthropic", // Persisted and restored with session
-  persist: myCustomBackend,
+  persist: "./sessions/my-agent",
 });
 await agent1.chat("Remember my project context");
 
 // In a subsequent worker/request:
 const agent2 = await createSeepient({
+  tenancy: "single",
   sessionId: "user-alice-session",
-  principalId: "user-alice", // Must match the principal that created the session
-  persist: myCustomBackend,
+  persist: "./sessions/my-agent",
 });
-// Full conversation history and providerAccount are loaded automatically from myCustomBackend
+// Full conversation history is loaded automatically
 console.log(agent2.sessionId); // "user-alice-session"
 ```
 
@@ -44,7 +45,7 @@ All persistence backends implement the same interface:
 
 ```typescript
 interface PersistenceBackend {
-  /** Brand discriminator — distinguishes from SessionStore. */
+  /** Brand discriminator — distinguishes from plain objects. */
   readonly __persistenceBackend: true;
 
   /** Save session data (messages, metadata, timestamps). Creates or updates. */
@@ -61,23 +62,16 @@ interface PersistenceBackend {
 }
 ```
 
-::: warning Breaking change in v0.2.2
-Third-party `PersistenceBackend` implementations must now include `readonly __persistenceBackend = true as const`. This brand field prevents the SDK from accidentally wrapping a `PersistenceBackend` and stripping metadata (`createdAt`, `provider`, `model`, custom `metadata`).
+::: warning Persistence contract
+Third-party `PersistenceBackend` implementations must include `readonly __persistenceBackend = true as const`. This brand field enables the SDK to validate custom backend instances and preserve session metadata (`createdAt`, `provider`, `model`, custom `metadata`).
 :::
 
-## Persistence Fidelity Tiers
+## Persistence Contract
 
-Seepient supports two tiers of session persistence contracts with distinct fidelity guarantees:
+All custom session storage implementations must implement the `PersistenceBackend` contract with full fidelity (`save`, `load`, `delete`, `list`):
 
-| Contract | Structure | Metadata Support | Tradeoff |
-|---|---|---|---|
-| `PersistenceBackend` | Full `SessionData` object (`messages`, `createdAt`, `updatedAt`, `provider`, `model`, `providerAccount`, `metadata`) | Full fidelity. Preserves exact creation times, model configurations, and custom application metadata across process restarts. | **Recommended for production.** Requires implementing `save`, `load`, `delete`, and `list` with the brand discriminator `readonly __persistenceBackend = true as const`. |
-| `SessionStore` (Adapter) | Array of `Message[]` (`get`, `set`) | Messages only. Automatically wrapped via `wrapAsPersistenceBackend`. | Discards provider, model, and custom metadata. Generates synthetic timestamps (`createdAt`/`updatedAt` set to load time). Best for simple or legacy backends. |
-
-### When to choose which contract
-
-- **Choose `PersistenceBackend`** when building production multi-tenant backends, worker fleets, or when you need audit logs and conversation resumption to accurately reflect the originating provider and model parameters.
-- **Choose `SessionStore`** only when adapting legacy key-value stores that store exclusively raw message arrays and do not need session-level metadata.
+- **Full fidelity**: Preserves exact creation times, model configurations, and custom application metadata across process restarts.
+- **Brand discriminator**: Implementations must include `readonly __persistenceBackend = true as const`.
 
 ## Asymmetric Storage Keying
 
@@ -93,7 +87,7 @@ When injecting storage contracts into `createSeepient` or `runSeepientServer` in
 This asymmetric design guarantees that actor accountability (`principalId`) is never conflated with workspace filesystem policies or conversation threads (`sessionId`).
 
 ::: warning Session ownership — resume is principal-bound
-Persisted sessions carry the `principalId` that created them (default `"sdk-user"`). Resuming a session under a different `principalId` fails closed with a `SESSION_OWNERSHIP_MISMATCH` error — the conversation history is never restored or continued across principals, even when tenants share one `PersistenceBackend`. Sessions persisted before ownership tracking (and sessions stored through the metadata-less `SessionStore` adapter) carry no owner stamp and are likewise not resumable. Custom `PersistenceBackend` implementations must round-trip the `principalId` field of `SessionData` to preserve this guarantee.
+Persisted sessions carry the `principalId` that created them (default `"sdk-user"`). Resuming a session under a different `principalId` fails closed with a `SESSION_OWNERSHIP_MISMATCH` error — the conversation history is never restored or continued across principals, even when tenants share one `PersistenceBackend`. Sessions persisted before ownership tracking carry no owner stamp and are likewise not resumable. Custom `PersistenceBackend` implementations must round-trip the `principalId` field of `SessionData` to preserve this guarantee.
 :::
 
 ## Built-in stores
@@ -151,6 +145,7 @@ const store = createPersistenceBackend({ type: "memory" });
 
 // Useful for testing
 const agent = await createSeepient({
+  tenancy: "single",
   persist: store,
 });
 ```
@@ -178,6 +173,7 @@ Pass a directory path as a string. Seepient Agent creates a `FilePersistenceBack
 
 ```typescript
 const agent = await createSeepient({
+  tenancy: "single",
   persist: "./data/sessions",
 });
 ```
@@ -192,6 +188,7 @@ import { createPersistenceBackend } from "seepient";
 const store = createPersistenceBackend({ type: "file", path: "./data/sessions" });
 
 const agent = await createSeepient({
+  tenancy: "single",
   persist: store,
 });
 ```
@@ -202,8 +199,8 @@ When you use `createSeepient()` with a `persist` option, Seepient Agent auto-gen
 
 ```typescript
 // Each creates a separate session file
-const agent1 = await createSeepient({ persist: "./sessions" });
-const agent2 = await createSeepient({ persist: "./sessions" });
+const agent1 = await createSeepient({ tenancy: "single", persist: "./sessions" });
+const agent2 = await createSeepient({ tenancy: "single", persist: "./sessions" });
 
 await agent1.chat("Hello from agent 1");
 await agent2.chat("Hello from agent 2");
@@ -218,7 +215,7 @@ await agent2.chat("Hello from agent 2");
 The session is automatically saved after each `chat()` and `chatStream()` call:
 
 ```typescript
-const agent = await createSeepient({ persist: "./sessions" });
+const agent = await createSeepient({ tenancy: "single", persist: "./sessions" });
 
 // Saves to disk after each call
 await agent.chat("First message");    // Session saved
@@ -231,11 +228,11 @@ When an agent is created with a persist path that contains existing session data
 
 ```typescript
 // Process 1: create and chat
-const agent = await createSeepient({ persist: "./sessions/app" });
+const agent = await createSeepient({ tenancy: "single", persist: "./sessions/app" });
 await agent.chat("Remember: project uses TypeScript");
 
 // Process 2: resume (same path)
-const resumedAgent = await createSeepient({ persist: "./sessions/app" });
+const resumedAgent = await createSeepient({ tenancy: "single", persist: "./sessions/app" });
 const reply = await resumedAgent.chat("What language does the project use?");
 // The agent remembers the TypeScript context
 ```
@@ -245,7 +242,7 @@ const reply = await resumedAgent.chat("What language does the project use?");
 Use `agent.clear()` to reset conversation history. The session file is updated:
 
 ```typescript
-const agent = await createSeepient({ persist: "./sessions" });
+const agent = await createSeepient({ tenancy: "single", persist: "./sessions" });
 
 await agent.chat("Some context");
 agent.clear();
@@ -329,7 +326,7 @@ const redisStore: PersistenceBackend = {
   },
 };
 
-const agent = await createSeepient({ persist: redisStore });
+const agent = await createSeepient({ tenancy: "single", persist: redisStore });
 ```
 
 ### Database session store
@@ -370,7 +367,7 @@ const dbStore: PersistenceBackend = {
   },
 };
 
-const agent = await createSeepient({ persist: dbStore });
+const agent = await createSeepient({ tenancy: "single", persist: dbStore });
 ```
 
 ::: tip
@@ -382,8 +379,6 @@ For custom stores, implement TTL cleanup in your backend (Redis EX, database cro
 | Function                       | Signature                                        | Returns                     |
 |--------------------------------|--------------------------------------------------|-----------------------------|
 | `createPersistenceBackend()`   | `(config: PersistenceConfig) => PersistenceBackend` | `FilePersistenceBackend` or `MemoryPersistenceBackend` |
-| `createSessionStore()`         | `(path?: string) => PersistenceBackend`          | `FilePersistenceBackend` (legacy, deprecated) |
-| `createMemoryStore()`          | `() => PersistenceBackend`                       | `MemoryPersistenceBackend` (legacy, deprecated) |
 
 ```typescript
 import { createPersistenceBackend } from "seepient";
@@ -394,10 +389,6 @@ const fileStore = createPersistenceBackend({ type: "file", path: "./data/session
 // Testing: in-memory
 const testStore = createPersistenceBackend({ type: "memory" });
 ```
-
-::: tip
-`createSessionStore()` and `createMemoryStore()` are **deprecated** aliases. Use `createPersistenceBackend()` for new code.
-:::
 
 ## Related APIs
 

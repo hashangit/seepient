@@ -11,6 +11,7 @@ describe("SDK e2e — askSeepient with mock runtime", () => {
     ]);
 
     const result = await askSeepient("Say hello", {
+      tenancy: "single",
       tools: [],
       maxSteps: 1,
       runtime,
@@ -34,6 +35,7 @@ describe("SDK e2e — askSeepient with mock runtime", () => {
     const onFinish = vi.fn();
 
     await askSeepient("Ping", {
+      tenancy: "single",
       tools: [],
       maxSteps: 1,
       runtime,
@@ -54,6 +56,7 @@ describe("SDK e2e — askSeepient with mock runtime", () => {
     ]);
 
     const result = await askSeepient("Hello", {
+      tenancy: "single",
       tools: [],
       maxSteps: 1,
       runtime,
@@ -76,7 +79,7 @@ describe("SDK e2e — chatStream with a streaming runtime", () => {
       },
     ]);
 
-    const agent = await createSeepient({ runtime, tools: [], maxSteps: 1 } as any);
+    const agent = await createSeepient({ tenancy: "single", runtime, tools: [], maxSteps: 1 } as any);
 
     const result = await agent.chatStream("hi");
     const chunks: string[] = [];

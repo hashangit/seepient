@@ -226,6 +226,7 @@ describe("Consumer Reference Scenario: 5-Tool Mixed-Rung Agent (QS-3.3)", () => 
     };
 
     const agent = await createSeepient({
+      tenancy: "single",
       runtime: runtime as never,
       network: mockNetwork,
       tools: [getAccounts, getTransactions, transferFunds, exportReport, lookupRates],

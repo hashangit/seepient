@@ -11,43 +11,28 @@ Seepient preserves conversation history across runs. A session records every use
 
 By default, Seepient writes session records to `~/.seepient/sessions/` using atomic JSON files. Each session receives a unique identifier based on timestamp and hash.
 
-### Managing sessions from the CLI
+### Resuming sessions from the CLI
 
-List previous sessions:
+Resume a previous conversation by session ID:
 
 ```bash
-seepient sessions list
+seepient --resume sess_20260905_a1b2c3
+# Or using the shorthand flag:
+seepient -r sess_20260905_a1b2c3
 ```
 
-Resume a previous conversation:
+To resume your most recent conversation, pass `last`:
 
 ```bash
-seepient --session sess_20260905_a1b2c3
-```
-
-Export a session to a markdown transcript:
-
-```bash
-seepient sessions export sess_20260905_a1b2c3 --output ./transcript.md
+seepient -r last
 ```
 
 ### Managing sessions in the TUI
 
 Inside the interactive terminal interface:
 
-- `/session list`: Shows recent sessions in an interactive list selector.
-- `/session resume <id>`: Swaps context to the selected session.
-- `/session new`: Starts a fresh session while leaving the current one saved on disk.
-
-## Session forking
-
-When experimenting with alternate prompts or refactoring paths, you can fork an existing session from a specific turn:
-
-```bash
-seepient sessions fork sess_20260905_a1b2c3 --turn 4
-```
-
-The new session inherits the conversation history up to turn 4, creating an independent branch that does not overwrite the parent session.
+- `/sessions`: Opens an interactive session selector overlay with fuzzy search to browse, inspect, and resume previous sessions.
+- `/clear`: Clears the current conversation view.
 
 ## Embedder-owned storage (SDK)
 
@@ -56,16 +41,19 @@ In serverless environments or multi-tenant web applications, writing to a local 
 You can inject custom storage adapters directly into `createSeepient`:
 
 ```typescript
-import { createSeepient, type SessionStore } from 'seepient'
+import { createSeepient, type PersistenceBackend, type SessionData } from 'seepient'
 
-class RedisSessionStore implements SessionStore {
-  async get(sessionId: string) { /* ... fetch from redis ... */ }
-  async save(session: SessionRecord) { /* ... write to redis ... */ }
-  async delete(sessionId: string) { /* ... */ }
+class RedisPersistenceBackend implements PersistenceBackend {
+  readonly __persistenceBackend = true as const
+
+  async save(sessionId: string, data: SessionData): Promise<void> { /* ... write to redis ... */ }
+  async load(sessionId: string): Promise<SessionData | null> { /* ... fetch from redis ... */ }
+  async delete(sessionId: string): Promise<void> { /* ... */ }
+  async list(): Promise<string[]> { /* ... */ }
 }
 
-const agent = createSeepient({
-  sessionStore: new RedisSessionStore(),
+const agent = await createSeepient({
+  persist: new RedisPersistenceBackend(),
   sessionId: 'user_42_workspace_99'
 })
 ```

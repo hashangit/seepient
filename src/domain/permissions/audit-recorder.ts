@@ -28,7 +28,8 @@ import type {
   ActionState,
   AuditStore as AuditStoreContract,
 } from "../../foundations/contracts/execution-brokers.js";
-import { AuditError } from "../../foundations/errors.js";
+import { AuditError, InvalidPrincipalIdError } from "../../foundations/errors.js";
+import { PRINCIPAL_ID_RE } from "../tenancy/tenancy-mode.js";
 
 const TERMINAL_STATES: ReadonlySet<ActionState> = new Set<ActionState>([
   "succeeded",
@@ -78,9 +79,11 @@ interface AuditFileEntry {
  */
 export class LocalAuditStore implements AuditStoreContract {
   readonly isLocal = true;
-  private readonly dir: string;
+  readonly isIsolated: boolean;
+  readonly dir: string;
 
   constructor(opts?: { root?: string }) {
+    this.isIsolated = Boolean(opts?.root);
     this.dir =
       opts?.root ??
       (process.env.SEEPIENT_SECURITY_DIR
@@ -88,11 +91,19 @@ export class LocalAuditStore implements AuditStoreContract {
         : path.join(os.homedir(), ".seepient", "security", "audit"));
   }
 
+  private assertValidSlug(slug: string): void {
+    if (!slug || !PRINCIPAL_ID_RE.test(slug)) {
+      throw new InvalidPrincipalIdError(`Invalid principalId "${slug}" for audit storage path`);
+    }
+  }
+
   private eventsFile(workspaceId: string): string {
+    this.assertValidSlug(workspaceId);
     return path.join(this.dir, workspaceId, "events.ndjson");
   }
 
   private async ensureDir(workspaceId: string): Promise<void> {
+    this.assertValidSlug(workspaceId);
     await fs.mkdir(path.join(this.dir, workspaceId), {
       recursive: true,
       mode: 0o700,
@@ -117,6 +128,7 @@ export class LocalAuditStore implements AuditStoreContract {
     opts: { idempotencyKey: string },
   ): Promise<"written" | "duplicate"> {
     const wsId = event.principalId; // workspaceId routes via principal in v1 local
+    this.assertValidSlug(wsId);
     await this.ensureDir(wsId);
     const file = this.eventsFile(wsId);
     const lockFile = file + ".lock";
@@ -194,6 +206,7 @@ export class LocalAuditStore implements AuditStoreContract {
     try {
       const workspaces = await fs.readdir(this.dir);
       for (const wsId of workspaces) {
+        if (!PRINCIPAL_ID_RE.test(wsId)) continue;
         const file = this.eventsFile(wsId);
         const terminal = await this.findTerminal(file, actionId);
         if (terminal) return terminal;
@@ -217,6 +230,7 @@ export class LocalAuditStore implements AuditStoreContract {
       const entries = await fs.readdir(this.dir, { withFileTypes: true });
       for (const entry of entries) {
         if (!entry.isDirectory()) continue; // e.g. a policy store file sharing the root
+        if (!PRINCIPAL_ID_RE.test(entry.name)) continue;
         const file = this.eventsFile(entry.name);
         let raw: string;
         try {
@@ -325,7 +339,7 @@ export interface OutboxEntry {
 export class TerminalEventOutbox {
   private pending = new Map<string, OutboxEntry>();
   private readonly store: AuditStoreContract;
-  private readonly outboxFile: string;
+  readonly outboxFile: string;
   private unhealthy = false;
   /**
    * In-process mutex serializing `enqueue`/`flush`/`reload`. A shared outbox
@@ -344,9 +358,11 @@ export class TerminalEventOutbox {
     this.store = store;
     const dir =
       opts?.outboxDir ??
-      (process.env.SEEPIENT_SECURITY_DIR
-        ? path.join(process.env.SEEPIENT_SECURITY_DIR, "outbox")
-        : path.join(os.homedir(), ".seepient", "security", "outbox"));
+      (store && "dir" in store && typeof (store as any).dir === "string"
+        ? path.join((store as any).dir, "outbox")
+        : (process.env.SEEPIENT_SECURITY_DIR
+            ? path.join(process.env.SEEPIENT_SECURITY_DIR, "outbox")
+            : path.join(os.homedir(), ".seepient", "security", "outbox")));
     // Per-process outbox file (Gate 5 / cross-process safety): each process
     // owns `pending.<pid>.ndjson`, so concurrent processes sharing
     // ~/.seepient never contend on one file. `reload()` scans EVERY
@@ -655,7 +671,7 @@ export async function recoverIndeterminateActions(
         // If append fails, enqueue in the outbox for retry. The action is
         // still indeterminate (we just couldn't persist the marker yet); the
         // outbox will retry and the deployment reports degraded audit health.
-        outbox?.enqueue(event, idempotencyKey(actionId, "indeterminate"));
+        await outbox?.enqueue(event, idempotencyKey(actionId, "indeterminate"));
         indeterminate.push(actionId);
       }
     }

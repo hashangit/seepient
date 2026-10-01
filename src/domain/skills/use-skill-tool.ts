@@ -46,7 +46,7 @@ export const UseSkillTool: ToolModule = {
     }
 
     const body = await registry.getBody(skill_name);
-    if (!body) return `Error: Skill '${skill_name}' has no content.`;
+    if (!body) return `Error: SKILL_BODY_UNAVAILABLE: Skill '${skill_name}' content is unavailable or unreadable.`;
 
     // If skillArgs provided, substitute positional variables
     let resolvedBody = body;

@@ -11,6 +11,7 @@ import type {
 import { InferenceError } from "../../foundations/errors.js";
 import { classifyInferenceError } from "../../foundations/errors/error-classifier.js";
 import { canonicalToGoogleImagePayload } from "./google-canonical-converter.js";
+import { assertBaseUrlEgressAllowed } from "../egress-check.js";
 
 /**
  * Raw Google image backend executing via `@google/genai`.
@@ -31,21 +32,34 @@ export class GoogleImageRaw implements ImageBackend {
 
     let onAbort: (() => void) | undefined;
     try {
-      const secret = await lease.secret();
-      if (secret.kind !== "api_key") {
+      const rawSecret = await lease.secret();
+      // 022-5 FR-007 (tenancy-invariant): undefined/empty keys must never
+      // reach the vendored client. kind:"none" maps to the explicit "unused"
+      // sentinel (no-auth endpoint).
+      const secret = rawSecret?.kind === "none" ? { kind: "api_key" as const, value: "unused" } : rawSecret;
+      if (!secret || secret.kind !== "api_key" || !secret.value) {
         throw new InferenceError({
           code: "auth",
-          message: `Google image backend requires an api_key credential, received kind "${secret.kind}"`,
+          message: `CREDENTIAL_REQUIRED: Image inference requires an explicit api_key credential for provider "${target.upstreamProvider}" — configure it through provider management.`,
           providerAccount: target.providerAccount,
           model: target.model,
           retryable: false,
         });
+      }
+      if (opts?.tenancyMode === "multi" && target.baseUrl) {
+        assertBaseUrlEgressAllowed(target.baseUrl, opts.capabilities, target);
       }
 
       const ai =
         this.client ??
         new GoogleGenAI({
           apiKey: secret.value,
+          // 022-5-WO4 follow-up (pass-15 lens A): an explicit baseUrl — the
+          // SDK's getBaseUrl falls back to ambient GOOGLE_GEMINI_BASE_URL /
+          // GOOGLE_VERTEX_BASE_URL when httpOptions.baseUrl is absent, which
+          // redirects the stored credential's traffic with zero checks. The
+          // explicit default matches the SDK's own (dist:13656) byte-for-byte.
+          httpOptions: { baseUrl: target.baseUrl ?? "https://generativelanguage.googleapis.com/" },
         });
 
       if (opts?.signal?.aborted) {

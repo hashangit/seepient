@@ -58,7 +58,6 @@ export interface AccountInput {
   upstreamProvider?: string;
   credential:
     | { mode: "paste"; keyValue?: string; keyText?: string }
-    | { mode: "env"; varName: string }
     | { mode: "none" }
     | { mode: "preserve" };
   baseUrl?: string | null;

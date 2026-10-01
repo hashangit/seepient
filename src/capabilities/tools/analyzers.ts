@@ -24,6 +24,54 @@ import type {
 import type { PreparationArtifactStore } from "../../foundations/contracts/execution-brokers.js";
 import type { ToolAnalysisContext } from "../../foundations/contracts/custom-tools.js";
 import { generateId } from "../../foundations/id.js";
+import { isGuardNeutralized } from "../../foundations/test-seams.js";
+import { PathEscapesWorkspaceError, PathIdentityMismatchError } from "../../foundations/errors.js";
+
+/**
+ * Authorizes a read target path against the tenant's workspace ceiling (FR-002, FR-003).
+ * Read permissions apply to the real file: if the realpath remains within the workspace,
+ * it is authorized and the target's canonicalPath is updated to the realpath.
+ * If the realpath escapes the workspace ceiling, it throws PathEscapesWorkspaceError.
+ */
+function authorizeReadTargetPath(rawPath: string, cwd: string, target: CanonicalPathTarget): string {
+  let realPath: string;
+  try {
+    realPath = fs_realpathSync(target.canonicalPath);
+  } catch {
+    // 022-5-WO1 T034: realpath failed (dangling symlink or missing path).
+    // Distinguish a DANGLING SYMLINK (its target may sit outside the
+    // ceiling) from a plain missing path: the dangling link is refused with
+    // the same SYMLINK_READ_DENIED shape the executor would produce for an
+    // existing link — no distinguishable outcome either way, so neither
+    // existence nor canonicalization leaks.
+    let st: ReturnType<typeof fs_lstatSync> | undefined;
+    try {
+      st = fs_lstatSync(target.canonicalPath);
+    } catch {
+      st = undefined;
+    }
+    if (st?.isSymbolicLink()) {
+      throw new PathEscapesWorkspaceError(target.canonicalPath);
+    }
+    realPath = target.canonicalPath;
+  }
+  let realWorkspace: string;
+  try {
+    realWorkspace = fs_realpathSync(cwd);
+  } catch {
+    realWorkspace = cwd;
+  }
+  const rel = path.relative(realWorkspace, realPath);
+  const isInside = rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+  if (!isInside) {
+    throw new PathEscapesWorkspaceError(realPath);
+  }
+  if (target.finalSymlink) {
+    target.canonicalPath = realPath;
+    target.finalSymlink = false;
+  }
+  return realPath;
+}
 
 /**
  * Analyzer signature: maps tool args + analysis context to a prepared action.
@@ -129,6 +177,8 @@ export function snapshotPath(target: CanonicalPathTarget): FileSnapshot | undefi
     const st = fs_lstatSync(target.canonicalPath);
     return {
       exists: true,
+      device: String(st.dev),
+      inode: String(st.ino),
       size: st.size,
       modifiedNs: String(st.mtimeMs * 1e6),
     };
@@ -137,27 +187,53 @@ export function snapshotPath(target: CanonicalPathTarget): FileSnapshot | undefi
   }
 }
 
+/**
+ * Device/inode identity of a snapshotted file, used to pin reads against
+ * mid-path symlink swaps between authorization and execution.
+ */
+export function identityOfSnapshot(
+  snapshot: FileSnapshot | undefined,
+): { dev: number; ino: number } | undefined {
+  if (!snapshot || !snapshot.exists || snapshot.device === undefined || snapshot.inode === undefined) {
+    return undefined;
+  }
+  return { dev: Number(snapshot.device), ino: Number(snapshot.inode) };
+}
+
 /** Sensitivity classification for read sources. */
 export function classifyReadSensitivity(canonicalPath: string): SensitivityClass {
-  const lower = canonicalPath.toLowerCase();
-  if (
-    lower.includes("/.seepient/security/") ||
-    lower.includes("/.ssh/") ||
-    lower.includes("/.aws/credentials") ||
-    lower.includes("/.env") ||
-    lower.endsWith(".pem") ||
-    lower.endsWith(".key")
-  ) {
-    return "secret";
+  let resolved = canonicalPath;
+  try {
+    resolved = fs_realpathSync(canonicalPath);
+  } catch {
+    /* keep canonicalPath */
   }
-  if (
-    lower.includes("/.seepient/") ||
-    lower.includes("/.config/") ||
-    lower.includes("/.gnupg/")
-  ) {
-    return "sensitive";
-  }
-  return "normal";
+
+  const check = (p: string): SensitivityClass | null => {
+    const lower = p.toLowerCase();
+    if (
+      lower.includes("/.seepient/security/") ||
+      lower.includes("/.ssh/") ||
+      lower.includes("/.aws/credentials") ||
+      lower.includes("/.env") ||
+      lower.endsWith(".pem") ||
+      lower.endsWith(".key")
+    ) {
+      return "secret";
+    }
+    if (
+      lower.includes("/.seepient/") ||
+      lower.includes("/.config/") ||
+      lower.includes("/.gnupg/")
+    ) {
+      return "sensitive";
+    }
+    return null;
+  };
+
+  const fromResolved = check(resolved);
+  if (fromResolved) return fromResolved;
+  return check(canonicalPath) ?? "normal";
 }
 
 /** Analyzer helper: build a PreparedToolAction. */
@@ -207,6 +283,7 @@ export async function analyzeReadFile(
 ): Promise<PreparedToolAction> {
   const cwd = ctx.workspace.canonicalRoot;
   const target = await canonicalizePath(args.path, cwd);
+  authorizeReadTargetPath(args.path, cwd, target);
   const sensitivity = classifyReadSensitivity(target.canonicalPath);
   const expected = snapshotPath(target) ?? { exists: false };
 
@@ -315,10 +392,56 @@ export async function analyzeEditFile(
   // dispatch with `expected` snapshots — the capability envelope is finally
   // checked on the write that actually happens.
   const { applySectionsToSnapshot } = await import("../../foundations/hashline/patcher.js");
-  const { readFile: fsReadFile } = await import("node:fs/promises");
+  const [{ open: fsOpenSection }, { constants: fsConstants }] = await Promise.all([
+    import("node:fs/promises"),
+    import("node:fs"),
+  ]);
   const sections = await applySectionsToSnapshot(
     patchStr,
-    (p) => fsReadFile(path.isAbsolute(p) ? p : path.resolve(cwd, p), "utf-8"),
+    async (p) => {
+      // FR-003: the section read is a real read — it clears the workspace
+      // ceiling like every other model-influenced read before the pinned
+      // open. Outside-ceiling targets (existing or dangling) deny identically,
+      // closing the existence/hash oracle.
+      const abs = path.isAbsolute(p) ? p : path.resolve(cwd, p);
+      const real = authorizeReadTargetPath(abs, cwd, {
+        canonicalPath: abs,
+        canonicalParent: path.dirname(abs),
+        basename: path.basename(abs),
+        exists: true,
+        finalSymlink: false,
+      });
+      // 022-5-WO1 T015 + WO4 T006: O_NONBLOCK bounds the open (a FIFO
+      // swapped in for a tagged path cannot wedge the ANALYSIS phase
+      // pre-approval), the pinned fd must be a regular file, and its dev/ino
+      // must match the identity the read_file executor RECORDED AT MINT TIME
+      // from its already-verified fd stat (WO3's read-time self-comparison
+      // could never fire; WO4 threads the verified identity). A post-tag
+      // inode swap is denied before host bytes enter the merge.
+      const recordedIdentity = ctx.snapshotStore?.identityOf?.(real) ?? null;
+      const handle = await fsOpenSection(real, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0));
+      try {
+        const st = await handle.stat();
+        if (st.isSymbolicLink() || st.nlink > 1) {
+          throw new Error(
+            `Refusing edit source: ${real} is a symbolic link or hardlink; edit the resolved real file`,
+          );
+        }
+        if (!st.isFile()) {
+          throw new Error(`Refusing edit source: ${real} is not a regular file`);
+        }
+        if (
+          !isGuardNeutralized("P1-1-READ-IDENTITY") &&
+          recordedIdentity &&
+          (String(st.dev) !== recordedIdentity.device || String(st.ino) !== recordedIdentity.inode)
+        ) {
+          throw new PathIdentityMismatchError(real);
+        }
+        return await handle.readFile({ encoding: "utf-8" });
+      } finally {
+        await handle.close();
+      }
+    },
     ctx.snapshotStore,
   );
 
@@ -336,10 +459,18 @@ export async function analyzeEditFile(
     const bytes = Buffer.from(section.applied, "utf8");
     const artifact = await ctx.artifacts.put(bytes, "text/plain");
     if (!expectedByPath.has(target.canonicalPath)) {
+      // 022-5-WO2 T010 (pass-12 P2-1): the commit's expected snapshot carries
+      // the authorization-time identity — the executor's old-content pin
+      // compares fstat(fd) against it, so a swapped-inode destination is
+      // denied before raced bytes reach the metadata surface.
+      const identity = snapshotPath(target);
       expectedByPath.set(target.canonicalPath, {
         exists: true,
         size: Buffer.byteLength(section.current, "utf8"),
         sha256: createHash("sha256").update(section.current, "utf8").digest("hex"),
+        ...(identity?.device !== undefined && identity.inode !== undefined
+          ? { device: identity.device, inode: identity.inode }
+          : {}),
       });
       uniqueTargets.push(target);
     }
@@ -830,12 +961,29 @@ export async function analyzeGenerateImage(
 
   const cwd = ctx.workspace.canonicalRoot;
 
-  // Resolve input targets (read side-effect if image_path or mask_path is provided)
-  const inputTargets = await Promise.all(
-    [args.image_path, args.mask_path]
-      .filter((p): p is string => typeof p === "string" && p.length > 0)
-      .map((p) => canonicalizePath(p, cwd)),
-  );
+  let imageTarget: CanonicalPathTarget | undefined;
+  if (typeof args.image_path === "string" && args.image_path.length > 0) {
+    imageTarget = await canonicalizePath(args.image_path, cwd);
+    authorizeReadTargetPath(args.image_path, cwd, imageTarget);
+  }
+
+  let maskTarget: CanonicalPathTarget | undefined;
+  if (typeof args.mask_path === "string" && args.mask_path.length > 0) {
+    maskTarget = await canonicalizePath(args.mask_path, cwd);
+    authorizeReadTargetPath(args.mask_path, cwd, maskTarget);
+  }
+
+  const inputTargets = [imageTarget, maskTarget].filter((t): t is CanonicalPathTarget => !!t);
+
+  // Identity pins captured at authorization time (authorize-what-you-open):
+  // the media executor verifies the opened input against these device/inode
+  // pairs so a parent-directory symlink swap cannot redirect the read.
+  const imageIdentity = imageTarget
+    ? identityOfSnapshot(snapshotPath(imageTarget))
+    : undefined;
+  const maskIdentity = maskTarget
+    ? identityOfSnapshot(snapshotPath(maskTarget))
+    : undefined;
 
   // Resolve save destination: output_path takes precedence over output_dir, defaulting to workspace root
   const count = typeof args.n === "number" && args.n > 0 ? Math.floor(args.n) : 1;
@@ -884,6 +1032,13 @@ export async function analyzeGenerateImage(
     destinations: targets,
   };
 
+  let maxSensitivity: SensitivityClass = "normal";
+  for (const input of inputTargets) {
+    const s = classifyReadSensitivity(input.canonicalPath);
+    if (s === "secret") maxSensitivity = "secret";
+    else if (s === "sensitive" && maxSensitivity !== "secret") maxSensitivity = "sensitive";
+  }
+
   const effects: EffectRequest[] = [
     { kind: "network-egress", destinations: [{ scheme: "https", host: "*" }] },
     {
@@ -897,8 +1052,8 @@ export async function analyzeGenerateImage(
     {
       kind: "model-egress",
       providerClass: ctx.modelProviderClass,
-      dataClasses: ["normal"],
-      sources: ["image-response"],
+      dataClasses: inputTargets.length > 0 ? [maxSensitivity] : ["normal"],
+      sources: inputTargets.length > 0 ? inputTargets.map((t) => t.canonicalPath) : ["image-response"],
     },
   ];
 
@@ -906,15 +1061,21 @@ export async function analyzeGenerateImage(
     effects.unshift({
       kind: "filesystem-read",
       targets: inputTargets,
-      sensitivity: "normal",
+      sensitivity: maxSensitivity,
     });
   }
 
   const inputObj: Record<string, import("../../foundations/contracts/tool-effects.js").JsonValue> = {};
   if (args.prompt !== undefined) inputObj.prompt = args.prompt;
   if (outputCommit) inputObj.outputPath = outputCommit.destination.canonicalPath;
-  if (args.image_path !== undefined) inputObj.imagePath = args.image_path;
-  if (args.mask_path !== undefined) inputObj.maskPath = args.mask_path;
+  if (imageTarget) {
+    inputObj.imagePath = imageTarget.canonicalPath;
+    if (imageIdentity) inputObj.imageIdentity = imageIdentity;
+  } else if (args.image_path !== undefined) inputObj.imagePath = args.image_path;
+  if (maskTarget) {
+    inputObj.maskPath = maskTarget.canonicalPath;
+    if (maskIdentity) inputObj.maskIdentity = maskIdentity;
+  } else if (args.mask_path !== undefined) inputObj.maskPath = args.mask_path;
   if (args.mode !== undefined) inputObj.mode = args.mode;
   if (args.model !== undefined) inputObj.model = args.model;
   if (args.n !== undefined) inputObj.n = args.n;
@@ -922,6 +1083,7 @@ export async function analyzeGenerateImage(
   if (args.quality !== undefined) inputObj.quality = args.quality;
   if (args.style !== undefined) inputObj.style = args.style;
   if (args.output_dir !== undefined) inputObj.outputDir = args.output_dir;
+  inputObj.workspaceRoot = cwd;
 
   const operation: PreparedOperation = {
     kind: "broker",

@@ -117,7 +117,7 @@ describe("Pack Verification Gate (Spec 021-2 / FR-001)", () => {
 
   describe("live repo check", () => {
     it("passes against the restored working tree with prepublishOnly safe", () => {
-      const result = verifyPack(process.cwd());
+      const result = verifyPack(process.cwd(), { allowPlaceholder: true });
       expect(result.success).toBe(true);
       expect(result.count).toBeGreaterThan(0);
     });

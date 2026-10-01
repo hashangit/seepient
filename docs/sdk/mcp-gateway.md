@@ -7,7 +7,11 @@ description: Connect Model Context Protocol (MCP) servers and external REST tool
 
 The Seepient SDK exports an MCP Gateway integration (`gateway`) that allows applications to connect Model Context Protocol (MCP) servers and external REST endpoints directly into the Seepient tool execution loop.
 
-External tools discovered via the gateway are dynamically converted into proxy tools and registered in Seepient's tool registry.
+External tools discovered via the gateway are dynamically converted into proxy tools and returned for registration in Seepient's per-agent tool registry.
+
+::: tip Multi-Tenant Isolation
+Tools discovered from gateways are scoped to the agent instance where they are supplied. For multi-tenant environments and migration details, see the [Multi-Tenant Isolation Guide](./multi-tenant.md).
+:::
 
 ## Import
 
@@ -18,18 +22,26 @@ import { gateway } from "seepient";
 ## Quick Example
 
 ```typescript
-import { gateway, createSeepient } from "seepient";
+import { gateway, createSeepient, GatewaySettingsAdapter } from "seepient";
 
-// 1. Initialize the gateway with configuration
-const mcpGateway = await gateway.createGateway({
-  enabled: true,
-  semanticTopK: 5,
-  defaultRateLimitPerMin: 60,
-  maxAuditLogsInMemory: 1000,
+// 1. Initialize settings adapter and gateway with configuration
+const adapter = new GatewaySettingsAdapter();
+await adapter.initialize();
+
+const mcpResult = await gateway.createGateway(
+  {
+    enabled: true,
+    semanticTopK: 5,
+    defaultRateLimitPerMin: 60,
+    maxAuditLogsInMemory: 1000,
+  },
+  adapter,
+);
+
+// 2. Pass discovered tools explicitly into the agent instance
+const agent = await createSeepient({
+  tools: mcpResult ? mcpResult.tools : [],
 });
-
-// 2. Create an agent instance — it automatically receives registered MCP tools
-const agent = await createSeepient();
 const response = await agent.chat("Check database connection using our MCP tool");
 console.log(response.text);
 ```

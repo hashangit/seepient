@@ -20,16 +20,14 @@ When run without `prompt` or `subcommand`, Seepient starts the interactive Termi
 
 | Flag | Shorthand | Type | Default | Description |
 |---|---|---|---|---|
-| `--provider <name>` | `-p` | String | Configured default | LLM provider to use (`anthropic`, `openai`, `gemini`, etc.). |
-| `--model <name>` | `-m` | String | Configured default | Model name (e.g. `claude-3-7-sonnet`, `gpt-4o`). |
-| `--tier <tier>` | | String | `standard` | Purpose tier: `standard`, `complex`, or `efficient`. |
-| `--session <id>` | `-s` | String | Auto-generated | Session ID to attach to or resume. |
-| `--skill <name>` | | String | None | Force-inject a skill pack into the agent context. |
-| `--no-interactive` | `-y` | Boolean | `false` | Automatically approve safe operations without prompting. |
-| `--dry-run` | | Boolean | `false` | Plan actions and display diffs without writing to disk or executing commands. |
-| `--consent-mode <mode>` | | String | `always-ask` | Consent mode: `always-ask`, `ask-untrusted`, `autonomous-trusted`. |
-| `--no-sandbox` | | Boolean | `false` | Disable operating system process sandboxing. |
-| `--version` | `-v` | Boolean | | Print version number and exit. |
+| `--provider <provider>` | `-p` | String | Configured default | Provider to use (`openai-compatible`, `openai`, `anthropic`, `glm`). |
+| `--model <model>` | `-m` | String | Configured default | Model to use. |
+| `--no-interactive` | `-n` | Boolean | `false` | Exit after processing the initial query (Headless mode). |
+| `--docker` | | Boolean | `false` | Docker mode: implies --no-interactive, disables interactive prompts (denies un-predeclared actions; pass `--mode autonomous` or `--yes` for unattended runs). |
+| `--yes` | `-y` | Boolean | `false` | Autonomous mode: auto-approve actions within deployment ceiling (alias for --mode autonomous). |
+| `--mode <mode>` | | String | `edit-enabled` | Consent mode: `ask-everything`, `edit-enabled` (default), `autonomous`. |
+| `--resume <id>` | `-r` | String | | Resume a previous session by id (or "last"). |
+| `--version` | `-V` | Boolean | | Print version number and exit. |
 | `--help` | `-h` | Boolean | | Print help summary and exit. |
 
 ---
@@ -43,29 +41,63 @@ Launches the interactive setup wizard to configure providers, API credentials, a
 seepient setup
 ```
 
-### `seepient sessions`
-Inspects and manages conversation checkpoints.
+### `seepient server`
+Starts the Seepient HTTP and WebSocket daemon from the CLI.
 
 ```bash
-# List recent sessions
-seepient sessions list
+# Start server on default port (7337)
+seepient server
 
-# Export a session transcript to markdown
-seepient sessions export sess_20260905_a1b2 --output ./review.md
-
-# Fork an existing session from turn 3
-seepient sessions fork sess_20260905_a1b2 --turn 3
+# Custom port and interface
+seepient server --port 8080 --host 0.0.0.0
 ```
 
-### `seepient audit`
-Inspects recent entries recorded in `~/.seepient/audit.log`.
+### `seepient auth`
+Manages provider authentication and server API tokens.
 
 ```bash
-# View the last 10 audit entries
-seepient audit --limit 10
+# Log in or configure an API key for a provider
+seepient auth login anthropic
 
-# Filter audit records by session ID
-seepient audit --session sess_20260905_a1b2
+# Remove credentials for an account
+seepient auth logout anthropic
+
+# Issue a scoped server API key
+seepient auth issue-token --scope agent:run --label my-app
+```
+
+### `seepient providers`
+Inspects and registers upstream model providers.
+
+```bash
+# List configured providers
+seepient providers list
+
+# Register a local Ollama endpoint
+seepient providers add local-ollama --upstream ollama --url http://127.0.0.1:11434/v1 --allow-private
+
+# Register a custom OpenAI-compatible endpoint (keyless; store a key via auth login)
+seepient providers add custom-ai --upstream openai --url https://api.example.com/v1
+seepient auth login custom-ai --key sk-...
+```
+
+### `seepient models`
+Inspects model catalogs and configures model assignments.
+
+```bash
+# List available models across active providers
+seepient models list
+```
+
+### `seepient generate`
+Direct media generation commands for image models.
+
+```bash
+# Generate an image from a prompt
+seepient generate image "A futuristic city skyline at twilight" --output ./images
+
+# Generate variations or edits
+seepient generate image "Make the sky overcast" --operation edit --output ./images
 ```
 
 ---
@@ -82,7 +114,6 @@ seepient-server [options]
 |---|---|---|---|
 | `--port <number>` | Number | `7337` | Port to listen on. |
 | `--host <string>` | String | `127.0.0.1` | Network interface to bind to (`0.0.0.0` for all interfaces). |
-| `--api-key <key>` | String | None | Static API key required for HTTP and WebSocket authentication. |
 | `--generate-api-key` | Boolean | `false` | Generates an ephemeral cryptographic API key and prints it on startup. |
 
 ---
@@ -91,7 +122,5 @@ seepient-server [options]
 
 | Code | Meaning |
 |---|---|
-| `0` | Execution completed successfully. |
-| `1` | Runtime error or unhandled model execution failure. |
-| `2` | Configuration error, invalid command flags, or missing API credentials. |
-| `130` | Terminated by user (`SIGINT` or `Ctrl+C`). |
+| `0` | Execution completed successfully (or clean user exit via SIGINT). |
+| `1` | Runtime error, invalid configuration/flags, or unhandled execution failure. |

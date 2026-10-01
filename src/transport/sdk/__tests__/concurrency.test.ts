@@ -37,6 +37,7 @@ describe("SDK Concurrency & Mutex Correctness (Task 1.1, Task 1.2)", () => {
     const seepient = await createSeepient({
       runtime,
       tools: [],
+      tenancy: "single",
     });
 
     const [res1, res2] = await Promise.all([
@@ -62,6 +63,7 @@ describe("SDK Concurrency & Mutex Correctness (Task 1.1, Task 1.2)", () => {
     const seepient = await createSeepient({
       runtime,
       tools: [],
+      tenancy: "single",
     });
 
     const stream = await seepient.chatStream("Stream prompt");
@@ -135,6 +137,7 @@ describe("SDK Concurrency & Mutex Correctness (Task 1.1, Task 1.2)", () => {
     const seepient = await createSeepient({
       runtime,
       tools: [],
+      tenancy: "single",
       persist: {
         __persistenceBackend: true as const,
         save: rejectingBackend.save,

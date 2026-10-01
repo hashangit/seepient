@@ -192,4 +192,127 @@ describe("TUI slash-command skill launch & REPL parity", () => {
     expect(lastFrame()).toContain("Unknown command: /nonexistent-cmd. Type /? for help.");
     expect(lastFrame()).not.toContain("arrives in US2");
   });
+
+  it("handles null skill registry gracefully with 'skills unavailable' message (FR-035)", async () => {
+    const fakeAgent = {
+      chat: vi.fn(),
+      createAbortSignal: vi.fn(() => new AbortController().signal),
+      isPermissionPipelineEnabled: vi.fn(() => false),
+      setPipelineApprovalBroker: vi.fn(),
+      getSkillRegistry: vi.fn(() => null),
+      getProviderRuntime: vi.fn(() => ({})),
+      getConsentMode: vi.fn(() => "edit-enabled" as const),
+      getModel: vi.fn(() => "mock-model"),
+      clearConversation: vi.fn(),
+    } as unknown as Agent;
+
+    const dispatchCommand = vi.fn(async () => ({ status: "fallthrough" as const }));
+
+    const { stdin, lastFrame } = render(
+      <TuiApp
+        agent={fakeAgent}
+        consentMode="edit-enabled"
+        onExit={() => {}}
+        dispatchCommand={dispatchCommand}
+        commands={[]}
+        skills={[]}
+        resetView={() => {}}
+        providerType="mock"
+        gatewayOn={false}
+        skillCount={0}
+        mcpCount={0}
+        getSettingsList={() => []}
+        onSetSetting={async () => {}}
+        listSessions={async () => []}
+        onSwitchSession={async () => null}
+        onDeleteSession={async () => {}}
+        onExportSession={async () => null}
+        onTranscriptSession={async () => null}
+        onRenameSession={async () => true}
+        getSessionId={() => "sess-test"}
+      />,
+    );
+
+    await waitForStdinSubscription(stdin, "ink stdin subscribed");
+    await typeUntilEchoed(stdin, lastFrame, "/some-skill", "command echoed in prompt");
+    stdin.write("\r");
+
+    await waitFor(
+      () => lastFrame()?.includes("skills unavailable") ?? false,
+      "feed to show skills unavailable info entry",
+    );
+
+    expect(lastFrame()).toContain("skills unavailable");
+  });
+
+  it("handles SKILL_BODY_UNAVAILABLE gracefully with error entry in feed (FR-034)", async () => {
+    const brokenSkill = {
+      name: "broken",
+      description: "broken skill",
+      tags: [],
+      body: "",
+      source: "test",
+      filePath: "",
+    };
+
+    const mockRegistry = {
+      get: vi.fn((name: string) => (name === "broken" ? brokenSkill : undefined)),
+      getMetadata: vi.fn(() => [brokenSkill]),
+      getAll: vi.fn(() => [brokenSkill]),
+      getBody: vi.fn(async () => ""),
+      resolveConfig: vi.fn(() => ({})),
+      has: vi.fn((name: string) => name === "broken"),
+    };
+
+    const fakeAgent = {
+      chat: vi.fn(),
+      createAbortSignal: vi.fn(() => new AbortController().signal),
+      isPermissionPipelineEnabled: vi.fn(() => false),
+      setPipelineApprovalBroker: vi.fn(),
+      getSkillRegistry: vi.fn(() => mockRegistry as unknown as SkillRegistry),
+      getProviderRuntime: vi.fn(() => ({})),
+      getConsentMode: vi.fn(() => "edit-enabled" as const),
+      getModel: vi.fn(() => "mock-model"),
+      clearConversation: vi.fn(),
+    } as unknown as Agent;
+
+    const dispatchCommand = vi.fn(async () => ({ status: "fallthrough" as const }));
+
+    const { stdin, lastFrame } = render(
+      <TuiApp
+        agent={fakeAgent}
+        consentMode="edit-enabled"
+        onExit={() => {}}
+        dispatchCommand={dispatchCommand}
+        commands={[]}
+        skills={[]}
+        resetView={() => {}}
+        providerType="mock"
+        gatewayOn={false}
+        skillCount={1}
+        mcpCount={0}
+        getSettingsList={() => []}
+        onSetSetting={async () => {}}
+        listSessions={async () => []}
+        onSwitchSession={async () => null}
+        onDeleteSession={async () => {}}
+        onExportSession={async () => null}
+        onTranscriptSession={async () => null}
+        onRenameSession={async () => true}
+        getSessionId={() => "sess-test"}
+      />,
+    );
+
+    await waitForStdinSubscription(stdin, "ink stdin subscribed");
+    await typeUntilEchoed(stdin, lastFrame, "/broken", "command echoed in prompt");
+    stdin.write("\r");
+
+    await waitFor(
+      () => lastFrame()?.includes("SKILL_BODY_UNAVAILABLE") ?? false,
+      "feed to show SKILL_BODY_UNAVAILABLE error entry",
+    );
+
+    expect(lastFrame()).toContain("SKILL_BODY_UNAVAILABLE");
+    expect(lastFrame()).toContain("broken");
+  });
 });

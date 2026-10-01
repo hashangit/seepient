@@ -81,40 +81,43 @@ describe("ServerSessionManager (Spec 021-2 / FR-004)", () => {
 
     const session1 = await manager.createSession("test-key", { id: "in-flight-session" });
     const session2 = await manager.createSession("test-key", { id: "idle-session" });
+    const cKey1 = `${hashKey("test-key")}:${session1.id}`;
+    const cKey2 = `${hashKey("test-key")}:${session2.id}`;
 
     // Mark session1 as in-flight
     expect(manager.acquireTurn(session1.id)).toBe(true);
 
     // Simulate 30-min inactivity passed for both sessions
     const oldTime = Date.now() - 30 * 60 * 1000;
-    (manager as any).sessions.get(session1.id)!.lastActivityAt = oldTime;
-    (manager as any).sessions.get(session2.id)!.lastActivityAt = oldTime;
+    (manager as any).sessions.get(cKey1)!.lastActivityAt = oldTime;
+    (manager as any).sessions.get(cKey2)!.lastActivityAt = oldTime;
 
     // Run cleanup
     manager.cleanup();
 
     // session1 is in-flight, so it MUST survive cleanup!
-    expect((manager as any).sessions.has(session1.id)).toBe(true);
+    expect((manager as any).sessions.has(cKey1)).toBe(true);
 
     // session2 was idle, so it MUST be reaped!
-    expect((manager as any).sessions.has(session2.id)).toBe(false);
+    expect((manager as any).sessions.has(cKey2)).toBe(false);
 
     // W152: the absolute TTL ceiling ALSO defers to an in-flight turn —
     // expiry must never clear a live writer lock.
-    (manager as any).sessions.get(session1.id)!.createdAt = Date.now() - 25 * 60 * 60 * 1000;
+    (manager as any).sessions.get(cKey1)!.createdAt = Date.now() - 25 * 60 * 60 * 1000;
     manager.cleanup();
-    expect((manager as any).sessions.has(session1.id)).toBe(true);
-    expect((manager as any).inFlightTurns.has(session1.id)).toBe(true);
+    expect((manager as any).sessions.has(cKey1)).toBe(true);
+    expect((manager as any).inFlightTurns.has(cKey1)).toBe(true);
 
     // Once the turn completes, the expired session is collected normally.
     manager.releaseTurn(session1.id);
     manager.cleanup();
-    expect((manager as any).sessions.has(session1.id)).toBe(false);
+    expect((manager as any).sessions.has(cKey1)).toBe(false);
   });
 
   it("deleteSession refuses while a turn is in flight, then clears the lock (W035 as amended by 021-4 W152)", async () => {
     const manager = new ServerSessionManager({ backend: new MemoryPersistenceBackend() });
     const session = await manager.createSession("test-key", { id: "turn-lock-sess" });
+    const cKey = `${hashKey("test-key")}:${session.id}`;
     expect(manager.acquireTurn(session.id)).toBe(true);
     expect(manager.isTurnInFlight(session.id)).toBe(true);
 
@@ -122,13 +125,13 @@ describe("ServerSessionManager (Spec 021-2 / FR-004)", () => {
     // second writer start mid-stream — refused while the turn is in flight.
     manager.deleteSession(session.id);
     expect(manager.isTurnInFlight(session.id)).toBe(true);
-    expect((manager as any).sessions.has(session.id)).toBe(true);
+    expect((manager as any).sessions.has(cKey)).toBe(true);
 
     // After the turn completes, deletion works and clears any residual lock.
     manager.releaseTurn(session.id);
     manager.deleteSession(session.id);
-    expect((manager as any).inFlightTurns.has(session.id)).toBe(false);
-    expect((manager as any).sessions.has(session.id)).toBe(false);
+    expect((manager as any).inFlightTurns.has(cKey)).toBe(false);
+    expect((manager as any).sessions.has(cKey)).toBe(false);
   });
 
   it("rolls back in-memory session if backend persistence throws on createSession (W038.3)", async () => {
@@ -143,7 +146,7 @@ describe("ServerSessionManager (Spec 021-2 / FR-004)", () => {
     ).rejects.toThrow("Disk full simulation");
 
     // Must be deleted from in-memory sessions
-    expect((manager as any).sessions.has("fail-persist-sess")).toBe(false);
+    expect((manager as any).sessions.has(`${hashKey("test-key")}:fail-persist-sess`)).toBe(false);
   });
 
   it("atomically guards concurrent createSession with same ID (W010)", async () => {
@@ -180,21 +183,21 @@ describe("ServerSessionManager (Spec 021-2 / FR-004)", () => {
     // 1. Raw key with 'hash' substring should be hashed, not stored raw
     const keyWithHash = "my-test-api-key-hash-token";
     const s1 = await manager.createSession(keyWithHash, { id: "sess-1" });
-    const stored1 = (manager as any).sessions.get(s1.id);
+    const stored1 = (manager as any).sessions.get(`${hashKey(keyWithHash)}:${s1.id}`);
     expect(stored1.apiKeyHash).not.toBe(keyWithHash);
     expect(stored1.apiKeyHash).toMatch(/^[0-9a-f]{64}$/);
 
     // 2. 64-hex shaped key passed positionally must also be hashed
     const hex64Key = "a".repeat(64);
     const s2 = await manager.createSession(hex64Key, { id: "sess-2" });
-    const stored2 = (manager as any).sessions.get(s2.id);
+    const stored2 = (manager as any).sessions.get(`${hashKey(hex64Key)}:${s2.id}`);
     expect(stored2.apiKeyHash).not.toBe(hex64Key);
     expect(stored2.apiKeyHash).toMatch(/^[0-9a-f]{64}$/);
 
     // 3. Precomputed hash is ONLY accepted via explicit options.apiKeyHash
     const precomputed = "b".repeat(64);
     const s3 = await manager.createSession("any-key", { id: "sess-3", apiKeyHash: precomputed });
-    const stored3 = (manager as any).sessions.get(s3.id);
+    const stored3 = (manager as any).sessions.get(`${precomputed}:${s3.id}`);
     expect(stored3.apiKeyHash).toBe(precomputed);
 
     // 4. hashKey helper itself always hashes 64-hex input without fast-path

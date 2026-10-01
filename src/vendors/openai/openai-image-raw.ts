@@ -11,6 +11,7 @@ import type {
 import { InferenceError } from "../../foundations/errors.js";
 import { classifyInferenceError } from "../../foundations/errors/error-classifier.js";
 import { canonicalToOpenAIImageParams } from "./openai-canonical-converter.js";
+import { assertBaseUrlEgressAllowed } from "../egress-check.js";
 
 /**
  * Raw OpenAI Image backend executing directly via the OpenAI SDK.
@@ -40,22 +41,32 @@ export class OpenAIImageRaw implements ImageBackend {
         });
       }
 
-      const secret = await lease.secret();
-      if (secret.kind !== "api_key") {
+      const rawSecret = await lease.secret();
+      // 022-5 FR-007 (tenancy-invariant): undefined/empty keys must never
+      // reach the vendored client — the OpenAI SDK falls back to host
+      // process.env when apiKey is undefined. kind:"none" maps to the
+      // explicit "unused" sentinel (no-auth endpoint).
+      const secret = rawSecret?.kind === "none" ? { kind: "api_key" as const, value: "unused" } : rawSecret;
+      if (!secret || secret.kind !== "api_key" || !secret.value) {
         throw new InferenceError({
           code: "auth",
-          message: `OpenAI image backend requires an api_key credential, received kind "${secret.kind}"`,
+          message: `CREDENTIAL_REQUIRED: Image inference requires an explicit api_key credential for provider "${target.upstreamProvider}" — configure it through provider management.`,
           providerAccount: target.providerAccount,
           model: target.model,
           retryable: false,
         });
+      }
+      if (opts?.tenancyMode === "multi" && target.baseUrl) {
+        assertBaseUrlEgressAllowed(target.baseUrl, opts.capabilities, target);
       }
 
       const client =
         this.client ??
         new OpenAI({
           apiKey: secret.value,
-          baseURL: target.baseUrl,
+          // 022-5-WO4 T009 (pass-14 P1-3): explicit default — no destructor
+          // fallback to ambient OPENAI_BASE_URL.
+          baseURL: target.baseUrl ?? "https://api.openai.com/v1",
           timeout: opts?.timeoutMs,
         });
 

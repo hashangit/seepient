@@ -32,7 +32,12 @@ Even inside an OS sandbox, an agent might attempt to curl an external server wit
 
 The **Egress Gate** inspects outgoing network requests and tool arguments:
 1. **SSRF protection**: Rejects network requests targeting cloud metadata IP addresses (such as `169.254.169.254` for AWS/GCP instance credentials) and internal loopback addresses unless explicitly allowed.
-2. **Credential redaction**: Automatically redacts environment variable secrets (such as strings matching `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`) from tool stdout and stderr before they return to the model or display in the UI.
+2. **Credential redaction**: Automatically strips known provider API-key variables (and any variable whose name matches the provider-key patterns) from the sandbox environment, so their values cannot reach tool output or the model.
+3. **Response caps** (022-5-WO2): Brokered network tool responses (e.g. `read_website`) abort mid-stream once the body exceeds 10 MiB or the request exceeds 30 s, matching the broker's own limits — a response is never buffered without bound in the host process.
+
+## Process lifecycle: no daemons by default (022-5-WO1, D2)
+
+Sandboxed command execution kills the whole process group when the command settles — on normal completion as well as on abort. A tool call that backgrounds children (`server & …`) does not leave them running after the call returns: the boundary treats a settled exec as finished work and reaps its descendants. This is intended product behavior on every path (contained and uncontained); pin it by test before changing it.
 
 ---
 

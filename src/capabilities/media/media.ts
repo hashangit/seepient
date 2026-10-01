@@ -10,6 +10,8 @@ import { safeSsrfFetch } from '../../foundations/network/ssrf-fetch.js';
 import * as path from 'path';
 import type { FileCommitBroker } from '../../foundations/contracts/execution-brokers.js';
 import type { CapabilityEnvelope } from '../../foundations/contracts/permission-policy.js';
+import { PathHardlinkRefusedError, PathIdentityMismatchError } from '../../foundations/errors.js';
+import { isGuardNeutralized } from '../../foundations/test-seams.js';
 
 export interface ImageRequest {
   prompt?: string;
@@ -17,6 +19,10 @@ export interface ImageRequest {
   destinations?: string[];
   imagePath?: string;
   maskPath?: string;
+  /** Authorization-time device/inode pin for the input image (authorize-what-you-open). */
+  imageIdentity?: { dev: number; ino: number };
+  /** Authorization-time device/inode pin for the mask image. */
+  maskIdentity?: { dev: number; ino: number };
   mode?: 'text-to-image' | 'variation' | 'edit';
   model?: string;
   n?: number;
@@ -24,6 +30,7 @@ export interface ImageRequest {
   quality?: string;
   style?: string;
   outputDir?: string;
+  workspaceRoot?: string;
 }
 
 export interface MediaConfig {
@@ -33,6 +40,8 @@ export interface MediaConfig {
   runtime?: any;
   commitBroker?: FileCommitBroker;
   envelope?: CapabilityEnvelope;
+  tenancyMode?: "single" | "multi";
+  capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[];
 }
 
 export interface RuntimeImageOutput {
@@ -60,6 +69,62 @@ export interface StructuredImageResult {
 }
 
 /**
+ * Pinned input read shared by the image and mask paths (022-5 FR-002/FR-004b):
+ * no-follow, non-blocking open (bounds a FIFO open instead of freezing the
+ * event loop), regular-file gate, hardlink gate, and the authorization-time
+ * identity pin. Exported for the identity-discipline tests.
+ */
+export async function readPinnedImage(
+  resolvedPath: string,
+  identity: { dev: number; ino: number } | undefined,
+  label: string,
+  operatorAllowsHardlinks: boolean | undefined,
+  signal?: AbortSignal,
+): Promise<{ type: "image"; mediaType: "image/png"; data: string }> {
+  if (signal?.aborted) throw new Error(`Refusing ${label}: aborted before open`);
+  // 022-5-WO1 T016: the open is INSIDE the try — an ELOOP/EMLINK from the
+  // open itself must reach the symlink conversion below (it was dead code).
+  let handle: fs.promises.FileHandle | undefined;
+  try {
+    handle = await fs.promises.open(
+      resolvedPath,
+      fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0),
+    );
+    const st = await handle.stat();
+    if (st.isSymbolicLink()) {
+      // 022-5-WO2 T014: the code survives classifyMediaError — the caller
+      // learns WHY, not just "generation failed".
+      throw Object.assign(new Error(`Refusing ${label}: ${resolvedPath} is a symbolic link`), { code: "SYMLINK_READ_DENIED" });
+    }
+    if (!st.isFile()) {
+      throw Object.assign(new Error(`Refusing ${label}: ${resolvedPath} is not a regular file`), { code: "MEDIA_INPUT_NOT_REGULAR_FILE" });
+    }
+    if (st.nlink > 1 && !operatorAllowsHardlinks) {
+      throw new PathHardlinkRefusedError(resolvedPath);
+    }
+    // Authorization-time identity pin: without it O_NOFOLLOW only guards the
+    // final component, so a parent-directory swap redirects this read.
+    if (
+      !isGuardNeutralized("P1-1-READ-IDENTITY") &&
+      (!identity ||
+        String(st.dev) !== String(identity.dev) ||
+        String(st.ino) !== String(identity.ino))
+    ) {
+      throw new PathIdentityMismatchError(resolvedPath);
+    }
+    const data = await handle.readFile({ signal });
+    return { type: "image" as const, mediaType: "image/png" as const, data: data.toString("base64") };
+  } catch (err: any) {
+    if (err?.code === "ELOOP" || err?.code === "EMLINK") {
+      throw Object.assign(new Error(`Refusing ${label}: ${resolvedPath} is a symbolic link`), { code: "SYMLINK_READ_DENIED" });
+    }
+    throw err;
+  } finally {
+    await handle?.close();
+  }
+}
+
+/**
  * Execute image generation via ProviderRuntime without performing filesystem writes.
  * Used by the effect broker / vendorOperationHandler for pipeline-managed exact commits.
  */
@@ -68,6 +133,12 @@ export async function generateImageRuntime(
   runtime: any,
   signal?: AbortSignal,
   timeoutMs?: number,
+  opts?: {
+    tenancyMode?: "single" | "multi";
+    capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[];
+    workspaceRoot?: string;
+    operatorAllowsHardlinks?: boolean;
+  },
 ): Promise<RuntimeImageExecutionResult> {
   const mode = req.mode ?? (req.imagePath && req.maskPath ? "edit" : req.imagePath ? "variation" : "text-to-image");
 
@@ -75,7 +146,15 @@ export async function generateImageRuntime(
     throw new Error("Prompt cannot be empty for image generation.");
   }
 
-  if ((mode === "variation" || mode === "edit") && (!req.imagePath || !fs.existsSync(req.imagePath))) {
+  const workspaceRoot = opts?.workspaceRoot ?? req.workspaceRoot ?? process.cwd();
+  const resolvedImagePath = req.imagePath
+    ? (path.isAbsolute(req.imagePath) ? req.imagePath : path.resolve(workspaceRoot, req.imagePath))
+    : undefined;
+  const resolvedMaskPath = req.maskPath
+    ? (path.isAbsolute(req.maskPath) ? req.maskPath : path.resolve(workspaceRoot, req.maskPath))
+    : undefined;
+
+  if ((mode === "variation" || mode === "edit") && (!resolvedImagePath || !fs.existsSync(resolvedImagePath))) {
     throw new Error(`Input image path "${req.imagePath}" not found.`);
   }
 
@@ -98,21 +177,25 @@ export async function generateImageRuntime(
   }
 
   let inputImage: any;
-  if (req.imagePath && fs.existsSync(req.imagePath)) {
-    inputImage = {
-      type: "image" as const,
-      mediaType: "image/png" as const,
-      data: fs.readFileSync(req.imagePath).toString("base64"),
-    };
+  if (resolvedImagePath && fs.existsSync(resolvedImagePath)) {
+    inputImage = await readPinnedImage(
+      resolvedImagePath,
+      req.imageIdentity,
+      "image input",
+      opts?.operatorAllowsHardlinks,
+      signal,
+    );
   }
 
   let mask: any;
-  if (req.maskPath && fs.existsSync(req.maskPath)) {
-    mask = {
-      type: "image" as const,
-      mediaType: "image/png" as const,
-      data: fs.readFileSync(req.maskPath).toString("base64"),
-    };
+  if (resolvedMaskPath && fs.existsSync(resolvedMaskPath)) {
+    mask = await readPinnedImage(
+      resolvedMaskPath,
+      req.maskIdentity,
+      "image mask",
+      opts?.operatorAllowsHardlinks,
+      signal,
+    );
   }
 
   const result = await runtime.executeImage(
@@ -130,6 +213,8 @@ export async function generateImageRuntime(
     {
       signal,
       timeoutMs,
+      tenancyMode: opts?.tenancyMode,
+      capabilities: opts?.capabilities,
     },
   );
 
@@ -197,7 +282,16 @@ export async function generateImagesStructured(
 
   const generatedFiles: string[] = [];
   try {
-    const execResult = await generateImageRuntime(req, config.runtime, config.signal, config.timeoutMs);
+    const execResult = await generateImageRuntime(
+      req,
+      config.runtime,
+      config.signal,
+      config.timeoutMs,
+      {
+        tenancyMode: config.tenancyMode,
+        capabilities: config.capabilities ?? config.envelope?.capabilities,
+      },
+    );
 
     if (req.outputPath) {
       const resolvedPath = path.resolve(req.outputPath);
@@ -312,6 +406,8 @@ RULES:
     {
       signal: config.signal,
       timeoutMs: config.timeoutMs,
+      tenancyMode: config.tenancyMode,
+      capabilities: config.capabilities ?? config.envelope?.capabilities,
     },
   )) {
     if (event.type === "content_block_delta" && event.delta.type === "text_delta") {

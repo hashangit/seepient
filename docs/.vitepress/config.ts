@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitepress'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-let seepientVersion = '0.7.2'
+let seepientVersion = '0.8.0'
 try {
   const pkgPath = path.resolve(__dirname, '../../package.json')
   if (fs.existsSync(pkgPath)) {
@@ -17,7 +17,7 @@ try {
 
 export default defineConfig({
   title: 'Seepient',
-  description: 'An autonomous AI agent species: TUI, CLI, SDK, and server over one runtime',
+  description: 'An autonomous AI agent species: full spectrum of deployment surfaces across CLI, TUI, SDK, server, and container workers',
   base: '/',
   appearance: false,
   head: [
@@ -35,10 +35,12 @@ export default defineConfig({
       {
         text: 'Surfaces',
         items: [
-          { text: 'Terminal UI (TUI)', link: '/tui/overview' },
           { text: 'Command Line (CLI)', link: '/cli/overview' },
-          { text: 'TypeScript SDK', link: '/sdk/overview' },
-          { text: 'Server & Protocol', link: '/server/overview' }
+          { text: 'Terminal UI (TUI)', link: '/tui/overview' },
+          { text: 'Embedded SDK', link: '/sdk/overview' },
+          { text: 'Programmatic Server', link: '/sdk/stateless-workers' },
+          { text: 'REST / WS Server', link: '/server/overview' },
+          { text: 'Container Workers', link: '/server/workers' }
         ]
       },
       {
@@ -160,6 +162,7 @@ export default defineConfig({
             { text: 'Hooks and middleware', link: '/sdk/hooks' },
             { text: 'Session persistence', link: '/sdk/session-persistence' },
             { text: 'Stateless workers', link: '/sdk/stateless-workers' },
+            { text: 'Multi-tenant isolation', link: '/sdk/multi-tenant' },
             { text: 'Types', link: '/sdk/types' }
           ]
         }

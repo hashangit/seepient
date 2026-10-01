@@ -5,7 +5,7 @@ import { useData, withBase } from 'vitepress'
 const { theme } = useData()
 const shore = `${withBase('/textures/shore.jpg')}`
 
-const rawVersion = computed(() => theme.value.seepientVersion || '0.7.2')
+const rawVersion = computed(() => theme.value.seepientVersion || '0.8.0')
 const displayVersion = computed(() => `v${rawVersion.value.replace(/^v/, '')}`)
 const releaseUrl = computed(() => `https://github.com/hashangit/seepient/releases/tag/${displayVersion.value}`)
 </script>
@@ -32,9 +32,9 @@ const releaseUrl = computed(() => `https://github.com/hashangit/seepient/release
         <span>an autonomous agent species.</span>
       </h1>
       <p class="hero-sub" v-reveal>
-        Seepient pairs a full-screen terminal UI with a CLI, a TypeScript SDK,
-        and a standalone server — one agent loop, one permission engine, one
-        audit trail across all of them.
+        Seepient spans the full spectrum of deployment surfaces: CLI, TUI,
+        embedded SDK, programmatic server, REST/WS server, and serverless/container
+        workers — one agent loop, one permission engine, one audit trail across all of them.
       </p>
       <div class="hero-actions" v-reveal>
         <a class="lp-btn lp-btn--ink" href="/guides/quick-start">Get started</a>

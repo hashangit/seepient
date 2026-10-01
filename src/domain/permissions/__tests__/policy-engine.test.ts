@@ -349,7 +349,12 @@ describe("PolicyEngine (T106/T110)", () => {
     const ctx = context({ interaction: { mode: "none" } });
     const d = engine.evaluate(writeAction("/proj/a.txt"), ctx);
     expect(d.decision).toBe("deny");
-    if (d.decision === "deny") expect(d.reason).toBe("approval-unavailable");
+    if (d.decision === "deny") {
+      expect(d.reason).toBe("approval-unavailable");
+      expect(d.message).toContain("Headless run:");
+      expect(d.message).toContain("Pass consentMode");
+      expect(d.message).toContain("docs/sdk/ask-seepient.md#permissions-and-consent-mode");
+    }
   });
 
   it("approval-mode never denies needs-approval even in inline mode", () => {
@@ -357,7 +362,12 @@ describe("PolicyEngine (T106/T110)", () => {
     const ctx = context({ approvalMode: "never" });
     const d = engine.evaluate(writeAction("/proj/a.txt"), ctx);
     expect(d.decision).toBe("deny");
-    if (d.decision === "deny") expect(d.reason).toBe("approval-unavailable");
+    if (d.decision === "deny") {
+      expect(d.reason).toBe("approval-unavailable");
+      expect(d.message).toContain("Approval mode is 'never'");
+      expect(d.message).toContain("Pass consentMode");
+      expect(d.message).toContain("docs/sdk/ask-seepient.md#permissions-and-consent-mode");
+    }
   });
 
   it("autonomous mode allows an in-ceiling action without requesting approval", () => {

@@ -88,6 +88,22 @@ describe("MemoryPersistenceBackend", () => {
     await expect(store.load("../traversal")).rejects.toThrow("Invalid session ID");
     await expect(store.delete("../traversal")).rejects.toThrow("Invalid session ID");
   });
+
+  it("T064: bare-id load after a composite write returns null (FR-036)", async () => {
+    const store = new MemoryPersistenceBackend();
+    const compositeKey = "tenantA_session-123";
+    await store.save(compositeKey, {
+      id: "session-123",
+      messages: [{ role: "user", content: "hello" } as any],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
+    // Exact composite key matches
+    expect(await store.load(compositeKey)).not.toBeNull();
+    // Bare id without composite prefix must return null (no suffix-match fallback)
+    expect(await store.load("session-123")).toBeNull();
+  });
 });
 
 describe("createPersistenceBackend", () => {

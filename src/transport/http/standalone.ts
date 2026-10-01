@@ -11,7 +11,7 @@
  *
  * Environment variables:
  *   SEEPIENT_PORT / PORT     — Port to listen on (default: 7337)
- *   SEEPIENT_HOST            — Host to bind to (default: "0.0.0.0")
+ *   SEEPIENT_HOST            — Host to bind to (default: "127.0.0.1")
  *   SEEPIENT_SESSION_DIR     — Directory for session storage
  *   SEEPIENT_SESSION_TTL     — Session TTL in seconds (default: 86400)
  *   SEEPIENT_API_KEYS_FILE   — Path to API key store file
@@ -29,6 +29,7 @@ function resolveVersion(): string {
   try {
     const pkgPath = path.join(
       import.meta.dirname ?? ".",
+      "..",
       "..",
       "..",
       "package.json",
@@ -57,32 +58,73 @@ function handleGenerateApiKey(): void {
   process.exit(0);
 }
 
+import { parseServerCliArgs, type ServerCliArgs } from "../cli/server-cli.js";
+
+// ── Process Guards ──────────────────────────────────────────────────────
+
+export function registerProcessGuards(): void {
+  process.on("unhandledRejection", (reason: any) => {
+    const message = reason instanceof Error ? reason.stack ?? reason.message : String(reason);
+    const logEntry = JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level: "error",
+      event: "process_unhandled_rejection",
+      error: message,
+    });
+    process.stderr.write(`${logEntry}\n`);
+  });
+
+  process.on("uncaughtException", (err: any) => {
+    const message = err instanceof Error ? err.stack ?? err.message : String(err);
+    const logEntry = JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level: "error",
+      event: "process_uncaught_exception",
+      error: message,
+    });
+    process.stderr.write(`${logEntry}\n`);
+    process.exit(1);
+  });
+}
+
 // ── Main ────────────────────────────────────────────────────────────────
 
-async function main(): Promise<void> {
+export async function startStandaloneServer(args: string[] = process.argv.slice(2)): Promise<any> {
+  registerProcessGuards();
+  const { warnIfTestEnvAtHostedBoot } = await import("../../foundations/test-seams.js");
+  warnIfTestEnvAtHostedBoot("seepient-server");
+
+  let parsedArgs: ServerCliArgs;
+  try {
+    parsedArgs = parseServerCliArgs(args);
+  } catch (err: any) {
+    process.stderr.write(`[seepient] Error: ${err.message}\n`);
+    process.exit(1);
+  }
+
   // Handle --generate-api-key flag
-  if (process.argv.includes("--generate-api-key")) {
+  if (parsedArgs.generateApiKey) {
     handleGenerateApiKey();
-    return; // unreachable, but satisfies type checker
+    return;
   }
 
   const version = resolveVersion();
 
-  // Resolve configuration from environment
-  const port = parseInt(process.env.SEEPIENT_PORT ?? process.env.PORT ?? "", 10);
-  const host = process.env.SEEPIENT_HOST ?? "0.0.0.0";
+  // Resolve configuration from environment / parsed args
+  const port = parsedArgs.port;
+  const host = parsedArgs.host ?? process.env.SEEPIENT_HOST ?? "127.0.0.1";
   const sessionTTL = parseInt(process.env.SEEPIENT_SESSION_TTL ?? "", 10);
-  const apiKeysFile = process.env.SEEPIENT_API_KEYS_FILE;
-
-  // Expose API keys file path for the auth module if provided
-  if (apiKeysFile) {
-    process.env.SEEPIENT_API_KEYS_FILE = apiKeysFile;
+  const apiKeysFile = parsedArgs.apiKeysFile ?? process.env.SEEPIENT_API_KEYS_FILE;
+  if (parsedArgs.apiKeysFile) {
+    process.env.SEEPIENT_API_KEYS_FILE = parsedArgs.apiKeysFile;
   }
 
   const options: RunSeepientServerOptions = {
     host,
-    ...(isNaN(port) || port <= 0 ? {} : { port }),
+    ...(port === undefined || port <= 0 ? {} : { port }),
     ...(isNaN(sessionTTL) || sessionTTL <= 0 ? {} : { sessionTTL }),
+    ...(parsedArgs.providersFile ? { providersFile: parsedArgs.providersFile } : {}),
+    ...(parsedArgs.apiKeysFile ? { apiKeysFile: parsedArgs.apiKeysFile } : {}),
   };
 
   process.stdout.write(`[seepient] Starting Seepient server v${version}\n`);
@@ -105,8 +147,7 @@ async function main(): Promise<void> {
         }\n`,
     );
 
-    // Graceful shutdown: runSeepientServer registers the SIGINT/SIGTERM
-    // handlers for listening servers (W130) — no duplicate registration here.
+    return server;
   } catch (err) {
     const message =
       err instanceof Error ? err.message : String(err);
@@ -118,7 +159,7 @@ async function main(): Promise<void> {
       process.stdout.write(
         `[seepient] Fatal: ${message}\n` +
           `[seepient] Check that port ${
-            isNaN(port) || port <= 0 ? 7337 : port
+            port ?? 7337
           } is available and you have permission to bind.\n`,
       );
     } else if (
@@ -139,4 +180,6 @@ async function main(): Promise<void> {
   }
 }
 
-main();
+if (!process.env.VITEST && process.argv[1] && process.argv[1].includes('standalone')) {
+  startStandaloneServer();
+}

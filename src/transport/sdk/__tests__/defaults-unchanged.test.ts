@@ -4,7 +4,7 @@
  * Verifies that running createSeepient, askSeepient (non-streaming and
  * streaming) without any store/runtime injection options preserves default
  * behavior, defaults to "sdk-user" principal identity, writes to
- * ~/.seepient/security, and memoizes getDefaultProviderRuntime().
+ * ~/.seepient/security, and creates ambient provider runtime.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -14,7 +14,7 @@ import { join } from "node:path";
 import {
   createSeepient,
   askSeepient,
-  getDefaultProviderRuntime,
+  createAmbientProviderRuntime,
 } from "../index.js";
 import { createMockRuntime } from "../../../domain/__tests__/test-doubles.js";
 
@@ -42,10 +42,9 @@ describe("QS-0: Defaults unchanged", () => {
     rmSync(workspaceDir, { recursive: true, force: true });
   });
 
-  it("getDefaultProviderRuntime memoizes a single default instance across calls", () => {
-    const r1 = getDefaultProviderRuntime();
-    const r2 = getDefaultProviderRuntime();
-    expect(r1).toBe(r2);
+  it("createAmbientProviderRuntime creates ambient runtime with isIsolated: false", () => {
+    const r1 = createAmbientProviderRuntime();
+    expect(r1.isIsolated).toBe(false);
   });
 
   it("createSeepient with default options writes to security/audit/sdk-user", async () => {
@@ -65,6 +64,7 @@ describe("QS-0: Defaults unchanged", () => {
     const agent = await createSeepient({
       cwd: workspaceDir,
       runtime: mockRuntime,
+      tenancy: "single",
     });
 
     const res = await agent.chat("Write a file");
@@ -122,6 +122,7 @@ describe("QS-0: Defaults unchanged", () => {
     const agent = await createSeepient({
       cwd: workspaceDir,
       runtime: mockRuntime,
+      tenancy: "single",
       // No approval broker or approveTool provided
     });
 
@@ -143,6 +144,7 @@ describe("QS-0: Defaults unchanged", () => {
       persist: sessionDir,
       cwd: workspaceDir,
       runtime: mockRuntime,
+      tenancy: "single",
     });
 
     await agent.chat("Persist this message");

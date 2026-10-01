@@ -1,4 +1,6 @@
 import { builtinImagesModels } from "@earendil-works/pi-ai/providers/all";
+import { createPiCredentialStore } from "./pi-auth-adapter.js";
+import { assertBaseUrlEgressAllowed } from "../egress-check.js";
 import type {
   ImagesModel,
   ImagesApi,
@@ -62,9 +64,16 @@ function resolveSignal(opts?: InferenceOptions): {
  */
 export class PiImageRaw implements ImageBackend {
   private imageModels: any;
+  private credentialStore?: any;
 
-  constructor(customImageModels?: any) {
-    this.imageModels = customImageModels ?? builtinImagesModels();
+  constructor(customImageModels?: any, credentialStore?: any) {
+    this.credentialStore = credentialStore;
+    if (customImageModels) {
+      this.imageModels = customImageModels;
+    } else {
+      const piStore = credentialStore ? createPiCredentialStore(credentialStore) : undefined;
+      this.imageModels = builtinImagesModels(piStore ? { credentials: piStore } : undefined);
+    }
   }
 
   async generate(
@@ -98,8 +107,26 @@ export class PiImageRaw implements ImageBackend {
         });
       }
 
-      const secret = await lease.secret();
-      const apiKey = secret.kind === "api_key" ? secret.value : undefined;
+      const rawSecret = await lease.secret();
+      // 022-5 FR-007 (tenancy-invariant): undefined/empty keys must never
+      // reach the vendored layer — it falls back to host environment keys.
+      // kind:"none" maps to the explicit "unused" sentinel (no-auth endpoint),
+      // which satisfies the vendored hasExplicitApiKey check.
+      const secret = rawSecret?.kind === "none" ? { kind: "api_key" as const, value: "unused" } : rawSecret;
+      if (!secret || secret.kind !== "api_key" || !secret.value) {
+        throw new InferenceError({
+          code: "auth",
+          message: `CREDENTIAL_REQUIRED: Image inference requires an explicit api_key credential for provider "${target.upstreamProvider}" — configure it through provider management.`,
+          providerAccount: target.providerAccount,
+          model: target.model,
+          retryable: false,
+        });
+      }
+      if (opts?.tenancyMode === "multi" && target.baseUrl) {
+        assertBaseUrlEgressAllowed(target.baseUrl, opts.capabilities, target);
+      }
+
+      const apiKey = secret.value;
 
       const providerName = target.upstreamProvider;
       let model = this.imageModels.getModel(providerName, target.model) as
@@ -114,6 +141,10 @@ export class PiImageRaw implements ImageBackend {
           model: target.model,
           retryable: false,
         });
+      }
+
+      if (target.baseUrl) {
+        model = { ...model, baseUrl: target.baseUrl };
       }
 
       const inputContents: ImagesInputContent[] = [

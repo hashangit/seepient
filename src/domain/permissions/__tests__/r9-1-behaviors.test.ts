@@ -499,6 +499,150 @@ describe("R9.1 Integration Wiring Verification", () => {
     const duplicateCas = await store.cas("cont-1", 1, decision);
     expect(duplicateCas.status).toBe("duplicate");
   });
+
+  it("casSync is principal-bound: a foreign actor's CAS is rejected without mutating (022-5 FR-013 / SC-010)", async () => {
+    const { DurableApprovalStore } = await import("../durable-approval-store.js");
+    const store = new DurableApprovalStore({ root: tmpDir });
+    await store.load();
+
+    const req: import("../../../foundations/contracts/permission-policy.js").PermissionRequest = {
+      requestId: "req-fp",
+      principalId: "tenant-a",
+      runId: "r-fp",
+      toolCallId: "tc-fp",
+      actionDigest: "ad-fp",
+      action: { title: "T", summary: "T", canonicalTargets: [], effects: [] },
+      requestedCapabilities: [],
+      approvalOptions: [],
+      approvalChoices: [],
+      offeredLifetimes: ["action"],
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 60000,
+    };
+    store.create({ request: req, tenantId: "t1", sessionId: "s1", continuationId: "cont-fp" });
+
+    const foreignDecision: import("../../../foundations/contracts/permission-policy.js").PermissionDecision = {
+      approved: true,
+      requestId: "req-fp",
+      actionDigest: "ad-fp",
+      optionId: "opt-1",
+      lifetime: "action",
+      actorId: "tenant-b",
+      decidedAt: Date.now(),
+    };
+    const rejected = store.casSync("cont-fp", 1, foreignDecision);
+    expect(rejected.status).toBe("stale");
+
+    // Nothing mutated: the record is still pending at version 1, and the
+    // owner can still decide it.
+    const after = store.get("cont-fp");
+    expect(after?.status).toBe("pending");
+    expect(after?.version).toBe(1);
+
+    const ownerDecision: import("../../../foundations/contracts/permission-policy.js").PermissionDecision = {
+      ...foreignDecision,
+      actorId: "tenant-a",
+    };
+    const owned = store.casSync("cont-fp", 1, ownerDecision);
+    expect(owned.status).toBe("transitioned");
+  });
+
+  it("casSync binding matrix (022-5-WO1 T011): owner falls back to the request; actor-less is stale; legacy owner-less accepts any actor", async () => {
+    const { DurableApprovalStore } = await import("../durable-approval-store.js");
+    const { mkdtempSync } = await import("node:fs");
+    const { tmpdir: osTmp } = await import("node:os");
+    // Each store gets its OWN root and requestId — a shared root plus shared
+    // requestId makes the stores see each other's persisted records
+    // (persist-flush timing turned this into an order-dependent failure).
+    const tempDirs: string[] = [];
+    const mkStore = (() => {
+      let n = 0;
+      return () => {
+        n += 1;
+        const root = mkdtempSync(join(osTmp(), `r91-matrix-${n}-`));
+        tempDirs.push(root);
+        return { store: new DurableApprovalStore({ root }) };
+      };
+    })();
+    // Cleanup at the end of the test (tracked persists flush on a live dir;
+    // a late flush after cleanup is routed to onPersistenceError by design).
+    const mkReq = (principalId: string | undefined, requestId: string) => ({
+      requestId,
+      principalId,
+      runId: "r",
+      toolCallId: "c",
+      actionDigest: "ad",
+      action: { title: "t", summary: "s", canonicalTargets: [], effects: [] },
+      requestedCapabilities: [],
+      approvalOptions: [],
+      approvalChoices: [],
+      offeredLifetimes: ["action"],
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 60_000,
+    });
+    const decision = (requestId: string, actorId?: string): import("../../../foundations/contracts/permission-policy.js").PermissionDecision => ({
+      approved: true,
+      requestId,
+      actionDigest: "ad",
+      optionId: "opt",
+      lifetime: "action",
+      actorId: actorId ?? "",
+      decidedAt: Date.now(),
+    });
+
+    // Owner resolves rec.principalId ?? request.principalId: a record with an
+    // unstamped principal but a principal-bearing request is still bound.
+    const { store: viaRequest } = mkStore();
+    await viaRequest.load();
+    viaRequest.create({ request: mkReq("tenant-a", "r-vr") as never, tenantId: "t", sessionId: "s", continuationId: "cont-vr" });
+    expect(viaRequest.casSync("cont-vr", 1, decision("r-vr", "tenant-b")).status).toBe("stale");
+    expect(viaRequest.casSync("cont-vr", 1, decision("r-vr", "tenant-a")).status).toBe("transitioned");
+
+    // An owned record with an actor-LESS decision is stale, not transitioned.
+    const { store: actorLess } = mkStore();
+    await actorLess.load();
+    actorLess.create({ request: mkReq("tenant-a", "r-al") as never, tenantId: "t", sessionId: "s", continuationId: "cont-al" });
+    expect(actorLess.casSync("cont-al", 1, decision("r-al", undefined)).status).toBe("stale");
+    expect(actorLess.get("cont-al")?.status).toBe("pending");
+
+    // Legacy owner-less record (no principal anywhere) keeps accepting any
+    // actor and expiring naturally — no migration cliff.
+    const { store: legacy } = mkStore();
+    await legacy.load();
+    legacy.create({ request: mkReq(undefined, "r-lg") as never, tenantId: "t", sessionId: "s", continuationId: "cont-lg" });
+    expect(legacy.casSync("cont-lg", 1, decision("r-lg", "whoever")).status).toBe("transitioned");
+    for (const d of tempDirs) rmSync(d, { recursive: true, force: true });
+  });
+
+  it("getDecision resolves via requestId only, never a continuationId (022-5-WO1 T012 / SC-010)", async () => {
+    const { DurableApprovalStore } = await import("../durable-approval-store.js");
+    const store = new DurableApprovalStore({ root: tmpDir });
+    await store.load();
+    const req = {
+      requestId: "req-fp2",
+      principalId: "tenant-a",
+      runId: "r",
+      toolCallId: "c",
+      actionDigest: "ad",
+      action: { title: "t", summary: "s", canonicalTargets: [], effects: [] },
+      requestedCapabilities: [],
+      approvalOptions: [],
+      approvalChoices: [],
+      offeredLifetimes: ["action"],
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 60_000,
+    } as never;
+    store.create({ request: req, tenantId: "t", sessionId: "s", continuationId: "cont-fp2" });
+    store.casSync("cont-fp2", 1, {
+      approved: true, requestId: "req-fp2", actionDigest: "ad",
+      optionId: "opt", lifetime: "action" as const, actorId: "tenant-a", decidedAt: Date.now(),
+    } as never);
+    // The decision lives under the requestId; the continuation id is
+    // connection-scoped and never aliases into the decision map.
+    expect(await store.getDecision("req-fp2")).toBeDefined();
+    expect(await store.getDecision("cont-fp2")).toBeUndefined();
+  });
+
   it("DockerWorkerScheduler rejects forged signature and nonce replay (P4)", async () => {
     const { DockerWorkerScheduler } = await import("../../../capabilities/execution/docker-worker-scheduler.js");
     const { signDispatchPayload } = await import("../../../foundations/contracts/worker-protocol.js");

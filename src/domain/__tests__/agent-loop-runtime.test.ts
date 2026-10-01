@@ -308,4 +308,85 @@ describe("Agent Loop Execution via ProviderRuntime (QS-P5.3c)", () => {
     expect(extracted.toolCalls[0].name).toBe("execute_shell_command");
     expect(JSON.parse(extracted.toolCalls[0].arguments)).toEqual({ command: "ls -la" });
   });
+
+  it("passes temperature, maxTokens, and thinkingLevel to LanguageRequest and InvocationPlan (FR-017)", async () => {
+    let capturedReq: any;
+    let capturedTarget: any;
+    const mockLanguageBackend: LanguageBackend = {
+      chatStream: async function* (target, req) {
+        capturedTarget = target;
+        capturedReq = req;
+        yield {
+          type: "start",
+          resolvedModel: {
+            providerAccount: "main-account",
+            modelId: "gpt-4o",
+          },
+        };
+        yield {
+          type: "content_block_delta",
+          index: 0,
+          delta: {
+            type: "text_delta",
+            text: "Hello!",
+          },
+        };
+        yield {
+          type: "finish",
+          stopReason: "end_turn",
+        };
+      },
+      chat: async () => ({
+        message: { role: "assistant", content: [] },
+        stopReason: "end_turn",
+      }),
+    };
+
+    const adapter = new AggregateInferenceAdapter({
+      language: mockLanguageBackend,
+    });
+
+    const credStore = new MemoryCredentialStore();
+    const configStore = new ProviderConfigStore(":memory:");
+    await configStore.updateOverlay({
+      providers: {
+        "main-account": {
+          adapter: "pi-ai",
+          upstreamProvider: "openai",
+          credential: { kind: "none" },
+        },
+      },
+      modelAssignments: {
+        text: {
+          standard: {
+            providerAccount: "main-account",
+            model: "o3-mini",
+          },
+        },
+      },
+    }, 0);
+
+    const runtime = new ProviderRuntime({
+      configStore,
+      credentialStore: credStore,
+      adapter,
+    });
+
+    const result = await runAgentLoop({
+      runtime,
+      messages: [{ id: "m1", role: "user", content: "hi", timestamp: 1 }],
+      toolDefs: [],
+      maxSteps: 1,
+      temperature: 0.85,
+      maxTokens: 256,
+      modelOverride: { thinkingLevel: "high" },
+      hooks: createHookExecutor(),
+    });
+
+    expect(result.finishReason).toBe("stop");
+    expect(capturedReq).toBeDefined();
+    expect(capturedReq.temperature).toBe(0.85);
+    expect(capturedReq.maxOutputTokens).toBe(256);
+    expect(capturedTarget.thinkingLevel).toBe("high");
+  });
 });

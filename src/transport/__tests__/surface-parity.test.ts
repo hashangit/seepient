@@ -41,6 +41,7 @@ describe("Surface Parity Suite (QS-P6.7)", () => {
 
     // 2. SDK instance resolution
     const sdk = await createSeepient({
+      tenancy: "single",
       providers: snapshot.config.providers,
       modelAssignments: snapshot.assignments,
       credentials: credStore,

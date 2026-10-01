@@ -9,7 +9,7 @@ import type { ApprovalBroker } from "../../../foundations/contracts/permission-p
 import { initializeSkillRegistry } from "../../../capabilities/skills/index.js";
 import { createHookExecutor } from "../../hooks.js";
 import { createMockRuntime } from "../../__tests__/test-doubles.js";
-import { getAllToolDefinitions } from "../../tool-executor.js";
+import { ToolRegistry } from "../../tool-executor.js";
 
 const NOOP_BROKER: ApprovalBroker = {
   mode: "none",
@@ -53,9 +53,9 @@ Instructions on how to operate the hello system.
 
     // spec 019: the composition root wires host callbacks — the executor
     // runs registered callbacks ONLY after the ambient fallback deletion.
-    const { getAllToolModules } = await import("../../../domain/tool-executor.js");
+    const toolRegistry = new ToolRegistry();
     const hostCallbacks = new Map<string, (args: unknown) => Promise<unknown>>();
-    for (const mod of getAllToolModules()) {
+    for (const mod of toolRegistry.modules()) {
       if (mod.handler) {
         hostCallbacks.set(mod.definition.function.name, (args) => mod.handler!(args as never, {}, { skills: registry }));
       }
@@ -95,7 +95,8 @@ Instructions on how to operate the hello system.
     const result = await runAgentLoop({
       messages: [{ id: "m1", role: "user", content: "activate hello-ops", timestamp: Date.now() }],
       systemPrompt: "You are a test agent.",
-      toolDefs: getAllToolDefinitions(),
+      toolDefs: toolRegistry.definitions(),
+      toolRegistry,
       config: { autoConfirm: true },
       runtime,
       hooks: createHookExecutor({}),
@@ -119,9 +120,9 @@ Instructions on how to operate the hello system.
 
     // spec 019: the composition root wires host callbacks — the executor
     // runs registered callbacks ONLY after the ambient fallback deletion.
-    const { getAllToolModules } = await import("../../../domain/tool-executor.js");
+    const toolRegistry = new ToolRegistry();
     const hostCallbacks = new Map<string, (args: unknown) => Promise<unknown>>();
-    for (const mod of getAllToolModules()) {
+    for (const mod of toolRegistry.modules()) {
       if (mod.handler) {
         hostCallbacks.set(mod.definition.function.name, (args) => mod.handler!(args as never, {}, { skills: registry }));
       }
@@ -160,7 +161,8 @@ Instructions on how to operate the hello system.
     const result = await runAgentLoop({
       messages: [{ id: "m1", role: "user", content: "activate missing", timestamp: Date.now() }],
       systemPrompt: "You are a test agent.",
-      toolDefs: getAllToolDefinitions(),
+      toolDefs: toolRegistry.definitions(),
+      toolRegistry,
       config: { autoConfirm: true },
       runtime,
       hooks: createHookExecutor({}),

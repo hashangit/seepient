@@ -29,8 +29,48 @@ export async function handleChat(
       code: "FORBIDDEN",
       retryable: false,
       message: "Requires agent:run scope",
+      ...(msg.id ? { clientMsgId: msg.id } : {}),
     });
     return;
+  }
+
+  // W248: Fail-closed off-contract input on server surfaces
+  if (typeof (msg as any).message !== "string") {
+    safeSend(ws, {
+      type: "error",
+      code: "VALIDATION_ERROR",
+      retryable: false,
+      message: "Field 'message' must be a string",
+      ...(msg.id ? { clientMsgId: msg.id } : {}),
+    });
+    return;
+  }
+
+  if (msg.options?.skills !== undefined) {
+    if (!Array.isArray(msg.options.skills) || msg.options.skills.some((s) => typeof s !== "string")) {
+      safeSend(ws, {
+        type: "error",
+        code: "VALIDATION_ERROR",
+        retryable: false,
+        message: "Field 'skills' must be an array of strings",
+        ...(msg.id ? { clientMsgId: msg.id } : {}),
+      });
+      return;
+    }
+  }
+
+  // FR-016 (VULN-22): Fail-closed tools array edge validation
+  if ((msg.options as any)?.tools !== undefined) {
+    if (!Array.isArray((msg.options as any).tools) || (msg.options as any).tools.some((t: any) => typeof t !== "string")) {
+      safeSend(ws, {
+        type: "error",
+        code: "VALIDATION_ERROR",
+        retryable: false,
+        message: "Field 'tools' must be an array of strings",
+        ...(msg.id ? { clientMsgId: msg.id } : {}),
+      });
+      return;
+    }
   }
 
   // Busy guard: only one active chat turn per connection
@@ -40,6 +80,7 @@ export async function handleChat(
       code: "REQUEST_IN_FLIGHT",
       retryable: true,
       message: "Another chat turn is already in flight for this connection",
+      ...(msg.id ? { clientMsgId: msg.id } : {}),
     });
     return;
   }
@@ -53,7 +94,7 @@ export async function handleChat(
 
   const releaseSessionTurn = () => {
     if (acquiredSessionId) {
-      ctx.sessionManager.releaseTurn(acquiredSessionId);
+      ctx.sessionManager.releaseTurn(acquiredSessionId, state.apiKeyHash);
       acquiredSessionId = null;
     }
   };
@@ -95,12 +136,13 @@ export async function handleChat(
         }
         // W154d: pin the connection to the session only after the turn lock
         // is acquired — a busy-reject must not re-pin the connection.
-        if (!ctx.sessionManager.acquireTurn(session.id)) {
+        if (!ctx.sessionManager.acquireTurn(session.id, state.apiKeyHash)) {
           safeSend(ws, {
             type: "error",
             code: "REQUEST_IN_FLIGHT",
             retryable: true,
             message: `Session "${session.id}" has a request already in flight`,
+            ...(msg.id ? { clientMsgId: msg.id } : {}),
           });
           return;
         }
@@ -108,7 +150,7 @@ export async function handleChat(
         acquiredSessionId = session.id;
 
         // F1: resolve a dangling failed-turn draft before history is captured.
-        ctx.sessionManager.resolveTrailingDraft(session.id);
+        ctx.sessionManager.resolveTrailingDraft(session.id, state.apiKeyHash);
 
         history = [...session.messages];
       } catch (err: unknown) {
@@ -119,15 +161,17 @@ export async function handleChat(
             code: "SESSION_LIMIT",
             retryable: false,
             message,
+            ...(msg.id ? { clientMsgId: msg.id } : {}),
           });
           return;
         }
         if (/already exists/i.test(message) || (err as any)?.code === "SESSION_ALREADY_EXISTS") {
           safeSend(ws, {
             type: "error",
-            code: "SESSION_NOT_FOUND",
+            code: "FORBIDDEN",
             retryable: false,
-            message: "Session not found or expired",
+            message: `Session "${targetSessionId}" is not accessible`,
+            ...(msg.id ? { clientMsgId: msg.id } : {}),
           });
           return;
         }
@@ -145,6 +189,7 @@ export async function handleChat(
             code: "SESSION_NOT_FOUND",
             retryable: false,
             message: "Session not found or expired",
+            ...(msg.id ? { clientMsgId: msg.id } : {}),
           });
           return;
         }
@@ -162,6 +207,7 @@ export async function handleChat(
           code: "SESSION_ERROR",
           retryable: false,
           message: "Session error",
+          ...(msg.id ? { clientMsgId: msg.id } : {}),
         });
         return;
       }
@@ -178,7 +224,7 @@ export async function handleChat(
           content: msg.message,
           timestamp: Date.now(),
         };
-        ctx.sessionManager.addMessage(acquiredSessionId!, userMsg);
+        ctx.sessionManager.addMessage(acquiredSessionId!, userMsg, state.apiKeyHash);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         logTransportEvent({
@@ -194,6 +240,7 @@ export async function handleChat(
           code: "SESSION_ERROR",
           retryable: false,
           message: "Session error",
+          ...(msg.id ? { clientMsgId: msg.id } : {}),
         });
         return;
       }
@@ -237,10 +284,34 @@ export async function handleChat(
             code: "STREAM_ERROR",
             retryable: false,
             message: "Stream failed",
+            ...(msg.id ? { clientMsgId: msg.id } : {}),
           });
         }
         resolve();
       };
+
+      const envMaxSteps = process.env.SEEPIENT_MAX_STEPS ? parseInt(process.env.SEEPIENT_MAX_STEPS, 10) : undefined;
+      const settingMaxSteps = ctx.settingsHandlerContext?.settingsManager?.get("server.maxSteps")?.value as number | undefined;
+      const serverMaxSteps = (settingMaxSteps !== undefined && !isNaN(settingMaxSteps) && settingMaxSteps > 0)
+        ? settingMaxSteps
+        : (envMaxSteps !== undefined && !isNaN(envMaxSteps) && envMaxSteps > 0 ? envMaxSteps : 100);
+
+      if (msg.options?.maxSteps !== undefined) {
+        if (typeof msg.options.maxSteps !== "number" || !Number.isInteger(msg.options.maxSteps) || msg.options.maxSteps <= 0) {
+          safeSend(ws, {
+            type: "error",
+            code: "INVALID_REQUEST",
+            retryable: false,
+            message: "maxSteps must be a positive integer",
+            ...(msg.id ? { clientMsgId: msg.id } : {}),
+          });
+          return;
+        }
+      }
+
+      const requestedSteps = msg.options?.maxSteps ?? 10;
+      const effectiveMaxSteps = Math.min(requestedSteps, serverMaxSteps);
+      const wasClamped = requestedSteps > serverMaxSteps;
 
       try {
         const maybePromise: unknown = ctx.streamText({
@@ -248,7 +319,7 @@ export async function handleChat(
           model,
           provider,
           tools: msg.options?.tools,
-          maxSteps: msg.options?.maxSteps ?? 10,
+          maxSteps: effectiveMaxSteps,
           skills: msg.options?.skills,
           sessionId: acquiredSessionId ?? undefined,
           history,
@@ -311,6 +382,7 @@ export async function handleChat(
               message: "Stream failed",
               provider: error.provider,
               tool: error.tool,
+              ...(msg.id ? { clientMsgId: msg.id } : {}),
             });
             resolve();
           },
@@ -324,6 +396,7 @@ export async function handleChat(
                 serverMsgId,
                 usage: result.usage,
                 finishReason: result.finishReason,
+                ...(wasClamped ? { effectiveMaxSteps, maxSteps: effectiveMaxSteps } : {}),
               });
 
               // Add assistant message to session only on non-error finish
@@ -335,7 +408,7 @@ export async function handleChat(
                     content: result.text,
                     timestamp: Date.now(),
                   };
-                  ctx.sessionManager.addMessage(acquiredSessionId, assistantMsg);
+                  ctx.sessionManager.addMessage(acquiredSessionId, assistantMsg, state.apiKeyHash);
                 } catch (err: unknown) {
                   const message = err instanceof Error ? err.message : String(err);
                   logTransportEvent({
@@ -351,6 +424,7 @@ export async function handleChat(
                     code: "SESSION_ERROR",
                     retryable: false,
                     message: "Session error",
+                    ...(msg.id ? { clientMsgId: msg.id } : {}),
                   });
                 }
               }
@@ -379,6 +453,7 @@ export async function handleChat(
       code: "STREAM_ERROR",
       retryable: false,
       message: "Stream failed",
+      ...(msg.id ? { clientMsgId: msg.id } : {}),
     });
   } finally {
     releaseSessionTurn();
@@ -388,7 +463,7 @@ export async function handleChat(
 
 export function handleAbort(
   ws: WebSocket,
-  _msg: AbortMessage,
+  msg: AbortMessage,
   state: ConnectionState,
 ): void {
   if (state.activeChats.size > 0) {
@@ -401,6 +476,7 @@ export function handleAbort(
       code: "ABORTED",
       retryable: false,
       message: "Request aborted by client",
+      ...(msg.id ? { clientMsgId: msg.id } : {}),
     });
   }
 }

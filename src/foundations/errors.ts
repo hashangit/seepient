@@ -325,3 +325,225 @@ export class UnsupportedBackendError extends PermissionError {
     this.operationKind = opts.operationKind;
   }
 }
+
+// ── Skill store errors ──────────────────────────────────────────────────
+
+/**
+ * Thrown when an operation requires a SkillStore (such as saving a generated
+ * skill) but no SkillStore is present in the effective sources list.
+ */
+export class SkillStoreUnavailableError extends SeepientError {
+  constructor(
+    message = "SKILL_STORE_UNAVAILABLE: No SkillStore is configured in the effective sources list. Remediation: To save generated skills in an SDK/stateless worker, inject a SkillStore in the `sources` array (e.g. `sources: [..., mySkillStore]`).",
+  ) {
+    super(message, "SKILL_STORE_UNAVAILABLE", false);
+    this.name = "SkillStoreUnavailableError";
+  }
+}
+
+/**
+ * Thrown when attempting to save a generated skill with a name that already
+ * exists in one of the effective sources without explicit update intent.
+ */
+export class SkillCollisionError extends SeepientError {
+  existingName: string;
+  existingSource?: string;
+
+  constructor(name: string, source?: string) {
+    super(
+      `Skill "${name}" already exists (collision in source: ${source ?? "unknown"}). To update the existing skill, provide explicit update intent (replace: true, changelogEntry: "...") or choose a different name.`,
+      "SKILL_COLLISION",
+      false,
+    );
+    this.name = "SkillCollisionError";
+    this.existingName = name;
+    this.existingSource = source;
+  }
+}
+
+/**
+ * Thrown when a catalog-listed skill exists in the registry but its body
+ * cannot be loaded or is unreadable (FR-034).
+ */
+export class SkillBodyUnavailableError extends SeepientError {
+  skillName: string;
+
+  constructor(skillName: string, detail?: string) {
+    const detailMsg = detail ? ` (${detail})` : "";
+    super(
+      `SKILL_BODY_UNAVAILABLE: Skill '${skillName}' content is unavailable or unreadable${detailMsg}.`,
+      "SKILL_BODY_UNAVAILABLE",
+      false,
+    );
+    this.name = "SkillBodyUnavailableError";
+    this.skillName = skillName;
+  }
+}
+
+/**
+ * Thrown when attempting to save a generated skill with an empty body (FR-036).
+ */
+export class SkillBodyRequiredError extends SeepientError {
+  constructor(name: string) {
+    super(
+      `SKILL_BODY_REQUIRED: Cannot save skill '${name}' with an empty body.`,
+      "SKILL_BODY_REQUIRED",
+      false,
+    );
+    this.name = "SkillBodyRequiredError";
+  }
+}
+
+// ── Session persistence errors ──────────────────────────────────────────
+
+/**
+ * Thrown when the `persist` option passed to `createSeepient` does not match
+ * any supported persistence backend format.
+ */
+export class PersistConfigInvalidError extends SeepientError {
+  constructor(
+    message = 'PERSIST_CONFIG_INVALID: Invalid "persist" configuration shape. Supported forms are: (1) directory path string, (2) PersistenceConfig object ({ type: "file", path: "..." } or { type: "memory" }), or (3) a custom PersistenceBackend instance implementing load() and save().',
+  ) {
+    super(message, "PERSIST_CONFIG_INVALID", false);
+    this.name = "PersistConfigInvalidError";
+  }
+}
+
+/**
+ * Thrown when a session ID is invalid (format mismatch or exceeds 128 characters).
+ */
+export class SessionIdInvalidError extends SeepientError {
+  readonly sessionId: string;
+
+  constructor(sessionId: string, message?: string) {
+    const defaultMessage = `SESSION_ID_INVALID: Invalid session ID "${sessionId}". Only alphanumeric characters, dashes, and underscores are allowed (max 128 characters).`;
+    super(message ?? defaultMessage, "SESSION_ID_INVALID", false);
+    this.name = "SessionIdInvalidError";
+    this.sessionId = sessionId;
+  }
+}
+
+// ── Multi-tenant errors ─────────────────────────────────────────────────
+
+/**
+ * Thrown when multi-tenant mode is active (explicit or upgraded) but no explicit
+ * principalId is provided.
+ */
+export class PrincipalRequiredError extends SeepientError {
+  constructor(
+    message = 'PRINCIPAL_REQUIRED: tenancy: "multi" requires an explicit principalId. Pass a stable per-tenant identifier (e.g. tenantId or userId).',
+  ) {
+    super(message, "PRINCIPAL_REQUIRED", false);
+    this.name = "PrincipalRequiredError";
+  }
+}
+
+/**
+ * Thrown when a principalId violates the allowed slug grammar /^[a-zA-Z0-9_-]{1,128}$/
+ * or matches a case-insensitive sentinel ("default", "anonymous", "sdk-user").
+ */
+export class InvalidPrincipalIdError extends PrincipalRequiredError {
+  constructor(
+    message = 'INVALID_PRINCIPAL_ID: principalId must match /^[a-zA-Z0-9_-]{1,128}$/ and cannot be a sentinel value ("default", "anonymous", "sdk-user").',
+  ) {
+    super(message);
+    this.code = "INVALID_PRINCIPAL_ID";
+    this.name = "InvalidPrincipalIdError";
+  }
+}
+
+/**
+ * Thrown when multi-tenant mode is active without an explicit cwd/workspace.
+ */
+export class TenancyWorkspaceRequiredError extends SeepientError {
+  constructor(
+    message = 'TENANCY_WORKSPACE_REQUIRED: tenancy: "multi" requires an explicit cwd/workspaceRoot to prevent cross-tenant disk contamination.',
+  ) {
+    super(message, "TENANCY_WORKSPACE_REQUIRED", false);
+    this.name = "TenancyWorkspaceRequiredError";
+  }
+}
+
+/**
+ * Thrown when an explicit credential is required in multi-tenant mode but was omitted
+ * or cannot be resolved without ambient fallback.
+ */
+export class CredentialRequiredError extends SeepientError {
+  constructor(
+    message = 'CREDENTIAL_REQUIRED: Explicit credential required in multi-tenant mode.',
+  ) {
+    super(message, "CREDENTIAL_REQUIRED", false);
+    this.name = "CredentialRequiredError";
+  }
+}
+
+/**
+ * Thrown when global approval lifetime is requested or persisted in multi-tenant mode.
+ */
+export class GlobalLifetimeForbiddenError extends PermissionError {
+  constructor(
+    message = "GLOBAL_LIFETIME_FORBIDDEN: global approval lifetime is not available in multi-tenant mode; use project or session scope",
+  ) {
+    super(message, "GLOBAL_LIFETIME_FORBIDDEN", { retryable: false });
+    this.name = "GlobalLifetimeForbiddenError";
+  }
+}
+
+/**
+ * Thrown when a file path resolves outside the tenant workspace boundary.
+ * The resolved host path is kept on `resolvedPath` for internal logging but is
+ * deliberately omitted from the message: tenants must not get a host-path
+ * existence/canonicalization oracle.
+ */
+export class PathEscapesWorkspaceError extends ToolError {
+  readonly resolvedPath: string;
+  constructor(resolvedPath: string, message?: string) {
+    super(
+      message ??
+        "PATH_ESCAPES_WORKSPACE: this path resolves outside your workspace; ask your operator for access or work on a copy inside the workspace",
+    );
+    this.name = "PathEscapesWorkspaceError";
+    this.code = "PATH_ESCAPES_WORKSPACE";
+    this.retryable = false;
+    this.resolvedPath = resolvedPath;
+  }
+}
+
+/**
+ * Thrown when attempting to read a hardlinked file with link count > 1.
+ */
+export class PathHardlinkRefusedError extends ToolError {
+  readonly targetPath: string;
+  constructor(targetPath: string, message?: string) {
+    super(
+      message ??
+        `PATH_HARDLINK_REFUSED: reads of files with more than one name on this filesystem are prohibited: ${targetPath}. Use a regular file inside your workspace`,
+    );
+    this.name = "PathHardlinkRefusedError";
+    this.code = "PATH_HARDLINK_REFUSED";
+    this.retryable = false;
+    this.targetPath = targetPath;
+  }
+}
+
+/**
+ * Thrown when the file opened for reading is not the same file (device/inode)
+ * that was authorized at analysis time. Catches mid-path (parent-directory)
+ * symlink swaps and rename swaps that O_NOFOLLOW cannot see.
+ */
+export class PathIdentityMismatchError extends ToolError {
+  readonly targetPath: string;
+  constructor(targetPath: string, message?: string) {
+    super(
+      message ??
+        `PATH_IDENTITY_MISMATCH: the file at ${targetPath} changed between authorization and read (device/inode mismatch); re-read the file and retry`,
+    );
+    this.name = "PathIdentityMismatchError";
+    this.code = "PATH_IDENTITY_MISMATCH";
+    this.retryable = false;
+    this.targetPath = targetPath;
+  }
+}
+
+
+

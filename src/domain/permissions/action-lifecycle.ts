@@ -46,6 +46,7 @@ import type { PolicyEngine } from "./policy-engine.js";
 import { generateId } from "../../foundations/id.js";
 import { idempotencyKey } from "./audit-recorder.js";
 import { PolicyConflictError } from "../../foundations/errors.js";
+import { isGuardNeutralized } from "../../foundations/test-seams.js";
 import {
   GLOBAL_WORKSPACE_ID,
   scopeGlobalPolicyCapabilities,
@@ -83,6 +84,10 @@ export interface ActionLifecycleOptions {
    */
   capabilityLedger?: CapabilityLedger;
   sessionId?: string;
+  /** Spec 022 Tenancy principal ID for scoping persistent approvals (P1-A). */
+  principalId?: string;
+  /** Spec 022 Tenancy mode ("single" | "multi"). */
+  tenancyMode?: "single" | "multi";
   /**
    * Protected policy store + workspace identity for persistent
    * (`project`/`global`) approvals (spec 011). When present, a persistent
@@ -143,6 +148,8 @@ export class ActionLifecycle {
   private readonly active: MutableCapabilitySet;
   private readonly now: () => number;
   private readonly sessionId?: string;
+  private readonly principalId?: string;
+  private readonly tenancyMode?: "single" | "multi";
   private readonly policyStore?: PolicyStore;
   private readonly workspaceId?: string;
   private readonly persistentBaselineCapabilities: Capability[];
@@ -156,6 +163,8 @@ export class ActionLifecycle {
     this.broker = opts.broker;
     this.boundary = opts.boundary;
     this.sessionId = opts.sessionId;
+    this.principalId = opts.principalId;
+    this.tenancyMode = opts.tenancyMode;
     this.policyStore = opts.policyStore;
     this.workspaceId = opts.workspaceId;
     this.persistentBaselineCapabilities = [
@@ -187,7 +196,7 @@ export class ActionLifecycle {
       const nowTs = this.now();
       const { checkRunLifetime, checkSessionLifetime } = await import("./persisted-capability-ledger.js");
       if (action.runId) {
-        const runRes = checkRunLifetime(action.runId, Number.MAX_SAFE_INTEGER, this.capabilityLedger, nowTs);
+        const runRes = checkRunLifetime(action.runId, Number.MAX_SAFE_INTEGER, this.capabilityLedger, nowTs, { principalId: action.principalId });
         if (runRes === "revoked") {
           const outcome = this.toOutcome(action, "denied", undefined, "capability-revoked");
           await this.record(action, "denied", "capability-revoked");
@@ -203,7 +212,7 @@ export class ActionLifecycle {
       // `action.sessionId`, so relying on it alone would let revoked session
       // authority keep authorizing later actions (spec 011 review fix).
       const boundSessionId = action.sessionId ?? this.sessionId;
-      if (boundSessionId && this.capabilityLedger.isSessionRevoked(boundSessionId)) {
+      if (boundSessionId && this.capabilityLedger.isSessionRevoked(boundSessionId, { principalId: action.principalId })) {
         const outcome = this.toOutcome(action, "denied", undefined, "capability-revoked");
         await this.record(action, "denied", "capability-revoked");
         return {
@@ -245,6 +254,26 @@ export class ActionLifecycle {
               "approval-unavailable",
               "Approval broker failed or was aborted",
             ),
+            success: false,
+          },
+        };
+      }
+
+      // SC-009 (022-5-WO1 T037): ANY broker answer shape flows to the typed
+      // denial — a broker resolving literal null/undefined must never throw.
+      if (
+        typeof answer !== "object" ||
+        answer === null ||
+        typeof (answer as PermissionDecision).approved !== "boolean"
+      ) {
+        const outcome = this.toOutcome(action, "denied", undefined, "invalid-approval-response");
+        await this.record(action, "denied", "invalid-approval-response");
+        return {
+          decision,
+          approval: answer,
+          outcome,
+          toolResult: {
+            output: denialOutput("invalid-approval-response", "Approval broker returned an invalid response"),
             success: false,
           },
         };
@@ -342,6 +371,25 @@ export class ActionLifecycle {
       // Round 4 P1: no silent lifetime default — an approved decision must
       // name an explicit supported lifetime or be rejected below.
       const lifetimeKind = answer.lifetime;
+      if (this.tenancyMode === "multi" && lifetimeKind === "global") {
+        // Typed backstop: record the terminal denial first so the audit trail
+        // does not end at awaiting-approval (pass-10 P2-11), then return the
+        // typed denial — run() never throws for a broker answer (022-5 FR-012).
+        await this.record(action, "denied", "global-lifetime-forbidden").catch(() => {});
+        const outcome = this.toOutcome(action, "denied", undefined, "invalid-approval-response");
+        return {
+          decision,
+          approval: answer,
+          outcome,
+          toolResult: {
+            output: denialOutput(
+              "invalid-approval-response",
+              "The 'global' approval lifetime is not available in multi-tenant mode",
+            ),
+            success: false,
+          },
+        };
+      }
       if (
         !option.supportedLifetimes.includes(lifetimeKind) ||
         !decision.request.offeredLifetimes.includes(lifetimeKind)
@@ -419,7 +467,7 @@ export class ActionLifecycle {
             },
           };
         }
-        if (this.capabilityLedger?.isSessionRevoked(sessionId)) {
+        if (this.capabilityLedger?.isSessionRevoked(sessionId, { principalId: action.principalId })) {
           const outcome = this.toOutcome(action, "denied", undefined, "capability-revoked");
           await this.record(action, "denied", "capability-revoked");
           return {
@@ -441,6 +489,23 @@ export class ActionLifecycle {
         // execute (fail closed; never a silent session-only fallback).
         // Exact capabilities only: the choice projection never offers a
         // bounded persistent choice.
+        if (this.tenancyMode === "multi" && lifetimeKind === "global") {
+          await this.record(action, "denied", "global-lifetime-forbidden").catch(() => {});
+          const outcome = this.toOutcome(action, "denied", undefined, "invalid-approval-response");
+          return {
+            decision,
+            approval: answer,
+            outcome,
+            toolResult: {
+              output: denialOutput(
+                "invalid-approval-response",
+                "The 'global' approval lifetime is not available in multi-tenant mode",
+              ),
+              success: false,
+            },
+          };
+        }
+
         const targetWorkspaceId =
           lifetimeKind === "project"
             ? (decision.request.workspaceId ?? this.workspaceId)
@@ -475,7 +540,11 @@ export class ActionLifecycle {
         let persisted = false;
         let beforeVersion = 0;
         try {
-          const current = await this.policyStore.read(targetWorkspaceId);
+          const readOpts = {
+            principalId: action.principalId ?? this.principalId,
+            tenancyMode: this.tenancyMode ?? "single",
+          };
+          const current = await this.policyStore.read(targetWorkspaceId, readOpts);
           beforeVersion = current.version;
           const persistentCapabilities =
             lifetimeKind === "global" && this.policyContext.workspaceRoot
@@ -484,8 +553,12 @@ export class ActionLifecycle {
                   this.policyContext.workspaceRoot,
                 )
               : option.capabilities;
+          const targetPrincipal = action.principalId ?? this.principalId ?? "sdk-user";
+          const targetCaps = current.policy.capabilities.filter(
+            (c) => c.principalId === targetPrincipal || (!c.principalId && !targetPrincipal),
+          );
           const fresh = persistentCapabilities.filter(
-            (c) => !setCovers(current.policy, c),
+            (c) => !setCovers({ version: 1, capabilities: targetCaps }, c),
           );
           // Audit copies of capabilities redact process argv (SC-011). The
           // trail must match the full mutation: on a fresh workspace a
@@ -526,33 +599,63 @@ export class ActionLifecycle {
             );
             // Retry once on a concurrent-writer conflict (stale version).
             for (let attempt = 0; attempt < 2 && !persisted; attempt++) {
-              const retried = attempt > 0
-                ? await this.policyStore.read(targetWorkspaceId)
-                : current;
               try {
-                const nextCapabilities = [...retried.policy.capabilities];
-                const candidates = [
+                // P1-1 & FR-016: One-bucket unstamped CAS semantics.
+                // Raw un-filtered snapshot read preserves other principals' grants and unstamped baseline.
+                // Partition raw capabilities into three disjoint sets:
+                // 1) otherPrincipalCaps: capabilities explicitly belonging to other principals.
+                // 2) unstampedCaps: baseline workspace capabilities with no principalId. Carried verbatim once.
+                // 3) currentPrincipalCaps: capabilities explicitly belonging to targetPrincipal.
+                const targetPrincipal = action.principalId ?? this.principalId ?? "sdk-user";
+                const isMulti = this.tenancyMode === "multi";
+                const rawSnap = await this.policyStore.read(targetWorkspaceId);
+                const otherPrincipalCaps = rawSnap.policy.capabilities.filter(
+                  (c) => Boolean(c.principalId && c.principalId !== targetPrincipal),
+                );
+                // 022-5 FR-011: the multi merge strips the whole universal-root
+                // class ("*", "/", and the corrupt "") — each shape grants every
+                // path, so none may survive a tenant merge.
+                const UNIVERSAL_ROOTS = new Set(["*", "/", ""]);
+                const unstampedCaps = rawSnap.policy.capabilities.filter(
+                  (c) => !c.principalId && (!isMulti || !((c.kind === "write-root" || c.kind === "read-root") && UNIVERSAL_ROOTS.has((c as any).root))),
+                );
+                const currentPrincipalCaps = rawSnap.policy.capabilities.filter(
+                  (c) => c.principalId === targetPrincipal,
+                );
+
+                const nextPrincipalCaps = [...currentPrincipalCaps];
+                const candidates: Capability[] = [
                   // Baseline seed authority is part of the project grant and
                   // must land even when a concurrent writer won the first
                   // CAS (version > 0 then means OUR baseline never landed);
                   // setCovers dedup keeps it out when the winner already
                   // wrote it.
                   ...(lifetimeKind === "project"
-                    ? this.persistentBaselineCapabilities
+                    ? this.persistentBaselineCapabilities.map((c) => ({ ...c, principalId: c.principalId ?? targetPrincipal }))
                     : []),
-                  ...fresh,
+                  ...fresh.map((c) => ({ ...c, principalId: c.principalId ?? targetPrincipal })),
                 ];
                 for (const capability of candidates) {
-                  if (!setCovers({ version: 1, capabilities: nextCapabilities }, capability)) {
-                    nextCapabilities.push(capability);
+                  if (
+                    isGuardNeutralized("R2-CAS-ONE-BUCKET") ||
+                    !setCovers({ version: 1, capabilities: nextPrincipalCaps }, capability)
+                  ) {
+                    nextPrincipalCaps.push(capability);
                   }
                 }
                 const snap = await this.policyStore.compareAndSet(
                   targetWorkspaceId,
-                  retried.version,
+                  rawSnap.version,
                   {
                     version: 1 as const,
-                    capabilities: nextCapabilities,
+                    capabilities: [
+                      ...otherPrincipalCaps,
+                      ...unstampedCaps,
+                      // Neutralized probes reproduce the pre-R2 double-bucket
+                      // write-back (unstamped re-appended per approval → 2^K).
+                      ...(isGuardNeutralized("R2-CAS-ONE-BUCKET") ? unstampedCaps : []),
+                      ...nextPrincipalCaps,
+                    ],
                   },
                   {
                     kind: "human",
@@ -720,6 +823,7 @@ export class ActionLifecycle {
           const consumed = await this.capabilityLedger.consume(
             envelope.envelopeId,
             envelope.actionDigest,
+            { principalId: action.principalId },
           );
           if (!consumed) {
             // Already consumed — replay attempt.
@@ -744,7 +848,7 @@ export class ActionLifecycle {
             };
           }
         } else if (envelope.lifetime.kind === "run") {
-          const runRes = checkRunLifetime(envelope.runId, envelope.expiresAt ?? Infinity, this.capabilityLedger, nowTs);
+          const runRes = checkRunLifetime(envelope.runId, envelope.expiresAt ?? Infinity, this.capabilityLedger, nowTs, { principalId: action.principalId });
           if (runRes !== "ok") {
             const reason = runRes === "revoked" ? "capability-revoked" : "capability-expired";
             const outcome = this.toOutcome(action, "denied", undefined, reason);
@@ -757,7 +861,7 @@ export class ActionLifecycle {
             };
           }
         } else if (envelope.lifetime.kind === "session") {
-          const sessRes = checkSessionLifetime(action.sessionId ?? envelope.lifetime.sessionId, envelope.expiresAt, this.capabilityLedger, nowTs);
+          const sessRes = checkSessionLifetime(action.sessionId ?? envelope.lifetime.sessionId, envelope.expiresAt, this.capabilityLedger, nowTs, { principalId: action.principalId });
           if (sessRes !== "ok") {
             const reason = sessRes === "revoked" ? "capability-revoked" : "capability-expired";
             const outcome = this.toOutcome(action, "denied", undefined, reason);
@@ -850,6 +954,9 @@ export class ActionLifecycle {
         : {
             output: `Tool execution failed: ${execution.error.message}`,
             success: false,
+            metadata: {
+              errorCode: execution.error.code,
+            },
           };
 
     return { decision, approval, outcome, execution, toolResult };

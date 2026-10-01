@@ -9,13 +9,14 @@
  * 4. Default server startup without options continues to use default local stores.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as http from "node:http";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { runSeepientServer } from "../index.js";
 import { generateApiKey } from "../../auth/auth.js";
+import { computeWorkspaceId } from "../../../domain/permissions/policy-store.js";
 import {
   FakeAuditStore,
   FakePolicyStore,
@@ -165,12 +166,138 @@ describe("QS-3: Server Store Injection (FR-010)", () => {
     expect(server).toBeDefined();
   });
 
+  it("FR-021: unstamped legacy grant invisible to a server key over real HTTP; per-key stamped grant visible only to its key", async () => {
+    const keyEntry1 = generateApiKey(["agent:run"], { filePath: tempKeyPath, label: "tenant-key-1" });
+    const keyEntry2 = generateApiKey(["agent:run"], { filePath: tempKeyPath, label: "tenant-key-2" });
+
+    const auditStore = new FakeAuditStore();
+    const policyStore = new FakePolicyStore();
+    const capabilityLedger = new FakeCapabilityLedger();
+    const runtime = createFakeRuntime({
+      responses: [{ content: "response 1" }, { content: "response 2" }],
+    });
+
+    const workspaceId = computeWorkspaceId(path.join(process.cwd(), ".seepient", "workspaces", keyEntry1.keyHash));
+    policyStore.snapshots.set(workspaceId, {
+      workspaceId,
+      version: 1,
+      policyDigest: "test-digest",
+      policy: {
+        version: 1,
+        capabilities: [
+          { kind: "network-destination", scheme: "https", host: "legacy-unstamped.internal" },
+          { kind: "network-destination", scheme: "https", host: "key1-only.internal", principalId: keyEntry1.keyHash },
+        ],
+      },
+      mutationHistory: [],
+    });
+
+    const readSpy = vi.spyOn(policyStore, "read");
+
+    const server = await runSeepientServer({
+      runtime,
+      auditStore,
+      policyStore,
+      capabilityLedger,
+      listen: false,
+    });
+    activeServers.push(server);
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const addr = server.address() as { port: number };
+
+    // Request 1 from Key 1
+    const postData1 = JSON.stringify({ message: "Hello from key 1", model: "mock-model" });
+    await new Promise<void>((resolve, reject) => {
+      const req = http.request(
+        {
+          hostname: "127.0.0.1",
+          port: addr.port,
+          path: "/v1/chat",
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Content-Length": Buffer.byteLength(postData1),
+            "Authorization": `Bearer ${keyEntry1.rawKey}`,
+          },
+        },
+        (res) => {
+          res.on("data", () => {});
+          res.on("end", () => resolve());
+        },
+      );
+      req.on("error", reject);
+      req.write(postData1);
+      req.end();
+    });
+
+    // Request 2 from Key 2
+    const postData2 = JSON.stringify({ message: "Hello from key 2", model: "mock-model" });
+    await new Promise<void>((resolve, reject) => {
+      const req = http.request(
+        {
+          hostname: "127.0.0.1",
+          port: addr.port,
+          path: "/v1/chat",
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Content-Length": Buffer.byteLength(postData2),
+            "Authorization": `Bearer ${keyEntry2.rawKey}`,
+          },
+        },
+        (res) => {
+          res.on("data", () => {});
+          res.on("end", () => resolve());
+        },
+      );
+      req.on("error", reject);
+      req.write(postData2);
+      req.end();
+    });
+
+    // Verify policy reads:
+    const read1 = readSpy.mock.calls.find((c) => c[1]?.principalId === keyEntry1.keyHash);
+    expect(read1).toBeDefined();
+    expect(read1![1]?.tenancyMode).toBe("multi");
+
+    const read2 = readSpy.mock.calls.find((c) => c[1]?.principalId === keyEntry2.keyHash);
+    expect(read2).toBeDefined();
+    expect(read2![1]?.tenancyMode).toBe("multi");
+
+    const result1 = await readSpy.mock.results.find((_, idx) => readSpy.mock.calls[idx][1]?.principalId === keyEntry1.keyHash)!.value;
+    const result2 = await readSpy.mock.results.find((_, idx) => readSpy.mock.calls[idx][1]?.principalId === keyEntry2.keyHash)!.value;
+
+    // In result1 (key 1):
+    // - legacy-unstamped.internal is invisible (filtered out by tenancyMode: "multi")
+    // - key1-only.internal is present
+    expect(result1.policy.capabilities.some((c: any) => c.host === "legacy-unstamped.internal")).toBe(false);
+    expect(result1.policy.capabilities.some((c: any) => c.host === "key1-only.internal")).toBe(true);
+
+    // In result2 (key 2):
+    // - legacy-unstamped.internal is invisible
+    // - key1-only.internal is invisible to key 2
+    expect(result2.policy.capabilities.some((c: any) => c.host === "legacy-unstamped.internal")).toBe(false);
+    expect(result2.policy.capabilities.some((c: any) => c.host === "key1-only.internal")).toBe(false);
+  });
+
+  it("FR-021 fence: server never constructs single-mode policy reads for chat principals", () => {
+    const serverIndexPath = path.resolve(__dirname, "../index.ts");
+    const serverIndexContent = fs.readFileSync(serverIndexPath, "utf-8");
+
+    // Must construct serverPipelineFactory with tenancyMode: "multi"
+    expect(serverIndexContent).toContain('tenancyMode: "multi"');
+    // Must NOT contain single mode anywhere in server index
+    expect(serverIndexContent).not.toContain('tenancyMode: "single"');
+  });
+
   it("custom ProviderRuntimeContract is preserved on server and returns 501 for mutations without disk writes", async () => {
     const { createRestHandler } = await import("../rest.js");
     const { Readable } = await import("node:stream");
     const { EventEmitter } = await import("node:events");
 
     const runtime: import("../../../foundations/contracts/provider-runtime.js").ProviderRuntimeContract = {
+      isIsolated: true,
       createTurnSnapshot: async () => ({
         revision: 1,
         createdAt: new Date().toISOString(),
@@ -241,6 +368,167 @@ describe("QS-3: Server Store Injection (FR-010)", () => {
     const parsedBody = JSON.parse(res.body);
     expect(parsedBody.error.code).toBe("NOT_IMPLEMENTED");
     expect(parsedBody.error.message).toContain("Injected provider runtime does not implement configuration mutations");
+  });
+
+  it("server rejects ambient stores without isIsolated: true with TENANCY_STORE_INCOMPLETE (P1-2)", async () => {
+    // 022-5-WO3: injected runtimes must carry the multi stamp (the T006
+    // refusal) — this fixture stamps it so the test's own subject, the
+    // ambient-STORE check, is what fires.
+    const runtime = createFakeRuntime();
+    Object.defineProperty(runtime, "tenancySignal", { value: "multi", configurable: true });
+    const ambientStore = { isIsolated: false } as any;
+
+    await expect(
+      runSeepientServer({
+        runtime,
+        auditStore: ambientStore,
+        listen: false,
+      }),
+    ).rejects.toThrow(/TENANCY_STORE_INCOMPLETE|isIsolated/);
+
+    await expect(
+      runSeepientServer({
+        runtime,
+        policyStore: ambientStore,
+        listen: false,
+      }),
+    ).rejects.toThrow(/TENANCY_STORE_INCOMPLETE|isIsolated/);
+
+    await expect(
+      runSeepientServer({
+        runtime,
+        capabilityLedger: ambientStore,
+        listen: false,
+      }),
+    ).rejects.toThrow(/TENANCY_STORE_INCOMPLETE|isIsolated/);
+  });
+
+  it("server uses custom apiKeysFile without relying on ambient server-keys.json (P2-3)", async () => {
+    const customKeyPath = path.join(
+      os.tmpdir(),
+      `custom-server-keys-${Date.now()}-${Math.random().toString(36).slice(2)}.json`,
+    );
+    try {
+      const keyEntry = generateApiKey(["agent:run"], { filePath: customKeyPath, label: "custom-key" });
+      const runtime = createFakeRuntime({
+        responses: [{ content: "Custom key response." }],
+      });
+
+      const server = await runSeepientServer({
+        runtime,
+        apiKeysFile: customKeyPath,
+        listen: false,
+      });
+      activeServers.push(server);
+
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const addr = server.address() as { port: number };
+
+      const response = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const req = http.request(
+          {
+            hostname: "127.0.0.1",
+            port: addr.port,
+            path: "/v1/chat",
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${keyEntry.rawKey}`,
+            },
+          },
+          (res) => {
+            let data = "";
+            res.on("data", (chunk) => { data += chunk; });
+            res.on("end", () => { resolve({ status: res.statusCode ?? 0, body: data }); });
+          },
+        );
+        req.on("error", reject);
+        req.write(JSON.stringify({ message: "Hello", model: "mock-model" }));
+        req.end();
+      });
+
+      expect(response.status).toBe(200);
+      const data = JSON.parse(response.body);
+      expect(data.text).toBe("Custom key response.");
+    } finally {
+      if (fs.existsSync(customKeyPath)) {
+        fs.unlinkSync(customKeyPath);
+      }
+    }
+  });
+
+  it("P0-1: WebSocket upgrade respects injected apiKeysFile and rejects ambient keys", async () => {
+    const ambientKeyPath = path.join(
+      os.tmpdir(),
+      `ambient-keys-${Date.now()}-${Math.random().toString(36).slice(2)}.json`,
+    );
+    const customKeyPath = path.join(
+      os.tmpdir(),
+      `custom-keys-${Date.now()}-${Math.random().toString(36).slice(2)}.json`,
+    );
+    const originalEnv = process.env.SEEPIENT_API_KEYS_FILE;
+    try {
+      process.env.SEEPIENT_API_KEYS_FILE = ambientKeyPath;
+      const ambientKey = generateApiKey(["agent:run", "admin"], { filePath: ambientKeyPath, label: "ambient-key" });
+      const customKey = generateApiKey(["agent:run", "admin"], { filePath: customKeyPath, label: "custom-key" });
+
+      const runtime = createFakeRuntime({
+        responses: [{ content: "P0-1 verified." }],
+      });
+
+      const server = await runSeepientServer({
+        runtime,
+        apiKeysFile: customKeyPath,
+        listen: false,
+      });
+      activeServers.push(server);
+
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const addr = server.address() as { port: number };
+
+      const testUpgrade = (rawKey: string): Promise<number> => {
+        return new Promise((resolve, reject) => {
+          const req = http.request({
+            host: "127.0.0.1",
+            port: addr.port,
+            path: "/ws",
+            headers: {
+              connection: "Upgrade",
+              upgrade: "websocket",
+              "sec-websocket-version": "13",
+              "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+              authorization: `Bearer ${rawKey}`,
+            },
+          });
+          req.on("response", (res) => {
+            resolve(res.statusCode ?? 0);
+            res.resume();
+          });
+          req.on("upgrade", (_res, socket) => {
+            socket.destroy();
+            resolve(101);
+          });
+          req.on("error", reject);
+          req.end();
+        });
+      };
+
+      // 1. WebSocket upgrade with ambient key MUST fail with 401
+      const ambientWsStatus = await testUpgrade(ambientKey.rawKey!);
+      expect(ambientWsStatus).toBe(401);
+
+      // 2. WebSocket upgrade with custom injected key MUST succeed with 101
+      const customWsStatus = await testUpgrade(customKey.rawKey!);
+      expect(customWsStatus).toBe(101);
+    } finally {
+      if (originalEnv !== undefined) {
+        process.env.SEEPIENT_API_KEYS_FILE = originalEnv;
+      } else {
+        delete process.env.SEEPIENT_API_KEYS_FILE;
+      }
+      if (fs.existsSync(ambientKeyPath)) fs.unlinkSync(ambientKeyPath);
+      if (fs.existsSync(customKeyPath)) fs.unlinkSync(customKeyPath);
+    }
   });
 });
 

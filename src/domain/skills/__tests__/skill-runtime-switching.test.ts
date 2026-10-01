@@ -75,7 +75,7 @@ describe("Skill Runtime Switching (Site #8, P5.4)", () => {
     // Step 2: Skill switch to Claude 3.5 Sonnet on anthropic
     await switcher.switchIfNeeded({
       prompt: "review code",
-      skill: { name: "code-review", description: "review code", tags: [] },
+      skill: { name: "code-review", description: "review code", version: "1.0.0", tags: [] },
       providerSwitchNeeded: true,
       preferredProvider: "anthropic",
       preferredModel: "claude-sonnet-5",

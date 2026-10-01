@@ -41,6 +41,7 @@ describe("W019: chatStream per-call purpose and tier", () => {
     };
 
     const seepient = await createSeepient({
+      tenancy: "single",
       purpose: "text",
       tier: "standard",
       providers: {

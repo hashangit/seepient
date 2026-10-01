@@ -1,5 +1,5 @@
 <script setup>
-const surfaces = ['Terminal UI (TUI)', 'CLI & REPL', 'Server API', 'Worker SDK']
+const surfaces = ['CLI', 'TUI', 'Embedded SDK', 'Programmatic Server', 'REST/WS Server', 'Container Workers']
 
 const lanes = [
   {
@@ -29,7 +29,7 @@ const notes = [
   },
   {
     kicker: 'One policy engine',
-    body: 'All four surfaces delegate to the same agent loop and permission broker, so behavior never forks between terminal and server.',
+    body: 'All deployment surfaces delegate to the same agent loop and permission broker, so behavior never forks across CLI, TUI, SDK, server, or cloud workers.',
   },
   {
     kicker: 'Shared foundations',

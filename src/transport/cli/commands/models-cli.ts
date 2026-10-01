@@ -7,9 +7,10 @@
  */
 
 import path from "node:path";
+import { statSync } from "node:fs";
 import { Command } from "commander";
 import chalk from "chalk";
-import { getDefaultProviderRuntime } from "../../../domain/providers/provider-runtime.js";
+import { createAmbientProviderRuntime } from "../../../domain/providers/provider-runtime.js";
 import {
   createProviderManagerApi,
   type ProviderManagerApi,
@@ -19,7 +20,7 @@ import {
 import { generateImagesStructured } from "../../../capabilities/media/media.js";
 
 export function registerModelsCommands(program: Command, apiOverride?: ProviderManagerApi): void {
-  const getApi = () => apiOverride ?? createProviderManagerApi(getDefaultProviderRuntime());
+  const getApi = () => apiOverride ?? createProviderManagerApi(createAmbientProviderRuntime());
   const modelsCmd = program.command("models").description("Manage purpose-based model assignments, browse catalog, and resolve status");
 
   modelsCmd
@@ -504,7 +505,7 @@ export function registerModelsCommands(program: Command, apiOverride?: ProviderM
     .option("--mask <path>", "Input mask path for editing")
     .option("--output <dir>", "Output directory for generated images", ".")
     .action(async (opts) => {
-      const runtime = getDefaultProviderRuntime();
+      const runtime = createAmbientProviderRuntime();
       const count = parseInt(opts.count, 10) || 1;
       const resolvedOutputDir = path.resolve(opts.output ?? ".");
       const destinations: string[] = [];
@@ -512,6 +513,19 @@ export function registerModelsCommands(program: Command, apiOverride?: ProviderM
       for (let i = 0; i < count; i++) {
         destinations.push(path.join(resolvedOutputDir, `generated-${timestamp}-${i + 1}.png`));
       }
+
+      // Identity pins for the input reads (022-5 FR-001): request-build time
+      // is this caller's authorization moment — stat once here so the media
+      // reader can verify the opened file is the one the operator pointed at.
+      const inputIdentity = (p?: string) => {
+        if (!p) return undefined;
+        try {
+          const st = statSync(p);
+          return { dev: st.dev, ino: st.ino };
+        } catch {
+          return undefined;
+        }
+      };
 
       const { createCliImageCommitContext } = await import("../../../domain/media/cli-image-commit.js");
       const { commitBroker, envelope } = await createCliImageCommitContext(destinations);
@@ -524,7 +538,9 @@ export function registerModelsCommands(program: Command, apiOverride?: ProviderM
           quality: opts.qualityPreset === "high" ? "hd" : "standard",
           n: count,
           imagePath: opts.image,
+          imageIdentity: inputIdentity(opts.image),
           maskPath: opts.mask,
+          maskIdentity: inputIdentity(opts.mask),
           outputDir: opts.output,
           destinations,
         },

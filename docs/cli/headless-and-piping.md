@@ -39,10 +39,12 @@ Seepient integrates cleanly into CI runners (such as GitHub Actions, GitLab CI, 
 Example GitHub Action step:
 
 ```yaml
+- name: Configure Seepient credential
+  run: seepient auth login anthropic --key "${{ secrets.ANTHROPIC_KEY }}"
+
 - name: Run Seepient Code Audit
   env:
-    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-    SEEPIENT_CONSENT_MODE: autonomous-trusted
+    SEEPIENT_CONSENT_MODE: autonomous
   run: |
     seepient -y "Inspect modified files in this pull request and check compliance with project guidelines"
 ```

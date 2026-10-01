@@ -95,8 +95,8 @@ describe("AddAccount — account id", () => {
     await vi.waitFor(() => {
       const frame = inst.lastFrame() ?? "";
       expect(frame).toContain("[1] Paste API key");
-      expect(frame).toContain("[2] Use an environment variable");
-      expect(frame).toContain("[3] No key");
+      expect(frame).toContain("[2] No key (keyless / local endpoint)");
+      expect(frame).not.toContain("environment variable"); // 022-5 demolition
     }, { timeout: 5000 });
   });
 
@@ -152,7 +152,7 @@ describe("AddAccount — credential modes", () => {
     }, { timeout: 5000 });
   });
 
-  it("env mode takes a variable NAME only", async () => {
+  it("the env credential mode is demolished (022-5): no env option, 2 is keyless", async () => {
     const { inst, props } = setup();
     await type(inst, ENTER);
     await vi.waitFor(() => {
@@ -160,15 +160,12 @@ describe("AddAccount — credential modes", () => {
     }, { timeout: 5000 });
     await type(inst, ENTER);
     await vi.waitFor(() => {
-      expect(inst.lastFrame() ?? "").toContain("[2] Use an environment variable");
+      expect(inst.lastFrame() ?? "").toContain("[2] No key");
     }, { timeout: 5000 });
     await type(inst, "2");
-    await type(inst, "MY");
-    await type(inst, "_KEY");
-    await type(inst, ENTER);
     await vi.waitFor(() => {
       expect(props.onSaveAccount).toHaveBeenCalledWith(
-        expect.objectContaining({ credential: { mode: "env", varName: "MY_KEY" } }),
+        expect.objectContaining({ credential: { mode: "none" } }),
       );
     });
   });
@@ -181,9 +178,9 @@ describe("AddAccount — credential modes", () => {
     }, { timeout: 5000 });
     await type(inst, ENTER);
     await vi.waitFor(() => {
-      expect(inst.lastFrame() ?? "").toContain("[3] No key");
+      expect(inst.lastFrame() ?? "").toContain("[2] No key");
     }, { timeout: 5000 });
-    await type(inst, "3");
+    await type(inst, "2");
     await vi.waitFor(() => {
       expect(props.onSaveAccount).toHaveBeenCalledWith(
         expect.objectContaining({ credential: { mode: "none" } }),
@@ -235,9 +232,9 @@ describe("AddAccount — custom endpoint path", () => {
     }, { timeout: 5000 });
     await type(inst, ENTER); // id default "custom"
     await vi.waitFor(() => {
-      expect(inst.lastFrame() ?? "").toContain("[3] No key");
+      expect(inst.lastFrame() ?? "").toContain("[2] No key");
     }, { timeout: 5000 });
-    await type(inst, "3");   // keyless
+    await type(inst, "2");   // keyless
     await vi.waitFor(() => {
       expect(props.onSaveAccount).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -296,7 +293,7 @@ describe("AddAccount — navigation", () => {
     }, { timeout: 5000 });
   });
 
-  it("offers [4] Sign in with provider for supported OAuth upstreams", async () => {
+  it("offers [3] Sign in with provider for supported OAuth upstreams", async () => {
     const onSignIn = vi.fn();
     const canSignIn = (u: string) => ["anthropic", "openai", "github", "kimi", "xai"].includes(u.toLowerCase());
     const { inst } = setup({
@@ -312,10 +309,10 @@ describe("AddAccount — navigation", () => {
     await type(inst, ENTER); // credential phase
     await vi.waitFor(() => {
       const frame = inst.lastFrame() ?? "";
-      expect(frame).toContain("[4] Sign in with provider");
+      expect(frame).toContain("[3] Sign in with provider");
     }, { timeout: 5000 });
 
-    await type(inst, "4");
+    await type(inst, "3");
     expect(onSignIn).toHaveBeenCalledWith("openai");
   });
 });

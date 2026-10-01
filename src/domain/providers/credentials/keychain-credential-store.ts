@@ -167,6 +167,7 @@ export class DefaultPlatformKeychainProvider implements PlatformKeychainProvider
  * NEVER silently falls back to plaintext.
  */
 export class KeychainCredentialStore implements CredentialStore {
+  readonly isIsolated = false;
   private defaultService: string;
   private provider?: PlatformKeychainProvider;
 

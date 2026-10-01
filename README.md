@@ -6,7 +6,7 @@
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg?style=flat-square)](https://github.com/hashangit/seepient/blob/main/LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com)
 
-**The Engineering-First Headless Agent Framework: CLI, SDK, and Server. Stable, Scalable Automation for the Post-Vision Era.**
+**The Engineering-First Headless Agent Framework across CLI, TUI, SDK, Server, and Container Workers. Stable, Scalable Automation for the Post-Vision Era.**
 
 **Platform support** — chat, planning, and file reads work everywhere. Model-authored file writes are enforced through exact atomic commits via the bundled native helper (`native/fs-commit`): fully supported on **macOS (arm64/x64)** and **Linux (x64/arm64)**; on **Windows** writes are refused before approval (read-only) until a win32 helper exists. There is no unguarded write fallback.
 
@@ -16,9 +16,9 @@
 
 ---
 
-Seepient Agent is a high-stability, open-source automation framework specifically engineered for **headless systems**.
+Seepient Agent is a high-stability, open-source automation framework spanning the **full spectrum of deployment surfaces**: **CLI**, **TUI**, **embedded SDK**, **programmatic server**, **REST/WS server**, and **serverless/container workers** — all sharing one agent loop, one permission engine, and one durable audit trail.
 
-Unlike "screen-seeing" agents (such as OpenClaw) that rely on visual interpretation, Seepient Agent is built on a foundation of precise command-driven execution. This makes it significantly more **stable**, **robust from an engineering perspective**, and **easier to scale** across complex environments—whether it's a local server, a CI/CD pipeline, or thousands of containerized nodes.
+Unlike "screen-seeing" agents (such as OpenClaw) that rely on visual interpretation, Seepient Agent is built on a foundation of precise command-driven execution. This makes it significantly more **stable**, **robust from an engineering perspective**, and **easier to scale** across complex environments—whether it's a developer terminal, a CI/CD pipeline, an embedded backend application, or thousands of containerized worker nodes.
 
 ## Why Seepient Agent?
 - 🐳 **Docker Native**: Built to run safely inside containers with pre-packaged Chromium, CJK fonts, non-root security, and native helper binaries.
@@ -27,7 +27,7 @@ Unlike "screen-seeing" agents (such as OpenClaw) that rely on visual interpretat
 - 📈 **Massive Scalability**: Low resource consumption allows orchestrating thousands of instances (e.g., in K8s) for true automation swarms.
 - 🔌 **Swarm Ready**: Stateless design allows for easy orchestration via K8s, Docker Swarm, or simple shell loops.
 - 🧩 **Extensible Integrations**: Built-in support for Web Search (Tavily), Email (SMTP), and Notification Webhooks (Feishu, DingTalk, WeCom).
-- 📦 **SDK & Server**: TypeScript SDK for programmatic use, standalone HTTP/WebSocket server for remote access.
+- 🌐 **Full Deployment Spectrum**: Native support across CLI, TUI, embedded SDK, programmatic server, REST/WS server, and serverless/container workers with unified governance.
 - 🛠 **Skills System**: Loadable skill packs with file references, custom tool registration, and extensible workflows.
 
 ## Features
@@ -43,13 +43,15 @@ Unlike "screen-seeing" agents (such as OpenClaw) that rely on visual interpretat
 - 🌐 **Web Search**: Integrated with Tavily for real-time information retrieval.
 - 🕒 **Time Accuracy**: Built-in tool to get precise system date and time for correct temporal context.
 - 📧 **Communication**: Send emails and push notifications to chat groups automatically.
-- 📦 **TypeScript SDK**: Programmatic access via 3 statefulness tiers: `askSeepient` (one-shot), `createSeepient` (stateful multi-turn), and `runSeepientServer` (remote server).
-- 🖥 **Server Mode**: Standalone HTTP/WebSocket server with REST v2 management API (`/v1/providers`, `/v1/models` with ETag/If-Match), API key auth, and session management.
+- 🌐 **Full Deployment Spectrum**: Native support across CLI, interactive TUI, embedded TypeScript SDK, programmatic server, standalone REST/WS server daemon, and serverless/container workers.
+- 📦 **TypeScript SDK & Programmatic Server**: Programmatic access via `askSeepient` (one-shot), `createSeepient` (stateful multi-turn), and `runSeepientServer` (embeddable server with custom store injection).
+- 🖥 **Standalone REST & WebSocket Server**: High-performance HTTP/WebSocket service with REST v2 management APIs (`/v1/providers`, `/v1/models` with ETag/If-Match), API key auth, and session management.
+- 🐳 **Stateless Container & Cloud Workers**: Ephemeral worker deployment pattern with zero local disk footprint, externalized store contracts, and isolated container execution.
 - 🛠 **Skills System**: Loadable skill packs from directories with `@path` file references, turn-scoped skill switching, and custom tool creation.
 - 🛡️ **Security & Permission Pipeline**: Single Domain-owned enforcement pipeline (`PolicyEngine` → `ApprovalBroker` → `ExecutionBoundary` → `AuditRecorder`) default-on across CLI, TUI, SDK, and HTTP/WebSocket server.
 - 🔒 **Fail-Closed Isolation & SSRF Defense**: Process containment (macOS Seatbelt / Linux Bubblewrap) and exact-file write helpers fail closed; SSRF guards prevent metadata reflection.
 - 💾 **Durable Approvals & 0600 Audit**: File-locked atomic NDJSON stores and append-only `0600` audit logs (`~/.seepient/audit.log`) with fsync before mutation commits.
-- 🐳 **Server Worker Backend**: ephemeral Docker worker container scheduler with mTLS transport, Ed25519/HMAC signed dispatches, and secret-free worker execution environments.
+- 🐳 **Server Mode Execution**: Standalone HTTP/WebSocket server operating in inference and planning mode, failing closed with `backend-unsupported` on effectful operations until the isolated container scheduler ships.
 - 🏗️ **Clean Modular Architecture**: Strict responsibility-driven layers (`UI → Transport → Domain → Capabilities → Vendors → Foundations`) with decomposed route modules, isolated WebSocket message families, centralized connection registry, and decoupled TUI state hooks.
 - 🖥️ **Interactive TUI**: In a TTY, a full-screen Ink/React UI with bordered always-on input, streaming feed, interactive terminal widgets (tables, forms, charts), session manager, message queue/`/steer`, and inline `write_file` diffs (atomic, crash-safe writes).
 
@@ -134,6 +136,17 @@ import { runSeepientServer } from 'seepient/server';
 
 ## Usage
 
+Seepient spans the **full spectrum of deployment surfaces**: **CLI**, **TUI**, **embedded SDK**, **programmatic server**, **REST/WS server**, and **serverless/container workers**. Every surface shares the same underlying agent core, model routing, and fail-closed permission pipeline.
+
+| Surface | Description | Primary Interface | Ideal Workload |
+| :--- | :--- | :--- | :--- |
+| **[CLI](#3-command-line-interface-cli)** | Headless one-shots, Unix pipes, scriptable subcommands | `seepient "prompt" -y` | CI/CD pipelines, shell scripts, cron jobs |
+| **[TUI](#1-terminal-user-interface-tui)** | Full-screen interactive terminal UI with live widgets | `seepient` | Daily interactive developer workflows & diff reviews |
+| **[Embedded SDK](#2-embedded-typescript-sdk)** | Programmatic agent instances inside Node.js apps | `createSeepient()`, `askSeepient()` | Integrating autonomous capabilities into backend services |
+| **[Programmatic Server](#5-programmatic-server)** | Embeddable server runtime with custom injected stores | `runSeepientServer()` | Multi-tenant platforms & microservices with custom backends |
+| **[REST / WS Server](#4-standalone-rest--websocket-server)** | Standalone network daemon with auth & session APIs | HTTP / WS daemon (`--port 7337`) | Remote agent access, web frontends, cross-language clients |
+| **[Container Workers](#6-serverless--container-workers)** | Ephemeral, stateless containerized worker execution | Docker, K8s, microVMs | Scalable automation swarms with zero local state footprint |
+
 ### 1. Terminal User Interface (TUI)
 
 Running `seepient` in any standard terminal launches a full-screen interactive interface built with Ink and React:
@@ -210,9 +223,9 @@ Type `/` in the composer for fuzzy autocomplete across all commands and custom s
 
 ---
 
-### 2. TypeScript SDK & Programmatic Usage
+### 2. Embedded TypeScript SDK
 
-Seepient Agent provides a TypeScript SDK for building agent-powered applications.
+Seepient Agent provides an embedded TypeScript SDK (`createSeepient`, `askSeepient`) for building autonomous agent capabilities directly into your Node.js applications.
 
 #### Basic Agent
 ```ts
@@ -221,6 +234,7 @@ import { createSeepient } from 'seepient';
 const seepient = await createSeepient({
   provider: 'anthropic',
   model: 'claude-sonnet-4-5-20250929',
+  consentMode: 'edit-enabled',
 });
 
 const result = await seepient.chat('List all running Docker containers');
@@ -347,27 +361,18 @@ const seepient = await createSeepient({
 ```ts
 const seepient = await createSeepient({
   provider: 'anthropic',
-  persist: 'my-session',          // Resume a previous session
+  sessionId: 'my-session',        // Session identifier
+  persist: './sessions',          // Directory path or custom PersistenceBackend
+  tenancy: 'single',              // single-user mode; bare persist otherwise upgrades to multi and requires principalId
 });
 ```
 
-#### Programmatic Server Creation & Custom Store Injection
-```ts
-import { runSeepientServer } from "seepient/server";
-
-// Stateless worker mode with custom runtime and in-memory stores
-const server = await runSeepientServer({
-  port: 7337,
-  runtime: myCustomRuntime,
-  persist: myRedisBackend,
-  auditStore: myRemoteAuditStore,
-});
-```
+> **Tip**: To run Seepient as an embeddable server with custom store injection, see [5. Programmatic Server](#5-programmatic-server). For ephemeral worker tier deployments with zero local disk footprint, see [6. Serverless & Container Workers](#6-serverless--container-workers).
 
 #### Programmatic Gateway Client
 ```ts
 import { gateway } from 'seepient';
-const gw = await gateway.createGateway({ enabled: true, semanticTopK: 3, defaultRateLimitPerMin: 60, maxAuditLogsInMemory: 1000 });
+const { gateway: gw, tools } = await gateway.createGateway({ enabled: true, semanticTopK: 3, defaultRateLimitPerMin: 60, maxAuditLogsInMemory: 1000 });
 ```
 
 ---
@@ -404,7 +409,7 @@ seepient -r last "Continue with the remaining test failures"
 | `-y, --yes` | Autonomous mode: auto-approve actions within deployment ceiling (alias for `--mode autonomous`) |
 | `--mode <mode>` | Set consent mode: `edit-enabled` (default) \| `ask-everything` \| `autonomous` |
 | `-r, --resume <id>` | Resume a conversation by session ID, or pass `last` for the most recent session |
-| `--docker` | Run in container mode: implies `--no-interactive` and suppresses interactive prompts |
+| `--docker` | Run in container mode: implies `--no-interactive` and suppresses interactive prompts (denies un-predeclared actions; pass `--mode autonomous` or `--yes` for unattended runs) |
 
 #### Consent Modes & Security Governance
 
@@ -431,8 +436,8 @@ Inspect model assignments, browse the live upstream catalog, and configure routi
 | `models list` | List configured purpose assignments | `--resolved` (show active runtime targets), `--json` |
 | `models browse [query]` | Search catalog models with reachability, context window, and pricing | `--reachable-only`, `--json` |
 | `models resolve <slot>` | Dry-run preview of the selected target and fallback chain (e.g. `text.standard`) | `--json` |
-| `models set <slot> <target>` | Assign a model to a slot (e.g. `text.standard anthropic/claude-sonnet-5`) | `--thinking <none\|low\|medium\|high>`, `--json` |
-| `models fallback <slot> <targets>` | Configure ordered fallback candidates (e.g. `anthropic/claude-sonnet-5,openai/gpt-4o`) | `--json` |
+| `models set <slot> <target>` | Assign a model to a slot (e.g. `text.standard anthropic/claude-sonnet-4-6-20260320`) | `--thinking <none\|low\|medium\|high>`, `--json` |
+| `models fallback <slot> <targets>` | Configure ordered fallback candidates (e.g. `anthropic/claude-sonnet-4-6-20260320,openai/gpt-5.4`) | `--json` |
 | `models status` | Display active assignments and credential health across all slots | `--json` |
 | `models check` | Pre-flight sanity check ensuring required model slots are configured | `--require <slots>`, `--offline`, `--json` |
 | `models probe <provider>` | Test connectivity, latency, and credential validity for a provider | `--json` |
@@ -444,7 +449,7 @@ Manage connected provider accounts, credentials, and custom endpoints:
 | Subcommand | Description | Key Options |
 | :--- | :--- | :--- |
 | `providers list` | List all configured provider accounts and their status | `--pool <language\|image>`, `--json` |
-| `providers add <id>` | Add a new provider account | `--upstream <provider>`, `--credential env:VAR\|none`, `--url <url>`, `--allow-private`, `--compat <compat>` |
+| `providers add <id>` | Add a new provider account | `--upstream <provider>`, `--credential none`, `--url <url>`, `--allow-private`, `--compat <compat>` |
 | `providers edit <id>` | Update an existing provider account's configuration | `--upstream`, `--credential`, `--url`, `--allow-private`, `--compat` |
 | `providers remove <id>` | Remove a provider account | `--force` (bypass active slot references), `--json` |
 
@@ -453,9 +458,9 @@ Manage provider credentials and issue server API keys:
 
 | Subcommand | Description | Key Options |
 | :--- | :--- | :--- |
-| `auth login <provider>` | Configure credentials or initiate OAuth sign-in | `--key <apiKey>`, `--env-var <name>`, `--upstream <provider>` |
+| `auth login <provider>` | Configure credentials or initiate OAuth sign-in | `--key <apiKey>`, `--upstream <provider>` |
 | `auth logout <provider>` | Remove stored credentials for an account | `--json` |
-| `auth issue-token` | Generate a scoped server API key token (SHA-256 hashed at rest) | `--scope <agent:run\|agent:read\|provider:admin\|admin>`, `--label <name>` |
+| `auth issue-token` | Generate a scoped server API key token (SHA-256 hashed at rest) | `--scope <agent:run\|agent:read\|provider:read\|provider:admin\|admin>`, `--label <name>` |
 
 ##### Direct Media Generation (`seepient generate`)
 Generate or edit images directly from the command line using your configured image model:
@@ -466,9 +471,9 @@ Supported options: `--prompt <text>`, `--operation <generate|variation|edit|mask
 
 ---
 
-### 4. Server Mode
+### 4. Standalone REST & WebSocket Server
 
-Run Seepient Agent as a standalone HTTP/WebSocket server for remote agent access or stateless worker deployments. The HTTP server operates in inference and planning mode in this release; effectful tool execution fails closed with `backend-unsupported` by design until the isolated worker scheduler ships.
+Run Seepient Agent as a standalone HTTP/WebSocket daemon (`seepient-server`) for remote agent access, web frontends, or cross-language clients. The HTTP server operates in inference and planning mode in this release; effectful tool execution fails closed with `backend-unsupported` by design until the isolated worker scheduler ships.
 
 #### Starting the Server
 ```bash
@@ -507,28 +512,71 @@ ws.onopen = () => {
   ws.send(JSON.stringify({
     type: 'chat',
     message: 'Analyze the error logs',
-    provider: 'anthropic',
+    options: { provider: 'anthropic' },
   }));
 };
 
 ws.onmessage = (event) => {
   const chunk = JSON.parse(event.data);
-  process.stdout.write(chunk.text);
+  if (chunk.type === 'text' && chunk.delta) {
+    process.stdout.write(chunk.delta);
+  }
 };
 ```
 
-#### Programmatic Server Creation & Custom Store Injection
+---
+
+### 5. Programmatic Server
+
+Embed a custom Seepient server directly within your Node.js application, microservice, or backend tier with full control over runtime configuration, storage adapters, and audit recording:
+
 ```ts
 import { runSeepientServer } from "seepient/server";
 
-// Stateless worker mode with custom runtime and in-memory stores
+// Embeddable server with custom stores and runtime
 const server = await runSeepientServer({
   port: 7337,
+  host: "127.0.0.1",
   runtime: myCustomRuntime,
   persist: myRedisBackend,
   auditStore: myRemoteAuditStore,
 });
+
+// Graceful shutdown
+await server.close();
 ```
+
+---
+
+### 6. Serverless & Container Workers
+
+For high-throughput automation swarms, serverless functions, or multi-tenant cloud architectures (Docker, Kubernetes, AWS Lambda, Cloud Run, microVMs), Seepient can be deployed as ephemeral, stateless container workers:
+
+- **Zero Local Disk Footprint**: When embedder store adapters are injected, Seepient writes zero persistent state to the local worker filesystem.
+- **Multi-Tenant Isolation**: Each task or tenant executes within an isolated container or microVM with OS-level sandboxing (`bwrap` on Linux, Seatbelt on macOS) and exact atomic file writes.
+- **Externalized Storage Sovereignty**: Sessions, audit records, and policy grants stream back to your centralized databases via injected store contracts.
+
+```ts
+import { createSeepient, createIsolatedProviderRuntime } from "seepient";
+import { RemoteAuditStore, RedisPersistence, PostgresPolicyStore, RemoteCapabilityLedger } from "./stores.js";
+
+// Ephemeral worker instance with externalized state
+const worker = await createSeepient({
+  principalId: tenantId,
+  cwd: `/tmp/workspace-${tenantId}`,
+  runtime: createIsolatedProviderRuntime({ tenancyMode: "multi" }),
+  auditStore: new RemoteAuditStore(tenantId),
+  persist: new RedisPersistence(sessionId),
+  policyStore: new PostgresPolicyStore(tenantId),
+  capabilityLedger: new RemoteCapabilityLedger(tenantId),
+  consentMode: 'autonomous',
+});
+
+const result = await worker.chat(taskPrompt);
+await worker.dispose();
+```
+
+For a complete runnable multi-tenant stateless worker deployment, see the [reference worker example](./examples/worker) and the [Stateless Workers Guide](https://seepient.dev/sdk/stateless-workers).
 
 ---
 
@@ -545,7 +593,6 @@ Seepient loads configuration through a clear hierarchy:
 
 | Variable | Purpose | Default |
 |:---|:---|:---|
-| `SEEPIENT_SHELL_APPROVE` | Shell command approval: `auto` (approve all), `deny` (block all), or unset (interactive prompt) | unset |
 | `SEEPIENT_CONSENT_MODE` | Runtime permission level: `ask-everything`, `edit-enabled`, or `autonomous` | `edit-enabled` |
 | `SEEPIENT_SKILLS_PATH` | Colon-separated list of custom skill directories | unset |
 | `SEEPIENT_SESSION_DIR` | Directory for persisted conversation history | `~/.seepient/sessions` |
@@ -560,14 +607,9 @@ Seepient routes model requests across upstream providers with automatic catalog 
 
 You can configure providers in three ways:
 
-#### 1. Zero-config auto-discovery
-If you have standard provider API keys in your environment or `.env`, Seepient detects them automatically at boot:
-- `OPENAI_API_KEY` (OpenAI)
-- `ANTHROPIC_API_KEY` (Anthropic Claude)
-- `GEMINI_API_KEY` (Google Gemini)
-- `DEEPSEEK_API_KEY` (DeepSeek)
-- `GROQ_API_KEY` (Groq)
-- `GLM_API_KEY` (Z.ai GLM)
+#### 1. Guided setup (the only path)
+
+Seepient reads no API keys from the environment. Configure providers through the setup wizard (`seepient setup`), the TUI dock (`/models`), or `seepient auth login <id> --key <key>`. Embedders can inject a custom credential store through the SDK.
 
 #### 2. Guided wizard and interactive TUI dock
 - Run `seepient setup` for the first-run interactive onboarding wizard.
@@ -581,17 +623,17 @@ Add accounts, sign in with OAuth, and map models from the shell:
 seepient auth login openai
 seepient auth login anthropic
 
-# Configure using a custom environment variable or key directly
-seepient auth login my-openai --env-var CUSTOM_OPENAI_KEY
+# Configure accounts with keys directly
+seepient auth login my-openai --key sk-...
 seepient auth login my-claude --key sk-ant-...
 
 # Register a local endpoint (Ollama, LM Studio, vLLM) without credentials
-seepient providers add ollama-local --upstream openai --base-url http://127.0.0.1:11434/v1 --credential none
+seepient providers add ollama-local --upstream openai --url http://127.0.0.1:11434/v1 --credential none
 
 # Assign default models by purpose and tier
-seepient models set text.standard openai/gpt-5.6-terra
-seepient models set text.efficient openai/gpt-5.6-luna
-seepient models set plan.standard openai/gpt-5.6-sol
+seepient models set text.standard openai/gpt-5.4
+seepient models set text.efficient openai/gpt-5.4-mini
+seepient models set plan.standard openai/gpt-5.4-pro
 ```
 
 ### Credential storage options
@@ -602,7 +644,6 @@ Credentials are never stored in plaintext within version-controlled repositories
 |:---|:---|:---|
 | **OS Keychain** | `keychain` | Encrypted via macOS Keychain or Linux Secret Service. No plaintext keys touch disk. |
 | **OAuth / Session** | `seepient` | Secure token storage with automatic token refresh for subscription sign-ins. |
-| **Environment pointer** | `env` | Stores only the variable name (e.g. `OPENAI_API_KEY`). The secret stays in your shell environment. |
 | **None** | `none` | For local inference endpoints that do not require authentication (e.g. Ollama, LM Studio). |
 
 ### Configuration shape (`setting.json`)
@@ -615,12 +656,12 @@ When saved to `~/.seepient/setting.json` or `.seepient/setting.json`, your provi
     "openai": {
       "adapter": "pi-ai",
       "upstreamProvider": "openai",
-      "credential": { "kind": "env", "name": "OPENAI_API_KEY" }
+      "credential": { "kind": "seepient", "id": "openai" }
     },
     "anthropic": {
       "adapter": "pi-ai",
       "upstreamProvider": "anthropic",
-      "credential": { "kind": "env", "name": "ANTHROPIC_API_KEY" }
+      "credential": { "kind": "keychain", "account": "anthropic" }
     },
     "ollama-local": {
       "adapter": "pi-ai",
@@ -634,13 +675,13 @@ When saved to `~/.seepient/setting.json` or `.seepient/setting.json`, your provi
     "text": {
       "standard": {
         "providerAccount": "openai",
-        "model": "gpt-5.6-terra",
-        "fallback": [{ "providerAccount": "anthropic", "model": "claude-sonnet-5" }]
+        "model": "gpt-5.4",
+        "fallback": [{ "providerAccount": "anthropic", "model": "claude-sonnet-4-6-20260320" }]
       },
-      "efficient": { "providerAccount": "openai", "model": "gpt-5.6-luna" }
+      "efficient": { "providerAccount": "openai", "model": "gpt-5.4-mini" }
     },
-    "plan": { "standard": { "providerAccount": "openai", "model": "gpt-5.6-sol" } },
-    "media": { "image": { "providerAccount": "openai", "model": "gpt-image-2" } }
+    "plan": { "standard": { "providerAccount": "openai", "model": "gpt-5.4-pro" } },
+    "media": { "image": { "providerAccount": "openai", "model": "dall-e-3" } }
   },
   "retryPolicy": {
     "maxAttempts": 3,
@@ -681,7 +722,7 @@ Seepient includes a universal API gateway that connects to downstream MCP server
 **SDK**:
 ```ts
 import { gateway } from 'seepient';
-const gw = await gateway.createGateway({ enabled: true, semanticTopK: 3, defaultRateLimitPerMin: 60, maxAuditLogsInMemory: 1000 });
+const { gateway: gw, tools } = await gateway.createGateway({ enabled: true, semanticTopK: 3, defaultRateLimitPerMin: 60, maxAuditLogsInMemory: 1000 });
 ```
 
 ### Web Search (Tavily)
@@ -733,9 +774,11 @@ Reference files with @k8s/deployment.yaml.
 ### Discovery Locations
 Skills are discovered in priority order (last wins):
 1. Built-in bundled skills
-2. `~/.seepient/skills/`
-3. `.seepient/skills/` (project-level)
-4. `SEEPIENT_SKILLS_PATH` directories
+2. `~/.agents/skills/` (shared cross-agent skills)
+3. `~/.seepient/skills/` (user global skills)
+4. `/mnt/skills` (container volume mount)
+5. `.seepient/skills/` (project-level)
+6. `SEEPIENT_SKILLS_PATH` directories
 
 ```bash
 # Add custom skill directories
@@ -777,14 +820,7 @@ docker run --rm \
   seepient seepient chat "Check disk usage" --docker
 ```
 
-When Seepient detects a container or non-interactive shell (or when passed `--docker`), it turns off interactive prompts and formats output cleanly for log streams.
-
-### Shell approval in containers
-
-Set `SEEPIENT_SHELL_APPROVE` to control command execution without interactive prompts:
-- `auto`: Approve commands automatically (recommended for isolated containers)
-- `deny`: Block all shell execution
-- _(unset)_: Ask interactively (requires a TTY)
+When Seepient detects a container or non-interactive shell (or when passed `--docker`), it turns off interactive prompts and formats output cleanly for log streams. Headless execution denies un-predeclared actions with typed remediation; pass `--mode autonomous` or `--yes` for unattended runs.
 
 ### Docker Compose setup
 
