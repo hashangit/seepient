@@ -773,7 +773,22 @@ interface PipelineContext {
   model: string;
   toolDefs: unknown[];
   metadata: Record<string, unknown>;
-  result?: unknown;
+  result?: {
+    messages: Message[];
+    steps: StepResult[];
+    toolCalls: ToolCall[];
+    usage: Usage;
+    contextTokens: number;
+    finishReason: string;
+    /** Populated when the loop finished in an error state. */
+    error?: {
+      message: string;
+      code: string;
+      retryable: boolean;
+      provider?: string;
+      tool?: string;
+    };
+  };
   signal?: AbortSignal;
   startedAt: number;
 }
