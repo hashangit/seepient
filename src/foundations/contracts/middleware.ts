@@ -32,6 +32,14 @@ export interface PipelineContext {
     usage: Usage;
     contextTokens: number;
     finishReason: string;
+    /** Populated when the loop finished in an error state (same shape as AgentLoopError) */
+    error?: {
+      message: string;
+      code: string;
+      retryable: boolean;
+      provider?: string;
+      tool?: string;
+    };
   };
   /** Abort signal */
   signal?: AbortSignal;

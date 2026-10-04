@@ -290,6 +290,67 @@ describe("Agent Loop Execution via ProviderRuntime (QS-P5.3c)", () => {
     expect(result.messages.length).toBe(1);
   });
 
+  it("preserves the loop error through the middleware pipeline (EMPTY_COMPLETION)", async () => {
+    const mockLanguageBackend: LanguageBackend = {
+      chatStream: async function* () {
+        yield {
+          type: "start",
+          resolvedModel: { providerAccount: "main-account", modelId: "gpt-4o" },
+        };
+        yield {
+          type: "finish",
+          stopReason: "end_turn",
+          usage: { inputTokens: 10, outputTokens: 0, totalTokens: 10 },
+        };
+      },
+      chat: async () => ({
+        message: { role: "assistant", content: [] },
+        stopReason: "end_turn",
+      }),
+    };
+
+    const adapter = new AggregateInferenceAdapter({ language: mockLanguageBackend });
+    const credStore = new MemoryCredentialStore();
+    const configStore = new ProviderConfigStore(":memory:");
+    await configStore.updateOverlay({
+      providers: {
+        "main-account": {
+          adapter: "pi-ai",
+          upstreamProvider: "openai",
+          credential: { kind: "none" },
+        },
+      },
+      modelAssignments: {
+        text: {
+          standard: { providerAccount: "main-account", model: "gpt-4o" },
+        },
+      },
+    }, 0);
+
+    const runtime = new ProviderRuntime({
+      configStore,
+      credentialStore: credStore,
+      adapter,
+    });
+
+    const initialMessages = [{ id: "1", role: "user" as const, content: "Hi", timestamp: Date.now() }];
+    const result = await runAgentLoop({
+      runtime,
+      model: "gpt-4o",
+      messages: initialMessages,
+      toolDefs: [],
+      maxSteps: 3,
+      hooks: createHookExecutor(),
+      middleware: [async (_ctx, next) => { await next(); }],
+    });
+
+    // Same failure must surface identically with middleware in the chain —
+    // extractLoopError on the SDK side reads exactly this field.
+    expect(result.finishReason).toBe("error");
+    expect(result.error?.code).toBe("EMPTY_COMPLETION");
+    expect(result.error?.retryable).toBe(true);
+  });
+
   it("extracts in-band XML tool calls (<tool_call>) from content", async () => {
     const { extractInBandToolCalls } = await import("../agent-loop.js");
     const raw = `Let me check the weather.\n<tool_call>\n{"name": "web_search", "arguments": {"query": "weather in Tokyo"}}\n</tool_call>\nDone.`;
