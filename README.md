@@ -127,7 +127,7 @@ import { runSeepientServer } from 'seepient/server';
     ```bash
     seepient setup
     ```
-    The wizard connects to the live community catalog (supporting dozens of upstream providers including OpenAI, Anthropic, Google, xAI, OpenRouter, Mistral, DeepSeek, and local endpoints), allows multi-mode credentials (API key paste, environment variable reference, keyless, or OAuth provider sign-in), and assigns your main models safely without touching unrelated settings.
+    The wizard connects to the live community catalog (supporting dozens of upstream providers including OpenAI, Anthropic, Google, xAI, OpenRouter, Mistral, DeepSeek, and local endpoints), supports three credential modes (paste the key, keyless for local endpoints, or OAuth sign-in for subscription providers), and assigns your main models safely without touching unrelated settings.
 
 2.  **Run**: Start the agent in interactive mode.
     ```bash

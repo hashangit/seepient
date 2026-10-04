@@ -45,8 +45,8 @@ When you select **Add or configure an LLM provider**, Seepient lists supported p
 The wizard supports three ways to store credentials:
 
 1. **Paste the key (default)**: The key is stored through provider management (encrypted credential file, or the OS keychain when available) — never read back from the environment at runtime.
-2. **Keychain storage**: On macOS and supported Linux desktops, Seepient encrypts the API key and writes it directly to your operating system keychain.
-3. **Keyless / local**: Configures local models (like Ollama on `http://127.0.0.1:11434`) that require no authentication tokens.
+2. **Keyless / local**: Configures local models (like Ollama on `http://127.0.0.1:11434`) that require no authentication tokens.
+3. **Sign in with provider**: OAuth sign-in for subscription providers (shown when the provider supports an OAuth flow).
 
 ---
 
