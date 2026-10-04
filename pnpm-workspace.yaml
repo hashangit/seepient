@@ -17,3 +17,10 @@ allowBuilds:
   esbuild: true
   playwright: true
   protobufjs: true
+
+audit:
+  ignore:
+    # node-forge <=1.4.0 via @anthropic-ai/sandbox-runtime (mitm CA generation).
+    # No patched node-forge release exists; sandbox-runtime 0.0.78 still requires ^1.4.0.
+    # Remove this entry when the advisory ships a fix.
+    - GHSA-86w9-cpqp-85rv

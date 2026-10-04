@@ -25,6 +25,10 @@ Callers running the bare loop (no middleware) were never affected.
 - Pull and rebuild. No configuration, credential, or tenant changes are needed, and no client-facing wire contract is removed — the WS change is additive (a frame where there was silence).
 - The pipeline now passes the loop result through unchanged (`PipelineContext.result` gained an optional `error` field, same shape as the loop's error object). Middleware that inspects `ctx.result` sees one extra field.
 
+## Known advisories
+
+`pnpm audit --prod` reports one high advisory with no upstream fix: GHSA-86w9-cpqp-85rv (node-forge ≤ 1.4.0, RSA PKCS#1 v1.5 signature verification). It arrives transitively through `@anthropic-ai/sandbox-runtime`, which requires `node-forge: ^1.4.0` in every published version, including the latest. node-forge is used there for MITM CA certificate generation in the sandbox, not signature verification. The CI audit gate carries this advisory as a named, documented exception (`audit.ignore` in `pnpm-workspace.yaml`) — remove the entry once node-forge ships a patched release. Every other advisory keeps failing the gate.
+
 ## Verification
 
 Regression pins cover both halves, each proven to fail on the unfixed tree: the domain-level copy (`EMPTY_COMPLETION` through a passthrough middleware keeps the loop error) and the end-to-end SDK path (`chatStream` with creation-level middleware fires `onError` with the typed provider error). Full suite, mutation probes, examples, and build green at the release commit; the release-gate receipt is recorded in the project's internal review vault.
