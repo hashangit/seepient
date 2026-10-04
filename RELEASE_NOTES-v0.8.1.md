@@ -11,13 +11,13 @@ Concretely, with any middleware in the chain (auth, rate-limit, logging, or cust
 - `onError` never fired for return-style loop failures such as `EMPTY_COMPLETION` (a model finishing its turn with no text and no tool calls) or provider stream errors.
 - `chatStream`/`askSeepient({ stream: true })` resolved `fullText` normally instead of rejecting, and delivered an empty answer with no error signal.
 - Non-streaming `chat`/`askSeepient` returned empty text instead of throwing the typed `SeepientError`.
-- On the standalone server's WS/SSE chat, a tenant client received no terminal frame at all for such failures — the connection went silent after the ack. It now receives a typed error frame (`code`, `retryable`).
+- On the standalone server's WS chat, a tenant client received no terminal frame at all for such failures — the connection went silent after the ack. It now receives a typed error frame (`code`, `retryable`).
 
 Callers running the bare loop (no middleware) were never affected.
 
 ## What does not change
 
-- REST response bodies stay generic by design (`PROVIDER_ERROR` / `Generation failed`); the typed message reaches the SDK embedder's `onError` or exception and the operator's server-side log, not the wire.
+- REST response bodies stay generic by design (`PROVIDER_ERROR` / `Generation failed`); the typed message reaches the SDK embedder's `onError` or exception, not the wire.
 - Error message text on the wire is unchanged and remains generic; nothing new is exposed to tenants.
 
 ## Upgrade notes
