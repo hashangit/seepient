@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitepress'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-let seepientVersion = '0.8.0'
+let seepientVersion = '0.8.1'
 try {
   const pkgPath = path.resolve(__dirname, '../../package.json')
   if (fs.existsSync(pkgPath)) {

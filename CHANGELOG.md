@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.8.1] - 2026-10-05
+
+### Fixed
+
+- **Loop errors now surface through the middleware pipeline.** `runAgentLoop`'s middleware wrapper dropped the loop's `error` field when copying `executeLoop`'s result into `PipelineContext` — the throw path kept it, the success-path copy did not. Any loop failure that *returns* instead of throwing (for example `EMPTY_COMPLETION` after its empty retries, or a provider stream error) therefore reached SDK consumers as a success-shaped result with `finishReason: "error"` but no error object: `extractLoopError` found nothing, `onError` never fired, `fullText` resolved normally, and non-streaming `chat`/`askSeepient` returned empty text instead of throwing. Only callers with middleware in the chain were affected (auth, rate-limit, logging, custom); the bare loop returned the result intact. The pipeline now passes the loop result through unchanged, `PipelineContext.result` carries `error`, and regression pins cover both the domain copy and the end-to-end consumer path (`chatStream` with passthrough middleware surfaces the typed provider error). Wire-visible change: REST/WS error responses now carry the real typed loop message where they previously fell back to the constant `loop resolved with finishReason error`.
+
 ## [v0.8.0] - 2026-10-01
 
 ### Claims corrections (022-5 FR-009)
