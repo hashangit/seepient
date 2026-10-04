@@ -339,8 +339,7 @@ An error occurred. May be sent at any time during a chat flow or connection life
   "type": "error",
   "code": "PROVIDER_ERROR",
   "retryable": true,
-  "message": "OpenAI API returned 429: rate limit exceeded",
-  "provider": "openai"
+  "message": "Stream failed"
 }
 ```
 

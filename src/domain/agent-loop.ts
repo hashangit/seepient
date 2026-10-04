@@ -321,14 +321,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         },
       };
       const result = await executeLoop(mergedOptions);
-      ctx.result = {
-        messages: result.messages,
-        steps: result.steps,
-        toolCalls: result.toolCalls,
-        usage: result.usage,
-        contextTokens: result.contextTokens,
-        finishReason: result.finishReason,
-      };
+      ctx.result = result;
     });
 
     if (!ctx.result) {
@@ -339,14 +332,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
       );
     }
 
-    return {
-      messages: ctx.result.messages,
-      steps: ctx.result.steps,
-      toolCalls: ctx.result.toolCalls,
-      usage: ctx.result.usage,
-      contextTokens: ctx.result.contextTokens,
-      finishReason: ctx.result.finishReason as AgentLoopResult["finishReason"],
-    };
+    return ctx.result as AgentLoopResult;
   } catch (err) {
     const seepientErr = toSeepientError(err, "MIDDLEWARE_ERROR");
     await hooks.onError(seepientErr);
