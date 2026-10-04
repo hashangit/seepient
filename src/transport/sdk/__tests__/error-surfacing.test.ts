@@ -110,6 +110,29 @@ describe("Centralized Loop Error Surfacing (Task 1.2)", () => {
     expect(err.message).toBe("Invalid API key");
   });
 
+  it("chatStream surfaces loop errors through middleware (error must survive the pipeline copy)", async () => {
+    const runtime = createFailingRuntime("AUTH_FAILURE", "Invalid API key");
+    const agent = await createSeepient({
+      runtime: runtime as any,
+      model: "mock-model",
+      tenancy: "single",
+    });
+
+    const onError = vi.fn();
+    const stream = await agent.chatStream("Hello", {
+      onError,
+      middleware: [async (_ctx, next) => { await next(); }],
+    });
+
+    const finish = await stream.finishReason;
+    expect(finish).toBe("error");
+    expect(onError).toHaveBeenCalledTimes(1);
+    const err = onError.mock.calls[0][0];
+    expect(err).toBeInstanceOf(SeepientError);
+    expect(err.code).toBe("AUTH_FAILURE");
+    expect(err.message).toBe("Invalid API key");
+  });
+
   it("serverStreamText invokes onError and onDone with finishReason error on provider failure", async () => {
     const runtime = createFailingRuntime("INTERNAL_ERROR", "Server crash");
     const onError = vi.fn();
