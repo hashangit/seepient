@@ -112,17 +112,18 @@ describe("Centralized Loop Error Surfacing (Task 1.2)", () => {
 
   it("chatStream surfaces loop errors through middleware (error must survive the pipeline copy)", async () => {
     const runtime = createFailingRuntime("AUTH_FAILURE", "Invalid API key");
+    // Middleware must be passed at creation level: instance methods thread
+    // opts.middleware into runAgentLoop; per-call middleware on chatStream is
+    // not read, and a per-call pin would pass vacuously off the bare loop.
     const agent = await createSeepient({
       runtime: runtime as any,
       model: "mock-model",
       tenancy: "single",
+      middleware: [async (_ctx, next) => { await next(); }],
     });
 
     const onError = vi.fn();
-    const stream = await agent.chatStream("Hello", {
-      onError,
-      middleware: [async (_ctx, next) => { await next(); }],
-    });
+    const stream = await agent.chatStream("Hello", { onError });
 
     const finish = await stream.finishReason;
     expect(finish).toBe("error");
