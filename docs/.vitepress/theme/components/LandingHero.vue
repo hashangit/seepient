@@ -5,7 +5,7 @@ import { useData, withBase } from 'vitepress'
 const { theme } = useData()
 const shore = `${withBase('/textures/shore.jpg')}`
 
-const rawVersion = computed(() => theme.value.seepientVersion || '0.8.0')
+const rawVersion = computed(() => theme.value.seepientVersion || '0.8.1')
 const displayVersion = computed(() => `v${rawVersion.value.replace(/^v/, '')}`)
 const releaseUrl = computed(() => `https://github.com/hashangit/seepient/releases/tag/${displayVersion.value}`)
 </script>
