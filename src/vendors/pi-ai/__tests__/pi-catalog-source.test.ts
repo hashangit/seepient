@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { PiCatalogSource } from "../pi-catalog-source.js";
+import { PiCatalogSource, getSyncBuiltinCatalog } from "../pi-catalog-source.js";
 import type { UpstreamModel, ThinkingLevel } from "../../../foundations/schemas/inference.js";
 
 const VALID_THINKING_LEVELS: readonly ThinkingLevel[] = [
@@ -147,3 +147,29 @@ describe("T008: Live Structural Smoke Test (Drift-Tolerant)", () => {
   });
 });
 
+
+describe("026: image listing parity across the pi-ai 1.0 port", () => {
+  // The 0.87.1 image enumeration (builtinImagesModels().getModels()), captured
+  // before the port. Upstream may ADD image models; it must not silently drop
+  // any that existed when users picked them.
+  const IMAGE_CATALOG_0_87_1: string[] = JSON.parse(
+    readFileSync(resolve(__dirname, "./fixtures/image-catalog-0.87.1.json"), "utf-8"),
+  );
+
+  it("every image model listed pre-port is still image-capable post-port", () => {
+    const catalog = getSyncBuiltinCatalog();
+    const imageCapable = new Set(
+      catalog.filter((m) => m.capabilities.imageGenerate).map((m) => `${m.upstreamProvider}:${m.id}`),
+    );
+    const missing = IMAGE_CATALOG_0_87_1.filter((key) => !imageCapable.has(key));
+    expect(missing, `image models dropped by the 1.0 port: ${missing.join(", ")}`).toEqual([]);
+  });
+
+  it("image-capable entries carry the pi catalog provenance and generation capability only from the image kind", () => {
+    const catalog = getSyncBuiltinCatalog();
+    for (const m of catalog.filter((x) => x.capabilities.imageGenerate)) {
+      expect(m.provenance).toBe("pi-catalog");
+      expect(m.id, "empty image id").toBeTruthy();
+    }
+  });
+});

@@ -1,9 +1,8 @@
-import { builtinImagesModels } from "@earendil-works/pi-ai/providers/all";
-import { createPiCredentialStore } from "./pi-auth-adapter.js";
+import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import { assertBaseUrlEgressAllowed } from "../egress-check.js";
 import type {
-  ImagesModel,
-  ImagesApi,
+  ImageModel,
+  ImageApi,
   ImagesInputContent,
   AssistantImages,
 } from "@earendil-works/pi-ai";
@@ -63,17 +62,12 @@ function resolveSignal(opts?: InferenceOptions): {
  * Pi AI raw image backend implementation using generateImages().
  */
 export class PiImageRaw implements ImageBackend {
-  private imageModels: any;
-  private credentialStore?: any;
+  private models: any;
 
-  constructor(customImageModels?: any, credentialStore?: any) {
-    this.credentialStore = credentialStore;
-    if (customImageModels) {
-      this.imageModels = customImageModels;
-    } else {
-      const piStore = credentialStore ? createPiCredentialStore(credentialStore) : undefined;
-      this.imageModels = builtinImagesModels(piStore ? { credentials: piStore } : undefined);
-    }
+  constructor(customModels?: any) {
+    // Credentials flow per-call (options.apiKey, always explicit — see the
+    // sentinel below), so the 0.87 collection's credential store is gone.
+    this.models = customModels ?? builtinModels();
   }
 
   async generate(
@@ -110,8 +104,9 @@ export class PiImageRaw implements ImageBackend {
       const rawSecret = await lease.secret();
       // 022-5 FR-007 (tenancy-invariant): undefined/empty keys must never
       // reach the vendored layer — it falls back to host environment keys.
-      // kind:"none" maps to the explicit "unused" sentinel (no-auth endpoint),
-      // which satisfies the vendored hasExplicitApiKey check.
+      // kind:"none" maps to the explicit "unused" sentinel (no-auth endpoint):
+      // resolveProviderAuth's explicit-key short-circuit (auth/resolve.js)
+      // returns before any credential-store or ambient env read.
       const secret = rawSecret?.kind === "none" ? { kind: "api_key" as const, value: "unused" } : rawSecret;
       if (!secret || secret.kind !== "api_key" || !secret.value) {
         throw new InferenceError({
@@ -129,8 +124,8 @@ export class PiImageRaw implements ImageBackend {
       const apiKey = secret.value;
 
       const providerName = target.upstreamProvider;
-      let model = this.imageModels.getModel(providerName, target.model) as
-        | ImagesModel<ImagesApi>
+      let model = this.models.getModelOfType("image", providerName, target.model) as
+        | ImageModel<ImageApi>
         | undefined;
 
       if (!model) {
@@ -153,7 +148,7 @@ export class PiImageRaw implements ImageBackend {
 
       let result: AssistantImages;
       try {
-        result = await this.imageModels.generateImages(
+        result = await this.models.generateImages(
           model,
           { input: inputContents },
           {
@@ -187,12 +182,18 @@ export class PiImageRaw implements ImageBackend {
       }
 
       if (result.stopReason === "error") {
+        // 1.0 delivers vendor failures as results, so this branch — not the
+        // catch below — is the primary failure channel. Classify like the
+        // throw path: a permanent 401 must stay non-retryable instead of
+        // triggering cross-account failover.
+        const classified = classifyInferenceError(result.errorMessage || "", false);
         throw new InferenceError({
-          code: "internal_adapter",
+          code: classified.code,
           message: result.errorMessage || "Pi image generation failed with error stopReason",
           providerAccount: target.providerAccount,
           model: target.model,
-          retryable: true,
+          retryable: classified.retryable,
+          retryAfterMs: classified.retryAfterMs,
         });
       }
 
