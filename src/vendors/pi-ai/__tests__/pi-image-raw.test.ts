@@ -40,7 +40,7 @@ function makeMockModels(imageModel?: any) {
   const resolved = imageModel === undefined
     ? { id: "flux-schnell", provider: "openrouter", type: "image" }
     : imageModel;
-  const generateImages = vi.fn(async () => ({
+  const generateImages = vi.fn(async (_model: any, _context: any, _options: any) => ({
     api: "openrouter-images",
     provider: "openrouter",
     model: "flux-schnell",
@@ -131,7 +131,7 @@ describe("PiImageRaw backend (QS-P3.4; 026 port to pi-ai 1.0 model-kind lookup)"
       stopReason: "error",
       errorMessage: "provider quota exhausted",
       timestamp: Date.now(),
-    });
+    } as any);
     const backend = new PiImageRaw(models);
     try {
       await backend.generate(makeTarget(), { prompt: "test", operation: "generate" });
