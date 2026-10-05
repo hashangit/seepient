@@ -1,4 +1,4 @@
-import { builtinModels, builtinImagesModels } from "@earendil-works/pi-ai/providers/all";
+import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import type {
   DiscoverySource,
   DiscoveryResult,
@@ -11,7 +11,6 @@ import type {
  */
 export class PiDiscoverySource implements DiscoverySource {
   private static cachedModels = builtinModels();
-  private static cachedImageModels = builtinImagesModels();
 
   async discover(account: ProviderAccountContext): Promise<DiscoveryResult> {
     try {
@@ -19,8 +18,8 @@ export class PiDiscoverySource implements DiscoverySource {
       const chatModels = PiDiscoverySource.cachedModels
         .getModels(provider)
         .map((m) => m.id);
-      const imgModels = PiDiscoverySource.cachedImageModels
-        .getModels(provider)
+      const imgModels = PiDiscoverySource.cachedModels
+        .getModelsOfType("image", provider)
         .map((m) => m.id);
 
       const uniqueIds = Array.from(new Set([...chatModels, ...imgModels]));
