@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.8.2] - 2026-10-05
+
+### Changed
+
+- **The vendored inference library is current at 1.0.2** (from 0.87.1). The supply-chain review of the delta found the credential-handling code byte-identical between versions, no new outbound endpoints, and no new transitive dependencies. Image generation was ported to the library's reworked model interface (image models resolve by kind from the same collection as chat models). One behavioral repair came out of the release gate: vendor image failures (a permanent 401, for example) now classify exactly like other provider errors — non-retryable auth failures fail fast instead of triggering cross-account failover.
+- Image model listings are unchanged for existing users: a fixture pinning all 55 image models from the previous release verifies each remains available (models upstream added flow through as usual).
+- No public API, tool, or wire changes. No breaking changes.
+
 ## [v0.8.1] - 2026-10-05
 
 ### Fixed
