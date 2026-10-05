@@ -1,9 +1,8 @@
-import { builtinImagesModels } from "@earendil-works/pi-ai/providers/all";
-import { createPiCredentialStore } from "./pi-auth-adapter.js";
+import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import { assertBaseUrlEgressAllowed } from "../egress-check.js";
 import type {
-  ImagesModel,
-  ImagesApi,
+  ImageModel,
+  ImageApi,
   ImagesInputContent,
   AssistantImages,
 } from "@earendil-works/pi-ai";
@@ -63,17 +62,12 @@ function resolveSignal(opts?: InferenceOptions): {
  * Pi AI raw image backend implementation using generateImages().
  */
 export class PiImageRaw implements ImageBackend {
-  private imageModels: any;
-  private credentialStore?: any;
+  private models: any;
 
-  constructor(customImageModels?: any, credentialStore?: any) {
-    this.credentialStore = credentialStore;
-    if (customImageModels) {
-      this.imageModels = customImageModels;
-    } else {
-      const piStore = credentialStore ? createPiCredentialStore(credentialStore) : undefined;
-      this.imageModels = builtinImagesModels(piStore ? { credentials: piStore } : undefined);
-    }
+  constructor(customModels?: any) {
+    // Credentials flow per-call (options.apiKey, always explicit — see the
+    // sentinel below), so the 0.87 collection's credential store is gone.
+    this.models = customModels ?? builtinModels();
   }
 
   async generate(
@@ -129,8 +123,8 @@ export class PiImageRaw implements ImageBackend {
       const apiKey = secret.value;
 
       const providerName = target.upstreamProvider;
-      let model = this.imageModels.getModel(providerName, target.model) as
-        | ImagesModel<ImagesApi>
+      let model = this.models.getModelOfType("image", providerName, target.model) as
+        | ImageModel<ImageApi>
         | undefined;
 
       if (!model) {
@@ -153,7 +147,7 @@ export class PiImageRaw implements ImageBackend {
 
       let result: AssistantImages;
       try {
-        result = await this.imageModels.generateImages(
+        result = await this.models.generateImages(
           model,
           { input: inputContents },
           {

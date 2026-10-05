@@ -1,4 +1,4 @@
-import { builtinModels, builtinImagesModels } from "@earendil-works/pi-ai/providers/all";
+import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import type { CatalogSource } from "../../foundations/contracts/backend-ports.js";
 import type { UpstreamModel, Pricing, ThinkingLevel } from "../../foundations/schemas/inference.js";
 import { registerCatalogAccessor } from "../../foundations/models-catalog.js";
@@ -53,8 +53,9 @@ export function getSyncBuiltinCatalog(): UpstreamModel[] {
     return cachedSyncCatalog;
   }
 
-  const chatModels = builtinModels().getModels();
-  const imageModels = builtinImagesModels().getModels();
+  const models = builtinModels();
+  const chatModels = models.getModels();
+  const imageModels = models.getModelsOfType("image");
   const result: UpstreamModel[] = [];
 
   for (const m of chatModels) {

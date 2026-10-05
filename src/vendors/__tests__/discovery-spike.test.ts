@@ -74,13 +74,15 @@ describe("S0.15 failure-safe shallow discovery", () => {
     expect([200, 400, 403, 429]).toContain(res.status);
   }, 30_000);
 
-  it("Pi discovery — surfaces model IDs via builtinImagesModels / builtinModels catalogs", async () => {
+  it("Pi discovery — surfaces model IDs via builtinModels catalog (chat + image kinds)", async () => {
     // Pi does not expose a per-account `/models` endpoint of its own; its
-    // "discovery" is the bundled catalog (builtinModels / builtinImagesModels).
+    // "discovery" is the bundled catalog. Since pi-ai 1.0, image models live
+    // in the same collection, resolved by kind (getModelsOfType("image")).
     // This proves the CatalogSource shape (list of IDs) Pi contributes.
-    const { builtinModels, builtinImagesModels } = await import("@earendil-works/pi-ai/providers/all");
-    const chat = builtinModels().getModels().map((m) => m.id);
-    const img = builtinImagesModels().getModels().map((m) => m.id);
+    const { builtinModels } = await import("@earendil-works/pi-ai/providers/all");
+    const models = builtinModels();
+    const chat = models.getModels().map((m) => m.id);
+    const img = models.getModelsOfType("image").map((m) => m.id);
     const result: DiscoveryResult = {
       provider: "pi",
       ok: true,
@@ -92,6 +94,9 @@ describe("S0.15 failure-safe shallow discovery", () => {
     console.log("Pi catalog discovery:", JSON.stringify(result, null, 2));
     expect(chat.length, "Pi chat catalog non-empty").toBeGreaterThan(0);
     expect(img.length, "Pi image catalog non-empty").toBeGreaterThan(0);
+    // Kind separation (026 FR-006): the chat listing never contains
+    // image-typed entries even when ids could collide across kinds.
+    expect(models.getModels().some((m) => (m as any).type === "image"), "chat listing must not contain image-kind models").toBe(false);
   });
 
   it("failure-safe: discovery that fails does NOT throw past the caller (mocked, no key needed)", async () => {
