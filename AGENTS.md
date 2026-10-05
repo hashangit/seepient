@@ -666,6 +666,9 @@ shell commands, and other important information, read the current plan:
   pi-catalog-source.ts to kind-filtered enumeration; invariants I-1..I-5
   (credential demolition sentinel, egress assert before traffic,
   abort/timeout parity, kind separation, no public surface change);
-  3-file vendors-layer budget; prior completed release on this train:
-  v0.8.1 (middleware loop-error propagation fix, gate receipt PASS).
+  4-file vendors-layer budget (incl. discovery-spike test); IMPLEMENTED
+  on 026-pi-ai-upgrade — gates green, Red Team P2 (result-branch error
+  laundering) repaired at f05f48e, receipt PASS; prior completed release
+  on this train: v0.8.1 (middleware loop-error propagation fix, gate
+  receipt PASS).
 <!-- SPECKIT END -->
