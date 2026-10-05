@@ -121,15 +121,18 @@ describe("PiImageRaw backend (QS-P3.4; 026 port to pi-ai 1.0 model-kind lookup)"
     expect(generateImages).not.toHaveBeenCalled();
   });
 
-  it("maps stopReason:error results to typed InferenceError (pi-ai 1.0 returns failures, does not throw)", async () => {
+  it("maps stopReason:error results through classification (pi-ai 1.0 returns failures, does not throw)", async () => {
     const { models, generateImages } = makeMockModels();
+    // Red Team 026: 1.0 delivers vendor failures as results, so this branch is
+    // the primary failure channel — a permanent 401 must classify as
+    // non-retryable auth, not a retryable internal_adapter (failover storm).
     generateImages.mockResolvedValueOnce({
       api: "openrouter-images",
       provider: "openrouter",
       model: "flux-schnell",
       output: [],
       stopReason: "error",
-      errorMessage: "provider quota exhausted",
+      errorMessage: "401 invalid key",
       timestamp: Date.now(),
     } as any);
     const backend = new PiImageRaw(models);
@@ -138,7 +141,31 @@ describe("PiImageRaw backend (QS-P3.4; 026 port to pi-ai 1.0 model-kind lookup)"
       expect.fail("Should have thrown");
     } catch (err: any) {
       expect(err).toBeInstanceOf(InferenceError);
-      expect(err.message).toContain("provider quota exhausted");
+      expect(err.code).toBe("auth");
+      expect(err.retryable).toBe(false);
+      expect(err.message).toContain("401 invalid key");
+    }
+  });
+
+  it("maps generic stopReason:error messages to a retryable provider classification", async () => {
+    const { models, generateImages } = makeMockModels();
+    generateImages.mockResolvedValueOnce({
+      api: "openrouter-images",
+      provider: "openrouter",
+      model: "flux-schnell",
+      output: [],
+      stopReason: "error",
+      errorMessage: "provider overloaded, try again",
+      timestamp: Date.now(),
+    } as any);
+    const backend = new PiImageRaw(models);
+    try {
+      await backend.generate(makeTarget(), { prompt: "test", operation: "generate" });
+      expect.fail("Should have thrown");
+    } catch (err: any) {
+      expect(err).toBeInstanceOf(InferenceError);
+      expect(err.retryable).toBe(true);
+      expect(err.message).toContain("provider overloaded");
     }
   });
 

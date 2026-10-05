@@ -104,8 +104,9 @@ export class PiImageRaw implements ImageBackend {
       const rawSecret = await lease.secret();
       // 022-5 FR-007 (tenancy-invariant): undefined/empty keys must never
       // reach the vendored layer — it falls back to host environment keys.
-      // kind:"none" maps to the explicit "unused" sentinel (no-auth endpoint),
-      // which satisfies the vendored hasExplicitApiKey check.
+      // kind:"none" maps to the explicit "unused" sentinel (no-auth endpoint):
+      // resolveProviderAuth's explicit-key short-circuit (auth/resolve.js)
+      // returns before any credential-store or ambient env read.
       const secret = rawSecret?.kind === "none" ? { kind: "api_key" as const, value: "unused" } : rawSecret;
       if (!secret || secret.kind !== "api_key" || !secret.value) {
         throw new InferenceError({
@@ -181,12 +182,18 @@ export class PiImageRaw implements ImageBackend {
       }
 
       if (result.stopReason === "error") {
+        // 1.0 delivers vendor failures as results, so this branch — not the
+        // catch below — is the primary failure channel. Classify like the
+        // throw path: a permanent 401 must stay non-retryable instead of
+        // triggering cross-account failover.
+        const classified = classifyInferenceError(result.errorMessage || "", false);
         throw new InferenceError({
-          code: "internal_adapter",
+          code: classified.code,
           message: result.errorMessage || "Pi image generation failed with error stopReason",
           providerAccount: target.providerAccount,
           model: target.model,
-          retryable: true,
+          retryable: classified.retryable,
+          retryAfterMs: classified.retryAfterMs,
         });
       }
 
