@@ -6,10 +6,13 @@ import {
 } from "../message-convert.js";
 import { SeepientError, ProviderError, ToolError } from "../../../foundations/errors.js";
 import { whenEstimatorReady } from "../../../capabilities/tokenizer/tokenizer.js";
+import { registerExactEstimator } from "../../../capabilities/tokenizer/register-exact-estimator.js";
+
+registerExactEstimator(); // spec 027: exact mode, as the full package composes
 
 describe("estimateTokens", () => {
   it("uses BPE tokenization (delegates to countTokens)", async () => {
-    await whenEstimatorReady;
+    await whenEstimatorReady();
     expect(estimateTokens("")).toBe(0);
     expect(estimateTokens("hello world")).toBe(2);
     expect(estimateTokens("this is a longer sentence")).toBeGreaterThan(

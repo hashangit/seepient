@@ -1,5 +1,6 @@
 {
   "//": "The exclude list MIRRORS the tsconfig.core.json include list (spec 027 D18: single membership source, drift caught by the pack:verify B-3 no-dup assert). Engine files emit into packages/core/dist only; full-side surfaces import them via the 'seepient-core' specifier. src/domain/media stays full-side (registration seam), so the domain excludes enumerate its siblings.",
+  "//": "The exclude list MIRRORS the tsconfig.core.json include list (spec 027 D18: single membership source, drift caught by the pack:verify B-3 no-dup assert). Engine files emit into packages/core/dist only; full-side surfaces import them via the 'seepient-core' specifier. src/domain/media stays full-side (registration seam), so the domain excludes enumerate its siblings.",
   "compilerOptions": {
     "target": "ES2024",
     "module": "NodeNext",
@@ -17,7 +18,6 @@
   "include": [
     "src/**/*"
   ],
-  "//": "The exclude list MIRRORS the tsconfig.core.json include list (spec 027 D18: single membership source, drift caught by the pack:verify B-3 no-dup assert). Engine files emit into packages/core/dist only; full-side surfaces import them via the 'seepient-core' specifier. src/domain/media stays full-side (registration seam), so the domain excludes enumerate its siblings.",
   "exclude": [
     "node_modules",
     "src/**/__tests__/**",
@@ -60,6 +60,7 @@
     "src/vendors/pi-ai/**/*",
     "src/vendors/anthropic.ts",
     "src/vendors/egress-check.ts",
-    "src/capabilities/execution/model-egress-gate.ts"
+    "src/capabilities/execution/model-egress-gate.ts",
+    "src/vendors/gpt-tokenizer.ts"
   ]
 }

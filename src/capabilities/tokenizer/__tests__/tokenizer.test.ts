@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { countTokens, isCorrected, whenEstimatorReady } from '../tokenizer.js';
+import { registerExactEstimator } from '../register-exact-estimator.js';
+
+registerExactEstimator(); // spec 027: exact mode, as the full package composes
 
 describe('countTokens', () => {
   it('returns 0 for empty string', () => {
@@ -7,13 +10,13 @@ describe('countTokens', () => {
   });
 
   it('counts a simple phrase plausibly (OpenAI BPE)', async () => {
-    await whenEstimatorReady;
+    await whenEstimatorReady();
     // "hello world" is a well-known 2-token sequence in GPT BPE
     expect(countTokens('hello world')).toBe(2);
   });
 
   it('scales with text length', async () => {
-    await whenEstimatorReady;
+    await whenEstimatorReady();
     const short = countTokens('one word');
     const long = countTokens('this is a much longer sentence with many more words');
     expect(long).toBeGreaterThan(short);

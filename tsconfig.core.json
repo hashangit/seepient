@@ -37,6 +37,7 @@
     "src/**/*.test.ts",
     "src/**/*.spec.ts",
     "src/domain/media/**/*",
-    "src/capabilities/inference/register-image-backends.ts"
+    "src/capabilities/inference/register-image-backends.ts",
+    "src/vendors/gpt-tokenizer.ts"
   ]
 }
