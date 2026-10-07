@@ -4,6 +4,12 @@ packages:
 
 overrides:
   '@hono/node-server': 2.0.12
+  # GHSA-6qxp-vccf-f47h + source-map-js event-loop DoS (upstream advisories
+  # published 2026-10-06/07, after the v0.8.2 audit): force the patched
+  # versions across the tree — the MCP SDK also rides pi-ai's nested
+  # @google/genai, which the root pin cannot reach.
+  '@modelcontextprotocol/sdk': '>=1.31.0 <2'
+  source-map-js: '>=1.2.2' 
   body-parser: 2.3.0
   esbuild: 0.28.1
   fast-uri: ^3.1.7
