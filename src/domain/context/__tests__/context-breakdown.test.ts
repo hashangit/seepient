@@ -19,6 +19,18 @@ const tool: ToolDefinition = {
 };
 
 describe('buildContextBreakdown', () => {
+  it('reports the active token-estimate mode (spec 027 FR-004)', async () => {
+    const { whenEstimatorReady } = await import('../../../capabilities/tokenizer/tokenizer.js');
+    const mode = await whenEstimatorReady;
+    const b = buildContextBreakdown({
+      messages: [sys('base prompt'), user('hi')],
+      toolDefs: [tool],
+      skillCatalog: '',
+      model: 'test',
+    });
+    expect(b.estimateMode).toBe(mode);
+  });
+
   it('produces 5 parts: System Prompt, Tools, Skills, Messages, Tool Results', () => {
     const b = buildContextBreakdown({
       messages: [sys('base prompt'), user('hi')],

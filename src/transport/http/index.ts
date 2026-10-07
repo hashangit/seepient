@@ -22,6 +22,7 @@ import { createConnectionRegistry } from "../ws/connection-registry.js";
 import { ServerSessionManager } from "./session-store.js";
 import { MemoryPersistenceBackend } from "../../domain/sessions/session-store.js";
 import { SettingsManager } from "../../domain/settings/settings-manager.js";
+import { FULL_TOOL_MODULES } from '../sdk/full-registrations.js';
 import { ToolRegistry } from "../../domain/tool-executor.js";
 import type { SettingsHandlerContext } from "./settings-handlers.js";
 import type { WsServerHandle } from "../ws/websocket.js";
@@ -201,7 +202,7 @@ function handlePreflight(
 export async function runSeepientServer(options?: RunSeepientServerOptions): Promise<SeepientHttpServer> {
   const version = resolveVersion();
   const startTime = Date.now();
-  const serverToolRegistry = options?.toolRegistry ?? (options?.builtInTools ? new ToolRegistry() : new ToolRegistry([]));
+  const serverToolRegistry = options?.toolRegistry ?? (options?.builtInTools ? new ToolRegistry(FULL_TOOL_MODULES) : new ToolRegistry([]));
 
   // Spec 008: build a per-request pipeline factory when the operator opts in.
   // Product behavior: each API request gets its OWN permission identity

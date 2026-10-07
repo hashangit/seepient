@@ -1,8 +1,12 @@
 /**
- * Token counting via BPE (byte-pair encoding).
+ * Token counting via BPE (byte-pair encoding) with a heuristic fallback.
  *
  * Uses `gpt-tokenizer` — a pure-JS implementation of OpenAI's BPE — as the
  * base tokenizer, then applies a correction multiplier per provider family.
+ * The vendor loads lazily (spec 027 FR-004): the full package resolves the
+ * exact-BPE module; core-only installs keep a chars÷4 heuristic with no hard
+ * dependency, and the active mode is observable via `currentEstimateMode()` /
+ * `whenEstimatorReady`.
  *
  * The base BPE is exact for OpenAI-family models. Anthropic and GLM use
  * different (unpublished) BPE vocabularies; empirically, tiktoken/gpt-tokenizer
@@ -17,7 +21,34 @@
  * provide (per-part: system vs tools vs skills vs history).
  */
 
-import { encode } from '../../vendors/gpt-tokenizer.js';
+type EncodeFn = (text: string) => number[];
+
+function heuristicEncode(text: string): number[] {
+  // chars÷4 fallback: ~4 characters per token for English prose.
+  return new Array(Math.max(1, Math.ceil(text.length / 4))).fill(0);
+}
+
+let encode: EncodeFn = heuristicEncode;
+let estimateMode: "exact" | "heuristic" = "heuristic";
+
+/**
+ * Settles once the exact-BPE vendor import resolves or fails. Resolves with
+ * the active estimate mode — "exact" when the vendor is present, "heuristic"
+ * when it is absent/unresolvable (core-only installs, spec 027 FR-004).
+ */
+export const whenEstimatorReady: Promise<"exact" | "heuristic"> = import("../../vendors/gpt-tokenizer.js").then(
+  (m) => {
+    encode = m.encode as EncodeFn;
+    estimateMode = "exact";
+    return estimateMode;
+  },
+  () => estimateMode,
+);
+
+/** The active token-estimate mode ("exact" | "heuristic"). */
+export function currentEstimateMode(): "exact" | "heuristic" {
+  return estimateMode;
+}
 
 /** Correction multiplier applied to BPE counts per provider family. */
 const CORRECTION_FACTOR: Record<string, number> = {

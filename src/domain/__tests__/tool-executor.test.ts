@@ -10,6 +10,19 @@ import {
   ALL_TOOLS,
 } from "../tool-executor.js";
 import { builtInTools } from "../../capabilities/tools/index.js";
+import { registerDefaultToolModules } from "../../foundations/injection-seams.js";
+import { UseSkillTool } from "../skills/use-skill-tool.js";
+import { beforeAll, afterAll } from "vitest";
+
+// These tests pin the FULL package's default (built-ins resolve by default).
+// The engine default is zero tools (spec 027 FR-003); the full barrel is the
+// registered package default.
+beforeAll(() => {
+  registerDefaultToolModules([...builtInTools, UseSkillTool]);
+});
+afterAll(() => {
+  registerDefaultToolModules([]);
+});
 
 describe("ToolRegistry definitions", () => {
   it("returns at least the core tools", () => {

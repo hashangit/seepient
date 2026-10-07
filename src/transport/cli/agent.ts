@@ -2,6 +2,8 @@ import chalk from 'chalk';
 import ora from 'ora';
 import * as path from 'path';
 import { ToolRegistry } from '../../domain/tool-executor.js';
+import { FULL_TOOL_MODULES } from '../sdk/full-registrations.js';
+import { getMediaVendorOperationHandlerFactory } from '../../foundations/injection-seams.js';
 import type { ToolModule, ToolDefinition } from '../../foundations/contracts/tool.js';
 import { buildSystemPrompt } from '../../domain/prompts/system-prompts.js';
 import { initializeSkillRegistry } from '../../capabilities/skills/index.js';
@@ -83,7 +85,7 @@ export class Agent {
     this.providerType = providerType;
     this.persistence = persistence;
     this.sessionId = generateId();
-    this._toolRegistry = toolRegistry ?? new ToolRegistry();
+    this._toolRegistry = toolRegistry ?? new ToolRegistry(FULL_TOOL_MODULES);
 
     this.messages = [{
       id: generateId(),
@@ -283,8 +285,8 @@ export class Agent {
     const snapshotStore = opts.snapshotStore ?? (await import("../../foundations/hashline/snapshot-store.js")).createSnapshotStore();
     const { InMemoryArtifactStore } = await import("../../capabilities/execution/in-memory-artifact-store.js");
     const sharedArtifacts = new InMemoryArtifactStore();
-    const { createMediaVendorOperationHandler } = await import("../../domain/media/vendor-operation-handler.js");
-    const vendorOperationHandler = createMediaVendorOperationHandler({
+    // Spec 027 FR-009: seam-registered media factory (full package arms it).
+    const vendorOperationHandler = getMediaVendorOperationHandlerFactory()?.({
       runtime: () => this.providerRuntime,
       artifacts: sharedArtifacts,
     });

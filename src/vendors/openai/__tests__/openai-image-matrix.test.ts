@@ -5,7 +5,7 @@
  *   - `dall-e-3`: generate only (edit/variation/mask unsupported)
  *   - `gpt-image-2`: generate / variation / edit / mask
  *
- * Uses the OpenAI SDK directly (via the vendor quarantine `src/vendors/openai.ts`),
+ * Uses the OpenAI SDK directly (pi-ai's pinned `openai` major),
  * the same surface the P3 OpenAI raw wrapper will build on. Each cell records
  * supported / unsupported / error.
  *
@@ -16,7 +16,7 @@
  * Gated on `OPENAI_API_KEY`; skips without it.
  */
 import { describe, it, expect } from "vitest";
-import { OpenAI } from "../../openai.js";
+import OpenAI from "openai";
 import { env, requireKey, SPIKE_KEYS } from "../../__tests__/spike-keys.js";
 
 type Operation = "generate" | "variation" | "edit" | "mask";

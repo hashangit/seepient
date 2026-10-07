@@ -6,8 +6,6 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { builtInTools } from "../capabilities/tools/index.js";
-import { UseSkillTool } from "./skills/use-skill-tool.js";
 import { ToolModule, ToolDefinition, ToolExecExtra, ToolRegistryContract } from "../foundations/contracts/tool.js";
 export type { ToolModule, ToolDefinition, ToolExecExtra, ToolRegistryContract };
 import {
@@ -16,16 +14,9 @@ import {
   ToolResult,
 } from "../foundations/types.js";
 import { SeepientError } from "../foundations/errors.js";
+import { getDefaultToolModules } from "../foundations/injection-seams.js";
 
-// ── Built-in Tools & Per-Agent Registry ──────────────────────────────
-
-/**
- * Immutable, frozen built-in tool modules — shared safely across all agents in a process.
- */
-export const BUILT_IN_TOOL_MODULES: readonly ToolModule[] = Object.freeze([
-  ...builtInTools,
-  UseSkillTool,
-]);
+// ── Per-Agent Registry ───────────────────────────────────────────────
 
 /**
  * Thrown when registering a tool whose name conflicts with an existing tool in the registry.
@@ -43,13 +34,17 @@ export class ToolRegistrationError extends SeepientError {
 
 /**
  * Per-agent tool registry holding built-in and explicitly registered custom/gateway tools.
+ *
+ * Default modules come from the package seam (spec 027): the full `seepient`
+ * package registers its built-in barrel at composition roots; seepient-core
+ * runs with zero built-in tools until the host registers its own.
  */
 export class ToolRegistry implements ToolRegistryContract {
   private readonly _modules: ToolModule[] = [];
   private readonly _byName: Map<string, ToolModule> = new Map();
 
   constructor(builtIns?: readonly ToolModule[]) {
-    const initial = builtIns ?? BUILT_IN_TOOL_MODULES;
+    const initial = builtIns ?? getDefaultToolModules() ?? [];
     for (const mod of initial) {
       this.register(mod);
     }
@@ -230,12 +225,18 @@ export function normalizeToolResult(raw: string | ToolResult): ToolResult {
 /**
  * Return the built-in tool definitions belonging to a named group.
  *
- * @param group  One of "core", "comm", "advanced", or "all"
- * @returns      Array of OpenAI function definitions for the matching tools
- * @throws       Error if the group name is not recognised
+ * Group membership is resolved against `modules` (default: the registered
+ * package default) — a registry that lacks a group member simply contributes
+ * nothing for it.
+ *
+ * @param group   One of "core", "comm", "advanced", or "all"
+ * @param modules Tool modules to resolve against (default: registered package default)
+ * @returns       Array of OpenAI function definitions for the matching tools
+ * @throws        Error if the group name is not recognised
  */
 export function getToolGroup(
   group: "core" | "comm" | "advanced" | "all",
+  modules: readonly ToolModule[] = getDefaultToolModules() ?? [],
 ): ToolDefinition[] {
   let names: string[];
 
@@ -261,7 +262,7 @@ export function getToolGroup(
   const defs: ToolDefinition[] = [];
 
   for (const name of names) {
-    const found = BUILT_IN_TOOL_MODULES.find(
+    const found = modules.find(
       (t) => t.definition.function.name === name,
     );
     if (found) {
@@ -317,7 +318,7 @@ export function resolveTools(tools?: ToolInput[], targetRegistry?: ToolRegistryC
     if (typeof input === "string") {
       // Group expansion
       if (input === "all" || input === "core" || input === "comm" || input === "advanced") {
-        const groupDefs = getToolGroup(input);
+        const groupDefs = getToolGroup(input, reg.modules());
         for (const def of groupDefs) {
           const name = def.function.name;
           const found = reg.find(name);
@@ -333,6 +334,11 @@ export function resolveTools(tools?: ToolInput[], targetRegistry?: ToolRegistryC
       const found = reg.find(input);
       if (!found) {
         const available = reg.definitions().map((t) => t.function.name).join(", ");
+        if (ALL_TOOLS.includes(input)) {
+          throw new Error(
+            `Unknown tool "${input}". Built-in tools ship with the full "seepient" package — install "seepient", or with seepient-core register a custom/trusted-host tool. Available: ${available}`,
+          );
+        }
         throw new Error(
           `Unknown tool "${input}". Available: ${available}`,
         );

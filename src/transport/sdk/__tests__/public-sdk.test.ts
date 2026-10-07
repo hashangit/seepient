@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import "../full-registrations.js";
 import { createSeepient } from "../seepient.js";
 import { AggregateInferenceAdapter } from "../../../capabilities/inference/aggregate-adapter.js";
 import type { LanguageBackend } from "../../../foundations/contracts/backend-ports.js";

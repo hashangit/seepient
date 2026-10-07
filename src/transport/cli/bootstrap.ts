@@ -19,6 +19,7 @@ import * as os from 'os';
 import * as readline from 'readline/promises';
 
 import { Agent } from './agent.js';
+import { FULL_TOOL_MODULES } from '../sdk/full-registrations.js';
 import { ToolRegistry } from '../../domain/tool-executor.js';
 import { resolveLaunchMode, selectSystemPrompt } from '../../domain/prompts/system-prompts.js';
 import { createAmbientProviderRuntime } from '../../domain/providers/provider-runtime.js';
@@ -168,7 +169,7 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
   // defaultSessionPath()). Disabled backends can be added via registerBackend().
   fullConfig.hasExplicitModel = Boolean(options.model);
   const persistence = createPersistenceBackend({ type: 'file' });
-  const toolRegistry = new ToolRegistry();
+  const toolRegistry = new ToolRegistry(FULL_TOOL_MODULES);
   const agent = new Agent(runtime, options.model ?? resolvedModel, fullConfig, systemPrompt, persistence, activeProviderType, toolRegistry);
   if (cliProvider) {
     agent.switchProvider(cliProvider, options.model ?? resolvedModel);

@@ -1,17 +1,19 @@
 import { describe, it, expect } from 'vitest';
-import { countTokens, isCorrected } from '../tokenizer.js';
+import { countTokens, isCorrected, whenEstimatorReady } from '../tokenizer.js';
 
 describe('countTokens', () => {
   it('returns 0 for empty string', () => {
     expect(countTokens('')).toBe(0);
   });
 
-  it('counts a simple phrase plausibly (OpenAI BPE)', () => {
+  it('counts a simple phrase plausibly (OpenAI BPE)', async () => {
+    await whenEstimatorReady;
     // "hello world" is a well-known 2-token sequence in GPT BPE
     expect(countTokens('hello world')).toBe(2);
   });
 
-  it('scales with text length', () => {
+  it('scales with text length', async () => {
+    await whenEstimatorReady;
     const short = countTokens('one word');
     const long = countTokens('this is a much longer sentence with many more words');
     expect(long).toBeGreaterThan(short);

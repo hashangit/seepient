@@ -5,9 +5,11 @@ import {
   messageToCanonicalMessage,
 } from "../message-convert.js";
 import { SeepientError, ProviderError, ToolError } from "../../../foundations/errors.js";
+import { whenEstimatorReady } from "../../../capabilities/tokenizer/tokenizer.js";
 
 describe("estimateTokens", () => {
-  it("uses BPE tokenization (delegates to countTokens)", () => {
+  it("uses BPE tokenization (delegates to countTokens)", async () => {
+    await whenEstimatorReady;
     expect(estimateTokens("")).toBe(0);
     expect(estimateTokens("hello world")).toBe(2);
     expect(estimateTokens("this is a longer sentence")).toBeGreaterThan(

@@ -34,6 +34,15 @@ export const PINNED_ACCEPTED_STATE: readonly string[] = Object.freeze([
   "transport/auth/auth.ts:cachedKeys",
   "transport/sdk/settings.ts:manager",
   "capabilities/skills/skill-sources-helper.ts:multiZeroSourcesNoticed",
+  // Spec 027 package-boundary injection seams: full-package registrations
+  // (tool barrel, boundary pipeline, media, discovery, provider-manager API).
+  "foundations/injection-seams.ts:defaultToolModules",
+  "foundations/injection-seams.ts:mediaVendorOperationHandlerFactory",
+  "foundations/injection-seams.ts:executionBoundaryFactory",
+  "foundations/injection-seams.ts:providerManagerApiFactory",
+  // Spec 027 tokenizer seam: lazily-resolved exact-BPE encoder + its mode.
+  "capabilities/tokenizer/tokenizer.ts:encode",
+  "capabilities/tokenizer/tokenizer.ts:estimateMode",
   "transport/http/provider-management/oauth.ts:pendingOAuthAttempts",
 ]);
 

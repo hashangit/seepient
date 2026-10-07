@@ -4,7 +4,10 @@ import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import { DEFAULT_ANALYZERS } from "../../../capabilities/tools/analyzers.js";
 import { COMM_ANALYZERS } from "../../../capabilities/tools/comm-analyzers.js";
-import { BUILT_IN_TOOL_MODULES } from "../../../domain/tool-executor.js";
+import { builtInTools } from "../../../capabilities/tools/index.js";
+import { UseSkillTool } from "../../skills/use-skill-tool.js";
+
+const BUILT_IN_TOOL_MODULES = Object.freeze([...builtInTools, UseSkillTool]);
 import { InMemoryArtifactStore } from "../../../capabilities/execution/in-memory-artifact-store.js";
 import type { ToolAnalysisContext } from "../../../foundations/contracts/custom-tools.js";
 import { createSnapshotStore, tagFor } from "../../../foundations/hashline/snapshot-store.js";

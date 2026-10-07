@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { createSeepient } from "../seepient.js";
+import { createSeepient } from "../index.js";
 import { createMockRuntime } from "../../../domain/__tests__/test-doubles.js";
 import { MemoryPersistenceBackend } from "../../../domain/sessions/session-store.js";
 
