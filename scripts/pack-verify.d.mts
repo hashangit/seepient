@@ -25,7 +25,7 @@ export function verifyPack(projectRoot?: string, opts?: { core?: boolean; allowP
 
 export function assertNoWorkspaceSpecifiers(manifest: { dependencies?: Record<string, string>; devDependencies?: Record<string, string>; peerDependencies?: Record<string, string> }, label: string): void;
 
-export function assertNoDuplicatedEngine(rootDist: string, coreDist: string): string[];
+export function assertNoDuplicatedEngine(rootDist: string, coreDist: string): void;
 
 export function assertReleaseWorkflowInvariants(repoRoot: string): void;
 

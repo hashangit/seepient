@@ -19,7 +19,7 @@ npm install openai@7.19.0
 
 ### 2. Deep imports of `seepient/dist/...` engine paths break
 
-Engine modules now live in `seepient-core`. Deep imports of `seepient/dist/...` (never a stable surface) that reached engine paths — e.g. `seepient/dist/domain/agent-loop.js` — must switch to the equivalent `seepient-core` deep path (`seepient-core/dist/domain/agent-loop.js`), or better, import from the package roots. The three public import paths are unchanged and complete: `seepient` (full engine + full-package surface), `seepient/server`, and `seepient/types` (preserved via a path-preserving forwarding shim).
+Engine modules now live in `seepient-core`. Deep imports of `seepient/dist/...` (never a stable surface) that reached engine paths — e.g. `seepient/dist/domain/agent-loop.js` — must import from the package roots (`seepient` or `seepient-core`). A `seepient-core/dist/...` deep path resolves (the full package uses those internally) but carries no stability promise. The three public import paths are unchanged and complete: `seepient` (full engine + full-package surface), `seepient/server`, and `seepient/types` (preserved via a path-preserving forwarding shim).
 
 ### 3. Both packages release in lockstep
 

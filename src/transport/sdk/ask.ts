@@ -17,7 +17,7 @@ import { createHookExecutor } from "../../domain/hooks.js";
 import { StreamManager } from "../../domain/streaming/stream-manager.js";
 import { resolveTools, extractHostCallbacks, extractRegistrations, DEFAULT_TRUSTED_HOST_ALLOWLIST } from "./tools.js";
 import { ToolRegistry } from "../../domain/tool-executor.js";
-import { getDefaultToolModules, getMediaVendorOperationHandlerFactory, getExecutionBoundaryFactory, ambientStoreDefaultsRegistered } from "../../foundations/injection-seams.js";
+import { getDefaultToolModules, getMediaVendorOperationHandlerFactory, ambientStoreDefaultsRegistered } from "../../foundations/injection-seams.js";
 import { runAgentLoop } from "../../domain/agent-loop.js";
 import { initializeSkillRegistry } from "../../capabilities/skills/index.js";
 import { validateSessionId } from "./seepient.js";
@@ -31,7 +31,7 @@ import { extractLoopError } from "./error-surfacing.js";
 import type { Middleware } from "../../foundations/contracts/middleware.js";
 import type { ToolModule } from "../../foundations/contracts/tool.js";
 import { computeEffectiveSkillSources, emitMultiZeroSourcesNoticeOnce } from "./skill-sources-helper.js";
-import { buildLightExecutionBoundary } from "../../capabilities/execution/light-execution-boundary.js";
+import { resolveTurnBoundary } from "../../capabilities/execution/light-execution-boundary.js";
 import {
   resolveTenancyMode,
   validateTenancyCompleteness,
@@ -280,20 +280,17 @@ export async function askSeepient(
       : undefined;
   // Spec 027 FR-012: full package injects the boundary pipeline; the
   // engine default is the light boundary (trusted-host/none only).
-  const boundaryFactory = getExecutionBoundaryFactory();
-  const { boundary } = boundaryFactory
-    ? await boundaryFactory({
-        artifacts: sharedArtifacts,
-        workspaceRoot: opts.cwd ?? process.cwd(),
-        snapshotStore,
-        hostCallbacks,
-        vendorOperationHandler,
-        commitHelper: opts.commitHelper,
-        network: opts.network,
-        tenancyMode,
-        secretResolver,
-      })
-    : await buildLightExecutionBoundary({ artifacts: sharedArtifacts, hostCallbacks });
+  const boundary = await resolveTurnBoundary({
+    artifacts: sharedArtifacts,
+    workspaceRoot: opts.cwd ?? process.cwd(),
+    snapshotStore,
+    hostCallbacks,
+    vendorOperationHandler,
+    commitHelper: opts.commitHelper,
+    network: opts.network,
+    tenancyMode,
+    secretResolver,
+  });
   const approvalMode = opts.consentMode
     ? (opts.consentMode === "autonomous" ? "autonomous" : opts.consentMode === "ask-everything" ? "manual" : "balanced")
     : (opts.approvalBroker || opts.approveTool ? "manual" : "never");

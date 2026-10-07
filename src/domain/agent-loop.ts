@@ -15,9 +15,8 @@ import { extractPattern } from "../foundations/grant-pattern.js";
 import {
   getDefaultToolModules,
   getMediaVendorOperationHandlerFactory,
-  getExecutionBoundaryFactory,
 } from "../foundations/injection-seams.js";
-import { buildLightExecutionBoundary } from "../capabilities/execution/light-execution-boundary.js";
+import { resolveTurnBoundary } from "../capabilities/execution/light-execution-boundary.js";
 import { UseSkillTool } from "./skills/use-skill-tool.js";
 import { currentEstimateMode } from "../capabilities/tokenizer/tokenizer.js";
 import type { ToolRegistryContract } from "../foundations/contracts/tool.js";
@@ -426,18 +425,15 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
 
     // Spec 027 FR-012: full package injects the boundary pipeline; the
     // engine default is the light boundary (trusted-host/none only).
-    const boundaryFactory = getExecutionBoundaryFactory();
-    const { boundary } = boundaryFactory
-      ? await boundaryFactory({
-          artifacts,
-          hostCallbacks,
-          workspaceRoot: options.cwd ?? process.cwd(),
-          snapshotStore,
-          commitHelper: options.commitHelper,
-          vendorOperationHandler,
-          tenancyMode: options.tenancyMode,
-        })
-      : await buildLightExecutionBoundary({ artifacts, hostCallbacks });
+    const boundary = await resolveTurnBoundary({
+      artifacts,
+      hostCallbacks,
+      workspaceRoot: options.cwd ?? process.cwd(),
+      snapshotStore,
+      commitHelper: options.commitHelper,
+      vendorOperationHandler,
+      tenancyMode: options.tenancyMode,
+    });
     const broker = approveTool
       ? legacyApproveToolToBroker(approveTool)
       : autoConfirm

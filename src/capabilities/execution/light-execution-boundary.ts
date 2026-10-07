@@ -11,6 +11,10 @@ import type {
   ExecutionResult,
   ToolProgress,
 } from "../../foundations/contracts/execution-boundary.js";
+import {
+  getExecutionBoundaryFactory,
+  type ExecutionBoundaryBuildOptions,
+} from "../../foundations/injection-seams.js";
 import type { PreparedToolAction } from "../../foundations/contracts/prepared-action.js";
 import type { CapabilityEnvelope } from "../../foundations/contracts/permission-policy.js";
 import { UnsupportedBackendError } from "../../foundations/errors.js";
@@ -80,4 +84,24 @@ export async function buildLightExecutionBoundary(opts?: {
   } satisfies ExecutionBoundary as ExecutionBoundary;
 
   return { boundary, artifacts };
+}
+
+/**
+ * The single boundary-resolution point (review ponytail: this ternary lived
+ * copy-pasted at three composition sites). Full package registered → its
+ * boundary-carrying pipeline; core → the light boundary.
+ */
+export async function resolveTurnBoundary(
+  opts: ExecutionBoundaryBuildOptions & { hostCallbacks?: Map<string, (args: unknown) => Promise<unknown>> },
+): Promise<ExecutionBoundary> {
+  const factory = getExecutionBoundaryFactory();
+  if (factory) {
+    const { boundary } = await factory(opts);
+    return boundary;
+  }
+  const { boundary } = await buildLightExecutionBoundary({
+    artifacts: opts.artifacts as InMemoryArtifactStore | undefined,
+    hostCallbacks: opts.hostCallbacks,
+  });
+  return boundary;
 }

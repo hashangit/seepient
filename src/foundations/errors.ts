@@ -301,11 +301,6 @@ export class WorkerSchedulerError extends PermissionError {
 }
 
 /**
- * Execution backend cannot enforce the requested capability shape. Policy
- * must not offer an unenforceable shape; this surfaces when a caller asks
- * anyway.
- */
-/**
  * Review P3 (027): a tool registration cannot run because the machinery it
  * needs ships only with the full package (e.g. broker-connector evaluation).
  * Typed so surfaces can branch on it instead of parsing message prefixes.

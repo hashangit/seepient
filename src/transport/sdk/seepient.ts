@@ -69,7 +69,7 @@ import {
 import { normalizeHistoryForSend } from "../../domain/sessions/normalize-history.js";
 import { generateId } from "../../foundations/id.js";
 import { surfaceLoopError, extractLoopError } from "./error-surfacing.js";
-import { buildLightExecutionBoundary } from "../../capabilities/execution/light-execution-boundary.js";
+import { resolveTurnBoundary } from "../../capabilities/execution/light-execution-boundary.js";
 import { SeepientError, PersistConfigInvalidError, SessionIdInvalidError } from "../../foundations/errors.js";
 
 // ── Session persistence helpers ──────────────────────────────────────────
@@ -494,23 +494,17 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   // Spec 027 FR-012: the full package injects the boundary-carrying
   // pipeline; seepient-core defaults to the light boundary (trusted-host and
   // none operations only — no sandbox, broker, or native helper).
-  const boundaryFactory = getExecutionBoundaryFactory();
-  const { boundary } = boundaryFactory
-    ? await boundaryFactory({
-        artifacts: sharedArtifacts,
-        workspaceRoot: opts.cwd ?? process.cwd(),
-        snapshotStore,
-        hostCallbacks,
-        vendorOperationHandler,
-        commitHelper: opts.commitHelper,
-        network: opts.network,
-        tenancyMode,
-        secretResolver,
-      })
-    : await buildLightExecutionBoundary({
-        artifacts: sharedArtifacts,
-        hostCallbacks,
-      });
+  const boundary = await resolveTurnBoundary({
+    artifacts: sharedArtifacts,
+    workspaceRoot: opts.cwd ?? process.cwd(),
+    snapshotStore,
+    hostCallbacks,
+    vendorOperationHandler,
+    commitHelper: opts.commitHelper,
+    network: opts.network,
+    tenancyMode,
+    secretResolver,
+  });
   const approvalMode = opts.consentMode
     ? opts.consentMode === "autonomous"
       ? "autonomous"
@@ -983,7 +977,7 @@ async function chat(userMessage: string): Promise<AgentResponse> {
 
   async function addProvider(input: AccountInput): Promise<SaveResult> {
     if (!managerApi) {
-      throw new SeepientError("Injected provider runtime does not support configuration mutations", "NOT_IMPLEMENTED", false);
+      throw new SeepientError("Provider management mutations are not available here: the injected runtime does not support configuration changes. Provider management (addProvider/removeProvider/assignments) ships with the full \"seepient\" package.", "NOT_IMPLEMENTED", false);
     }
     const res = await managerApi.saveAccount(input);
     if (res.ok) latestState = await managerApi.getState();
@@ -992,7 +986,7 @@ async function chat(userMessage: string): Promise<AgentResponse> {
 
   async function removeProvider(id: string, opts?: { force?: boolean }): Promise<DeleteResult> {
     if (!managerApi) {
-      throw new SeepientError("Injected provider runtime does not support configuration mutations", "NOT_IMPLEMENTED", false);
+      throw new SeepientError("Provider management mutations are not available here: the injected runtime does not support configuration changes. Provider management (addProvider/removeProvider/assignments) ships with the full \"seepient\" package.", "NOT_IMPLEMENTED", false);
     }
     const res = await managerApi.deleteAccount(id, opts);
     if (res.ok) latestState = await managerApi.getState();
@@ -1001,7 +995,7 @@ async function chat(userMessage: string): Promise<AgentResponse> {
 
   async function setAssignment(purpose: Purpose, tier: Tier | undefined, target: AssignmentTarget): Promise<SaveResult> {
     if (!managerApi) {
-      throw new SeepientError("Injected provider runtime does not support configuration mutations", "NOT_IMPLEMENTED", false);
+      throw new SeepientError("Provider management mutations are not available here: the injected runtime does not support configuration changes. Provider management (addProvider/removeProvider/assignments) ships with the full \"seepient\" package.", "NOT_IMPLEMENTED", false);
     }
     const res = await managerApi.setAssignment(purpose as PurposeId, tier ?? null, target);
     if (res.ok) latestState = await managerApi.getState();
@@ -1010,7 +1004,7 @@ async function chat(userMessage: string): Promise<AgentResponse> {
 
   async function clearAssignment(purpose: Purpose, tier?: Tier): Promise<SaveResult> {
     if (!managerApi) {
-      throw new SeepientError("Injected provider runtime does not support configuration mutations", "NOT_IMPLEMENTED", false);
+      throw new SeepientError("Provider management mutations are not available here: the injected runtime does not support configuration changes. Provider management (addProvider/removeProvider/assignments) ships with the full \"seepient\" package.", "NOT_IMPLEMENTED", false);
     }
     const res = await managerApi.clearAssignment(purpose as PurposeId, tier ?? null);
     if (res.ok) latestState = await managerApi.getState();

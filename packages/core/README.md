@@ -85,6 +85,10 @@ The full [`seepient`](https://www.npmjs.com/package/seepient) package adds the b
 - Exact-BPE token counting degrades to a heuristic; `usage.estimateMode` reports `"heuristic"` (the full package reports `"exact"`).
 - Provider model discovery (`refreshModels`) degrades with an actionable message.
 
+## Mixing with the full package
+
+Registering the full `seepient` package anywhere in the same process (importing it, the server, or the CLI) flips the engine's defaults to the full-package composition for every agent in that process — including ones constructed through `seepient-core`. Keep serverless deployments single-package.
+
 ## Deep imports
 
 `seepient-core/dist/...` is reserved for the full package's internal use — no stability promise. Import from the package root only.
