@@ -181,7 +181,6 @@ export async function askSeepient(
     auditStore: opts.auditStore,
     policyStore: opts.policyStore,
     capabilityLedger: opts.capabilityLedger,
-    preferInMemoryDefaults,
     stateless: opts.stateless,
     isSessionful: false,
     principalId: opts.principalId,
@@ -316,7 +315,6 @@ export async function askSeepient(
     auditStore: opts.auditStore,
     policyStore: opts.policyStore,
     capabilityLedger: opts.capabilityLedger,
-    preferInMemoryDefaults,
     operatorBaseline: toCapabilitySet(opts.operatorBaseline),
     tenancyMode,
   });

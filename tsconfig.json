@@ -33,6 +33,7 @@
     "src/capabilities/execution/operation-executor-registry.ts",
     "src/capabilities/execution/host-executors.ts",
     "src/capabilities/execution/light-execution-boundary.ts",
+    "src/capabilities/execution/model-egress-gate.ts",
     "src/domain/agent-loop.ts",
     "src/domain/tool-executor.ts",
     "src/domain/hooks.ts",
@@ -58,9 +59,6 @@
     "src/transport/legacy-adapter.ts",
     "src/transport/approval-brokers.ts",
     "src/vendors/pi-ai/**/*",
-    "src/vendors/anthropic.ts",
-    "src/vendors/egress-check.ts",
-    "src/capabilities/execution/model-egress-gate.ts",
-    "src/vendors/gpt-tokenizer.ts"
+    "src/vendors/egress-check.ts"
   ]
 }

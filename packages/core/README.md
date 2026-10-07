@@ -2,7 +2,7 @@
 
 Seepient's chat/agent engine as a slim, separately installable package: multi-turn chat, streaming, the provider system, and injectable store contracts — without the full agent's built-in tools, browser automation, sandbox, MCP gateway, or terminal UI.
 
-**Clean-install closure: ~102 MB** (budget ≤ 150 MB) versus ~346 MB for the full [`seepient`](https://www.npmjs.com/package/seepient) package.
+**Clean-install closure: ~102 MB** (budget ≤ 150 MB) versus ~301 MB for the full [`seepient`](https://www.npmjs.com/package/seepient) package.
 
 ## Install
 
