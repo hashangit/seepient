@@ -58,6 +58,12 @@ Behavioral differences are all fail-closed and typed: built-in tool names are re
 
 ---
 
+## Ambient-free defaults for single+stateless
+
+`seepient-core` construction in single mode with `stateless: true` defaults the permission-plane stores (audit, policy, capability ledger) to the in-memory set — a per-function container on a read-only `$HOME` constructs and turns with zero ambient-disk writes, and the provider-audit log degrades to a warning instead of failing the mutation. The full `seepient` package keeps its Profile-A ambient defaults (`~/.seepient`); multi-tenant mode is untouched in both — it requires the injected store trio.
+
+---
+
 ## Injecting storage contracts
 
 To run statelessly, inject custom store implementations when creating the agent:

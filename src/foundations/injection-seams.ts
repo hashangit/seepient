@@ -245,3 +245,22 @@ export function getExactEstimatorLoader():
   | undefined {
   return exactEstimatorLoader;
 }
+
+// ── Ambient store defaults (spec 027 review P1-3) ───────────────────────────
+
+let ambientStoreDefaults = false;
+
+/**
+ * Register that ambient operator-state defaults are allowed (the FULL
+ * package calls this: Profile A keeps its ~/.seepient defaults). Unregistered
+ * — seepient-core — single+stateless construction defaults to the in-memory
+ * store set instead of ambient disk, so a serverless container on a
+ * read-only $HOME constructs and runs with zero ambient writes.
+ */
+export function registerAmbientStoreDefaults(): void {
+  ambientStoreDefaults = true;
+}
+
+export function ambientStoreDefaultsRegistered(): boolean {
+  return ambientStoreDefaults;
+}

@@ -17,7 +17,7 @@ import { createHookExecutor } from "../../domain/hooks.js";
 import { StreamManager } from "../../domain/streaming/stream-manager.js";
 import { resolveTools, extractHostCallbacks, extractRegistrations, DEFAULT_TRUSTED_HOST_ALLOWLIST } from "./tools.js";
 import { ToolRegistry } from "../../domain/tool-executor.js";
-import { getDefaultToolModules, getMediaVendorOperationHandlerFactory, getExecutionBoundaryFactory } from "../../foundations/injection-seams.js";
+import { getDefaultToolModules, getMediaVendorOperationHandlerFactory, getExecutionBoundaryFactory, ambientStoreDefaultsRegistered } from "../../foundations/injection-seams.js";
 import { runAgentLoop } from "../../domain/agent-loop.js";
 import { initializeSkillRegistry } from "../../capabilities/skills/index.js";
 import { validateSessionId } from "./seepient.js";
@@ -170,6 +170,10 @@ export async function askSeepient(
   };
   const { mode: tenancyMode, upgraded } = resolveTenancyMode(tenancySignals);
   emitTenancyNoticeOnce(upgraded);
+  // Review P1-3: the one-shot is inherently stateless — core-only single mode
+  // defaults the store set to in-memory (zero ambient writes).
+  const preferInMemoryDefaults =
+    tenancyMode === "single" && !ambientStoreDefaultsRegistered();
 
   // Validate tenancy completeness before any runtime defaulting or I/O
   validateTenancyCompleteness(tenancyMode, {
@@ -177,6 +181,7 @@ export async function askSeepient(
     auditStore: opts.auditStore,
     policyStore: opts.policyStore,
     capabilityLedger: opts.capabilityLedger,
+    preferInMemoryDefaults,
     stateless: opts.stateless,
     isSessionful: false,
     principalId: opts.principalId,
@@ -311,6 +316,7 @@ export async function askSeepient(
     auditStore: opts.auditStore,
     policyStore: opts.policyStore,
     capabilityLedger: opts.capabilityLedger,
+    preferInMemoryDefaults,
     operatorBaseline: toCapabilitySet(opts.operatorBaseline),
     tenancyMode,
   });
