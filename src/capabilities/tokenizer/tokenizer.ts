@@ -54,9 +54,24 @@ export function whenEstimatorReady(): Promise<"exact" | "heuristic"> {
       estimateMode = "exact";
       return estimateMode;
     },
-    () => estimateMode,
+    () => {
+      // A failed load pins heuristic honestly — the mode must reflect what
+      // this process will actually count with.
+      estimateMode = "heuristic";
+      return estimateMode;
+    },
   ) ?? Promise.resolve(estimateMode);
   return readyPromise;
+}
+
+/**
+ * Forget a settled readiness memo (spec 027 review P1-1). A core-only turn
+ * that settles "heuristic" before the full package registers its loader must
+ * not pin heuristic forever — registration resets this memo and arms the
+ * load (see `registerExactEstimator`).
+ */
+export function resetEstimatorMemo(): void {
+  readyPromise = undefined;
 }
 
 /** The active token-estimate mode ("exact" | "heuristic"). */

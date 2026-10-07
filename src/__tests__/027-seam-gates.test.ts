@@ -34,20 +34,24 @@ describe("027 seam (a): tools injection", () => {
   });
 });
 
-// ── Gate (b): tokenizer heuristic fallback (T005) ───────────────────────────
-
-// The vendor IS resolvable in-repo; the mock simulates a core-only install
-// where the exact-BPE package is absent (factory throw = unresolvable module).
-vi.mock("../vendors/gpt-tokenizer.js", () => {
-  throw new Error("simulated: exact-BPE vendor unresolvable (core-only install)");
-});
+// ── Gate (b): tokenizer heuristic fallback (T005; de-vacuumed per review P1-1) ──
 
 describe("027 seam (b): tokenizer fallback", () => {
-  it("estimateMode is heuristic when the BPE vendor is unresolvable", async () => {
+  it("estimateMode is heuristic when the exact-BPE loader rejects", async () => {
+    // The loader path itself must execute: register a REJECTING loader (the
+    // core-only condition) and drive readiness through it. The original
+    // vi.mock of the vendor module never executed — the initial state is
+    // heuristic regardless, which is why P1-1 survived a green suite.
+    const { registerExactEstimatorLoader } = await import(
+      "../foundations/injection-seams.js"
+    );
     const tokenizer = await import("../capabilities/tokenizer/tokenizer.js");
-    const mode =
-      (tokenizer as { currentEstimateMode?: () => string }).currentEstimateMode?.();
+    registerExactEstimatorLoader(() =>
+      Promise.reject(new Error("simulated: exact-BPE vendor unresolvable (core-only install)")),
+    );
+    const mode = await tokenizer.whenEstimatorReady();
     expect(mode).toBe("heuristic");
+    expect(tokenizer.currentEstimateMode()).toBe("heuristic");
     expect(tokenizer.countTokens("hello world, estimating without BPE")).toBeGreaterThan(0);
   });
 });
