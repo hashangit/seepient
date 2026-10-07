@@ -655,20 +655,28 @@ Keep `CONTEXT.md` under 20 lines total. Do NOT summarize the full conversation �
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-- **ACTIVE SPEC (026 — branch 026-pi-ai-upgrade, planned 2026-10-05; next:
-  /speckit-tasks then implementation)**:
-  `~/Documents/Obsidian/Seepient/Implementation-Specs/026-pi-ai-image-port/plan.md`
-  — pi-ai 1.0 upgrade & image generation port: pin @earendil-works/pi-ai
-  0.87.1 → 1.0.2 (supply-chain review complete: credential seams
-  byte-identical, no new outbound endpoints/deps); port pi-image-raw.ts to
-  the 1.0 interface (getModelOfType("image",…) + Models.generateImages +
-  error-result mapping D3), switch pi-discovery-source.ts /
-  pi-catalog-source.ts to kind-filtered enumeration; invariants I-1..I-5
-  (credential demolition sentinel, egress assert before traffic,
-  abort/timeout parity, kind separation, no public surface change);
-  4-file vendors-layer budget (incl. discovery-spike test); IMPLEMENTED
-  on 026-pi-ai-upgrade — gates green, Red Team P2 (result-branch error
-  laundering) repaired at f05f48e, receipt PASS; prior completed release
-  on this train: v0.8.1 (middleware loop-error propagation fix, gate
-  receipt PASS).
+- **ACTIVE SPEC (027 — branch 027-serverless-chat-core to be cut; specified,
+  planned, tasked, RED-TEAMED and RE-BASELINED 2026-10-07; ready for
+  /speckit-implement)**:
+  `~/Documents/Obsidian/Seepient/Implementation-Specs/027-serverless-chat-core/plan.md`
+  — serverless chat core package split: new slim `seepient-core` npm package
+  (chat/agent engine; deps = pi-ai + typebox only; ≤150MB closure gate) with
+  the full `seepient` package unchanged, consuming the engine via pnpm
+  workspace; FIVE seams after the red team caught the dynamic-edge undercount
+  (tools injection, tokenizer heuristic fallback, media/image registration,
+  provider-SDK dedupe incl. anthropic — derived from pi-ai pins, and
+  execution-pipeline injection: core default = light pipeline, boundary
+  injected by full); core entry is a NEW file (today's sdk/index.ts
+  re-exports full modules); dynamic-aware comment-stripping tracer +
+  per-package pack:verify (npm-pack fallback deleted); lockstep dual publish
+  (core-first pnpm publish, first-release bootstrap, tag-re-run recovery,
+  dry-run mutation fix). Phantom createStatelessAgent corrected to
+  createSeepient({stateless}) + chatStream method + askSeepient (all in
+  core) PLUS createChat — the owner-approved multi-turn front door
+  (send/stream/messages, thin sugar over the stateless agent; the single
+  deliberate new API shape). Red team:
+  Reviews/2026-10-07-027-pre-implementation-red-team.md
+  (5 lenses; RT-1..RT-18 + ponytail net-cut folded; all six owner OQs
+  answered 2026-10-07). 21 tasks ≈4.5 days.
+- Prior train: 026 pi-ai 1.0 image port IMPLEMENTED (rides v0.8.2).
 <!-- SPECKIT END -->
