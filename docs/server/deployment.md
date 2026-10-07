@@ -322,3 +322,9 @@ Response:
 - [ ] Enable WebSocket heartbeat (ping/pong every 30s) for Cloud Run deployments
 - [ ] Configure reverse proxy (nginx, Cloud Load Balancer) with WebSocket upgrade support
 - [ ] Set up log aggregation for `[server]` and `[ws]` log prefixes
+
+---
+
+## Serverless chat routes
+
+Deploying per-turn chat functions (no tools, no sandbox, sessions owned by your app)? Install [`seepient-core`](https://www.npmjs.com/package/seepient-core) instead of the full package — the same chat/agent engine at a ~102 MB install closure, with the same injectable store contracts and tenancy behavior. See [Stateless workers → Slim install for serverless](../sdk/stateless-workers.md#slim-install-for-serverless-seepient-core). The full `seepient` server binary documented above is unchanged.

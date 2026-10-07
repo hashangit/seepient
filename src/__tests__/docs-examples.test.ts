@@ -3,12 +3,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import * as sdkExports from '../transport/sdk/index.js';
 import { askSeepient } from '../transport/sdk/index.js';
+import * as coreEntryExports from '../transport/sdk/core.js';
 import { createMockRuntime } from '../domain/__tests__/test-doubles.js';
 
 const repoRoot = path.resolve(__dirname, '../..');
 const docsSdkDir = path.join(repoRoot, 'docs/sdk');
 
 const loadBearingPages = [
+  'packages/core/README.md',
   'docs/sdk/ask-seepient.md',
   'docs/sdk/create-seepient.md',
   'docs/sdk/skills.md',
@@ -55,6 +57,12 @@ describe('docs example import and runtime checks (FR-003)', () => {
       ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/custom-tools.ts')),
     ]);
     const unexportedImports: string[] = [];
+    const knownCoreExports = new Set([
+      ...Object.keys(coreEntryExports),
+      ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/core.ts')),
+      ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/chat.ts')),
+      ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/custom-tools.ts')),
+    ]);
 
     for (const page of loadBearingPages) {
       const filePath = path.join(repoRoot, page);

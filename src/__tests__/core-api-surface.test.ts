@@ -67,3 +67,16 @@ describe("seepient-core surface pin (027 T010)", () => {
     expect(() => resolveTools(["read_file"], new ToolRegistry())).toThrow(/seepient/);
   });
 });
+
+describe("full-entry parity (027 T015 wrapper pin)", () => {
+  it("the full entry re-exports the engine's createSeepient by identity — no re-plumbing wrapper", async () => {
+    const full = await import("../transport/sdk/index.js");
+    const core = await import("../transport/sdk/core.js");
+    expect(full.createSeepient).toBe(core.createSeepient);
+    expect(full.askSeepient).toBe(core.askSeepient);
+    expect(full.createChat).toBe(core.createChat);
+    // The full entry additionally carries its own surface.
+    expect(typeof full.createProviderManagerApi).toBe("function");
+    expect(full.gateway).toBeDefined();
+  });
+});
