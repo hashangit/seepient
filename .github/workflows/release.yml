@@ -145,7 +145,7 @@ jobs:
           '
 
       - name: Build both packages (explicit — pnpm -r build skips the root, E12)
-        run: pnpm --filter seepient-core build && pnpm build
+        run: pnpm run build:core && pnpm build
 
       - name: Verify pack contents (both tarballs)
         run: pnpm run pack:verify
