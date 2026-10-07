@@ -28,8 +28,10 @@ jobs:
       - name: Audit runtime dependencies
         run: pnpm audit --prod
 
+      # build:core chains first — the root program resolves the engine via
+      # the seepient-core workspace package (spec 027 D20).
       - name: Typecheck
-        run: pnpm exec tsc --noEmit
+        run: pnpm run typecheck
 
       - name: Build native helper
         run: pnpm native:build
