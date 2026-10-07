@@ -119,7 +119,7 @@ describe("Pack Verification Gate (Spec 021-2 / FR-001)", () => {
     it("passes against the restored working tree with prepublishOnly safe", () => {
       const result = verifyPack(process.cwd(), { allowPlaceholder: true });
       expect(result.success).toBe(true);
-      expect(result.count).toBeGreaterThan(0);
+      expect(result.files).toBeGreaterThan(0);
     });
   });
 });
