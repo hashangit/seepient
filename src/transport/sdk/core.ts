@@ -159,6 +159,7 @@ export {
   PolicyConflictError,
   WorkerSchedulerError,
   UnsupportedBackendError,
+  ToolUnavailableError,
   SkillStoreUnavailableError,
   SkillCollisionError,
   SkillBodyUnavailableError,

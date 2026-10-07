@@ -111,7 +111,8 @@ COPY --from=builder /build/node_modules/   ./node_modules/
 # node_modules copy carries a dangling symlink to /build/packages/core, so
 # materialize the built core package at the link target.
 RUN rm -f node_modules/seepient-core
-COPY --from=builder /build/packages/core/   ./node_modules/seepient-core/
+COPY --from=builder /build/packages/core/package.json ./node_modules/seepient-core/package.json
+COPY --from=builder /build/packages/core/dist/        ./node_modules/seepient-core/dist/
 COPY --from=builder /build/package.json    ./
 
 # Copy compiled native helper binary to /usr/local/bin

@@ -9,7 +9,6 @@
  */
 import type {
   AgentResponse,
-  AskSeepientOptions,
   AskSeepientStreamResult,
   CreateSeepientOptions,
   Message,
@@ -21,6 +20,23 @@ import { createSeepient } from "./seepient.js";
 export type ChatTurnResult = AgentResponse;
 
 /**
+ * Per-stream-turn options — exactly the fields the streaming turn consumes
+ * (review P3: the previous type advertised fields like model/tools/system
+ * prompt that the instance ignores on a per-call basis).
+ */
+export interface ChatStreamOptions {
+  purpose?: import("../../foundations/types.js").Purpose;
+  tier?: import("../../foundations/types.js").Tier;
+  temperature?: number;
+  maxTokens?: number;
+  onStep?: (step: import("../../foundations/types.js").StepResult) => void;
+  onText?: (delta: string) => void;
+  onToolCall?: (tool: { name: string; args: Record<string, unknown>; callId: string }) => void;
+  onToolResult?: (result: { callId: string; output: string; success: boolean }) => void;
+  onError?: (error: import("../../domain/agent-loop.js").AgentLoopError) => void;
+}
+
+/**
  * A multi-turn chat session created by `createChat`. The session owns its
  * message history across turns; durability comes from the injected stores,
  * not from this object.
@@ -29,10 +45,7 @@ export interface ChatSession {
   /** Run one turn and await the complete result. */
   send(text: string): Promise<ChatTurnResult>;
   /** Run one streaming turn; resolves when the turn settles. */
-  stream(
-    text: string,
-    callbacks?: Omit<AskSeepientOptions, "stream" | "signal">,
-  ): Promise<AskSeepientStreamResult>;
+  stream(text: string, callbacks?: ChatStreamOptions): Promise<AskSeepientStreamResult>;
   /** The history this session owns (assistant/user/tool/system rows). */
   readonly messages: readonly Message[];
   /** Abort the in-flight turn, if any. */

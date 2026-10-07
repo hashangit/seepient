@@ -125,10 +125,6 @@ else
 fi
 
 # --- resolve target version ------------------------------------------------
-# Strip the --dry-run flag from BUMP if it was passed as the first positional
-BUMP="${1:-}"
-[[ "$BUMP" == "--dry-run" || "$BUMP" == "-n" ]] && BUMP=""
-
 bump_version() {
   # arithmetic bump — npm version MUTATES package.json, which would break
   # dry-run purity (the pre-existing defect this fixes, spec 027 E11)

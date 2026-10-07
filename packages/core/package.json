@@ -2,14 +2,16 @@
   "name": "seepient-core",
   "version": "0.8.2",
   "type": "module",
-  "description": "Seepient's chat/agent engine — multi-turn chat, streaming, providers, and injectable stores, without the full agent's tools, sandbox, or UI.",
+  "description": "Seepient's chat/agent engine \u2014 multi-turn chat, streaming, providers, and injectable stores, without the full agent's tools, sandbox, or UI.",
   "main": "./dist/transport/sdk/core.js",
   "types": "./dist/transport/sdk/core.d.ts",
   "publishConfig": {
     "access": "public"
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE",
+    "README.md"
   ],
   "license": "BUSL-1.1",
   "author": "Hashan Wickramasinghe",

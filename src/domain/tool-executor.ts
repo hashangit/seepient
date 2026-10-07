@@ -333,14 +333,15 @@ export function resolveTools(tools?: ToolInput[], targetRegistry?: ToolRegistryC
       // Individual tool lookup
       const found = reg.find(input);
       if (!found) {
-        const available = reg.definitions().map((t) => t.function.name).join(", ");
+        const registered = reg.definitions().map((t) => t.function.name);
+        const availableSuffix = registered.length > 0 ? ` Available: ${registered.join(", ")}` : "";
         if (ALL_TOOLS.includes(input)) {
           throw new Error(
-            `Unknown tool "${input}". Built-in tools ship with the full "seepient" package — install "seepient", or with seepient-core register a custom/trusted-host tool. Available: ${available}`,
+            `Unknown tool "${input}". Built-in tools ship with the full "seepient" package — install "seepient", or with seepient-core register a custom/trusted-host tool.${availableSuffix}`,
           );
         }
         throw new Error(
-          `Unknown tool "${input}". Available: ${available}`,
+          `Unknown tool "${input}".${availableSuffix}`,
         );
       }
       const name = found.definition.function.name;
