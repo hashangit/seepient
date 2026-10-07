@@ -18,7 +18,7 @@ When deployed in multi-tenant environments:
 
 ## Slim install for serverless: `seepient-core`
 
-Serverless chat routes that use only the multi-turn engine, the provider system, and injected stores can install **`seepient-core`** instead — the same engine at a ~102 MB clean-install closure (versus ~346 MB), with zero built-in tools, sandbox, MCP gateway, or browser automation in `node_modules`:
+Serverless chat routes that use only the multi-turn engine, the provider system, and injected stores can install **`seepient-core`** instead — the same engine at a ~102 MB clean-install closure (versus ~301 MB), with zero built-in tools, sandbox, MCP gateway, or browser automation in `node_modules`:
 
 ```ts
 import { createChat } from 'seepient-core'

@@ -1,8 +1,12 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync, mkdirSync, rmSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   assertNoCleanInPublishHooks,
   assertPackFiles,
   assertNotPlaceholder,
+  assertReleaseWorkflowInvariants,
   verifyPack,
   REQUIRED_PACK_FILES,
 } from "../../scripts/pack-verify.mjs";
@@ -112,6 +116,29 @@ describe("Pack Verification Gate (Spec 021-2 / FR-001)", () => {
       expect(() => {
         assertPackFiles(REQUIRED_PACK_FILES);
       }).not.toThrow();
+    });
+  });
+
+  describe("release.yml invariant self-test (T019, review P2-5)", () => {
+    it("an order-swapped workflow copy (root published before core) fails the invariants", () => {
+      const tmp = mkdtempSync(join(tmpdir(), "release-invariants-"));
+      try {
+        const original = readFileSync(join(process.cwd(), ".github/workflows/release.yml"), "utf8");
+        // Swap: root publish block before the core publish block.
+        const coreIdx = original.indexOf("Publish seepient-core FIRST");
+        const rootIdx = original.indexOf("Publish seepient (root)");
+        expect(coreIdx).toBeGreaterThan(-1);
+        expect(rootIdx).toBeGreaterThan(coreIdx);
+        const coreBlock = original.slice(coreIdx, rootIdx);
+        const tailIdx = original.indexOf("publish-homebrew", rootIdx);
+        const rootBlock = original.slice(rootIdx, tailIdx);
+        const swapped = original.slice(0, coreIdx) + rootBlock + coreBlock + original.slice(tailIdx);
+        mkdirSync(join(tmp, ".github/workflows"), { recursive: true });
+        writeFileSync(join(tmp, ".github/workflows/release.yml"), swapped);
+        expect(() => assertReleaseWorkflowInvariants(tmp)).toThrow(/core/i);
+      } finally {
+        rmSync(tmp, { recursive: true, force: true });
+      }
     });
   });
 

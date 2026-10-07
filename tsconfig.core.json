@@ -27,7 +27,6 @@
     "src/transport/legacy-adapter.ts",
     "src/transport/approval-brokers.ts",
     "src/vendors/pi-ai/**/*",
-    "src/vendors/anthropic.ts",
     "src/vendors/egress-check.ts",
     "src/capabilities/execution/model-egress-gate.ts"
   ],

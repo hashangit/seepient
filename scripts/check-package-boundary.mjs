@@ -40,10 +40,7 @@ const BANNED_DEPS = new Set([
   "jsdom", "@mozilla/readability",
   // terminal UI
   "ink", "ink-select-input", "ink-spinner", "react", "inquirer", "figlet", "ora",
-  "chalk", "terminal-link", "get-east-asian-width", "es-toolkit",
-  "@inquirer/core", "@inquirer/prompts", "@inquirer/input", "@inquirer/select",
-  "@inquirer/confirm", "@inquirer/checkbox", "@inquirer/expand", "@inquirer/number",
-  "@inquirer/password", "@inquirer/editor", "@inquirer/rawlist", "@inquirer/core",
+  "chalk", "terminal-link", "get-east-asian-width", "es-toolkit", "@inquirer",
   // MCP gateway
   "@modelcontextprotocol/sdk", "rxjs",
   // OS sandbox
@@ -64,9 +61,7 @@ const BANNED_DEPS = new Set([
  * artifact, and the import site degrades with a typed error when absent.
  * Adding an entry requires naming the engine-spine reason in the PR.
  */
-const GUARDED_DYNAMIC_OK = new Set([
-  "vendors/gpt-tokenizer.js", // FR-004: exact-BPE lazy import; heuristic fallback when absent
-]);
+const GUARDED_DYNAMIC_OK = new Set(); // absence-tolerant lazy imports (none today — the tokenizer vendor arrives via the registered loader)
 
 const ALLOWED_EXTERNALS = [/^node:/, /^@earendil-works\/pi-ai(\/|$)/, /^typebox(\/|$)/];
 
@@ -182,11 +177,58 @@ function runCheck(distDir, entry) {
   return traceCore(distDir, entry);
 }
 
+function scanOrphans(distDir, closure) {
+  // Review P2-1: the tarball ships files:["dist"] — an emitted-but-unreachable
+  // file still installs. Flag orphans whose imports would violate B-2.
+  const violations = [];
+  const all = listJsFiles(distDir);
+  let orphanCount = 0;
+  for (const abs of all) {
+    const rel = relative(distDir, abs).split("\\").join("/");
+    if (closure.has(rel)) continue;
+    orphanCount += 1;
+    const source = stripComments(readFileSync(abs, "utf8"));
+    for (const spec of extractSpecifiers(source)) {
+      // Orphans stay load-bearing for the full package's deep imports — only
+      // banned/undeclared NON-builtin externals in them are violations.
+      if (spec.startsWith(".") || spec.startsWith("node:") || isBuiltin(spec)) continue;
+      const pkg = spec.startsWith("@") ? spec.split("/").slice(0, 2).join("/") : spec.split("/")[0];
+      if (BANNED_DEPS.has(pkg)) {
+        violations.push(`ORPHAN-B-2: ${rel} (unreachable from the entry) imports banned package "${pkg}"`);
+      } else if (!ALLOWED_EXTERNALS.some((re) => re.test(spec))) {
+        violations.push(`ORPHAN-B-2: ${rel} (unreachable from the entry) imports undeclared external "${spec}"`);
+      }
+    }
+  }
+  return { violations, orphanCount };
+}
+
 // ── main ─────────────────────────────────────────────────────────────────────
 const { violations, externals, builtins, moduleCount } = runCheck(CORE_DIST, ENTRY);
 console.log(`[boundary] core closure: ${moduleCount} modules from ${ENTRY}`);
 console.log(`[boundary] externals: ${[...externals].sort().join(", ") || "(none)"}`);
 console.log(`[boundary] node builtins: ${[...builtins].sort().join(", ") || "(none)"}`);
+
+// Orphan scan needs the closure set — re-run with collection.
+const closureSet = new Set((function collect(distDir, entry) {
+  const visited = new Set();
+  const queue = [entry];
+  while (queue.length) {
+    const rel = queue.pop();
+    if (visited.has(rel)) continue;
+    visited.add(rel);
+    const abs = join(distDir, rel);
+    if (!existsSync(abs)) continue;
+    for (const spec of extractSpecifiers(stripComments(readFileSync(abs, "utf8")))) {
+      if (!spec.startsWith(".")) continue;
+      const t = relative(distDir, resolve(dirname(abs), spec));
+      if (!t.startsWith("..") && existsSync(join(distDir, t))) queue.push(t);
+    }
+  }
+  return visited;
+})(CORE_DIST, ENTRY));
+const { violations: orphanViolations, orphanCount } = scanOrphans(CORE_DIST, closureSet);
+console.log(`[boundary] emitted files: ${closureSet.size + orphanCount} (${orphanCount} orphans from the entry)`);
 
 // ── negative self-tests (on a throwaway copy) ────────────────────────────────
 const tmp = mkdtempSync(join(tmpdir(), "boundary-selftest-"));
@@ -220,6 +262,8 @@ if (selfTestFailures.length > 0) {
   process.exit(1);
 }
 console.log("[boundary] self-tests: banned-import RED ✓, dynamic full-edge RED ✓, doc-comment inert ✓");
+
+for (const v of orphanViolations) violations.push(v);
 
 if (violations.length > 0) {
   console.error(`[boundary] VIOLATIONS (${violations.length}):`);
