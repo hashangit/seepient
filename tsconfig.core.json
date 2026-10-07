@@ -1,0 +1,8 @@
+{
+  "//": "seepient-core emit (027): this include list is the SINGLE membership source of the engine spine (data-model §1.1); the root tsconfig's exclude list mirrors it. Module format note (research E12): an emit's module format is governed by the nearest package.json to the emitted FILE — packages/core/package.json (type: module) covers packages/core/dist, so the core output is ESM like the root.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./packages/core/dist"
+  },
+  "include": ["src/foundations/types.ts"]
+}
