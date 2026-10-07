@@ -19,19 +19,13 @@ interface ReplayEntry {
 }
 
 /**
- * Public structural contract for replay ledgers across single-tenant and multi-tenant profiles.
- */
-export interface ReplayLedger {
-  load(): Promise<void>;
-  has(requestId: string): Promise<boolean>;
-  hasSync?(requestId: string): boolean;
-  consume(requestId: string): Promise<boolean>;
-}
-
-/**
  * Durable replay ledger. Backed by an append-only NDJSON file.
  * `load()` must be called once at startup before any `has()` / `consume()`.
+ * The ReplayLedger CONTRACT lives in foundations/contracts/replay-ledger.ts
+ * (spec 027) and is re-exported here for this module's consumers.
  */
+import type { ReplayLedger } from "seepient-core/dist/foundations/contracts/replay-ledger.js";
+export type { ReplayLedger };
 export class PersistedReplayLedger implements ReplayLedger {
   private readonly dir: string;
   private readonly file: string;

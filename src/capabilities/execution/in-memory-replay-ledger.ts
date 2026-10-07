@@ -1,4 +1,4 @@
-import type { ReplayLedger } from "./persisted-replay-ledger.js";
+import type { ReplayLedger } from "../../foundations/contracts/replay-ledger.js";
 
 /**
  * In-memory replay ledger for isolated execution in multi-tenant environments.

@@ -84,6 +84,14 @@ jobs:
     needs: [test, native-helper]
     runs-on: ubuntu-latest
 
+    # Spec 027 recovery: if this job fails after `seepient-core` published,
+    # RE-RUN THE JOB ON THE EXISTING TAG. Skip-if-exists skips core and
+    # publishes root. Do NOT re-run scripts/publish.sh — it bumps a NEW
+    # version the preflight refuses (contracts/release-flow.md §4).
+    permissions:
+      contents: write
+      id-token: write # npm provenance for the seepient-core publish
+
     steps:
       - uses: actions/checkout@v4
 
@@ -136,7 +144,10 @@ jobs:
           console.log("manifest:", JSON.stringify(manifest.binaries, null, 2));
           '
 
-      - name: Verify pack contents
+      - name: Build both packages (explicit — pnpm -r build skips the root, E12)
+        run: pnpm --filter seepient-core build && pnpm build
+
+      - name: Verify pack contents (both tarballs)
         run: pnpm run pack:verify
 
       - name: Refuse placeholder publish
@@ -155,7 +166,18 @@ jobs:
           }
           '
 
-      - name: Publish to npm
+      - name: Publish seepient-core FIRST (lockstep order)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./packages/core/package.json').version")
+          if npm view "seepient-core@${VERSION}" version >/dev/null 2>&1; then
+            echo "seepient-core@${VERSION} is already published on npm — skipping publish"
+          else
+            cd packages/core && pnpm publish --access public --no-git-checks --provenance
+          fi
+
+      - name: Publish seepient (root)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
@@ -163,7 +185,7 @@ jobs:
           if npm view "seepient@${VERSION}" version >/dev/null 2>&1; then
             echo "seepient@${VERSION} is already published on npm — skipping publish"
           else
-            npm publish --access public
+            pnpm publish --access public --no-git-checks
           fi
 
   publish-homebrew:
