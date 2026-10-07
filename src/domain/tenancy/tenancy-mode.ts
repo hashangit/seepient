@@ -1,6 +1,7 @@
 /**
  * Spec 022 — Tenancy Mode & Fail-Closed Validation (contracts/tenancy-mode.md).
  */
+import { ambientStoreDefaultsRegistered } from "../../foundations/injection-seams.js";
 import {
   SeepientError,
   PrincipalRequiredError,
@@ -271,9 +272,15 @@ export function resetTenancyNoticeForTest(): void {
 export function emitCredentialsSingleUserWarningOnce(): void {
   if (noticePrinted.credentials) return;
   noticePrinted.credentials = true;
+  // Review round-2 P2-3: describe the store set that WILL actually apply.
+  // seepient-core's single+stateless persona defaults to in-memory stores;
+  // the full package keeps its ambient ~/.seepient defaults.
+  const storeSentence = ambientStoreDefaultsRegistered()
+    ? `Ambient ~/.seepient stores and single-user policies will be used. `
+    : `Store defaults are in-memory (seepient-core persona) — no ambient state is written. `;
   console.warn(
     `[seepient] Notice: Running in single-user mode with custom credentials/providers. ` +
-      `Ambient ~/.seepient stores and single-user policies will be used. ` +
+      storeSentence +
       `For multi-tenant isolation, pass tenancy: "multi" and inject isolated stores.`,
   );
 }

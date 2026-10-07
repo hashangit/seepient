@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { SeepientError } from "../../foundations/errors.js";
 import { redact, redactUrlCredentials } from "../../foundations/security/redact.js";
+import { ambientStoreDefaultsRegistered } from "../../foundations/injection-seams.js";
 
 export interface ProviderAuditEvent {
   timestamp: string;
@@ -84,6 +85,15 @@ export function recordProviderAuditEvent(event: ProviderAuditEvent, customAuditP
         "SECURITY_ERROR",
         false,
       );
+    }
+    // Review round-2 P2-1: a pre-existing but unwritable dir (container layer,
+    // wrong owner) is the same fail-soft case as mkdir — warn and continue.
+    // Symlink refusals above stay fatal.
+    if (err.code === "EACCES" || err.code === "EROFS" || err.code === "EPERM") {
+      console.warn(
+        `[seepient] provider audit log unwritable at ${auditPath} (${err.code}); continuing without it`,
+      );
+      return;
     }
     throw new SeepientError(
       `Failed to write durable audit log: ${err.message}`,
