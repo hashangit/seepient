@@ -47,6 +47,11 @@ jobs:
 
       # Review P2-2: the security-suite inventory baseline, wired as a gate
       # (recorded 2026-10-07: 711 matched test names; may only grow).
+      # Review round-2 P2-5: the COMPILED full package must count exactly —
+      # the suite runs the engine from src (alias); this pins the dist.
+      - name: Compiled-full exact-BPE pin
+        run: pnpm run build && pnpm run qs:dist-exact
+
       - name: Security-suite inventory baseline (QS-4)
         run: pnpm exec vitest list 2>/dev/null | grep -icE 'tenancy|egress|ssrf|vuln|permission|consent' | awk '{ exit !($1 >= 711) }' 
 

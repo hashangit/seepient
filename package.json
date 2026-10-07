@@ -44,7 +44,8 @@
     "pack:verify": "node scripts/pack-verify.mjs && node scripts/pack-verify.mjs --core",
     "prepublishOnly": "pnpm run build",
     "boundary:check": "node scripts/check-package-boundary.mjs",
-    "qs:core-chat": "node scripts/qs-core-chat.mjs"
+    "qs:core-chat": "node scripts/qs-core-chat.mjs",
+    "qs:dist-exact": "node scripts/qs-dist-exact-mode.mjs"
   },
   "files": [
     "dist/foundations",
