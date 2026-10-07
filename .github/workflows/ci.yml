@@ -39,6 +39,17 @@ jobs:
       - name: Test
         run: pnpm test
 
+      # Review P1-4: the compiled-artifact behavioral gate — the six contract
+      # flows against the PACKED core tarball (the suite runs the engine from
+      # source via the test alias; this is the what-ships check).
+      - name: Core-only chat e2e (packed tarball)
+        run: pnpm run qs:core-chat
+
+      # Review P2-2: the security-suite inventory baseline, wired as a gate
+      # (recorded 2026-10-07: 711 matched test names; may only grow).
+      - name: Security-suite inventory baseline (QS-4)
+        run: pnpm exec vitest list 2>/dev/null | grep -icE 'tenancy|egress|ssrf|vuln|permission|consent' | awk '{ exit !($1 >= 711) }' 
+
       - name: Verify mutation probes
         run: pnpm run test:probes
 

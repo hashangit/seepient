@@ -25,8 +25,19 @@ export function recordProviderAuditEvent(event: ProviderAuditEvent, customAuditP
     path.join(os.homedir(), ".seepient", "audit.log");
 
   const dir = path.dirname(auditPath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  try {
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    }
+  } catch (err) {
+    // Review P1-3: the operator audit trail is a Profile-A convenience — on a
+    // read-only $HOME (Lambda-style containers) the provider mutation must
+    // still succeed. Fail soft with a warning; the security plane's own
+    // AuditStore is a separate, injected concern.
+    console.warn(
+      `[seepient] provider audit log unavailable at ${auditPath} (${err instanceof Error ? err.code ?? err.message : err}); continuing without it`,
+    );
+    return;
   }
 
   // Reject symlinks

@@ -22,6 +22,7 @@ import {
   getMediaVendorOperationHandlerFactory,
   getExecutionBoundaryFactory,
   getProviderManagerApiFactory,
+  ambientStoreDefaultsRegistered,
   type MediaVendorOperationHandler,
 } from "../../foundations/injection-seams.js";
 import type { ToolModule } from "../../foundations/contracts/tool.js";
@@ -421,12 +422,21 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     TerminalEventOutbox,
     recoverIndeterminateActions,
   } = await import("../../domain/permissions/audit-recorder.js");
+  const { InMemoryAuditStore } = await import("../../domain/permissions/in-memory-stores.js");
 
   let auditOutbox:
     | import("../../domain/permissions/audit-recorder.js").TerminalEventOutbox
     | undefined;
-  const isLocalStore = !opts.auditStore || isLocalAuditStore(opts.auditStore);
-  const auditStore = opts.auditStore ?? new LocalAuditStore();
+  // Review P1-3: the "serverless" persona constructs on read-only $HOME.
+  // seepient-core defaults single+stateless construction to the in-memory
+  // store set (zero ambient writes); the full package keeps its Profile-A
+  // ambient defaults. Multi mode is untouched — it requires explicit stores.
+  const preferInMemoryDefaults =
+    tenancyMode === "single" && Boolean(opts.stateless) && !ambientStoreDefaultsRegistered();
+  const isLocalStore =
+    opts.auditStore !== undefined && isLocalAuditStore(opts.auditStore);
+  const auditStore =
+    opts.auditStore ?? (preferInMemoryDefaults ? new InMemoryAuditStore() : new LocalAuditStore());
   if (isLocalStore) {
     auditOutbox = new TerminalEventOutbox(
       auditStore as InstanceType<typeof LocalAuditStore>,
@@ -526,6 +536,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     auditStore,
     policyStore: opts.policyStore,
     capabilityLedger: opts.capabilityLedger,
+    preferInMemoryDefaults,
     operatorBaseline: toCapabilitySet(opts.operatorBaseline),
     tenancyMode,
     terminalOutbox: auditOutbox,

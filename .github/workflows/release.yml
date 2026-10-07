@@ -147,6 +147,9 @@ jobs:
       - name: Build both packages (explicit — pnpm -r build skips the root, E12)
         run: pnpm run build:core && pnpm build
 
+      - name: Core-only chat e2e (packed tarball — review P1-4)
+        run: pnpm run qs:core-chat
+
       - name: Verify pack contents (both tarballs)
         run: pnpm run pack:verify
 

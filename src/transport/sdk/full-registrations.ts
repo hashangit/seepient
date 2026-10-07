@@ -15,6 +15,7 @@ import {
   registerExecutionBoundaryFactory,
   registerProviderManagerApiFactory,
   registerBrokerConnectorEvaluator,
+  registerAmbientStoreDefaults,
 } from "seepient-core/dist/foundations/injection-seams.js";
 import { registerImageBackends } from "../../capabilities/inference/register-image-backends.js";
 import { registerDiscoverySources } from "../../capabilities/inference/register-discovery-sources.js";
@@ -36,6 +37,10 @@ export const FULL_TOOL_MODULES: readonly ToolModule[] = Object.freeze([
 ]);
 
 registerDefaultToolModules(FULL_TOOL_MODULES);
+
+// Review P1-3: Profile A ambient defaults (~/.seepient) ride the full
+// package only; seepient-core defaults single+stateless to in-memory stores.
+registerAmbientStoreDefaults();
 
 // Spec 027: built-in tool analyzers (prepared-action builders) register with
 // the engine; the consent pipeline consults the seam table.
