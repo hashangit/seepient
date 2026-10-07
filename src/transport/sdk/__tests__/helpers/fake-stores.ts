@@ -297,7 +297,7 @@ export function createFakeRuntime(opts?: {
   responses?: MockStepResponse[] | ((req: any) => MockStepResponse);
   configStore?: ProviderConfigStore;
   credentialStore?: CompositeCredentialStore | MemoryCredentialStore;
-}): ProviderRuntime {
+}): import("seepient-core/dist/domain/providers/provider-runtime.js").ProviderRuntime {
   if (opts?.responses && !opts.configStore && !opts.credentialStore) {
     // 022-5-WO3: injected runtimes on multi servers must carry the stamp —
     // the shared fake gets it by default so every server test composes the
@@ -306,7 +306,7 @@ export function createFakeRuntime(opts?: {
     // overrides it for the test double.
     const mock = createMockRuntime(opts.responses);
     Object.defineProperty(mock, "tenancySignal", { value: "multi", configurable: true });
-    return mock;
+    return mock as never; // declared as the seepient-core type (spec 027)
   }
 
   const configStore = opts?.configStore ?? new ProviderConfigStore(":memory:");
@@ -359,5 +359,5 @@ export function createFakeRuntime(opts?: {
     credentialStore,
     modelCatalog: new ModelCatalog([]),
     tenancyMode: "multi", // 022-5-WO3: injected runtimes are multi-stamped
-  });
+  }) as never; // declared as the seepient-core type (spec 027)
 }
