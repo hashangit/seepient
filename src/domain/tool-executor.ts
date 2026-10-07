@@ -335,13 +335,14 @@ export function resolveTools(tools?: ToolInput[], targetRegistry?: ToolRegistryC
       if (!found) {
         const registered = reg.definitions().map((t) => t.function.name);
         const availableSuffix = registered.length > 0 ? ` Available: ${registered.join(", ")}` : "";
-        if (ALL_TOOLS.includes(input)) {
-          throw new Error(
-            `Unknown tool "${input}". Built-in tools ship with the full "seepient" package — install "seepient", or with seepient-core register a custom/trusted-host tool.${availableSuffix}`,
-          );
-        }
-        throw new Error(
-          `Unknown tool "${input}".${availableSuffix}`,
+        // Review P3: typed denial (ToolRegistrationError), not a plain Error.
+        throw new ToolRegistrationError(
+          input,
+          `Unknown tool "${input}".` +
+            (ALL_TOOLS.includes(input)
+              ? ` Built-in tools ship with the full "seepient" package — install "seepient", or with seepient-core register a custom/trusted-host tool.`
+              : "") +
+            availableSuffix,
         );
       }
       const name = found.definition.function.name;

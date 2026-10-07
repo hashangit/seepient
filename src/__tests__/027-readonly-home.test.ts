@@ -146,10 +146,8 @@ describe("027 review P1-3: read-only HOME zero-write", () => {
     const work1 = mkdtempSync(join(tmpdir(), "readonly-ask-w1-"));
     const saved = isolateAmbientPaths(writableHome);
     try {
-      const res = await askSeepient("use echo", {
-        runtime, tenancy: "single", skills: false, tools: [echo],
-        cwd: work1, approveTool: async () => true,
-      } as never);
+      const opts = { runtime, tenancy: "single", skills: false, tools: [echo], cwd: work1, approveTool: async () => true } as never;
+      const res = (await askSeepient("use echo", opts as { stream?: false })) as { text: string };
       expect(res.text).toBe("Done");
       expect(existsSync(join(writableHome, ".seepient"))).toBe(false);
     } finally {
@@ -164,10 +162,8 @@ describe("027 review P1-3: read-only HOME zero-write", () => {
     chmodSync(roHome, 0o555);
     const saved2 = isolateAmbientPaths(roHome);
     try {
-      const res = await askSeepient("use echo", {
-        runtime, tenancy: "single", skills: false, tools: [echo],
-        cwd: work2, approveTool: async () => true,
-      } as never);
+      const opts2 = { runtime, tenancy: "single", skills: false, tools: [echo], cwd: work2, approveTool: async () => true } as never;
+      const res = (await askSeepient("use echo", opts2 as { stream?: false })) as { text: string };
       expect(res.text).toBe("Done");
       expect(existsSync(join(roHome, ".seepient"))).toBe(false);
     } finally {

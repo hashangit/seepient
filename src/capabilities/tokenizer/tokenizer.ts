@@ -48,19 +48,25 @@ let readyPromise: Promise<"exact" | "heuristic"> | undefined;
  * installs, spec 027 FR-004). Lazy: call AFTER registration.
  */
 export function whenEstimatorReady(): Promise<"exact" | "heuristic"> {
-  readyPromise ??= getExactEstimatorLoader()?.().then(
+  const loader = getExactEstimatorLoader();
+  if (!loader) return Promise.resolve(estimateMode);
+  // Guard against out-of-order settles across memo generations (review P3):
+  // a stale generation's settle must not clobber a newer registration.
+  readyPromise ??= loader().then(
     (m) => {
+      if (getExactEstimatorLoader() !== loader) return whenEstimatorReady();
       encode = m.encode;
       estimateMode = "exact";
       return estimateMode;
     },
     () => {
+      if (getExactEstimatorLoader() !== loader) return whenEstimatorReady();
       // A failed load pins heuristic honestly — the mode must reflect what
       // this process will actually count with.
       estimateMode = "heuristic";
       return estimateMode;
     },
-  ) ?? Promise.resolve(estimateMode);
+  );
   return readyPromise;
 }
 

@@ -300,17 +300,17 @@ export function verifyPack(projectRoot = process.cwd(), opts = {}) {
     // 2. Stage placeholders if missing
     stagePlaceholderHelpers(projectRoot);
 
-    // 3. Dry-run pack (contents only — the real tarball check is pack+inspect below)
-    const stdout = execSync("pnpm pack --dry-run --json", {
-      cwd: projectRoot,
-      stdio: ["pipe", "pipe", "pipe"],
-      encoding: "utf8",
-      maxBuffer: 64 * 1024 * 1024,
-    });
-    const parsed = JSON.parse(stdout);
-    const files = Array.isArray(parsed) ? parsed[0]?.files : parsed?.files;
-    if (!Array.isArray(files)) throw new Error(`Unexpected pack json structure: missing files array`);
-    const filePaths = files.map((f) => (typeof f === "string" ? f : f.path));
+    // 3+7. Pack ONCE (review ponytail: the dry-run + real pack duplicated the
+    // most expensive step); contents, workspace: leakage, and B-3 all read
+    // from the same tarball.
+    const tarball = packTarball(projectRoot);
+    let filePaths;
+    try {
+      const listing = execSync(`tar -tzf ${JSON.stringify(tarball)}`, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+      filePaths = listing.trim().split("\n").map((f) => f.replace(/^package\//, "").replace(/^\.\//, "")).filter(Boolean);
+    } catch {
+      filePaths = [];
+    }
     assertPackFiles(filePaths);
 
     // 4. Assert not placeholder (FR-039)
@@ -334,7 +334,6 @@ export function verifyPack(projectRoot = process.cwd(), opts = {}) {
     assertReleaseWorkflowInvariants(projectRoot);
 
     // 7. Packed manifest carries no workspace: specifiers
-    const tarball = packTarball(projectRoot);
     const manifestJson = readTarballManifest(tarball);
     assertNoWorkspaceSpecifiers(manifestJson, "root tarball");
     fs.rmSync(tarball, { force: true });
@@ -361,7 +360,7 @@ export function verifyPack(projectRoot = process.cwd(), opts = {}) {
 
     // Weight budget: clean install of the packed tarball ≤ 150 MB unpacked.
     const { mb, installed } = measureCoreInstallWeight(tarball);
-    console.log(`[pack-verify] seepient-core clean-install closure: ${mb} MB (budget ${CORE_WEIGHT_BUDGET_MB} MB)`);
+    console.log(`[pack-verify] seepient-core clean-install closure: ${mb} MiB (budget ${CORE_WEIGHT_BUDGET_MB} MiB, du -sm)`);
     if (mb > CORE_WEIGHT_BUDGET_MB) {
       throw new Error(`Weight budget exceeded: ${mb} MB > ${CORE_WEIGHT_BUDGET_MB} MB`);
     }
@@ -387,7 +386,7 @@ if (isMain) {
   try {
     const result = verifyPack(projectRoot, { core });
     if (core) {
-      console.log(`✓ Core pack verification passed: ${result.installedCount} packages installed, ${result.weightMb} MB (≤ ${CORE_WEIGHT_BUDGET_MB} MB).`);
+      console.log(`✓ Core pack verification passed: ${result.installedCount} packages installed, ${result.weightMb} MiB (≤ ${CORE_WEIGHT_BUDGET_MB} MiB).`);
     } else {
       console.log(`✓ Pack verification passed: all native helpers and manifest present (${result.files} files); B-3 + workflow invariants green.`);
     }

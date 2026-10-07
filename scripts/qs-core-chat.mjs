@@ -116,7 +116,7 @@ async function main() {
     const s2 = await agent.chatStream("second");
     let t2 = "";
     for await (const d of s2.textStream) t2 += d;
-    check("flow (a) turn 2 carries history", t2 === "turn two answer");
+    check("flow (a) turn 2 completes after turn 1 (multi-turn session)", t2 === "turn two answer");
   }
 
   // ── flow (b): createChat front door — send + stream + owned history ──

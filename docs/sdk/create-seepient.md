@@ -56,7 +56,7 @@ For multi-tenant workers and cloud functions requiring full state injection (aud
 | `providerAccount` | `string`                               | *(none)*                   | Active provider account name (persisted and restored with session state) |
 | `providers`     | `Record<string, any>`                    | *(none)*                   | Programmatic provider account definitions for isolated or in-memory runtimes |
 | `modelAssignments` | `PurposeModelMap`                     | *(none)*                   | Custom purpose-and-tier model routing assignments |
-| `credentials`   | `CredentialStore`                        | Local/env store            | Injected credential store (e.g. `MemoryCredentialStore` for isolated runtimes) |
+| `credentials`   | `CredentialStore`                        | In-memory empty default    | Injected credential store (e.g. `MemoryCredentialStore` for isolated runtimes) — put records with `put(id, {kind: "api_key", keyValue})` and reference them via `credential: { kind: "seepient", id }` |
 | `overlayFile`   | `string`                                 | *(none)*                   | Config overlay file path, or `":memory:"` for zero-disk ephemeral agents |
 | `adapter`       | `InferenceAdapter`                       | `AggregateInferenceAdapter`| Custom inference adapter or test double |
 | `override`      | `{ providerAccount?, model?, thinkingLevel? }` | *(none)*             | Per-instance model and account override |

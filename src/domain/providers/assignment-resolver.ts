@@ -90,7 +90,7 @@ export async function resolveInvocationPlan(
   if (!assignment) {
     throw new InferenceError({
       code: "unconfigured_purpose",
-      message: `No model assignment configured for purpose "${purpose}" (tier "${tier}")`,
+      message: `No model assignment configured for purpose "${purpose}" (tier "${tier}") — configure providers + modelAssignments (or inject a runtime that has them)`,
       retryable: false,
     });
   }
