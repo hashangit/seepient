@@ -217,11 +217,14 @@ export function assertReleaseWorkflowInvariants(repoRoot) {
   const firstRoot = wf.toLowerCase().includes("pnpm publish");
   if (!firstRoot) violations.push('release.yml must use "pnpm publish" (never raw "npm publish")');
   if (/(?<!p)npm publish/.test(wf)) violations.push('release.yml mentions raw "npm publish" — forbidden (workspace:^ poison)');
-  // Explicit build before pack:verify (pnpm -r build does NOT build the root — E12).
-  if (!/pnpm\s+--filter\s+seepient-core\s+build/.test(wf)) {
-    violations.push('release.yml must run `pnpm --filter seepient-core build` explicitly before pack:verify');
+  // Explicit build before pack:verify. The core manifest is script-free
+  // (E12 — pnpm publish --dry-run would run prepublishOnly), so
+  // `pnpm --filter seepient-core build` has nothing to run; the root
+  // `build:core` script is the build entry (P0-1).
+  if (!/pnpm\s+run\s+build:core/.test(wf)) {
+    violations.push('release.yml must run `pnpm run build:core` explicitly before pack:verify');
   }
-  const buildIdx = wf.search(/pnpm\s+--filter\s+seepient-core\s+build/);
+  const buildIdx = wf.search(/pnpm\s+run\s+build:core/);
   const verifyIdx = wf.indexOf("pack:verify");
   if (buildIdx !== -1 && verifyIdx !== -1 && buildIdx > verifyIdx) {
     violations.push("release.yml: the explicit core build must appear BEFORE pack:verify");
