@@ -5,7 +5,7 @@
  * requires displaying the high-risk confirmation overlay.
  */
 
-import type { ConsentMode } from '../../foundations/settings-schema.js';
+import type { ConsentMode } from 'seepient-core/dist/foundations/settings-schema.js';
 
 export interface SettingLike {
   dotKey: string;

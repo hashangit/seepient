@@ -3,10 +3,10 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { ProviderRuntime } from "../../../domain/providers/provider-runtime.js";
+import type { ProviderRuntime } from "seepient-core/dist/domain/providers/provider-runtime.js";
 import type { ApiKeyEntry } from "../../auth/auth.js";
 import { hasScope } from "../../auth/auth.js";
-import { redactUrlCredentials } from "../../../foundations/security/redact.js";
+import { redactUrlCredentials } from "seepient-core/dist/foundations/security/redact.js";
 import { createProviderManagerApi, sanitizeBaseUrl } from "../../cli/provider-manager-api.js";
 import { PayloadTooLargeError } from "../body.js";
 import {

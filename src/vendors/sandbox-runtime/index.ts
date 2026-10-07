@@ -21,12 +21,12 @@
  * dependency. The dynamic import below keeps unused SDK out of memory when
  * not installed.
  */
-import type { CommandDescriptor, RootRequest } from "../../foundations/contracts/tool-effects.js";
+import type { CommandDescriptor, RootRequest } from "seepient-core/dist/foundations/contracts/tool-effects.js";
 import { spawn } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { securityStoreRoots } from "../../foundations/security-paths.js";
+import { securityStoreRoots } from "seepient-core/dist/foundations/security-paths.js";
 // Type-only imports from the pinned SDK (0.0.67). `ISandboxManager` is not
 // re-exported from the package index, so it is imported from the deep
 // declaration; both are erased at compile time, keeping the optional peer

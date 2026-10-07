@@ -25,7 +25,7 @@
 // both Capabilities and Vendors may import (security-paths.ts) — so the
 // SEEPIENT_SECURITY_DIR override is enforced by every surface, not only the
 // default ~/.seepient/security (review P0).
-export { isSecurityPath } from "../../foundations/security-paths.js";
+export { isSecurityPath } from "seepient-core/dist/foundations/security-paths.js";
 
 /**
  * Environment variable prefixes that MUST NOT cross the execution boundary.

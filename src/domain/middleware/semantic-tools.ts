@@ -8,11 +8,15 @@
 
 import type { PipelineContext, Middleware } from '../../foundations/contracts/middleware.js';
 import type { ToolModule } from '../../foundations/contracts/tool.js';
-import type { MCPGateway } from '../../capabilities/gateway/gateway.js';
-import { scoreRelevance } from '../../capabilities/gateway/semantic-scorer.js';
+import { scoreRelevance } from './semantic-scorer.js';
+
+/** Structural gateway shape the middleware needs (spec 027: no full-module type edge). */
+interface InjectableGateway {
+  getInjectableTools(): ToolModule[];
+}
 
 export function semanticToolInjectionMiddleware(
-  gateway: MCPGateway,
+  gateway: InjectableGateway,
   topK: number = 3,
 ): Middleware {
   return async (ctx: PipelineContext, next: () => Promise<void>) => {

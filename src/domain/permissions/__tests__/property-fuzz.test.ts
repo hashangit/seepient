@@ -18,7 +18,8 @@ import {
   effectiveCapabilities,
   isDeniedByRule,
 } from "../capability-store.js";
-import { digestAction, canonicalizePath } from "../default-analyzers.js";
+import { digestAction } from "../../../foundations/action-digest.js";
+import { canonicalizePath } from "../../../capabilities/tools/analyzers.js";
 import type {
   Capability,
   CapabilitySet,

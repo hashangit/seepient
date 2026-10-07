@@ -7,11 +7,11 @@
 
 import { Client, StdioClientTransport, SSEClientTransport, CreateMessageRequestSchema } from '../../vendors/mcp.js';
 
-import { GatewayError } from '../../foundations/errors.js';
-import { safeSsrfFetch } from '../../foundations/network/ssrf-fetch.js';
-import type { ToolModule } from '../../foundations/contracts/tool.js';
+import { GatewayError } from 'seepient-core/dist/foundations/errors.js';
+import { safeSsrfFetch } from 'seepient-core/dist/foundations/network/ssrf-fetch.js';
+import type { ToolModule } from 'seepient-core/dist/foundations/contracts/tool.js';
 import { GatewaySettingsAdapter } from './settings-adapter.js';
-import { scoreRelevance } from './semantic-scorer.js';
+import { scoreRelevance } from 'seepient-core/dist/domain/middleware/semantic-scorer.js';
 import type {
   AuditRecord,
   GatewayConfig,

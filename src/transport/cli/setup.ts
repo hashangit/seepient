@@ -9,7 +9,7 @@ import chalk from 'chalk';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { isNonInteractive } from '../../foundations/environment.js';
+import { isNonInteractive } from 'seepient-core/dist/foundations/environment.js';
 
 export function ensureDocumentsWorkspace(): void {
   const docsDir = path.join(os.homedir(), 'seepient_documents');

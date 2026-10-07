@@ -13,12 +13,12 @@
 import chalk from 'chalk';
 import ora from 'ora';
 import type { CommandHandler } from './registry.js';
-import { runAgentLoop } from '../../../domain/agent-loop.js';
-import { now } from '../../../domain/context/message-convert.js';
-import { generateId } from '../../../foundations/id.js';
-import { createHookExecutor } from '../../../domain/hooks.js';
-import type { Message } from '../../../foundations/types.js';
-import { buildSystemPrompt } from '../../../domain/prompts/system-prompts.js';
+import { runAgentLoop } from 'seepient-core/dist/domain/agent-loop.js';
+import { now } from 'seepient-core/dist/domain/context/message-convert.js';
+import { generateId } from 'seepient-core/dist/foundations/id.js';
+import { createHookExecutor } from 'seepient-core/dist/domain/hooks.js';
+import type { Message } from 'seepient-core/dist/foundations/types.js';
+import { buildSystemPrompt } from 'seepient-core/dist/domain/prompts/system-prompts.js';
 
 export const compactHandler: CommandHandler = async (ctx) => {
   const { agent, args } = ctx;

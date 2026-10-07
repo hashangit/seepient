@@ -3,15 +3,15 @@ import type {
   ImageBackend,
   InferenceTarget,
   InferenceOptions,
-} from "../../foundations/contracts/backend-ports.js";
+} from "seepient-core/dist/foundations/contracts/backend-ports.js";
 import type {
   ImageRequest,
   ImageResult,
-} from "../../foundations/schemas/inference.js";
-import { InferenceError } from "../../foundations/errors.js";
-import { classifyInferenceError } from "../../foundations/errors/error-classifier.js";
+} from "seepient-core/dist/foundations/schemas/inference.js";
+import { InferenceError } from "seepient-core/dist/foundations/errors.js";
+import { classifyInferenceError } from "seepient-core/dist/foundations/errors/error-classifier.js";
 import { canonicalToGoogleImagePayload } from "./google-canonical-converter.js";
-import { assertBaseUrlEgressAllowed } from "../egress-check.js";
+import { assertBaseUrlEgressAllowed } from "seepient-core/dist/vendors/egress-check.js";
 
 /**
  * Raw Google image backend executing via `@google/genai`.

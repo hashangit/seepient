@@ -8,11 +8,13 @@
  *   - Live mode toggling without restart
  */
 import { describe, it, expect, beforeEach } from "vitest";
+import { registerFullComposition } from "../../__tests__/full-composition.js";
+registerFullComposition(); // spec 027: full-package composition (built-ins + analyzers + boundary)
 import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import { PolicyEngine } from "../policy-engine.js";
-import { ALL_ANALYZERS } from "../action-lifecycle-factory.js";
+import { allAnalyzers } from "../action-lifecycle-factory.js";
 import { InMemoryArtifactStore } from "../../../capabilities/execution/in-memory-artifact-store.js";
 import { createSnapshotStore, tagFor } from "../../../foundations/hashline/snapshot-store.js";
 import type { PolicyContext } from "../../../foundations/contracts/permission-policy.js";
@@ -127,33 +129,33 @@ describe("consent mode matrix (spec 017, T024 / T032 / T033 / QS-4)", () => {
       const p = pCtx();
 
       // Zero effect / always allowed
-      const dt = await ALL_ANALYZERS.get_current_datetime({}, ctx);
+      const dt = await allAnalyzers().get_current_datetime({}, ctx);
       expect(engine.evaluate(dt, p).decision).toBe("allow");
 
       // Read normal file
-      const readNormal = await ALL_ANALYZERS.read_file({ path: "normal.txt" }, ctx);
+      const readNormal = await allAnalyzers().read_file({ path: "normal.txt" }, ctx);
       expect(engine.evaluate(readNormal, p).decision).toBe("allow");
 
       // Read secret file (.env)
-      const readSecret = await ALL_ANALYZERS.read_file({ path: ".env" }, ctx);
+      const readSecret = await allAnalyzers().read_file({ path: ".env" }, ctx);
       expect(engine.evaluate(readSecret, p).decision).toBe("needs-approval");
 
       // Write / edit in workspace
-      const write = await ALL_ANALYZERS.write_file({ path: "out.txt", content: "data" }, ctx);
+      const write = await allAnalyzers().write_file({ path: "out.txt", content: "data" }, ctx);
       expect(engine.evaluate(write, p).decision).toBe("needs-approval");
 
       // Shell
-      const shellSafe = await ALL_ANALYZERS.execute_shell_command({ command: "ls" }, ctx);
+      const shellSafe = await allAnalyzers().execute_shell_command({ command: "ls" }, ctx);
       expect(engine.evaluate(shellSafe, p).decision).toBe("needs-approval");
 
       // Brokered
-      const webSearch = await ALL_ANALYZERS.web_search({ query: "q" }, ctx);
+      const webSearch = await allAnalyzers().web_search({ query: "q" }, ctx);
       expect(engine.evaluate(webSearch, p).decision).toBe("needs-approval");
 
-      const readWeb = await ALL_ANALYZERS.read_website({ url: "https://example.com" }, ctx);
+      const readWeb = await allAnalyzers().read_website({ url: "https://example.com" }, ctx);
       expect(engine.evaluate(readWeb, p).decision).toBe("needs-approval");
 
-      const email = await ALL_ANALYZERS.send_email({ to: "a@b.com", subject: "s", body: "b" }, ctx);
+      const email = await allAnalyzers().send_email({ to: "a@b.com", subject: "s", body: "b" }, ctx);
       expect(engine.evaluate(email, p).decision).toBe("needs-approval");
     });
   });
@@ -165,58 +167,58 @@ describe("consent mode matrix (spec 017, T024 / T032 / T033 / QS-4)", () => {
       const p = pCtx();
 
       // Zero effect
-      const dt = await ALL_ANALYZERS.get_current_datetime({}, ctx);
+      const dt = await allAnalyzers().get_current_datetime({}, ctx);
       expect(engine.evaluate(dt, p).decision).toBe("allow");
 
       // Read normal file
-      const readNormal = await ALL_ANALYZERS.read_file({ path: "normal.txt" }, ctx);
+      const readNormal = await allAnalyzers().read_file({ path: "normal.txt" }, ctx);
       expect(engine.evaluate(readNormal, p).decision).toBe("allow");
 
       // Read secret file (.env) routes to prompt
-      const readSecret = await ALL_ANALYZERS.read_file({ path: ".env" }, ctx);
+      const readSecret = await allAnalyzers().read_file({ path: ".env" }, ctx);
       expect(engine.evaluate(readSecret, p).decision).toBe("needs-approval");
 
       // Write / edit inside workspace auto-approves
-      const write = await ALL_ANALYZERS.write_file({ path: "out.txt", content: "data" }, ctx);
+      const write = await allAnalyzers().write_file({ path: "out.txt", content: "data" }, ctx);
       expect(engine.evaluate(write, p).decision).toBe("allow");
 
       const editTag = tagFor("normal.txt", "normal content\n");
-      const edit = await ALL_ANALYZERS.edit_file(
+      const edit = await allAnalyzers().edit_file(
         { patch: `[normal.txt#${editTag}]\n+updated` },
         ctx,
       );
       expect(engine.evaluate(edit, p).decision).toBe("allow");
 
       // Shell safe auto-approves
-      const shellSafe = await ALL_ANALYZERS.execute_shell_command({ command: "ls" }, ctx);
+      const shellSafe = await allAnalyzers().execute_shell_command({ command: "ls" }, ctx);
       expect(engine.evaluate(shellSafe, p).decision).toBe("allow");
 
       // Shell destructive routes to prompt
-      const shellDestructive = await ALL_ANALYZERS.execute_shell_command(
+      const shellDestructive = await allAnalyzers().execute_shell_command(
         { command: "rm -rf /tmp/test" },
         ctx,
       );
       expect(engine.evaluate(shellDestructive, p).decision).toBe("needs-approval");
 
       // Web search & read website auto-approve
-      const webSearch = await ALL_ANALYZERS.web_search({ query: "q" }, ctx);
+      const webSearch = await allAnalyzers().web_search({ query: "q" }, ctx);
       expect(engine.evaluate(webSearch, p).decision).toBe("allow");
 
-      const readWeb = await ALL_ANALYZERS.read_website({ url: "https://example.com" }, ctx);
+      const readWeb = await allAnalyzers().read_website({ url: "https://example.com" }, ctx);
       expect(engine.evaluate(readWeb, p).decision).toBe("allow");
 
       // generate_image & optimize_prompt auto-approve
-      const img = await ALL_ANALYZERS.generate_image({ prompt: "art" }, ctx);
+      const img = await allAnalyzers().generate_image({ prompt: "art" }, ctx);
       expect(engine.evaluate(img, p).decision).toBe("allow");
 
-      const opt = await ALL_ANALYZERS.optimize_prompt({ raw_prompt: "prompt" }, ctx);
+      const opt = await allAnalyzers().optimize_prompt({ raw_prompt: "prompt" }, ctx);
       expect(engine.evaluate(opt, p).decision).toBe("allow");
 
       // Sends route to prompt
-      const email = await ALL_ANALYZERS.send_email({ to: "a@b.com", subject: "s", body: "b" }, ctx);
+      const email = await allAnalyzers().send_email({ to: "a@b.com", subject: "s", body: "b" }, ctx);
       expect(engine.evaluate(email, p).decision).toBe("needs-approval");
 
-      const notify = await ALL_ANALYZERS.send_notification({ platform: "feishu", content: "hi" }, ctx);
+      const notify = await allAnalyzers().send_notification({ platform: "feishu", content: "hi" }, ctx);
       expect(engine.evaluate(notify, p).decision).toBe("needs-approval");
     });
   });
@@ -228,15 +230,15 @@ describe("consent mode matrix (spec 017, T024 / T032 / T033 / QS-4)", () => {
       const p = pCtx();
 
       const actions = [
-        await ALL_ANALYZERS.read_file({ path: ".env" }, ctx),
-        await ALL_ANALYZERS.write_file({ path: "out.txt", content: "c" }, ctx),
-        await ALL_ANALYZERS.execute_shell_command({ command: "rm -rf /tmp/test" }, ctx),
-        await ALL_ANALYZERS.web_search({ query: "q" }, ctx),
-        await ALL_ANALYZERS.read_website({ url: "https://example.com" }, ctx),
-        await ALL_ANALYZERS.generate_image({ prompt: "art" }, ctx),
-        await ALL_ANALYZERS.optimize_prompt({ raw_prompt: "prompt" }, ctx),
-        await ALL_ANALYZERS.send_email({ to: "a@b.com", subject: "s", body: "b" }, ctx),
-        await ALL_ANALYZERS.send_notification({ platform: "feishu", content: "hi" }, ctx),
+        await allAnalyzers().read_file({ path: ".env" }, ctx),
+        await allAnalyzers().write_file({ path: "out.txt", content: "c" }, ctx),
+        await allAnalyzers().execute_shell_command({ command: "rm -rf /tmp/test" }, ctx),
+        await allAnalyzers().web_search({ query: "q" }, ctx),
+        await allAnalyzers().read_website({ url: "https://example.com" }, ctx),
+        await allAnalyzers().generate_image({ prompt: "art" }, ctx),
+        await allAnalyzers().optimize_prompt({ raw_prompt: "prompt" }, ctx),
+        await allAnalyzers().send_email({ to: "a@b.com", subject: "s", body: "b" }, ctx),
+        await allAnalyzers().send_notification({ platform: "feishu", content: "hi" }, ctx),
       ];
 
       for (const action of actions) {
@@ -249,7 +251,7 @@ describe("consent mode matrix (spec 017, T024 / T032 / T033 / QS-4)", () => {
   describe("live mode toggling (T032)", () => {
     it("immediately changes the next decision when approvalMode is switched", async () => {
       const p = makeContext("manual");
-      const write = await ALL_ANALYZERS.write_file({ path: "out.txt", content: "c" }, ctx);
+      const write = await allAnalyzers().write_file({ path: "out.txt", content: "c" }, ctx);
 
       // In manual -> needs-approval
       expect(engine.evaluate(write, p).decision).toBe("needs-approval");

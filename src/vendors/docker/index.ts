@@ -9,7 +9,7 @@
  * Image/mount/limit allowlists are enforced here so a forged dispatch cannot
  * launch an unapproved image or mount a sibling tenant's workspace.
  */
-import type { WorkerDispatch, WorkspaceLease } from "../../foundations/contracts/worker-protocol.js";
+import type { WorkerDispatch, WorkspaceLease } from "seepient-core/dist/foundations/contracts/worker-protocol.js";
 
 /** Allowlisted image digests (immutable worker images). */
 export interface ImageAllowlist {

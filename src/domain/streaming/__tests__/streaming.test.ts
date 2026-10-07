@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { registerFullComposition } from "../../__tests__/full-composition.js";
+registerFullComposition(); // spec 027: full-package composition
 import { runAgentLoop } from '../../agent-loop.js';
 import { createHookExecutor } from '../../hooks.js';
 import { StreamingResponseAccumulator } from '../stream-accumulator.js';

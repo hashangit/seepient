@@ -18,6 +18,7 @@
  * boundary is covered by the executor + broker test suites.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import "../sdk/full-registrations.js"; // spec 027: full-package composition (built-ins + analyzers)
 import { mkdtempSync, rmSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

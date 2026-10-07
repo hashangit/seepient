@@ -1,7 +1,7 @@
 import { chromium } from '../../vendors/playwright.js';
 import { Readability } from '../../vendors/readability.js';
 import { JSDOM } from '../../vendors/jsdom.js';
-import { ToolModule } from '../../foundations/contracts/tool.js';
+import { ToolModule } from 'seepient-core/dist/foundations/contracts/tool.js';
 
 export const BrowserTool: ToolModule = {
   name: "Web Browser",

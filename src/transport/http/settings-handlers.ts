@@ -5,9 +5,9 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'http';
-import { SettingsError } from '../../domain/settings/settings-manager.js';
-import { SETTINGS_MAP, SETTINGS_SCHEMA, SETTINGS_CATEGORIES } from '../../foundations/settings-schema.js';
-import type { SettingsManagerLike } from '../../foundations/contracts/settings-manager-like.js';
+import { SettingsError } from 'seepient-core/dist/domain/settings/settings-manager.js';
+import { SETTINGS_MAP, SETTINGS_SCHEMA, SETTINGS_CATEGORIES } from 'seepient-core/dist/foundations/settings-schema.js';
+import type { SettingsManagerLike } from 'seepient-core/dist/foundations/contracts/settings-manager-like.js';
 import type { WebSocket, ConnectionState } from '../ws/ws-types.js';
 import type { ApiKeyEntry, KeyScope } from '../auth/auth.js';
 import { hasScope } from '../auth/auth.js';
@@ -22,7 +22,7 @@ export interface SettingsHandlerContext {
   maxBodyBytes?: number;
   /** Get all connected WS clients (excluding sender) */
   getOtherClients: (excludeWs?: WebSocket) => Array<{ ws: WebSocket; state: ConnectionState }>;
-  runtime?: import('../../foundations/contracts/provider-runtime.js').ProviderRuntimeContract | import('../../domain/providers/provider-runtime.js').ProviderRuntime;
+  runtime?: import('seepient-core/dist/foundations/contracts/provider-runtime.js').ProviderRuntimeContract | import('seepient-core/dist/domain/providers/provider-runtime.js').ProviderRuntime;
   tenancyMode?: "single" | "multi";
 }
 

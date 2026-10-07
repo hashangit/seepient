@@ -16,8 +16,8 @@
 
 import chalk from 'chalk';
 import type { Agent } from '../agent.js';
-import type { SkillRegistry } from '../../../capabilities/skills/types.js';
-import type { ContextBreakdown } from '../../../foundations/contracts/context.js';
+import type { SkillRegistry } from 'seepient-core/dist/capabilities/skills/types.js';
+import type { ContextBreakdown } from 'seepient-core/dist/foundations/contracts/context.js';
 
 // ── Types ──────────────────────────────────────────────────────────────
 

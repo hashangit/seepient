@@ -6,7 +6,7 @@
  */
 
 import type { CommandHandler, CommandRegistry } from './registry.js';
-import type { SkillRegistry } from '../../../capabilities/skills/types.js';
+import type { SkillRegistry } from 'seepient-core/dist/capabilities/skills/types.js';
 
 export function createHelpHandler(
   registry: CommandRegistry,

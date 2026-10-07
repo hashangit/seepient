@@ -3,7 +3,7 @@ import type {
   DiscoverySource,
   DiscoveryResult,
   ProviderAccountContext,
-} from "../../foundations/contracts/backend-ports.js";
+} from "seepient-core/dist/foundations/contracts/backend-ports.js";
 
 /**
  * OpenAI model discovery source querying `/v1/models`.

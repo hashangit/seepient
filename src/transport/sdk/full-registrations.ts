@@ -7,16 +7,21 @@
  * composition root (SDK entry, CLI, server) at module load — engine modules
  * hold no static or dynamic edge into this tree.
  */
-import type { ToolModule } from "../../foundations/contracts/tool.js";
+import type { ToolModule } from "seepient-core/dist/foundations/contracts/tool.js";
 import {
+  registerBuiltInAnalyzers,
   registerDefaultToolModules,
   registerMediaVendorOperationHandlerFactory,
   registerExecutionBoundaryFactory,
   registerProviderManagerApiFactory,
-} from "../../foundations/injection-seams.js";
+  registerBrokerConnectorEvaluator,
+} from "seepient-core/dist/foundations/injection-seams.js";
 import { registerImageBackends } from "../../capabilities/inference/register-image-backends.js";
+import { registerDiscoverySources } from "../../capabilities/inference/register-discovery-sources.js";
 import { builtInTools } from "../../capabilities/tools/index.js";
-import { UseSkillTool } from "../../domain/skills/use-skill-tool.js";
+import { DEFAULT_ANALYZERS } from "../../capabilities/tools/analyzers.js";
+import { COMM_ANALYZERS } from "../../capabilities/tools/comm-analyzers.js";
+import { UseSkillTool } from "seepient-core/dist/domain/skills/use-skill-tool.js";
 import { createMediaVendorOperationHandler } from "../../domain/media/vendor-operation-handler.js";
 import { buildLocalBoundary } from "../../capabilities/execution/build-local-boundary.js";
 
@@ -31,11 +36,19 @@ export const FULL_TOOL_MODULES: readonly ToolModule[] = Object.freeze([
 
 registerDefaultToolModules(FULL_TOOL_MODULES);
 
+// Spec 027: built-in tool analyzers (prepared-action builders) register with
+// the engine; the consent pipeline consults the seam table.
+registerBuiltInAnalyzers({
+  ...DEFAULT_ANALYZERS,
+  ...COMM_ANALYZERS,
+});
+
 // Spec 027 FR-009: media/image vendors are full-package registrations.
 registerMediaVendorOperationHandlerFactory(
   (opts) => createMediaVendorOperationHandler(opts as Parameters<typeof createMediaVendorOperationHandler>[0]),
 );
 registerImageBackends();
+registerDiscoverySources();
 
 // Spec 027 FR-012: the boundary-carrying pipeline (sandbox + effect broker +
 // native helper) is a full-package injection; the engine default is light.
@@ -43,6 +56,13 @@ registerExecutionBoundaryFactory(
   async (opts) =>
     buildLocalBoundary(opts as Parameters<typeof buildLocalBoundary>[0]),
 );
+
+// Spec 027: broker-connector evaluation (MCP connector registry) is lazy
+// full-package machinery behind the seam.
+registerBrokerConnectorEvaluator(async (registration, args, ctx) => {
+  const { evaluateBrokerConnector } = await import("../../capabilities/tools/connector-registry.js");
+  return evaluateBrokerConnector(registration as never, args, ctx as never);
+});
 
 // Spec 027: provider management (CLI impl) arrives via a lazy registration.
 registerProviderManagerApiFactory(async (runtime) => {

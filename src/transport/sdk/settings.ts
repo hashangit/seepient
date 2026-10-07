@@ -10,15 +10,15 @@ import {
   SettingsError,
   SettingValue,
   SettingEntry,
-} from '../../domain/settings/settings-manager.js';
-import { SettingsCategory } from '../../foundations/settings-schema.js';
+} from 'seepient-core/dist/domain/settings/settings-manager.js';
+import { SettingsCategory } from 'seepient-core/dist/foundations/settings-schema.js';
 import {
   loadMergedConfig,
   loadJsonConfig,
   getConfigPaths,
   applyEnvOverrides,
   AppConfig,
-} from '../../foundations/config.js';
+} from 'seepient-core/dist/foundations/config.js';
 
 // ── Singleton ─────────────────────────────────────────────────────────────
 

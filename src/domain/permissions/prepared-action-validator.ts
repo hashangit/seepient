@@ -22,7 +22,7 @@ import type {
   EffectRequest,
   ToolRiskCategory,
 } from "../../foundations/contracts/tool-effects.js";
-import { digestAction, digestArgs } from "../../capabilities/tools/analyzers.js";
+import { digestAction, digestArgs } from "../../foundations/action-digest.js";
 
 export const SUPPORTED_OPERATION_KINDS: readonly string[] = [
   "commit-files",

@@ -41,9 +41,18 @@ describe('docs example import and runtime checks (FR-003)', () => {
       return names;
     }
 
+    // Spec 027: the full entry star-exports the core entry — follow the star
+    // so docs teaching `seepient` (which re-exports the core surface) still
+    // resolve against code truth.
     const knownSdkExports = new Set([
       ...Object.keys(sdkExports),
       ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/index.ts')),
+      ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/core.ts')),
+      ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/ask.ts')),
+      ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/chat.ts')),
+      ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/seepient.ts')),
+      ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/tools.ts')),
+      ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/custom-tools.ts')),
     ]);
     const unexportedImports: string[] = [];
 

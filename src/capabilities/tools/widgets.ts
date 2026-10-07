@@ -8,9 +8,9 @@
  * See `contracts/widget-protocol.md`.
  */
 
-import { WidgetError } from '../../foundations/errors.js';
-import type { ToolModule } from '../../foundations/contracts/tool.js';
-import type { WidgetKind, WidgetAction, WidgetSpec } from '../../foundations/contracts/presentation.js';
+import { WidgetError } from 'seepient-core/dist/foundations/errors.js';
+import type { ToolModule } from 'seepient-core/dist/foundations/contracts/tool.js';
+import type { WidgetKind, WidgetAction, WidgetSpec } from 'seepient-core/dist/foundations/contracts/presentation.js';
 
 const VALID_KINDS = new Set([
   'table', 'keyvalue', 'chart', 'tree', 'panel',

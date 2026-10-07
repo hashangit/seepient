@@ -10,7 +10,7 @@ import type { Duplex } from "stream";
 import type {
   Message,
   Usage,
-} from "../../foundations/types.js";
+} from "seepient-core/dist/foundations/types.js";
 
 // ── WS library type shims ────────────────────────────────────────────
 
@@ -351,7 +351,7 @@ export interface WsConnectionRegistry {
     /** Authenticated principal captured at create time (022-5-WO1 D1). */
     principalId?: string;
   }>;
-  durableApprovalStore: import("../../domain/permissions/durable-approval-store.js").DurableApprovalStore;
+  durableApprovalStore: import("seepient-core/dist/domain/permissions/durable-approval-store.js").DurableApprovalStore;
   getOtherClients(excludeWs?: WebSocket): Array<{ ws: WebSocket; state: ConnectionState }>;
   getActiveConnectionCount(): number;
   closeAllConnections(): void;
@@ -381,8 +381,8 @@ export interface WebSocketHandlerContext {
     apiKeyHash?: string;
     tenantId?: string;
     principalId?: string;
-    approveTool?: import("../../foundations/types.js").ApproveToolFn;
-    history?: import("../../foundations/types.js").Message[];
+    approveTool?: import("seepient-core/dist/foundations/types.js").ApproveToolFn;
+    history?: import("seepient-core/dist/foundations/types.js").Message[];
     onText: (delta: string) => void;
     onToolCall: (info: { name: string; args: Record<string, unknown>; callId: string }) => void;
     onToolResult: (info: { callId: string; output: string; success: boolean }) => void;

@@ -6,6 +6,7 @@
  * through a real product surface." No fake boundary.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import "../sdk/full-registrations.js"; // spec 027: full-package composition (built-ins + analyzers)
 import { mkdtempSync, rmSync, realpathSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

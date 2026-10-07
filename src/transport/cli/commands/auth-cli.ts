@@ -10,7 +10,7 @@ import chalk from "chalk";
 import * as readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { generateApiKey, KeyScope } from "../../auth/auth.js";
-import { createAmbientProviderRuntime } from "../../../domain/providers/provider-runtime.js";
+import { createAmbientProviderRuntime } from "seepient-core/dist/domain/providers/provider-runtime.js";
 import { createProviderManagerApi } from "../provider-manager-api.js";
 
 export function registerAuthCommands(program: Command): void {
@@ -57,7 +57,7 @@ export function registerAuthCommands(program: Command): void {
       }
 
       // Interactive TTY menu
-      const { isOAuthSupported } = await import("../../../domain/providers/oauth-service.js");
+      const { isOAuthSupported } = await import("seepient-core/dist/domain/providers/oauth-service.js");
       const hasOAuth = isOAuthSupported(upstreamProvider);
 
       console.log(chalk.bold.cyan(`\nAuthenticate provider account "${providerId}":`));

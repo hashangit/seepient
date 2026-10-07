@@ -14,7 +14,7 @@ import type {
 } from "./ws-types.js";
 import type { SettingsHandlerContext } from "../http/settings-handlers.js";
 import { safeSend } from "./connection-registry.js";
-import { redactString } from "../../foundations/security/redact.js";
+import { redactString } from "seepient-core/dist/foundations/security/redact.js";
 import { requireWsScope } from "./session-control.js";
 
 export function handleSwitchProvider(

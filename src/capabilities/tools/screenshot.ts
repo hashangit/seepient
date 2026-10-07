@@ -1,5 +1,5 @@
 import { chromium } from '../../vendors/playwright.js';
-import { ToolModule } from '../../foundations/contracts/tool.js';
+import { ToolModule } from 'seepient-core/dist/foundations/contracts/tool.js';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as child_process from 'child_process';

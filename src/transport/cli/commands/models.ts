@@ -1,6 +1,6 @@
 import chalk from 'chalk';
-import { createAmbientProviderRuntime } from '../../../domain/providers/provider-runtime.js';
-import { isNonInteractive } from '../../../foundations/environment.js';
+import { createAmbientProviderRuntime } from 'seepient-core/dist/domain/providers/provider-runtime.js';
+import { isNonInteractive } from 'seepient-core/dist/foundations/environment.js';
 import { Agent } from '../agent.js';
 import type { CommandHandler } from './registry.js';
 

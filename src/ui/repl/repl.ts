@@ -12,7 +12,7 @@ import inquirer from 'inquirer';
 import { Agent } from '../../transport/cli/agent.js';
 import { bootstrapCliSession } from '../../transport/cli/bootstrap.js';
 import { buildCommandRegistry } from '../../transport/cli/commands/build-registry.js';
-import type { ApproveToolFn } from '../../foundations/types.js';
+import type { ApproveToolFn } from 'seepient-core/dist/foundations/types.js';
 
 // ── Interrupt handling ───────────────────────────────────────────────
 
@@ -139,7 +139,7 @@ export async function chatWithInterrupt(
   agent: Agent,
   input: string,
   config?: any,
-  providerFactory?: import('../../domain/agent-loop.js').ProviderFactory,
+  providerFactory?: import('seepient-core/dist/domain/agent-loop.js').ProviderFactory,
 ): Promise<void> {
   const handle = setupInterrupt(agent);
   const approveTool = config ? createCliApproveTool(config, handle) : undefined;
@@ -173,7 +173,7 @@ export async function runChat(queryParts: string[], options: any) {
 
   // @path resolver — hoisted so the initial query resolves at the caller,
   // not inside Agent.chat() (T022). The resolver is idempotent.
-  const { resolveReferences } = await import('../../capabilities/skills/resolver.js');
+  const { resolveReferences } = await import('seepient-core/dist/capabilities/skills/resolver.js');
 
   // Handle initial query if present
   if (initialQuery) {
@@ -203,7 +203,7 @@ export async function runChat(queryParts: string[], options: any) {
   const cmdRegistry = buildCommandRegistry(agent, fullConfig, activeProviderType, gatewayInstance);
 
   // Lazy-loaded modules (hoisted outside the loop to avoid repeated import overhead)
-  const { invokeSkill, createRuntimeSkillProviderSwitcher } = await import('../../domain/skills/skill-invoker.js');
+  const { invokeSkill, createRuntimeSkillProviderSwitcher } = await import('seepient-core/dist/domain/skills/skill-invoker.js');
 
   try {
     while (true) {

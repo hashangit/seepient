@@ -1,17 +1,17 @@
-import type { ProviderRuntime, ProviderRuntimeContract } from "../providers/provider-runtime.js";
-import type { InMemoryArtifactStore } from "../../capabilities/execution/in-memory-artifact-store.js";
-import type { BrokeredEffectRequest, PreparedArtifactRef } from "../../foundations/contracts/prepared-action.js";
-import type { BrokeredEffectResult } from "../../foundations/contracts/execution-brokers.js";
-import type { StructuredToolError } from "../../foundations/contracts/execution-boundary.js";
-import { InferenceError } from "../../foundations/errors.js";
-import { createSetupFailure } from "../../foundations/contracts/setup-failure.js";
+import type { ProviderRuntime, ProviderRuntimeContract } from "seepient-core/dist/domain/providers/provider-runtime.js";
+import type { InMemoryArtifactStore } from "seepient-core/dist/capabilities/execution/in-memory-artifact-store.js";
+import type { BrokeredEffectRequest, PreparedArtifactRef } from "seepient-core/dist/foundations/contracts/prepared-action.js";
+import type { BrokeredEffectResult } from "seepient-core/dist/foundations/contracts/execution-brokers.js";
+import type { StructuredToolError } from "seepient-core/dist/foundations/contracts/execution-boundary.js";
+import { InferenceError } from "seepient-core/dist/foundations/errors.js";
+import { createSetupFailure } from "seepient-core/dist/foundations/contracts/setup-failure.js";
 
 export interface MediaVendorOperationHandlerOptions {
   runtime: ProviderRuntime | ProviderRuntimeContract | (() => ProviderRuntime | ProviderRuntimeContract | undefined);
   artifacts: InMemoryArtifactStore;
   signal?: AbortSignal;
   tenancyMode?: "single" | "multi";
-  capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[];
+  capabilities?: import("seepient-core/dist/foundations/contracts/permission-policy.js").Capability[];
 }
 
 export function classifyMediaError(
@@ -122,11 +122,11 @@ export function createMediaVendorOperationHandler(
   opts: MediaVendorOperationHandlerOptions,
 ): (
   req: Extract<BrokeredEffectRequest, { kind: "vendor-operation" }>,
-  capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[],
+  capabilities?: import("seepient-core/dist/foundations/contracts/permission-policy.js").Capability[],
 ) => Promise<BrokeredEffectResult> {
   return async (
     req: Extract<BrokeredEffectRequest, { kind: "vendor-operation" }>,
-    capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[],
+    capabilities?: import("seepient-core/dist/foundations/contracts/permission-policy.js").Capability[],
   ): Promise<BrokeredEffectResult> => {
     const runtime = typeof opts.runtime === "function" ? opts.runtime() : opts.runtime;
     if (!runtime) {

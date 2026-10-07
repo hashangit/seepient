@@ -11,10 +11,12 @@
  * Plus the take_screenshot denial-message parity check (plan P1 step 3).
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { registerFullComposition } from "../../__tests__/full-composition.js";
+registerFullComposition(); // spec 027: full-package composition
 import { mkdtempSync, rmSync, realpathSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ALL_ANALYZERS } from "../action-lifecycle-factory.js";
+import { allAnalyzers } from "../action-lifecycle-factory.js";
 import { BrokerExecutor } from "../../../capabilities/execution/executors.js";
 import { FileCommitBroker } from "../../../capabilities/execution/file-commit-broker.js";
 import { EffectBroker } from "../../../capabilities/execution/effect-broker.js";
@@ -118,7 +120,7 @@ describe("image destination via broker chaining (spec 019)", () => {
 
   it("(a)+(b) destination declared → file lands via FileCommitBroker with the cap in the envelope", async () => {
     const dest = join(dir, "sunset.png");
-    const action = await ALL_ANALYZERS.generate_image({ prompt: "a sunset", output_path: dest }, ctx);
+    const action = await allAnalyzers().generate_image({ prompt: "a sunset", output_path: dest }, ctx);
     expect(action.operation.kind).toBe("broker");
 
     const result = await runBroker(action, envelopeFor(action, [dest]), PNG_BYTES);
@@ -133,7 +135,7 @@ describe("image destination via broker chaining (spec 019)", () => {
 
   it("(c) envelope without the commit-file cap → fetch happens but the write is refused", async () => {
     const dest = join(dir, "refused.png");
-    const action = await ALL_ANALYZERS.generate_image({ prompt: "no cap", output_path: dest }, ctx);
+    const action = await allAnalyzers().generate_image({ prompt: "no cap", output_path: dest }, ctx);
     // An envelope that forgot the commit-file cap the effect demands.
     const envelope = envelopeFor(action, []);
     const result = await runBroker(action, envelope, PNG_BYTES);
@@ -145,7 +147,7 @@ describe("image destination via broker chaining (spec 019)", () => {
   });
 
   it("(d) no destination → defaults to deterministic path in workspace root and commits file", async () => {
-    const action = await ALL_ANALYZERS.generate_image({ prompt: "no destination" }, ctx);
+    const action = await allAnalyzers().generate_image({ prompt: "no destination" }, ctx);
     expect(action.operation.kind).toBe("broker");
     if (action.operation.kind !== "broker") return;
     const req = action.operation.request as { outputCommit?: { destination: { canonicalPath: string } } };
@@ -164,7 +166,7 @@ describe("image destination via broker chaining (spec 019)", () => {
 
   it("(e) n > 1 creates distinct indexed file targets and commits each image", async () => {
     const dest = join(dir, "multi.png");
-    const action = await ALL_ANALYZERS.generate_image({ prompt: "multi cat", output_path: dest, n: 2 }, ctx);
+    const action = await allAnalyzers().generate_image({ prompt: "multi cat", output_path: dest, n: 2 }, ctx);
     expect(action.operation.kind).toBe("broker");
     if (action.operation.kind !== "broker") return;
     const req = action.operation.request as { outputCommit?: { destination: { canonicalPath: string }; destinations?: Array<{ canonicalPath: string }> } };
@@ -177,7 +179,7 @@ describe("image destination via broker chaining (spec 019)", () => {
 
   it("(b2) raw binary body is committed when bytes are returned", async () => {
     const dest = join(dir, "raw.png");
-    const action = await ALL_ANALYZERS.generate_image({ prompt: "raw body", output_path: dest }, ctx);
+    const action = await allAnalyzers().generate_image({ prompt: "raw body", output_path: dest }, ctx);
     const result = await runBroker(action, envelopeFor(action, [dest]), PNG_BYTES);
     expect(result.state).toBe("succeeded");
     expect(existsSync(dest)).toBe(true);
@@ -185,7 +187,7 @@ describe("image destination via broker chaining (spec 019)", () => {
   });
 
   it("take_screenshot keeps its honest denial message (parity check)", async () => {
-    const action = await ALL_ANALYZERS.take_screenshot({}, ctx);
+    const action = await allAnalyzers().take_screenshot({}, ctx);
     expect(action.operation.kind).toBe("none");
     if (action.operation.kind !== "none") return;
     const output = String(action.operation.result.output ?? "");

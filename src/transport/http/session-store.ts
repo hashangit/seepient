@@ -11,8 +11,8 @@
  * the `metadata` field of SessionData.
  */
 
-import type { Message, SessionData, PersistenceBackend } from "../../foundations/types.js";
-import { createPersistenceBackend, MemoryPersistenceBackend } from "../../domain/sessions/session-store.js";
+import type { Message, SessionData, PersistenceBackend } from "seepient-core/dist/foundations/types.js";
+import { createPersistenceBackend, MemoryPersistenceBackend } from "seepient-core/dist/domain/sessions/session-store.js";
 import { logTransportEvent } from "../logging.js";
 
 // ── Types ──────────────────────────────────────────────────────────────

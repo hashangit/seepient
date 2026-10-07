@@ -16,7 +16,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { PolicyEngine } from "../policy-engine.js";
-import { digestAction, digestArgs } from "../default-analyzers.js";
+import { digestAction, digestArgs } from "../../../foundations/action-digest.js";
 import type {
   Capability,
   CapabilitySet,

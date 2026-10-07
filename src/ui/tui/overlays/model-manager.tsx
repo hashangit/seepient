@@ -261,7 +261,7 @@ export async function runModelManagerStandalone(options: {
   initialTab?: "jobs" | "providers" | "now";
   onSwitchProvider?: (account: string, model?: string) => void;
 } = {}): Promise<void> {
-  const { createAmbientProviderRuntime } = await import("../../../domain/providers/provider-runtime.js");
+  const { createAmbientProviderRuntime } = await import("seepient-core/dist/domain/providers/provider-runtime.js");
   const { createProviderManagerApi } = await import("../../../transport/cli/provider-manager-api.js");
   const runtime = createAmbientProviderRuntime();
   const api = options.api ?? createProviderManagerApi(

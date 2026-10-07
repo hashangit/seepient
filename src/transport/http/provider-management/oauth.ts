@@ -3,10 +3,10 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { ProviderRuntime } from "../../../domain/providers/provider-runtime.js";
+import type { ProviderRuntime } from "seepient-core/dist/domain/providers/provider-runtime.js";
 import type { ApiKeyEntry } from "../../auth/auth.js";
 import { hasScope } from "../../auth/auth.js";
-import { redactString } from "../../../foundations/security/redact.js";
+import { redactString } from "seepient-core/dist/foundations/security/redact.js";
 import { createOAuthInteractionShim, createProviderManagerApi } from "../../cli/provider-manager-api.js";
 import { PayloadTooLargeError } from "../body.js";
 import {
@@ -66,7 +66,7 @@ export async function handleOAuthStart(
   }
 
   const { isOAuthSupported, getOAuthFlow } = await import(
-    "../../../domain/providers/oauth-service.js"
+    "seepient-core/dist/domain/providers/oauth-service.js"
   );
 
   const snapshot = await runtime.createTurnSnapshot();

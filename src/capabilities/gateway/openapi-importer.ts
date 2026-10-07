@@ -8,7 +8,7 @@
 import * as yaml from 'js-yaml';
 import type { MCPGateway } from './gateway.js';
 import type { RestTarget } from './types.js';
-import { safeSsrfFetch } from '../../foundations/network/ssrf-fetch.js';
+import { safeSsrfFetch } from 'seepient-core/dist/foundations/network/ssrf-fetch.js';
 
 export async function importOpenApiSpec(
   gateway: MCPGateway,

@@ -1,17 +1,31 @@
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "vitest";
 
 // Spec 027: these loops run the DEFAULT pipeline path — the full-package
-// composition (boundary-carrying pipeline) registered, as production does.
-import { registerExecutionBoundaryFactory } from "../../foundations/injection-seams.js";
+// composition (built-in modules + analyzers + boundary pipeline) registered,
+// as production does.
+import { builtInTools } from "../../capabilities/tools/index.js";
+import { DEFAULT_ANALYZERS } from "../../capabilities/tools/analyzers.js";
+import { COMM_ANALYZERS } from "../../capabilities/tools/comm-analyzers.js";
 import { buildLocalBoundary } from "../../capabilities/execution/build-local-boundary.js";
+import {
+  registerDefaultToolModules,
+  registerBuiltInAnalyzers,
+  registerExecutionBoundaryFactory,
+} from "../../foundations/injection-seams.js";
 beforeAll(() => {
+  registerDefaultToolModules([...builtInTools]);
+  registerBuiltInAnalyzers({ ...DEFAULT_ANALYZERS, ...COMM_ANALYZERS });
   registerExecutionBoundaryFactory(
     async (opts) => buildLocalBoundary(opts as Parameters<typeof buildLocalBoundary>[0]),
   );
 });
 afterAll(() => {
+  registerDefaultToolModules([]);
+  registerBuiltInAnalyzers({});
   registerExecutionBoundaryFactory(undefined as never);
 });
+
+
 import { mkdtempSync, rmSync, realpathSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

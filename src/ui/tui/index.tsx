@@ -20,8 +20,8 @@ import { buildCommandRegistry } from '../../transport/cli/commands/build-registr
 import { warmInkReset, resetInkStatic, guardInkVersion } from './ink-reset.js';
 import { ThemeProvider } from './hooks/use-theme.js';
 import type { SettingItem } from './overlays/settings-overlay.js';
-import { SettingsManager } from '../../domain/settings/settings-manager.js';
-import { SETTINGS_MAP, SETTINGS_SCHEMA } from '../../foundations/settings-schema.js';
+import { SettingsManager } from 'seepient-core/dist/domain/settings/settings-manager.js';
+import { SETTINGS_MAP, SETTINGS_SCHEMA } from 'seepient-core/dist/foundations/settings-schema.js';
 import { loadMergedConfig, loadJsonConfig, getConfigPaths, applyEnvOverrides } from '../../transport/cli/config-loader.js';
 
 export interface StartTuiArgs {

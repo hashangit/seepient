@@ -12,6 +12,8 @@
  * `approval-unavailable` instead of falling back to the legacy prompt.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { registerFullComposition } from "../../domain/__tests__/full-composition.js";
+registerFullComposition(); // spec 027: full-package composition (built-ins + analyzers + boundary)
 import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

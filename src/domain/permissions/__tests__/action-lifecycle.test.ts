@@ -9,6 +9,8 @@
  *  - audit is idempotent on `<actionId>:<state>`
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { registerFullComposition } from "../../__tests__/full-composition.js";
+registerFullComposition(); // spec 027: full-package composition (built-ins + analyzers + boundary)
 import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

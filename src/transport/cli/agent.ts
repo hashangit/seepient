@@ -1,27 +1,27 @@
 import chalk from 'chalk';
 import ora from 'ora';
 import * as path from 'path';
-import { ToolRegistry } from '../../domain/tool-executor.js';
+import { ToolRegistry } from 'seepient-core/dist/domain/tool-executor.js';
 import { FULL_TOOL_MODULES } from '../sdk/full-registrations.js';
-import { getMediaVendorOperationHandlerFactory } from '../../foundations/injection-seams.js';
-import type { ToolModule, ToolDefinition } from '../../foundations/contracts/tool.js';
-import { buildSystemPrompt } from '../../domain/prompts/system-prompts.js';
-import { initializeSkillRegistry } from '../../capabilities/skills/index.js';
-import type { SkillRegistry } from '../../capabilities/skills/types.js';
-import { runAgentLoop, type ProviderFactory } from '../../domain/agent-loop.js';
-import { now } from '../../domain/context/message-convert.js';
-import { generateId } from '../../foundations/id.js';
-import { createHookExecutor } from '../../domain/hooks.js';
-import { buildSkillCatalog } from '../../domain/skills/skill-catalog.js';
-import type { Message, StepResult, Usage, ToolCall, ApproveToolFn, PersistenceBackend } from '../../foundations/types.js';
-import { persistSession } from '../../domain/sessions/session-store.js';
-import type { Middleware } from '../../foundations/contracts/middleware.js';
-import type { ApprovalBroker, Capability, CapabilitySet, PermissionRequest } from '../../foundations/contracts/permission-policy.js';
-import type { PolicyStore } from '../../foundations/contracts/execution-brokers.js';
-import type { PolicySnapshot } from '../../foundations/contracts/execution-brokers.js';
-import { GLOBAL_WORKSPACE_ID } from '../../domain/permissions/policy-store.js';
-import { capabilityKey } from '../../domain/permissions/capability-store.js';
-import type { ProviderRuntime } from '../../domain/providers/provider-runtime.js';
+import { getMediaVendorOperationHandlerFactory } from 'seepient-core/dist/foundations/injection-seams.js';
+import type { ToolModule, ToolDefinition } from 'seepient-core/dist/foundations/contracts/tool.js';
+import { buildSystemPrompt } from 'seepient-core/dist/domain/prompts/system-prompts.js';
+import { initializeSkillRegistry } from 'seepient-core/dist/capabilities/skills/index.js';
+import type { SkillRegistry } from 'seepient-core/dist/capabilities/skills/types.js';
+import { runAgentLoop, type ProviderFactory } from 'seepient-core/dist/domain/agent-loop.js';
+import { now } from 'seepient-core/dist/domain/context/message-convert.js';
+import { generateId } from 'seepient-core/dist/foundations/id.js';
+import { createHookExecutor } from 'seepient-core/dist/domain/hooks.js';
+import { buildSkillCatalog } from 'seepient-core/dist/domain/skills/skill-catalog.js';
+import type { Message, StepResult, Usage, ToolCall, ApproveToolFn, PersistenceBackend } from 'seepient-core/dist/foundations/types.js';
+import { persistSession } from 'seepient-core/dist/domain/sessions/session-store.js';
+import type { Middleware } from 'seepient-core/dist/foundations/contracts/middleware.js';
+import type { ApprovalBroker, Capability, CapabilitySet, PermissionRequest } from 'seepient-core/dist/foundations/contracts/permission-policy.js';
+import type { PolicyStore } from 'seepient-core/dist/foundations/contracts/execution-brokers.js';
+import type { PolicySnapshot } from 'seepient-core/dist/foundations/contracts/execution-brokers.js';
+import { GLOBAL_WORKSPACE_ID } from 'seepient-core/dist/domain/permissions/policy-store.js';
+import { capabilityKey } from 'seepient-core/dist/domain/permissions/capability-store.js';
+import type { ProviderRuntime } from 'seepient-core/dist/domain/providers/provider-runtime.js';
 
 /**
  * Outcome of a single `Agent.chat()` turn. Returned so non-readline callers
@@ -183,7 +183,7 @@ export class Agent {
   }
 
   // The spec-008 wired pipeline (built lazily by enablePermissionPipeline()).
-  private _wiredPipeline: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle | null = null;
+  private _wiredPipeline: import("seepient-core/dist/domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle | null = null;
 
   /**
    * Opt into the spec-008 pipeline for this agent. After this call, every
@@ -224,12 +224,12 @@ export class Agent {
      * minutes; the CLI bootstrap passes `permissions.approvalTimeoutMs`.
      */
     approvalDeadlineMs?: number;
-    approvalMode?: import("../../foundations/contracts/permission-policy.js").PolicyContext["approvalMode"];
+    approvalMode?: import("seepient-core/dist/foundations/contracts/permission-policy.js").PolicyContext["approvalMode"];
     /** Session snapshot store (spec 019 FR-001); defaults to a fresh store. */
-    snapshotStore?: import("../../foundations/hashline/snapshot-store.js").SnapshotStore;
+    snapshotStore?: import("seepient-core/dist/foundations/hashline/snapshot-store.js").SnapshotStore;
   }): Promise<void> {
-    const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
-    const { legacyApproveToolToBroker } = await import("../legacy-adapter.js");
+    const { buildActionLifecycle } = await import("seepient-core/dist/domain/permissions/action-lifecycle-factory.js");
+    const { legacyApproveToolToBroker } = await import("seepient-core/dist/transport/legacy-adapter.js");
     // Use a mutable holder so the broker picks up the per-session approveTool
     // when chat() is called (REPL/TUI wire approveTool after bootstrap).
     this._pipelineApproveTool = undefined;
@@ -282,8 +282,8 @@ export class Agent {
     // spec 019 FR-001: one store instance backs the boundary's read-side
     // tagging and the lifecycle's analysis context. The composition root
     // (bootstrap) owns the session store; tests may inject their own.
-    const snapshotStore = opts.snapshotStore ?? (await import("../../foundations/hashline/snapshot-store.js")).createSnapshotStore();
-    const { InMemoryArtifactStore } = await import("../../capabilities/execution/in-memory-artifact-store.js");
+    const snapshotStore = opts.snapshotStore ?? (await import("seepient-core/dist/foundations/hashline/snapshot-store.js")).createSnapshotStore();
+    const { InMemoryArtifactStore } = await import("seepient-core/dist/capabilities/execution/in-memory-artifact-store.js");
     const sharedArtifacts = new InMemoryArtifactStore();
     // Spec 027 FR-009: seam-registered media factory (full package arms it).
     const vendorOperationHandler = getMediaVendorOperationHandlerFactory()?.({
@@ -327,9 +327,9 @@ export class Agent {
     // Also starts a background outbox-flush timer for failed terminal appends.
     try {
       const { recoverIndeterminateActions } = await import(
-        "../../domain/permissions/audit-recorder.js"
+        "seepient-core/dist/domain/permissions/audit-recorder.js"
       );
-      const auditStore = this._wiredPipeline!.auditStore as import("../../domain/permissions/audit-recorder.js").LocalAuditStore;
+      const auditStore = this._wiredPipeline!.auditStore as import("seepient-core/dist/domain/permissions/audit-recorder.js").LocalAuditStore;
       const recovered = await recoverIndeterminateActions(auditStore, this._wiredPipeline!.terminalOutbox);
       if (recovered.length > 0) {
         console.warn(
@@ -385,12 +385,12 @@ export class Agent {
    * never writes legacy grants (FR-018), so the grants list stays empty by
    * design.
    */
-  getActiveCapabilities(): import("../../foundations/contracts/permission-policy.js").Capability[] {
+  getActiveCapabilities(): import("seepient-core/dist/foundations/contracts/permission-policy.js").Capability[] {
     return this._wiredPipeline?.lifecycle.getActiveCapabilities() ?? [];
   }
 
   /** Set consent mode live with single setApprovalMode call (spec 017, T026). */
-  setConsentMode(mode: import('../../foundations/settings-schema.js').ConsentMode): void {
+  setConsentMode(mode: import('seepient-core/dist/foundations/settings-schema.js').ConsentMode): void {
     if (!this._wiredPipeline) {
       throw new Error('Protected permission pipeline is not enabled');
     }
@@ -398,7 +398,7 @@ export class Agent {
     this._wiredPipeline.lifecycle.setApprovalMode(approvalMode);
   }
 
-  getConsentMode(): import('../../foundations/settings-schema.js').ConsentMode {
+  getConsentMode(): import('seepient-core/dist/foundations/settings-schema.js').ConsentMode {
     const approvalMode = this._wiredPipeline?.lifecycle.getApprovalMode();
     if (approvalMode === 'autonomous') return 'autonomous';
     if (approvalMode === 'manual') return 'ask-everything';
@@ -427,7 +427,7 @@ export class Agent {
   }
 
   /** Return the wired action lifecycle pipeline if initialized. */
-  getWiredPipeline(): import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle | null {
+  getWiredPipeline(): import("seepient-core/dist/domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle | null {
     return this._wiredPipeline;
   }
 

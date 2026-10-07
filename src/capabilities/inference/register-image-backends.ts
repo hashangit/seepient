@@ -5,7 +5,7 @@
  * in Capabilities because src/vendors/ imports are forbidden from Transport
  * and UI (S-12); the full package's composition roots call this once at load.
  */
-import { registerImageBackendFactories } from "../../foundations/injection-seams.js";
+import { registerImageBackendFactories } from "seepient-core/dist/foundations/injection-seams.js";
 import { GoogleImageRaw } from "../../vendors/google/google-image-raw.js";
 import { OpenAIImageRaw } from "../../vendors/openai/openai-image-raw.js";
 

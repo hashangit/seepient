@@ -13,10 +13,12 @@
  *   - Typed setup failure messages with 'seepient setup' remediation when credentials are missing
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { registerFullComposition } from "../../__tests__/full-composition.js";
+registerFullComposition(); // spec 027: full-package composition (built-ins + analyzers + boundary)
 import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
-import { buildActionLifecycle, ALL_ANALYZERS } from "../action-lifecycle-factory.js";
+import { buildActionLifecycle, allAnalyzers } from "../action-lifecycle-factory.js";
 import { InMemoryArtifactStore } from "../../../capabilities/execution/in-memory-artifact-store.js";
 import type { ApprovalBroker, PolicyContext } from "../../../foundations/contracts/permission-policy.js";
 import type { ExecutionBoundary } from "../../../foundations/contracts/execution-boundary.js";
@@ -156,7 +158,7 @@ describe("golden tool baseline (spec 017, T002 / T015 / T016 / QS-1)", () => {
     expect(toolInvocations).toHaveLength(15);
 
     for (const inv of toolInvocations) {
-      const analyzer = ALL_ANALYZERS[inv.name];
+      const analyzer = allAnalyzers()[inv.name];
       expect(analyzer, `Analyzer must exist for tool ${inv.name}`).toBeDefined();
 
       const action = await analyzer(inv.args, ctx);
@@ -236,7 +238,7 @@ describe("golden tool baseline (spec 017, T002 / T015 / T016 / QS-1)", () => {
     ];
 
     for (const tool of brokeredTools) {
-      const analyzer = ALL_ANALYZERS[tool.name];
+      const analyzer = allAnalyzers()[tool.name];
       const action = await analyzer(tool.args, ctx);
       const decision = (wired.lifecycle as any).policy.evaluate(action, wired.policyContext);
       expect(
@@ -284,7 +286,7 @@ describe("golden tool baseline (spec 017, T002 / T015 / T016 / QS-1)", () => {
       });
       const brokerExecutor = new BrokerExecutor({ broker, workspaceRoot });
 
-      const webSearchAction = await ALL_ANALYZERS.web_search({ query: "news" }, ctx);
+      const webSearchAction = await allAnalyzers().web_search({ query: "news" }, ctx);
       const envelope = {
         version: 1 as const,
         envelopeId: "env-1",

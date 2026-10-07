@@ -91,7 +91,7 @@ export function registerProcessGuards(): void {
 
 export async function startStandaloneServer(args: string[] = process.argv.slice(2)): Promise<any> {
   registerProcessGuards();
-  const { warnIfTestEnvAtHostedBoot } = await import("../../foundations/test-seams.js");
+  const { warnIfTestEnvAtHostedBoot } = await import("seepient-core/dist/foundations/test-seams.js");
   warnIfTestEnvAtHostedBoot("seepient-server");
 
   let parsedArgs: ServerCliArgs;

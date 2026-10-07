@@ -5,11 +5,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
-import { isNonInteractive } from '../../foundations/environment.js';
+import { isNonInteractive } from 'seepient-core/dist/foundations/environment.js';
 import { loadProjectEnv } from './dotenv-guard.js';
 import { runSetup } from '../../transport/cli/setup.js';
 import { runChat } from '../repl/repl.js';
-import { resolveLaunchMode } from '../../domain/prompts/system-prompts.js';
+import { resolveLaunchMode } from 'seepient-core/dist/domain/prompts/system-prompts.js';
 
 // Handle Ctrl+C gracefully
 function handleExit() {

@@ -155,3 +155,70 @@ export function getProviderManagerApiFactory():
   | undefined {
   return providerManagerApiFactory;
 }
+
+// ── Broker-connector evaluation (spec 027) ──────────────────────────────────
+
+let brokerConnectorEvaluator:
+  | ((registration: unknown, args: unknown, ctx: unknown) => Promise<unknown>)
+  | undefined;
+
+/**
+ * Register the broker-connector evaluator (full-package machinery over the
+ * MCP connector registry). Unregistered (seepient-core) broker-connector
+ * tools deny typed at analysis time.
+ */
+export function registerBrokerConnectorEvaluator(
+  evaluate: (registration: unknown, args: unknown, ctx: unknown) => Promise<unknown>,
+): void {
+  brokerConnectorEvaluator = evaluate;
+}
+
+export function getBrokerConnectorEvaluator():
+  | ((registration: unknown, args: unknown, ctx: unknown) => Promise<unknown>)
+  | undefined {
+  return brokerConnectorEvaluator;
+}
+
+// ── Built-in tool analyzers (spec 027) ──────────────────────────────────────
+
+import type { ToolAnalyzer } from "./contracts/tool-analyzer.js";
+export type { ToolAnalyzer };
+
+let builtInAnalyzers: Record<string, ToolAnalyzer> = {};
+
+/**
+ * Register the built-in tool analyzers (the prepared-action builders for the
+ * built-in tools). Called by the full package; seepient-core runs with an
+ * empty table — it has no built-in tools to analyze.
+ */
+export function registerBuiltInAnalyzers(analyzers: Record<string, ToolAnalyzer>): void {
+  builtInAnalyzers = { ...builtInAnalyzers, ...analyzers };
+}
+
+export function getBuiltInAnalyzers(): Record<string, ToolAnalyzer> {
+  return builtInAnalyzers;
+}
+
+// ── Provider discovery sources (spec 027) ───────────────────────────────────
+
+export interface DiscoverySourceLoaders {
+  /** Loader for the OpenAI/openai-compatible discovery source. */
+  openai?: () => Promise<{ OpenAIDiscoverySource: new () => import("./contracts/backend-ports.js").DiscoverySource }>;
+  /** Loader for the Google discovery source. */
+  google?: () => Promise<{ GoogleDiscoverySource: new () => import("./contracts/backend-ports.js").DiscoverySource }>;
+}
+
+let discoverySourceLoaders: DiscoverySourceLoaders = {};
+
+/**
+ * Register the direct-SDK discovery-source loaders (lazy thunks owned by the
+ * full package). Unregistered (seepient-core) refreshModels degrades with a
+ * typed actionable message naming the absent full-side sources.
+ */
+export function registerDiscoverySourceLoaders(loaders: DiscoverySourceLoaders): void {
+  discoverySourceLoaders = { ...discoverySourceLoaders, ...loaders };
+}
+
+export function getDiscoverySourceLoaders(): DiscoverySourceLoaders {
+  return discoverySourceLoaders;
+}

@@ -1,6 +1,6 @@
 import { Box, Text } from 'ink';
 import { useTheme } from '../hooks/use-theme.js';
-import type { ContextBreakdown } from '../../../foundations/contracts/context.js';
+import type { ContextBreakdown } from 'seepient-core/dist/foundations/contracts/context.js';
 
 export interface ContextPanelProps {
   breakdown: ContextBreakdown;

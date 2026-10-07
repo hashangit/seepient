@@ -10,7 +10,7 @@ import { createHash } from "node:crypto";
 import * as path from "node:path";
 import { realpathSync as fs_realpathSync, lstatSync as fs_lstatSync } from "node:fs";
 import { spawn } from "node:child_process";
-import type { PreparedToolAction, PreparedOperation } from "../../foundations/contracts/prepared-action.js";
+import type { PreparedToolAction, PreparedOperation } from "seepient-core/dist/foundations/contracts/prepared-action.js";
 import type {
   CanonicalPathTarget,
   EffectRequest,
@@ -20,12 +20,14 @@ import type {
   ToolEffectKind,
   ToolRiskCategory,
   ExternalRecipient,
-} from "../../foundations/contracts/tool-effects.js";
-import type { PreparationArtifactStore } from "../../foundations/contracts/execution-brokers.js";
-import type { ToolAnalysisContext } from "../../foundations/contracts/custom-tools.js";
-import { generateId } from "../../foundations/id.js";
-import { isGuardNeutralized } from "../../foundations/test-seams.js";
-import { PathEscapesWorkspaceError, PathIdentityMismatchError } from "../../foundations/errors.js";
+} from "seepient-core/dist/foundations/contracts/tool-effects.js";
+import type { PreparationArtifactStore } from "seepient-core/dist/foundations/contracts/execution-brokers.js";
+import type { ToolAnalysisContext } from "seepient-core/dist/foundations/contracts/custom-tools.js";
+import { generateId } from "seepient-core/dist/foundations/id.js";
+import { isGuardNeutralized } from "seepient-core/dist/foundations/test-seams.js";
+import { PathEscapesWorkspaceError, PathIdentityMismatchError } from "seepient-core/dist/foundations/errors.js";
+import { digestAction, digestArgs } from "seepient-core/dist/foundations/action-digest.js";
+import type { ToolAnalyzer } from "seepient-core/dist/foundations/contracts/tool-analyzer.js";
 
 /**
  * Authorizes a read target path against the tenant's workspace ceiling (FR-002, FR-003).
@@ -73,55 +75,7 @@ function authorizeReadTargetPath(rawPath: string, cwd: string, target: Canonical
   return realPath;
 }
 
-/**
- * Analyzer signature: maps tool args + analysis context to a prepared action.
- * Re-exported via `domain/permissions/default-analyzers.ts` for callers that
- * import the type from the Domain shim.
- */
-export type ToolAnalyzer = (
-  args: unknown,
-  ctx: ToolAnalysisContext,
-) => Promise<PreparedToolAction>;
 
-function stableJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  const keys = Object.keys(value as object).sort();
-  return `{${keys
-    .map((k) => `${JSON.stringify(k)}:${stableJson((value as Record<string, unknown>)[k])}`)
-    .join(",")}}`;
-}
-
-/** SHA-256 digest of args object for action id derivation (key-order independent). */
-export function digestArgs(args: unknown): string {
-  return createHash("sha256").update(stableJson(args), "utf8").digest("hex");
-}
-
-export function digestAction(input: {
-  operation: PreparedOperation;
-  effects: EffectRequest[];
-  principalId: string;
-  toolName: string;
-  argsDigest: string;
-  runId?: string;
-  toolCallId?: string;
-}): string {
-  const payload = JSON.stringify({
-    operation: input.operation,
-    effects: input.effects,
-    principalId: input.principalId,
-    toolName: input.toolName,
-    argsDigest: input.argsDigest,
-    runId: input.runId,
-    toolCallId: input.toolCallId,
-  });
-  return createHash("sha256").update(payload, "utf8").digest("hex");
-}
-
-/**
- * Resolve a caller-supplied path to a canonical target.
- * Resolves symlinks via realpathSync to detect TOCTOU and workspace escape.
- */
 export async function canonicalizePath(
   rawPath: string,
   cwd: string,
@@ -381,7 +335,7 @@ export async function analyzeEditFile(
     throw new Error("Invalid patch: no valid [PATH#TAG] section headers found. Expected e.g. [/abs/path.ts#a1f2] where a1f2 is the content-tag from read_file");
   }
   if (!ctx.snapshotStore) {
-    const { HashlineError } = await import("../../foundations/errors.js");
+    const { HashlineError } = await import("seepient-core/dist/foundations/errors.js");
     throw new HashlineError("edit_file requires a snapshot store", "HASHLINE_NO_STORE", false);
   }
 
@@ -391,7 +345,7 @@ export async function analyzeEditFile(
   // bytes are prepared as artifacts and land through FileCommitBroker at
   // dispatch with `expected` snapshots — the capability envelope is finally
   // checked on the write that actually happens.
-  const { applySectionsToSnapshot } = await import("../../foundations/hashline/patcher.js");
+  const { applySectionsToSnapshot } = await import("seepient-core/dist/foundations/hashline/patcher.js");
   const [{ open: fsOpenSection }, { constants: fsConstants }] = await Promise.all([
     import("node:fs/promises"),
     import("node:fs"),
@@ -1065,7 +1019,7 @@ export async function analyzeGenerateImage(
     });
   }
 
-  const inputObj: Record<string, import("../../foundations/contracts/tool-effects.js").JsonValue> = {};
+  const inputObj: Record<string, import("seepient-core/dist/foundations/contracts/tool-effects.js").JsonValue> = {};
   if (args.prompt !== undefined) inputObj.prompt = args.prompt;
   if (outputCommit) inputObj.outputPath = outputCommit.destination.canonicalPath;
   if (imageTarget) {
@@ -1155,7 +1109,7 @@ export async function analyzeOptimizePrompt(
     },
   ];
 
-  const optInput: Record<string, import("../../foundations/contracts/tool-effects.js").JsonValue> = {
+  const optInput: Record<string, import("seepient-core/dist/foundations/contracts/tool-effects.js").JsonValue> = {
     raw_prompt: promptText,
   };
   if (contextText !== undefined) {
@@ -1334,56 +1288,3 @@ export const DEFAULT_ANALYZERS: Record<string, ToolAnalyzer> = {
   render_widget: analyzeRenderWidget as ToolAnalyzer,
 };
 
-export function resolveAnalyzerWithFallback(
-  analyzers: Record<string, ToolAnalyzer>,
-  toolName: string,
-): ToolAnalyzer {
-  if (analyzers[toolName]) return analyzers[toolName];
-  return async (args: unknown, ctx: ToolAnalysisContext): Promise<PreparedToolAction> => {
-    const jsonArgs = (args && typeof args === "object" ? args : {}) as Record<string, unknown>;
-    const operation: PreparedOperation = {
-      kind: "trusted-host",
-      registrationId: toolName,
-      toolName,
-      args: jsonArgs as any,
-    };
-    const effects: EffectRequest[] = [
-      { kind: "host-callback", toolName },
-      {
-        kind: "model-egress",
-        providerClass: ctx.modelProviderClass,
-        dataClasses: ["normal", "sensitive"],
-        sources: [toolName],
-      },
-    ];
-    const argsDigest = digestArgs(args);
-    const actionDigest = digestAction({
-      operation,
-      effects,
-      principalId: ctx.principalId,
-      toolName,
-      argsDigest,
-      runId: ctx.runId,
-      toolCallId: ctx.toolCallId,
-    });
-    return {
-      version: 1,
-      actionId: generateId(),
-      runId: ctx.runId,
-      toolCallId: ctx.toolCallId,
-      toolName,
-      principalId: ctx.principalId,
-      argsDigest,
-      actionDigest,
-      risk: "destructive",
-      effects,
-      display: {
-        title: toolName,
-        summary: `Execute host callback ${toolName}`,
-        canonicalTargets: [],
-        effects: ["host-callback"],
-      },
-      operation,
-    };
-  };
-}

@@ -9,9 +9,9 @@
 
 import chalk from 'chalk';
 import type { CommandHandler } from './registry.js';
-import { getModelMeta } from '../../../foundations/models-catalog.js';
-import { buildContextBreakdown } from '../../../domain/context/context-breakdown.js';
-import type { ContextBreakdown } from '../../../foundations/contracts/context.js';
+import { getModelMeta } from 'seepient-core/dist/foundations/models-catalog.js';
+import { buildContextBreakdown } from 'seepient-core/dist/domain/context/context-breakdown.js';
+import type { ContextBreakdown } from 'seepient-core/dist/foundations/contracts/context.js';
 
 /** Format the breakdown as plain text for the readline REPL. */
 function formatBreakdownAsText(b: ContextBreakdown): string {

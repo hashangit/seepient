@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { ALL_ANALYZERS } from "../action-lifecycle-factory.js";
+import { registerFullComposition } from "../../__tests__/full-composition.js";
+registerFullComposition(); // spec 027: full-package composition
+import { allAnalyzers } from "../action-lifecycle-factory.js";
 import { InMemoryArtifactStore } from "../../../capabilities/execution/in-memory-artifact-store.js";
 import { createSnapshotStore } from "../../../foundations/hashline/snapshot-store.js";
 import type { ToolAnalysisContext } from "../../../foundations/contracts/custom-tools.js";
@@ -25,7 +27,7 @@ function makeContext(overrides?: Partial<ToolAnalysisContext>): ToolAnalysisCont
 describe("Media tools in ALL_ANALYZERS registry (Task 1 regression gate)", () => {
   it("generate_image emits a vendor-operation broker request with no hardcoded OpenAI references", async () => {
     const ctx = makeContext();
-    const action = await ALL_ANALYZERS.generate_image({ prompt: "A rocket launching" }, ctx);
+    const action = await allAnalyzers().generate_image({ prompt: "A rocket launching" }, ctx);
 
     expect(action.toolName).toBe("generate_image");
     expect(action.operation.kind).toBe("broker");
@@ -47,7 +49,7 @@ describe("Media tools in ALL_ANALYZERS registry (Task 1 regression gate)", () =>
 
   it("generate_image with output_path declares filesystem-write effect and outputCommit on vendor-operation", async () => {
     const ctx = makeContext();
-    const action = await ALL_ANALYZERS.generate_image(
+    const action = await allAnalyzers().generate_image(
       { prompt: "A rocket launching", output_path: "/workspace/rocket.png" },
       ctx,
     );
@@ -67,7 +69,7 @@ describe("Media tools in ALL_ANALYZERS registry (Task 1 regression gate)", () =>
 
   it("generate_image with output_dir derives deterministic filename and declares filesystem-write effect", async () => {
     const ctx = makeContext();
-    const action = await ALL_ANALYZERS.generate_image(
+    const action = await allAnalyzers().generate_image(
       { prompt: "A rocket launching", output_dir: "/workspace/images" },
       ctx,
     );
@@ -91,7 +93,7 @@ describe("Media tools in ALL_ANALYZERS registry (Task 1 regression gate)", () =>
       }),
     });
 
-    const action = await ALL_ANALYZERS.generate_image({ prompt: "A rocket launching" }, ctx);
+    const action = await allAnalyzers().generate_image({ prompt: "A rocket launching" }, ctx);
     expect(action.operation.kind).toBe("none");
     if (action.operation.kind === "none") {
       expect(action.operation.result.success).toBe(false);
@@ -103,7 +105,7 @@ describe("Media tools in ALL_ANALYZERS registry (Task 1 regression gate)", () =>
 
   it("optimize_prompt emits a vendor-operation broker request with no hardcoded OpenAI REST destination", async () => {
     const ctx = makeContext();
-    const action = await ALL_ANALYZERS.optimize_prompt({ raw_prompt: "Draw a mountain" }, ctx);
+    const action = await allAnalyzers().optimize_prompt({ raw_prompt: "Draw a mountain" }, ctx);
 
     expect(action.toolName).toBe("optimize_prompt");
     expect(action.operation.kind).toBe("broker");

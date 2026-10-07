@@ -2,8 +2,8 @@ import { spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { ToolModule, ToolExecExtra, APPROVAL_SCHEMA } from '../../foundations/contracts/tool.js';
-import type { FileWriteMetadata } from '../../foundations/contracts/presentation.js';
+import { ToolModule, ToolExecExtra, APPROVAL_SCHEMA } from 'seepient-core/dist/foundations/contracts/tool.js';
+import type { FileWriteMetadata } from 'seepient-core/dist/foundations/contracts/presentation.js';
 
 export const ShellTool: ToolModule = {
   name: "Shell Execution",

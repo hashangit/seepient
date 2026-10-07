@@ -19,7 +19,7 @@
  * blocks render without duration (cosmetic only).
  */
 
-import type { Message } from '../../foundations/types.js';
+import type { Message } from 'seepient-core/dist/foundations/types.js';
 import type { FeedEntryInput } from './types.js';
 import type { Todo } from './components/goal-status.js';
 

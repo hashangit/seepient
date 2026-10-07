@@ -29,8 +29,8 @@ import { isAutonomousWarned, shouldShowAutonomousWarning } from './autonomous-de
 import { messagesToFeedEntries } from './feed-serializer.js';
 import type { Suggestion } from './components/autocomplete.js';
 import type { Agent } from '../../transport/cli/agent.js';
-import type { ConsentMode } from '../../foundations/settings-schema.js';
-import { getModelMeta } from '../../foundations/models-catalog.js';
+import type { ConsentMode } from 'seepient-core/dist/foundations/settings-schema.js';
+import { getModelMeta } from 'seepient-core/dist/foundations/models-catalog.js';
 import { HORIZONTAL_PADDING } from './layout.js';
 
 /** Outcome of dispatching a slash command in the TUI (built in startTui). */
@@ -245,7 +245,7 @@ export function TuiApp({
           feed.appendEntry({ kind: 'info', content: 'skills unavailable' });
           return;
         }
-        const { invokeSkill, createRuntimeSkillProviderSwitcher } = await import('../../domain/skills/skill-invoker.js');
+        const { invokeSkill, createRuntimeSkillProviderSwitcher } = await import('seepient-core/dist/domain/skills/skill-invoker.js');
         let skillResult: any;
         try {
           skillResult = await invokeSkill({ input: raw, registry });

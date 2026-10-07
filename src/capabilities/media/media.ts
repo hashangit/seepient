@@ -6,12 +6,12 @@
  */
 
 import * as fs from 'fs';
-import { safeSsrfFetch } from '../../foundations/network/ssrf-fetch.js';
+import { safeSsrfFetch } from 'seepient-core/dist/foundations/network/ssrf-fetch.js';
 import * as path from 'path';
-import type { FileCommitBroker } from '../../foundations/contracts/execution-brokers.js';
-import type { CapabilityEnvelope } from '../../foundations/contracts/permission-policy.js';
-import { PathHardlinkRefusedError, PathIdentityMismatchError } from '../../foundations/errors.js';
-import { isGuardNeutralized } from '../../foundations/test-seams.js';
+import type { FileCommitBroker } from 'seepient-core/dist/foundations/contracts/execution-brokers.js';
+import type { CapabilityEnvelope } from 'seepient-core/dist/foundations/contracts/permission-policy.js';
+import { PathHardlinkRefusedError, PathIdentityMismatchError } from 'seepient-core/dist/foundations/errors.js';
+import { isGuardNeutralized } from 'seepient-core/dist/foundations/test-seams.js';
 
 export interface ImageRequest {
   prompt?: string;
@@ -41,7 +41,7 @@ export interface MediaConfig {
   commitBroker?: FileCommitBroker;
   envelope?: CapabilityEnvelope;
   tenancyMode?: "single" | "multi";
-  capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[];
+  capabilities?: import("seepient-core/dist/foundations/contracts/permission-policy.js").Capability[];
 }
 
 export interface RuntimeImageOutput {
@@ -135,7 +135,7 @@ export async function generateImageRuntime(
   timeoutMs?: number,
   opts?: {
     tenancyMode?: "single" | "multi";
-    capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[];
+    capabilities?: import("seepient-core/dist/foundations/contracts/permission-policy.js").Capability[];
     workspaceRoot?: string;
     operatorAllowsHardlinks?: boolean;
   },

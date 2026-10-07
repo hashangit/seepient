@@ -15,7 +15,7 @@ import type {
   PurposeId,
   UiError,
 } from "../../../transport/cli/provider-manager-api.js";
-import type { PurposeModelMap } from "../../../foundations/schemas/provider-config.js";
+import type { PurposeModelMap } from "seepient-core/dist/foundations/schemas/provider-config.js";
 
 const MAX_VISIBLE = 10;
 

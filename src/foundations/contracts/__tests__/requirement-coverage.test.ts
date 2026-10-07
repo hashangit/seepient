@@ -25,7 +25,7 @@ const COVERAGE: Record<string, string[]> = {
   "FR-003": ["src/capabilities/execution/operation-executor-registry.ts", "src/capabilities/execution/local-execution-boundary.ts"],
   "FR-004": ["src/domain/permissions/capability-store.ts", "src/domain/permissions/policy-engine.ts"],
   "FR-005": ["src/domain/permissions/policy-engine.ts", "src/foundations/contracts/permission-policy.ts"],
-  "FR-006": ["src/domain/permissions/default-analyzers.ts", "src/domain/permissions/comm-analyzers.ts"],
+  "FR-006": ["src/domain/permissions/default-analyzers.ts", "src/capabilities/tools/comm-analyzers.ts"],
   "FR-007": ["src/capabilities/execution/file-commit-broker.ts", "src/vendors/native-fs-commit/index.ts"],
   "FR-008": ["src/capabilities/execution/environment-policy.ts", "src/vendors/sandbox-runtime/index.ts", "src/capabilities/execution/process-executor.ts"],
   "FR-009": ["src/capabilities/execution/effect-broker.ts"],

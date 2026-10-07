@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { useTheme } from '../hooks/use-theme.js';
-import { extractPattern } from '../../../foundations/grant-pattern.js';
+import { extractPattern } from 'seepient-core/dist/foundations/grant-pattern.js';
 import type {
   PermissionRequest,
   TuiApprovalSelection,
-} from '../../../foundations/contracts/permission-policy.js';
-import type { ApprovalContext, ApprovalDecision, GrantScope } from '../../../foundations/types.js';
+} from 'seepient-core/dist/foundations/contracts/permission-policy.js';
+import type { ApprovalContext, ApprovalDecision, GrantScope } from 'seepient-core/dist/foundations/types.js';
 
 // ══════════════════════════════════════════════════════════════════════════
 // Native (spec 011) prompt — typed PermissionRequest flow

@@ -7,7 +7,7 @@
  * shared by the producer (`capabilities/tools/core.ts`) and this renderer —
  * neither imports the other.
  */
-import type { FileWriteMetadata } from '../../../foundations/contracts/presentation.js';
+import type { FileWriteMetadata } from 'seepient-core/dist/foundations/contracts/presentation.js';
 
 export function isFileWriteMetadata(u: unknown): u is FileWriteMetadata {
   if (typeof u !== 'object' || u === null) return false;

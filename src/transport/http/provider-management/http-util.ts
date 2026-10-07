@@ -3,7 +3,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { ProviderRuntime } from "../../../domain/providers/provider-runtime.js";
+import type { ProviderRuntime } from "seepient-core/dist/domain/providers/provider-runtime.js";
 import { PayloadTooLargeError } from "../body.js";
 
 export function sendJSON(res: ServerResponse, status: number, body: unknown, revision?: number): void {
