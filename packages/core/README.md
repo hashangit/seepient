@@ -12,20 +12,25 @@ npm install seepient-core
 
 ## Chat-only quickstart
 
+Providers are a record of provider entries keyed by account id; credentials reference where the key lives (`env`, `seepient`, `keychain`, `externalsecret`, or `none`) — the engine never accepts inline key material:
+
 ```ts
-import { createChat, trustedHostTool } from 'seepient-core';
+import { createChat } from 'seepient-core';
 
 const chat = await createChat({
-  stateless: true,
-  providers: [
-    {
-      id: 'my-openai',
+  stateless: true,           // no session persistence — your app owns durability
+  tenancy: 'single',         // solo deployment (multi-tenant: 'multi' + principalId + cwd)
+  skills: false,             // no filesystem skill discovery in a slim function
+  providers: {
+    'my-openai': {
       adapter: 'pi-ai',
       upstreamProvider: 'openai',
-      model: 'gpt-4.1-mini',
-      credential: { kind: 'api_key', value: process.env.OPENAI_API_KEY! },
+      credential: { kind: 'env', name: 'OPENAI_API_KEY' },
     },
-  ],
+  },
+  modelAssignments: {
+    text: { standard: { providerAccount: 'my-openai', model: 'gpt-4.1-mini' } },
+  },
   systemPrompt: 'You are a helpful assistant.',
 });
 
