@@ -65,7 +65,16 @@ Unlike "screen-seeing" agents (such as OpenClaw) that rely on visual interpretat
 
 ## Installation
 
-### npm
+### Which package?
+
+| You are… | Install | Closure |
+|---|---|---|
+| Building an app that needs the agent — CLI, TUI, tools, sandbox, MCP gateway, server | `npm install -g seepient` | ~346 MB |
+| Embedding the chat/agent engine in serverless or SDK-only routes (your app owns sessions, tools, persistence) | `npm install seepient-core` | ~102 MB |
+
+`seepient-core` exposes `createSeepient` (incl. `stateless`), `createChat`, `askSeepient`, `trustedHostTool`, the provider runtime, and the injectable store contracts — the same engine, same tenancy/consent/egress security plane, with everything tool/sandbox/UI-shaped failing closed with typed errors naming `seepient`. See [`packages/core/README.md`](packages/core/README.md).
+
+### npm (full package)
 ```bash
 npm install -g seepient
 ```

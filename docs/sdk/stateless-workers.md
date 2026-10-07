@@ -16,6 +16,31 @@ When deployed in multi-tenant environments:
 
 ---
 
+## Slim install for serverless: `seepient-core`
+
+Serverless chat routes that use only the multi-turn engine, the provider system, and injected stores can install **`seepient-core`** instead — the same engine at a ~102 MB clean-install closure (versus ~346 MB), with zero built-in tools, sandbox, MCP gateway, or browser automation in `node_modules`:
+
+```ts
+import { createChat, trustedHostTool } from 'seepient-core'
+
+const chat = await createChat({
+  stateless: true,
+  // injected stores exactly as below — the engine contracts are identical
+  auditStore, policyStore, capabilityLedger, credentialStore,
+  providers, // your provider configuration
+  tenancy: 'multi',
+  principalId,
+  cwd: '/workspace',
+})
+
+const res = await chat.send('...')           // one turn
+const stream = await chat.stream('...')      // one streaming turn
+```
+
+Behavioral differences are all fail-closed and typed: built-in tool names are rejected at registration naming `seepient`, media/image generation without a registered vendor denies typed, token counting reports `usage.estimateMode: "heuristic"`, and provider model discovery (`refreshModels`) degrades with an actionable message. Tenancy stamping, consent lifecycle, and egress arming are unchanged — the engine-coupled security plane ships in `seepient-core`. Host-executed tools (`trustedHostTool`) run via the light default pipeline. If you need built-in tools, the sandbox, or the MCP gateway, install the full `seepient` package.
+
+---
+
 ## Deployment models
 
 ### Model A: Serverless and ephemeral (Lambda, Cloudflare Workers)
