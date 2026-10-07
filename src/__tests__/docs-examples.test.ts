@@ -77,8 +77,18 @@ describe('docs example import and runtime checks (FR-003)', () => {
         if (fenceHeader.includes('no-check')) continue;
 
         const code = match[1];
-        const importRegex = /import\s+\{([^}]+)\}\s+from\s+['"]seepient['"]/g;
+        // seepient-core imports validate against the core entry surface.
+        const coreImportRegex = /import\s+\{([^}]+)\}\s+from\s+['"]seepient-core['"]/g;
         let impMatch;
+        while ((impMatch = coreImportRegex.exec(code)) !== null) {
+          for (const spec of impMatch[1].split(',').map((x) => x.trim().split(/\s+as\s+/)[0].trim()).filter(Boolean)) {
+            const cleanSpec = spec.replace(/^type\s+/, '');
+            if (!knownCoreExports.has(cleanSpec)) {
+              unexportedImports.push(`${page}: imported "${cleanSpec}" from "seepient-core" is not exported`);
+            }
+          }
+        }
+        const importRegex = /import\s+\{([^}]+)\}\s+from\s+['"]seepient['"]/g;
         while ((impMatch = importRegex.exec(code)) !== null) {
           const specifiers = impMatch[1]
             .split(',')
@@ -99,6 +109,55 @@ describe('docs example import and runtime checks (FR-003)', () => {
       console.error('Docs example import errors:', unexportedImports);
     }
     expect(unexportedImports, 'Unexported SDK imports found in docs examples (R10)').toEqual([]);
+  });
+
+  it('constructs the packages/core/README quickstart under a mock runtime (review P1-2)', async () => {
+    // The flagship example of the new package must CONSTRUCT. The pre-fix
+    // example died three ways: tenancy-incomplete (PRINCIPAL_REQUIRED —
+    // live-exploited on the packed tarball), shape-invalid providers (array,
+    // not record), and a demolished inline-key credential grammar.
+    const readme = fs.readFileSync(path.join(repoRoot, 'packages/core/README.md'), 'utf8');
+    const fence = /```ts\n([\s\S]*?)```/.exec(readme)?.[1] ?? '';
+    // Sync pin: the tested shape cannot drift from the published example.
+    for (const loadBearing of [
+      "stateless: true",
+      "tenancy: 'single'",
+      "adapter: 'pi-ai'",
+      "upstreamProvider: 'openai'",
+      "credential: { kind: 'env', name: 'OPENAI_API_KEY' }",
+      "modelAssignments: {",
+      "providerAccount: 'my-openai', model: 'gpt-4.1-mini'",
+    ]) {
+      expect(fence.includes(loadBearing), `core README quickstart must contain ${JSON.stringify(loadBearing)}`).toBe(true);
+    }
+
+    const { createChat } = await import('../transport/sdk/core.js');
+    const { createMockRuntime } = await import('../domain/__tests__/test-doubles.js');
+    const runtime = createMockRuntime([{ content: 'Paris.' }, { content: 'Still Paris.' }]);
+    const chat = await createChat({
+      stateless: true,
+      tenancy: 'single',
+      skills: false,
+      providers: {
+        'my-openai': {
+          adapter: 'pi-ai',
+          upstreamProvider: 'openai',
+          credential: { kind: 'env', name: 'OPENAI_API_KEY' },
+        },
+      },
+      modelAssignments: {
+        text: { standard: { providerAccount: 'my-openai', model: 'gpt-4.1-mini' } },
+      },
+      systemPrompt: 'You are a helpful assistant.',
+      runtime: runtime as never, // gate construction: mock engine, identical shape
+    } as never);
+    const turn = await chat.send('What is the capital of France?');
+    expect(turn.text).toBe('Paris.');
+    const stream = await chat.stream('Go on');
+    let streamed = '';
+    for await (const delta of stream.textStream) streamed += delta;
+    expect(streamed).toBe('Still Paris.');
+    expect(chat.messages.filter((m) => m.role === 'assistant').length).toBe(2);
   });
 
   it('runs the documented literal quickstart without throwing TENANCY_RUNTIME_REQUIRED (R19)', async () => {
