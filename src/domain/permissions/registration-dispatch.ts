@@ -10,6 +10,7 @@ import type { EffectRequest, ToolRiskCategory } from "../../foundations/contract
 import { buildPreparedAction } from "./prepared-action-validator.js";
 import { digestArgs, digestAction } from "../../foundations/action-digest.js";
 import { generateId } from "../../foundations/id.js";
+import { ToolUnavailableError } from "../../foundations/errors.js";
 
 export function makeRegistrationAnalyzer(
   registration: PreparedToolRegistration | BrokerConnectorRegistration | TrustedHostToolRegistration,
@@ -27,8 +28,8 @@ export function makeRegistrationAnalyzer(
         // via the seam; core-only broker-connector tools deny typed.
         const evaluate = getBrokerConnectorEvaluator();
         if (!evaluate) {
-          throw new Error(
-            `TOOL_UNAVAILABLE: broker-connector tools ship with the full "seepient" package ` +
+          throw new ToolUnavailableError(
+            `broker-connector tools ship with the full "seepient" package ` +
             `(the connector registry is not part of seepient-core). Install "seepient" or use trustedHostTool.`,
           );
         }

@@ -67,7 +67,7 @@ const chat = await createChat({ stateless: true, tools: [getBalance] /* + provid
 const res = await chat.send('What is my balance?');
 ```
 
-Inject your own stores (sessions, audit, policy, capability ledger) for durability — the engine routes all consent/audit/tenancy machinery through them exactly as the full package does.
+Inject your own stores (sessions, audit, policy, capability ledger) for durability — the engine routes all consent/audit/tenancy machinery through them exactly as the full package does. The full-package guides ([`askSeepient`](https://github.com/hashangit/seepient/blob/main/docs/sdk/ask-seepient.md), [`createSeepient`](https://github.com/hashangit/seepient/blob/main/docs/sdk/create-seepient.md), [stateless workers](https://github.com/hashangit/seepient/blob/main/docs/sdk/stateless-workers.md)) apply to this package identically except where they touch built-in tools, the sandbox, or the MCP gateway.
 
 ## What is NOT here
 

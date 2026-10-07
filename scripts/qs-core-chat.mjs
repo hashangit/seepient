@@ -28,11 +28,16 @@ function check(name, cond, detail) {
 
 // ── 1. pack the core tarball + clean install ────────────────────────────────
 const workDir = mkdtempSync(join(tmpdir(), "qs-core-chat-"));
-process.on("exit", () => { try { rmSync(workDir, { recursive: true, force: true }); } catch {} });
+const tarballsToClean = [];
+process.on("exit", () => {
+  try { rmSync(workDir, { recursive: true, force: true }); } catch {}
+  for (const t of tarballsToClean) { try { rmSync(t, { force: true }); } catch {} }
+});
 console.log("[qs-core-chat] packing seepient-core…");
 const packOut = execSync("pnpm pack --json", { cwd: join(ROOT, "packages/core"), encoding: "utf8" });
 const tarballName = JSON.parse(packOut).filename;
 const tarball = join(ROOT, "packages/core", tarballName);
+tarballsToClean.push(tarball);
 execSync(`npm install ${JSON.stringify(tarball)} --ignore-scripts --no-audit --no-fund --loglevel=error`, {
   cwd: workDir, stdio: "pipe", maxBuffer: 64 * 1024 * 1024,
 });
@@ -40,7 +45,7 @@ const core = await import(pathToFileURL(join(workDir, "node_modules", "seepient-
 console.log(`[qs-core-chat] installed seepient-core; ${Object.keys(core).length} runtime exports`);
 
 // ── 2. the mock runtime (structural adapter, seeded config store) ──────────
-function makeMockRuntime(script) {
+async function makeMockRuntime(script) {
   let call = 0;
   const languageBackend = {
     chatStream: async function* (_target, req) {
@@ -81,20 +86,16 @@ function makeMockRuntime(script) {
   const credentialStore = new core.MemoryCredentialStore();
   const runtime = new core.ProviderRuntime({ configStore, credentialStore, adapter });
   // Seed via the store's public API (mirrors the createSeepient bootstrap).
-  const overlayPromise = (async () => {
-    const current = await configStore.getOverlay();
-    await configStore.updateOverlay(
-      {
-        providers: {
-          "mock-account": { adapter: "pi-ai", upstreamProvider: "mock-account", credential: { kind: "none" } },
-        },
-        modelAssignments: { text: { standard: { providerAccount: "mock-account", model: "mock-model" } } },
+  const current = await configStore.getOverlay();
+  await configStore.updateOverlay(
+    {
+      providers: {
+        "mock-account": { adapter: "pi-ai", upstreamProvider: "mock-account", credential: { kind: "none" } },
       },
-      current.revision,
-    );
-  })();
-  // The overlay write is async; runtime methods await config reads anyway.
-  runtime.__overlayReady = overlayPromise;
+      modelAssignments: { text: { standard: { providerAccount: "mock-account", model: "mock-model" } } },
+    },
+    current.revision,
+  );
   return runtime;
 }
 
@@ -104,7 +105,7 @@ async function main() {
   // ── flow (a): stateless multi-turn via createSeepient + chatStream ──
   console.log("[qs-core-chat] flow (a): stateless multi-turn (createSeepient + chatStream)");
   {
-    const runtime = makeMockRuntime([{ content: "turn one answer" }, { content: "turn two answer" }]);
+    const runtime = await makeMockRuntime([{ content: "turn one answer" }, { content: "turn two answer" }]);
     const agent = await core.createSeepient({
       stateless: true, tenancy: "single", runtime, skills: false,
     });
@@ -121,7 +122,7 @@ async function main() {
   // ── flow (b): createChat front door — send + stream + owned history ──
   console.log("[qs-core-chat] flow (b): createChat send + stream with owned history");
   {
-    const runtime = makeMockRuntime([{ content: "c1" }, { content: "c2" }, { content: "c3" }]);
+    const runtime = await makeMockRuntime([{ content: "c1" }, { content: "c2" }, { content: "c3" }]);
     const chat = await core.createChat({ stateless: true, tenancy: "single", runtime, skills: false });
     const r1 = await chat.send("one");
     check("flow (b) send", r1.text === "c1");
@@ -136,7 +137,7 @@ async function main() {
   // ── flow (c): askSeepient one-shot ──
   console.log("[qs-core-chat] flow (c): askSeepient one-shot");
   {
-    const runtime = makeMockRuntime([{ content: "one-shot answer" }]);
+    const runtime = await makeMockRuntime([{ content: "one-shot answer" }]);
     const res = await core.askSeepient("hello", { runtime, tenancy: "single", skills: false });
     check("flow (c) one-shot", res.text === "one-shot answer");
   }
@@ -152,7 +153,7 @@ async function main() {
       },
       execute: async (args) => { calls.push(args.text); return `echo:${args.text}`; },
     });
-    const runtime = makeMockRuntime([
+    const runtime = await makeMockRuntime([
       { toolCalls: [{ id: "tc1", name: "echo", args: { text: "hi" } }] },
       { content: "done" },
     ]);
@@ -166,7 +167,7 @@ async function main() {
   }
 
   // ── flow (e): tool approval through injected stores on the light pipeline ──
-  console.log("[qs-core-chat] flow (e): approval via approveTool on the light default pipeline");
+  console.log("[qs-core-chat] flow (e): approval prompted through the light default pipeline (approveTool callback)");
   {
     const echo = core.trustedHostTool({
       definition: {
@@ -176,7 +177,7 @@ async function main() {
       execute: async () => "ok",
     });
     const prompts = [];
-    const runtime = makeMockRuntime([
+    const runtime = await makeMockRuntime([
       { toolCalls: [{ id: "tc1", name: "echo2", args: {} }] },
       { content: "approved turn done" },
     ]);
@@ -205,7 +206,7 @@ async function main() {
   // ── seam degradation: heuristic tokenizer + actionable refreshModels ──
   console.log("[qs-core-chat] seam degradation: heuristic tokenizer, actionable refreshModels");
   {
-    const runtime = makeMockRuntime([{ content: "usage probe" }]);
+    const runtime = await makeMockRuntime([{ content: "usage probe" }]);
     const res = await core.askSeepient("hi", { runtime, tenancy: "single", skills: false });
     check("estimateMode observable + heuristic (BPE vendor absent)",
       res.usage?.estimateMode === "heuristic", JSON.stringify(res.usage));

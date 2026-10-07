@@ -1,0 +1,96 @@
+Business Source License 1.1
+
+Parameters
+
+Licensor:             Hashan Wickramasinghe
+Licensed Work:        Seepient Agent — the `seepient` npm package and the
+                      corresponding source code in this repository, including
+                      the CLI (`seepient`, `seepient-server`), the SDK (`seepient`),
+                      the server adapter, built-in tools, and skills.
+                      The Licensed Work does not include separate third-party
+                      software modules distributed under their own licenses.
+Additional Use Grant: Use of the Licensed Work is permitted at no cost for:
+                        1. Personal, non-commercial use by individuals.
+                        2. Non-commercial use by educators, students, and
+                           academic or research institutions.
+                        3. Evaluation and internal trial use by any
+                           organization, for the lesser of ninety (90) days
+                           or a single development project.
+                      This Additional Use Grant does not extend to:
+                        a. Any production or commercial deployment of the
+                           Licensed Work, by or for the benefit of an
+                           organization.
+                        b. Offering the Licensed Work, in whole or in part,
+                           as a managed service, hosted product, or embedded
+                           component of a commercial offering.
+Change Date:          2028-01-01
+Change License:       Apache License 2.0
+
+Notice
+
+The Licensed Work is provided under the Business Source License 1.1 (BSL),
+a source-available license that is not an open-source license. You may not
+use the Licensed Work except in compliance with the BSL. The parameters
+above define the Additional Use Grant, the Change Date, and the Change
+License under which the Licensed Work will become available on or after the
+Change Date.
+
+A commercial license is required for any use that exceeds the Additional
+Use Grant above. To obtain a commercial license, contact the Licensor.
+
+For the full terms of the Business Source License 1.1, see:
+
+    https://mariadb.com/bsl11/
+
+Terms
+
+The Licensed Work is (c) 2024-2026 Hashan Wickramasinghe.
+
+------------------------------------------------------------------------------
+
+Business Source License 1.1
+
+Terms
+
+The Licensor hereby grants you the right to copy, modify, create derivative
+works, redistribute, and non-commercially use the Licensed Work to the
+extent you are a Licensee in compliance with the Additional Use Grant and
+its associated terms and conditions, which are hereby incorporated by
+reference.
+
+You may redistribute the Licensed Work, in whole or in part, provided that
+you:
+
+    1. Prominently display the parameters of the BSL (Licensor, Licensed
+       Work, Additional Use Grant, Change Date, and Change License) on or
+       in association with every copy of the Licensed Work; and
+
+    2. Include a copy of, or the Uniform Resource Identifier for, the BSL
+       with every copy of the Licensed Work.
+
+You may use the Licensed Work for the purposes of the Additional Use Grant
+only. Any use beyond the scope of the Additional Use Grant (including but
+not limited to commercial use in production) requires the Licensor's
+separate written agreement (a "Commercial License"). Contact the Licensor
+to obtain a Commercial License.
+
+The Licensor will not bring a patent or copyright infringement action
+against you under the BSL for any use of the Licensed Work falling within
+the Additional Use Grant.
+
+On or after the Change Date, the Licensed Work will automatically become
+available under the Change License and you will be able to use it under the
+terms of that Change License.
+
+This License does not extend to, and no permission is granted for, the use
+of any trade names, trademarks, service marks, or product names of the
+Licensor, except as required for reasonable and customary use in describing
+the origin of the Licensed Work.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.

@@ -166,7 +166,13 @@ export function assertNoWorkspaceSpecifiers(manifest, label) {
 
 /** B-3: no compiled engine module duplicated into the root dist (forwarding shims whitelisted). */
 export function assertNoDuplicatedEngine(rootDist, coreDist) {
-  if (!fs.existsSync(coreDist) || !fs.existsSync(rootDist)) return [];
+  // Review P3: a missing dist silently passing was a fresh-clone false-green.
+  if (!fs.existsSync(coreDist)) {
+    throw new Error(`B-3: core emit missing at ${coreDist} — run \`pnpm run build:core\` first`);
+  }
+  if (!fs.existsSync(rootDist)) {
+    throw new Error(`B-3: root dist missing at ${rootDist} — run \`pnpm run build\` first`);
+  }
   const coreFiles = [];
   (function walk(dir) {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -196,7 +202,6 @@ export function assertNoDuplicatedEngine(rootDist, coreDist) {
       `B-3: engine modules compiled into BOTH artifacts (forwarding shims excepted):\n  - ${duplicates.join("\n  - ")}`,
     );
   }
-  return [];
 }
 
 /** release.yml invariants, grepped in-repo (D18: no separate workflow-lint script). */
@@ -213,7 +218,6 @@ export function assertReleaseWorkflowInvariants(repoRoot) {
   if (corePublish === -1 || rootPublish === -1) {
     violations.push("release.yml must publish packages/core via pnpm publish");
   }
-  const firstCore = wf.indexOf("--no-git-checks");
   const firstRoot = wf.toLowerCase().includes("pnpm publish");
   if (!firstRoot) violations.push('release.yml must use "pnpm publish" (never raw "npm publish")');
   if (/(?<!p)npm publish/.test(wf)) violations.push('release.yml mentions raw "npm publish" — forbidden (workspace:^ poison)');
@@ -343,8 +347,8 @@ export function verifyPack(projectRoot = process.cwd(), opts = {}) {
   if (Object.keys(pkg.scripts ?? {}).length > 0) {
     throw new Error("seepient-core manifest must be script-free (pnpm publish --dry-run would run prepublishOnly — E12)");
   }
-  if (JSON.stringify(pkg.files) !== JSON.stringify(["dist"])) {
-    throw new Error("seepient-core files must be exactly [\"dist\"]");
+  if (JSON.stringify(pkg.files) !== JSON.stringify(["dist", "LICENSE", "README.md"])) {
+    throw new Error('seepient-core files must be exactly ["dist", "LICENSE", "README.md"]');
   }
   if (pkg.publishConfig?.access !== "public") {
     throw new Error("seepient-core publishConfig.access must be public");
