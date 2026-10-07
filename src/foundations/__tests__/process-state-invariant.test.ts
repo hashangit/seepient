@@ -40,6 +40,9 @@ export const PINNED_ACCEPTED_STATE: readonly string[] = Object.freeze([
   "foundations/injection-seams.ts:mediaVendorOperationHandlerFactory",
   "foundations/injection-seams.ts:executionBoundaryFactory",
   "foundations/injection-seams.ts:providerManagerApiFactory",
+  "foundations/injection-seams.ts:brokerConnectorEvaluator",
+  "foundations/injection-seams.ts:discoverySourceLoaders",
+  "foundations/injection-seams.ts:builtInAnalyzers",
   // Spec 027 tokenizer seam: lazily-resolved exact-BPE encoder + its mode.
   "capabilities/tokenizer/tokenizer.ts:encode",
   "capabilities/tokenizer/tokenizer.ts:estimateMode",

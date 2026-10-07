@@ -40,7 +40,7 @@ function CustomBlock({ props, contextTokens }: { props: unknown; contextTokens?:
     return <SkillsList skills={p.skills as Array<{ name: string; description: string }>} />;
   }
   if (p.component === 'context' && p.breakdown) {
-    return <ContextPanel breakdown={p.breakdown as import('../../../foundations/contracts/context.js').ContextBreakdown} contextTokens={contextTokens} />;
+    return <ContextPanel breakdown={p.breakdown as import('seepient-core/dist/foundations/contracts/context.js').ContextBreakdown} contextTokens={contextTokens} />;
   }
   return <Text color="gray">[unknown custom block]</Text>;
 }

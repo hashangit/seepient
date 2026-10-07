@@ -16,13 +16,13 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Agent, type ChatResult } from '../../../transport/cli/agent.js';
-import { InlineApprovalBroker } from '../../../transport/approval-brokers.js';
-import type { InlineApprovalPresenter } from '../../../transport/approval-brokers.js';
+import { InlineApprovalBroker } from 'seepient-core/dist/transport/approval-brokers.js';
+import type { InlineApprovalPresenter } from 'seepient-core/dist/transport/approval-brokers.js';
 import type {
   PermissionRequest,
   TuiApprovalSelection,
-} from '../../../foundations/contracts/permission-policy.js';
-import type { ApproveToolFn, ApprovalContext, ApprovalDecision, StepResult, CumulativeUsage } from '../../../foundations/types.js';
+} from 'seepient-core/dist/foundations/contracts/permission-policy.js';
+import type { ApproveToolFn, ApprovalContext, ApprovalDecision, StepResult, CumulativeUsage } from 'seepient-core/dist/foundations/types.js';
 import type { Todo } from '../components/goal-status.js';
 import type { FeedApi } from './use-feed.js';
 import type { WidgetHost } from '../widget-host.js';
@@ -63,7 +63,7 @@ export interface AgentApi {
   contextTokens: number;
   /** Persistent todo list (updated by manage_todos tool; null when none). */
   latestTodos: Todo[] | null;
-  submit: (input: string, providerFactory?: import('../../../domain/agent-loop.js').ProviderFactory) => Promise<void>;
+  submit: (input: string, providerFactory?: import('seepient-core/dist/domain/agent-loop.js').ProviderFactory) => Promise<void>;
   /** Native selections or legacy decisions both flow through this resolver. */
   resolvePermission: (selection: TuiApprovalSelection | ApprovalDecision) => void;
   abort: () => void;
@@ -75,7 +75,7 @@ export interface AgentApi {
 export interface UseAgentArgs {
   agent: Agent;
   feed: FeedApi;
-  consentMode?: import('../../../foundations/settings-schema.js').ConsentMode;
+  consentMode?: import('seepient-core/dist/foundations/settings-schema.js').ConsentMode;
   widgetHost?: WidgetHost;
 }
 
@@ -196,7 +196,7 @@ export function useAgent({ agent, feed, consentMode, widgetHost }: UseAgentArgs)
 
   const submit = useCallback(async (
     input: string,
-    providerFactory?: import('../../../domain/agent-loop.js').ProviderFactory,
+    providerFactory?: import('seepient-core/dist/domain/agent-loop.js').ProviderFactory,
   ): Promise<void> => {
     const trimmed = input.trim();
     if (!trimmed) return;
@@ -222,7 +222,7 @@ export function useAgent({ agent, feed, consentMode, widgetHost }: UseAgentArgs)
     let resolvedInput = trimmed;
     if (trimmed.includes('@')) {
       try {
-        const { resolveReferences } = await import('../../../capabilities/skills/resolver.js');
+        const { resolveReferences } = await import('seepient-core/dist/capabilities/skills/resolver.js');
         resolvedInput = await resolveReferences(trimmed);
       } catch { /* resolver not available — use raw input */ }
     }

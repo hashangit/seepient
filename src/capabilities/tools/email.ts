@@ -1,5 +1,5 @@
 import nodemailer from '../../vendors/nodemailer.js';
-import { ToolModule } from '../../foundations/contracts/tool.js';
+import { ToolModule } from 'seepient-core/dist/foundations/contracts/tool.js';
 
 export const EmailTool: ToolModule = {
   name: "Email Service",

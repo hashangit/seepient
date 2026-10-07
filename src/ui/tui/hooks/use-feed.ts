@@ -8,7 +8,7 @@
  */
 
 import { useCallback, useState } from 'react';
-import { generateId } from '../../../foundations/id.js';
+import { generateId } from 'seepient-core/dist/foundations/id.js';
 import type { FeedEntry, FeedEntryInput, BlockEntry } from '../types.js';
 
 export interface FeedApi {

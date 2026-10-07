@@ -7,8 +7,8 @@ import type { WebSocket, ToolApprovalResponse } from "./ws-types.js";
 import type {
   PermissionDecision,
   PermissionRequest,
-} from "../../foundations/contracts/permission-policy.js";
-import type { ApproveToolFn } from "../../foundations/types.js";
+} from "seepient-core/dist/foundations/contracts/permission-policy.js";
+import type { ApproveToolFn } from "seepient-core/dist/foundations/types.js";
 import { safeSend } from "./connection-registry.js";
 import type { WsConnectionRegistry } from "./ws-types.js";
 

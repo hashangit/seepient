@@ -20,9 +20,9 @@ import * as readline from 'readline/promises';
 
 import { Agent } from './agent.js';
 import { FULL_TOOL_MODULES } from '../sdk/full-registrations.js';
-import { ToolRegistry } from '../../domain/tool-executor.js';
-import { resolveLaunchMode, selectSystemPrompt } from '../../domain/prompts/system-prompts.js';
-import { createAmbientProviderRuntime } from '../../domain/providers/provider-runtime.js';
+import { ToolRegistry } from 'seepient-core/dist/domain/tool-executor.js';
+import { resolveLaunchMode, selectSystemPrompt } from 'seepient-core/dist/domain/prompts/system-prompts.js';
+import { createAmbientProviderRuntime } from 'seepient-core/dist/domain/providers/provider-runtime.js';
 import {
   loadJsonConfig,
   applyEnvOverrides,
@@ -30,12 +30,12 @@ import {
   getConfigDir,
 } from './config-loader.js';
 import { runSetup } from './setup.js';
-import { isNonInteractive } from '../../foundations/environment.js';
-import { type ConsentMode, consentModeToApprovalMode } from '../../foundations/settings-schema.js';
-import { VALID_CONSENT_MODES } from '../../foundations/config.js';
-import type { PersistenceBackend } from '../../foundations/types.js';
-import { createPersistenceBackend } from '../../domain/sessions/session-store.js';
-import { SettingsManager } from '../../domain/settings/settings-manager.js';
+import { isNonInteractive } from 'seepient-core/dist/foundations/environment.js';
+import { type ConsentMode, consentModeToApprovalMode } from 'seepient-core/dist/foundations/settings-schema.js';
+import { VALID_CONSENT_MODES } from 'seepient-core/dist/foundations/config.js';
+import type { PersistenceBackend } from 'seepient-core/dist/foundations/types.js';
+import { createPersistenceBackend } from 'seepient-core/dist/domain/sessions/session-store.js';
+import { SettingsManager } from 'seepient-core/dist/domain/settings/settings-manager.js';
 import { loadMergedConfig } from './config-loader.js';
 
 export interface CliSessionContext {
@@ -90,7 +90,7 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
   let fullConfig = { ...globalConfig, ...localConfig };
 
   // T3: create session SnapshotStore for hash-anchored edits
-  const { createSnapshotStore } = await import('../../foundations/hashline/snapshot-store.js');
+  const { createSnapshotStore } = await import('seepient-core/dist/foundations/hashline/snapshot-store.js');
   const snapshotStore = createSnapshotStore();
   (fullConfig as any).snapshotStore = snapshotStore;
 
@@ -205,7 +205,7 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
       if (gwResult) {
         gatewayInstance = gwResult.gateway;
         agent.registerManyTools(gwResult.tools);
-        const { semanticToolInjectionMiddleware } = await import('../../domain/middleware/semantic-tools.js');
+        const { semanticToolInjectionMiddleware } = await import('seepient-core/dist/domain/middleware/semantic-tools.js');
         agent.setMiddleware([semanticToolInjectionMiddleware(gatewayInstance, gatewayConfig.semanticTopK)]);
         if (options.interactive) {
           console.log(chalk.green('Gateway initialized'));
@@ -222,7 +222,7 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
   // through compare-and-set; proposals are inert until approved.
   try {
     const { LocalPolicyStore, computeWorkspaceId } = await import(
-      '../../domain/permissions/policy-store.js'
+      'seepient-core/dist/domain/permissions/policy-store.js'
     );
     const policyStore = new LocalPolicyStore();
     const workspaceId = computeWorkspaceId(process.cwd());
@@ -287,7 +287,7 @@ export async function bootstrapCliSession(options: any): Promise<CliSessionConte
   // records without a terminal event on startup. Best-effort, never blocks.
   try {
     const { LocalAuditStore, TerminalEventOutbox, recoverIndeterminateActions } = await import(
-      '../../domain/permissions/audit-recorder.js'
+      'seepient-core/dist/domain/permissions/audit-recorder.js'
     );
     const auditStore = new LocalAuditStore();
     const outbox = new TerminalEventOutbox(auditStore);

@@ -1,4 +1,5 @@
 {
+  "//": "The exclude list MIRRORS the tsconfig.core.json include list (spec 027 D18: single membership source, drift caught by the pack:verify B-3 no-dup assert). Engine files emit into packages/core/dist only; full-side surfaces import them via the 'seepient-core' specifier. src/domain/media stays full-side (registration seam), so the domain excludes enumerate its siblings.",
   "compilerOptions": {
     "target": "ES2024",
     "module": "NodeNext",
@@ -13,6 +14,52 @@
     "rootDir": "./src",
     "declaration": true
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "src/**/__tests__/**", "src/**/*.test.ts", "src/**/*.spec.ts"]
+  "include": [
+    "src/**/*"
+  ],
+  "//": "The exclude list MIRRORS the tsconfig.core.json include list (spec 027 D18: single membership source, drift caught by the pack:verify B-3 no-dup assert). Engine files emit into packages/core/dist only; full-side surfaces import them via the 'seepient-core' specifier. src/domain/media stays full-side (registration seam), so the domain excludes enumerate its siblings.",
+  "exclude": [
+    "node_modules",
+    "src/**/__tests__/**",
+    "src/**/*.test.ts",
+    "src/**/*.spec.ts",
+    "src/foundations/**/*",
+    "src/capabilities/skills/**/*",
+    "src/capabilities/tokenizer/tokenizer.ts",
+    "src/capabilities/inference/aggregate-adapter.ts",
+    "src/capabilities/inference/catalog-merge.ts",
+    "src/capabilities/execution/in-memory-artifact-store.ts",
+    "src/capabilities/execution/in-memory-replay-ledger.ts",
+    "src/capabilities/execution/operation-executor-registry.ts",
+    "src/capabilities/execution/host-executors.ts",
+    "src/capabilities/execution/light-execution-boundary.ts",
+    "src/domain/agent-loop.ts",
+    "src/domain/tool-executor.ts",
+    "src/domain/hooks.ts",
+    "src/domain/index.ts",
+    "src/domain/context/**/*",
+    "src/domain/middleware/**/*",
+    "src/domain/permissions/**/*",
+    "src/domain/prompts/**/*",
+    "src/domain/providers/**/*",
+    "src/domain/sessions/**/*",
+    "src/domain/settings/**/*",
+    "src/domain/skills/**/*",
+    "src/domain/streaming/**/*",
+    "src/domain/tenancy/**/*",
+    "src/transport/sdk/seepient.ts",
+    "src/transport/sdk/ask.ts",
+    "src/transport/sdk/chat.ts",
+    "src/transport/sdk/core.ts",
+    "src/transport/sdk/custom-tools.ts",
+    "src/transport/sdk/tools.ts",
+    "src/transport/sdk/error-surfacing.ts",
+    "src/transport/sdk/skill-sources-helper.ts",
+    "src/transport/legacy-adapter.ts",
+    "src/transport/approval-brokers.ts",
+    "src/vendors/pi-ai/**/*",
+    "src/vendors/anthropic.ts",
+    "src/vendors/egress-check.ts",
+    "src/capabilities/execution/model-egress-gate.ts"
+  ]
 }

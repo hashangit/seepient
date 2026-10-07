@@ -25,11 +25,10 @@ import {
   GLOBAL_WORKSPACE_ID,
 } from "./policy-store.js";
 import { setCovers } from "./capability-store.js";
-import { DEFAULT_ANALYZERS } from "./default-analyzers.js";
-import { COMM_ANALYZERS } from "./comm-analyzers.js";
 import { deriveConfigGrants } from "./config-derived-grants.js";
 import { CURRENT_CEILING_VERSION } from "./policy-store.js";
-import type { ToolAnalyzer } from "./default-analyzers.js";
+import type { ToolAnalyzer } from "../../foundations/contracts/tool-analyzer.js";
+import { getBuiltInAnalyzers } from "../../foundations/injection-seams.js";
 import type {
   ApprovalBroker,
   Capability,
@@ -52,11 +51,14 @@ import { PersistedCapabilityLedger } from "./persisted-capability-ledger.js";
 import { PrincipalRequiredError, InvalidPrincipalIdError } from "../../foundations/errors.js";
 import { SENTINEL_PRINCIPAL_IDS, PRINCIPAL_ID_RE } from "../tenancy/tenancy-mode.js";
 
-/** All analyzers, merged. Tools without an analyzer fall through. */
-export const ALL_ANALYZERS: Record<string, ToolAnalyzer> = {
-  ...DEFAULT_ANALYZERS,
-  ...COMM_ANALYZERS,
-};
+/**
+ * All registered analyzers, merged — evaluated LIVE at each call (spec 027:
+ * the full package registers its tables at composition roots, so a load-time
+ * snapshot would be empty in every graph that has not registered yet).
+ */
+export function allAnalyzers(): Record<string, ToolAnalyzer> {
+  return getBuiltInAnalyzers();
+}
 
 export interface ActionLifecycleInputs {
   principalId: string;
@@ -588,7 +590,7 @@ export async function buildActionLifecycle(
     policyContext,
     activeCapabilities,
     grantedCapabilities: activeCapabilities.capabilities,
-    analyzers: ALL_ANALYZERS,
+    analyzers: allAnalyzers(),
     registrations: inputs.registrations,
     auditStore,
     terminalOutbox,

@@ -5,22 +5,22 @@
  * contracts/provider-manager-api.md. Binding rules R1–R15 in plan.md.
  */
 
-import type { ProviderRuntime } from "../../domain/providers/provider-runtime.js";
-import type { AvailableModel } from "../../domain/providers/model-catalog.js";
+import type { ProviderRuntime } from "seepient-core/dist/domain/providers/provider-runtime.js";
+import type { AvailableModel } from "seepient-core/dist/domain/providers/model-catalog.js";
 export type { AvailableModel };
 import type {
   CredentialRef,
-} from "../../foundations/schemas/credential-store.js";
+} from "seepient-core/dist/foundations/schemas/credential-store.js";
 import type {
   PurposeModelMap,
   ProviderEntry,
   ProviderEntryPatch,
-} from "../../foundations/schemas/provider-config.js";
-import type { ThinkingLevel } from "../../foundations/schemas/inference.js";
-import { redactString, redactUrlCredentials, isSensitiveKey } from "../../foundations/security/redact.js";
-import { SeepientError } from "../../foundations/errors.js";
-import { validateEndpointUrl } from "../../foundations/network/ssrf-fetch.js";
-import { getCanonicalOAuthFlowId, isOAuthSupported, FLOW_MAP } from "../../domain/providers/oauth-service.js";
+} from "seepient-core/dist/foundations/schemas/provider-config.js";
+import type { ThinkingLevel } from "seepient-core/dist/foundations/schemas/inference.js";
+import { redactString, redactUrlCredentials, isSensitiveKey } from "seepient-core/dist/foundations/security/redact.js";
+import { SeepientError } from "seepient-core/dist/foundations/errors.js";
+import { validateEndpointUrl } from "seepient-core/dist/foundations/network/ssrf-fetch.js";
+import { getCanonicalOAuthFlowId, isOAuthSupported, FLOW_MAP } from "seepient-core/dist/domain/providers/oauth-service.js";
 export { isOAuthSupported, getCanonicalOAuthFlowId, FLOW_MAP };
 
 // ── Vocabulary types (data-model.md §2.1) ───────────────────────────────────
@@ -884,7 +884,7 @@ export function createProviderManagerApi(
     callbacks: OAuthFlowCallbacks,
   ): Promise<SaveResult> {
     const { getOAuthFlow, isOAuthSupported } = await import(
-      "../../domain/providers/oauth-service.js"
+      "seepient-core/dist/domain/providers/oauth-service.js"
     );
     if (!isOAuthSupported(upstream)) {
       return {
@@ -1128,7 +1128,7 @@ export function createProviderManagerApi(
 
   async function getAvailableOAuthFlows(): Promise<readonly string[]> {
     const { AVAILABLE_OAUTH_FLOWS } = await import(
-      "../../domain/providers/oauth-service.js"
+      "seepient-core/dist/domain/providers/oauth-service.js"
     );
     return AVAILABLE_OAUTH_FLOWS;
   }

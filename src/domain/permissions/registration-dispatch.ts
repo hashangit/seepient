@@ -1,13 +1,14 @@
-import type { ToolAnalyzer } from "./default-analyzers.js";
+import type { ToolAnalyzer } from "../../foundations/contracts/tool-analyzer.js";
 import type {
   PreparedToolRegistration,
   BrokerConnectorRegistration,
   TrustedHostToolRegistration,
 } from "../../foundations/contracts/custom-tools.js";
 import type { PreparedOperation, ActionDisplay } from "../../foundations/contracts/prepared-action.js";
+import { getBrokerConnectorEvaluator } from "../../foundations/injection-seams.js";
 import type { EffectRequest, ToolRiskCategory } from "../../foundations/contracts/tool-effects.js";
 import { buildPreparedAction } from "./prepared-action-validator.js";
-import { digestArgs, digestAction } from "./default-analyzers.js";
+import { digestArgs, digestAction } from "../../foundations/action-digest.js";
 import { generateId } from "../../foundations/id.js";
 
 export function makeRegistrationAnalyzer(
@@ -22,8 +23,16 @@ export function makeRegistrationAnalyzer(
     }
     if (registration.kind === "broker-connector") {
       return async (args, ctx) => {
-        const { evaluateBrokerConnector } = await import("../../capabilities/tools/connector-registry.js");
-        const draft = await evaluateBrokerConnector(registration, args, ctx);
+        // Spec 027: connector evaluation is full-package machinery arriving
+        // via the seam; core-only broker-connector tools deny typed.
+        const evaluate = getBrokerConnectorEvaluator();
+        if (!evaluate) {
+          throw new Error(
+            `TOOL_UNAVAILABLE: broker-connector tools ship with the full "seepient" package ` +
+            `(the connector registry is not part of seepient-core). Install "seepient" or use trustedHostTool.`,
+          );
+        }
+        const draft = await evaluate(registration, args, ctx);
         return buildPreparedAction(draft, registration, ctx, args);
       };
     }

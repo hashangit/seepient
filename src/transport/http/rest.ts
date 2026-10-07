@@ -10,7 +10,7 @@ import type { IncomingMessage, ServerResponse } from "http";
 import type {
   SkillMetadata,
   AskSeepientResult,
-} from "../../foundations/types.js";
+} from "seepient-core/dist/foundations/types.js";
 import { authMiddleware, hasScope } from "../auth/auth.js";
 import { ServerSessionManager, hashKey } from "./session-store.js";
 import {
@@ -22,7 +22,7 @@ import {
 import { globalRateLimiter, RateLimiter } from "./rate-limit.js";
 import { logTransportEvent } from "../logging.js";
 import { parseBody, PayloadTooLargeError } from "./body.js";
-import { extractLoopError } from "../sdk/error-surfacing.js";
+import { extractLoopError } from "seepient-core/dist/transport/sdk/error-surfacing.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -42,7 +42,7 @@ export interface RestHandlerContext {
     tenantId?: string;
     principalId?: string;
     sessionId?: string;
-    history?: import("../../foundations/types.js").Message[];
+    history?: import("seepient-core/dist/foundations/types.js").Message[];
   }) => Promise<AskSeepientResult>;
   /** List available models grouped by provider */
   listModels: () => Record<string, string[]>;
@@ -53,7 +53,7 @@ export interface RestHandlerContext {
   /** Gateway REST handler — delegated for all /v1/gateway/* routes */
   gatewayHandler?: (req: IncomingMessage, res: ServerResponse, path: string, method: string) => Promise<void>;
   /** Provider runtime instance */
-  runtime?: import("../../foundations/contracts/provider-runtime.js").ProviderRuntimeContract;
+  runtime?: import("seepient-core/dist/foundations/contracts/provider-runtime.js").ProviderRuntimeContract;
   /** Maximum request body size in bytes */
   maxBodyBytes?: number;
   /** Rate limiter instance */
@@ -292,7 +292,7 @@ export function createRestHandler(ctx: RestHandlerContext) {
         if (ctx.runtime) return ctx.runtime;
         // 022-5-WO2 T008: the fallback runtime serves the same multi server
         // surface — arm it to match the boot-time composition.
-        const { createIsolatedProviderRuntime } = await import("../../domain/providers/provider-runtime.js");
+        const { createIsolatedProviderRuntime } = await import("seepient-core/dist/domain/providers/provider-runtime.js");
         return createIsolatedProviderRuntime({ tenancyMode: "multi" });
       };
 
@@ -568,11 +568,11 @@ async function handleChat(
   // If sessionId is provided, verify it exists and belongs to caller.
   // W154c: an empty/whitespace sessionId means "no session", not an id of "".
   const sessionId = parsed.sessionId?.trim() || undefined;
-  let history: import("../../foundations/types.js").Message[] | undefined;
+  let history: import("seepient-core/dist/foundations/types.js").Message[] | undefined;
   let turnAcquired = false;
 
   if (sessionId) {
-    let session: import("../../foundations/types.js").SessionData | null;
+    let session: import("seepient-core/dist/foundations/types.js").SessionData | null;
     try {
       session = await ctx.sessionManager.getSession(sessionId, keyHash);
       if (!session) {
@@ -762,7 +762,7 @@ async function handleGetSession(
     return;
   }
 
-  let session: import("../../foundations/types.js").SessionData | null;
+  let session: import("seepient-core/dist/foundations/types.js").SessionData | null;
   try {
     session = await ctx.sessionManager.getSession(sessionId, key.keyHash ?? (key.key ? hashKey(key.key) : ""));
   } catch (err: any) {

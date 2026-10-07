@@ -16,16 +16,16 @@
  * (fail closed). No tool silently runs through the old unrestricted handler.
  */
 import { LocalExecutionBoundary } from "./local-execution-boundary.js";
-import { OperationExecutorRegistry } from "./operation-executor-registry.js";
+import { OperationExecutorRegistry } from "seepient-core/dist/capabilities/execution/operation-executor-registry.js";
 import { CommitFilesExecutor, ReadFileExecutor, BrokerExecutor } from "./executors.js";
-import { NoneExecutor, TrustedHostExecutor } from "./host-executors.js";
+import { NoneExecutor, TrustedHostExecutor } from "seepient-core/dist/capabilities/execution/host-executors.js";
 import { ProcessExecutor } from "./process-executor.js";
-import { InMemoryArtifactStore } from "./in-memory-artifact-store.js";
+import { InMemoryArtifactStore } from "seepient-core/dist/capabilities/execution/in-memory-artifact-store.js";
 import { FileCommitBroker } from "./file-commit-broker.js";
 import { EffectBroker, NodeNetworkAdapter, type BrokerNetworkAdapter } from "./effect-broker.js";
 import { createNativeProcessSandbox, UncontainedSandbox } from "../../vendors/sandbox-runtime/index.js";
 import { probeCommitHelper, PackagedCommitHelper } from "../../vendors/native-fs-commit/index.js";
-import type { ExecutionBoundary } from "../../foundations/contracts/execution-boundary.js";
+import type { ExecutionBoundary } from "seepient-core/dist/foundations/contracts/execution-boundary.js";
 
 export interface BuildLocalBoundaryResult {
   boundary: ExecutionBoundary;
@@ -55,21 +55,21 @@ export async function buildLocalBoundary(opts?: {
   network?: BrokerNetworkAdapter;
   /** Optional handler for vendor-operation broker requests (e.g. media generation/optimization). */
   vendorOperationHandler?: (
-    req: Extract<import("../../foundations/contracts/prepared-action.js").BrokeredEffectRequest, { kind: "vendor-operation" }>,
-    capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[],
-  ) => Promise<import("../../foundations/contracts/execution-brokers.js").BrokeredEffectResult>;
+    req: Extract<import("seepient-core/dist/foundations/contracts/prepared-action.js").BrokeredEffectRequest, { kind: "vendor-operation" }>,
+    capabilities?: import("seepient-core/dist/foundations/contracts/permission-policy.js").Capability[],
+  ) => Promise<import("seepient-core/dist/foundations/contracts/execution-brokers.js").BrokeredEffectResult>;
   /**
    * Session snapshot store for read-side tagging and edit-time patch
    * application (spec 019 FR-001). The composition root owns the store so
    * the ReadFileExecutor and the analyzers share ONE store.
    */
-  snapshotStore?: import("../../foundations/hashline/snapshot-store.js").SnapshotStore;
+  snapshotStore?: import("seepient-core/dist/foundations/hashline/snapshot-store.js").SnapshotStore;
   /**
    * Commit-helper injection (tests / e2e pipelines). When supplied, the
    * probe is skipped and this helper backs the FileCommitBroker — the same
    * seam the broker unit tests use.
    */
-  commitHelper?: import("../../foundations/contracts/execution-brokers.js").CommitHelper;
+  commitHelper?: import("seepient-core/dist/foundations/contracts/execution-brokers.js").CommitHelper;
   /** Optional secret resolver for injecting credentials securely inside the broker. */
   secretResolver?: (ref: string) => string | undefined;
   /** Tenancy mode ('single' | 'multi'). In multi mode, ambient secret fallback is disabled. */

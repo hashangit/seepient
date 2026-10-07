@@ -193,6 +193,9 @@ importers:
       react:
         specifier: ^19.2.7
         version: 19.3.0
+      seepient-core:
+        specifier: workspace:^
+        version: link:packages/core
       terminal-link:
         specifier: ^5.0.0
         version: 5.0.0

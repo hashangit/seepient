@@ -1,8 +1,42 @@
 {
-  "//": "seepient-core emit (027): this include list is the SINGLE membership source of the engine spine (data-model §1.1); the root tsconfig's exclude list mirrors it. Module format note (research E12): an emit's module format is governed by the nearest package.json to the emitted FILE — packages/core/package.json (type: module) covers packages/core/dist, so the core output is ESM like the root.",
+  "//": "seepient-core emit (027): this include list is the SINGLE membership source of the engine spine (data-model \u00a71.1); the root tsconfig's exclude list mirrors it and scripts/check-package-boundary.mjs enforces the closure. Module format note (research E12): an emit's module format is governed by the nearest package.json to the emitted FILE \u2014 packages/core/package.json (type: module) covers packages/core/dist, so the core output is ESM like the root. Dynamic edges into full-package modules (tokenizer vendor, discovery sources) are seam-guarded and degrade with typed errors when absent.",
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "outDir": "./packages/core/dist"
   },
-  "include": ["src/foundations/types.ts"]
+  "include": [
+    "src/foundations/**/*",
+    "src/capabilities/skills/**/*",
+    "src/capabilities/tokenizer/tokenizer.ts",
+    "src/capabilities/inference/aggregate-adapter.ts",
+    "src/capabilities/inference/catalog-merge.ts",
+    "src/capabilities/execution/in-memory-artifact-store.ts",
+    "src/capabilities/execution/in-memory-replay-ledger.ts",
+    "src/capabilities/execution/operation-executor-registry.ts",
+    "src/capabilities/execution/host-executors.ts",
+    "src/capabilities/execution/light-execution-boundary.ts",
+    "src/domain/**/*",
+    "src/transport/sdk/seepient.ts",
+    "src/transport/sdk/ask.ts",
+    "src/transport/sdk/chat.ts",
+    "src/transport/sdk/core.ts",
+    "src/transport/sdk/custom-tools.ts",
+    "src/transport/sdk/tools.ts",
+    "src/transport/sdk/error-surfacing.ts",
+    "src/transport/sdk/skill-sources-helper.ts",
+    "src/transport/legacy-adapter.ts",
+    "src/transport/approval-brokers.ts",
+    "src/vendors/pi-ai/**/*",
+    "src/vendors/anthropic.ts",
+    "src/vendors/egress-check.ts",
+    "src/capabilities/execution/model-egress-gate.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "src/**/__tests__/**",
+    "src/**/*.test.ts",
+    "src/**/*.spec.ts",
+    "src/domain/media/**/*",
+    "src/capabilities/inference/register-image-backends.ts"
+  ]
 }

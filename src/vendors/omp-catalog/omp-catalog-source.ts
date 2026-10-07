@@ -7,8 +7,8 @@
  * (e.g. zero/missing pricing, missing reasoning levels, missing contextWindow).
  */
 
-import type { CatalogSource } from "../../foundations/contracts/backend-ports.js";
-import type { UpstreamModel, Pricing, ThinkingLevel } from "../../foundations/schemas/inference.js";
+import type { CatalogSource } from "seepient-core/dist/foundations/contracts/backend-ports.js";
+import type { UpstreamModel, Pricing, ThinkingLevel } from "seepient-core/dist/foundations/schemas/inference.js";
 
 export class OmpCatalogSource implements CatalogSource {
   readonly id = "omp-catalog";

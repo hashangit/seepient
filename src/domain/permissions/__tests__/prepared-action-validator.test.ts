@@ -11,7 +11,7 @@ import type {
 import type { CanonicalPathTarget } from "../../../foundations/contracts/tool-effects.js";
 import { InMemoryArtifactStore } from "../../../capabilities/execution/in-memory-artifact-store.js";
 import { createSnapshotStore } from "../../../foundations/hashline/snapshot-store.js";
-import { digestAction, digestArgs } from "../../../capabilities/tools/analyzers.js";
+import { digestAction, digestArgs } from "../../../foundations/action-digest.js";
 
 function sampleTarget(path = "/mock/workspace/report.txt"): CanonicalPathTarget {
   return {

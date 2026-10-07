@@ -8,8 +8,8 @@
 
 import chalk from 'chalk';
 import inquirer from 'inquirer';
-import { SettingsManager } from '../../../domain/settings/settings-manager.js';
-import { SettingsError } from '../../../domain/settings/settings-manager.js';
+import { SettingsManager } from 'seepient-core/dist/domain/settings/settings-manager.js';
+import { SettingsError } from 'seepient-core/dist/domain/settings/settings-manager.js';
 import {
   SETTINGS_MAP,
   SETTINGS_SCHEMA,
@@ -17,7 +17,7 @@ import {
   isSecretField,
   isRestartRequired,
   getSettingsByCategory,
-} from '../../../foundations/settings-schema.js';
+} from 'seepient-core/dist/foundations/settings-schema.js';
 import {
   formatSettingValue,
   formatSettingTable,
@@ -28,7 +28,7 @@ import {
   renderCategoryStatus,
 } from './settings-utils.js';
 import { loadMergedConfig, loadJsonConfig, getConfigPaths, applyEnvOverrides } from '../config-loader.js';
-import { isNonInteractive } from '../../../foundations/environment.js';
+import { isNonInteractive } from 'seepient-core/dist/foundations/environment.js';
 import type { CommandHandler, CommandContext } from './registry.js';
 
 // ── Subcommand router ─────────────────────────────────────────────────────

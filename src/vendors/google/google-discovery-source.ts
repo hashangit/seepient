@@ -2,7 +2,7 @@ import type {
   DiscoverySource,
   DiscoveryResult,
   ProviderAccountContext,
-} from "../../foundations/contracts/backend-ports.js";
+} from "seepient-core/dist/foundations/contracts/backend-ports.js";
 
 /**
  * Google Gemini model discovery source querying `/v1beta/models`.

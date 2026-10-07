@@ -16,22 +16,22 @@
  * implement the same `ExecutionBoundary` contract, so `PolicyEngine` and
  * `ActionLifecycle` are deployment-agnostic.
  */
-import type { PreparedToolAction } from "../../foundations/contracts/prepared-action.js";
-import type { PreparedOperation } from "../../foundations/contracts/prepared-action.js";
+import type { PreparedToolAction } from "seepient-core/dist/foundations/contracts/prepared-action.js";
+import type { PreparedOperation } from "seepient-core/dist/foundations/contracts/prepared-action.js";
 import type {
   ExecutionBoundary,
   ExecutionBackendCapabilities,
   ExecutionResult,
   ToolProgress,
-} from "../../foundations/contracts/execution-boundary.js";
-import type { CapabilityEnvelope } from "../../foundations/contracts/permission-policy.js";
+} from "seepient-core/dist/foundations/contracts/execution-boundary.js";
+import type { CapabilityEnvelope } from "seepient-core/dist/foundations/contracts/permission-policy.js";
 import type {
   WorkerDispatch,
   WorkerResult,
   WorkerScheduler,
   SchedulerAuthContext,
-} from "../../foundations/contracts/worker-protocol.js";
-import { UnsupportedBackendError } from "../../foundations/errors.js";
+} from "seepient-core/dist/foundations/contracts/worker-protocol.js";
+import { UnsupportedBackendError } from "seepient-core/dist/foundations/errors.js";
 
 /**
  * Operation kinds the control plane MAY execute directly (no effect).
@@ -168,9 +168,9 @@ export class WorkerExecutionBoundary implements ExecutionBoundary {
   }
 
   /** Collect artifact references mentioned in the operation. */
-  private collectManifest(action: PreparedToolAction): import("../../foundations/contracts/prepared-action.js").PreparedArtifactRef[] {
+  private collectManifest(action: PreparedToolAction): import("seepient-core/dist/foundations/contracts/prepared-action.js").PreparedArtifactRef[] {
     const op = action.operation;
-    const out: import("../../foundations/contracts/prepared-action.js").PreparedArtifactRef[] = [];
+    const out: import("seepient-core/dist/foundations/contracts/prepared-action.js").PreparedArtifactRef[] = [];
     if (op.kind === "commit-files") {
       for (const c of op.commits) out.push(c.content);
     } else if (op.kind === "broker") {

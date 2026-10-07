@@ -13,27 +13,27 @@ import * as path from "path";
 import * as crypto from "node:crypto";
 import { homedir } from "os";
 
-import { getSyncBuiltinCatalog } from "../../domain/providers/model-catalog.js";
-import { createIsolatedProviderRuntime } from "../../domain/providers/provider-runtime.js";
+import { getSyncBuiltinCatalog } from "seepient-core/dist/domain/providers/model-catalog.js";
+import { createIsolatedProviderRuntime } from "seepient-core/dist/domain/providers/provider-runtime.js";
 import { serverGenerateText, serverStreamText } from "./server-core.js";
 import { createRestHandler, type RestHandlerContext } from "./rest.js";
 import { setupWebSocket, type WebSocketHandlerContext } from "../ws/websocket.js";
 import { createConnectionRegistry } from "../ws/connection-registry.js";
 import { ServerSessionManager } from "./session-store.js";
-import { MemoryPersistenceBackend } from "../../domain/sessions/session-store.js";
-import { SettingsManager } from "../../domain/settings/settings-manager.js";
+import { MemoryPersistenceBackend } from "seepient-core/dist/domain/sessions/session-store.js";
+import { SettingsManager } from "seepient-core/dist/domain/settings/settings-manager.js";
 import { FULL_TOOL_MODULES } from '../sdk/full-registrations.js';
-import { ToolRegistry } from "../../domain/tool-executor.js";
+import { ToolRegistry } from "seepient-core/dist/domain/tool-executor.js";
 import type { SettingsHandlerContext } from "./settings-handlers.js";
 import type { WsServerHandle } from "../ws/websocket.js";
-import { loadMergedConfig, getConfigPaths, loadJsonConfig } from "../../foundations/config.js";
+import { loadMergedConfig, getConfigPaths, loadJsonConfig } from "seepient-core/dist/foundations/config.js";
 import { RateLimiter, globalRateLimiter } from "./rate-limit.js";
-import { isGuardNeutralized } from "../../foundations/test-seams.js";
+import { isGuardNeutralized } from "seepient-core/dist/foundations/test-seams.js";
 import { logTransportEvent } from "../logging.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
-import type { RunSeepientServerOptions } from "../../foundations/types.js";
+import type { RunSeepientServerOptions } from "seepient-core/dist/foundations/types.js";
 export type { RunSeepientServerOptions };
 
 export {
@@ -102,16 +102,16 @@ function listModels(): Record<string, string[]> {
  */
 export async function initializeSkills(): Promise<void> {
   try {
-    const { initializeSkillRegistry } = await import("../../capabilities/skills/index.js");
+    const { initializeSkillRegistry } = await import("seepient-core/dist/capabilities/skills/index.js");
     await initializeSkillRegistry(process.cwd());
   } catch {
     // Skills system not available
   }
 }
 
-async function listSkills(sources?: import("../../foundations/contracts/skill-source.js").SkillSource[]): Promise<{ name: string; description: string; tags: string[] }[]> {
+async function listSkills(sources?: import("seepient-core/dist/foundations/contracts/skill-source.js").SkillSource[]): Promise<{ name: string; description: string; tags: string[] }[]> {
   try {
-    const { initializeSkillRegistry } = await import("../../capabilities/skills/index.js");
+    const { initializeSkillRegistry } = await import("seepient-core/dist/capabilities/skills/index.js");
     const registry = await initializeSkillRegistry(process.cwd(), {
       tenancyMode: "multi",
       sources: sources ?? [],
@@ -219,9 +219,9 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     runId: string;
     workspaceRoot: string;
     modelProviderClass: string;
-  }) => Promise<import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle>;
+  }) => Promise<import("seepient-core/dist/domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle>;
   let outboxFlushTimer: NodeJS.Timeout | undefined;
-  let serverOutboxRef: import("../../domain/permissions/audit-recorder.js").TerminalEventOutbox | undefined;
+  let serverOutboxRef: import("seepient-core/dist/domain/permissions/audit-recorder.js").TerminalEventOutbox | undefined;
   let serverPipelineFactory: PipelineFactory | undefined;
   const serverPermissionPipelineEnabled = true;
   // FROZEN SCOPE (R9.1): the server control plane does NOT execute model-
@@ -253,7 +253,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
       (runtimeAny.configStore && runtimeAny.configStore.isIsolated !== true) ||
       (runtimeAny.credentialStore && runtimeAny.credentialStore.isIsolated !== true)
     ) {
-      const { TenancyRuntimeRequiredError } = await import("../../domain/tenancy/tenancy-mode.js");
+      const { TenancyRuntimeRequiredError } = await import("seepient-core/dist/domain/tenancy/tenancy-mode.js");
       throw new TenancyRuntimeRequiredError();
     }
     // 022-5-WO3 T006 (pass-13 P1-1) + pass-15 fix: the runtime's OWN tenancy
@@ -264,7 +264,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     // plane refuses unstamped runtimes with the same rule
     // (validateTenancyCompleteness, 022-5-WO4 T007).
     if (runtimeAny.tenancySignal !== "multi" && runtimeAny.tenancyMode !== "multi") {
-      const { TenancyRuntimeRequiredError } = await import("../../domain/tenancy/tenancy-mode.js");
+      const { TenancyRuntimeRequiredError } = await import("seepient-core/dist/domain/tenancy/tenancy-mode.js");
       throw new TenancyRuntimeRequiredError(
         "TENANCY_RUNTIME_REQUIRED: an injected runtime on a multi-tenant server must be stamped tenancyMode 'multi' " +
         "(createIsolatedProviderRuntime({ tenancyMode: 'multi' })) — unstamped runtimes would silently disable egress enforcement.",
@@ -278,15 +278,15 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     // 022-5-WO4 T013 (pass-13 P2-4): explicit and derived baselines UNION —
     // passing an explicit baseline no longer erases the file accounts' own
     // implicit grants.
-    const { createRuntimeFromProvidersFile, deriveBaselineFromProviders } = await import("../../domain/providers/provider-runtime.js");
+    const { createRuntimeFromProvidersFile, deriveBaselineFromProviders } = await import("seepient-core/dist/domain/providers/provider-runtime.js");
     const { readFileSync: readPf } = await import("node:fs");
-    let derivedCaps: import("../../foundations/contracts/permission-policy.js").Capability[] = [];
+    let derivedCaps: import("seepient-core/dist/foundations/contracts/permission-policy.js").Capability[] = [];
     try {
       derivedCaps = deriveBaselineFromProviders(JSON.parse(readPf(options.providersFile, "utf8")).providers);
     } catch { /* the file factory surfaces its own error */ }
     const explicitCaps = normalizeBaselineCaps(options.operatorBaseline) ?? [];
     const seen = new Set<string>();
-    const unionCaps: import("../../foundations/contracts/permission-policy.js").Capability[] = [];
+    const unionCaps: import("seepient-core/dist/foundations/contracts/permission-policy.js").Capability[] = [];
     for (const c of [...explicitCaps, ...derivedCaps]) {
       const key = `${(c as any).kind}|${(c as any).scheme}|${(c as any).host}|${(c as any).port ?? ""}`;
       if (!seen.has(key)) {
@@ -313,15 +313,15 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
       capabilities: normalizeBaselineCaps(options?.operatorBaseline),
     });
   }
-  const { warnIfTestEnvAtHostedBoot } = await import("../../foundations/test-seams.js");
+  const { warnIfTestEnvAtHostedBoot } = await import("seepient-core/dist/foundations/test-seams.js");
   warnIfTestEnvAtHostedBoot("seepient server (runSeepientServer)");
   const getServerRuntime = () => serverRuntime;
 
   /** Normalize the operator baseline option into a capability list for the
    *  runtime's multi egress assert (022-5-WO2 T008). */
   function normalizeBaselineCaps(
-    baseline?: import("../../foundations/contracts/permission-policy.js").CapabilitySet | import("../../foundations/contracts/permission-policy.js").Capability[],
-  ): import("../../foundations/contracts/permission-policy.js").Capability[] | undefined {
+    baseline?: import("seepient-core/dist/foundations/contracts/permission-policy.js").CapabilitySet | import("seepient-core/dist/foundations/contracts/permission-policy.js").Capability[],
+  ): import("seepient-core/dist/foundations/contracts/permission-policy.js").Capability[] | undefined {
     if (!baseline) return undefined;
     return Array.isArray(baseline) ? baseline : baseline.capabilities;
   }
@@ -333,18 +333,18 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
   let composedPolicyStore: unknown;
 
   if (serverPermissionPipelineEnabled) {
-    const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
-    const { NoneApprovalBroker } = await import("../approval-brokers.js");
-    const { TerminalEventOutbox, recoverIndeterminateActions } = await import("../../domain/permissions/audit-recorder.js");
-    const { isLocalAuditStore } = await import("../../foundations/contracts/execution-brokers.js");
-    const { InMemoryAuditStore, InMemoryPolicyStore, InMemoryCapabilityLedger } = await import("../../domain/permissions/in-memory-stores.js");
+    const { buildActionLifecycle } = await import("seepient-core/dist/domain/permissions/action-lifecycle-factory.js");
+    const { NoneApprovalBroker } = await import("seepient-core/dist/transport/approval-brokers.js");
+    const { TerminalEventOutbox, recoverIndeterminateActions } = await import("seepient-core/dist/domain/permissions/audit-recorder.js");
+    const { isLocalAuditStore } = await import("seepient-core/dist/foundations/contracts/execution-brokers.js");
+    const { InMemoryAuditStore, InMemoryPolicyStore, InMemoryCapabilityLedger } = await import("seepient-core/dist/domain/permissions/in-memory-stores.js");
 
     if (
       (options?.auditStore && (options.auditStore as any).isIsolated !== true) ||
       (options?.policyStore && (options.policyStore as any).isIsolated !== true) ||
       (options?.capabilityLedger && (options.capabilityLedger as any).isIsolated !== true)
     ) {
-      const { TenancyStoreIncompleteError } = await import("../../domain/tenancy/tenancy-mode.js");
+      const { TenancyStoreIncompleteError } = await import("seepient-core/dist/domain/tenancy/tenancy-mode.js");
       throw new TenancyStoreIncompleteError(
         [],
         'Multi-tenant mode requires isolated stores (isIsolated: true). Ambient stores cannot be used in multi-tenant mode.',
@@ -354,7 +354,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     const serverAuditStore =
       options?.auditStore ??
       (isGuardNeutralized("VULN-9")
-        ? new (await import("../../domain/permissions/audit-recorder.js")).LocalAuditStore()
+        ? new (await import("seepient-core/dist/domain/permissions/audit-recorder.js")).LocalAuditStore()
         : new InMemoryAuditStore());
     const isLocalStore = isLocalAuditStore(serverAuditStore);
     composedAuditStore = serverAuditStore;
@@ -362,7 +362,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     const serverPolicyStore =
       options?.policyStore ??
       (isGuardNeutralized("VULN-9")
-        ? new (await import("../../domain/permissions/policy-store.js")).LocalPolicyStore()
+        ? new (await import("seepient-core/dist/domain/permissions/policy-store.js")).LocalPolicyStore()
         : new InMemoryPolicyStore());
     composedPolicyStore = serverPolicyStore;
     const serverCapabilityLedger = options?.capabilityLedger ?? new InMemoryCapabilityLedger();
@@ -371,7 +371,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     // different pending-event set than the one live requests populate.
     const serverOutbox = isLocalStore
       ? new TerminalEventOutbox(
-          serverAuditStore as import("../../domain/permissions/audit-recorder.js").LocalAuditStore,
+          serverAuditStore as import("seepient-core/dist/domain/permissions/audit-recorder.js").LocalAuditStore,
           (serverAuditStore as any).dir ? { outboxDir: path.join((serverAuditStore as any).dir, "outbox") } : undefined,
         )
       : undefined;
@@ -384,7 +384,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
       try {
         await serverOutbox.reload();
         await serverOutbox.flush();
-        await recoverIndeterminateActions(serverAuditStore as import("../../domain/permissions/audit-recorder.js").LocalAuditStore, serverOutbox);
+        await recoverIndeterminateActions(serverAuditStore as import("seepient-core/dist/domain/permissions/audit-recorder.js").LocalAuditStore, serverOutbox);
       } catch (e) {
         console.warn("[server] Audit outbox recovery initialization failed:", e instanceof Error ? e.message : String(e));
       }
@@ -398,7 +398,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     // every effectful action with `backend-unsupported` before dispatch. The
     // server remains useful for chat/planning/effect-free tools; it never
     // performs a model-authored side effect.
-    const unsupportedBoundary: import("../../foundations/contracts/execution-boundary.js").ExecutionBoundary = {
+    const unsupportedBoundary: import("seepient-core/dist/foundations/contracts/execution-boundary.js").ExecutionBoundary = {
       capabilities: {
         backend: "uncontained",
         capabilityKinds: [],
@@ -425,7 +425,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
       },
     };
 
-    const serverOperatorBaseline: import("../../foundations/contracts/permission-policy.js").CapabilitySet | undefined = options?.operatorBaseline
+    const serverOperatorBaseline: import("seepient-core/dist/foundations/contracts/permission-policy.js").CapabilitySet | undefined = options?.operatorBaseline
       ? (Array.isArray(options.operatorBaseline)
           ? { version: 1 as const, capabilities: options.operatorBaseline }
           : options.operatorBaseline)
@@ -509,7 +509,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
 
   // Initialize gateway (FR-017 / FR-010: default-off in multi-tenant server boot; requires explicit opt-in with isolated storageDir)
   let gatewayHandler: ((req: any, res: any, path: string, method: string) => Promise<void>) | undefined;
-  let gatewayMiddleware: import("../../foundations/contracts/middleware.js").Middleware[] | undefined;
+  let gatewayMiddleware: import("seepient-core/dist/foundations/contracts/middleware.js").Middleware[] | undefined;
   const explicitGateway = options?.gateway;
   const isGatewayOptedIn = Boolean(
     explicitGateway === true ||
@@ -521,7 +521,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
     const ambientHomeSeepient = path.resolve(path.join(homedir(), ".seepient"));
     const explicitDir = gwOpts.storageDir ? path.resolve(gwOpts.storageDir) : undefined;
     if (!explicitDir || explicitDir === ambientHomeSeepient) {
-      const { SeepientError } = await import("../../foundations/errors.js");
+      const { SeepientError } = await import("seepient-core/dist/foundations/errors.js");
       throw new SeepientError(
         "GATEWAY_ISOLATION_REQUIRED: Gateway opt-in on a multi-tenant server requires an explicit isolated storageDir. Ambient ~/.seepient or ambient environment storage is not permitted.",
         "GATEWAY_ISOLATION_REQUIRED",
@@ -557,7 +557,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
         gatewayHandler = createGatewayRestHandler({ gateway: gatewayInstance, settingsAdapter: gwSettingsAdapter, importOpenApiSpec, maxBodyBytes: maxBodyBytesSetting, apiKeysFile: options?.apiKeysFile });
 
         // Wire semantic injection middleware
-        const { semanticToolInjectionMiddleware } = await import("../../domain/middleware/semantic-tools.js");
+        const { semanticToolInjectionMiddleware } = await import("seepient-core/dist/domain/middleware/semantic-tools.js");
         gatewayMiddleware = [semanticToolInjectionMiddleware(gatewayInstance, gatewayConfig.semanticTopK)];
       }
     }
@@ -578,11 +578,11 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
       // Spec 008: construct a per-request pipeline with the authenticated
       // principal's identity. No shared state between requests.
       const principal = opts.principalId ?? opts.apiKeyHash;
-      const { SENTINEL_PRINCIPAL_IDS, PrincipalRequiredError } = await import("../../domain/tenancy/tenancy-mode.js");
+      const { SENTINEL_PRINCIPAL_IDS, PrincipalRequiredError } = await import("seepient-core/dist/domain/tenancy/tenancy-mode.js");
       if (!principal || typeof principal !== "string" || principal.trim().length === 0 || SENTINEL_PRINCIPAL_IDS.has(principal.trim())) {
         throw new PrincipalRequiredError();
       }
-      let wiredPipeline: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle | undefined;
+      let wiredPipeline: import("seepient-core/dist/domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle | undefined;
       if (serverPipelineFactory) {
         wiredPipeline = await serverPipelineFactory({
           principalId: principal.trim(),
@@ -652,7 +652,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
       // Spec 008: construct a per-request pipeline with the WS client's
       // authenticated identity. No shared state between connections.
       const principal = opts.principalId ?? opts.apiKeyHash;
-      const { SENTINEL_PRINCIPAL_IDS, PrincipalRequiredError } = await import("../../domain/tenancy/tenancy-mode.js");
+      const { SENTINEL_PRINCIPAL_IDS, PrincipalRequiredError } = await import("seepient-core/dist/domain/tenancy/tenancy-mode.js");
       if (!principal || typeof principal !== "string" || principal.trim().length === 0 || SENTINEL_PRINCIPAL_IDS.has(principal.trim())) {
         opts.onError({
           code: "PRINCIPAL_REQUIRED",
@@ -660,7 +660,7 @@ export async function runSeepientServer(options?: RunSeepientServerOptions): Pro
         });
         return;
       }
-      let wiredPipeline: import("../../domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle | undefined;
+      let wiredPipeline: import("seepient-core/dist/domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle | undefined;
       if (serverPipelineFactory) {
         wiredPipeline = await serverPipelineFactory({
           principalId: principal.trim(),

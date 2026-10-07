@@ -36,6 +36,7 @@ import type { InferenceAdapter } from "../../foundations/contracts/backend-ports
 export const MAX_RETRY_DURATION_MS = 240_000;
 
 import type { RetryPolicy } from "../../foundations/schemas/provider-config.js";
+import { getDiscoverySourceLoaders } from "../../foundations/injection-seams.js";
 
 export function computeBackoffDelay(
   attemptIndex: number,
@@ -907,25 +908,33 @@ export class ProviderRuntime extends EventEmitter implements ProviderRuntimeCont
         compat: acc.compat,
       };
 
+      // Spec 027: discovery sources are full-package modules arriving via
+      // lazy registered loaders; a core-only refresh degrades with an
+      // actionable message instead of a module-not-found.
+      const loaders = getDiscoverySourceLoaders();
       if (acc.upstreamProvider === "openai" || acc.upstreamProvider === "openai-compatible") {
-        const { OpenAIDiscoverySource } = await import("../../vendors/openai/openai-discovery-source.js");
-        const result = await discoveryCache.refreshAccount(context, new OpenAIDiscoverySource());
-        if (result?.lastRefreshError) discoveryErrors.push(result.lastRefreshError);
+        if (!loaders.openai) {
+          discoveryErrors.push(
+            `Model discovery for "${providerAccount}" (openai) is unavailable: the discovery source ships with the full "seepient" package — install "seepient" or declare models explicitly.`,
+          );
+        } else {
+          const { OpenAIDiscoverySource } = await loaders.openai();
+          const result = await discoveryCache.refreshAccount(context, new OpenAIDiscoverySource());
+          if (result?.lastRefreshError) discoveryErrors.push(result.lastRefreshError);
+        }
       } else if (acc.upstreamProvider === "google") {
-        const { GoogleDiscoverySource } = await import("../../vendors/google/google-discovery-source.js");
-        const result = await discoveryCache.refreshAccount(context, new GoogleDiscoverySource());
-        if (result?.lastRefreshError) discoveryErrors.push(result.lastRefreshError);
+        if (!loaders.google) {
+          discoveryErrors.push(
+            `Model discovery for "${providerAccount}" (google) is unavailable: the discovery source ships with the full "seepient" package — install "seepient" or declare models explicitly.`,
+          );
+        } else {
+          const { GoogleDiscoverySource } = await loaders.google();
+          const result = await discoveryCache.refreshAccount(context, new GoogleDiscoverySource());
+          if (result?.lastRefreshError) discoveryErrors.push(result.lastRefreshError);
+        }
       }
     } catch (err) {
-      // Spec 027: discovery sources ship with the full package — a core-only
-      // refresh must say so instead of surfacing a module-not-found.
-      const detail = err instanceof Error ? err.message : String(err);
-      const absent = /Cannot find module|ERR_MODULE_NOT_FOUND/.test(detail);
-      discoveryErrors.push(
-        absent
-          ? `Model discovery for "${providerAccount}" (${acc.upstreamProvider}) is unavailable: the discovery source ships with the full "seepient" package — install "seepient" or declare models explicitly.`
-          : detail,
-      );
+      discoveryErrors.push(err instanceof Error ? err.message : String(err));
     }
     if (discoveryErrors.length > 0) {
       const err = new Error(`[refreshModels] discovery errors for "${providerAccount}": ${discoveryErrors.join("; ")}`);

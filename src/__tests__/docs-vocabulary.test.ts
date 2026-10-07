@@ -308,9 +308,16 @@ describe('docs vocabulary gate (FR-002)', () => {
       return names;
     }
 
+    // Spec 027: the full entry star-exports the core entry — follow the star.
     const knownSdkExports = new Set([
       ...Object.keys(sdkExports),
       ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/index.ts')),
+      ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/core.ts')),
+      ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/ask.ts')),
+      ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/chat.ts')),
+      ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/seepient.ts')),
+      ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/tools.ts')),
+      ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/custom-tools.ts')),
     ]);
     const knownServerExports = new Set([
       ...Object.keys(serverExports),

@@ -11,7 +11,7 @@
  * trivially testable.
  */
 
-import type { SessionData } from '../../foundations/types.js';
+import type { SessionData } from 'seepient-core/dist/foundations/types.js';
 
 /** Lossless JSON dump of the full session record. */
 export function formatJson(session: SessionData): string {

@@ -8,20 +8,20 @@
  * Layer rule: Capabilities imports Foundations only.
  */
 
-import { generateId } from "../../foundations/id.js";
-import { isMetadataIp, isPrivateIp } from "../../foundations/network/ip-classifier.js";
+import { generateId } from "seepient-core/dist/foundations/id.js";
+import { isMetadataIp, isPrivateIp } from "seepient-core/dist/foundations/network/ip-classifier.js";
 import type {
   BrokerConnectorRegistration,
   DeclarativeConnectorMapping,
   ToolAnalysisContext,
-} from "../../foundations/contracts/custom-tools.js";
+} from "seepient-core/dist/foundations/contracts/custom-tools.js";
 import type {
   BrokerConnectorDescriptor,
   EvaluatedConnectorMapping,
-} from "../../foundations/contracts/broker-connectors.js";
-import { ConnectorMappingError } from "../../foundations/contracts/broker-connectors.js";
-import type { PreparedOperation } from "../../foundations/contracts/prepared-action.js";
-import type { EffectRequest, NetworkDestination } from "../../foundations/contracts/tool-effects.js";
+} from "seepient-core/dist/foundations/contracts/broker-connectors.js";
+import { ConnectorMappingError } from "seepient-core/dist/foundations/contracts/broker-connectors.js";
+import type { PreparedOperation } from "seepient-core/dist/foundations/contracts/prepared-action.js";
+import type { EffectRequest, NetworkDestination } from "seepient-core/dist/foundations/contracts/tool-effects.js";
 
 /** Resolve a JSON Pointer (RFC 6901) into an object. */
 export function resolveJsonPointer(obj: unknown, pointer: string): unknown {
@@ -220,7 +220,7 @@ export const HTTP_CONNECTOR: BrokerConnectorDescriptor = {
       }
     }
 
-    let bodyArtifactRef: import("../../foundations/contracts/prepared-action.js").PreparedArtifactRef | undefined;
+    let bodyArtifactRef: import("seepient-core/dist/foundations/contracts/prepared-action.js").PreparedArtifactRef | undefined;
     const rawBody = boundArgs.body ?? mapping.constants?.body;
     if (rawBody !== undefined) {
       const bodyBytes = typeof rawBody === "string"
@@ -256,7 +256,7 @@ export const HTTP_CONNECTOR: BrokerConnectorDescriptor = {
       },
     };
 
-    const risk: import("../../foundations/contracts/tool-effects.js").ToolRiskCategory =
+    const risk: import("seepient-core/dist/foundations/contracts/tool-effects.js").ToolRiskCategory =
       method === "GET" || method === "HEAD" ? "safe" : "edit";
 
     return {

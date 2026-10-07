@@ -7,13 +7,13 @@
  * `isolated:false` (uncontained mode), the audit evidence records that fact
  * so status never falsely claims path/network containment (T213).
  */
-import type { PreparedToolAction } from "../../foundations/contracts/prepared-action.js";
+import type { PreparedToolAction } from "seepient-core/dist/foundations/contracts/prepared-action.js";
 import type {
   ExecutionResult,
   ToolProgress,
-} from "../../foundations/contracts/execution-boundary.js";
-import type { CapabilityEnvelope } from "../../foundations/contracts/permission-policy.js";
-import type { OperationExecutor } from "./operation-executor-registry.js";
+} from "seepient-core/dist/foundations/contracts/execution-boundary.js";
+import type { CapabilityEnvelope } from "seepient-core/dist/foundations/contracts/permission-policy.js";
+import type { OperationExecutor } from "seepient-core/dist/capabilities/execution/operation-executor-registry.js";
 import type { NativeProcessSandbox } from "../../vendors/sandbox-runtime/index.js";
 import { sanitizeEnvironment, isSecurityPath } from "./environment-policy.js";
 import { existsSync } from "node:fs";

@@ -8,7 +8,7 @@
  */
 import chalk from "chalk";
 import type { CommandHandler } from "./registry.js";
-import type { ConsentMode } from "../../../foundations/settings-schema.js";
+import type { ConsentMode } from "seepient-core/dist/foundations/settings-schema.js";
 import { createSettingsManager } from "./settings.js";
 
 const VALID_MODES: ReadonlyArray<ConsentMode> = [

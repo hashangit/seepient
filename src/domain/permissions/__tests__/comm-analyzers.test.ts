@@ -15,7 +15,7 @@ import {
   analyzeSendNotification,
   analyzeReadWebsite,
   COMM_ANALYZERS,
-} from "../comm-analyzers.js";
+} from "../../../capabilities/tools/comm-analyzers.js";
 import { InMemoryArtifactStore } from "../../../capabilities/execution/in-memory-artifact-store.js";
 import type { ToolAnalysisContext } from "../../../foundations/contracts/custom-tools.js";
 
