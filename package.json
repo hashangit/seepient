@@ -24,7 +24,7 @@
   },
   "scripts": {
     "clean": "rm -rf dist packages/core/dist",
-    "build:core": "tsc -p tsconfig.core.json",
+    "build:core": "rm -rf packages/core/dist && tsc -p tsconfig.core.json",
     "build": "pnpm run build:core && node scripts/clean-dist.mjs && tsc",
     "typecheck": "pnpm run build:core && tsc --noEmit",
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
@@ -41,9 +41,10 @@
     "bench:provider": "vitest run src/domain/providers/__tests__/provider-benchmark.test.ts",
     "native:build": "cargo build --manifest-path native/fs-commit/Cargo.toml --release && node scripts/place-native-helper.cjs",
     "native:test": "cargo test --manifest-path native/fs-commit/Cargo.toml",
-    "pack:verify": "node scripts/pack-verify.mjs",
+    "pack:verify": "node scripts/pack-verify.mjs && node scripts/pack-verify.mjs --core",
     "prepublishOnly": "pnpm run build",
-    "boundary:check": "node scripts/check-package-boundary.mjs"
+    "boundary:check": "node scripts/check-package-boundary.mjs",
+    "qs:core-chat": "node scripts/qs-core-chat.mjs"
   },
   "files": [
     "dist/foundations",

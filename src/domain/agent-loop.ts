@@ -72,7 +72,7 @@ export interface AgentLoopOptions {
   explicitRegistrationIds?: string[];
   /** Allow JS filesystem fallback for file commits when native helper is absent. */
   /** Commit-helper injection for tests/e2e (spec 019): pins the probe. */
-  commitHelper?: import("../vendors/native-fs-commit/index.js").NativeCommitHelper;
+  commitHelper?: import("../foundations/contracts/execution-brokers.js").CommitHelper;
   /** Tenancy mode ('single' | 'multi'). When 'multi', wiredPipeline is strictly required. */
   tenancyMode?: "single" | "multi";
 }
