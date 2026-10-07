@@ -12,20 +12,27 @@ npm install seepient-core
 
 ## Chat-only quickstart
 
-Providers are a record of provider entries keyed by account id; credentials reference where the key lives (`env`, `seepient`, `keychain`, `externalsecret`, or `none`) — the engine never accepts inline key material:
+Providers are a record of provider entries keyed by account id. A provider's `credential` is a *reference* into a credential store you inject — the engine never accepts inline key material, and environment-variable references are refused by design. Put the key in a `MemoryCredentialStore` (or your own database-backed implementation of the same contract) and point the provider at it:
 
 ```ts
-import { createChat } from 'seepient-core';
+import { createChat, MemoryCredentialStore } from 'seepient-core';
+
+const credentials = new MemoryCredentialStore();
+await credentials.put('openai-main', {
+  kind: 'api_key',
+  keyValue: process.env.OPENAI_API_KEY!, // your key, your store
+});
 
 const chat = await createChat({
   stateless: true,           // no session persistence — your app owns durability
   tenancy: 'single',         // solo deployment (multi-tenant: 'multi' + principalId + cwd)
   skills: false,             // no filesystem skill discovery in a slim function
+  credentials,               // the store the engine resolves credential refs against
   providers: {
     'my-openai': {
       adapter: 'pi-ai',
       upstreamProvider: 'openai',
-      credential: { kind: 'env', name: 'OPENAI_API_KEY' },
+      credential: { kind: 'seepient', id: 'openai-main' },
     },
   },
   modelAssignments: {
