@@ -18,6 +18,7 @@ import {
 } from "seepient-core/dist/foundations/injection-seams.js";
 import { registerImageBackends } from "../../capabilities/inference/register-image-backends.js";
 import { registerDiscoverySources } from "../../capabilities/inference/register-discovery-sources.js";
+import { registerExactEstimator } from "../../capabilities/tokenizer/register-exact-estimator.js";
 import { builtInTools } from "../../capabilities/tools/index.js";
 import { DEFAULT_ANALYZERS } from "../../capabilities/tools/analyzers.js";
 import { COMM_ANALYZERS } from "../../capabilities/tools/comm-analyzers.js";
@@ -49,6 +50,7 @@ registerMediaVendorOperationHandlerFactory(
 );
 registerImageBackends();
 registerDiscoverySources();
+registerExactEstimator();
 
 // Spec 027 FR-012: the boundary-carrying pipeline (sandbox + effect broker +
 // native helper) is a full-package injection; the engine default is light.

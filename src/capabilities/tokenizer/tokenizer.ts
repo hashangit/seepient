@@ -21,6 +21,8 @@
  * provide (per-part: system vs tools vs skills vs history).
  */
 
+import { getExactEstimatorLoader } from "../../foundations/injection-seams.js";
+
 type EncodeFn = (text: string) => number[];
 
 function heuristicEncode(text: string): number[] {
@@ -32,18 +34,30 @@ let encode: EncodeFn = heuristicEncode;
 let estimateMode: "exact" | "heuristic" = "heuristic";
 
 /**
- * Settles once the exact-BPE vendor import resolves or fails. Resolves with
- * the active estimate mode — "exact" when the vendor is present, "heuristic"
- * when it is absent/unresolvable (core-only installs, spec 027 FR-004).
+ * Settles once the exact-BPE loader (registered by the full package) resolves
+ * or fails. Resolves with the active estimate mode — "exact" when the vendor
+ * is present, "heuristic" when it is unregistered/unresolvable (core-only
+ * installs, spec 027 FR-004).
  */
-export const whenEstimatorReady: Promise<"exact" | "heuristic"> = import("../../vendors/gpt-tokenizer.js").then(
-  (m) => {
-    encode = m.encode as EncodeFn;
-    estimateMode = "exact";
-    return estimateMode;
-  },
-  () => estimateMode,
-);
+let readyPromise: Promise<"exact" | "heuristic"> | undefined;
+
+/**
+ * Settles once the exact-BPE loader (registered by the full package) resolves
+ * or fails. Resolves with the active estimate mode — "exact" when the vendor
+ * is present, "heuristic" when it is unregistered/unresolvable (core-only
+ * installs, spec 027 FR-004). Lazy: call AFTER registration.
+ */
+export function whenEstimatorReady(): Promise<"exact" | "heuristic"> {
+  readyPromise ??= getExactEstimatorLoader()?.().then(
+    (m) => {
+      encode = m.encode;
+      estimateMode = "exact";
+      return estimateMode;
+    },
+    () => estimateMode,
+  ) ?? Promise.resolve(estimateMode);
+  return readyPromise;
+}
 
 /** The active token-estimate mode ("exact" | "heuristic"). */
 export function currentEstimateMode(): "exact" | "heuristic" {

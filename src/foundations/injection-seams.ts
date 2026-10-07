@@ -222,3 +222,26 @@ export function registerDiscoverySourceLoaders(loaders: DiscoverySourceLoaders):
 export function getDiscoverySourceLoaders(): DiscoverySourceLoaders {
   return discoverySourceLoaders;
 }
+
+// ── Exact-BPE estimator loader (spec 027 FR-004) ────────────────────────────
+
+type ExactEncodeFn = (text: string) => number[];
+
+let exactEstimatorLoader: (() => Promise<{ encode: ExactEncodeFn }>) | undefined;
+
+/**
+ * Register the exact-BPE tokenizer loader (a full-package lazy thunk). 
+ * Unregistered (seepient-core) token estimation stays on the chars÷4
+ * heuristic with estimateMode "heuristic".
+ */
+export function registerExactEstimatorLoader(
+  loader: () => Promise<{ encode: ExactEncodeFn }>,
+): void {
+  exactEstimatorLoader = loader;
+}
+
+export function getExactEstimatorLoader():
+  | (() => Promise<{ encode: ExactEncodeFn }>)
+  | undefined {
+  return exactEstimatorLoader;
+}

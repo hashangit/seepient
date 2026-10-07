@@ -33,7 +33,7 @@
     "dev": "tsx src/ui/cli/index.ts",
     "dev:server": "tsx src/transport/http/standalone.ts",
     "check": "pnpm run build:core && tsc --noEmit && tsc --noEmit -p tsconfig.test.json && vitest run && pnpm run build",
-    "test": "pnpm run build:core && tsc --noEmit && tsc --noEmit -p tsconfig.test.json && vitest run",
+    "test": "pnpm run build:core && tsc --noEmit && tsc --noEmit -p tsconfig.test.json && vitest run && pnpm run boundary:check",
     "test:unit": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -42,7 +42,8 @@
     "native:build": "cargo build --manifest-path native/fs-commit/Cargo.toml --release && node scripts/place-native-helper.cjs",
     "native:test": "cargo test --manifest-path native/fs-commit/Cargo.toml",
     "pack:verify": "node scripts/pack-verify.mjs",
-    "prepublishOnly": "pnpm run build"
+    "prepublishOnly": "pnpm run build",
+    "boundary:check": "node scripts/check-package-boundary.mjs"
   },
   "files": [
     "dist/foundations",
