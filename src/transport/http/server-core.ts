@@ -3,6 +3,7 @@ import { runAgentLoop } from "../../domain/agent-loop.js";
 import { createHookExecutor } from "../../domain/hooks.js";
 import type { ToolRegistryContract } from "../../foundations/contracts/tool.js";
 import { resolveTools, ToolRegistry } from "../../domain/tool-executor.js";
+import { FULL_TOOL_MODULES } from "../sdk/full-registrations.js";
 import { now } from "../../domain/context/message-convert.js";
 import { generateId } from "../../foundations/id.js";
 import { createIsolatedProviderRuntime, type ProviderRuntime } from "../../domain/providers/provider-runtime.js";
@@ -76,7 +77,7 @@ export async function serverGenerateText(
     throw new TenancyRuntimeRequiredError();
   }
   const runtime = options.runtime ?? createIsolatedProviderRuntime();
-  const registry = options.toolRegistry ?? new ToolRegistry();
+  const registry = options.toolRegistry ?? new ToolRegistry(FULL_TOOL_MODULES);
 
   // Resolve tools
   const isMulti = (options as any).tenancyMode === "multi";
@@ -188,7 +189,7 @@ export async function handleAgentChatStream(
     throw new TenancyRuntimeRequiredError();
   }
   const runtime = opts.runtime ?? createIsolatedProviderRuntime();
-  const registry = opts.toolRegistry ?? new ToolRegistry();
+  const registry = opts.toolRegistry ?? new ToolRegistry(FULL_TOOL_MODULES);
   const isMulti = (opts as any).tenancyMode === "multi";
   const toolDefs = opts.tools ? resolveTools(opts.tools, registry) : ((isMulti && !(opts as any).builtInTools && !isGuardNeutralized("VULN-17")) ? [] : registry.definitions());
   const hooks = createHookExecutor();

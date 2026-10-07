@@ -10,7 +10,7 @@
 import type { Message } from '../../foundations/types.js';
 import type { ToolDefinition } from '../../foundations/contracts/tool.js';
 import type { ContextBreakdown, ContextBreakdownPart } from '../../foundations/contracts/context.js';
-import { countTokens } from '../../capabilities/tokenizer/tokenizer.js';
+import { countTokens, currentEstimateMode } from '../../capabilities/tokenizer/tokenizer.js';
 
 /**
  * Build a context-window breakdown from the live agent state.
@@ -85,5 +85,6 @@ export function buildContextBreakdown(opts: {
     contextWindow,
     model,
     providerType: pt,
+    estimateMode: currentEstimateMode(),
   };
 }

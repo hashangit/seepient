@@ -56,7 +56,7 @@ describe("027 seam (b): tokenizer fallback", () => {
 
 describe("027 seam (c): media registration", () => {
   it("media handler and direct-SDK image backends are unregistered by default and deny typed", async () => {
-    const seams = (await import("../domain/injection-seams.js")) as {
+    const seams = (await import("../foundations/injection-seams.js")) as {
       getMediaVendorOperationHandlerFactory?: () => unknown;
     };
     expect(seams.getMediaVendorOperationHandlerFactory?.()).toBeUndefined();
@@ -149,10 +149,14 @@ describe("027 seam (e): light default pipeline", () => {
 
     const executed: string[] = [];
     const echo = trustedHostTool({
-      name: "echo",
-      description: "echoes its input",
-      parameters: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
-      trust: "host",
+      definition: {
+        type: "function",
+        function: {
+          name: "echo",
+          description: "echoes its input",
+          parameters: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
+        },
+      },
       execute: async (args: { text: string }) => {
         executed.push(args.text);
         return `echo:${args.text}`;

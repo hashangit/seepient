@@ -92,6 +92,8 @@ export interface Usage {
   completionTokens: number;
   totalTokens: number;
   cost: number;
+  /** How token estimates were computed in this process (spec 027 FR-004). */
+  estimateMode?: "exact" | "heuristic";
 }
 
 export interface CumulativeUsage {

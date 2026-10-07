@@ -17,7 +17,8 @@
  */
 import { LocalExecutionBoundary } from "./local-execution-boundary.js";
 import { OperationExecutorRegistry } from "./operation-executor-registry.js";
-import { CommitFilesExecutor, ReadFileExecutor, NoneExecutor, BrokerExecutor, TrustedHostExecutor } from "./executors.js";
+import { CommitFilesExecutor, ReadFileExecutor, BrokerExecutor } from "./executors.js";
+import { NoneExecutor, TrustedHostExecutor } from "./host-executors.js";
 import { ProcessExecutor } from "./process-executor.js";
 import { InMemoryArtifactStore } from "./in-memory-artifact-store.js";
 import { FileCommitBroker } from "./file-commit-broker.js";

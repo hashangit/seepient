@@ -19,6 +19,8 @@ import { createAmbientProviderRuntime, createIsolatedProviderRuntime, type Provi
 import { createHookExecutor } from "../../domain/hooks.js";
 import { StreamManager } from "../../domain/streaming/stream-manager.js";
 import { resolveTools, extractHostCallbacks, extractRegistrations, DEFAULT_TRUSTED_HOST_ALLOWLIST } from "./tools.js";
+import { FULL_TOOL_MODULES } from "./full-registrations.js";
+import { getMediaVendorOperationHandlerFactory } from "../../foundations/injection-seams.js";
 import { ToolRegistry } from "../../domain/tool-executor.js";
 import type { ToolModule } from "../../foundations/contracts/tool.js";
 import { runAgentLoop } from "../../domain/agent-loop.js";
@@ -34,6 +36,10 @@ import { extractLoopError } from "./error-surfacing.js";
 import type { Middleware } from "../../foundations/contracts/middleware.js";
 import { homedir } from 'os';
 import * as path from 'path';
+
+// Full-package registrations must run before any exported surface is used
+// (spec 027): built-in tool barrel, boundary pipeline, media, discovery, PM API.
+import "./full-registrations.js";
 
 // ── Re-exports ───────────────────────────────────────────────────────────
 
@@ -421,7 +427,7 @@ export async function askSeepient(
   );
 
   // Construct per-call ToolRegistry (Spec 022)
-  const toolRegistry = new ToolRegistry();
+  const toolRegistry = new ToolRegistry(FULL_TOOL_MODULES);
   for (const item of opts.tools ?? []) {
     if (
       item &&
@@ -460,10 +466,11 @@ export async function askSeepient(
   const { buildLocalBoundary } = await import("../../capabilities/execution/build-local-boundary.js");
   const { createSnapshotStore } = await import("../../foundations/hashline/snapshot-store.js");
   const { InMemoryArtifactStore } = await import("../../capabilities/execution/in-memory-artifact-store.js");
-  const { createMediaVendorOperationHandler } = await import("../../domain/media/vendor-operation-handler.js");
   const snapshotStore = createSnapshotStore();
   const sharedArtifacts = new InMemoryArtifactStore();
-  const vendorOperationHandler = createMediaVendorOperationHandler({
+  // Spec 027 FR-009: seam-registered media factory (armed by the full-package
+  // registrations import above).
+  const vendorOperationHandler = getMediaVendorOperationHandlerFactory()?.({
     runtime,
     artifacts: sharedArtifacts,
     signal: abortController.signal,

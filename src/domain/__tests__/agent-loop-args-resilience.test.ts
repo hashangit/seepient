@@ -1,4 +1,17 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "vitest";
+
+// Spec 027: these loops run the DEFAULT pipeline path — the full-package
+// composition (boundary-carrying pipeline) registered, as production does.
+import { registerExecutionBoundaryFactory } from "../../foundations/injection-seams.js";
+import { buildLocalBoundary } from "../../capabilities/execution/build-local-boundary.js";
+beforeAll(() => {
+  registerExecutionBoundaryFactory(
+    async (opts) => buildLocalBoundary(opts as Parameters<typeof buildLocalBoundary>[0]),
+  );
+});
+afterAll(() => {
+  registerExecutionBoundaryFactory(undefined as never);
+});
 import { mkdtempSync, rmSync, realpathSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

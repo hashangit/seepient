@@ -172,7 +172,7 @@ describe("Media tools in ALL_ANALYZERS registry (Task 1 regression gate)", () =>
   });
 
   it("TrustedHostExecutor returns HOST_TOOL_NOT_REGISTERED when tool module has no handler", async () => {
-    const { TrustedHostExecutor } = await import("../../../capabilities/execution/executors.js");
+    const { TrustedHostExecutor } = await import("../../../capabilities/execution/host-executors.js");
     const executor = new TrustedHostExecutor(new Map());
 
     const action: any = {

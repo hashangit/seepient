@@ -48,7 +48,8 @@ export type InferenceErrorCode =
   | "unknown_model"
   | "unconfigured_provider"
   | "unconfigured_purpose"
-  | "oauth_expired";
+  | "oauth_expired"
+  | "media_not_registered"; // spec 027 FR-009: media/image vendors unregistered (core-only)
 
 export interface InferenceErrorOptions {
   code: InferenceErrorCode;

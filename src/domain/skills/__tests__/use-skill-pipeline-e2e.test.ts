@@ -10,6 +10,7 @@ import { initializeSkillRegistry } from "../../../capabilities/skills/index.js";
 import { createHookExecutor } from "../../hooks.js";
 import { createMockRuntime } from "../../__tests__/test-doubles.js";
 import { ToolRegistry } from "../../tool-executor.js";
+import { UseSkillTool } from "../use-skill-tool.js";
 
 const NOOP_BROKER: ApprovalBroker = {
   mode: "none",
@@ -53,7 +54,8 @@ Instructions on how to operate the hello system.
 
     // spec 019: the composition root wires host callbacks — the executor
     // runs registered callbacks ONLY after the ambient fallback deletion.
-    const toolRegistry = new ToolRegistry();
+    // spec 027: use_skill is loop-side; composition roots wire it explicitly.
+    const toolRegistry = new ToolRegistry([UseSkillTool]);
     const hostCallbacks = new Map<string, (args: unknown) => Promise<unknown>>();
     for (const mod of toolRegistry.modules()) {
       if (mod.handler) {
@@ -120,7 +122,8 @@ Instructions on how to operate the hello system.
 
     // spec 019: the composition root wires host callbacks — the executor
     // runs registered callbacks ONLY after the ambient fallback deletion.
-    const toolRegistry = new ToolRegistry();
+    // spec 027: use_skill is loop-side; composition roots wire it explicitly.
+    const toolRegistry = new ToolRegistry([UseSkillTool]);
     const hostCallbacks = new Map<string, (args: unknown) => Promise<unknown>>();
     for (const mod of toolRegistry.modules()) {
       if (mod.handler) {

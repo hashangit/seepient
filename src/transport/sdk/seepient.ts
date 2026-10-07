@@ -17,6 +17,13 @@ import { AggregateInferenceAdapter } from "../../capabilities/inference/aggregat
 import { runAgentLoop } from "../../domain/agent-loop.js";
 import { createHookExecutor } from "../../domain/hooks.js";
 import { resolveTools, ToolRegistry } from "../../domain/tool-executor.js";
+import {
+  getDefaultToolModules,
+  getMediaVendorOperationHandlerFactory,
+  getExecutionBoundaryFactory,
+  getProviderManagerApiFactory,
+  type MediaVendorOperationHandler,
+} from "../../foundations/injection-seams.js";
 import type { ToolModule } from "../../foundations/contracts/tool.js";
 import {
   DEFAULT_TRUSTED_HOST_ALLOWLIST,
@@ -61,6 +68,7 @@ import {
 import { normalizeHistoryForSend } from "../../domain/sessions/normalize-history.js";
 import { generateId } from "../../foundations/id.js";
 import { surfaceLoopError, extractLoopError } from "./error-surfacing.js";
+import { buildLightExecutionBoundary } from "../../capabilities/execution/light-execution-boundary.js";
 import { SeepientError, PersistConfigInvalidError, SessionIdInvalidError } from "../../foundations/errors.js";
 
 // ── Session persistence helpers ──────────────────────────────────────────
@@ -319,8 +327,9 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   const composeSystem = () =>
     skillCatalog ? systemPrompt + "\n\n" + skillCatalog : systemPrompt;
 
-  // Tools — per-agent registry (Spec 022)
-  const toolRegistry = new ToolRegistry();
+  // Tools — per-agent registry (Spec 022). Default modules come from the
+  // package seam (027): the full package registers its barrel; core runs empty.
+  const toolRegistry = new ToolRegistry(getDefaultToolModules());
   for (const item of opts.tools ?? []) {
     if (
       item &&
@@ -407,9 +416,6 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     "../../domain/permissions/action-lifecycle-factory.js"
   );
   const { legacyApproveToolToBroker } = await import("../legacy-adapter.js");
-  const { buildLocalBoundary } = await import(
-    "../../capabilities/execution/build-local-boundary.js"
-  );
   const {
     LocalAuditStore,
     TerminalEventOutbox,
@@ -441,23 +447,30 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   const { InMemoryArtifactStore } = await import(
     "../../capabilities/execution/in-memory-artifact-store.js"
   );
-  const { createMediaVendorOperationHandler } = await import(
-    "../../domain/media/vendor-operation-handler.js"
-  );
   const snapshotStore = createSnapshotStore();
   const sharedArtifacts = new InMemoryArtifactStore();
   // B1: the handler is re-created per turn so the CURRENT turn's abort
   // controller reaches media operations — a static handler would leave
   // generate_image and other media fetches running after agent.abort()
   // (the same regression W110 fixed for askSeepient).
-  let currentVendorHandler = createMediaVendorOperationHandler({
-    runtime,
-    artifacts: sharedArtifacts,
-    tenancyMode,
-  });
-  const vendorOperationHandler = (
-    req: Parameters<typeof currentVendorHandler>[0],
-  ) => currentVendorHandler(req);
+  // Spec 027 FR-009: the factory arrives via registration; unregistered
+  // (seepient-core) leaves it undefined — media turns deny typed.
+  const mediaFactory = getMediaVendorOperationHandlerFactory();
+  const makeVendorHandler = (streamOpts?: {
+    signal?: AbortSignal;
+    capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[];
+  }): MediaVendorOperationHandler | undefined =>
+    mediaFactory?.({
+      runtime,
+      artifacts: sharedArtifacts,
+      tenancyMode,
+      signal: streamOpts?.signal,
+      capabilities: streamOpts?.capabilities,
+    });
+  let currentVendorHandler = makeVendorHandler();
+  const vendorOperationHandler: MediaVendorOperationHandler | undefined = currentVendorHandler
+    ? (req, capabilities) => currentVendorHandler!(req, capabilities)
+    : undefined;
   const secretResolver =
     tenancyMode === "multi"
       ? (ref: string) => {
@@ -465,17 +478,26 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
           return store?.resolveSecret?.(ref) ?? undefined;
         }
       : undefined;
-  const { boundary } = await buildLocalBoundary({
-    artifacts: sharedArtifacts,
-    workspaceRoot: opts.cwd ?? process.cwd(),
-    snapshotStore,
-    hostCallbacks,
-    vendorOperationHandler,
-    commitHelper: opts.commitHelper,
-    network: opts.network,
-    tenancyMode,
-    secretResolver,
-  });
+  // Spec 027 FR-012: the full package injects the boundary-carrying
+  // pipeline; seepient-core defaults to the light boundary (trusted-host and
+  // none operations only — no sandbox, broker, or native helper).
+  const boundaryFactory = getExecutionBoundaryFactory();
+  const { boundary } = boundaryFactory
+    ? await boundaryFactory({
+        artifacts: sharedArtifacts,
+        workspaceRoot: opts.cwd ?? process.cwd(),
+        snapshotStore,
+        hostCallbacks,
+        vendorOperationHandler,
+        commitHelper: opts.commitHelper,
+        network: opts.network,
+        tenancyMode,
+        secretResolver,
+      })
+    : await buildLightExecutionBoundary({
+        artifacts: sharedArtifacts,
+        hostCallbacks,
+      });
   const approvalMode = opts.consentMode
     ? opts.consentMode === "autonomous"
       ? "autonomous"
@@ -575,11 +597,8 @@ async function chat(userMessage: string): Promise<AgentResponse> {
     const release = await acquire();
     try {
       activeAbortController = new AbortController();
-      currentVendorHandler = createMediaVendorOperationHandler({
-        runtime,
-        artifacts: sharedArtifacts,
+      currentVendorHandler = makeVendorHandler({
         signal: activeAbortController.signal,
-        tenancyMode,
         capabilities: wiredPipeline.activeCapabilities?.capabilities,
       });
 
@@ -682,11 +701,8 @@ async function chat(userMessage: string): Promise<AgentResponse> {
     try {
       const streamAbort = new AbortController();
       activeAbortController = streamAbort;
-      currentVendorHandler = createMediaVendorOperationHandler({
-        runtime,
-        artifacts: sharedArtifacts,
+      currentVendorHandler = makeVendorHandler({
         signal: streamAbort.signal,
-        tenancyMode,
         capabilities: wiredPipeline.activeCapabilities?.capabilities,
       });
       const mergedHooks = {
@@ -943,9 +959,11 @@ async function chat(userMessage: string): Promise<AgentResponse> {
 
   // ── Provider Management Methods ─────────────────────────────────────────
 
-  const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
-  const managerApi = typeof runtime.getConfigStore === "function"
-    ? createProviderManagerApi(runtime as ProviderRuntime)
+  // Spec 027: the provider-management API is a full-package impl arriving
+  // via registration; seepient-core provider mutations deny typed below.
+  const pmApiFactory = getProviderManagerApiFactory();
+  const managerApi = pmApiFactory && typeof runtime.getConfigStore === "function"
+    ? await pmApiFactory(runtime as ProviderRuntime)
     : null;
   let latestState = managerApi ? await managerApi.getState() : { revision: 0, assignments: {} as PurposeModelMap };
 

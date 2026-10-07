@@ -917,7 +917,15 @@ export class ProviderRuntime extends EventEmitter implements ProviderRuntimeCont
         if (result?.lastRefreshError) discoveryErrors.push(result.lastRefreshError);
       }
     } catch (err) {
-      discoveryErrors.push(err instanceof Error ? err.message : String(err));
+      // Spec 027: discovery sources ship with the full package — a core-only
+      // refresh must say so instead of surfacing a module-not-found.
+      const detail = err instanceof Error ? err.message : String(err);
+      const absent = /Cannot find module|ERR_MODULE_NOT_FOUND/.test(detail);
+      discoveryErrors.push(
+        absent
+          ? `Model discovery for "${providerAccount}" (${acc.upstreamProvider}) is unavailable: the discovery source ships with the full "seepient" package — install "seepient" or declare models explicitly.`
+          : detail,
+      );
     }
     if (discoveryErrors.length > 0) {
       const err = new Error(`[refreshModels] discovery errors for "${providerAccount}": ${discoveryErrors.join("; ")}`);

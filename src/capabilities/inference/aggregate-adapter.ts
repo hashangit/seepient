@@ -17,8 +17,7 @@ import type {
 import { InferenceError } from "../../foundations/errors.js";
 import { PiLanguageRaw } from "../../vendors/pi-ai/pi-language-raw.js";
 import { PiImageRaw } from "../../vendors/pi-ai/pi-image-raw.js";
-import { GoogleImageRaw } from "../../vendors/google/google-image-raw.js";
-import { OpenAIImageRaw } from "../../vendors/openai/openai-image-raw.js";
+import { getImageBackendFactory } from "../../foundations/injection-seams.js";
 import { NATIVE_IMAGE_ANNOTATIONS } from "./catalog-merge.js";
 
 import type { CredentialStore } from "../../foundations/contracts/credential-store.js";
@@ -28,8 +27,8 @@ export class AggregateInferenceAdapter {
 
   private languageBackend: LanguageBackend;
   private piImageBackend: ImageBackend;
-  private googleImageBackend: ImageBackend;
-  private openaiImageBackend: ImageBackend;
+  private googleImageBackend?: ImageBackend;
+  private openaiImageBackend?: ImageBackend;
   private catalog: readonly UpstreamModel[];
 
   constructor(
@@ -44,8 +43,10 @@ export class AggregateInferenceAdapter {
   ) {
     this.languageBackend = customBackends?.language ?? new PiLanguageRaw(undefined, credentialStore);
     this.piImageBackend = customBackends?.piImage ?? new PiImageRaw();
-    this.googleImageBackend = customBackends?.googleImage ?? new GoogleImageRaw();
-    this.openaiImageBackend = customBackends?.openaiImage ?? new OpenAIImageRaw();
+    // Spec 027 FR-009: direct-SDK image vendors arrive via registration from
+    // the full package; unregistered providers deny typed at first use.
+    this.googleImageBackend = customBackends?.googleImage ?? getImageBackendFactory("google")?.();
+    this.openaiImageBackend = customBackends?.openaiImage ?? getImageBackendFactory("openai")?.();
     this.catalog = catalog ?? [];
   }
 
@@ -184,9 +185,27 @@ export class AggregateInferenceAdapter {
     if (!opSupported) return undefined;
 
     if (target.upstreamProvider === "google") {
+      if (!this.googleImageBackend && !getImageBackendFactory("google")) {
+        throw new InferenceError({
+          code: "media_not_registered",
+          message: `Image generation for "google" models is not available in seepient-core — the vendor adapter ships with the full "seepient" package. Pass a googleImage backend (or install "seepient") to enable it.`,
+          providerAccount: target.providerAccount,
+          model: target.model,
+          retryable: false,
+        });
+      }
       return this.googleImageBackend;
     }
     if (target.upstreamProvider === "openai") {
+      if (!this.openaiImageBackend && !getImageBackendFactory("openai")) {
+        throw new InferenceError({
+          code: "media_not_registered",
+          message: `Image generation for "openai" models is not available in seepient-core — the vendor adapter ships with the full "seepient" package. Pass an openaiImage backend (or install "seepient") to enable it.`,
+          providerAccount: target.providerAccount,
+          model: target.model,
+          retryable: false,
+        });
+      }
       return this.openaiImageBackend;
     }
     return this.piImageBackend;

@@ -1,4 +1,17 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+
+// Spec 027: these loops run the DEFAULT pipeline path — the full-package
+// composition (boundary-carrying pipeline) registered, as production does.
+import { registerExecutionBoundaryFactory } from "../../foundations/injection-seams.js";
+import { buildLocalBoundary } from "../../capabilities/execution/build-local-boundary.js";
+beforeAll(() => {
+  registerExecutionBoundaryFactory(
+    async (opts) => buildLocalBoundary(opts as Parameters<typeof buildLocalBoundary>[0]),
+  );
+});
+afterAll(() => {
+  registerExecutionBoundaryFactory(undefined as never);
+});
 import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
