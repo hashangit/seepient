@@ -107,6 +107,11 @@ WORKDIR /app
 # Copy production artifacts from builder stage
 COPY --from=builder /build/dist/           ./dist/
 COPY --from=builder /build/node_modules/   ./node_modules/
+# The engine ships as the seepient-core workspace package (spec 027): the
+# node_modules copy carries a dangling symlink to /build/packages/core, so
+# materialize the built core package at the link target.
+RUN rm -f node_modules/seepient-core
+COPY --from=builder /build/packages/core/   ./node_modules/seepient-core/
 COPY --from=builder /build/package.json    ./
 
 # Copy compiled native helper binary to /usr/local/bin
