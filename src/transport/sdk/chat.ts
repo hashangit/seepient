@@ -64,9 +64,31 @@ export interface ChatSession {
  *
  * @example
  * ```ts
- * import { createChat } from "seepient-core";
+ * import { createChat, MemoryCredentialStore } from "seepient-core";
  *
- * const chat = await createChat({ providers: [...], systemPrompt: "You are…" });
+ * const credentials = new MemoryCredentialStore();
+ * await credentials.put("openai-main", {
+ *   kind: "api_key",
+ *   keyValue: process.env.OPENAI_API_KEY!,
+ * });
+ *
+ * const chat = await createChat({
+ *   stateless: true,
+ *   tenancy: "single",
+ *   credentials,
+ *   providers: {
+ *     "my-openai": {
+ *       adapter: "pi-ai",
+ *       upstreamProvider: "openai",
+ *       credential: { kind: "seepient", id: "openai-main" },
+ *     },
+ *   },
+ *   modelAssignments: {
+ *     text: { standard: { providerAccount: "my-openai", model: "gpt-4.1-mini" } },
+ *   },
+ *   systemPrompt: "You are a helpful assistant.",
+ * });
+ *
  * const first = await chat.send("Hello!");
  * for await (const delta of (await chat.stream("Go on")).textStream) { … }
  * ```

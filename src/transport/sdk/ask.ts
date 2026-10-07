@@ -315,6 +315,7 @@ export async function askSeepient(
     auditStore: opts.auditStore,
     policyStore: opts.policyStore,
     capabilityLedger: opts.capabilityLedger,
+    preferInMemoryDefaults,
     operatorBaseline: toCapabilitySet(opts.operatorBaseline),
     tenancyMode,
   });

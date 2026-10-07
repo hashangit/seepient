@@ -433,10 +433,13 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   // ambient defaults. Multi mode is untouched — it requires explicit stores.
   const preferInMemoryDefaults =
     tenancyMode === "single" && Boolean(opts.stateless) && !ambientStoreDefaultsRegistered();
-  const isLocalStore =
-    opts.auditStore !== undefined && isLocalAuditStore(opts.auditStore);
   const auditStore =
     opts.auditStore ?? (preferInMemoryDefaults ? new InMemoryAuditStore() : new LocalAuditStore());
+  // Review P1-2: test the RESOLVED store — a defaulted LocalAuditStore must
+  // get the terminal outbox (crash recovery + close-time flush) exactly like
+  // an injected one. isLocalAuditStore already excludes InMemoryAuditStore,
+  // which was the old narrowing's only legitimate effect.
+  const isLocalStore = isLocalAuditStore(auditStore);
   if (isLocalStore) {
     auditOutbox = new TerminalEventOutbox(
       auditStore as InstanceType<typeof LocalAuditStore>,
