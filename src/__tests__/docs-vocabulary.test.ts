@@ -400,7 +400,10 @@ describe('docs vocabulary gate (FR-002)', () => {
     const bannedIdentifiers = [
       'getDefaultProviderRuntime',
       'TENANCY_EDGE_VALIDATION_FAILED',
-      'seepient/types',
+      // 'seepient/types' was banned as a fiction through 0.8.2; spec 027's
+      // path-preserving forwarding shim (D16) makes it REAL — dist/foundations
+      // /types.js re-exports seepient-core — and the pack:verify B-3 whitelist
+      // pins the shim. No longer banned.
       // Purged env-var names: env-key synthesis was demolished; these must not
       // creep back into any consumer-facing page or the changelog.
       'LLM_PROVIDER',

@@ -655,9 +655,12 @@ Keep `CONTEXT.md` under 20 lines total. Do NOT summarize the full conversation �
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-- **ACTIVE SPEC (027 — branch 027-serverless-chat-core to be cut; specified,
-  planned, tasked, RED-TEAMED and RE-BASELINED 2026-10-07; ready for
-  /speckit-implement)**:
+- **ACTIVE SPEC (027 — branch 027-serverless-chat-core IMPLEMENTED
+  2026-10-07; all 21 tasks [X]; gates green — suite 2230+/11 skipped,
+  probes 11/11, boundary:check + pack:verify (core closure MEASURED 102MB
+  ≤150), qs:core-chat e2e green; next: /release-gate in a fresh session,
+  then the owner confirms NPM_TOKEN scope covers a second package name
+  before tagging v0.9.0)**:
   `~/Documents/Obsidian/Seepient/Implementation-Specs/027-serverless-chat-core/plan.md`
   — serverless chat core package split: new slim `seepient-core` npm package
   (chat/agent engine; deps = pi-ai + typebox only; ≤150MB closure gate) with
