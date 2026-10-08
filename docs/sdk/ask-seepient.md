@@ -96,7 +96,7 @@ Throws InferenceError (code: unconfigured_purpose)
 2. **Persisted overlay configuration.** If you configured providers using `seepient setup`, the terminal UI dock, or the settings API, Seepient reads `~/.seepient/providers-overlay.json`. It looks up the assignment for `modelAssignments.text.standard`.
 3. **Persisted provider accounts.** Seepient never reads provider API keys from the environment — accounts come from provider management only (setup wizard, TUI dock, `seepient auth login`, or an injected credential store).
 4. **Built-in model catalog lookup.** Seepient looks up the recommended `standard` model for the selected provider in its catalog. For OpenAI, it defaults to `gpt-5.4`. For Anthropic, it defaults to `claude-sonnet-4-6-20260320`.
-5. **Missing credentials.** If no provider accounts are configured, the runtime throws an `InferenceError` with code `unconfigured_purpose` — run `seepient setup` or inject a credential store.
+5. **Missing credentials.** If no provider accounts are configured, the runtime throws an `InferenceError` with code `unconfigured_purpose` — configure providers + `modelAssignments` in the options (any SDK rung accepts them), inject a runtime that has them, or — full package only — run `seepient setup`.
 
 ### Purpose and tier routing
 
@@ -118,14 +118,12 @@ The `options.tools` parameter controls which tools the agent can call:
 
 ### Credential resolution
 
-The runtime resolves credentials through `CompositeCredentialStore`. It inspects sources in this sequence:
+Seepient never reads provider API keys from environment variables. The runtime resolves every credential through credential stores, in this sequence:
 
-1. Process environment variables
-2. Operating system keychain (macOS Keychain, Linux Secret Service, Windows Credential Manager)
-3. Local credential store directory at `~/.seepient/credentials/`
-4. In-memory credentials if injected via SDK options
+1. **The injected credential store.** Pass `credentials` (any implementation of the `CredentialStore` contract — `MemoryCredentialStore` ships in the box) and point each provider entry at a record in it: `credential: { kind: "seepient", id: "openai-main" }` resolves against the record you put at that id. Put the key in the store yourself: `credentials.put("openai-main", { kind: "api_key", keyValue: ... })`.
+2. **The full package's operator stores.** In `seepient`, accounts configured through provider management (setup wizard, TUI dock, `seepient auth login`) resolve from the operator's own credential storage.
 
-You do not need to pass API keys in code if they exist in your shell environment or local credential store.
+A provider entry whose credential reference does not resolve to a value-bearing `api_key` record fails closed with `CREDENTIAL_REQUIRED`. Environment-variable *references* (`{ kind: "env", ... }`) are refused by design — read the variable in your own code and put the value in your store.
 
 ### Permissions and consent mode
 
@@ -178,6 +176,9 @@ The `skills` option controls skill injection:
 | `purpose` | `Purpose` | `"text"` | Purpose routing target (`"text"`, `"coding"`, `"plan"`, `"vision"`, `"commit"`, `"data"`, `"dreaming"`) |
 | `tier` | `"efficient" \| "standard" \| "complex"` | `"standard"` | Capability tier hint used by the assignment resolver |
 | `providerAccount` | `string` | *(none)* | Target account name in multi-account provider configurations |
+| `providers` | `Record<string, any>` | *(none)* | Provider entries keyed by account id; with `modelAssignments`/`credentials`/`adapter` they bootstrap a runtime when `runtime` is omitted |
+| `modelAssignments` | `PurposeModelMap` | *(none)* | Purpose/tier → account + model assignments used by resolution |
+| `credentials` | `CredentialStore` | *(none)* | Store the engine resolves `credential: { kind: "seepient", id }` references against |
 | `tools` | `(string \| UserToolDefinition \| AnyToolRegistration)[]` | All 15 built-in tools | Tool names, tool groups (`"core"`, `"comm"`, `"advanced"`), or custom registrations. Pass `[]` for pure text |
 | `maxSteps` | `number` | `10` | Maximum agent loop iterations before terminating |
 | `systemPrompt` | `string` | *(none)* | Instructions prepended as a system message before the user prompt |
@@ -609,17 +610,21 @@ try {
 }
 ```
 
-When running in streaming mode (`stream: true`), `stream.fullText` rejects with the typed `SeepientError` if a turn fails, matching non-streaming behavior. `stream.finishReason` resolves to `"error"`, and `onError` fires.
+When running in streaming mode (`stream: true`), a failed turn is observable everywhere: `stream.fullText` rejects with the typed `SeepientError` (matching non-streaming behavior), the `textStream` iterator throws the same error after delivering the deltas received before the failure, `stream.finishReason` resolves to `"error"`, and `onError` fires.
 
-## askSeepient versus createSeepient
+## askSeepient versus createChat versus createSeepient
 
-| Feature | `askSeepient()` | `createSeepient()` |
-| ------- | --------------- | ------------------ |
-| Statefulness | Stateless. Fresh state on every call | Stateful. Retains conversation history across `.chat()` calls |
-| Session persistence | No persistence. Execution state discards on finish | Built-in session store support (`memory`, `file`, custom) |
-| Primary use case | One-shot scripts, server endpoints, background jobs, workers | Interactive chats, multi-turn dialogues, assistant bots |
-| Streaming | Pass `{ stream: true }` | Call `agent.chatStream(prompt)` |
-| Memory usage | Discarded immediately after execution | Kept in memory or loaded from session backend |
+| Feature | `askSeepient()` | `createChat()` | `createSeepient()` |
+| ------- | --------------- | -------------- | ------------------ |
+| Statefulness | Stateless. Fresh state on every call | Stateful. The session object owns its history | Stateful. Retains conversation history across `.chat()` calls |
+| Session persistence | No persistence. Execution state discards on finish | Your injected stores (in-memory unless injected) | Built-in session store support (`memory`, `file`, custom) |
+| Primary use case | One-shot scripts, server endpoints, background jobs, workers | App-managed chat sessions (serverless functions, bots) | Interactive chats, multi-turn dialogues, assistant bots |
+| Streaming | Pass `{ stream: true }` | `chat.stream(text)` | Call `agent.chatStream(prompt)` |
+| Memory usage | Discarded immediately after execution | Kept in the session object | Kept in memory or loaded from session backend |
+| Package | `seepient` and `seepient-core` | `seepient` and `seepient-core` | `seepient` and `seepient-core` |
 
 - Choose **`askSeepient()`** when each request is independent, when managing conversation history in your own database, or when building background automation tasks.
-- Choose **`createSeepient()`** when you need multi-turn continuity where follow-up questions must reference earlier turns.
+- Choose **`createChat()`** when you want multi-turn continuity with the session object owning the history — the slimmest multi-turn shape, and the front door of [`seepient-core`](/sdk/stateless-workers), the engine-only package for serverless installs.
+- Choose **`createSeepient()`** when you need multi-turn continuity plus the provider-management methods and session backends.
+
+All three rungs accept the same providers/credential option family (`providers`, `modelAssignments`, `credentials`, `adapter`) and reach the vendor through the same runtime bootstrap. In `seepient-core` the engine, tenancy, and consent machinery are identical; what differs is absence of the full package's built-in tools, sandbox, and MCP gateway — those deny typed, naming `seepient`.

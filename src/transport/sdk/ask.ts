@@ -12,12 +12,12 @@ import type {
   Message,
   StepResult,
 } from "../../foundations/types.js";
-import { createAmbientProviderRuntime } from "../../domain/providers/provider-runtime.js";
 import { createHookExecutor } from "../../domain/hooks.js";
 import { StreamManager } from "../../domain/streaming/stream-manager.js";
 import { resolveTools, extractHostCallbacks, extractRegistrations, DEFAULT_TRUSTED_HOST_ALLOWLIST } from "./tools.js";
 import { ToolRegistry } from "../../domain/tool-executor.js";
 import { getDefaultToolModules, getMediaVendorOperationHandlerFactory, ambientStoreDefaultsRegistered } from "../../foundations/injection-seams.js";
+import { bootstrapProviderRuntime } from "./bootstrap-provider-runtime.js";
 import { runAgentLoop } from "../../domain/agent-loop.js";
 import { initializeSkillRegistry } from "../../capabilities/skills/index.js";
 import { validateSessionId } from "./seepient.js";
@@ -36,7 +36,6 @@ import {
   resolveTenancyMode,
   validateTenancyCompleteness,
   emitTenancyNoticeOnce,
-  emitCredentialsSingleUserWarningOnce,
   type TenancyMode,
   type TenancySignals,
 } from "../../domain/tenancy/tenancy-mode.js";
@@ -155,8 +154,8 @@ export async function askSeepient(
   const looksLikeCredentialStore = (v: unknown): boolean =>
     typeof v === "object" && v !== null && typeof (v as any).resolve === "function";
   const hasInjectedCredentials = Boolean(
-    ((opts as any).credentials && (looksLikeCredentialStore((opts as any).credentials) || Object.keys((opts as any).credentials).length > 0)) ||
-    ((opts as any).providers && (Array.isArray((opts as any).providers) ? (opts as any).providers.length > 0 : Object.keys((opts as any).providers).length > 0)),
+    (opts.credentials && (looksLikeCredentialStore(opts.credentials) || Object.keys(opts.credentials).length > 0)) ||
+    (opts.providers && (Array.isArray(opts.providers) ? opts.providers.length > 0 : Object.keys(opts.providers).length > 0)),
   );
 
   const tenancySignals: TenancySignals = {
@@ -191,7 +190,10 @@ export async function askSeepient(
   }
 
   const maxSteps = opts.maxSteps ?? 10;
-  const runtime = opts.runtime ?? createAmbientProviderRuntime();
+  // Round-3 P1-2 rung parity: the one-shot bootstraps a runtime from the
+  // same providers/credentials/adapter family createSeepient takes — the
+  // options are never read as tenancy signals and then dropped.
+  const runtime = await bootstrapProviderRuntime(opts, tenancyMode);
 
   // One abort controller per call: bridges the caller's signal and drives the
   // agent loop AND media vendor operations in both modes, so `stream.abort()`
@@ -263,8 +265,9 @@ export async function askSeepient(
   const { InMemoryArtifactStore } = await import("../../capabilities/execution/in-memory-artifact-store.js");
   const snapshotStore = createSnapshotStore();
   const sharedArtifacts = new InMemoryArtifactStore();
-  // Spec 027 FR-009: seam-registered media factory (armed by the full-package
-  // registrations import above).
+  // Spec 027 FR-009: the media factory arrives via the registration seam —
+  // the full package arms it from its composition roots; a core-only install
+  // leaves it undefined and media turns deny typed on the light boundary.
   const vendorOperationHandler = getMediaVendorOperationHandlerFactory()?.({
     runtime,
     artifacts: sharedArtifacts,

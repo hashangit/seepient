@@ -268,16 +268,18 @@ export function resetTenancyNoticeForTest(): void {
 
 /**
  * Emits a warning when credentials or providers are injected in single-user mode (NEW-9).
+ * `inMemoryDefaults` is the caller's RESOLVED default-store outcome (round-3
+ * P2-3): true only when construction actually resolved the in-memory set, so
+ * the zero-write sentence never prints for a construction that writes.
  */
-export function emitCredentialsSingleUserWarningOnce(): void {
+export function emitCredentialsSingleUserWarningOnce(inMemoryDefaults: boolean): void {
   if (noticePrinted.credentials) return;
   noticePrinted.credentials = true;
-  // Review round-2 P2-3: describe the store set that WILL actually apply.
-  // seepient-core's single+stateless persona defaults to in-memory stores;
-  // the full package keeps its ambient ~/.seepient defaults.
   const storeSentence = ambientStoreDefaultsRegistered()
     ? `Ambient ~/.seepient stores and single-user policies will be used. `
-    : `Store defaults are in-memory (seepient-core persona) — no ambient state is written. `;
+    : inMemoryDefaults
+    ? `Store defaults are in-memory (seepient-core persona) — no ambient state is written. `
+    : `Store defaults resolve to ambient ~/.seepient state; pass stateless: true for in-memory defaults. `;
   console.warn(
     `[seepient] Notice: Running in single-user mode with custom credentials/providers. ` +
       storeSentence +

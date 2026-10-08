@@ -77,6 +77,10 @@ async function makeMockRuntime(script) {
 }
 
 const dir = mkdtempSync(join(tmpdir(), "qs-dist-exact-"));
+// Round-3 P2-2: the mock runtime's updateOverlay fires the provider audit
+// trail — direct it at the temp dir instead of the operator's real
+// ~/.seepient/audit.log (the created `dir` was previously never wired up).
+process.env.SEEPIENT_AUDIT_LOG_PATH = join(dir, "provider-audit.log");
 try {
   const runtime = await makeMockRuntime([{ content: "count me exactly" }]);
   const res = await fullEntry.askSeepient("hello", {

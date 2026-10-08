@@ -164,8 +164,10 @@ describe("askSeepient — Unified One-Shot Entry Point", () => {
     expect(reported.code).toBe("RATE_LIMIT");
   });
 
-  // F2: a failed streaming turn must be observable — fullText rejects (the
-  // non-streaming path throws), even when the caller has no onError callback.
+  // F2 (+ round-3 P2-1): a failed streaming turn must be observable on BOTH
+  // consumers — fullText rejects (the non-streaming path throws) even when
+  // the caller has no onError callback, and the textStream iterator throws
+  // the same error after draining the deltas queued before the failure.
   it("streaming fullText rejects on provider error instead of resolving empty", async () => {
     const runtime = {
       isIsolated: true,
@@ -197,9 +199,13 @@ describe("askSeepient — Unified One-Shot Entry Point", () => {
     await expect(stream.fullText).rejects.toThrow(/invalid api key/);
     expect(onError).toHaveBeenCalledTimes(1);
     expect(await stream.finishReason).toBe("error");
-    // textStream completes without throwing for delta-only consumers
+    // Delta-only consumers get the error too — no silent zero-output completion.
     const chunks: string[] = [];
-    for await (const chunk of stream.textStream) chunks.push(chunk);
+    await expect(
+      (async () => {
+        for await (const chunk of stream.textStream) chunks.push(chunk);
+      })(),
+    ).rejects.toThrow(/invalid api key/);
     expect(chunks).toEqual([]);
   });
 

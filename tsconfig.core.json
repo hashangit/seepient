@@ -18,6 +18,7 @@
     "src/domain/**/*",
     "src/transport/sdk/seepient.ts",
     "src/transport/sdk/ask.ts",
+    "src/transport/sdk/bootstrap-provider-runtime.ts",
     "src/transport/sdk/chat.ts",
     "src/transport/sdk/core.ts",
     "src/transport/sdk/custom-tools.ts",
