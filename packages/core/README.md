@@ -45,9 +45,14 @@ const chat = await createChat({
 const turn = await chat.send('What is the capital of France?');
 console.log(turn.text);
 
-// One streaming turn:
+// One streaming turn. A failed turn throws from the loop (and fullText
+// rejects) — vendor auth failures are never silent:
 const stream = await chat.stream('Go on');
-for await (const delta of stream.textStream) process.stdout.write(delta);
+try {
+  for await (const delta of stream.textStream) process.stdout.write(delta);
+} catch (err) {
+  console.error('turn failed:', err);
+}
 
 // The session owns its history across turns:
 console.log(chat.messages.length);

@@ -6,14 +6,9 @@
  * ExecutionBoundary, AuditStore).
  */
 
-import {
-  createAmbientProviderRuntime,
-  ProviderRuntime,
-} from "../../domain/providers/provider-runtime.js";
+import { ProviderRuntime } from "../../domain/providers/provider-runtime.js";
 import type { ProviderRuntimeContract } from "../../foundations/contracts/provider-runtime.js";
-import { ProviderConfigStore } from "../../domain/providers/config-store/provider-config-store.js";
-import { MemoryCredentialStore } from "../../domain/providers/credentials/memory-credential-store.js";
-import { AggregateInferenceAdapter } from "../../capabilities/inference/aggregate-adapter.js";
+import { bootstrapProviderRuntime } from "./bootstrap-provider-runtime.js";
 import { runAgentLoop } from "../../domain/agent-loop.js";
 import { createHookExecutor } from "../../domain/hooks.js";
 import { resolveTools, ToolRegistry } from "../../domain/tool-executor.js";
@@ -180,8 +175,16 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   const { mode: tenancyMode, upgraded } = resolveTenancyMode(tenancySignals);
   emitTenancyNoticeOnce(upgraded);
 
+  // Review P1-3 + round-3 P2-3: the "serverless" persona constructs on
+  // read-only $HOME. seepient-core defaults single+stateless construction to
+  // the in-memory store set (zero ambient writes); the full package keeps its
+  // Profile-A ambient defaults. Multi mode is untouched — it requires explicit
+  // stores. Computed before the notice so it describes the RESOLVED store
+  // set, not just the package persona.
+  const preferInMemoryDefaults =
+    tenancyMode === "single" && Boolean(opts.stateless) && !ambientStoreDefaultsRegistered();
   if (tenancyMode === "single" && hasInjectedCredentials) {
-    emitCredentialsSingleUserWarningOnce();
+    emitCredentialsSingleUserWarningOnce(preferInMemoryDefaults);
   }
 
   // Validate tenancy completeness before any runtime bootstrapping or ambient I/O
@@ -200,18 +203,15 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     throw new TenancyWorkspaceRequiredError();
   }
 
-  // If providers, modelAssignments, or overlay options are passed without an explicit runtime,
-  // bootstrap a configured ProviderRuntime
-  let bootstrapRuntime: ProviderRuntimeContract | ProviderRuntime | undefined = opts.runtime;
-  if (bootstrapRuntime && tenancyMode === "multi") {
-    // 022-5-WO4 T008 (D2, pass-14 P2-1) + pass-15 fix: the embed's operator
-    // baseline feeds BOTH planes — capabilities land on the runtime so
-    // refreshModels and the saveAccount seam enforce egress, not just the
-    // permission pipeline. The threading UNIONS with any capabilities the
-    // runtime already carries (same semantics as the server's T013 union):
-    // an explicit baseline must not erase grants the runtime was constructed
-    // with (e.g. createRuntimeFromProvidersFile's derived baseline).
-    const rt = bootstrapRuntime as unknown as {
+  // 022-5-WO4 T008 (D2, pass-14 P2-1) + pass-15 fix: on a multi injected
+  // runtime, the embed's operator baseline feeds BOTH planes — capabilities
+  // land on the runtime so refreshModels and the saveAccount seam enforce
+  // egress, not just the permission pipeline. The threading UNIONS with any
+  // capabilities the runtime already carries (same semantics as the server's
+  // T013 union): an explicit baseline must not erase grants the runtime was
+  // constructed with (e.g. createRuntimeFromProvidersFile's derived baseline).
+  if (opts.runtime && tenancyMode === "multi") {
+    const rt = opts.runtime as unknown as {
       setRuntimeCapabilities?: (caps: unknown[]) => void;
       grantedCapabilities?: unknown[];
     };
@@ -243,35 +243,10 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
       }
     }
   }
-  if (!bootstrapRuntime) {
-    if (opts.providers || opts.modelAssignments || opts.credentials || opts.overlayFile || opts.adapter) {
-      const configStore = new ProviderConfigStore(opts.overlayFile ?? ":memory:");
-      if (opts.providers || opts.modelAssignments) {
-        const currentOverlay = await configStore.getOverlay();
-        await configStore.updateOverlay(
-          {
-            providers: opts.providers as any,
-            modelAssignments: opts.modelAssignments as any,
-          },
-          currentOverlay.revision,
-        );
-      }
-      const credentialStore = opts.credentials ?? new MemoryCredentialStore();
-      const adapter = opts.adapter ?? new AggregateInferenceAdapter(undefined, undefined, credentialStore);
-      bootstrapRuntime = new ProviderRuntime({
-        configStore,
-        credentialStore,
-        adapter,
-        // 022-5-WO3 T007 (D2): the internally-built runtime carries the
-        // embed's tenancy stamp — the natural embed shape is egress-armed by
-        // construction, not silently single-stamped.
-        tenancyMode,
-      });
-    } else {
-      bootstrapRuntime = createAmbientProviderRuntime();
-    }
-  }
-  const runtime: ProviderRuntimeContract | ProviderRuntime = bootstrapRuntime;
+  // Providers/credentials/adapter options without an explicit runtime
+  // bootstrap a configured ProviderRuntime — the same construction the
+  // askSeepient rung uses (round-3 P1-2 rung parity).
+  const runtime = await bootstrapProviderRuntime(opts, tenancyMode);
 
   const sessionId = opts.sessionId ?? generateId();
   validateSessionId(sessionId);
@@ -427,12 +402,6 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   let auditOutbox:
     | import("../../domain/permissions/audit-recorder.js").TerminalEventOutbox
     | undefined;
-  // Review P1-3: the "serverless" persona constructs on read-only $HOME.
-  // seepient-core defaults single+stateless construction to the in-memory
-  // store set (zero ambient writes); the full package keeps its Profile-A
-  // ambient defaults. Multi mode is untouched — it requires explicit stores.
-  const preferInMemoryDefaults =
-    tenancyMode === "single" && Boolean(opts.stateless) && !ambientStoreDefaultsRegistered();
   const auditStore =
     opts.auditStore ?? (preferInMemoryDefaults ? new InMemoryAuditStore() : new LocalAuditStore());
   // Review P1-2: test the RESOLVED store — a defaulted LocalAuditStore must

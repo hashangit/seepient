@@ -20,6 +20,15 @@ export function redactObject(obj: any): any {
  * Appends an audit event to ~/.seepient/audit.log with 0600 permissions, symlink rejection, and fsync durability.
  */
 export function recordProviderAuditEvent(event: ProviderAuditEvent, customAuditPath?: string): void {
+  // Spec 027 review round-3 P1-1: the IMPLICIT ambient trail
+  // ($HOME/.seepient/audit.log) is a Profile-A convenience armed by the full
+  // package's ambient-defaults registration — seepient-core writes nothing
+  // there, including when an embedder bootstraps a providers record through
+  // the SDK front doors. Explicit destinations (customAuditPath arg or the
+  // SEEPIENT_AUDIT_LOG_PATH redirect) still write: they are caller-owned.
+  const implicitAmbientPath = !customAuditPath && !process.env.SEEPIENT_AUDIT_LOG_PATH;
+  if (implicitAmbientPath && !ambientStoreDefaultsRegistered()) return;
+
   const auditPath =
     customAuditPath ??
     process.env.SEEPIENT_AUDIT_LOG_PATH ??

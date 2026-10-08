@@ -26,52 +26,30 @@ function isolateAmbientPaths(home: string): { restore(): void } {
     home: process.env.HOME,
     userProfile: process.env.USERPROFILE,
     secDir: process.env.SEEPIENT_SECURITY_DIR,
+    auditLog: process.env.SEEPIENT_AUDIT_LOG_PATH,
   };
   process.env.HOME = home;
   process.env.USERPROFILE = home;
   delete process.env.SEEPIENT_SECURITY_DIR;
+  delete process.env.SEEPIENT_AUDIT_LOG_PATH;
   return {
     restore() {
       process.env.HOME = saved.home;
       process.env.USERPROFILE = saved.userProfile;
       if (saved.secDir === undefined) delete process.env.SEEPIENT_SECURITY_DIR;
       else process.env.SEEPIENT_SECURITY_DIR = saved.secDir;
+      if (saved.auditLog === undefined) delete process.env.SEEPIENT_AUDIT_LOG_PATH;
+      else process.env.SEEPIENT_AUDIT_LOG_PATH = saved.auditLog;
     },
   };
 }
-
-const MOCK_RUNTIME = async () => {
-  const { createMockRuntime } = await import("../domain/__tests__/test-doubles.js");
-  return createMockRuntime([
-    { toolCalls: [{ id: "tc1", name: "echo", args: { text: "hi" } }] },
-    { content: "turn complete" },
-  ]);
-};
-
-const ECHO_TOOL = async () => {
-  const { trustedHostTool } = await import("../transport/sdk/custom-tools.js");
-  return trustedHostTool({
-    definition: {
-      type: "function",
-      function: {
-        name: "echo",
-        description: "echoes",
-        parameters: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
-      },
-    },
-    execute: async (args: { text: string }) => `echo:${args.text}`,
-  } as never);
-};
 
 describe("027 review P1-3: read-only HOME zero-write", () => {
   it("core-only single+stateless constructs and completes a turn on a read-only $HOME", async () => {
     const fakeHome = mkdtempSync(join(tmpdir(), "readonly-home-"));
     const workDir = mkdtempSync(join(tmpdir(), "readonly-home-work-"));
     chmodSync(fakeHome, 0o555); // read-only: EACCES on any mkdir under it
-    const prevHome = process.env.HOME;
-    const prevUserProfile = process.env.USERPROFILE;
-    process.env.HOME = fakeHome;
-    process.env.USERPROFILE = fakeHome;
+    const saved = isolateAmbientPaths(fakeHome);
 
     try {
       const { createSeepient } = await import("../transport/sdk/seepient.js");
@@ -113,11 +91,45 @@ describe("027 review P1-3: read-only HOME zero-write", () => {
       expect(existsSync(join(fakeHome, ".seepient"))).toBe(false);
       expect(readdirSync(fakeHome)).toEqual([]);
     } finally {
-      process.env.HOME = prevHome;
-      process.env.USERPROFILE = prevUserProfile;
+      saved.restore();
       chmodSync(fakeHome, 0o755);
       rmSync(fakeHome, { recursive: true, force: true });
       rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+
+  it("review round-3 P1-1: a providers-record construction writes nothing ambient on a writable $HOME", async () => {
+    const { createSeepient } = await import("../transport/sdk/seepient.js");
+    const { MemoryCredentialStore } = await import("../domain/providers/credentials/memory-credential-store.js");
+    const home = mkdtempSync(join(tmpdir(), "providers-home-"));
+    const work = mkdtempSync(join(tmpdir(), "providers-work-"));
+    const saved = isolateAmbientPaths(home);
+    try {
+      const credentials = new MemoryCredentialStore();
+      await credentials.put("openai-main", { kind: "api_key", keyValue: "sk-test" } as never);
+      // The core README's own quickstart shape. Pre-fix, the runtime bootstrap's
+      // updateOverlay fired recordProviderAuditEvent, which wrote
+      // $HOME/.seepient/audit.log in the same construction the tenancy notice
+      // claimed wrote nothing.
+      const agent = await createSeepient({
+        stateless: true,
+        tenancy: "single",
+        skills: false,
+        cwd: work,
+        credentials,
+        providers: {
+          "my-openai": { adapter: "pi-ai", upstreamProvider: "test", credential: { kind: "seepient", id: "openai-main" } },
+        },
+        modelAssignments: { text: { standard: { providerAccount: "my-openai", model: "gpt-4.1-mini" } } },
+      } as never);
+      expect(existsSync(join(home, ".seepient"))).toBe(false);
+      expect(readdirSync(home)).toEqual([]);
+      await agent.close();
+      expect(existsSync(join(home, ".seepient"))).toBe(false);
+    } finally {
+      saved.restore();
+      rmSync(home, { recursive: true, force: true });
+      rmSync(work, { recursive: true, force: true });
     }
   });
 
