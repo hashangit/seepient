@@ -190,7 +190,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   const preferInMemoryDefaults =
     tenancyMode === "single" && !ambientStoreDefaultsRegistered();
   if (tenancyMode === "single" && hasInjectedCredentials) {
-    emitCredentialsSingleUserWarningOnce(preferInMemoryDefaults);
+    emitCredentialsSingleUserWarningOnce();
   }
 
   // Validate tenancy completeness before any runtime bootstrapping or ambient I/O
@@ -715,7 +715,13 @@ async function chat(userMessage: string): Promise<AgentResponse> {
           if (errorReported) return;
           errorReported = true;
           try {
-            streamOptions?.onError?.(loopFailure);
+            const delivered = streamOptions?.onError?.(loopFailure);
+            // A rejected promise escapes the try below — catch it too (gate r2 P2-D).
+            if (delivered && typeof (delivered as { catch?: unknown }).catch === "function") {
+              (delivered as Promise<void>).catch((rejection) =>
+                console.error("[seepient] onError callback rejected:", rejection),
+              );
+            }
           } catch (callbackErr) {
             console.error("[seepient] onError callback threw:", callbackErr);
           }

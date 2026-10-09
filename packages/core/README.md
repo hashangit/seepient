@@ -81,6 +81,8 @@ const chat = await createChat({ stateless: true, tools: [getBalance] /* + provid
 const res = await chat.send('What is my balance?');
 ```
 
+A construction that passes **no** provider-family option (`providers`, `modelAssignments`, `credentials`, `overlayFile`, `adapter`) composes the host's ambient provider configuration — `~/.seepient/providers-overlay.json` plus the ambient credential store, exactly like the full package's single-user operator path. On a machine where you use the `seepient` CLI, the snippet above would route through those accounts; on a clean image it fails typed with a "configure providers" message. To guarantee isolation, pass a provider record — even an empty one (`providers: {}`) — or your own stores.
+
 Inject your own stores (sessions, audit, policy, capability ledger) for durability — the engine routes all consent/audit/tenancy machinery through them exactly as the full package does. The full-package guides ([`askSeepient`](https://github.com/hashangit/seepient/blob/main/docs/sdk/ask-seepient.md), [`createSeepient`](https://github.com/hashangit/seepient/blob/main/docs/sdk/create-seepient.md), [stateless workers](https://github.com/hashangit/seepient/blob/main/docs/sdk/stateless-workers.md)) apply to this package identically except where they touch built-in tools, the sandbox, or the MCP gateway.
 
 ## What is NOT here
@@ -90,7 +92,7 @@ The full [`seepient`](https://www.npmjs.com/package/seepient) package adds the b
 - Built-in tool names (e.g. `read_file`) are rejected at registration, naming `seepient`.
 - Media/image generation without a registered vendor denies typed.
 - Exact-BPE token counting degrades to a heuristic; `usage.estimateMode` reports `"heuristic"` (the full package reports `"exact"`).
-- Provider model discovery (`refreshModels`) degrades with an actionable message.
+- Provider model discovery is a full-package surface — the core entry exposes no `refreshModels`.
 
 ## Mixing with the full package
 

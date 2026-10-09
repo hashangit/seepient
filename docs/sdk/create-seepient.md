@@ -86,7 +86,7 @@ For multi-tenant workers and cloud functions requiring full state injection (aud
 | `config`        | `Record<string, unknown>`                | `{}`                       | Extra config passed to tool handlers |
 
 ::: warning Partial State Store Injection Warning
-For fully stateless zero-disk execution, all three permission contracts (`auditStore`, `policyStore`, and `capabilityLedger`) must be injected together along with `persist`. If 1 or 2 permission stores are injected, the SDK logs a warning (`[seepient] WARNING: Partial state store injection detected...`) and falls back missing stores to the local filesystem (`~/.seepient` or `./.seepient`).
+For fully stateless zero-disk execution, all three permission contracts (`auditStore`, `policyStore`, and `capabilityLedger`) must be injected together along with `persist`. If 1 or 2 permission stores are injected, the SDK logs a warning (`[seepient] WARNING: Partial state store injection detected...`); the missing stores resolve to the defaults — in-memory when ambient store defaults are unregistered (`seepient-core`), otherwise the local filesystem (`~/.seepient` or `./.seepient`).
 :::
 
 ::: info Permission Pipeline Always Active

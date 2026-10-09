@@ -19,15 +19,12 @@
 set -euo pipefail
 
 # --- path setup -----------------------------------------------------------
-# Resolve the repo root from git so the script works from any checkout
-# layout (it lives at .agents/skills/release-gate/scripts/); fall back to a
-# relative walk for non-git copies. CI runs this under --dry-run as a
-# runnability gate — a broken path setup fails the build, not the release.
+# Resolve the repo root from git (the script lives at three levels under the
+# root: .agents/skills/release-gate/scripts/). No fallback: outside a git
+# checkout set -e fails loud right here — which is exactly what the CI
+# self-check gate exists to catch (gate r1 P1-1).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR" && git rev-parse --show-toplevel 2>/dev/null || true)"
-if [[ -z "$REPO_ROOT" ]]; then
-  REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-fi
+REPO_ROOT="$(cd "$SCRIPT_DIR" && git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
 # --- color helpers --------------------------------------------------------

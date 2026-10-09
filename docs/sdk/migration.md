@@ -14,7 +14,8 @@ v0.9.0 splits the engine into `seepient-core` (a slim, separately installable pa
 The root previously declared `openai@^6.18.0`, `@google/genai@2.15.0`, and `@anthropic-ai/sdk@^0.52.0` as direct dependencies. v0.9.0 aligns every provider SDK to the vendored inference library's pins — `openai@7.19.0`, `@google/genai@2.21.0`, `@anthropic-ai/sdk@0.129.0` — exactly one version of each. If your app relies on one of the old majors, declare that version yourself:
 
 ```bash
-npm install openai@7.19.0
+# Example: pin your own openai@6 while seepient ships 7.19.0 internally
+npm install openai@^6
 ```
 
 ### 2. Deep imports of `seepient/dist/...` engine paths break
