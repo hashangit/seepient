@@ -185,4 +185,68 @@ describe("027 review P1-3: read-only HOME zero-write", () => {
       rmSync(work2, { recursive: true, force: true });
     }
   });
+
+  // v0.9.0 gate r1 (P2-c): the in-memory default gate now keys on the
+  // registered ambient defaults, NOT the stateless conjunct — a single-mode
+  // SESSIONFUL core construction (persist injected, no `stateless`) must
+  // also resolve the in-memory store set and write nothing ambient. Pre-fix
+  // it defaulted LocalAuditStore/LocalPolicyStore/PersistedCapabilityLedger,
+  // and the action lifecycle's pre-dispatch + terminal audit events created
+  // `$HOME/.seepient/security/{audit,caps}` on the first tool-bearing turn
+  // (asserted on a WRITABLE home: on a read-only one the same writes fail
+  // soft, so an exists check there cannot see the violation).
+  it("gate r1 P2-c: single+sessionful (persist injected) writes nothing ambient", async () => {
+    const fakeHome = mkdtempSync(join(tmpdir(), "readonly-sessionful-"));
+    const workDir = mkdtempSync(join(tmpdir(), "readonly-sessionful-w-"));
+    const saved = isolateAmbientPaths(fakeHome);
+
+    try {
+      const { createSeepient } = await import("../transport/sdk/seepient.js");
+      const { trustedHostTool } = await import("../transport/sdk/custom-tools.js");
+      const { createMockRuntime } = await import("../domain/__tests__/test-doubles.js");
+      const { MemoryPersistenceBackend } = await import("../domain/sessions/session-store.js");
+
+      const echo = trustedHostTool({
+        definition: {
+          type: "function",
+          function: {
+            name: "echo",
+            description: "echoes",
+            parameters: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
+          },
+        },
+        execute: async (args: { text: string }) => `echo:${args.text}`,
+      } as never);
+
+      const runtime = createMockRuntime([
+        { toolCalls: [{ id: "tc1", name: "echo", args: { text: "hi" } }] },
+        { content: "turn complete" },
+      ]);
+
+      const agent = await createSeepient({
+        // No `stateless` — the sessionful shape is the point of this gate.
+        tenancy: "single",
+        sessionId: "gate-r1-session",
+        persist: new MemoryPersistenceBackend(),
+        runtime: runtime as never,
+        tools: [echo],
+        cwd: workDir,
+        skills: false,
+        approveTool: async () => true,
+      } as never);
+
+      const res = await agent.chat("use echo");
+      expect(res.text).toBe("turn complete");
+      await agent.close(); // terminal events + outbox flush included
+
+      // Zero ambient writes under the (writable) home; persistence is the
+      // caller's injected backend, not the host disk.
+      expect(existsSync(join(fakeHome, ".seepient"))).toBe(false);
+      expect(readdirSync(fakeHome)).toEqual([]);
+    } finally {
+      saved.restore();
+      rmSync(fakeHome, { recursive: true, force: true });
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  });
 });

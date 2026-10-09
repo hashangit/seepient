@@ -175,14 +175,20 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   const { mode: tenancyMode, upgraded } = resolveTenancyMode(tenancySignals);
   emitTenancyNoticeOnce(upgraded);
 
-  // Review P1-3 + round-3 P2-3: the "serverless" persona constructs on
-  // read-only $HOME. seepient-core defaults single+stateless construction to
-  // the in-memory store set (zero ambient writes); the full package keeps its
-  // Profile-A ambient defaults. Multi mode is untouched — it requires explicit
-  // stores. Computed before the notice so it describes the RESOLVED store
-  // set, not just the package persona.
+  // Review P1-3 + round-3 P2-3 + gate r1 P2-c: the "serverless" persona
+  // constructs on read-only $HOME. When ambient store defaults are
+  // unregistered (seepient-core), ANY single-mode construction defaults to
+  // the in-memory store set — zero ambient writes — sessionful or not (the
+  // one-shot path in ask.ts already keyed the flag without the stateless
+  // conjunct; this construction now agrees, which is what makes the
+  // CHANGELOG's unconditional core zero-write claim true). Explicit store
+  // injections and destinations are unaffected. The full package keeps its
+  // Profile-A ambient defaults — there the registry below IS armed. Multi
+  // mode is untouched — it requires explicit stores. Computed before the
+  // notice so it describes the RESOLVED store set, not just the package
+  // persona.
   const preferInMemoryDefaults =
-    tenancyMode === "single" && Boolean(opts.stateless) && !ambientStoreDefaultsRegistered();
+    tenancyMode === "single" && !ambientStoreDefaultsRegistered();
   if (tenancyMode === "single" && hasInjectedCredentials) {
     emitCredentialsSingleUserWarningOnce(preferInMemoryDefaults);
   }
@@ -699,6 +705,21 @@ async function chat(userMessage: string): Promise<AgentResponse> {
       const stream = new StreamManager();
 
       (async () => {
+        // v0.9.0 gate r1 (P2-a): the consumer's onError is an untrusted
+        // boundary — a throwing callback used to re-enter the catch below
+        // (double dispatch), skip the stream settles (finishReason/fullText
+        // hung forever), and escape the fire-and-forget IIFE as an
+        // unhandledRejection. Dispatch once, guard the callback.
+        let errorReported = false;
+        const reportError = (loopFailure: SeepientError) => {
+          if (errorReported) return;
+          errorReported = true;
+          try {
+            streamOptions?.onError?.(loopFailure);
+          } catch (callbackErr) {
+            console.error("[seepient] onError callback threw:", callbackErr);
+          }
+        };
         // F1/W150: normalized model input; the stored copy stays intact
         // until the loop succeeds and its additions are merged back below
         // (id-matched, so the loop's system-shim unshift cannot skew it).
@@ -795,7 +816,7 @@ async function chat(userMessage: string): Promise<AgentResponse> {
           const loopErr = extractLoopError(result);
           stream.resolveUsage(result.usage);
           if (loopErr) {
-            if (streamOptions?.onError) streamOptions.onError(loopErr);
+            reportError(loopErr);
             stream.resolveFinish("error");
             // F2: parity with askSeepient — failed turns reject fullText.
             stream.rejectText(loopErr);
@@ -805,7 +826,7 @@ async function chat(userMessage: string): Promise<AgentResponse> {
           }
         } catch (err) {
           const seepientErr = toSeepientError(err, "PROVIDER_ERROR");
-          if (streamOptions?.onError) streamOptions.onError(seepientErr);
+          reportError(seepientErr);
           // F2: reject fullText instead of resolving "".
           stream.rejectText(seepientErr);
           stream.resolveUsage({
@@ -822,7 +843,7 @@ async function chat(userMessage: string): Promise<AgentResponse> {
           } catch (persistErr) {
             console.error("[seepient] chatStream persistence failed:", persistErr);
             const seepientErr = toSeepientError(persistErr, "PERSISTENCE_ERROR");
-            if (streamOptions?.onError) streamOptions.onError(seepientErr);
+            reportError(seepientErr);
             stream.resolveFinish("error");
           } finally {
             release();

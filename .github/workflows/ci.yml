@@ -28,6 +28,12 @@ jobs:
       - name: Audit runtime dependencies
         run: pnpm audit --prod
 
+      # v0.9.0 gate r1 (P1-1): the release script's path setup + manifest
+      # reads are consumed here on every push — a broken script fails CI,
+      # not the release night.
+      - name: Release tooling self-check
+        run: bash .agents/skills/release-gate/scripts/publish.sh --self-check
+
       # build:core chains first — the root program resolves the engine via
       # the seepient-core workspace package (spec 027 D20).
       - name: Typecheck

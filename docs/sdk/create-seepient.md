@@ -464,3 +464,14 @@ const agent = await createSeepient({ middleware: [auditLog] });
 
 - [askSeepient()](/sdk/ask-seepient) -- Stateless one-shot execution (streaming via `stream: true`)
 - [Tools](/tools/reference) -- Built-in and custom tool reference
+
+## createSeepient() in seepient-core
+
+`createSeepient()` ships in both packages. In [`seepient-core`](/sdk/stateless-workers#slim-install-for-serverless-seepient-core) — the engine-only package for serverless and SDK-only installs — the constructor, tenancy, and consent machinery are identical to this page; what differs is the package around it:
+
+- **No built-in tools**: register custom or trusted-host tools explicitly; built-in names reject at registration with an error naming `seepient`.
+- **No sandbox / MCP gateway / media generation**: boundary-needing operations and unregistered media deny typed instead of executing.
+- **In-memory store defaults in single mode**: with no stores injected, a core construction resolves the in-memory store set (zero ambient writes); inject `persist`/stores for anything durable.
+- **The same providers/credential option family** (`providers`, `modelAssignments`, `credentials`, `adapter`) reaches the vendor through the same runtime bootstrap as the full package.
+
+If you want the slimmest multi-turn shape with the session object owning its history, use [`createChat()`](/sdk/ask-seepient#askseepient-versus-createchat-versus-createseepient) instead.

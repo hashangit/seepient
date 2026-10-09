@@ -1,10 +1,16 @@
 /**
  * Spec 027 (T010): seepient-core public surface pin.
  *
- * The core entry's export set must equal the contract list — GENERATED from
- * the actual export sites in `src/transport/sdk/core.ts` (value exports only;
- * type exports erase at runtime), never hand-copied. The fail-closed
- * registration denial must name `seepient`.
+ * The core entry's runtime export set is pinned against a COMMITTED GOLDEN
+ * SNAPSHOT (`core-entry-exports.json`). The real property this pins: any
+ * commit that adds, removes, or renames a core export fails here until the
+ * golden file is regenerated — and that regeneration is the reviewable diff
+ * (v0.9.0 gate r1 P1-3: the previous pin generated its expected set from
+ * `core.ts` itself, so a scope-creeping commit updated both sides and stayed
+ * green; a self-read can never catch a source change).
+ *
+ * The surface itself is narrated by contracts/core-package-surface.md §2;
+ * the fail-closed registration denial must name `seepient`.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -12,27 +18,10 @@ import { join, dirname } from "node:path";
 import * as coreEntry from "../transport/sdk/core.js";
 import { ToolRegistry, resolveTools } from "../transport/sdk/core.js";
 
-const CORE_TS = join(dirname(new URL(import.meta.url).pathname), "../transport/sdk/core.ts");
-
-/** Value-export names declared by the core entry source (the contract list). */
-function declaredValueExports(source: string): Set<string> {
-  const names = new Set<string>();
-  // export { a, b, type c } from "..." — value names only
-  for (const m of source.matchAll(/export\s+\{([^}]+)\}/g)) {
-    for (const raw of m[1].split(",")) {
-      const item = raw.trim();
-      if (!item || item.startsWith("type ")) continue;
-      names.add(item.split(/\s+as\s+/).pop()!.trim());
-    }
-  }
-  // export const/function/class/let/var <name>
-  for (const m of source.matchAll(
-    /export\s+(?:declare\s+)?(?:async\s+)?(?:function\*?|const|let|var|class)\s+([a-zA-Z0-9_$]+)/g,
-  )) {
-    names.add(m[1]);
-  }
-  return names;
-}
+const GOLDEN = join(
+  dirname(new URL(import.meta.url).pathname),
+  "core-entry-exports.json",
+);
 
 function pinViolations(expected: Set<string>, actual: Set<string>): string[] {
   const violations: string[] = [];
@@ -46,19 +35,22 @@ function pinViolations(expected: Set<string>, actual: Set<string>): string[] {
 }
 
 describe("seepient-core surface pin (027 T010)", () => {
-  it("runtime exports equal the contract list generated from core.ts", () => {
-    const expected = declaredValueExports(readFileSync(CORE_TS, "utf8"));
-    expect(expected.size).toBeGreaterThan(20); // the parse itself must be live
+  it("runtime exports equal the committed golden surface", () => {
+    const golden: string[] = JSON.parse(readFileSync(GOLDEN, "utf8"));
+    expect(golden.length).toBeGreaterThan(20); // the snapshot itself must be live
 
     const actual = new Set(Object.keys(coreEntry));
-    const violations = pinViolations(expected, actual);
+    const violations = pinViolations(new Set(golden), actual);
     expect(violations, violations.join("; ")).toEqual([]);
   });
 
-  it("negative self-test: an unplanned export fails the pin", () => {
-    const expected = declaredValueExports(readFileSync(CORE_TS, "utf8"));
-    const tampered = new Set([...Object.keys(coreEntry), "createStatelessAgent"]);
-    const violations = pinViolations(expected, tampered);
+  it("negative self-test: an unplanned export fails the pin comparator", () => {
+    // In-suite this can only validate the comparator — the real guarantee is
+    // golden-vs-runtime above (a source commit cannot tamper this copy). See
+    // the file header for why the previous self-generated pin was hollow.
+    const golden: string[] = JSON.parse(readFileSync(GOLDEN, "utf8"));
+    const tampered = new Set([...golden, "createStatelessAgent"]);
+    const violations = pinViolations(new Set(golden), tampered);
     expect(violations).toContain("unplanned export: createStatelessAgent");
     expect(violations.length).toBeGreaterThan(0);
   });

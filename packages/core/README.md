@@ -12,7 +12,9 @@ npm install seepient-core
 
 ## Chat-only quickstart
 
-Providers are a record of provider entries keyed by account id. A provider's `credential` is a *reference* into a credential store you inject — the engine never accepts inline key material, and environment-variable references are refused by design. Put the key in a `MemoryCredentialStore` (or your own database-backed implementation of the same contract) and point the provider at it:
+Providers are a record of provider entries keyed by account id. A provider's `credential` is a *reference* into a credential store you inject — the engine never accepts inline key material, and environment-variable references are refused by design. Put the key in a `MemoryCredentialStore` (or your own database-backed implementation of the same contract) and point the provider at it.
+
+The examples are TypeScript — save them as `.ts` and run with `npx tsx`, or compile with your own toolchain.
 
 ```ts
 import { createChat, MemoryCredentialStore } from 'seepient-core';
