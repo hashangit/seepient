@@ -40,7 +40,7 @@ const stream = await chat.stream('...')      // one streaming turn
 
 Solo (non-hosted) serverless functions can instead pass `tenancy: 'single'` and skip the store trio — `seepient-core` then resolves every default (audit, policy, capability ledger) to the in-memory set, sessionful or not, so construction and turns write nothing to disk (see [Ambient-free defaults](#ambient-free-defaults)).
 
-Behavioral differences are all fail-closed and typed: built-in tool names are rejected at registration naming `seepient`, media/image generation without a registered vendor denies typed, and token counting reports `usage.estimateMode: "heuristic"`. Provider model discovery is a full-package surface — the core entry exposes no `refreshModels` at all. Tenancy stamping, consent lifecycle, and egress arming are unchanged — the engine-coupled security plane ships in `seepient-core`. Host-executed tools (`trustedHostTool`) run via the light default pipeline. If you need built-in tools, the sandbox, or the MCP gateway, install the full `seepient` package.
+Behavioral differences are all fail-closed and typed: built-in tool names are rejected at registration naming `seepient`, media/image generation without a registered vendor denies typed, and token counting reports `usage.estimateMode: "heuristic"`. The agent front doors expose no `refreshModels` — provider model discovery is a full-package surface (a directly constructed `ProviderRuntime` retains it). Tenancy stamping, consent lifecycle, and egress arming are unchanged — the engine-coupled security plane ships in `seepient-core`. Host-executed tools (`trustedHostTool`) run via the light default pipeline. If you need built-in tools, the sandbox, or the MCP gateway, install the full `seepient` package.
 
 ---
 

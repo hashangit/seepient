@@ -14,7 +14,7 @@ npm install seepient-core
 
 Providers are a record of provider entries keyed by account id. A provider's `credential` is a *reference* into a credential store you inject — the engine never accepts inline key material, and environment-variable references are refused by design. Put the key in a `MemoryCredentialStore` (or your own database-backed implementation of the same contract) and point the provider at it.
 
-The examples are TypeScript — save them as `.ts` and run with `npx tsx`, or compile with your own toolchain.
+The examples are TypeScript using top-level `await` — save them as `.mts` (or add `"type": "module"` to your package.json) and run with `npx tsx`, or compile with your own toolchain.
 
 ```ts
 import { createChat, MemoryCredentialStore } from 'seepient-core';
@@ -92,7 +92,7 @@ The full [`seepient`](https://www.npmjs.com/package/seepient) package adds the b
 - Built-in tool names (e.g. `read_file`) are rejected at registration, naming `seepient`.
 - Media/image generation without a registered vendor denies typed.
 - Exact-BPE token counting degrades to a heuristic; `usage.estimateMode` reports `"heuristic"` (the full package reports `"exact"`).
-- Provider model discovery is a full-package surface — the core entry exposes no `refreshModels`.
+- The agent front doors expose no `refreshModels` — provider model discovery is a full-package surface (a directly constructed `ProviderRuntime` retains it).
 
 ## Mixing with the full package
 

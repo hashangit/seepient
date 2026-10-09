@@ -163,7 +163,7 @@ console.log(r3.text);
 
 OpenAI-protocol endpoints are configured like any other provider: add an account with a base URL through provider management (or a `providers` record from the SDK), with a stored key or `none` for keyless servers.
 
-**Wire format — one wire today.** Every OpenAI-protocol account (`upstreamProvider: "openai"` or `"openai-compatible"`) dials the OpenAI **Responses** API: requests go to `POST {baseUrl}/v1/responses`. Your endpoint must serve that path. Chat-completions-only servers — most Ollama and vLLM deployments — are **not usable** through this path today, whatever model names you declare. Model declarations on an account affect assignment resolution (which names are allowed) but never the wire; the `compat` field is accepted by the schema but does not change wire selection. Chat-completions support is a known follow-up.
+**Wire format — one wire today.** Every OpenAI-protocol account (`upstreamProvider: "openai"` or `"openai-compatible"`) dials the OpenAI **Responses** API for chat turns: requests go to `POST {baseUrl}/v1/responses`, and your endpoint must serve that path. Chat-completions-only servers — most Ollama and vLLM deployments — are **not usable** for chat through this path today, whatever model names you declare. Model declarations affect assignment resolution (which names are allowed) but never the wire; the `compat` field is accepted by the schema but does not change wire selection. (Model discovery dials `GET {baseUrl}/v1/models`.) Chat-completions support is a known follow-up.
 
 ## Related APIs
 

@@ -216,10 +216,15 @@ export async function askSeepient(
     }
   }
 
-  // Gate r2 (P2-E): the bridge must detach even when the SETUP window
-  // throws (resolveSkills, tool resolution, pipeline construction) — these
-  // run before both dispatch-path finallys, and a throwing call leaked one
-  // listener per failure on the caller's long-lived signal.
+  // Gate r2 (P2-E) + gate r3 (P1-1): the bridge must detach when the SETUP
+  // window throws (resolveSkills, tool resolution, pipeline construction) —
+  // those run before both dispatch paths, and a throwing call leaked one
+  // listener per failure on the caller's long-lived signal. The streaming
+  // dispatch OWNS the bridge until its fire-and-forget turn settles (its
+  // own finally below detaches) — the outer finally must not fire for it
+  // at return-time, or a caller-signal abort after the return can no
+  // longer cancel the turn (the r2 regression this flag fixed).
+  let streamingDispatch = false;
   try {
     // Resolve skill catalog and append to the system prompt
     const { systemPrompt, skillRegistry } = await resolveSkills(
@@ -327,6 +332,7 @@ export async function askSeepient(
     });
 
     if (opts.stream) {
+      streamingDispatch = true;
       // Hooks — merge stream-level callbacks with any base hooks
       const mergedHooks = { ...opts.hooks };
       const hooks = createHookExecutor(mergedHooks);
@@ -458,6 +464,7 @@ export async function askSeepient(
           stream.resolveUsage({ promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 });
           stream.resolveFinish("error");
         } finally {
+          detachSignalBridge?.();
           stream.complete();
         }
       })();
@@ -571,6 +578,6 @@ export async function askSeepient(
     await hooks.onFinish(askResult);
     return askResult;
   } finally {
-    detachSignalBridge?.();
+    if (!streamingDispatch) detachSignalBridge?.();
   }
 }
