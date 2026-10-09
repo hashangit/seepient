@@ -9,9 +9,9 @@ description: Breaking changes and transition snippets for Seepient v0.8.0 and v0
 
 v0.9.0 splits the engine into `seepient-core` (a slim, separately installable package) which the full `seepient` package consumes. The full package's install command, binaries, and `seepient` / `seepient/server` / `seepient/types` import paths are unchanged. Three things broke, all pre-1.0 documented breaks:
 
-### 1. Old transitive provider-SDK majors are gone
+### 1. Provider-SDK majors are aligned to single pinned versions
 
-The root previously transitively installed `openai@^6`, `@google/genai@2.15`, and `@anthropic-ai/sdk@^0.52` (they were never declared dependencies of `seepient`). v0.9.0 aligns every provider SDK to the vendored inference library's pins — `openai@7.19.0`, `@google/genai@2.21.0`, `@anthropic-ai/sdk@0.129.0` — exactly one version of each. If your app imported those old majors directly, declare them yourself:
+The root previously declared `openai@^6.18.0`, `@google/genai@2.15.0`, and `@anthropic-ai/sdk@^0.52.0` as direct dependencies. v0.9.0 aligns every provider SDK to the vendored inference library's pins — `openai@7.19.0`, `@google/genai@2.21.0`, `@anthropic-ai/sdk@0.129.0` — exactly one version of each. If your app relies on one of the old majors, declare that version yourself:
 
 ```bash
 npm install openai@7.19.0

@@ -28,6 +28,7 @@ import {
 } from "../../domain/context/message-convert.js";
 import { generateId } from "../../foundations/id.js";
 import { extractLoopError } from "./error-surfacing.js";
+import { SeepientError } from "../../foundations/errors.js";
 import type { Middleware } from "../../foundations/contracts/middleware.js";
 import type { ToolModule } from "../../foundations/contracts/tool.js";
 import { computeEffectiveSkillSources, emitMultiZeroSourcesNoticeOnce } from "./skill-sources-helper.js";
@@ -329,6 +330,21 @@ export async function askSeepient(
     const stream = new StreamManager();
 
     (async () => {
+      // v0.9.0 gate r1 (P2-a): the consumer's onError is an untrusted
+      // boundary — a throwing callback used to re-enter the catch below
+      // (double dispatch), skip the stream settles, and escape the
+      // fire-and-forget IIFE as an unhandledRejection. Dispatch once,
+      // guard the callback.
+      let streamErrorReported = false;
+      const reportError = (loopFailure: SeepientError) => {
+        if (streamErrorReported) return;
+        streamErrorReported = true;
+        try {
+          opts.onError?.(loopFailure);
+        } catch (callbackErr) {
+          console.error("[seepient] onError callback threw:", callbackErr);
+        }
+      };
       try {
         const snapshot = await runtime.createTurnSnapshot();
 
@@ -402,7 +418,7 @@ export async function askSeepient(
         const loopErr = extractLoopError(result);
         stream.resolveUsage(result.usage);
         if (loopErr) {
-          if (opts.onError) opts.onError(loopErr);
+          reportError(loopErr);
           stream.resolveFinish("error");
           // F2: a failed turn must be observable — fullText rejects, in
           // parity with the non-streaming throw.
@@ -424,7 +440,7 @@ export async function askSeepient(
         }
       } catch (err) {
         const seepientErr = toSeepientError(err, "PROVIDER_ERROR");
-        if (opts.onError) opts.onError(seepientErr);
+        reportError(seepientErr);
         // F2: reject fullText instead of resolving "" — silent empty
         // responses hid provider failures from callers without onError.
         stream.rejectText(seepientErr);
@@ -450,44 +466,50 @@ export async function askSeepient(
 
   // Non-streaming (default)
   const hooks = createHookExecutor(opts.hooks);
-  const snapshot = await runtime.createTurnSnapshot();
+  // v0.9.0 gate r1 (P2-b): the signal bridge must detach even when snapshot
+  // creation or the loop throws — the streaming branch settles it in its
+  // finally; without this, every throwing call on a shared caller
+  // AbortSignal leaks one listener.
+  let result;
+  try {
+    const snapshot = await runtime.createTurnSnapshot();
 
-  const result = await runAgentLoop({
-    runtime,
-    turnSnapshot: snapshot,
-    model: opts.model,
-    modelOverride: opts.providerAccount || opts.model
-      ? { providerAccount: opts.providerAccount, model: opts.model }
-      : undefined,
-    purpose: opts.purpose,
-    tier: opts.tier,
-    temperature: opts.temperature,
-    maxTokens: opts.maxTokens,
-    messages,
-    toolRegistry,
-    toolDefs,
-    systemPrompt,
-    maxSteps,
-    hooks,
-    signal: abortController.signal,
-    config: { ...opts.config, runtime, skills: skillRegistry },
-    metadata: opts.metadata,
-    middleware: opts.middleware,
-    approveTool: opts.approveTool,
-    wiredPipeline,
-    tenancyMode,
-    onStep: opts.onStep || opts.onText || opts.onToolCall || opts.onToolResult ? (step: StepResult) => {
-      if (opts.onStep) opts.onStep(step);
-      if ((step.type === "text" || step.type === "text_delta") && step.content) {
-        if (opts.onText) opts.onText(step.content);
-      }
-      if (step.type === "tool_call" && step.toolCall) {
-        if (opts.onToolCall) {
-          opts.onToolCall({
-            name: step.toolCall.name,
-            args: step.toolCall.args,
-            callId: step.toolCall.id,
-          });
+    result = await runAgentLoop({
+      runtime,
+      turnSnapshot: snapshot,
+      model: opts.model,
+      modelOverride: opts.providerAccount || opts.model
+        ? { providerAccount: opts.providerAccount, model: opts.model }
+        : undefined,
+      purpose: opts.purpose,
+      tier: opts.tier,
+      temperature: opts.temperature,
+      maxTokens: opts.maxTokens,
+      messages,
+      toolRegistry,
+      toolDefs,
+      systemPrompt,
+      maxSteps,
+      hooks,
+      signal: abortController.signal,
+      config: { ...opts.config, runtime, skills: skillRegistry },
+      metadata: opts.metadata,
+      middleware: opts.middleware,
+      approveTool: opts.approveTool,
+      wiredPipeline,
+      tenancyMode,
+      onStep: opts.onStep || opts.onText || opts.onToolCall || opts.onToolResult ? (step: StepResult) => {
+        if (opts.onStep) opts.onStep(step);
+        if ((step.type === "text" || step.type === "text_delta") && step.content) {
+          if (opts.onText) opts.onText(step.content);
+        }
+        if (step.type === "tool_call" && step.toolCall) {
+          if (opts.onToolCall) {
+            opts.onToolCall({
+              name: step.toolCall.name,
+              args: step.toolCall.args,
+              callId: step.toolCall.id,
+            });
         }
         if (opts.onToolResult) {
           const output = step.toolCall.result;
@@ -503,14 +525,21 @@ export async function askSeepient(
         }
       }
     } : undefined,
-  });
-
-  detachSignalBridge?.();
+    });
+  } finally {
+    detachSignalBridge?.();
+  }
 
   // W111: onError parity with the streaming branch — report before rejecting.
+  // The callback is guarded (r1 P2-a): a throwing onError must not replace
+  // the real loop error as the thrown failure.
   const loopError = extractLoopError(result);
   if (loopError) {
-    if (opts.onError) opts.onError(loopError);
+    try {
+      opts.onError?.(loopError);
+    } catch (callbackErr) {
+      console.error("[seepient] onError callback threw:", callbackErr);
+    }
     throw loopError;
   }
 

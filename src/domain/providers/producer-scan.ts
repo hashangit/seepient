@@ -37,7 +37,12 @@ function stripCommentsAndTypeImports(src: string): string {
 /** Source files importing the vendored package (non-test, non-type-only,
  *  actual import statements — comments do not count). */
 export function vendoredImportSites(root = process.cwd()): string[] {
-  const out = execSync(`grep -rln "@earendil-works/pi-ai" ${JSON.stringify(join(root, "src"))} --include='*.ts' | grep -v __tests__`, {
+  // Single-quote the path: JSON.stringify does not escape shell metachars
+  // ($, backticks survive inside double quotes). Strip single quotes from the
+  // value itself so a hostile root cannot break out (gate r1 F-2 hardening;
+  // no production caller passes attacker input today).
+  const quoted = `'${join(root, "src").replace(/'/g, "'\\''")}'`;
+  const out = execSync(`grep -rln "@earendil-works/pi-ai" ${quoted} --include='*.ts' | grep -v __tests__`, {
     encoding: "utf8",
   });
   return out

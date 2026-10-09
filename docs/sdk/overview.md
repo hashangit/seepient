@@ -52,6 +52,10 @@ yarn add seepient
 
 :::
 
+::: tip Serverless or SDK-only?
+Install [`seepient-core`](/sdk/stateless-workers#slim-install-for-serverless-seepient-core) instead — the same chat/agent engine without the full agent's built-in tools, sandbox, and gateway (a ~102 MB closure vs ~301 MB).
+:::
+
 ## Import patterns
 
 ::: code-group
@@ -189,7 +193,7 @@ Seepient Agent supports multiple LLM providers out of the box:
 | GLM              | `"glm"`               | `opus`                          |
 | OpenAI-compatible| `"openai-compatible"` | `gpt-5.4` (configurable `baseUrl`) |
 
-Configure providers via environment variables, `.env`, or the `seepient setup` CLI wizard.
+Configure providers with the `seepient setup` CLI wizard, provider management, or — from the SDK — a `providers` record with a credential store. Seepient reads no provider API keys from the environment.
 
 ## Built-in tools
 

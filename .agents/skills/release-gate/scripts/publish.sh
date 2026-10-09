@@ -8,19 +8,26 @@
 #   3. a GitHub Release
 #
 # Usage:
-#   ./scripts/publish.sh                  # interactive: pick patch/minor/major
-#   ./scripts/publish.sh patch            # 0.3.0 -> 0.3.1
-#   ./scripts/publish.sh minor            # 0.3.0 -> 0.4.0
-#   ./scripts/publish.sh major            # 0.3.0 -> 1.0.0
-#   ./scripts/publish.sh 1.2.3            # explicit version
-#   ./scripts/publish.sh patch --dry-run  # show what would happen, change nothing
+#   .agents/skills/release-gate/scripts/publish.sh                  # interactive: pick patch/minor/major
+#   .agents/skills/release-gate/scripts/publish.sh patch            # 0.3.0 -> 0.3.1
+#   .agents/skills/release-gate/scripts/publish.sh minor            # 0.3.0 -> 0.4.0
+#   .agents/skills/release-gate/scripts/publish.sh major            # 0.3.0 -> 1.0.0
+#   .agents/skills/release-gate/scripts/publish.sh 1.2.3            # explicit version
+#   .agents/skills/release-gate/scripts/publish.sh patch --dry-run  # show what would happen, change nothing
 #
 # Requires: git, gh (authenticated), npm (for registry checks), jq
 set -euo pipefail
 
 # --- path setup -----------------------------------------------------------
+# Resolve the repo root from git so the script works from any checkout
+# layout (it lives at .agents/skills/release-gate/scripts/); fall back to a
+# relative walk for non-git copies. CI runs this under --dry-run as a
+# runnability gate — a broken path setup fails the build, not the release.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR" && git rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ -z "$REPO_ROOT" ]]; then
+  REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+fi
 cd "$REPO_ROOT"
 
 # --- color helpers --------------------------------------------------------
@@ -45,6 +52,27 @@ for arg in "$@"; do
     --dry-run|-n) DRY_RUN=true ;;
   esac
 done
+
+# --- self-check mode (CI runnability gate) --------------------------------
+# CI runs this on every push so the script's path setup + manifest reads can
+# never rot unnoticed again (the 027 gate caught exactly that rot: a move of
+# this file broke REPO_ROOT while every tree gate stayed green). It exercises
+# the guards that need no branch, network, or auth state; the release guards
+# below stay release-only.
+if [[ "$BUMP" == "--self-check" ]]; then
+  command -v jq >/dev/null || die "self-check: jq is required"
+  [[ -f package.json ]] || die "self-check: no package.json at $REPO_ROOT"
+  [[ -f packages/core/package.json ]] || die "self-check: no packages/core/package.json"
+  SC_ROOT_NAME=$(jq -r .name package.json)
+  [[ "$SC_ROOT_NAME" == "seepient" ]] || die "self-check: unexpected root package name: $SC_ROOT_NAME"
+  SC_CORE_NAME=$(jq -r .name packages/core/package.json)
+  [[ "$SC_CORE_NAME" == "seepient-core" ]] || die "self-check: unexpected core package name: $SC_CORE_NAME"
+  SC_ROOT_VER=$(jq -r .version package.json)
+  SC_CORE_VER=$(jq -r .version packages/core/package.json)
+  [[ "$SC_ROOT_VER" == "$SC_CORE_VER" ]] || die "self-check: manifests drifted out of lockstep ($SC_ROOT_VER vs $SC_CORE_VER)"
+  ok "self-check: repo root $REPO_ROOT — root $SC_ROOT_NAME@$SC_ROOT_VER, core $SC_CORE_NAME@$SC_CORE_VER (lockstep)"
+  exit 0
+fi
 
 # --- preflight checks -----------------------------------------------------
 [[ -f package.json ]] || die "Not in seepient repo: no package.json at $REPO_ROOT"
@@ -265,7 +293,9 @@ else
   err "${BOLD}Release workflow FAILED.${RESET} Investigate:"
   echo "  gh run list --workflow=release.yml --limit=1"
   echo
-  echo "  ${DIM}Note:${RESET} if npm publish succeeded but a later step failed, you may"
-  echo "  need to manually bump the homebrew tap or delete the npm version."
+  echo "  ${DIM}Note:${RESET} re-run the failed job on the EXISTING tag — per-package"
+  echo "  skip-if-exists heals a half state (core published, root not). If npm"
+  echo "  published but Homebrew failed, bump the tap manually; npm unpublish is"
+  echo "  policy-constrained (72h, dependents block it) — treat it as last resort."
   exit 1
 fi

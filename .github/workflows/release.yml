@@ -188,7 +188,7 @@ jobs:
           if npm view "seepient@${VERSION}" version >/dev/null 2>&1; then
             echo "seepient@${VERSION} is already published on npm — skipping publish"
           else
-            pnpm publish --access public --no-git-checks
+            pnpm publish --access public --no-git-checks --provenance
           fi
 
   publish-homebrew:
