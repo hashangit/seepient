@@ -5,28 +5,28 @@
  * askSeepient(), and formats output per Keep a Changelog.
  *
  * Usage:
- *   npx tsx scripts/generate-release-notes.ts <version>
- *   npx tsx scripts/generate-release-notes.ts 0.3.1
- *   npx tsx scripts/generate-release-notes.ts 0.3.1 --stdout   # print, don't write
+ *   npx tsx .agents/skills/release-gate/scripts/generate-release-notes.ts <version>
+ *   npx tsx .agents/skills/release-gate/scripts/generate-release-notes.ts 0.3.1
+ *   npx tsx .agents/skills/release-gate/scripts/generate-release-notes.ts 0.3.1 --stdout   # print, don't write
  *
  * Reads provider config from ~/.seepient/setting.json + .seepient/setting.json + env,
  * exactly like the CLI does. Your existing seepient setup just works.
  */
-import { askSeepient } from "../src/transport/sdk/index.js";
+import { askSeepient } from "../../../../src/transport/sdk/index.js";
 import { execSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = join(__dirname, "..");
+const REPO_ROOT = join(__dirname, "../../../..");
 
 // --- args -----------------------------------------------------------------
 const VERSION = process.argv[2];
 const STDOUT_ONLY = process.argv.includes("--stdout");
 
 if (!VERSION || !/^\d+\.\d+\.\d+$/.test(VERSION)) {
-  console.error("Usage: npx tsx scripts/generate-release-notes.ts <version> [--stdout]");
+  console.error("Usage: npx tsx .agents/skills/release-gate/scripts/generate-release-notes.ts <version> [--stdout]");
   console.error("  version must be semver, e.g. 0.3.1");
   process.exit(1);
 }
