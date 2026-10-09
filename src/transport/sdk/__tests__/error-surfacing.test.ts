@@ -379,4 +379,52 @@ describe("Throwing consumer callbacks (gate r1)", () => {
       tracked.stop();
     }
   });
+
+  // Gate r3 P1-1: the caller-signal bridge must live until the streaming
+  // turn settles — the r2 outer finally detached it at RETURN-time, so a
+  // caller abort after `askSeepient` returned could no longer cancel the
+  // in-flight turn (it kept running to maxSteps). Red on the r2 tree: the
+  // finishReason promise never settles.
+  it("streaming askSeepient: aborting the CALLER signal mid-stream settles the stream (gate r3 P1-1)", async () => {
+    const hangingRuntime = {
+      createTurnSnapshot: async () => ({
+        revision: 1,
+        createdAt: new Date().toISOString(),
+        catalog: [],
+        config: {} as any,
+        assignments: {} as any,
+      }),
+      resolvePlan: async () => ({
+        selectedTarget: { providerAccount: "mock", model: "mock-model" },
+        failureTargets: [],
+      }),
+      executeLanguage: async function* (
+        _plan: unknown,
+        _payload: unknown,
+        opts: { signal?: AbortSignal },
+      ) {
+        yield { type: "start", resolvedModel: { providerAccount: "mock", modelId: "mock-model" } };
+        await new Promise<void>((resolve) => {
+          if (opts?.signal?.aborted) resolve();
+          else opts?.signal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+        yield { type: "abort", reason: "user" };
+      },
+    };
+
+    const controller = new AbortController();
+    const stream = await askSeepient("Hello", {
+      stream: true,
+      runtime: hangingRuntime as any,
+      model: "mock-model",
+      tenancy: "single",
+      signal: controller.signal,
+    });
+
+    await new Promise((r) => setTimeout(r, 50)); // let the loop park in the hanging generator
+    controller.abort();
+
+    const finish = await stream.finishReason;
+    expect(finish).toBe("aborted");
+  });
 });
