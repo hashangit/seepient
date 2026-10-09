@@ -86,8 +86,8 @@ jobs:
 
     # Spec 027 recovery: if this job fails after `seepient-core` published,
     # RE-RUN THE JOB ON THE EXISTING TAG. Skip-if-exists skips core and
-    # publishes root. Do NOT re-run scripts/publish.sh — it bumps a NEW
-    # version the preflight refuses (contracts/release-flow.md §4).
+    # publishes root. Do NOT re-run .agents/skills/release-gate/scripts/publish.sh —
+    # it bumps a NEW version the preflight refuses (contracts/release-flow.md §4).
     permissions:
       contents: write
       id-token: write # npm provenance for the seepient-core publish
