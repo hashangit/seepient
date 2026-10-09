@@ -456,4 +456,95 @@ describe('docs vocabulary gate (FR-002)', () => {
 
     expect(violations, 'Banned identifier violations (FR-015, FR-031, FR-034)').toEqual([]);
   });
+
+  // Round-3 OQ-3: the second prose-only rot to slip a name-based gate —
+  // ask-seepient.md taught the demolished env grammar as CONCEPT prose
+  // ("You do not need to pass API keys in code if they exist in your shell
+  // environment") while every env-var NAME on the page passed the sweep.
+  // This check bans the sentence shapes, not names. Scope: living pages only
+  // (docs/, README, the core README, examples) — CHANGELOG and AGENTS.md
+  // quote historical registers and stay covered by the NAME bans of check 7.
+  it('check 8: credential-source concept prose — the env grammar must not return as prose (round-3 OQ-3)', () => {
+    const filesToScan = [
+      ...getAllMarkdownFiles(docsDir),
+      readmePath,
+      path.join(repoRoot, 'packages/core/README.md'),
+      ...getAllMarkdownFiles(path.join(repoRoot, 'examples')),
+    ];
+
+    interface ProsePattern {
+      re: RegExp;
+      why: string;
+      /** All must also match the same line (narrowing co-occurrence). */
+      also?: RegExp[];
+      /** Any match on the line suppresses the hit (truthful negations). */
+      unless?: RegExp;
+      /** Only fires under a heading matching this (list-item patterns). */
+      heading?: RegExp;
+    }
+
+    const patterns: ProsePattern[] = [
+      {
+        re: /need to pass (?:api |access )?keys?/i,
+        why: 'teaches that API keys need not be passed in code (the demolished env grammar)',
+      },
+      {
+        // A credential RESOLUTION-SEQUENCE item that is just "environment
+        // variables" — the exact rot line ask-seepient.md carried. Scoped to
+        // credential/resolution headings: general settings-precedence lists
+        // legitimately include env vars.
+        re: /^\s*(?:\d+[.)]|[-*+])\s*(?:process\s+)?environment\s+variables?\s*(?:\(|$)/i,
+        heading: /credential|resolution|auth/i,
+        why: 'lists environment variables as a credential-resolution source',
+      },
+      {
+        re: /^\s*(?:\d+[.)]|[-*+])\s*operating\s+system\s+keychain/i,
+        heading: /credential|resolution|auth/i,
+        why: 'lists the OS keychain as an SDK credential-resolution source (it is an operator store of the full package, not an SDK source)',
+      },
+      {
+        re: /mode:\s*["']?env["']?\s*[,|}]/i,
+        why: 'documents the demolished env credential mode',
+      },
+      {
+        re: /\bvarName\b/,
+        why: 'documents the demolished env-reference varName field',
+      },
+      {
+        re: /shell environment/i,
+        also: [/key|credential/i],
+        why: 'mixes the shell environment with API keys/credentials',
+      },
+      {
+        re: /(?:reads?|pulls?|resolves?)\s+(?:these\s+|the\s+|provider\s+|your\s+)?(?:api\s+|access\s+)?(?:keys?|credentials?|secrets?|variables?)[^.\n]{0,40}\b(?:from|in|via|out of)\s+(?:the\s+|your\s+)?(?:process\s+)?environment/i,
+        unless: /\b(?:never|no longer|not|no|rather than|instead of|refus)/i,
+        why: 'claims Seepient reads keys/credentials from the environment',
+      },
+    ];
+
+    const proseViolations: string[] = [];
+    for (const file of filesToScan) {
+      if (!fs.existsSync(file)) continue;
+      const relPath = path.relative(repoRoot, file);
+      const lines = fs.readFileSync(file, 'utf8').split('\n');
+      let heading = '';
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const h = line.match(/^#{1,6}\s+(.*)/);
+        if (h) {
+          heading = h[1];
+          continue;
+        }
+        for (const p of patterns) {
+          if (!p.re.test(line)) continue;
+          if (p.heading && !p.heading.test(heading)) continue;
+          if (p.also && !p.also.every((re) => re.test(line))) continue;
+          if (p.unless && p.unless.test(line)) continue;
+          proseViolations.push(`${relPath}:${i + 1} ${p.why}: "${line.trim().slice(0, 120)}"`);
+        }
+      }
+    }
+
+    expect(proseViolations, 'Credential-source prose violations (round-3 OQ-3)').toEqual([]);
+  });
 });
