@@ -105,26 +105,24 @@ describe("review round-3 P1-2: the providers option family completes on every ru
     ).rejects.toThrow(/principal/i);
   });
 
-  it("the credentials single-user notice describes the resolved store set (round-3 P2-3)", async () => {
+  it("the credentials single-user notice describes the resolved store set (round-3 P2-3, gate r2 P2-C)", async () => {
     const tenancy = await import("../../../domain/tenancy/tenancy-mode.js");
     tenancy.resetTenancyNoticeForTest();
     const warnings: string[] = [];
     const origWarn = console.warn;
     console.warn = (m: unknown) => warnings.push(String(m));
     try {
-      // Core persona (this file registers no ambient defaults) + stateless:
-      // the in-memory claim is true.
-      tenancy.emitCredentialsSingleUserWarningOnce(true);
-      tenancy.resetTenancyNoticeForTest();
-      // Core persona without stateless: defaults resolve to ambient state —
-      // the notice must not claim zero writes.
-      tenancy.emitCredentialsSingleUserWarningOnce(false);
+      // Core persona (this file registers no ambient defaults): post-widen
+      // the in-memory resolution holds for EVERY single-mode construction,
+      // so the notice claims zero writes. The old "pass stateless: true"
+      // arm is deleted — it was unreachable and its advice went stale.
+      tenancy.emitCredentialsSingleUserWarningOnce();
     } finally {
       console.warn = origWarn;
       tenancy.resetTenancyNoticeForTest();
     }
+    expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("no ambient state is written");
-    expect(warnings[1]).not.toContain("no ambient state is written");
-    expect(warnings[1]).toContain("ambient");
+    expect(warnings[0]).not.toContain("pass stateless");
   });
 });

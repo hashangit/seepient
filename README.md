@@ -636,7 +636,9 @@ seepient auth login anthropic
 seepient auth login my-openai --key sk-...
 seepient auth login my-claude --key sk-ant-...
 
-# Register a local endpoint (Ollama, LM Studio, vLLM) without credentials
+# Register a local endpoint without credentials.
+# The endpoint must serve the OpenAI Responses API (POST {baseUrl}/v1/responses) —
+# chat-completions-only servers (most Ollama/vLLM setups) are not usable yet.
 seepient providers add ollama-local --upstream openai --url http://127.0.0.1:11434/v1 --credential none
 
 # Assign default models by purpose and tier

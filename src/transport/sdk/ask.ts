@@ -216,265 +216,273 @@ export async function askSeepient(
     }
   }
 
-  // Resolve skill catalog and append to the system prompt
-  const { systemPrompt, skillRegistry } = await resolveSkills(
-    opts.systemPrompt,
-    opts.skills,
-    opts.cwd,
-    tenancyMode,
-    opts.sources,
-  );
-
-  // Construct per-call ToolRegistry (Spec 022)
-  const toolRegistry = new ToolRegistry(getDefaultToolModules());
-  for (const item of opts.tools ?? []) {
-    if (
-      item &&
-      typeof item === "object" &&
-      "definition" in item &&
-      typeof (item as { definition?: any }).definition?.function?.name === "string" &&
-      typeof (item as { handler?: any }).handler === "function" &&
-      !("trust" in item)
-    ) {
-      toolRegistry.register(item as unknown as ToolModule);
-    }
-  }
-
-  // Resolve tools
-  const toolDefs = opts.tools ? resolveTools(opts.tools, toolRegistry) : toolRegistry.definitions();
-  // spec 019 FR-006: explicit trustedHostTool registrations wire into the
-  // boundary's host-callback map and join the operator allowlist.
-  const { callbacks: hostCallbacks, registrationIds } = extractHostCallbacks(opts.tools, {
-    skills: skillRegistry,
-    registry: toolRegistry,
-  });
-  // spec 020 FR-001: custom preparedTool and brokerConnector registrations
-  const registrations = extractRegistrations(opts.tools);
-
-  // Build message list
-  const messages: Message[] = [];
-  messages.push({
-    id: generateId(),
-    role: "user" as const,
-    content: prompt,
-    timestamp: now(),
-  });
-
-  const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
-  const { legacyApproveToolToBroker } = await import("../legacy-adapter.js");
-  const { createSnapshotStore } = await import("../../foundations/hashline/snapshot-store.js");
-  const { InMemoryArtifactStore } = await import("../../capabilities/execution/in-memory-artifact-store.js");
-  const snapshotStore = createSnapshotStore();
-  const sharedArtifacts = new InMemoryArtifactStore();
-  // Spec 027 FR-009: the media factory arrives via the registration seam —
-  // the full package arms it from its composition roots; a core-only install
-  // leaves it undefined and media turns deny typed on the light boundary.
-  const vendorOperationHandler = getMediaVendorOperationHandlerFactory()?.({
-    runtime,
-    artifacts: sharedArtifacts,
-    signal: abortController.signal,
-    tenancyMode,
-  });
-  const secretResolver =
-    tenancyMode === "multi"
-      ? (ref: string) => {
-          const store = (runtime as any).credentialStore ?? (runtime as any).getCredentialStore?.();
-          return store?.resolveSecret?.(ref) ?? undefined;
-        }
-      : undefined;
-  // Spec 027 FR-012: full package injects the boundary pipeline; the
-  // engine default is the light boundary (trusted-host/none only).
-  const boundary = await resolveTurnBoundary({
-    artifacts: sharedArtifacts,
-    workspaceRoot: opts.cwd ?? process.cwd(),
-    snapshotStore,
-    hostCallbacks,
-    vendorOperationHandler,
-    commitHelper: opts.commitHelper,
-    network: opts.network,
-    tenancyMode,
-    secretResolver,
-  });
-  const approvalMode = opts.consentMode
-    ? (opts.consentMode === "autonomous" ? "autonomous" : opts.consentMode === "ask-everything" ? "manual" : "balanced")
-    : (opts.approvalBroker || opts.approveTool ? "manual" : "never");
-
-  const wiredPipeline = await buildActionLifecycle({
-    principalId: opts.principalId ?? "sdk-user",
-    runId: generateId(),
-    workspaceRoot: opts.cwd ?? process.cwd(),
-    modelProviderClass: (opts.provider ?? "openai") as string,
-    approvalBroker: opts.approvalBroker ?? legacyApproveToolToBroker(opts.approveTool),
-    executionBoundary: boundary,
-    approvalMode,
-    deploymentCeiling: toCapabilitySet(opts.deploymentCeiling),
-    principalPolicy: toCapabilitySet(opts.principalPolicy),
-    artifacts: sharedArtifacts,
-    snapshotStore,
-    trustedHostAllowlist: [...DEFAULT_TRUSTED_HOST_ALLOWLIST, ...registrationIds],
-    registrations,
-    auditStore: opts.auditStore,
-    policyStore: opts.policyStore,
-    capabilityLedger: opts.capabilityLedger,
-    preferInMemoryDefaults,
-    operatorBaseline: toCapabilitySet(opts.operatorBaseline),
-    tenancyMode,
-  });
-
-  if (opts.stream) {
-    // Hooks — merge stream-level callbacks with any base hooks
-    const mergedHooks = { ...opts.hooks };
-    const hooks = createHookExecutor(mergedHooks);
-
-    // Stream manager handles queues, async iterables, and SSE
-    const stream = new StreamManager();
-
-    (async () => {
-      // v0.9.0 gate r1 (P2-a): the consumer's onError is an untrusted
-      // boundary — a throwing callback used to re-enter the catch below
-      // (double dispatch), skip the stream settles, and escape the
-      // fire-and-forget IIFE as an unhandledRejection. Dispatch once,
-      // guard the callback.
-      let streamErrorReported = false;
-      const reportError = (loopFailure: SeepientError) => {
-        if (streamErrorReported) return;
-        streamErrorReported = true;
-        try {
-          opts.onError?.(loopFailure);
-        } catch (callbackErr) {
-          console.error("[seepient] onError callback threw:", callbackErr);
-        }
-      };
-      try {
-        const snapshot = await runtime.createTurnSnapshot();
-
-        const result = await runAgentLoop({
-          runtime,
-          turnSnapshot: snapshot,
-          model: opts.model,
-          modelOverride: opts.providerAccount || opts.model
-            ? { providerAccount: opts.providerAccount, model: opts.model }
-            : undefined,
-          purpose: opts.purpose,
-          tier: opts.tier,
-          temperature: opts.temperature,
-          maxTokens: opts.maxTokens,
-          messages,
-          toolRegistry,
-          toolDefs,
-          systemPrompt,
-          maxSteps,
-          hooks,
-          tenancyMode,
-          signal: abortController.signal,
-          config: { ...opts.config, runtime, skills: skillRegistry },
-          metadata: opts.metadata,
-          middleware: opts.middleware,
-          approveTool: opts.approveTool,
-          wiredPipeline,
-          onStep: (step: StepResult) => {
-            if (opts.onStep) opts.onStep(step);
-            if (
-              (step.type === "text" || step.type === "text_delta") &&
-              step.content
-            ) {
-              if (opts.onText) opts.onText(step.content);
-              stream.enqueueText(step.content);
-            }
-            if (step.type === "tool_call" && step.toolCall) {
-              if (opts.onToolCall) {
-                opts.onToolCall({
-                  name: step.toolCall.name,
-                  args: step.toolCall.args,
-                  callId: step.toolCall.id,
-                });
-              }
-              if (opts.onToolResult) {
-                const output = step.toolCall.result;
-                const success =
-                  typeof output === "string"
-                    ? !output.startsWith("Error:")
-                    : true;
-                opts.onToolResult({
-                  callId: step.toolCall.id,
-                  output,
-                  success,
-                });
-              }
-            }
-            stream.enqueueStep(step);
-          },
-        });
-
-        const lastAssistant = [...result.messages]
-          .reverse()
-          .find((m) => m.role === "assistant" && m.content);
-        const textFromSteps = result.steps
-          .filter((s: StepResult) => s.type === "text" || s.type === "text_delta")
-          .map((s: StepResult) => s.content ?? "")
-          .join("");
-        const allText = textFromSteps || (lastAssistant?.content ?? "");
-
-        const loopErr = extractLoopError(result);
-        stream.resolveUsage(result.usage);
-        if (loopErr) {
-          reportError(loopErr);
-          stream.resolveFinish("error");
-          // F2: a failed turn must be observable — fullText rejects, in
-          // parity with the non-streaming throw.
-          stream.rejectText(loopErr);
-        } else {
-          stream.resolveText(allText);
-          stream.resolveFinish(result.finishReason);
-          // W112: fire hooks.onFinish in streaming mode too, with the same
-          // assembled result the non-streaming path would have returned.
-          const streamedResult: AskSeepientResult = {
-            text: allText,
-            steps: result.steps,
-            toolCalls: result.toolCalls,
-            usage: result.usage,
-            finishReason: result.finishReason as AskSeepientResult["finishReason"],
-            messages: result.messages,
-          };
-          await hooks.onFinish(streamedResult);
-        }
-      } catch (err) {
-        const seepientErr = toSeepientError(err, "PROVIDER_ERROR");
-        reportError(seepientErr);
-        // F2: reject fullText instead of resolving "" — silent empty
-        // responses hid provider failures from callers without onError.
-        stream.rejectText(seepientErr);
-        stream.resolveUsage({ promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 });
-        stream.resolveFinish("error");
-      } finally {
-        detachSignalBridge?.();
-        stream.complete();
-      }
-    })();
-
-    return {
-      textStream: stream.textStream,
-      steps: stream.stepsStream,
-      fullText: stream.fullText,
-      usage: stream.usage,
-      finishReason: stream.finishReason,
-      abort: () => abortController.abort(),
-      toResponse: (respOpts?: { headers?: Record<string, string> }) => stream.toResponse(respOpts),
-      toSSEStream: () => stream.toSSEStream(),
-    };
-  }
-
-  // Non-streaming (default)
-  const hooks = createHookExecutor(opts.hooks);
-  // v0.9.0 gate r1 (P2-b): the signal bridge must detach even when snapshot
-  // creation or the loop throws — the streaming branch settles it in its
-  // finally; without this, every throwing call on a shared caller
-  // AbortSignal leaks one listener.
-  let result;
+  // Gate r2 (P2-E): the bridge must detach even when the SETUP window
+  // throws (resolveSkills, tool resolution, pipeline construction) — these
+  // run before both dispatch-path finallys, and a throwing call leaked one
+  // listener per failure on the caller's long-lived signal.
   try {
+    // Resolve skill catalog and append to the system prompt
+    const { systemPrompt, skillRegistry } = await resolveSkills(
+      opts.systemPrompt,
+      opts.skills,
+      opts.cwd,
+      tenancyMode,
+      opts.sources,
+    );
+
+    // Construct per-call ToolRegistry (Spec 022)
+    const toolRegistry = new ToolRegistry(getDefaultToolModules());
+    for (const item of opts.tools ?? []) {
+      if (
+        item &&
+        typeof item === "object" &&
+        "definition" in item &&
+        typeof (item as { definition?: any }).definition?.function?.name === "string" &&
+        typeof (item as { handler?: any }).handler === "function" &&
+        !("trust" in item)
+      ) {
+        toolRegistry.register(item as unknown as ToolModule);
+      }
+    }
+
+    // Resolve tools
+    const toolDefs = opts.tools ? resolveTools(opts.tools, toolRegistry) : toolRegistry.definitions();
+    // spec 019 FR-006: explicit trustedHostTool registrations wire into the
+    // boundary's host-callback map and join the operator allowlist.
+    const { callbacks: hostCallbacks, registrationIds } = extractHostCallbacks(opts.tools, {
+      skills: skillRegistry,
+      registry: toolRegistry,
+    });
+    // spec 020 FR-001: custom preparedTool and brokerConnector registrations
+    const registrations = extractRegistrations(opts.tools);
+
+    // Build message list
+    const messages: Message[] = [];
+    messages.push({
+      id: generateId(),
+      role: "user" as const,
+      content: prompt,
+      timestamp: now(),
+    });
+
+    const { buildActionLifecycle } = await import("../../domain/permissions/action-lifecycle-factory.js");
+    const { legacyApproveToolToBroker } = await import("../legacy-adapter.js");
+    const { createSnapshotStore } = await import("../../foundations/hashline/snapshot-store.js");
+    const { InMemoryArtifactStore } = await import("../../capabilities/execution/in-memory-artifact-store.js");
+    const snapshotStore = createSnapshotStore();
+    const sharedArtifacts = new InMemoryArtifactStore();
+    // Spec 027 FR-009: the media factory arrives via the registration seam —
+    // the full package arms it from its composition roots; a core-only install
+    // leaves it undefined and media turns deny typed on the light boundary.
+    const vendorOperationHandler = getMediaVendorOperationHandlerFactory()?.({
+      runtime,
+      artifacts: sharedArtifacts,
+      signal: abortController.signal,
+      tenancyMode,
+    });
+    const secretResolver =
+      tenancyMode === "multi"
+        ? (ref: string) => {
+            const store = (runtime as any).credentialStore ?? (runtime as any).getCredentialStore?.();
+            return store?.resolveSecret?.(ref) ?? undefined;
+          }
+        : undefined;
+    // Spec 027 FR-012: full package injects the boundary pipeline; the
+    // engine default is the light boundary (trusted-host/none only).
+    const boundary = await resolveTurnBoundary({
+      artifacts: sharedArtifacts,
+      workspaceRoot: opts.cwd ?? process.cwd(),
+      snapshotStore,
+      hostCallbacks,
+      vendorOperationHandler,
+      commitHelper: opts.commitHelper,
+      network: opts.network,
+      tenancyMode,
+      secretResolver,
+    });
+    const approvalMode = opts.consentMode
+      ? (opts.consentMode === "autonomous" ? "autonomous" : opts.consentMode === "ask-everything" ? "manual" : "balanced")
+      : (opts.approvalBroker || opts.approveTool ? "manual" : "never");
+
+    const wiredPipeline = await buildActionLifecycle({
+      principalId: opts.principalId ?? "sdk-user",
+      runId: generateId(),
+      workspaceRoot: opts.cwd ?? process.cwd(),
+      modelProviderClass: (opts.provider ?? "openai") as string,
+      approvalBroker: opts.approvalBroker ?? legacyApproveToolToBroker(opts.approveTool),
+      executionBoundary: boundary,
+      approvalMode,
+      deploymentCeiling: toCapabilitySet(opts.deploymentCeiling),
+      principalPolicy: toCapabilitySet(opts.principalPolicy),
+      artifacts: sharedArtifacts,
+      snapshotStore,
+      trustedHostAllowlist: [...DEFAULT_TRUSTED_HOST_ALLOWLIST, ...registrationIds],
+      registrations,
+      auditStore: opts.auditStore,
+      policyStore: opts.policyStore,
+      capabilityLedger: opts.capabilityLedger,
+      preferInMemoryDefaults,
+      operatorBaseline: toCapabilitySet(opts.operatorBaseline),
+      tenancyMode,
+    });
+
+    if (opts.stream) {
+      // Hooks — merge stream-level callbacks with any base hooks
+      const mergedHooks = { ...opts.hooks };
+      const hooks = createHookExecutor(mergedHooks);
+
+      // Stream manager handles queues, async iterables, and SSE
+      const stream = new StreamManager();
+
+      (async () => {
+        // v0.9.0 gate r1 (P2-a): the consumer's onError is an untrusted
+        // boundary — a throwing callback used to re-enter the catch below
+        // (double dispatch), skip the stream settles, and escape the
+        // fire-and-forget IIFE as an unhandledRejection. Dispatch once,
+        // guard the callback.
+        let streamErrorReported = false;
+        const reportError = (loopFailure: SeepientError) => {
+          if (streamErrorReported) return;
+          streamErrorReported = true;
+          try {
+            const delivered = opts.onError?.(loopFailure);
+            // A rejected promise escapes the try below — catch it too (gate r2 P2-D).
+            if (delivered && typeof (delivered as { catch?: unknown }).catch === "function") {
+              (delivered as Promise<void>).catch((rejection) =>
+                console.error("[seepient] onError callback rejected:", rejection),
+              );
+            }
+          } catch (callbackErr) {
+            console.error("[seepient] onError callback threw:", callbackErr);
+          }
+        };
+        try {
+          const snapshot = await runtime.createTurnSnapshot();
+
+          const result = await runAgentLoop({
+            runtime,
+            turnSnapshot: snapshot,
+            model: opts.model,
+            modelOverride: opts.providerAccount || opts.model
+              ? { providerAccount: opts.providerAccount, model: opts.model }
+              : undefined,
+            purpose: opts.purpose,
+            tier: opts.tier,
+            temperature: opts.temperature,
+            maxTokens: opts.maxTokens,
+            messages,
+            toolRegistry,
+            toolDefs,
+            systemPrompt,
+            maxSteps,
+            hooks,
+            tenancyMode,
+            signal: abortController.signal,
+            config: { ...opts.config, runtime, skills: skillRegistry },
+            metadata: opts.metadata,
+            middleware: opts.middleware,
+            approveTool: opts.approveTool,
+            wiredPipeline,
+            onStep: (step: StepResult) => {
+              if (opts.onStep) opts.onStep(step);
+              if (
+                (step.type === "text" || step.type === "text_delta") &&
+                step.content
+              ) {
+                if (opts.onText) opts.onText(step.content);
+                stream.enqueueText(step.content);
+              }
+              if (step.type === "tool_call" && step.toolCall) {
+                if (opts.onToolCall) {
+                  opts.onToolCall({
+                    name: step.toolCall.name,
+                    args: step.toolCall.args,
+                    callId: step.toolCall.id,
+                  });
+                }
+                if (opts.onToolResult) {
+                  const output = step.toolCall.result;
+                  const success =
+                    typeof output === "string"
+                      ? !output.startsWith("Error:")
+                      : true;
+                  opts.onToolResult({
+                    callId: step.toolCall.id,
+                    output,
+                    success,
+                  });
+                }
+              }
+              stream.enqueueStep(step);
+            },
+          });
+
+          const lastAssistant = [...result.messages]
+            .reverse()
+            .find((m) => m.role === "assistant" && m.content);
+          const textFromSteps = result.steps
+            .filter((s: StepResult) => s.type === "text" || s.type === "text_delta")
+            .map((s: StepResult) => s.content ?? "")
+            .join("");
+          const allText = textFromSteps || (lastAssistant?.content ?? "");
+
+          const loopErr = extractLoopError(result);
+          stream.resolveUsage(result.usage);
+          if (loopErr) {
+            reportError(loopErr);
+            stream.resolveFinish("error");
+            // F2: a failed turn must be observable — fullText rejects, in
+            // parity with the non-streaming throw.
+            stream.rejectText(loopErr);
+          } else {
+            stream.resolveText(allText);
+            stream.resolveFinish(result.finishReason);
+            // W112: fire hooks.onFinish in streaming mode too, with the same
+            // assembled result the non-streaming path would have returned.
+            const streamedResult: AskSeepientResult = {
+              text: allText,
+              steps: result.steps,
+              toolCalls: result.toolCalls,
+              usage: result.usage,
+              finishReason: result.finishReason as AskSeepientResult["finishReason"],
+              messages: result.messages,
+            };
+            await hooks.onFinish(streamedResult);
+          }
+        } catch (err) {
+          const seepientErr = toSeepientError(err, "PROVIDER_ERROR");
+          reportError(seepientErr);
+          // F2: reject fullText instead of resolving "" — silent empty
+          // responses hid provider failures from callers without onError.
+          stream.rejectText(seepientErr);
+          stream.resolveUsage({ promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 });
+          stream.resolveFinish("error");
+        } finally {
+          stream.complete();
+        }
+      })();
+
+      return {
+        textStream: stream.textStream,
+        steps: stream.stepsStream,
+        fullText: stream.fullText,
+        usage: stream.usage,
+        finishReason: stream.finishReason,
+        abort: () => abortController.abort(),
+        toResponse: (respOpts?: { headers?: Record<string, string> }) => stream.toResponse(respOpts),
+        toSSEStream: () => stream.toSSEStream(),
+      };
+    }
+
+    // Non-streaming (default)
+    const hooks = createHookExecutor(opts.hooks);
+    // v0.9.0 gate r1 (P2-b): the signal bridge must detach even when snapshot
+    // creation or the loop throws — the streaming branch settles it in its
+    // finally; without this, every throwing call on a shared caller
+    // AbortSignal leaks one listener.
     const snapshot = await runtime.createTurnSnapshot();
 
-    result = await runAgentLoop({
+    const result = await runAgentLoop({
       runtime,
       turnSnapshot: snapshot,
       model: opts.model,
@@ -524,39 +532,45 @@ export async function askSeepient(
           });
         }
       }
-    } : undefined,
+      } : undefined,
     });
+
+    // W111: onError parity with the streaming branch — report before rejecting.
+    // The callback is guarded (r1 P2-a): a throwing onError must not replace
+    // the real loop error as the thrown failure.
+    const loopError = extractLoopError(result);
+    if (loopError) {
+      try {
+        const delivered = opts.onError?.(loopError);
+        // A rejected promise escapes the try below — catch it too (gate r2 P2-D).
+        if (delivered && typeof (delivered as { catch?: unknown }).catch === "function") {
+          (delivered as Promise<void>).catch((rejection) =>
+            console.error("[seepient] onError callback rejected:", rejection),
+          );
+        }
+      } catch (callbackErr) {
+        console.error("[seepient] onError callback threw:", callbackErr);
+      }
+      throw loopError;
+    }
+
+    const lastAssistant = [...result.messages]
+      .reverse()
+      .find((m) => m.role === "assistant" && m.content);
+    const text = lastAssistant?.content ?? "";
+
+    const askResult: AskSeepientResult = {
+      text,
+      steps: result.steps,
+      toolCalls: result.toolCalls,
+      usage: result.usage,
+      finishReason: result.finishReason as AskSeepientResult["finishReason"],
+      messages: result.messages,
+    };
+
+    await hooks.onFinish(askResult);
+    return askResult;
   } finally {
     detachSignalBridge?.();
   }
-
-  // W111: onError parity with the streaming branch — report before rejecting.
-  // The callback is guarded (r1 P2-a): a throwing onError must not replace
-  // the real loop error as the thrown failure.
-  const loopError = extractLoopError(result);
-  if (loopError) {
-    try {
-      opts.onError?.(loopError);
-    } catch (callbackErr) {
-      console.error("[seepient] onError callback threw:", callbackErr);
-    }
-    throw loopError;
-  }
-
-  const lastAssistant = [...result.messages]
-    .reverse()
-    .find((m) => m.role === "assistant" && m.content);
-  const text = lastAssistant?.content ?? "";
-
-  const askResult: AskSeepientResult = {
-    text,
-    steps: result.steps,
-    toolCalls: result.toolCalls,
-    usage: result.usage,
-    finishReason: result.finishReason as AskSeepientResult["finishReason"],
-    messages: result.messages,
-  };
-
-  await hooks.onFinish(askResult);
-  return askResult;
 }

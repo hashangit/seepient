@@ -39,7 +39,9 @@ export const FULL_TOOL_MODULES: readonly ToolModule[] = Object.freeze([
 registerDefaultToolModules(FULL_TOOL_MODULES);
 
 // Review P1-3: Profile A ambient defaults (~/.seepient) ride the full
-// package only; seepient-core defaults single+stateless to in-memory stores.
+// package only; seepient-core resolves every single-mode default to the
+// in-memory store set (gate r1 P2-c: keyed on this registration, not on
+// the stateless option).
 registerAmbientStoreDefaults();
 
 // Spec 027: built-in tool analyzers (prepared-action builders) register with

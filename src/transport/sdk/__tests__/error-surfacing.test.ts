@@ -334,4 +334,49 @@ describe("Throwing consumer callbacks (gate r1)", () => {
     ).rejects.toThrowError(/snapshot exploded/);
     expect(removeSpy).toHaveBeenCalled();
   });
+
+  it("askSeepient non-streaming: a THROWING SETUP also detaches the caller-signal bridge (gate r2 P2-E)", async () => {
+    // An unknown tool name throws in resolveTools — inside the setup window,
+    // before the dispatch-path finallys. Pre-fix it leaked the bridge listener.
+    const controller = new AbortController();
+    const removeSpy = vi.spyOn(controller.signal, "removeEventListener");
+    await expect(
+      askSeepient("Hello", {
+        runtime: createFailingRuntime() as any,
+        model: "mock-model",
+        tenancy: "single",
+        signal: controller.signal,
+        tools: ["definitely_not_a_real_tool_xyz"],
+      }),
+    ).rejects.toThrowError(/definitely_not_a_real_tool_xyz/);
+    expect(removeSpy).toHaveBeenCalled();
+  });
+
+  it("an ASYNC-REJECTING onError also stays contained (gate r2 P2-D)", async () => {
+    const runtime = createFailingRuntime();
+    const agent = await createSeepient({
+      runtime: runtime as any,
+      model: "mock-model",
+      tenancy: "single",
+    });
+    const tracked = trackRejections();
+    let calls = 0;
+    try {
+      const stream = await agent.chatStream("Hello", {
+        onError: async () => {
+          calls += 1;
+          throw new Error("async sink down");
+        },
+      });
+
+      const finish = await stream.finishReason;
+      expect(finish).toBe("error");
+      await expect(stream.fullText).rejects.toThrowError(/Invalid API key/);
+      await new Promise((r) => setTimeout(r, 10));
+      expect(calls).toBe(1);
+      expect(tracked.rejections).toEqual([]);
+    } finally {
+      tracked.stop();
+    }
+  });
 });

@@ -1,10 +1,12 @@
 /**
  * Spec 027 (T010): seepient-core public surface pin.
  *
- * The core entry's runtime export set is pinned against a COMMITTED GOLDEN
- * SNAPSHOT (`core-entry-exports.json`). The real property this pins: any
- * commit that adds, removes, or renames a core export fails here until the
- * golden file is regenerated — and that regeneration is the reviewable diff
+ * The core entry's runtime VALUE export set is pinned against a COMMITTED
+ * GOLDEN SNAPSHOT (`core-entry-exports.json`). The real property this pins:
+ * any commit that adds, removes, or renames a runtime export fails here
+ * until the golden file is regenerated — and that regeneration is the
+ * reviewable diff. (Type-only exports erase at runtime and are out of this
+ * pin's sight; they ship in the .d.ts and are reviewable at release.)
  * (v0.9.0 gate r1 P1-3: the previous pin generated its expected set from
  * `core.ts` itself, so a scope-creeping commit updated both sides and stayed
  * green; a self-read can never catch a source change).
