@@ -204,43 +204,126 @@ export function assertNoDuplicatedEngine(rootDist, coreDist) {
   }
 }
 
-/** release.yml invariants, grepped in-repo (D18: no separate workflow-lint script). */
+/**
+ * Minimal GitHub Actions step extraction (round-3 OQ-4): an ordered list of
+ * `{ name, run }` for every step in the file. `run` bodies keep their
+ * newlines but drop full-line comments — the invariants match on this text,
+ * so a comment cannot satisfy a requirement and a line-wrapped command
+ * cannot evade one (the evasion classes the previous raw-text greps had).
+ */
+export function parseWorkflowSteps(wf) {
+  const steps = [];
+  let current = null;
+  let runIndent = -1; // -1 = not currently collecting a run block
+  for (const raw of wf.split("\n")) {
+    const named = raw.match(/^(\s*)-\s+name:\s*(.+?)\s*$/);
+    if (named) {
+      if (current) steps.push(current);
+      current = { name: named[2].replace(/^["']|["']$/g, ""), run: "" };
+      runIndent = -1;
+      continue;
+    }
+    const anonRun = raw.match(/^(\s*)-\s+run:\s*(.*)$/);
+    if (anonRun) {
+      if (current) steps.push(current);
+      current = { name: "(unnamed step)", run: "" };
+      const inline = anonRun[2].trim();
+      if (inline && !inline.startsWith("|") && !inline.startsWith(">") && inline !== "") {
+        current.run += inline + "\n";
+        runIndent = -1;
+      } else {
+        runIndent = anonRun[1].length; // block scalar follows
+      }
+      continue;
+    }
+    const anonUses = raw.match(/^(\s*)-\s+uses:\s*(.*)$/);
+    if (anonUses) {
+      if (current) steps.push(current);
+      current = { name: "(unnamed step)", run: "" };
+      runIndent = -1;
+      continue;
+    }
+    if (!current) continue;
+    if (runIndent === -1) {
+      const run = raw.match(/^(\s*)run:\s*(.*)$/);
+      if (run) {
+        const inline = run[2].trim();
+        if (inline && !inline.startsWith("|") && !inline.startsWith(">")) {
+          current.run += inline + "\n";
+        } else {
+          runIndent = run[1].length; // block scalar follows
+        }
+      }
+      continue;
+    }
+    if (raw.trim() === "") continue;
+    const indent = raw.match(/^\s*/)[0].length;
+    if (indent > runIndent) {
+      const line = raw.trim();
+      if (!line.startsWith("#")) current.run += line + "\n";
+    } else {
+      runIndent = -1; // block ended; the step may carry more keys (env:, if:)
+    }
+  }
+  if (current) steps.push(current);
+  return steps;
+}
+
+/**
+ * release.yml invariants, checked against the PARSED step list (round-3
+ * OQ-4): the previous implementation grepped raw workflow text, so a comment
+ * could satisfy the build:core requirement and a line-split core publish
+ * command could hide an inverted publish order. Every requirement now names
+ * a real step's comment-stripped run body.
+ */
 export function assertReleaseWorkflowInvariants(repoRoot) {
   const wfPath = path.join(repoRoot, ".github/workflows/release.yml");
   if (!fs.existsSync(wfPath)) {
     throw new Error("release.yml invariant check: .github/workflows/release.yml not found");
   }
   const wf = fs.readFileSync(wfPath, "utf8");
+  const steps = parseWorkflowSteps(wf);
+  if (steps.length === 0) {
+    throw new Error("release.yml invariants: no workflow steps parsed — refusing to pass");
+  }
   const violations = [];
-  // Core published BEFORE the root package.
-  const corePublish = wf.indexOf("packages/core");
-  const rootPublish = wf.indexOf('pnpm publish', Math.max(0, wf.indexOf("packages/core")));
-  if (corePublish === -1 || rootPublish === -1) {
-    violations.push("release.yml must publish packages/core via pnpm publish");
-  }
-  const firstRoot = wf.toLowerCase().includes("pnpm publish");
-  if (!firstRoot) violations.push('release.yml must use "pnpm publish" (never raw "npm publish")');
-  if (/(?<!p)npm publish/.test(wf)) violations.push('release.yml mentions raw "npm publish" — forbidden (workspace:^ poison)');
+  const findIdx = (re) => steps.findIndex((s) => re.test(s.run));
+
   // Explicit build before pack:verify. The core manifest is script-free
-  // (E12 — pnpm publish --dry-run would run prepublishOnly), so
-  // `pnpm --filter seepient-core build` has nothing to run; the root
+  // (E12 — pnpm publish --dry-run would run prepublishOnly), so the root
   // `build:core` script is the build entry (P0-1).
-  if (!/pnpm\s+run\s+build:core/.test(wf)) {
-    violations.push('release.yml must run `pnpm run build:core` explicitly before pack:verify');
+  const buildIdx = findIdx(/pnpm\s+run\s+build:core\b/);
+  if (buildIdx === -1) {
+    violations.push('release.yml must contain a step whose run executes `pnpm run build:core`');
   }
-  const buildIdx = wf.search(/pnpm\s+run\s+build:core/);
-  const verifyIdx = wf.indexOf("pack:verify");
+  const verifyIdx = findIdx(/pack:verify/);
+  if (verifyIdx === -1) violations.push("release.yml must contain a pack:verify step");
   if (buildIdx !== -1 && verifyIdx !== -1 && buildIdx > verifyIdx) {
-    violations.push("release.yml: the explicit core build must appear BEFORE pack:verify");
+    violations.push("release.yml: the explicit core build step must come BEFORE pack:verify");
   }
-  // Core-first order: packages/core publish line precedes the root publish line.
-  const coreLine = wf.split("\n").findIndex((l) => l.includes("packages/core") && l.includes("publish"));
-  const rootLine = wf.split("\n").findIndex((l) => l.trim().startsWith("pnpm publish") || (l.includes("pnpm publish") && !l.includes("packages/core")));
-  if (coreLine !== -1 && rootLine !== -1 && coreLine > rootLine) {
+  // Core-only chat e2e before pack:verify (review round-2 P1-4).
+  const qsIdx = findIdx(/qs:core-chat/);
+  if (qsIdx === -1) violations.push("release.yml must run the core-only chat e2e (qs:core-chat)");
+  if (qsIdx !== -1 && verifyIdx !== -1 && qsIdx > verifyIdx) {
+    violations.push("release.yml: qs:core-chat must come BEFORE pack:verify");
+  }
+  // Core-first lockstep publish order. The core step's run must reference
+  // packages/core AND pnpm publish (whitespace-normalized, so a line-split
+  // command still counts); the root step's run has pnpm publish without it.
+  const corePubIdx = steps.findIndex((s) => /pnpm\s+publish/.test(s.run) && /packages\/core/.test(s.run));
+  const rootPubIdx = steps.findIndex((s) => /pnpm\s+publish/.test(s.run) && !/packages\/core/.test(s.run));
+  if (corePubIdx === -1) violations.push("release.yml must publish packages/core via a `pnpm publish` step");
+  if (rootPubIdx === -1) {
+    violations.push('release.yml must publish the root package via a `pnpm publish` step (never raw "npm publish")');
+  }
+  if (corePubIdx !== -1 && rootPubIdx !== -1 && corePubIdx > rootPubIdx) {
     violations.push("release.yml: packages/core must be published FIRST (lockstep order)");
   }
-  if (wf.includes("--provenance") === false) {
-    violations.push("release.yml: core publish should carry --provenance (supply-chain transparency)");
+  if (corePubIdx !== -1 && !steps[corePubIdx].run.includes("--provenance")) {
+    violations.push("release.yml: the core publish step must carry --provenance (supply-chain transparency)");
+  }
+  if (steps.some((s) => /(?<!p)npm\s+publish/.test(s.run))) {
+    violations.push('release.yml runs raw "npm publish" — forbidden (workspace:^ poison)');
   }
   if (violations.length > 0) {
     throw new Error(`release.yml invariants failed:\n  - ${violations.join("\n  - ")}`);

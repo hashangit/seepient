@@ -29,6 +29,8 @@ export function assertNoDuplicatedEngine(rootDist: string, coreDist: string): vo
 
 export function assertReleaseWorkflowInvariants(repoRoot: string): void;
 
+export function parseWorkflowSteps(workflow: string): Array<{ name: string; run: string }>;
+
 export function measureCoreInstallWeight(tarballPath: string): { mb: number; installed: string[] };
 
 export function readTarballManifest(tarballPath: string): Record<string, unknown>;
