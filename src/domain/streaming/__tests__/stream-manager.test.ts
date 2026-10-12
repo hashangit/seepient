@@ -1,9 +1,10 @@
 /**
- * StreamManager contract (021-4 review F2/F3).
+ * StreamManager contract (021-4 review F2/F3 + round-3 P2-1).
  *
  * F2 — a failed turn must be observable: fullText rejects (parity with the
- *      non-streaming throw), while textStream still completes for consumers
- *      that only iterate deltas.
+ *      non-streaming throw), and textStream throws the same error after
+ *      draining the deltas already queued — a delta-only consumer must not
+ *      see a silent zero-output completion on a failed turn.
  * F3 — SSE tool_result events report the actual execution outcome instead of
  *      a hardcoded success.
  */
@@ -33,7 +34,7 @@ async function drainSse(stream: ReadableStream): Promise<string> {
   return out;
 }
 
-describe("F2 — fullText rejects on failed turns", () => {
+describe("F2 — failed turns are observable on fullText AND textStream", () => {
   it("rejectText surfaces the error to callers awaiting fullText", async () => {
     const mgr = new StreamManager();
     mgr.enqueueText("partial");
@@ -44,10 +45,37 @@ describe("F2 — fullText rejects on failed turns", () => {
 
     await expect(mgr.fullText).rejects.toThrow(/provider down/);
     await expect(mgr.finishReason).resolves.toBe("error");
-    // textStream still completes for delta-only consumers
+  });
+
+  it("textStream drains queued deltas, then throws the turn error (round-3 P2-1)", async () => {
+    const mgr = new StreamManager();
+    mgr.enqueueText("partial");
+    mgr.resolveUsage({ promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 });
+    mgr.resolveFinish("error");
+    mgr.rejectText(new SeepientError("provider down", "PROVIDER_ERROR", true));
+    mgr.complete();
+
+    const chunks: string[] = [];
+    await expect(
+      (async () => {
+        for await (const chunk of mgr.textStream) chunks.push(chunk);
+      })(),
+    ).rejects.toThrow(/provider down/);
+    expect(chunks).toEqual(["partial"]);
+  });
+
+  it("textStream still completes normally on a successful turn", async () => {
+    const mgr = new StreamManager();
+    mgr.enqueueText("all ");
+    mgr.enqueueText("good");
+    mgr.resolveText("all good");
+    mgr.resolveUsage({ promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 });
+    mgr.resolveFinish("stop");
+    mgr.complete();
+
     const chunks: string[] = [];
     for await (const chunk of mgr.textStream) chunks.push(chunk);
-    expect(chunks).toEqual(["partial"]);
+    expect(chunks).toEqual(["all ", "good"]);
   });
 
   it("fullText rejection does not become an unhandled rejection when unobserved", async () => {

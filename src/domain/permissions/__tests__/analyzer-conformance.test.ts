@@ -8,7 +8,9 @@
  *   4. Engine auto-issues model-egress capability for none-operation normal-class actions in all modes
  */
 import { describe, it, expect } from "vitest";
-import { ALL_ANALYZERS } from "../action-lifecycle-factory.js";
+import { registerFullComposition } from "../../__tests__/full-composition.js";
+registerFullComposition(); // spec 027: full-package composition (built-ins + analyzers + boundary)
+import { allAnalyzers } from "../action-lifecycle-factory.js";
 import { PolicyEngine } from "../policy-engine.js";
 import { InMemoryArtifactStore } from "../../../capabilities/execution/in-memory-artifact-store.js";
 import type { ToolAnalysisContext } from "../../../foundations/contracts/custom-tools.js";
@@ -63,7 +65,7 @@ describe("analyzer conformance (spec 017, T018 / QS-3)", () => {
     ];
 
     for (const tool of toolsToTest) {
-      const analyzer = ALL_ANALYZERS[tool.name];
+      const analyzer = allAnalyzers()[tool.name];
       expect(analyzer, `Analyzer for ${tool.name} must exist`).toBeDefined();
       const action = await analyzer(tool.args, ctx);
       const egress = action.effects.find((e) => e.kind === "model-egress");
@@ -77,7 +79,7 @@ describe("analyzer conformance (spec 017, T018 / QS-3)", () => {
   it("zero-effect tools declare model-egress normal and have operation.kind === 'none'", async () => {
     const zeroEffectTools = ["get_current_datetime", "manage_todos", "render_widget"];
     for (const name of zeroEffectTools) {
-      const analyzer = ALL_ANALYZERS[name];
+      const analyzer = allAnalyzers()[name];
       const action = await analyzer({}, ctx);
       expect(action.operation.kind).toBe("none");
       const egress = action.effects.find((e) => e.kind === "model-egress");
@@ -111,7 +113,7 @@ describe("analyzer conformance (spec 017, T018 / QS-3)", () => {
     };
 
     const engine = new PolicyEngine("digest-test");
-    const analyzer = ALL_ANALYZERS["get_current_datetime"];
+    const analyzer = allAnalyzers()["get_current_datetime"];
     const action = await analyzer({}, ctx);
 
     const decision = engine.evaluate(action, policyContext);

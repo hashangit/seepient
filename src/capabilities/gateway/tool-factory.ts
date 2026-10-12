@@ -6,7 +6,7 @@
  */
 
 import type { MCPGateway } from './gateway.js';
-import type { ToolModule } from '../../foundations/contracts/tool.js';
+import type { ToolModule } from 'seepient-core/dist/foundations/contracts/tool.js';
 
 export function createGatewayTools(gateway: MCPGateway): ToolModule[] {
   return [

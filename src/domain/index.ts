@@ -95,7 +95,6 @@ export {
   getToolGroup,
   ToolRegistry,
   ToolRegistrationError,
-  BUILT_IN_TOOL_MODULES,
   normalizeToolResult,
 } from './tool-executor.js';
 

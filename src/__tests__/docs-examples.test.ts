@@ -3,12 +3,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import * as sdkExports from '../transport/sdk/index.js';
 import { askSeepient } from '../transport/sdk/index.js';
+import * as coreEntryExports from '../transport/sdk/core.js';
 import { createMockRuntime } from '../domain/__tests__/test-doubles.js';
 
 const repoRoot = path.resolve(__dirname, '../..');
 const docsSdkDir = path.join(repoRoot, 'docs/sdk');
 
 const loadBearingPages = [
+  'packages/core/README.md',
   'docs/sdk/ask-seepient.md',
   'docs/sdk/create-seepient.md',
   'docs/sdk/skills.md',
@@ -41,11 +43,26 @@ describe('docs example import and runtime checks (FR-003)', () => {
       return names;
     }
 
+    // Spec 027: the full entry star-exports the core entry — follow the star
+    // so docs teaching `seepient` (which re-exports the core surface) still
+    // resolve against code truth.
     const knownSdkExports = new Set([
       ...Object.keys(sdkExports),
       ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/index.ts')),
+      ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/core.ts')),
+      ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/ask.ts')),
+      ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/chat.ts')),
+      ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/seepient.ts')),
+      ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/tools.ts')),
+      ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/custom-tools.ts')),
     ]);
     const unexportedImports: string[] = [];
+    const knownCoreExports = new Set([
+      ...Object.keys(coreEntryExports),
+      ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/core.ts')),
+      ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/chat.ts')),
+      ...extractExportNames(path.join(repoRoot, 'src/transport/sdk/custom-tools.ts')),
+    ]);
 
     for (const page of loadBearingPages) {
       const filePath = path.join(repoRoot, page);
@@ -60,8 +77,18 @@ describe('docs example import and runtime checks (FR-003)', () => {
         if (fenceHeader.includes('no-check')) continue;
 
         const code = match[1];
-        const importRegex = /import\s+\{([^}]+)\}\s+from\s+['"]seepient['"]/g;
+        // seepient-core imports validate against the core entry surface.
+        const coreImportRegex = /import\s+\{([^}]+)\}\s+from\s+['"]seepient-core['"]/g;
         let impMatch;
+        while ((impMatch = coreImportRegex.exec(code)) !== null) {
+          for (const spec of impMatch[1].split(',').map((x) => x.trim().split(/\s+as\s+/)[0].trim()).filter(Boolean)) {
+            const cleanSpec = spec.replace(/^type\s+/, '');
+            if (!knownCoreExports.has(cleanSpec)) {
+              unexportedImports.push(`${page}: imported "${cleanSpec}" from "seepient-core" is not exported`);
+            }
+          }
+        }
+        const importRegex = /import\s+\{([^}]+)\}\s+from\s+['"]seepient['"]/g;
         while ((impMatch = importRegex.exec(code)) !== null) {
           const specifiers = impMatch[1]
             .split(',')
@@ -82,6 +109,68 @@ describe('docs example import and runtime checks (FR-003)', () => {
       console.error('Docs example import errors:', unexportedImports);
     }
     expect(unexportedImports, 'Unexported SDK imports found in docs examples (R10)').toEqual([]);
+  });
+
+  it('constructs the packages/core/README quickstart through the REAL credential path (review P1-3)', async () => {
+    // Review round-1 P1-2 fixed construction; round-2 P1-3 found the taught
+    // credential grammar still killed turn one (env refs are refused by the
+    // stores, CREDENTIAL_REQUIRED). This gate now exercises the REAL
+    // credential path — no mock runtime bypassing the store seam.
+    const readme = fs.readFileSync(path.join(repoRoot, 'packages/core/README.md'), 'utf8');
+    const fence = /```ts\n([\s\S]*?)```/.exec(readme)?.[1] ?? '';
+    // Sync pin: the tested shape cannot drift from the published example.
+    for (const loadBearing of [
+      "stateless: true",
+      "tenancy: 'single'",
+      'new MemoryCredentialStore()',
+      "credentials.put('openai-main', {",
+      "kind: 'api_key',",
+      'credentials,',
+      "adapter: 'pi-ai'",
+      "credential: { kind: 'seepient', id: 'openai-main' }",
+      "modelAssignments: {",
+      "providerAccount: 'my-openai', model: 'gpt-4.1-mini'",
+    ]) {
+      expect(fence.includes(loadBearing), `core README quickstart must contain ${JSON.stringify(loadBearing)}`).toBe(true);
+    }
+    // The demolished grammar must NOT be taught anywhere on the page.
+    expect(fence.includes("kind: 'env'"), 'env-kind credentials are refused by the stores — never teach them').toBe(false);
+
+    const { createChat, MemoryCredentialStore } = await import('../transport/sdk/core.js');
+    const credentials = new MemoryCredentialStore();
+    // The exact grammar the README teaches: accepted by the store, resolves
+    // through a lease to a real secret — the same path a turn performs.
+    await credentials.put('openai-main', { kind: 'api_key', keyValue: 'sk-test-nonempty' });
+    const handle = await credentials.resolve({ kind: 'seepient', id: 'openai-main' });
+    const lease = handle.acquireLease();
+    const secret = await lease.secret();
+    expect((secret as { kind: string }).kind).toBe('api_key');
+    await lease.release();
+    // The env grammar is refused at lease time (022-5 FR-005) — documents WHY
+    // the old example died at turn one with CREDENTIAL_REQUIRED.
+    const envHandle = await credentials.resolve({ kind: 'env', name: 'OPENAI_API_KEY' } as never);
+    expect(() => envHandle.acquireLease()).toThrow(/CREDENTIAL_REQUIRED/);
+
+    // Construct the README's exact options (no mock): providers-record
+    // bootstrap + the injected credential store.
+    const chat = await createChat({
+      stateless: true,
+      tenancy: 'single',
+      skills: false,
+      credentials,
+      providers: {
+        'my-openai': {
+          adapter: 'pi-ai',
+          upstreamProvider: 'openai',
+          credential: { kind: 'seepient', id: 'openai-main' },
+        },
+      },
+      modelAssignments: {
+        text: { standard: { providerAccount: 'my-openai', model: 'gpt-4.1-mini' } },
+      },
+      systemPrompt: 'You are a helpful assistant.',
+    } as never);
+    expect(chat.messages.length).toBeGreaterThanOrEqual(0);
   });
 
   it('runs the documented literal quickstart without throwing TENANCY_RUNTIME_REQUIRED (R19)', async () => {

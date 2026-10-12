@@ -1,6 +1,33 @@
 ---
-title: v0.8.0 Migration Guide
-description: Breaking changes, architectural updates, and transition snippets for Seepient v0.8.0.
+title: Migration Guide
+description: Breaking changes and transition snippets for Seepient v0.8.0 and v0.9.0.
+---
+
+# Migration Guide
+
+## v0.9.0 — Serverless Chat Core Package Split
+
+v0.9.0 splits the engine into `seepient-core` (a slim, separately installable package) which the full `seepient` package consumes. The full package's install command, binaries, and `seepient` / `seepient/server` / `seepient/types` import paths are unchanged. Three things broke, all pre-1.0 documented breaks:
+
+### 1. Provider-SDK majors are aligned to single pinned versions
+
+The root previously declared `openai@^6.18.0`, `@google/genai@2.15.0`, and `@anthropic-ai/sdk@^0.52.0` as direct dependencies. v0.9.0 aligns every provider SDK to the vendored inference library's pins — `openai@7.19.0`, `@google/genai@2.21.0`, `@anthropic-ai/sdk@0.129.0` — exactly one version of each. If your app relies on one of the old majors, declare that version yourself:
+
+```bash
+# Example: pin your own openai@6 while seepient ships 7.19.0 internally
+npm install openai@^6
+```
+
+### 2. Deep imports of `seepient/dist/...` engine paths break
+
+Engine modules now live in `seepient-core`. Deep imports of `seepient/dist/...` (never a stable surface) that reached engine paths — e.g. `seepient/dist/domain/agent-loop.js` — must import from the package roots (`seepient` or `seepient-core`). A `seepient-core/dist/...` deep path resolves (the full package uses those internally) but carries no stability promise. The three public import paths are unchanged and complete: `seepient` (full engine + full-package surface), `seepient/server`, and `seepient/types` (preserved via a path-preserving forwarding shim).
+
+### 3. Both packages release in lockstep
+
+`seepient` now depends on `seepient-core@^<version>`; both publish together at the same version. Mixed-version installs are unsupported — the root resolves exactly one core range.
+
+If you only need the chat/agent engine (multi-turn chat, streaming, providers, injectable stores) — e.g. serverless chat routes — install [`seepient-core`](https://www.npmjs.com/package/seepient-core) instead (102 MB closure vs 301 MB); see [Stateless workers → Slim install for serverless](./stateless-workers.md#slim-install-for-serverless-seepient-core).
+
 ---
 
 # v0.8.0 Migration Guide

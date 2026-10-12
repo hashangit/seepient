@@ -7,11 +7,11 @@
  * See `contracts/hashline-edit.md`.
  */
 
-import type { ToolModule } from '../../foundations/contracts/tool.js';
-import { APPROVAL_SCHEMA } from '../../foundations/contracts/tool.js';
-import type { SnapshotStore } from '../../foundations/hashline/snapshot-store.js';
-import { applyPatch } from '../../foundations/hashline/patcher.js';
-import { HashlineError } from '../../foundations/errors.js';
+import type { ToolModule } from 'seepient-core/dist/foundations/contracts/tool.js';
+import { APPROVAL_SCHEMA } from 'seepient-core/dist/foundations/contracts/tool.js';
+import type { SnapshotStore } from 'seepient-core/dist/foundations/hashline/snapshot-store.js';
+import { applyPatch } from 'seepient-core/dist/foundations/hashline/patcher.js';
+import { HashlineError } from 'seepient-core/dist/foundations/errors.js';
 
 export const EditFileTool: ToolModule = {
   name: 'Edit File (hashline)',

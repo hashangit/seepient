@@ -611,7 +611,16 @@ describe("R9.1 Integration Wiring Verification", () => {
     await legacy.load();
     legacy.create({ request: mkReq(undefined, "r-lg") as never, tenantId: "t", sessionId: "s", continuationId: "cont-lg" });
     expect(legacy.casSync("cont-lg", 1, decision("r-lg", "whoever")).status).toBe("transitioned");
-    for (const d of tempDirs) rmSync(d, { recursive: true, force: true });
+    // A floating DurableApprovalStore persist may still be landing — settle,
+    // then retry the removal once before giving up (review-round flake).
+    for (const d of tempDirs) {
+      try {
+        rmSync(d, { recursive: true, force: true });
+      } catch {
+        await new Promise((r) => setTimeout(r, 50));
+        try { rmSync(d, { recursive: true, force: true }); } catch {}
+      }
+    }
   });
 
   it("getDecision resolves via requestId only, never a continuationId (022-5-WO1 T012 / SC-010)", async () => {

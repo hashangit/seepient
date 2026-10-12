@@ -1,4 +1,4 @@
-import type { ImageRequest, ImageBlock } from "../../foundations/schemas/inference.js";
+import type { ImageRequest, ImageBlock } from "seepient-core/dist/foundations/schemas/inference.js";
 
 export interface OpenAIImageParams {
   prompt: string;

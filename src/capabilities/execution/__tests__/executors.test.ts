@@ -10,14 +10,8 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { existsSync, mkdtempSync, rmSync, realpathSync, writeFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  CommitFilesExecutor,
-  ReadFileExecutor,
-  NoneExecutor,
-  UnsupportedExecutor,
-  TrustedHostExecutor,
-  BrokerExecutor,
-} from "../executors.js";
+import { CommitFilesExecutor, ReadFileExecutor, UnsupportedExecutor, BrokerExecutor } from "../executors.js";
+import { NoneExecutor, TrustedHostExecutor } from "../host-executors.js";
 import { EffectBroker } from "../effect-broker.js";
 import { ProcessExecutor } from "../process-executor.js";
 import { FileCommitBroker } from "../file-commit-broker.js";

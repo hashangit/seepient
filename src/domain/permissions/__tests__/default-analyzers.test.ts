@@ -15,9 +15,8 @@ import {
   analyzeShellCommand,
   canonicalizePath,
   classifyReadSensitivity,
-  digestArgs,
-  digestAction,
-} from "../default-analyzers.js";
+} from "../../../capabilities/tools/analyzers.js";
+import { digestArgs, digestAction } from "../../../foundations/action-digest.js";
 import { InMemoryArtifactStore } from "../../../capabilities/execution/in-memory-artifact-store.js";
 import type { ToolAnalysisContext } from "../../../foundations/contracts/custom-tools.js";
 

@@ -12,7 +12,7 @@ import type {
   ConnectionState,
   WsConnectionRegistry,
 } from "./ws-types.js";
-import { DurableApprovalStore } from "../../domain/permissions/durable-approval-store.js";
+import { DurableApprovalStore } from "seepient-core/dist/domain/permissions/durable-approval-store.js";
 
 export interface ConnectionRegistryOptions {
   durableApprovalStore?: DurableApprovalStore;

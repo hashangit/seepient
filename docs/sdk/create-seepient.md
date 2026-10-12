@@ -56,7 +56,7 @@ For multi-tenant workers and cloud functions requiring full state injection (aud
 | `providerAccount` | `string`                               | *(none)*                   | Active provider account name (persisted and restored with session state) |
 | `providers`     | `Record<string, any>`                    | *(none)*                   | Programmatic provider account definitions for isolated or in-memory runtimes |
 | `modelAssignments` | `PurposeModelMap`                     | *(none)*                   | Custom purpose-and-tier model routing assignments |
-| `credentials`   | `CredentialStore`                        | Local/env store            | Injected credential store (e.g. `MemoryCredentialStore` for isolated runtimes) |
+| `credentials`   | `CredentialStore`                        | In-memory empty default    | Injected credential store (e.g. `MemoryCredentialStore` for isolated runtimes) — put records with `put(id, {kind: "api_key", keyValue})` and reference them via `credential: { kind: "seepient", id }` |
 | `overlayFile`   | `string`                                 | *(none)*                   | Config overlay file path, or `":memory:"` for zero-disk ephemeral agents |
 | `adapter`       | `InferenceAdapter`                       | `AggregateInferenceAdapter`| Custom inference adapter or test double |
 | `override`      | `{ providerAccount?, model?, thinkingLevel? }` | *(none)*             | Per-instance model and account override |
@@ -86,7 +86,7 @@ For multi-tenant workers and cloud functions requiring full state injection (aud
 | `config`        | `Record<string, unknown>`                | `{}`                       | Extra config passed to tool handlers |
 
 ::: warning Partial State Store Injection Warning
-For fully stateless zero-disk execution, all three permission contracts (`auditStore`, `policyStore`, and `capabilityLedger`) must be injected together along with `persist`. If 1 or 2 permission stores are injected, the SDK logs a warning (`[seepient] WARNING: Partial state store injection detected...`) and falls back missing stores to the local filesystem (`~/.seepient` or `./.seepient`).
+For fully stateless zero-disk execution, all three permission contracts (`auditStore`, `policyStore`, and `capabilityLedger`) must be injected together along with `persist`. If 1 or 2 permission stores are injected, the SDK logs a warning (`[seepient] WARNING: Partial state store injection detected...`); the missing stores resolve to the defaults — in-memory when ambient store defaults are unregistered (`seepient-core`), otherwise the local filesystem (`~/.seepient` or `./.seepient`).
 :::
 
 ::: info Permission Pipeline Always Active
@@ -464,3 +464,14 @@ const agent = await createSeepient({ middleware: [auditLog] });
 
 - [askSeepient()](/sdk/ask-seepient) -- Stateless one-shot execution (streaming via `stream: true`)
 - [Tools](/tools/reference) -- Built-in and custom tool reference
+
+## createSeepient() in seepient-core
+
+`createSeepient()` ships in both packages. In [`seepient-core`](/sdk/stateless-workers#slim-install-for-serverless-seepient-core) — the engine-only package for serverless and SDK-only installs — the constructor, tenancy, and consent machinery are identical to this page; what differs is the package around it:
+
+- **No built-in tools**: register custom or trusted-host tools explicitly; built-in names reject at registration with an error naming `seepient`.
+- **No sandbox / MCP gateway / media generation**: boundary-needing operations and unregistered media deny typed instead of executing.
+- **In-memory store defaults in single mode**: with no stores injected, a core construction resolves the in-memory store set (zero ambient writes); inject `persist`/stores for anything durable.
+- **The same providers/credential option family** (`providers`, `modelAssignments`, `credentials`, `adapter`) reaches the vendor through the same runtime bootstrap as the full package.
+
+If you want the slimmest multi-turn shape with the session object owning its history, use [`createChat()`](/sdk/ask-seepient#askseepient-versus-createchat-versus-createseepient) instead.

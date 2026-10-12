@@ -12,8 +12,8 @@
  * policy digest, and expiry. Resuming reevaluates current outer ceilings
  * before dispatch — an approval never freezes a now-revoked operator policy.
  */
-import type { PermissionRequest } from "../../foundations/contracts/permission-policy.js";
-import type { PermissionDenyReason } from "../../foundations/contracts/permission-policy.js";
+import type { PermissionRequest } from "seepient-core/dist/foundations/contracts/permission-policy.js";
+import type { PermissionDenyReason } from "seepient-core/dist/foundations/contracts/permission-policy.js";
 
 export type ChatInteraction = "never" | "resumable";
 
@@ -65,7 +65,7 @@ export function handleNeedsApproval(opts: {
  */
 export function resumeContinuation(opts: {
   continuationId: string;
-  decision: import("../../foundations/contracts/permission-policy.js").PermissionDecision;
+  decision: import("seepient-core/dist/foundations/contracts/permission-policy.js").PermissionDecision;
   coversNow: (request: PermissionRequest) => boolean;
   lookup: (continuationId: string) => { request: PermissionRequest } | undefined;
 }): { proceed: true; request: PermissionRequest } | { proceed: false; reason: PermissionDenyReason } {

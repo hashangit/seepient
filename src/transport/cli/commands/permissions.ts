@@ -26,13 +26,13 @@
  */
 
 import chalk from 'chalk';
-import type { GrantScope } from '../../../foundations/types.js';
+import type { GrantScope } from 'seepient-core/dist/foundations/types.js';
 import type { CommandHandler } from './registry.js';
-import type { Capability, CapabilitySet } from '../../../foundations/contracts/permission-policy.js';
-import type { PolicyStore, PolicySnapshot } from '../../../foundations/contracts/execution-brokers.js';
-import { GLOBAL_WORKSPACE_ID, GLOBAL_WORKSPACE_ROOT } from '../../../domain/permissions/policy-store.js';
+import type { Capability, CapabilitySet } from 'seepient-core/dist/foundations/contracts/permission-policy.js';
+import type { PolicyStore, PolicySnapshot } from 'seepient-core/dist/foundations/contracts/execution-brokers.js';
+import { GLOBAL_WORKSPACE_ID, GLOBAL_WORKSPACE_ROOT } from 'seepient-core/dist/domain/permissions/policy-store.js';
 import type { ContainmentPreflightResult } from '../../../capabilities/execution/containment-preflight.js';
-import { capabilityKey } from '../../../domain/permissions/capability-store.js';
+import { capabilityKey } from 'seepient-core/dist/domain/permissions/capability-store.js';
 
 const SCOPES: GrantScope[] = ['session', 'project', 'global'];
 
@@ -406,7 +406,7 @@ async function renderPermissions(
   agentWorkspaceId: string | null | undefined,
   workspaceRoot: string | null | undefined,
   agent?: {
-    getConsentMode?: () => import('../../../foundations/settings-schema.js').ConsentMode;
+    getConsentMode?: () => import('seepient-core/dist/foundations/settings-schema.js').ConsentMode;
     recordRenderedPermissions?: (view: {
       session: string[];
       project: string[];

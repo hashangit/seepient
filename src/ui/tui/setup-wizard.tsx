@@ -470,9 +470,9 @@ export async function runSetupWizard(options: {
   buildApi?: () => ProviderManagerApi;
   buildSettings?: () => SettingsAdapter;
 }): Promise<void> {
-  const { createAmbientProviderRuntime } = await import("../../domain/providers/provider-runtime.js");
+  const { createAmbientProviderRuntime } = await import("seepient-core/dist/domain/providers/provider-runtime.js");
   const { createProviderManagerApi } = await import("../../transport/cli/provider-manager-api.js");
-  const { SettingsManager } = await import("../../domain/settings/settings-manager.js");
+  const { SettingsManager } = await import("seepient-core/dist/domain/settings/settings-manager.js");
   const { loadMergedConfig, loadJsonConfig, getConfigPaths, applyEnvOverrides } = await import("../../transport/cli/config-loader.js");
 
   const api = options.buildApi ? options.buildApi() : createProviderManagerApi(createAmbientProviderRuntime());

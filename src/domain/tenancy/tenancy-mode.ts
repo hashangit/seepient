@@ -1,6 +1,7 @@
 /**
  * Spec 022 — Tenancy Mode & Fail-Closed Validation (contracts/tenancy-mode.md).
  */
+import { ambientStoreDefaultsRegistered } from "../../foundations/injection-seams.js";
 import {
   SeepientError,
   PrincipalRequiredError,
@@ -153,7 +154,7 @@ export function validateTenancyCompleteness(
       console.warn(
         `[seepient] WARNING: Partial state store injection detected. ` +
           `Injected: [${present.join(", ")}]. Missing: [${missing.join(", ")}]. ` +
-          `Missing stores will fall back to local disk at ~/.seepient or ./.seepient. ` +
+          `Missing stores resolve to the defaults: in-memory when ambient store defaults are unregistered (seepient-core), otherwise local disk at ~/.seepient or ./.seepient. ` +
           `For fully stateless worker execution, all three permission stores (auditStore, policyStore, capabilityLedger) must be injected.`,
       );
     } else if (storeCount === 3 || inputs.runtime) {
@@ -267,13 +268,26 @@ export function resetTenancyNoticeForTest(): void {
 
 /**
  * Emits a warning when credentials or providers are injected in single-user mode (NEW-9).
+ * The store sentence keys on the RESOLVED ambient-defaults registration
+ * (round-3 P2-3, gate r2 P2-C): registered (full package) resolves disk
+ * stores; unregistered (seepient-core) resolves in-memory for every
+ * single-mode construction — so the zero-write sentence never prints for a
+ * construction that writes.
  */
 export function emitCredentialsSingleUserWarningOnce(): void {
   if (noticePrinted.credentials) return;
   noticePrinted.credentials = true;
+  // Two outcomes exist (gate r2 P2-C): ambient defaults registered (full
+  // package) resolve disk stores; unregistered (seepient-core) resolve
+  // in-memory for every single-mode construction — the third "pass
+  // stateless" arm became unreachable and misleading when createSeepient
+  // widened its in-memory default past the stateless conjunct.
+  const storeSentence = ambientStoreDefaultsRegistered()
+    ? `Ambient ~/.seepient stores and single-user policies will be used. `
+    : `Store defaults are in-memory (seepient-core persona) — no ambient state is written. `;
   console.warn(
     `[seepient] Notice: Running in single-user mode with custom credentials/providers. ` +
-      `Ambient ~/.seepient stores and single-user policies will be used. ` +
+      storeSentence +
       `For multi-tenant isolation, pass tenancy: "multi" and inject isolated stores.`,
   );
 }

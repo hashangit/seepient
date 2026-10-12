@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
+import "../sdk/full-registrations.js";
 import { ProviderConfigStore } from "../../domain/providers/config-store/provider-config-store.js";
 import { MemoryCredentialStore } from "../../domain/providers/credentials/memory-credential-store.js";
 import { ProviderRuntime } from "../../domain/providers/provider-runtime.js";

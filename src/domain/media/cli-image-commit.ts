@@ -6,10 +6,10 @@
  */
 import { createHash } from "node:crypto";
 import { FileCommitBroker } from "../../capabilities/execution/file-commit-broker.js";
-import { InMemoryArtifactStore } from "../../capabilities/execution/in-memory-artifact-store.js";
+import { InMemoryArtifactStore } from "seepient-core/dist/capabilities/execution/in-memory-artifact-store.js";
 import { probeCommitHelper, PackagedCommitHelper } from "../../vendors/native-fs-commit/index.js";
-import type { CapabilityEnvelope } from "../../foundations/contracts/permission-policy.js";
-import type { CommitHelper } from "../../foundations/contracts/execution-brokers.js";
+import type { CapabilityEnvelope } from "seepient-core/dist/foundations/contracts/permission-policy.js";
+import type { CommitHelper } from "seepient-core/dist/foundations/contracts/execution-brokers.js";
 
 export interface CliImageCommitContext {
   commitBroker: FileCommitBroker;

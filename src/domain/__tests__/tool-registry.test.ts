@@ -5,9 +5,11 @@ import { describe, it, expect } from "vitest";
 import {
   ToolRegistry,
   ToolRegistrationError,
-  BUILT_IN_TOOL_MODULES,
   resolveTools,
 } from "../tool-executor.js";
+import { registerDefaultToolModules } from "../../foundations/injection-seams.js";
+import { builtInTools } from "../../capabilities/tools/index.js";
+import { UseSkillTool } from "../skills/use-skill-tool.js";
 import type { ToolModule } from "../../foundations/contracts/tool.js";
 
 function makeTool(name: string, description = `Tool ${name}`): ToolModule {
@@ -33,18 +35,22 @@ function makeTool(name: string, description = `Tool ${name}`): ToolModule {
 }
 
 describe("ToolRegistry (T004)", () => {
-  it("BUILT_IN_TOOL_MODULES is frozen and immutable", () => {
-    expect(Object.isFrozen(BUILT_IN_TOOL_MODULES)).toBe(true);
-    expect(() => {
-      (BUILT_IN_TOOL_MODULES as any).push(makeTool("illegal"));
-    }).toThrow();
+  it("constructs with zero tools by default in the engine (spec 027 FR-003)", () => {
+    const registry = new ToolRegistry();
+    expect(registry.modules()).toEqual([]);
+    expect(registry.find("read_file")).toBeUndefined();
+    expect(registry.find("use_skill")).toBeUndefined();
   });
 
-  it("defaults to BUILT_IN_TOOL_MODULES on construction", () => {
-    const registry = new ToolRegistry();
-    expect(registry.modules().length).toBe(BUILT_IN_TOOL_MODULES.length);
-    expect(registry.find("read_file")).toBeDefined();
-    expect(registry.find("use_skill")).toBeDefined();
+  it("uses the registered package default when no explicit modules are passed", () => {
+    const t1 = makeTool("defaulted_tool");
+    registerDefaultToolModules([t1]);
+    try {
+      const registry = new ToolRegistry();
+      expect(registry.find("defaulted_tool")).toBe(t1);
+    } finally {
+      registerDefaultToolModules([]);
+    }
   });
 
   it("can be constructed with custom tool modules", () => {
@@ -135,7 +141,7 @@ describe("resolveTools (T005)", () => {
   });
 
   it("expands tool groups against the passed registry", () => {
-    const registry = new ToolRegistry(); // contains built-ins
+    const registry = new ToolRegistry([...builtInTools, UseSkillTool]); // contains built-ins
     const coreDefs = resolveTools(["core"], registry);
     expect(coreDefs.length).toBeGreaterThan(0);
     expect(coreDefs.some((d) => d.function.name === "read_file")).toBe(true);

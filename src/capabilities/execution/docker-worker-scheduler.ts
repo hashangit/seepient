@@ -25,11 +25,11 @@ import type {
   WorkerResult,
   WorkerScheduler,
   SchedulerAuthContext,
-} from "../../foundations/contracts/worker-protocol.js";
+} from "seepient-core/dist/foundations/contracts/worker-protocol.js";
 import type { DockerEngine, MountAllowlist, ImageAllowlist, WorkerLimits, WorkspaceTenantRegistry } from "../../vendors/docker/index.js";
 import { DEFAULT_WORKER_LIMITS } from "../../vendors/docker/index.js";
 import { validateDispatch, resolveMount } from "../../vendors/docker/index.js";
-import { WorkerSchedulerError } from "../../foundations/errors.js";
+import { WorkerSchedulerError } from "seepient-core/dist/foundations/errors.js";
 
 export interface DockerWorkerSchedulerOptions {
   engine: DockerEngine;
@@ -177,7 +177,7 @@ export class DockerWorkerScheduler implements WorkerScheduler {
     }
     // 4. Signature verification using verifyDispatchSignature.
     // 4. Signature verification using verifyDispatchSignature.
-    const { verifyDispatchSignature } = await import("../../foundations/contracts/worker-protocol.js");
+    const { verifyDispatchSignature } = await import("seepient-core/dist/foundations/contracts/worker-protocol.js");
     const signingKey = this.opts.signingPublicKey ?? "default-secret";
     const isTestEnv = process.env.NODE_ENV === "test" || process.env.VITEST === "true";
     const isMockSig = isTestEnv && (req.signature === "sig" || req.signature === "valid" || req.signature === "cp-sig:dispatch" || req.signature?.startsWith("cp-sig:") || req.signature?.includes("signed"));

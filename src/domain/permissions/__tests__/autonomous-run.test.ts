@@ -9,10 +9,12 @@
  *   5. Immutable denies enforced (security path writes denied)
  */
 import { describe, it, expect, beforeEach } from "vitest";
+import { registerFullComposition } from "../../__tests__/full-composition.js";
+registerFullComposition(); // spec 027: full-package composition (built-ins + analyzers + boundary)
 import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
-import { buildActionLifecycle, ALL_ANALYZERS } from "../action-lifecycle-factory.js";
+import { buildActionLifecycle, allAnalyzers } from "../action-lifecycle-factory.js";
 import { InMemoryArtifactStore } from "../../../capabilities/execution/in-memory-artifact-store.js";
 import type { ApprovalBroker } from "../../../foundations/contracts/permission-policy.js";
 import type { ExecutionBoundary } from "../../../foundations/contracts/execution-boundary.js";
@@ -116,9 +118,9 @@ describe("autonomous run end-to-end (spec 017, T034 / T035 / T036 / QS-5)", () =
     };
 
     // Prepare read_file (safe), get_current_datetime (safe), and execute_shell_command (destructive)
-    const readAction = await ALL_ANALYZERS.read_file({ path: "README.md" }, ctx);
-    const datetimeAction = await ALL_ANALYZERS.get_current_datetime({}, ctx);
-    const bashAction = await ALL_ANALYZERS.execute_shell_command({ command: "echo autonomous" }, ctx);
+    const readAction = await allAnalyzers().read_file({ path: "README.md" }, ctx);
+    const datetimeAction = await allAnalyzers().get_current_datetime({}, ctx);
+    const bashAction = await allAnalyzers().execute_shell_command({ command: "echo autonomous" }, ctx);
 
     for (const action of [readAction, datetimeAction, bashAction]) {
       const res = await wired.lifecycle.run(action);
@@ -140,7 +142,7 @@ describe("autonomous run end-to-end (spec 017, T034 / T035 / T036 / QS-5)", () =
       },
     });
 
-    const action = await ALL_ANALYZERS.read_website(
+    const action = await allAnalyzers().read_website(
       { url: "https://169.254.169.254/latest/meta-data" },
       {
         principalId: "auto-user",
@@ -204,7 +206,7 @@ describe("autonomous run end-to-end (spec 017, T034 / T035 / T036 / QS-5)", () =
       modelProviderClass: "openai", // remote provider class
     };
 
-    const secretReadAction = await ALL_ANALYZERS.read_file({ path: ".env" }, ctx);
+    const secretReadAction = await allAnalyzers().read_file({ path: ".env" }, ctx);
     // Declared egress for .env has sensitivity: "secret" and dataClasses: ["sensitive", "secret"]
     const readEffect = secretReadAction.effects.find((e) => e.kind === "filesystem-read");
     expect(readEffect?.sensitivity).toBe("secret");

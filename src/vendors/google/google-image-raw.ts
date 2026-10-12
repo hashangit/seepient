@@ -3,15 +3,15 @@ import type {
   ImageBackend,
   InferenceTarget,
   InferenceOptions,
-} from "../../foundations/contracts/backend-ports.js";
+} from "seepient-core/dist/foundations/contracts/backend-ports.js";
 import type {
   ImageRequest,
   ImageResult,
-} from "../../foundations/schemas/inference.js";
-import { InferenceError } from "../../foundations/errors.js";
-import { classifyInferenceError } from "../../foundations/errors/error-classifier.js";
+} from "seepient-core/dist/foundations/schemas/inference.js";
+import { InferenceError } from "seepient-core/dist/foundations/errors.js";
+import { classifyInferenceError } from "seepient-core/dist/foundations/errors/error-classifier.js";
 import { canonicalToGoogleImagePayload } from "./google-canonical-converter.js";
-import { assertBaseUrlEgressAllowed } from "../egress-check.js";
+import { assertBaseUrlEgressAllowed } from "seepient-core/dist/vendors/egress-check.js";
 
 /**
  * Raw Google image backend executing via `@google/genai`.
@@ -40,7 +40,7 @@ export class GoogleImageRaw implements ImageBackend {
       if (!secret || secret.kind !== "api_key" || !secret.value) {
         throw new InferenceError({
           code: "auth",
-          message: `CREDENTIAL_REQUIRED: Image inference requires an explicit api_key credential for provider "${target.upstreamProvider}" — configure it through provider management.`,
+          message: `CREDENTIAL_REQUIRED: Image inference requires an explicit api_key credential for provider "${target.upstreamProvider}" — put an api_key record in your credential store and reference it from the provider entry as credential: { kind: "seepient", id }.`,
           providerAccount: target.providerAccount,
           model: target.model,
           retryable: false,

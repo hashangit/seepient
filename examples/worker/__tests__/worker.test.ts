@@ -97,7 +97,9 @@ describe("QS-4: Reference Worker End-to-End", () => {
       principalId: "user-123",
       sessionId: "session-xyz",
       workspaceDir,
-      runtime,
+      // Test double built by src helpers; the engine option type resolves
+      // through seepient-core (spec 027) — same shape, different declaration.
+      runtime: runtime as never,
       controlPlaneUrl: `http://127.0.0.1:${controlPlanePort}`,
       controlPlaneToken: "token-user-123",
       consentMode: "ask-everything",
@@ -139,7 +141,7 @@ describe("QS-4: Reference Worker End-to-End", () => {
         principalId: "p1",
         sessionId: "s1",
         workspaceDir,
-        runtime,
+        runtime: runtime as never,
         controlPlaneUrl: "",
       }),
     ).rejects.toThrow(/controlPlaneUrl is required/);
