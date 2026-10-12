@@ -6,17 +6,20 @@
  * ExecutionBoundary, AuditStore).
  */
 
-import {
-  createAmbientProviderRuntime,
-  ProviderRuntime,
-} from "../../domain/providers/provider-runtime.js";
+import { ProviderRuntime } from "../../domain/providers/provider-runtime.js";
 import type { ProviderRuntimeContract } from "../../foundations/contracts/provider-runtime.js";
-import { ProviderConfigStore } from "../../domain/providers/config-store/provider-config-store.js";
-import { MemoryCredentialStore } from "../../domain/providers/credentials/memory-credential-store.js";
-import { AggregateInferenceAdapter } from "../../capabilities/inference/aggregate-adapter.js";
+import { bootstrapProviderRuntime } from "./bootstrap-provider-runtime.js";
 import { runAgentLoop } from "../../domain/agent-loop.js";
 import { createHookExecutor } from "../../domain/hooks.js";
 import { resolveTools, ToolRegistry } from "../../domain/tool-executor.js";
+import {
+  getDefaultToolModules,
+  getMediaVendorOperationHandlerFactory,
+  getExecutionBoundaryFactory,
+  getProviderManagerApiFactory,
+  ambientStoreDefaultsRegistered,
+  type MediaVendorOperationHandler,
+} from "../../foundations/injection-seams.js";
 import type { ToolModule } from "../../foundations/contracts/tool.js";
 import {
   DEFAULT_TRUSTED_HOST_ALLOWLIST,
@@ -61,6 +64,7 @@ import {
 import { normalizeHistoryForSend } from "../../domain/sessions/normalize-history.js";
 import { generateId } from "../../foundations/id.js";
 import { surfaceLoopError, extractLoopError } from "./error-surfacing.js";
+import { resolveTurnBoundary } from "../../capabilities/execution/light-execution-boundary.js";
 import { SeepientError, PersistConfigInvalidError, SessionIdInvalidError } from "../../foundations/errors.js";
 
 // ── Session persistence helpers ──────────────────────────────────────────
@@ -171,6 +175,20 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   const { mode: tenancyMode, upgraded } = resolveTenancyMode(tenancySignals);
   emitTenancyNoticeOnce(upgraded);
 
+  // Review P1-3 + round-3 P2-3 + gate r1 P2-c: the "serverless" persona
+  // constructs on read-only $HOME. When ambient store defaults are
+  // unregistered (seepient-core), ANY single-mode construction defaults to
+  // the in-memory store set — zero ambient writes — sessionful or not (the
+  // one-shot path in ask.ts already keyed the flag without the stateless
+  // conjunct; this construction now agrees, which is what makes the
+  // CHANGELOG's unconditional core zero-write claim true). Explicit store
+  // injections and destinations are unaffected. The full package keeps its
+  // Profile-A ambient defaults — there the registry below IS armed. Multi
+  // mode is untouched — it requires explicit stores. Computed before the
+  // notice so it describes the RESOLVED store set, not just the package
+  // persona.
+  const preferInMemoryDefaults =
+    tenancyMode === "single" && !ambientStoreDefaultsRegistered();
   if (tenancyMode === "single" && hasInjectedCredentials) {
     emitCredentialsSingleUserWarningOnce();
   }
@@ -191,18 +209,15 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     throw new TenancyWorkspaceRequiredError();
   }
 
-  // If providers, modelAssignments, or overlay options are passed without an explicit runtime,
-  // bootstrap a configured ProviderRuntime
-  let bootstrapRuntime: ProviderRuntimeContract | ProviderRuntime | undefined = opts.runtime;
-  if (bootstrapRuntime && tenancyMode === "multi") {
-    // 022-5-WO4 T008 (D2, pass-14 P2-1) + pass-15 fix: the embed's operator
-    // baseline feeds BOTH planes — capabilities land on the runtime so
-    // refreshModels and the saveAccount seam enforce egress, not just the
-    // permission pipeline. The threading UNIONS with any capabilities the
-    // runtime already carries (same semantics as the server's T013 union):
-    // an explicit baseline must not erase grants the runtime was constructed
-    // with (e.g. createRuntimeFromProvidersFile's derived baseline).
-    const rt = bootstrapRuntime as unknown as {
+  // 022-5-WO4 T008 (D2, pass-14 P2-1) + pass-15 fix: on a multi injected
+  // runtime, the embed's operator baseline feeds BOTH planes — capabilities
+  // land on the runtime so refreshModels and the saveAccount seam enforce
+  // egress, not just the permission pipeline. The threading UNIONS with any
+  // capabilities the runtime already carries (same semantics as the server's
+  // T013 union): an explicit baseline must not erase grants the runtime was
+  // constructed with (e.g. createRuntimeFromProvidersFile's derived baseline).
+  if (opts.runtime && tenancyMode === "multi") {
+    const rt = opts.runtime as unknown as {
       setRuntimeCapabilities?: (caps: unknown[]) => void;
       grantedCapabilities?: unknown[];
     };
@@ -234,35 +249,10 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
       }
     }
   }
-  if (!bootstrapRuntime) {
-    if (opts.providers || opts.modelAssignments || opts.credentials || opts.overlayFile || opts.adapter) {
-      const configStore = new ProviderConfigStore(opts.overlayFile ?? ":memory:");
-      if (opts.providers || opts.modelAssignments) {
-        const currentOverlay = await configStore.getOverlay();
-        await configStore.updateOverlay(
-          {
-            providers: opts.providers as any,
-            modelAssignments: opts.modelAssignments as any,
-          },
-          currentOverlay.revision,
-        );
-      }
-      const credentialStore = opts.credentials ?? new MemoryCredentialStore();
-      const adapter = opts.adapter ?? new AggregateInferenceAdapter(undefined, undefined, credentialStore);
-      bootstrapRuntime = new ProviderRuntime({
-        configStore,
-        credentialStore,
-        adapter,
-        // 022-5-WO3 T007 (D2): the internally-built runtime carries the
-        // embed's tenancy stamp — the natural embed shape is egress-armed by
-        // construction, not silently single-stamped.
-        tenancyMode,
-      });
-    } else {
-      bootstrapRuntime = createAmbientProviderRuntime();
-    }
-  }
-  const runtime: ProviderRuntimeContract | ProviderRuntime = bootstrapRuntime;
+  // Providers/credentials/adapter options without an explicit runtime
+  // bootstrap a configured ProviderRuntime — the same construction the
+  // askSeepient rung uses (round-3 P1-2 rung parity).
+  const runtime = await bootstrapProviderRuntime(opts, tenancyMode);
 
   const sessionId = opts.sessionId ?? generateId();
   validateSessionId(sessionId);
@@ -319,8 +309,9 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   const composeSystem = () =>
     skillCatalog ? systemPrompt + "\n\n" + skillCatalog : systemPrompt;
 
-  // Tools — per-agent registry (Spec 022)
-  const toolRegistry = new ToolRegistry();
+  // Tools — per-agent registry (Spec 022). Default modules come from the
+  // package seam (027): the full package registers its barrel; core runs empty.
+  const toolRegistry = new ToolRegistry(getDefaultToolModules());
   for (const item of opts.tools ?? []) {
     if (
       item &&
@@ -407,20 +398,23 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     "../../domain/permissions/action-lifecycle-factory.js"
   );
   const { legacyApproveToolToBroker } = await import("../legacy-adapter.js");
-  const { buildLocalBoundary } = await import(
-    "../../capabilities/execution/build-local-boundary.js"
-  );
   const {
     LocalAuditStore,
     TerminalEventOutbox,
     recoverIndeterminateActions,
   } = await import("../../domain/permissions/audit-recorder.js");
+  const { InMemoryAuditStore } = await import("../../domain/permissions/in-memory-stores.js");
 
   let auditOutbox:
     | import("../../domain/permissions/audit-recorder.js").TerminalEventOutbox
     | undefined;
-  const isLocalStore = !opts.auditStore || isLocalAuditStore(opts.auditStore);
-  const auditStore = opts.auditStore ?? new LocalAuditStore();
+  const auditStore =
+    opts.auditStore ?? (preferInMemoryDefaults ? new InMemoryAuditStore() : new LocalAuditStore());
+  // Review P1-2: test the RESOLVED store — a defaulted LocalAuditStore must
+  // get the terminal outbox (crash recovery + close-time flush) exactly like
+  // an injected one. isLocalAuditStore already excludes InMemoryAuditStore,
+  // which was the old narrowing's only legitimate effect.
+  const isLocalStore = isLocalAuditStore(auditStore);
   if (isLocalStore) {
     auditOutbox = new TerminalEventOutbox(
       auditStore as InstanceType<typeof LocalAuditStore>,
@@ -441,23 +435,30 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   const { InMemoryArtifactStore } = await import(
     "../../capabilities/execution/in-memory-artifact-store.js"
   );
-  const { createMediaVendorOperationHandler } = await import(
-    "../../domain/media/vendor-operation-handler.js"
-  );
   const snapshotStore = createSnapshotStore();
   const sharedArtifacts = new InMemoryArtifactStore();
   // B1: the handler is re-created per turn so the CURRENT turn's abort
   // controller reaches media operations — a static handler would leave
   // generate_image and other media fetches running after agent.abort()
   // (the same regression W110 fixed for askSeepient).
-  let currentVendorHandler = createMediaVendorOperationHandler({
-    runtime,
-    artifacts: sharedArtifacts,
-    tenancyMode,
-  });
-  const vendorOperationHandler = (
-    req: Parameters<typeof currentVendorHandler>[0],
-  ) => currentVendorHandler(req);
+  // Spec 027 FR-009: the factory arrives via registration; unregistered
+  // (seepient-core) leaves it undefined — media turns deny typed.
+  const mediaFactory = getMediaVendorOperationHandlerFactory();
+  const makeVendorHandler = (streamOpts?: {
+    signal?: AbortSignal;
+    capabilities?: import("../../foundations/contracts/permission-policy.js").Capability[];
+  }): MediaVendorOperationHandler | undefined =>
+    mediaFactory?.({
+      runtime,
+      artifacts: sharedArtifacts,
+      tenancyMode,
+      signal: streamOpts?.signal,
+      capabilities: streamOpts?.capabilities,
+    });
+  let currentVendorHandler = makeVendorHandler();
+  const vendorOperationHandler: MediaVendorOperationHandler | undefined = currentVendorHandler
+    ? (req, capabilities) => currentVendorHandler!(req, capabilities)
+    : undefined;
   const secretResolver =
     tenancyMode === "multi"
       ? (ref: string) => {
@@ -465,7 +466,10 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
           return store?.resolveSecret?.(ref) ?? undefined;
         }
       : undefined;
-  const { boundary } = await buildLocalBoundary({
+  // Spec 027 FR-012: the full package injects the boundary-carrying
+  // pipeline; seepient-core defaults to the light boundary (trusted-host and
+  // none operations only — no sandbox, broker, or native helper).
+  const boundary = await resolveTurnBoundary({
     artifacts: sharedArtifacts,
     workspaceRoot: opts.cwd ?? process.cwd(),
     snapshotStore,
@@ -504,6 +508,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     auditStore,
     policyStore: opts.policyStore,
     capabilityLedger: opts.capabilityLedger,
+    preferInMemoryDefaults,
     operatorBaseline: toCapabilitySet(opts.operatorBaseline),
     tenancyMode,
     terminalOutbox: auditOutbox,
@@ -575,11 +580,8 @@ async function chat(userMessage: string): Promise<AgentResponse> {
     const release = await acquire();
     try {
       activeAbortController = new AbortController();
-      currentVendorHandler = createMediaVendorOperationHandler({
-        runtime,
-        artifacts: sharedArtifacts,
+      currentVendorHandler = makeVendorHandler({
         signal: activeAbortController.signal,
-        tenancyMode,
         capabilities: wiredPipeline.activeCapabilities?.capabilities,
       });
 
@@ -682,11 +684,8 @@ async function chat(userMessage: string): Promise<AgentResponse> {
     try {
       const streamAbort = new AbortController();
       activeAbortController = streamAbort;
-      currentVendorHandler = createMediaVendorOperationHandler({
-        runtime,
-        artifacts: sharedArtifacts,
+      currentVendorHandler = makeVendorHandler({
         signal: streamAbort.signal,
-        tenancyMode,
         capabilities: wiredPipeline.activeCapabilities?.capabilities,
       });
       const mergedHooks = {
@@ -706,6 +705,27 @@ async function chat(userMessage: string): Promise<AgentResponse> {
       const stream = new StreamManager();
 
       (async () => {
+        // v0.9.0 gate r1 (P2-a): the consumer's onError is an untrusted
+        // boundary — a throwing callback used to re-enter the catch below
+        // (double dispatch), skip the stream settles (finishReason/fullText
+        // hung forever), and escape the fire-and-forget IIFE as an
+        // unhandledRejection. Dispatch once, guard the callback.
+        let errorReported = false;
+        const reportError = (loopFailure: SeepientError) => {
+          if (errorReported) return;
+          errorReported = true;
+          try {
+            const delivered = streamOptions?.onError?.(loopFailure);
+            // A rejected promise escapes the try below — catch it too (gate r2 P2-D).
+            if (delivered && typeof (delivered as { catch?: unknown }).catch === "function") {
+              (delivered as Promise<void>).catch((rejection) =>
+                console.error("[seepient] onError callback rejected:", rejection),
+              );
+            }
+          } catch (callbackErr) {
+            console.error("[seepient] onError callback threw:", callbackErr);
+          }
+        };
         // F1/W150: normalized model input; the stored copy stays intact
         // until the loop succeeds and its additions are merged back below
         // (id-matched, so the loop's system-shim unshift cannot skew it).
@@ -802,7 +822,7 @@ async function chat(userMessage: string): Promise<AgentResponse> {
           const loopErr = extractLoopError(result);
           stream.resolveUsage(result.usage);
           if (loopErr) {
-            if (streamOptions?.onError) streamOptions.onError(loopErr);
+            reportError(loopErr);
             stream.resolveFinish("error");
             // F2: parity with askSeepient — failed turns reject fullText.
             stream.rejectText(loopErr);
@@ -812,7 +832,7 @@ async function chat(userMessage: string): Promise<AgentResponse> {
           }
         } catch (err) {
           const seepientErr = toSeepientError(err, "PROVIDER_ERROR");
-          if (streamOptions?.onError) streamOptions.onError(seepientErr);
+          reportError(seepientErr);
           // F2: reject fullText instead of resolving "".
           stream.rejectText(seepientErr);
           stream.resolveUsage({
@@ -829,7 +849,7 @@ async function chat(userMessage: string): Promise<AgentResponse> {
           } catch (persistErr) {
             console.error("[seepient] chatStream persistence failed:", persistErr);
             const seepientErr = toSeepientError(persistErr, "PERSISTENCE_ERROR");
-            if (streamOptions?.onError) streamOptions.onError(seepientErr);
+            reportError(seepientErr);
             stream.resolveFinish("error");
           } finally {
             release();
@@ -943,15 +963,17 @@ async function chat(userMessage: string): Promise<AgentResponse> {
 
   // ── Provider Management Methods ─────────────────────────────────────────
 
-  const { createProviderManagerApi } = await import("../cli/provider-manager-api.js");
-  const managerApi = typeof runtime.getConfigStore === "function"
-    ? createProviderManagerApi(runtime as ProviderRuntime)
+  // Spec 027: the provider-management API is a full-package impl arriving
+  // via registration; seepient-core provider mutations deny typed below.
+  const pmApiFactory = getProviderManagerApiFactory();
+  const managerApi = pmApiFactory && typeof runtime.getConfigStore === "function"
+    ? await pmApiFactory(runtime as ProviderRuntime)
     : null;
   let latestState = managerApi ? await managerApi.getState() : { revision: 0, assignments: {} as PurposeModelMap };
 
   async function addProvider(input: AccountInput): Promise<SaveResult> {
     if (!managerApi) {
-      throw new SeepientError("Injected provider runtime does not support configuration mutations", "NOT_IMPLEMENTED", false);
+      throw new SeepientError("Provider management mutations are not available here: the injected runtime does not support configuration changes. Provider management (addProvider/removeProvider/assignments) ships with the full \"seepient\" package.", "NOT_IMPLEMENTED", false);
     }
     const res = await managerApi.saveAccount(input);
     if (res.ok) latestState = await managerApi.getState();
@@ -960,7 +982,7 @@ async function chat(userMessage: string): Promise<AgentResponse> {
 
   async function removeProvider(id: string, opts?: { force?: boolean }): Promise<DeleteResult> {
     if (!managerApi) {
-      throw new SeepientError("Injected provider runtime does not support configuration mutations", "NOT_IMPLEMENTED", false);
+      throw new SeepientError("Provider management mutations are not available here: the injected runtime does not support configuration changes. Provider management (addProvider/removeProvider/assignments) ships with the full \"seepient\" package.", "NOT_IMPLEMENTED", false);
     }
     const res = await managerApi.deleteAccount(id, opts);
     if (res.ok) latestState = await managerApi.getState();
@@ -969,7 +991,7 @@ async function chat(userMessage: string): Promise<AgentResponse> {
 
   async function setAssignment(purpose: Purpose, tier: Tier | undefined, target: AssignmentTarget): Promise<SaveResult> {
     if (!managerApi) {
-      throw new SeepientError("Injected provider runtime does not support configuration mutations", "NOT_IMPLEMENTED", false);
+      throw new SeepientError("Provider management mutations are not available here: the injected runtime does not support configuration changes. Provider management (addProvider/removeProvider/assignments) ships with the full \"seepient\" package.", "NOT_IMPLEMENTED", false);
     }
     const res = await managerApi.setAssignment(purpose as PurposeId, tier ?? null, target);
     if (res.ok) latestState = await managerApi.getState();
@@ -978,7 +1000,7 @@ async function chat(userMessage: string): Promise<AgentResponse> {
 
   async function clearAssignment(purpose: Purpose, tier?: Tier): Promise<SaveResult> {
     if (!managerApi) {
-      throw new SeepientError("Injected provider runtime does not support configuration mutations", "NOT_IMPLEMENTED", false);
+      throw new SeepientError("Provider management mutations are not available here: the injected runtime does not support configuration changes. Provider management (addProvider/removeProvider/assignments) ships with the full \"seepient\" package.", "NOT_IMPLEMENTED", false);
     }
     const res = await managerApi.clearAssignment(purpose as PurposeId, tier ?? null);
     if (res.ok) latestState = await managerApi.getState();

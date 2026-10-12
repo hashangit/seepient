@@ -24,4 +24,6 @@ export interface ContextBreakdown {
   model: string;
   /** Provider type (for display). */
   providerType?: string;
+  /** How token counts were computed (spec 027 FR-004): exact BPE or heuristic fallback. */
+  estimateMode: "exact" | "heuristic";
 }

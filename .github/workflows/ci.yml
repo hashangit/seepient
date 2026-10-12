@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, release/v0.8.0, release/v0.8.1]
+    branches: [main, release/v0.8.0, release/v0.8.1, 027-serverless-chat-core]
   pull_request:
     branches: [main]
 
@@ -28,14 +28,38 @@ jobs:
       - name: Audit runtime dependencies
         run: pnpm audit --prod
 
+      # v0.9.0 gate r1 (P1-1): the release script's path setup + manifest
+      # reads are consumed here on every push — a broken script fails CI,
+      # not the release night.
+      - name: Release tooling self-check
+        run: bash .agents/skills/release-gate/scripts/publish.sh --self-check
+
+      # build:core chains first — the root program resolves the engine via
+      # the seepient-core workspace package (spec 027 D20).
       - name: Typecheck
-        run: pnpm exec tsc --noEmit
+        run: pnpm run typecheck
 
       - name: Build native helper
         run: pnpm native:build
 
       - name: Test
         run: pnpm test
+
+      # Review P1-4: the compiled-artifact behavioral gate — the six contract
+      # flows against the PACKED core tarball (the suite runs the engine from
+      # source via the test alias; this is the what-ships check).
+      - name: Core-only chat e2e (packed tarball)
+        run: pnpm run qs:core-chat
+
+      # Review P2-2: the security-suite inventory baseline, wired as a gate
+      # (recorded 2026-10-07: 711 matched test names; may only grow).
+      # Review round-2 P2-5: the COMPILED full package must count exactly —
+      # the suite runs the engine from src (alias); this pins the dist.
+      - name: Compiled-full exact-BPE pin
+        run: pnpm run build && pnpm run qs:dist-exact
+
+      - name: Security-suite inventory baseline (QS-4)
+        run: pnpm exec vitest list 2>/dev/null | grep -icE 'tenancy|egress|ssrf|vuln|permission|consent' | awk '{ exit !($1 >= 711) }' 
 
       - name: Verify mutation probes
         run: pnpm run test:probes

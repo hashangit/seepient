@@ -10,7 +10,7 @@ import path from "node:path";
 import { statSync } from "node:fs";
 import { Command } from "commander";
 import chalk from "chalk";
-import { createAmbientProviderRuntime } from "../../../domain/providers/provider-runtime.js";
+import { createAmbientProviderRuntime } from "seepient-core/dist/domain/providers/provider-runtime.js";
 import {
   createProviderManagerApi,
   type ProviderManagerApi,

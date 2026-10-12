@@ -25,11 +25,10 @@ import {
   GLOBAL_WORKSPACE_ID,
 } from "./policy-store.js";
 import { setCovers } from "./capability-store.js";
-import { DEFAULT_ANALYZERS } from "./default-analyzers.js";
-import { COMM_ANALYZERS } from "./comm-analyzers.js";
 import { deriveConfigGrants } from "./config-derived-grants.js";
 import { CURRENT_CEILING_VERSION } from "./policy-store.js";
-import type { ToolAnalyzer } from "./default-analyzers.js";
+import type { ToolAnalyzer } from "../../foundations/contracts/tool-analyzer.js";
+import { getBuiltInAnalyzers } from "../../foundations/injection-seams.js";
 import type {
   ApprovalBroker,
   Capability,
@@ -49,14 +48,18 @@ import { isLocalAuditStore } from "../../foundations/contracts/execution-brokers
 import { InMemoryArtifactStore } from "../../capabilities/execution/in-memory-artifact-store.js";
 import * as path from "node:path";
 import { PersistedCapabilityLedger } from "./persisted-capability-ledger.js";
+import { InMemoryAuditStore, InMemoryPolicyStore, InMemoryCapabilityLedger } from "./in-memory-stores.js";
 import { PrincipalRequiredError, InvalidPrincipalIdError } from "../../foundations/errors.js";
 import { SENTINEL_PRINCIPAL_IDS, PRINCIPAL_ID_RE } from "../tenancy/tenancy-mode.js";
 
-/** All analyzers, merged. Tools without an analyzer fall through. */
-export const ALL_ANALYZERS: Record<string, ToolAnalyzer> = {
-  ...DEFAULT_ANALYZERS,
-  ...COMM_ANALYZERS,
-};
+/**
+ * All registered analyzers, merged — evaluated LIVE at each call (spec 027:
+ * the full package registers its tables at composition roots, so a load-time
+ * snapshot would be empty in every graph that has not registered yet).
+ */
+export function allAnalyzers(): Record<string, ToolAnalyzer> {
+  return getBuiltInAnalyzers();
+}
 
 export interface ActionLifecycleInputs {
   principalId: string;
@@ -116,6 +119,8 @@ export interface ActionLifecycleInputs {
   imageCapabilityProbe?: () => Promise<{ reachable: boolean; reason?: string }>;
   /** Optional: capability ledger for authority consumption & revocation (T107a, spec 021). */
   capabilityLedger?: CapabilityLedger;
+  /** Review P1-3: default missing stores to in-memory (core-only single+stateless). */
+  preferInMemoryDefaults?: boolean;
   /** Spec 022 T025: Operator-wide baseline capability set applied unstamped to all principals. */
   operatorBaseline?: CapabilitySet;
   /** Spec 022 Tenancy mode ("single" | "multi", defaults to "single"). */
@@ -220,7 +225,8 @@ export async function buildActionLifecycle(
   }
 
   const workspaceId = computeWorkspaceId(inputs.workspaceRoot);
-  const policyStore = inputs.policyStore ?? new LocalPolicyStore();
+  // Review P1-3: core-only single+stateless defaults to the in-memory set.
+  const policyStore = inputs.policyStore ?? (inputs.preferInMemoryDefaults ? new InMemoryPolicyStore() : new LocalPolicyStore());
 
   // Seed principal policy from the protected store. This is the ONE place the
   // PolicyStore feeds into a PolicyContext — answering Finding #2 from the
@@ -513,16 +519,18 @@ export async function buildActionLifecycle(
 
   const capabilityLedger =
     inputs.capabilityLedger ??
-    new PersistedCapabilityLedger({
-      ...(inputs.auditRoot ? { root: path.join(inputs.auditRoot, "caps") } : {}),
-      defaultPrincipalId: inputs.principalId,
-    });
+    (inputs.preferInMemoryDefaults
+      ? new InMemoryCapabilityLedger()
+      : new PersistedCapabilityLedger({
+          ...(inputs.auditRoot ? { root: path.join(inputs.auditRoot, "caps") } : {}),
+          defaultPrincipalId: inputs.principalId,
+        }));
   await capabilityLedger.load({ principalId: inputs.principalId }).catch(() => {});
 
   const policyDigest = computePolicyDigest(policyContext);
   const engine = new PolicyEngine(policyDigest, { ledger: capabilityLedger });
 
-  const auditStore = inputs.auditStore ?? new LocalAuditStore(inputs.auditRoot ? { root: inputs.auditRoot } : undefined);
+  const auditStore = inputs.auditStore ?? (inputs.preferInMemoryDefaults ? new InMemoryAuditStore() : new LocalAuditStore(inputs.auditRoot ? { root: inputs.auditRoot } : undefined));
   const artifacts = inputs.artifacts ?? new InMemoryArtifactStore();
 
   // Honor a caller-supplied outbox when the audit store is a LocalAuditStore.
@@ -588,7 +596,7 @@ export async function buildActionLifecycle(
     policyContext,
     activeCapabilities,
     grantedCapabilities: activeCapabilities.capabilities,
-    analyzers: ALL_ANALYZERS,
+    analyzers: allAnalyzers(),
     registrations: inputs.registrations,
     auditStore,
     terminalOutbox,

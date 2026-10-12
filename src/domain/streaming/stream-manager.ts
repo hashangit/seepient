@@ -46,6 +46,10 @@ export class StreamManager {
   private usageResolve!: (usage: Usage) => void;
   private finishResolve!: (reason: string) => void;
 
+  // F2/round-3 P2-1: the turn error, thrown to textStream consumers after
+  // they drain the deltas queued before the failure.
+  private textError: unknown = null;
+
   readonly fullText: Promise<string>;
   readonly usage: Promise<Usage>;
   readonly finishReason: Promise<string>;
@@ -96,9 +100,11 @@ export class StreamManager {
 
   /**
    * F2: reject the fullText promise — a failed turn must be observable by
-   * callers that await it, in parity with the non-streaming throw.
+   * callers that await it, in parity with the non-streaming throw. The same
+   * error surfaces to textStream iterators once queued deltas are drained.
    */
   rejectText(err: unknown): void {
+    this.textError = err;
     this.textReject(err);
   }
 
@@ -145,6 +151,9 @@ export class StreamManager {
             }
             if (self.textQueue.length > 0) {
               return { value: self.textQueue.shift()!, done: false };
+            }
+            if (self.textError !== null) {
+              throw self.textError;
             }
             return { value: undefined, done: true } as IteratorResult<string>;
           },

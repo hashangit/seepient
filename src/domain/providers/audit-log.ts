@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { SeepientError } from "../../foundations/errors.js";
 import { redact, redactUrlCredentials } from "../../foundations/security/redact.js";
+import { ambientStoreDefaultsRegistered } from "../../foundations/injection-seams.js";
 
 export interface ProviderAuditEvent {
   timestamp: string;
@@ -19,14 +20,34 @@ export function redactObject(obj: any): any {
  * Appends an audit event to ~/.seepient/audit.log with 0600 permissions, symlink rejection, and fsync durability.
  */
 export function recordProviderAuditEvent(event: ProviderAuditEvent, customAuditPath?: string): void {
+  // Spec 027 review round-3 P1-1: the IMPLICIT ambient trail
+  // ($HOME/.seepient/audit.log) is a Profile-A convenience armed by the full
+  // package's ambient-defaults registration — seepient-core writes nothing
+  // there, including when an embedder bootstraps a providers record through
+  // the SDK front doors. Explicit destinations (customAuditPath arg or the
+  // SEEPIENT_AUDIT_LOG_PATH redirect) still write: they are caller-owned.
+  const implicitAmbientPath = !customAuditPath && !process.env.SEEPIENT_AUDIT_LOG_PATH;
+  if (implicitAmbientPath && !ambientStoreDefaultsRegistered()) return;
+
   const auditPath =
     customAuditPath ??
     process.env.SEEPIENT_AUDIT_LOG_PATH ??
     path.join(os.homedir(), ".seepient", "audit.log");
 
   const dir = path.dirname(auditPath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  try {
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    }
+  } catch (err) {
+    // Review P1-3: the operator audit trail is a Profile-A convenience — on a
+    // read-only $HOME (Lambda-style containers) the provider mutation must
+    // still succeed. Fail soft with a warning; the security plane's own
+    // AuditStore is a separate, injected concern.
+    console.warn(
+      `[seepient] provider audit log unavailable at ${auditPath} (${err instanceof Error ? (err as NodeJS.ErrnoException).code ?? err.message : err}); continuing without it`,
+    );
+    return;
   }
 
   // Reject symlinks
@@ -73,6 +94,15 @@ export function recordProviderAuditEvent(event: ProviderAuditEvent, customAuditP
         "SECURITY_ERROR",
         false,
       );
+    }
+    // Review round-2 P2-1: a pre-existing but unwritable dir (container layer,
+    // wrong owner) is the same fail-soft case as mkdir — warn and continue.
+    // Symlink refusals above stay fatal.
+    if (err.code === "EACCES" || err.code === "EROFS" || err.code === "EPERM") {
+      console.warn(
+        `[seepient] provider audit log unwritable at ${auditPath} (${err.code}); continuing without it`,
+      );
+      return;
     }
     throw new SeepientError(
       `Failed to write durable audit log: ${err.message}`,

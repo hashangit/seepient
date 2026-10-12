@@ -1,5 +1,5 @@
-import { ToolModule } from '../../foundations/contracts/tool.js';
-import { safeSsrfFetch } from '../../foundations/network/ssrf-fetch.js';
+import { ToolModule } from 'seepient-core/dist/foundations/contracts/tool.js';
+import { safeSsrfFetch } from 'seepient-core/dist/foundations/network/ssrf-fetch.js';
 
 export const NotifyTool: ToolModule = {
   name: "Group Bot Notification",

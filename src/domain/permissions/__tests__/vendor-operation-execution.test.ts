@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { registerFullComposition } from "../../__tests__/full-composition.js";
+registerFullComposition(); // spec 027: full-package composition
 import { mkdtempSync, rmSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InMemoryArtifactStore } from "../../../capabilities/execution/in-memory-artifact-store.js";
 import { buildLocalBoundary } from "../../../capabilities/execution/build-local-boundary.js";
-import { buildActionLifecycle, ALL_ANALYZERS } from "../action-lifecycle-factory.js";
+import { buildActionLifecycle, allAnalyzers } from "../action-lifecycle-factory.js";
 import { createSnapshotStore } from "../../../foundations/hashline/snapshot-store.js";
 import { createMediaVendorOperationHandler } from "../../media/vendor-operation-handler.js";
 import type { ProviderRuntime } from "../../providers/provider-runtime.js";
@@ -151,7 +153,7 @@ describe("vendor-operation execution with media handler (Fix 1)", () => {
       snapshotStore,
     });
 
-    const action = await ALL_ANALYZERS.optimize_prompt(
+    const action = await allAnalyzers().optimize_prompt(
       { raw_prompt: "draw a landscape" },
       {
         principalId: "cli-user",
@@ -202,7 +204,7 @@ describe("vendor-operation execution with media handler (Fix 1)", () => {
       snapshotStore,
     });
 
-    const action = await ALL_ANALYZERS.generate_image(
+    const action = await allAnalyzers().generate_image(
       { prompt: "cyberpunk cat", output_path: join(dir, "cat.png") },
       {
         principalId: "cli-user",
@@ -251,7 +253,7 @@ describe("vendor-operation execution with media handler (Fix 1)", () => {
       snapshotStore,
     });
 
-    const action = await ALL_ANALYZERS.optimize_prompt(
+    const action = await allAnalyzers().optimize_prompt(
       { raw_prompt: "explain quantum physics" },
       {
         principalId: "sdk-user",
@@ -295,7 +297,7 @@ describe("vendor-operation execution with media handler (Fix 1)", () => {
       snapshotStore,
     });
 
-    const action = await ALL_ANALYZERS.optimize_prompt(
+    const action = await allAnalyzers().optimize_prompt(
       { raw_prompt: "test without handler" },
       {
         principalId: "test-user",

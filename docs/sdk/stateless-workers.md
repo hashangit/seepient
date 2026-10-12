@@ -16,18 +16,51 @@ When deployed in multi-tenant environments:
 
 ---
 
+## Slim install for serverless: `seepient-core`
+
+Serverless chat routes that use only the multi-turn engine, the provider system, and injected stores can install **`seepient-core`** instead — the same engine at a ~102 MB clean-install closure (versus ~301 MB), with zero built-in tools, sandbox, MCP gateway, or browser automation in `node_modules`:
+
+```ts
+import { createChat } from 'seepient-core'
+
+const chat = await createChat({
+  stateless: true,
+  // the same injected store trio the full package takes — the contracts are identical
+  auditStore, policyStore, capabilityLedger,
+  providers,               // record of provider entries, exactly as with `seepient`
+  tenancy: 'multi',        // multi-tenant hosting: an isolated runtime + all three stores
+  runtime,                 // your isolated ProviderRuntime (required in multi)
+  principalId,
+  cwd: '/workspace',
+})
+
+const res = await chat.send('...')           // one turn
+const stream = await chat.stream('...')      // one streaming turn
+```
+
+Solo (non-hosted) serverless functions can instead pass `tenancy: 'single'` and skip the store trio — `seepient-core` then resolves every default (audit, policy, capability ledger) to the in-memory set, sessionful or not, so construction and turns write nothing to disk (see [Ambient-free defaults](#ambient-free-defaults)).
+
+Behavioral differences are all fail-closed and typed: built-in tool names are rejected at registration naming `seepient`, media/image generation without a registered vendor denies typed, and token counting reports `usage.estimateMode: "heuristic"`. The agent front doors expose no `refreshModels` — provider model discovery is a full-package surface (a directly constructed `ProviderRuntime` retains it). Tenancy stamping, consent lifecycle, and egress arming are unchanged — the engine-coupled security plane ships in `seepient-core`. Host-executed tools (`trustedHostTool`) run via the light default pipeline. If you need built-in tools, the sandbox, or the MCP gateway, install the full `seepient` package.
+
+---
+
 ## Deployment models
 
-### Model A: Serverless and ephemeral (Lambda, Cloudflare Workers)
-- Runs inside short-lived execution contexts.
-- Uses brokered tools (web search, notifications, email, media) where operations are contained by design.
-- Direct machine execution tools fail closed if OS sandbox containment binaries are not present.
-- Every state store is injected on initialization.
+### Model A: Serverless and ephemeral (AWS Lambda, Google Cloud Functions, Azure Functions)
+- Node-capable function platforms. The engine requires Node ≥ 22 builtins (`node:net`, `node:dns`, `node:child_process`) — edge runtimes without Node builtins (e.g. Cloudflare Workers) cannot run either package.
+- Runs inside short-lived execution contexts; every state store is injected on initialization.
+- With `seepient-core` in single mode (any store posture — the in-memory default is keyed on the unregistered ambient defaults, not on `stateless`), chat turns complete on the light default pipeline with zero ambient-disk writes; with the full package, brokered tools (web search, notifications, email, media) are contained by design and direct machine execution tools fail closed without OS containment binaries.
 
 ### Model B: Container worker tier (Docker, microVM per tenant)
 - Each tenant task runs inside an isolated container (Docker, gVisor) or microVM (Firecracker).
 - The Seepient agent executes inside the worker, with OS-level sandboxing (Bubblewrap) isolating tool executions from the container root.
 - Persistent state routes back to the embedder database via injected store contracts.
+
+---
+
+## Ambient-free defaults
+
+`seepient-core` construction in single mode defaults the permission-plane stores (audit, policy, capability ledger) to the in-memory set — with or without `stateless`, and with an injected `persist` backend too — so a per-function container on a read-only `$HOME` constructs and turns with zero ambient-disk writes. The zero-write promise covers the whole providers option family too: bootstrapping a runtime from `providers`/`credentials`/`modelAssignments` writes nothing ambient (the provider-audit trail is a full-package Profile-A surface and is simply not written in core). The full `seepient` package keeps its Profile-A ambient defaults (`~/.seepient`); multi-tenant mode is untouched in both — it requires the injected store trio.
 
 ---
 
@@ -65,7 +98,7 @@ console.log(result.text)
 ```
 
 ::: warning Store injection completeness
-Stateless operation requires injecting all three permission contracts (`auditStore`, `policyStore`, and `capabilityLedger`) along with `persist`. If 1 or 2 permission stores are injected, the SDK logs a warning (`[seepient] WARNING: Partial state store injection detected...`) and falls back missing stores to writing to `~/.seepient` or `./.seepient` on the local filesystem.
+Stateless operation requires injecting all three permission contracts (`auditStore`, `policyStore`, and `capabilityLedger`) along with `persist`. If 1 or 2 permission stores are injected, the SDK logs a warning (`[seepient] WARNING: Partial state store injection detected...`). The full `seepient` package then falls the missing stores back to `~/.seepient` or `./.seepient` on the local filesystem; `seepient-core` in single mode defaults them to in-memory instead.
 
 For one-shot execution, `askSeepient()` also accepts `auditStore`, `policyStore`, `capabilityLedger`, `principalId`, and `runtime` to run without disk access. For tenant-partitioned or serverless skills, inject external skill sources via `sources` or pass inline literals; see [Skill Sources](/sdk/skills#skill-sources).
 :::

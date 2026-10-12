@@ -3,7 +3,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { createSeepient, askSeepient, gateway } from "../index.js";
-import { BUILT_IN_TOOL_MODULES } from "../../../domain/tool-executor.js";
+import { FULL_TOOL_MODULES } from "../full-registrations.js";
 import { createMockRuntime } from "../../../domain/__tests__/test-doubles.js";
 import type { GatewaySettingsAdapter } from "../../../capabilities/gateway/settings-adapter.js";
 
@@ -25,14 +25,14 @@ function createMockGatewaySettings(): GatewaySettingsAdapter {
 }
 
 describe("SDK Tools Isolation (T014, T015)", () => {
-  it("exposes exactly BUILT_IN_TOOL_MODULES definitions when tools option is omitted", async () => {
+  it("exposes exactly FULL_TOOL_MODULES definitions when tools option is omitted", async () => {
     const runtime = createMockRuntime([{ content: "ok" }]);
     const agent = await createSeepient({ runtime, tenancy: "single" });
 
     const defs = agent.getToolDefinitions();
-    expect(defs.length).toBe(BUILT_IN_TOOL_MODULES.length);
+    expect(defs.length).toBe(FULL_TOOL_MODULES.length);
     expect(defs.map((d) => d.function.name).sort()).toEqual(
-      BUILT_IN_TOOL_MODULES.map((m) => m.definition.function.name).sort(),
+      FULL_TOOL_MODULES.map((m) => m.definition.function.name).sort(),
     );
   });
 

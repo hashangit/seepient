@@ -535,14 +535,16 @@ interface HostToolContext {
 ```typescript
 interface AccountInput {
   accountId: string;
-  upstreamProvider: string;
-  credential: {
-    mode: "paste" | "env" | "keychain" | "none";
-    keyValue?: string;
-    varName?: string;
-  };
-  baseUrl?: string;
-  models?: string[];
+  upstreamProvider?: string;
+  credential:
+    | { mode: "paste"; keyValue?: string; keyText?: string }
+    | { mode: "none" }
+    | { mode: "preserve" };
+  baseUrl?: string | null;
+  allowPrivate?: boolean | null;
+  /** Accepted by the schema; does not change wire selection today
+   *  (OpenAI-protocol accounts always dial the Responses API). */
+  compat?: "openai" | "anthropic" | "google" | "openai-responses" | null;
 }
 ```
 

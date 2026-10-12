@@ -12,7 +12,13 @@ import { createHookExecutor } from "./hooks.js";
 import type { Middleware, PipelineContext } from "../foundations/contracts/middleware.js";
 import { compose } from "../foundations/contracts/middleware.js";
 import { extractPattern } from "../foundations/grant-pattern.js";
-import { BUILT_IN_TOOL_MODULES } from "./tool-executor.js";
+import {
+  getDefaultToolModules,
+  getMediaVendorOperationHandlerFactory,
+} from "../foundations/injection-seams.js";
+import { resolveTurnBoundary } from "../capabilities/execution/light-execution-boundary.js";
+import { UseSkillTool } from "./skills/use-skill-tool.js";
+import { currentEstimateMode } from "../capabilities/tokenizer/tokenizer.js";
 import type { ToolRegistryContract } from "../foundations/contracts/tool.js";
 import type { ToolModule } from "../foundations/contracts/tool.js";
 import { getModelMeta } from "../foundations/models-catalog.js";
@@ -65,7 +71,7 @@ export interface AgentLoopOptions {
   explicitRegistrationIds?: string[];
   /** Allow JS filesystem fallback for file commits when native helper is absent. */
   /** Commit-helper injection for tests/e2e (spec 019): pins the probe. */
-  commitHelper?: import("../vendors/native-fs-commit/index.js").NativeCommitHelper;
+  commitHelper?: import("../foundations/contracts/execution-brokers.js").CommitHelper;
   /** Tenancy mode ('single' | 'multi'). When 'multi', wiredPipeline is strictly required. */
   tenancyMode?: "single" | "multi";
 }
@@ -382,14 +388,18 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
   if (!wiredPipeline) {
     const { InMemoryArtifactStore } = await import("../capabilities/execution/in-memory-artifact-store.js");
     const { buildActionLifecycle } = await import("./permissions/action-lifecycle-factory.js");
-    const { buildLocalBoundary } = await import("../capabilities/execution/build-local-boundary.js");
     const { legacyApproveToolToBroker } = await import("../transport/legacy-adapter.js");
     const artifacts = new InMemoryArtifactStore();
     const hostCallbacks = new Map<string, (args: unknown) => Promise<unknown>>();
-    const modulesToWire: readonly ToolModule[] =
-      options.toolRegistry?.modules() ??
-      options.toolModules ??
-      BUILT_IN_TOOL_MODULES;
+    // use_skill stays loop-side (spec 027 FR-003): it is domain-owned and
+    // rides every composition, whatever tool set was injected.
+    const modulesToWire: readonly ToolModule[] = [
+      ...(options.toolRegistry?.modules() ??
+        options.toolModules ??
+        getDefaultToolModules() ??
+      []),
+      UseSkillTool,
+    ];
     for (const mod of modulesToWire) {
       if (mod.handler) {
         hostCallbacks.set(mod.definition.function.name, (args) => mod.handler!(args as any, config));
@@ -400,17 +410,22 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     // AND analysis-time patch application.
     const snapshotStore = (config as { snapshotStore?: import("../foundations/hashline/snapshot-store.js").SnapshotStore } | undefined)?.snapshotStore;
 
-    const { createMediaVendorOperationHandler } = await import("./media/vendor-operation-handler.js");
-    const vendorOperationHandler = runtime
-      ? createMediaVendorOperationHandler({
-          runtime,
-          artifacts,
-          signal,
-          tenancyMode: options.tenancyMode,
-        })
-      : undefined;
+    // Spec 027 FR-009: the media vendor handler arrives via registration;
+    // unregistered (core-only) leaves it undefined — media turns deny typed.
+    const mediaFactory = getMediaVendorOperationHandlerFactory();
+    const vendorOperationHandler =
+      runtime && mediaFactory
+        ? mediaFactory({
+            runtime,
+            artifacts,
+            signal,
+            tenancyMode: options.tenancyMode,
+          })
+        : undefined;
 
-    const { boundary } = await buildLocalBoundary({
+    // Spec 027 FR-012: full package injects the boundary pipeline; the
+    // engine default is the light boundary (trusted-host/none only).
+    const boundary = await resolveTurnBoundary({
       artifacts,
       hostCallbacks,
       workspaceRoot: options.cwd ?? process.cwd(),
@@ -965,6 +980,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     completionTokens,
     totalTokens: promptTokens + completionTokens,
     cost,
+    estimateMode: currentEstimateMode(),
   };
 
   return {

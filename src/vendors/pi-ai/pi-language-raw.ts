@@ -120,7 +120,7 @@ async function resolveSecretApiKey(
     // OAuth secrets skip this gate; the branches below handle them.
     throw new InferenceError({
       code: "auth",
-      message: `CREDENTIAL_REQUIRED: Inference requires an explicit api_key credential for provider "${target.upstreamProvider}" — configure it through provider management.`,
+      message: `CREDENTIAL_REQUIRED: Inference requires an explicit api_key credential for provider "${target.upstreamProvider}" — put an api_key record in your credential store and reference it from the provider entry as credential: { kind: "seepient", id }.`,
       providerAccount: target.providerAccount,
       model: target.model,
       retryable: false,

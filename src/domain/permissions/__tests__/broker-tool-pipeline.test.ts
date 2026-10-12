@@ -11,12 +11,14 @@
  * response content.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { registerFullComposition } from "../../__tests__/full-composition.js";
+registerFullComposition(); // spec 027: full-package composition (built-ins + analyzers + boundary)
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildLocalBoundary } from "../../../capabilities/execution/build-local-boundary.js";
 import { InMemoryArtifactStore } from "../../../capabilities/execution/in-memory-artifact-store.js";
-import { ALL_ANALYZERS } from "../action-lifecycle-factory.js";
+import { allAnalyzers } from "../action-lifecycle-factory.js";
 import type { ToolAnalysisContext } from "../../../foundations/contracts/custom-tools.js";
 import type { CapabilityEnvelope } from "../../../foundations/contracts/permission-policy.js";
 
@@ -110,7 +112,7 @@ describe("brokered tool pipeline wiring (analyzer → boundary → broker → mo
       },
     });
 
-    const action = await ALL_ANALYZERS.web_search({ query: "finland unemployment", depth: "advanced" }, makeCtx(artifacts));
+    const action = await allAnalyzers().web_search({ query: "finland unemployment", depth: "advanced" }, makeCtx(artifacts));
     const result = await boundary.execute(action, envelopeFor(action.actionDigest, "api.tavily.com"), {});
 
     expect(result.state).toBe("succeeded");
@@ -143,7 +145,7 @@ describe("brokered tool pipeline wiring (analyzer → boundary → broker → mo
       },
     });
 
-    const action = await ALL_ANALYZERS.read_website(
+    const action = await allAnalyzers().read_website(
       { url: "https://example.com/en/statistics/tyok" },
       makeCtx(artifacts),
     );
@@ -175,7 +177,7 @@ describe("brokered tool pipeline wiring (analyzer → boundary → broker → mo
       },
     });
 
-    const action = await ALL_ANALYZERS.read_website({ url: "https://example.com/huge" }, makeCtx(artifacts));
+    const action = await allAnalyzers().read_website({ url: "https://example.com/huge" }, makeCtx(artifacts));
     const result = await boundary.execute(action, envelopeFor(action.actionDigest, "example.com"), {});
 
     expect(result.state).toBe("succeeded");
@@ -203,7 +205,7 @@ describe("brokered tool pipeline wiring (analyzer → boundary → broker → mo
       },
     });
 
-    const action = await ALL_ANALYZERS.read_website({ url: "https://stat.fi/en/statistics/tyok" }, makeCtx(artifacts));
+    const action = await allAnalyzers().read_website({ url: "https://stat.fi/en/statistics/tyok" }, makeCtx(artifacts));
     const result = await boundary.execute(action, envelopeFor(action.actionDigest, "stat.fi"), {});
 
     expect(result.state).toBe("succeeded");

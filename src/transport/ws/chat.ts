@@ -10,7 +10,7 @@ import type {
   WebSocketHandlerContext,
   ConnectionState,
 } from "./ws-types.js";
-import type { Message } from "../../foundations/types.js";
+import type { Message } from "seepient-core/dist/foundations/types.js";
 import { safeSend } from "./connection-registry.js";
 import { createServerApproveTool } from "./approvals.js";
 import { requireWsScope } from "./session-control.js";

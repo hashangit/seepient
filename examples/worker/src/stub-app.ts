@@ -21,7 +21,7 @@ import type {
   PermissionRequest,
   PermissionDecision,
 } from "../../../src/transport/sdk/index.js";
-import { isGuardNeutralized, warnIfTestEnvAtHostedBoot } from "../../../src/foundations/test-seams.js";
+import { isGuardNeutralized, warnIfTestEnvAtHostedBoot } from "seepient-core/dist/foundations/test-seams.js";
 
 export const KNOWN_TOKENS: Record<string, string> = {
   "token-tenant-a": "tenant-a",

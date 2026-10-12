@@ -1,8 +1,12 @@
 /**
- * Token counting via BPE (byte-pair encoding).
+ * Token counting via BPE (byte-pair encoding) with a heuristic fallback.
  *
  * Uses `gpt-tokenizer` — a pure-JS implementation of OpenAI's BPE — as the
  * base tokenizer, then applies a correction multiplier per provider family.
+ * The vendor loads lazily (spec 027 FR-004): the full package resolves the
+ * exact-BPE module; core-only installs keep a chars÷4 heuristic with no hard
+ * dependency, and the active mode is observable via `currentEstimateMode()` /
+ * `whenEstimatorReady`.
  *
  * The base BPE is exact for OpenAI-family models. Anthropic and GLM use
  * different (unpublished) BPE vocabularies; empirically, tiktoken/gpt-tokenizer
@@ -17,7 +21,69 @@
  * provide (per-part: system vs tools vs skills vs history).
  */
 
-import { encode } from '../../vendors/gpt-tokenizer.js';
+import { getExactEstimatorLoader } from "../../foundations/injection-seams.js";
+
+type EncodeFn = (text: string) => number[];
+
+function heuristicEncode(text: string): number[] {
+  // chars÷4 fallback: ~4 characters per token for English prose.
+  return new Array(Math.max(1, Math.ceil(text.length / 4))).fill(0);
+}
+
+let encode: EncodeFn = heuristicEncode;
+let estimateMode: "exact" | "heuristic" = "heuristic";
+
+/**
+ * Settles once the exact-BPE loader (registered by the full package) resolves
+ * or fails. Resolves with the active estimate mode — "exact" when the vendor
+ * is present, "heuristic" when it is unregistered/unresolvable (core-only
+ * installs, spec 027 FR-004).
+ */
+let readyPromise: Promise<"exact" | "heuristic"> | undefined;
+
+/**
+ * Settles once the exact-BPE loader (registered by the full package) resolves
+ * or fails. Resolves with the active estimate mode — "exact" when the vendor
+ * is present, "heuristic" when it is unregistered/unresolvable (core-only
+ * installs, spec 027 FR-004). Lazy: call AFTER registration.
+ */
+export function whenEstimatorReady(): Promise<"exact" | "heuristic"> {
+  const loader = getExactEstimatorLoader();
+  if (!loader) return Promise.resolve(estimateMode);
+  // Guard against out-of-order settles across memo generations (review P3):
+  // a stale generation's settle must not clobber a newer registration.
+  readyPromise ??= loader().then(
+    (m) => {
+      if (getExactEstimatorLoader() !== loader) return whenEstimatorReady();
+      encode = m.encode;
+      estimateMode = "exact";
+      return estimateMode;
+    },
+    () => {
+      if (getExactEstimatorLoader() !== loader) return whenEstimatorReady();
+      // A failed load pins heuristic honestly — the mode must reflect what
+      // this process will actually count with.
+      estimateMode = "heuristic";
+      return estimateMode;
+    },
+  );
+  return readyPromise;
+}
+
+/**
+ * Forget a settled readiness memo (spec 027 review P1-1). A core-only turn
+ * that settles "heuristic" before the full package registers its loader must
+ * not pin heuristic forever — registration resets this memo and arms the
+ * load (see `registerExactEstimator`).
+ */
+export function resetEstimatorMemo(): void {
+  readyPromise = undefined;
+}
+
+/** The active token-estimate mode ("exact" | "heuristic"). */
+export function currentEstimateMode(): "exact" | "heuristic" {
+  return estimateMode;
+}
 
 /** Correction multiplier applied to BPE counts per provider family. */
 const CORRECTION_FACTOR: Record<string, number> = {

@@ -65,3 +65,6 @@ edited-*.png
 # spec 019: dev-built native helper binaries (pnpm native:build)
 src/native-fs-commit/
 native/fs-commit/target/
+
+# packed tarballs (release tooling packs its own)
+*.tgz

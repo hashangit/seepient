@@ -92,6 +92,8 @@ export interface Usage {
   completionTokens: number;
   totalTokens: number;
   cost: number;
+  /** How token estimates were computed in this process (spec 027 FR-004). */
+  estimateMode?: "exact" | "heuristic";
 }
 
 export interface CumulativeUsage {
@@ -172,6 +174,12 @@ export interface AskSeepientOptions {
   providerAccount?: string;
   purpose?: Purpose;
   tier?: Tier;
+  /** Provider entries keyed by account id — bootstraps a runtime when `runtime` is omitted (round-3 P1-2 rung parity with CreateSeepientOptions). */
+  providers?: Record<string, any>;
+  modelAssignments?: import("./schemas/provider-config.js").PurposeModelMap;
+  credentials?: import("./contracts/credential-store.js").CredentialStore;
+  overlayFile?: string;
+  adapter?: import("./contracts/backend-ports.js").InferenceAdapter;
   systemPrompt?: string;
   tools?: (string | UserToolDefinition | import("./contracts/custom-tools.js").AnyToolRegistration | import("./contracts/tool.js").ToolModule)[];
   skills?: string[] | boolean | import("./contracts/skill-source.js").SkillLiteral[];

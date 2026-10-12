@@ -16,28 +16,28 @@
  * Executors are sibling capabilities — they share Foundations contracts only
  * and never import each other or `capabilities/tools/`.
  */
-import type { PreparedToolAction } from "../../foundations/contracts/prepared-action.js";
-import type { SnapshotStore } from "../../foundations/hashline/snapshot-store.js";
+import type { PreparedToolAction } from "seepient-core/dist/foundations/contracts/prepared-action.js";
+import type { SnapshotStore } from "seepient-core/dist/foundations/hashline/snapshot-store.js";
 import type {
   ExecutionResult,
   ToolProgress,
-} from "../../foundations/contracts/execution-boundary.js";
-import type { CapabilityEnvelope } from "../../foundations/contracts/permission-policy.js";
-import type { OperationExecutor } from "./operation-executor-registry.js";
+} from "seepient-core/dist/foundations/contracts/execution-boundary.js";
+import type { CapabilityEnvelope } from "seepient-core/dist/foundations/contracts/permission-policy.js";
+import type { OperationExecutor } from "seepient-core/dist/capabilities/execution/operation-executor-registry.js";
 import type {
   FileCommitBroker,
   PreparationArtifactStore,
   EffectBroker,
-} from "../../foundations/contracts/execution-brokers.js";
-import { UnsupportedBackendError, PathHardlinkRefusedError, PathIdentityMismatchError } from "../../foundations/errors.js";
+} from "seepient-core/dist/foundations/contracts/execution-brokers.js";
+import { UnsupportedBackendError, PathHardlinkRefusedError, PathIdentityMismatchError } from "seepient-core/dist/foundations/errors.js";
 import { isSecurityPath } from "./environment-policy.js";
-import { isGuardNeutralized } from "../../foundations/test-seams.js";
-import { createSetupFailure } from "../../foundations/contracts/setup-failure.js";
+import { isGuardNeutralized } from "seepient-core/dist/foundations/test-seams.js";
+import { createSetupFailure } from "seepient-core/dist/foundations/contracts/setup-failure.js";
 
 /** Read the prepared bytes for a commit operation from the artifact store. */
 async function readContent(
   artifacts: PreparationArtifactStore,
-  ref: import("../../foundations/contracts/prepared-action.js").PreparedArtifactRef,
+  ref: import("seepient-core/dist/foundations/contracts/prepared-action.js").PreparedArtifactRef,
 ): Promise<Uint8Array> {
   return artifacts.read(ref);
 }
@@ -660,7 +660,7 @@ export class BrokerExecutor implements OperationExecutor {
     // Broker handles explicit secret resolution via secretResolver and fails closed with CREDENTIAL_REQUIRED.
     if (this.tenancyMode !== "multi") {
       // Preflight credential checks (spec 017, T014; spec 020, T015)
-      const { resolveCredentials } = await import("../../foundations/security/credential-resolver.js");
+      const { resolveCredentials } = await import("seepient-core/dist/foundations/security/credential-resolver.js");
       const creds = resolveCredentials(undefined, this.workspaceRoot);
 
       if (action.toolName === "web_search" && !creds.tavilyApiKey) {
@@ -918,7 +918,7 @@ export class BrokerExecutor implements OperationExecutor {
    * undefined when the response carries neither.
    */
   private async extractImageBytes(
-    artifact: import("../../foundations/contracts/prepared-action.js").PreparedArtifactRef | undefined,
+    artifact: import("seepient-core/dist/foundations/contracts/prepared-action.js").PreparedArtifactRef | undefined,
   ): Promise<Uint8Array | undefined> {
     if (!artifact || !this.artifacts) return undefined;
     let bytes: Uint8Array;
@@ -965,106 +965,5 @@ export class UnsupportedExecutor implements OperationExecutor {
       operationKind: action.operation.kind,
       actionDigest: action.actionDigest,
     });
-  }
-}
-
-/**
- * Trusted-host executor. Host tools are application authority and run the
- * registered callback directly — they are always audit-labelled and excluded
- * from agent-grant persistence. Registry-ONLY (spec 019 FR-006): the lookup
- * consults the composition root's callback map and nothing else — the former
- * ambient `getAllToolModules()` fallback is deleted. Misses fail closed with
- * `HOST_TOOL_NOT_REGISTERED`.
- */
-export class TrustedHostExecutor implements OperationExecutor {
-  readonly kind = "trusted-host" as const;
-  private readonly callbacks: Map<string, (args: unknown) => Promise<unknown>>;
-
-  constructor(callbacks: Map<string, (args: unknown) => Promise<unknown>>) {
-    this.callbacks = callbacks;
-  }
-
-  async execute(
-    action: PreparedToolAction,
-    _envelope: CapabilityEnvelope,
-    operation: Extract<PreparedToolAction["operation"], { kind: "trusted-host" }>,
-    _opts: { signal?: AbortSignal; onUpdate?: (u: ToolProgress) => void },
-  ): Promise<ExecutionResult> {
-    const cb = this.callbacks.get(operation.registrationId) ?? (operation.toolName ? this.callbacks.get(operation.toolName) : undefined);
-    if (!cb) {
-      return {
-        state: "failed",
-        error: {
-          code: "HOST_TOOL_NOT_REGISTERED",
-          message: `No host callback registered for ${operation.registrationId}`,
-          retryable: false,
-        },
-        evidence: {
-          backend: "local-native",
-          actionDigest: action.actionDigest,
-          executorId: "trusted-host",
-          operationKind: "trusted-host",
-        },
-      };
-    }
-    try {
-      const raw = await cb(operation.args);
-      const res = typeof raw === "string" ? { output: raw, success: true, metadata: undefined } : (raw as any);
-      return {
-        state: "succeeded",
-        result: {
-          output: typeof res?.output === "string" ? res.output : JSON.stringify(res?.output ?? res ?? ""),
-          success: res?.success ?? true,
-          metadata: res?.metadata,
-        },
-        evidence: {
-          backend: "local-native",
-          actionDigest: action.actionDigest,
-          executorId: "trusted-host",
-          operationKind: "trusted-host",
-        },
-      };
-    } catch (err) {
-      return {
-        state: "failed",
-        error: {
-          code: "HOST_TOOL_FAILED",
-          message: err instanceof Error ? err.message : String(err),
-          retryable: false,
-        },
-        evidence: {
-          backend: "local-native",
-          actionDigest: action.actionDigest,
-          executorId: "trusted-host",
-          operationKind: "trusted-host",
-        },
-      };
-    }
-  }
-}
-
-/**
- * None-op executor — for tools with no side effects (e.g. get_current_datetime).
- * Returns the pre-computed result attached to the prepared operation.
- */
-export class NoneExecutor implements OperationExecutor {
-  readonly kind = "none" as const;
-
-  async execute(
-    action: PreparedToolAction,
-    _envelope: CapabilityEnvelope,
-    operation: Extract<PreparedToolAction["operation"], { kind: "none" }>,
-    _opts: { signal?: AbortSignal; onUpdate?: (u: ToolProgress) => void },
-  ): Promise<ExecutionResult> {
-    return {
-      state: "succeeded",
-      result: operation.result,
-      evidence: {
-        backend: "local-native",
-        actionDigest: action.actionDigest,
-        executorId: "none",
-        operationKind: "none",
-      },
-    };
   }
 }

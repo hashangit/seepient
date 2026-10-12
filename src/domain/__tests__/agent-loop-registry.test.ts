@@ -2,6 +2,8 @@
  * Spec 022 — Agent Loop Registry Retargeting Unit Tests (T009).
  */
 import { describe, it, expect } from "vitest";
+import { registerFullComposition } from "../__tests__/full-composition.js";
+registerFullComposition(); // spec 027: full-package composition (built-ins + analyzers + boundary)
 import { runAgentLoop } from "../agent-loop.js";
 import { ToolRegistry } from "../tool-executor.js";
 import { createMockRuntime } from "./test-doubles.js";

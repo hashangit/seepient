@@ -111,7 +111,7 @@ export class PiImageRaw implements ImageBackend {
       if (!secret || secret.kind !== "api_key" || !secret.value) {
         throw new InferenceError({
           code: "auth",
-          message: `CREDENTIAL_REQUIRED: Image inference requires an explicit api_key credential for provider "${target.upstreamProvider}" — configure it through provider management.`,
+          message: `CREDENTIAL_REQUIRED: Image inference requires an explicit api_key credential for provider "${target.upstreamProvider}" — put an api_key record in your credential store and reference it from the provider entry as credential: { kind: "seepient", id }.`,
           providerAccount: target.providerAccount,
           model: target.model,
           retryable: false,

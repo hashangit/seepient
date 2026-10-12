@@ -48,7 +48,8 @@ export type InferenceErrorCode =
   | "unknown_model"
   | "unconfigured_provider"
   | "unconfigured_purpose"
-  | "oauth_expired";
+  | "oauth_expired"
+  | "media_not_registered"; // spec 027 FR-009: media/image vendors unregistered (core-only)
 
 export interface InferenceErrorOptions {
   code: InferenceErrorCode;
@@ -300,10 +301,22 @@ export class WorkerSchedulerError extends PermissionError {
 }
 
 /**
- * Execution backend cannot enforce the requested capability shape. Policy
- * must not offer an unenforceable shape; this surfaces when a caller asks
- * anyway.
+ * Review P3 (027): a tool registration cannot run because the machinery it
+ * needs ships only with the full package (e.g. broker-connector evaluation).
+ * Typed so surfaces can branch on it instead of parsing message prefixes.
  */
+export class ToolUnavailableError extends SeepientError {
+  constructor(message?: string) {
+    super(
+      message ??
+        "TOOL_UNAVAILABLE: this tool kind ships with the full \"seepient\" package.",
+      "TOOL_UNAVAILABLE",
+      false,
+    );
+    this.name = "ToolUnavailableError";
+  }
+}
+
 export class UnsupportedBackendError extends PermissionError {
   backend?: string;
   operationKind?: string;

@@ -17,11 +17,11 @@ export {
   getToolGroup,
   ToolRegistry,
   ToolRegistrationError,
-  BUILT_IN_TOOL_MODULES,
   normalizeToolResult,
 } from "../../domain/tool-executor.js";
 
-import { BUILT_IN_TOOL_MODULES, type ToolRegistry } from "../../domain/tool-executor.js";
+import { type ToolRegistry } from "../../domain/tool-executor.js";
+import { getDefaultToolModules } from "../../foundations/injection-seams.js";
 
 // ── spec 019 FR-006 (T022): host-callback wiring for trusted-host tools ──
 
@@ -40,7 +40,7 @@ export function extractHostCallbacks(
   const callbacks = new Map<string, (args: unknown) => Promise<unknown>>();
   const registrationIds: string[] = [];
 
-  const modules = extra?.registry ? extra.registry.modules() : BUILT_IN_TOOL_MODULES;
+  const modules = extra?.registry ? extra.registry.modules() : getDefaultToolModules() ?? [];
   for (const mod of modules) {
     if (typeof mod.handler === "function" && mod.definition?.function?.name) {
       callbacks.set(mod.definition.function.name, (args) => mod.handler!(args as never, {}, { skills: extra?.skills }));

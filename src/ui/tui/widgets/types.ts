@@ -6,4 +6,4 @@
  * from one place.
  */
 
-export type { WidgetKind, WidgetAction, WidgetSpec } from '../../../foundations/contracts/presentation.js';
+export type { WidgetKind, WidgetAction, WidgetSpec } from 'seepient-core/dist/foundations/contracts/presentation.js';

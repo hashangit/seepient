@@ -7,6 +7,8 @@
  * source scan (a fixed file list cannot see a new unarmed producer).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { registerDiscoverySources } from "../../../capabilities/inference/register-discovery-sources.js";
+registerDiscoverySources(); // spec 027: full-package discovery loaders
 import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

@@ -1,4 +1,4 @@
-import { ToolModule } from '../../foundations/contracts/tool.js';
+import { ToolModule } from 'seepient-core/dist/foundations/contracts/tool.js';
 import { ShellTool, ReadFileTool, WriteFileTool, DateTimeTool } from './core.js';
 import { TodoTool } from './todos.js';
 import { EmailTool } from './email.js';
