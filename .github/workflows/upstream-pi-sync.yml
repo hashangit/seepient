@@ -91,7 +91,8 @@ jobs:
           git checkout -b "${BRANCH}"
 
           echo "Bumping exact pin to @earendil-works/pi-ai@${UPSTREAM_VER}..."
-          pnpm add "@earendil-works/pi-ai@${UPSTREAM_VER}"
+          pnpm add -w "@earendil-works/pi-ai@${UPSTREAM_VER}"
+          pnpm add "@earendil-works/pi-ai@${UPSTREAM_VER}" --filter seepient-core
 
           echo "Running verification..."
           set +e
@@ -125,10 +126,10 @@ jobs:
             npm version patch --no-git-tag-version
             pnpm install --no-frozen-lockfile
 
-            # Lockfile diff audit (Invariant 3): only package.json and pnpm-lock.yaml changed
+            # Lockfile diff audit (Invariant 3): only package.json, packages/core/package.json, and pnpm-lock.yaml changed
             CHANGED_FILES=$(git diff --name-only)
             echo "Modified files: ${CHANGED_FILES}"
-            UNEXPECTED_FILES=$(echo "${CHANGED_FILES}" | grep -vE '^(package\.json|pnpm-lock\.yaml)$' || true)
+            UNEXPECTED_FILES=$(echo "${CHANGED_FILES}" | grep -vE '^(package\.json|packages/core/package\.json|pnpm-lock\.yaml)$' || true)
             if [ -n "${UNEXPECTED_FILES}" ]; then
               echo "Unexpected files changed by version bump: ${UNEXPECTED_FILES}"
               exit 1
