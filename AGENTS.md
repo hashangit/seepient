@@ -149,21 +149,21 @@ Documentation is split between the **Obsidian vault** (internal) and the **proje
 
 ## Obsidian vault — internal documentation
 
-All internal engineering and management documentation lives in the Obsidian vault under `Seepient/` (`~/Documents/Obsidian/Seepient/`), **not** in the project repo. This includes:
+All internal engineering and management documentation lives in the Obsidian vault under `Seepient/` (`~/Tailscale Share/Obsidian/Seepient/`), **not** in the project repo. This includes:
 
 - Planning & architecture (e.g. `Architecture/`)
 - Implementation specs & feature specs (e.g. `Implementation-Specs/007-tui-parity-upgrade/`)
 - Research, data models, API/contract definitions
 - Management documents (roadmaps, strategy, decisions, lessons learned)
 
-**Access:** Read and write vault files directly via their filesystem paths (e.g. `Read` / `Write` / `Edit` on `~/Documents/Obsidian/Seepient/...`). The `obsidian` CLI only launches the GUI app and is not scriptable from agents — use direct filesystem access for all vault work.
+**Access:** Read and write vault files directly via their filesystem paths (e.g. `Read` / `Write` / `Edit` on `~/Tailscale Share/Obsidian/Seepient/...`). The `obsidian` CLI only launches the GUI app and is not scriptable from agents — use direct filesystem access for all vault work.
 
 ## Vault structure
 
 Current layout of the Obsidian vault (annotated):
 
 ```
-~/Documents/Obsidian/Seepient/
+~/Tailscale Share/Obsidian/Seepient/
 ├── README.md                         # Vault overview / index
 ├── Architecture/                     # Cross-cutting architectural references
 │   └── security-posture.md           # AUTHORITATIVE security charter (owner-adopted 2026-09-24; v1.1 product re-alignment): §0 product ground (autonomous multi-purpose agent, outcome statements, autonomy ladder — consent is the bridge, the ceiling is the law), burden rules R1–R5, parties table, profiles + architecture stance, threat actors, boundary inventory + extension trust model (MCP/tools/skills first-class), non-goals + actuation stance, availability stance, severity rubric, guard-surface integrity principle, industry mapping, open decisions OD-1..6, pass-10 ownership ledger — every security disposition is graded against this document
@@ -458,7 +458,7 @@ Current layout of the Obsidian vault (annotated):
 - Each spec gets a numbered folder (`NNN-kebab-name/`) with the standard files above. Not every file is required — create what the spec needs, in this style.
 - New top-level areas (e.g. a `Decisions/` or `Roadmaps/` folder) should be added here when first created.
 
-**Maintenance — keep this map in sync.** This tree is the agent's contract for what to expect in the vault. When you add, remove, rename, or restructure vault files/directories, update this tree in the same change. If unsure of the current state, verify with `find ~/Documents/Obsidian/Seepient -type f | sort`.
+**Maintenance — keep this map in sync.** This tree is the agent's contract for what to expect in the vault. When you add, remove, rename, or restructure vault files/directories, update this tree in the same change. If unsure of the current state, verify with `find ~/Tailscale Share/Obsidian/Seepient -type f | sort`.
 
 ## Project repo — consumer-facing documentation
 
@@ -679,7 +679,7 @@ shell commands, and other important information, read the current plan:
   ready → repair round: P0-1 release build entry, P1-1 exact-BPE arming,
   P1-2 README construction, P1-3 read-only-HOME defaults + red gate,
   P1-4 e2e in CI, P2/P3 register)):**:
-  `~/Documents/Obsidian/Seepient/Implementation-Specs/027-serverless-chat-core/plan.md`
+  `~/Tailscale Share/Obsidian/Seepient/Implementation-Specs/027-serverless-chat-core/plan.md`
   — serverless chat core package split: new slim `seepient-core` npm package
   (chat/agent engine; deps = pi-ai + typebox only; ≤150MB closure gate) with
   the full `seepient` package unchanged, consuming the engine via pnpm
