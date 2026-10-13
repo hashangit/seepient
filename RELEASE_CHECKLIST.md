@@ -70,7 +70,7 @@ Update all version strings and documentation artifacts in lockstep:
 - [ ] **`AGENTS.md` & Obsidian Vault Specs**:
   - Update Key Files table and layer guidelines in `AGENTS.md`.
   - Mark completed specs as `SHIPPED` in `AGENTS.md` and in the corresponding Obsidian vault `spec.md`.
-  - Ensure `manual-validation-results.md` and any decision notes are recorded in `~/Documents/Obsidian/Seepient/Implementation-Specs/NNN-.../`.
+  - Ensure `manual-validation-results.md` and any decision notes are recorded in `~/Tailscale Share/Obsidian/Seepient/Implementation-Specs/NNN-.../`.
   - Update the vault directory tree index in `AGENTS.md` and vault `README.md`.
 
 ---

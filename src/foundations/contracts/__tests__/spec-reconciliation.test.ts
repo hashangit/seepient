@@ -109,7 +109,7 @@ describe("spec reconciliation (T607)", () => {
   it("the spec, plan, data-model, contracts, and tasks docs agree on revision", () => {
     const vault = join(
       process.env.HOME ?? "",
-      "Documents/Obsidian/Seepient/Implementation-Specs/008-permission-system-redesign",
+      "Tailscale Share/Obsidian/Seepient/Implementation-Specs/008-permission-system-redesign",
     );
     if (!existsSync(vault)) {
       // Vault not present in this environment — skip silently.

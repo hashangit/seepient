@@ -14,7 +14,7 @@ if (!featureDir) {
   const home = process.env.HOME || '/Users/hashanw';
   featureDir = path.join(
     home,
-    'Documents/Obsidian/Seepient/Implementation-Specs/022-multi-tenant-isolation/022-1-readiness-remediation'
+    'Tailscale Share/Obsidian/Seepient/Implementation-Specs/022-multi-tenant-isolation/022-1-readiness-remediation'
   );
 }
 
