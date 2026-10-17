@@ -9,14 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Vendored inference library upgraded: `@earendil-works/pi-ai` 1.1.0 → 1.3.0** (both packages, lockstep). Upstream brings automatic retry for more transient provider failures (gateway upstream errors, `service is temporarily unavailable`, Vertex OAuth refresh hiccups), an Anthropic retry when the provider rejects a strict tool set, Mistral requests no longer aborting mid-generation when only the response headers were slow, OpenRouter placeholder prices no longer reporting −$1,000,000 per 1M tokens, and a batch of model-specific thinking fixes (Gemini 4 thinking levels on Vertex and the Gemini API, Claude Haiku 5.5 / Opus 5 `off` level, GPT-6 cache-preserving effort changes, Xiaomi MiMo `minimal`).
-- **Thinking from other models is now dropped on model switch, not inlined.** When a conversation switches models mid-stream — which Seepient's purpose×tier routing does within a session — thinking blocks produced by a different model are no longer sent to the new model as `<thinking>`-tagged text. The new model sees prior answers, not prior reasoning; previously it could treat the tagged reasoning as part of the assistant's reply and imitate it. (Upstream fix #10995; reasoning signatures only verify on the model that produced them.)
-- **Malformed tool-call arguments now fail loudly.** A tool call whose final arguments are broken JSON (an invalid `\u` escape such as `\usepackage`, for example) carries `argumentsError` and fails validation with the raw argument text, instead of silently executing with only the fields parsed before the error. Seepient already validated arguments before execution, so the practical change is that the failure surfaces earlier and the model sees exactly what it sent. (Upstream fix #10897.)
+- **Vendored inference library upgraded: `@earendil-works/pi-ai` 1.1.0 → 1.3.0** (both packages, lockstep). Upstream brings automatic retry for more transient provider failures (`service is temporarily unavailable`, gateway upstream errors, `unable to forward upstream`), an Anthropic retry when the provider rejects a strict tool set, Mistral requests no longer aborting mid-generation when only the response headers were slow, OpenRouter placeholder prices no longer reporting −$1,000,000 per 1M tokens, and model-specific thinking fixes (Gemini 4 thinking levels on Vertex and the Gemini API, Claude Haiku 5.5 / Opus 5 `off` level, GPT-6 cache-preserving effort changes, Xiaomi MiMo no longer offering unsupported thinking levels).
+- **An OpenRouter image model was removed upstream.** `openrouter:inclusionai/ming-image-0.1-design` no longer exists in pi-ai 1.3.0's OpenRouter catalog. Assignments pointing at it stop resolving; pick another image-capable model.
 
 ### Fixed
 
 - OpenCode Zen and OpenCode Go moved upstream to the `opencode.ai/inference` endpoints, fixing 404s for OpenCode Go Gemini models and adding Google Generative AI support to the provider; model resolution picks the new endpoints up from the catalog automatically.
-- kimi-coding now speaks the official Kimi Code protocol (`https://api.kimi.com/coding/v1`), so tools added mid-conversation no longer invalidate its prompt cache; custom `models.json` overrides of the kimi-coding base URL must now include `/v1`.
+- kimi-coding now dials the official Kimi Code endpoint (`https://api.kimi.com/coding/v1`), so tools added mid-conversation no longer invalidate its prompt cache. If you override the base URL of a kimi-coding account, it must now point at the `/v1` root.
+
+### Known limitation (cross-model replay)
+
+- **Thinking blocks from earlier turns still reach a newly selected model.** Upstream 1.3.0 drops (rather than inlines) thinking produced by a different model at provider switches, but Seepient's conversation replay stamps every prior assistant message with the current target's identity, so the upstream drop never fires here and prior-model reasoning can still enter the new model's context. Provenance threading through the replay path is tracked for a follow-up release.
 
 ## [v0.9.0] - 2026-10-07
 
