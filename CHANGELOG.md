@@ -5,7 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v0.9.0] - 2026-10-07
+## [v0.10.0] - 2026-10-18
+
+### Changed
+
+- **Vendored inference library upgraded: `@earendil-works/pi-ai` 1.1.0 → 1.3.0** (both packages, lockstep). Upstream brings automatic retry for more transient provider failures (gateway upstream errors, `service is temporarily unavailable`, Vertex OAuth refresh hiccups), an Anthropic retry when the provider rejects a strict tool set, Mistral requests no longer aborting mid-generation when only the response headers were slow, OpenRouter placeholder prices no longer reporting −$1,000,000 per 1M tokens, and a batch of model-specific thinking fixes (Gemini 4 thinking levels on Vertex and the Gemini API, Claude Haiku 5.5 / Opus 5 `off` level, GPT-6 cache-preserving effort changes, Xiaomi MiMo `minimal`).
+- **Thinking from other models is now dropped on model switch, not inlined.** When a conversation switches models mid-stream — which Seepient's purpose×tier routing does within a session — thinking blocks produced by a different model are no longer sent to the new model as `<thinking>`-tagged text. The new model sees prior answers, not prior reasoning; previously it could treat the tagged reasoning as part of the assistant's reply and imitate it. (Upstream fix #10995; reasoning signatures only verify on the model that produced them.)
+- **Malformed tool-call arguments now fail loudly.** A tool call whose final arguments are broken JSON (an invalid `\u` escape such as `\usepackage`, for example) carries `argumentsError` and fails validation with the raw argument text, instead of silently executing with only the fields parsed before the error. Seepient already validated arguments before execution, so the practical change is that the failure surfaces earlier and the model sees exactly what it sent. (Upstream fix #10897.)
+
+### Fixed
+
+- OpenCode Zen and OpenCode Go moved upstream to the `opencode.ai/inference` endpoints, fixing 404s for OpenCode Go Gemini models and adding Google Generative AI support to the provider; model resolution picks the new endpoints up from the catalog automatically.
+- kimi-coding now speaks the official Kimi Code protocol (`https://api.kimi.com/coding/v1`), so tools added mid-conversation no longer invalidate its prompt cache; custom `models.json` overrides of the kimi-coding base URL must now include `/v1`.
+
+
 
 ### Added
 

@@ -149,19 +149,24 @@ describe("T008: Live Structural Smoke Test (Drift-Tolerant)", () => {
 
 
 describe("026: image listing parity across the pi-ai 1.0 port", () => {
-  // The 0.87.1 image enumeration (builtinImagesModels().getModels()), captured
-  // before the port. Upstream may ADD image models; it must not silently drop
+  // Image-capable keys of the installed pi-ai catalog, captured at 1.3.0
+  // (re-baselined from the pre-port 0.87.1 snapshot: upstream removed
+  // openrouter:inclusionai/ming-image-0.1-design from the openrouter catalog
+  // in 1.3.0). Upstream may ADD image models; it must not silently drop
   // any that existed when users picked them.
-  const IMAGE_CATALOG_0_87_1: string[] = JSON.parse(
-    readFileSync(resolve(__dirname, "./fixtures/image-catalog-0.87.1.json"), "utf-8"),
+  const IMAGE_CATALOG_1_3_0: string[] = JSON.parse(
+    readFileSync(resolve(__dirname, "./fixtures/image-catalog-1.3.0.json"), "utf-8"),
   );
 
   it("every image model listed pre-port is still image-capable post-port", () => {
     const catalog = getSyncBuiltinCatalog();
-    const imageCapable = new Set(
-      catalog.filter((m) => m.capabilities.imageGenerate).map((m) => `${m.upstreamProvider}:${m.id}`),
-    );
-    const missing = IMAGE_CATALOG_0_87_1.filter((key) => !imageCapable.has(key));
+    const imageCapable: Record<string, true> = {};
+    for (const m of catalog) {
+      if (m.capabilities.imageGenerate) {
+        imageCapable[`${m.upstreamProvider}:${m.id}`] = true;
+      }
+    }
+    const missing = IMAGE_CATALOG_1_3_0.filter((key) => !imageCapable[key]);
     expect(missing, `image models dropped by the 1.0 port: ${missing.join(", ")}`).toEqual([]);
   });
 

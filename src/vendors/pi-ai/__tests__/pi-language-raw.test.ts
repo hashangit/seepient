@@ -415,7 +415,7 @@ describe("PiLanguageRaw backend (QS-P3.3)", () => {
     expect(capturedModel).toBeDefined();
     expect(capturedModel.id).toBe("glm-5");
     expect(capturedModel.provider).toBe("opencode");
-    expect(capturedModel.baseUrl).toBe("https://opencode.ai/zen/v1");
+    expect(capturedModel.baseUrl).toBe("https://opencode.ai/inference/v1");
   });
 
   it("extracts access token from nested piAuthContext in pi_oauth secrets", async () => {
