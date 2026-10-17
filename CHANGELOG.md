@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OpenCode Zen and OpenCode Go moved upstream to the `opencode.ai/inference` endpoints, fixing 404s for OpenCode Go Gemini models and adding Google Generative AI support to the provider; model resolution picks the new endpoints up from the catalog automatically.
 - kimi-coding now speaks the official Kimi Code protocol (`https://api.kimi.com/coding/v1`), so tools added mid-conversation no longer invalidate its prompt cache; custom `models.json` overrides of the kimi-coding base URL must now include `/v1`.
 
-
+## [v0.9.0] - 2026-10-07
 
 ### Added
 
