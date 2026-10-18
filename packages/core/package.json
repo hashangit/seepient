@@ -1,6 +1,6 @@
 {
   "name": "seepient-core",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "type": "module",
   "description": "Seepient's chat/agent engine — multi-turn chat, streaming, providers, and injectable stores, without the full agent's tools, sandbox, or UI.",
   "main": "./dist/transport/sdk/core.js",
