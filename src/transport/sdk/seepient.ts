@@ -393,6 +393,14 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     });
   }
 
+  // Spec 029 (M02 T028): hydration seam — seed externally owned product
+  // history exactly once per constructed agent (stateless adapter runs).
+  // Placed AFTER the system-prompt seed so hydrated rows never displace the
+  // engine's own instructions; the adapter maps only user/assistant rows.
+  if (opts.initialHistory?.length) {
+    messages.push(...opts.initialHistory);
+  }
+
   // Action lifecycle pipeline
   const { buildActionLifecycle } = await import(
     "../../domain/permissions/action-lifecycle-factory.js"

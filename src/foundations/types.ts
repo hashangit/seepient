@@ -301,6 +301,13 @@ export interface CreateSeepientOptions {
   /** Spec 022 Tenancy mode ("single" | "multi") and stateless declaration */
   tenancy?: "single" | "multi";
   stateless?: boolean;
+  /**
+   * Spec 029 (M02 T028): once-per-run hydration seam — seed externally owned
+   * product history at construction (the S08 adapter's hydrate-once rule).
+   * Exactly-once: applied only when no persisted session was loaded; the
+   * engine never writes back to the product store (single history authority).
+   */
+  initialHistory?: Message[];
 }
 
 export interface Seepient {

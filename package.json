@@ -130,6 +130,7 @@
     "ws": "^8.21.1"
   },
   "devDependencies": {
+    "@seepients/adapter-kit": "workspace:*",
     "@types/figlet": "^1.7.0",
     "@types/inquirer": "^9.0.9",
     "@types/js-yaml": "^4.0.9",
@@ -141,9 +142,9 @@
     "ink-testing-library": "^4.0.0",
     "ts-node": "^10.9.2",
     "tsx": "^4.21.0",
+    "turbo": "2.10.12",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.4",
-    "turbo": "2.10.12"
+    "vitest": "^4.1.4"
   },
   "packageManager": "pnpm@12.14.0"
 }
