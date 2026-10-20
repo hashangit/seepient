@@ -1,21 +1,21 @@
-import type { AskSeepientResult, Usage, Message, ApproveToolFn, StepResult } from "seepient-core/dist/foundations/types.js";
-import { runAgentLoop } from "seepient-core/dist/domain/agent-loop.js";
-import { createHookExecutor } from "seepient-core/dist/domain/hooks.js";
-import type { ToolRegistryContract } from "seepient-core/dist/foundations/contracts/tool.js";
-import { resolveTools, ToolRegistry } from "seepient-core/dist/domain/tool-executor.js";
+import type { AskSeepientResult, Usage, Message, ApproveToolFn, StepResult } from "seepient-engine/dist/foundations/types.js";
+import { runAgentLoop } from "seepient-engine/dist/domain/agent-loop.js";
+import { createHookExecutor } from "seepient-engine/dist/domain/hooks.js";
+import type { ToolRegistryContract } from "seepient-engine/dist/foundations/contracts/tool.js";
+import { resolveTools, ToolRegistry } from "seepient-engine/dist/domain/tool-executor.js";
 import { FULL_TOOL_MODULES } from "../sdk/full-registrations.js";
-import { now } from "seepient-core/dist/domain/context/message-convert.js";
-import { generateId } from "seepient-core/dist/foundations/id.js";
-import { createIsolatedProviderRuntime, type ProviderRuntime } from "seepient-core/dist/domain/providers/provider-runtime.js";
-import type { ProviderRuntimeContract } from "seepient-core/dist/foundations/contracts/provider-runtime.js";
-import type { Middleware } from "seepient-core/dist/foundations/contracts/middleware.js";
-import { extractLoopError } from "seepient-core/dist/transport/sdk/error-surfacing.js";
-import { normalizeHistoryForSend } from "seepient-core/dist/domain/sessions/normalize-history.js";
+import { now } from "seepient-engine/dist/domain/context/message-convert.js";
+import { generateId } from "seepient-engine/dist/foundations/id.js";
+import { createIsolatedProviderRuntime, type ProviderRuntime } from "seepient-engine/dist/domain/providers/provider-runtime.js";
+import type { ProviderRuntimeContract } from "seepient-engine/dist/foundations/contracts/provider-runtime.js";
+import type { Middleware } from "seepient-engine/dist/foundations/contracts/middleware.js";
+import { extractLoopError } from "seepient-engine/dist/transport/sdk/error-surfacing.js";
+import { normalizeHistoryForSend } from "seepient-engine/dist/domain/sessions/normalize-history.js";
 import { logTransportEvent } from "../logging.js";
-import { isGuardNeutralized } from "seepient-core/dist/foundations/test-seams.js";
+import { isGuardNeutralized } from "seepient-engine/dist/foundations/test-seams.js";
 import * as crypto from "node:crypto";
-import { initializeSkillRegistry } from "seepient-core/dist/capabilities/skills/index.js";
-import { buildSkillCatalog } from "seepient-core/dist/domain/skills/skill-catalog.js";
+import { initializeSkillRegistry } from "seepient-engine/dist/capabilities/skills/index.js";
+import { buildSkillCatalog } from "seepient-engine/dist/domain/skills/skill-catalog.js";
 
 /**
  * Resolve the skill catalog for a server-side request. Returns the system
@@ -24,8 +24,8 @@ import { buildSkillCatalog } from "seepient-core/dist/domain/skills/skill-catalo
  */
 async function resolveServerSkills(
   skills?: string[],
-  sources?: import("seepient-core/dist/foundations/contracts/skill-source.js").SkillSource[],
-): Promise<{ skillCatalog?: string; skillRegistry?: import("seepient-core/dist/capabilities/skills/types.js").SkillRegistry }> {
+  sources?: import("seepient-engine/dist/foundations/contracts/skill-source.js").SkillSource[],
+): Promise<{ skillCatalog?: string; skillRegistry?: import("seepient-engine/dist/capabilities/skills/types.js").SkillRegistry }> {
   try {
     const registry = await initializeSkillRegistry(process.cwd(), {
       tenancyMode: "multi",
@@ -61,19 +61,19 @@ export async function serverGenerateText(
     tools?: string[];
     maxSteps?: number;
     skills?: string[];
-    sources?: import("seepient-core/dist/foundations/contracts/skill-source.js").SkillSource[];
+    sources?: import("seepient-engine/dist/foundations/contracts/skill-source.js").SkillSource[];
     history?: Message[];
     runtime?: ProviderRuntime | ProviderRuntimeContract;
     toolRegistry?: ToolRegistryContract;
     /** Spec 008 wired pipeline (constructed by createServer). */
-    wiredPipeline?: import("seepient-core/dist/domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle;
+    wiredPipeline?: import("seepient-engine/dist/domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle;
     tenancyMode?: "single" | "multi";
     builtInTools?: boolean;
   },
   middleware?: Middleware[],
 ): Promise<AskSeepientResult> {
   if (options.runtime && (options.runtime as any).isIsolated !== true && options.tenancyMode === "multi") {
-    const { TenancyRuntimeRequiredError } = await import("seepient-core/dist/domain/tenancy/tenancy-mode.js");
+    const { TenancyRuntimeRequiredError } = await import("seepient-engine/dist/domain/tenancy/tenancy-mode.js");
     throw new TenancyRuntimeRequiredError();
   }
   const runtime = options.runtime ?? createIsolatedProviderRuntime();
@@ -165,13 +165,13 @@ export async function handleAgentChatStream(
     tools?: string[];
     maxSteps?: number;
     skills?: string[];
-    sources?: import("seepient-core/dist/foundations/contracts/skill-source.js").SkillSource[];
+    sources?: import("seepient-engine/dist/foundations/contracts/skill-source.js").SkillSource[];
     history?: Message[];
     approveTool?: ApproveToolFn;
     runtime?: ProviderRuntime | ProviderRuntimeContract;
     toolRegistry?: ToolRegistryContract;
     /** Spec 008 wired pipeline (constructed by createServer). */
-    wiredPipeline?: import("seepient-core/dist/domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle;
+    wiredPipeline?: import("seepient-engine/dist/domain/permissions/action-lifecycle-factory.js").WiredActionLifecycle;
     tenancyMode?: "single" | "multi";
     builtInTools?: boolean;
     onText: (chunk: string) => void;
@@ -185,7 +185,7 @@ export async function handleAgentChatStream(
   middleware?: Middleware[],
 ): Promise<void> {
   if (opts.runtime && (opts.runtime as any).isIsolated !== true && (opts as any).tenancyMode === "multi") {
-    const { TenancyRuntimeRequiredError } = await import("seepient-core/dist/domain/tenancy/tenancy-mode.js");
+    const { TenancyRuntimeRequiredError } = await import("seepient-engine/dist/domain/tenancy/tenancy-mode.js");
     throw new TenancyRuntimeRequiredError();
   }
   const runtime = opts.runtime ?? createIsolatedProviderRuntime();

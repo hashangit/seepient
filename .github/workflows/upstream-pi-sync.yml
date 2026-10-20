@@ -92,7 +92,7 @@ jobs:
 
           echo "Bumping exact pin to @earendil-works/pi-ai@${UPSTREAM_VER}..."
           pnpm add -w "@earendil-works/pi-ai@${UPSTREAM_VER}"
-          pnpm add "@earendil-works/pi-ai@${UPSTREAM_VER}" --filter seepient-core
+          pnpm add "@earendil-works/pi-ai@${UPSTREAM_VER}" --filter seepient-engine
 
           echo "Running verification..."
           set +e

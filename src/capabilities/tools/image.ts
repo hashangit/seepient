@@ -1,4 +1,4 @@
-import { ToolModule, APPROVAL_SCHEMA } from 'seepient-core/dist/foundations/contracts/tool.js';
+import { ToolModule, APPROVAL_SCHEMA } from 'seepient-engine/dist/foundations/contracts/tool.js';
 
 const toolDefinition = {
   type: "function",

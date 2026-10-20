@@ -12,8 +12,8 @@ import {
   isSecretField,
   isRestartRequired,
   SettingsCategory,
-} from 'seepient-core/dist/foundations/settings-schema.js';
-import type { SettingsManager } from 'seepient-core/dist/domain/settings/settings-manager.js';
+} from 'seepient-engine/dist/foundations/settings-schema.js';
+import type { SettingsManager } from 'seepient-engine/dist/domain/settings/settings-manager.js';
 
 // ── Value formatting ──────────────────────────────────────────────────────
 

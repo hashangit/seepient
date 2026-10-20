@@ -13,11 +13,11 @@ import type {
   FileCommitBroker as FileCommitBrokerContract,
   FileWriteMetadata,
   PreparationArtifactStore,
-} from "seepient-core/dist/foundations/contracts/execution-brokers.js";
-import type { CapabilityEnvelope } from "seepient-core/dist/foundations/contracts/permission-policy.js";
-import type { FileSnapshot } from "seepient-core/dist/foundations/contracts/tool-effects.js";
+} from "seepient-engine/dist/foundations/contracts/execution-brokers.js";
+import type { CapabilityEnvelope } from "seepient-engine/dist/foundations/contracts/permission-policy.js";
+import type { FileSnapshot } from "seepient-engine/dist/foundations/contracts/tool-effects.js";
 import type { NativeCommitHelper } from "../../vendors/native-fs-commit/index.js";
-import { UnsupportedBackendError } from "seepient-core/dist/foundations/errors.js";
+import { UnsupportedBackendError } from "seepient-engine/dist/foundations/errors.js";
 
 export interface FileCommitBrokerOptions {
   artifacts: PreparationArtifactStore;

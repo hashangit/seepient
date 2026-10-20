@@ -2,8 +2,8 @@
 /**
  * QS-2 — Core-only chat end-to-end (spec 027).
  *
- * Installs the PACKED seepient-core tarball into a clean temp dir and runs
- * the six contract flows using ONLY `seepient-core` imports (contracts/
+ * Installs the PACKED seepient-engine tarball into a clean temp dir and runs
+ * the six contract flows using ONLY `seepient-engine` imports (contracts/
  * core-package-surface.md §4). Because the full package is not installed,
  * any dynamic edge into a full-package module would crash the flow with
  * ERR_MODULE_NOT_FOUND — completion is itself the loaded-modules assert.
@@ -33,7 +33,7 @@ process.on("exit", () => {
   try { rmSync(workDir, { recursive: true, force: true }); } catch {}
   for (const t of tarballsToClean) { try { rmSync(t, { force: true }); } catch {} }
 });
-console.log("[qs-core-chat] packing seepient-core…");
+console.log("[qs-core-chat] packing seepient-engine…");
 const packOut = execSync("pnpm pack --json", { cwd: join(ROOT, "packages/core"), encoding: "utf8" });
 const tarballName = JSON.parse(packOut).filename;
 const tarball = join(ROOT, "packages/core", tarballName);
@@ -41,8 +41,8 @@ tarballsToClean.push(tarball);
 execSync(`npm install ${JSON.stringify(tarball)} --ignore-scripts --no-audit --no-fund --loglevel=error`, {
   cwd: workDir, stdio: "pipe", maxBuffer: 64 * 1024 * 1024,
 });
-const core = await import(pathToFileURL(join(workDir, "node_modules", "seepient-core", "dist", "transport", "sdk", "core.js")).href);
-console.log(`[qs-core-chat] installed seepient-core; ${Object.keys(core).length} runtime exports`);
+const core = await import(pathToFileURL(join(workDir, "node_modules", "seepient-engine", "dist", "transport", "sdk", "core.js")).href);
+console.log(`[qs-core-chat] installed seepient-engine; ${Object.keys(core).length} runtime exports`);
 
 // ── 2. the mock runtime (structural adapter, seeded config store) ──────────
 async function makeMockRuntime(script) {

@@ -3,7 +3,7 @@ import { useTheme } from "../hooks/use-theme.js";
 import type {
   ChangeProposal,
   ActivationStatus,
-} from "seepient-core/dist/foundations/contracts/self-evolution.js";
+} from "seepient-engine/dist/foundations/contracts/self-evolution.js";
 
 /**
  * Self-evolution candidate/verification/activation status panel (spec 008,

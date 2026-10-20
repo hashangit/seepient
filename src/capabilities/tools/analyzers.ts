@@ -10,7 +10,7 @@ import { createHash } from "node:crypto";
 import * as path from "node:path";
 import { realpathSync as fs_realpathSync, lstatSync as fs_lstatSync } from "node:fs";
 import { spawn } from "node:child_process";
-import type { PreparedToolAction, PreparedOperation } from "seepient-core/dist/foundations/contracts/prepared-action.js";
+import type { PreparedToolAction, PreparedOperation } from "seepient-engine/dist/foundations/contracts/prepared-action.js";
 import type {
   CanonicalPathTarget,
   EffectRequest,
@@ -20,14 +20,14 @@ import type {
   ToolEffectKind,
   ToolRiskCategory,
   ExternalRecipient,
-} from "seepient-core/dist/foundations/contracts/tool-effects.js";
-import type { PreparationArtifactStore } from "seepient-core/dist/foundations/contracts/execution-brokers.js";
-import type { ToolAnalysisContext } from "seepient-core/dist/foundations/contracts/custom-tools.js";
-import { generateId } from "seepient-core/dist/foundations/id.js";
-import { isGuardNeutralized } from "seepient-core/dist/foundations/test-seams.js";
-import { PathEscapesWorkspaceError, PathIdentityMismatchError } from "seepient-core/dist/foundations/errors.js";
-import { digestAction, digestArgs } from "seepient-core/dist/foundations/action-digest.js";
-import type { ToolAnalyzer } from "seepient-core/dist/foundations/contracts/tool-analyzer.js";
+} from "seepient-engine/dist/foundations/contracts/tool-effects.js";
+import type { PreparationArtifactStore } from "seepient-engine/dist/foundations/contracts/execution-brokers.js";
+import type { ToolAnalysisContext } from "seepient-engine/dist/foundations/contracts/custom-tools.js";
+import { generateId } from "seepient-engine/dist/foundations/id.js";
+import { isGuardNeutralized } from "seepient-engine/dist/foundations/test-seams.js";
+import { PathEscapesWorkspaceError, PathIdentityMismatchError } from "seepient-engine/dist/foundations/errors.js";
+import { digestAction, digestArgs } from "seepient-engine/dist/foundations/action-digest.js";
+import type { ToolAnalyzer } from "seepient-engine/dist/foundations/contracts/tool-analyzer.js";
 
 /**
  * Authorizes a read target path against the tenant's workspace ceiling (FR-002, FR-003).
@@ -335,7 +335,7 @@ export async function analyzeEditFile(
     throw new Error("Invalid patch: no valid [PATH#TAG] section headers found. Expected e.g. [/abs/path.ts#a1f2] where a1f2 is the content-tag from read_file");
   }
   if (!ctx.snapshotStore) {
-    const { HashlineError } = await import("seepient-core/dist/foundations/errors.js");
+    const { HashlineError } = await import("seepient-engine/dist/foundations/errors.js");
     throw new HashlineError("edit_file requires a snapshot store", "HASHLINE_NO_STORE", false);
   }
 
@@ -345,7 +345,7 @@ export async function analyzeEditFile(
   // bytes are prepared as artifacts and land through FileCommitBroker at
   // dispatch with `expected` snapshots — the capability envelope is finally
   // checked on the write that actually happens.
-  const { applySectionsToSnapshot } = await import("seepient-core/dist/foundations/hashline/patcher.js");
+  const { applySectionsToSnapshot } = await import("seepient-engine/dist/foundations/hashline/patcher.js");
   const [{ open: fsOpenSection }, { constants: fsConstants }] = await Promise.all([
     import("node:fs/promises"),
     import("node:fs"),
@@ -1019,7 +1019,7 @@ export async function analyzeGenerateImage(
     });
   }
 
-  const inputObj: Record<string, import("seepient-core/dist/foundations/contracts/tool-effects.js").JsonValue> = {};
+  const inputObj: Record<string, import("seepient-engine/dist/foundations/contracts/tool-effects.js").JsonValue> = {};
   if (args.prompt !== undefined) inputObj.prompt = args.prompt;
   if (outputCommit) inputObj.outputPath = outputCommit.destination.canonicalPath;
   if (imageTarget) {
@@ -1109,7 +1109,7 @@ export async function analyzeOptimizePrompt(
     },
   ];
 
-  const optInput: Record<string, import("seepient-core/dist/foundations/contracts/tool-effects.js").JsonValue> = {
+  const optInput: Record<string, import("seepient-engine/dist/foundations/contracts/tool-effects.js").JsonValue> = {
     raw_prompt: promptText,
   };
   if (contextText !== undefined) {

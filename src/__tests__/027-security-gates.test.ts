@@ -2,8 +2,8 @@
  * Spec 027 (T016, FR-008): security gates on both sides of the split.
  *
  * The engine-coupled security plane (tenancy stamping, inference egress
- * arming, permission/consent lifecycle) SHIPS IN seepient-core — the
- * workspace `seepient-core` specifier must resolve into packages/core, and
+ * arming, permission/consent lifecycle) SHIPS IN seepient-engine — the
+ * workspace `seepient-engine` specifier must resolve into packages/core, and
  * an engine-coupled journey must behave identically when driven through the
  * package path. The executor-bound suites (read-plane identity binding,
  * sandbox) keep running against the FULL package in their own files — this
@@ -12,14 +12,14 @@
 import { describe, it, expect } from "vitest";
 
 describe("027 security gates across the split (T016)", () => {
-  it("the seepient-core workspace specifier resolves into packages/core", () => {
-    const resolved = import.meta.resolve("seepient-core/dist/transport/sdk/core.js");
+  it("the seepient-engine workspace specifier resolves into packages/core", () => {
+    const resolved = import.meta.resolve("seepient-engine/dist/transport/sdk/core.js");
     expect(resolved.replace(/\\/g, "/")).toContain("packages/core/dist/transport/sdk/core.js");
   });
 
   it("an engine-coupled journey (tenancy upgrade) behaves identically through the package path", async () => {
     const { resolveTenancyMode } = await import(
-      "seepient-core/dist/domain/tenancy/tenancy-mode.js"
+      "seepient-engine/dist/domain/tenancy/tenancy-mode.js"
     );
     const upgraded = resolveTenancyMode({
       explicit: undefined,

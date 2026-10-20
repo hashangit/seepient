@@ -36,7 +36,7 @@ export class ToolRegistrationError extends SeepientError {
  * Per-agent tool registry holding built-in and explicitly registered custom/gateway tools.
  *
  * Default modules come from the package seam (spec 027): the full `seepient`
- * package registers its built-in barrel at composition roots; seepient-core
+ * package registers its built-in barrel at composition roots; seepient-engine
  * runs with zero built-in tools until the host registers its own.
  */
 export class ToolRegistry implements ToolRegistryContract {
@@ -340,7 +340,7 @@ export function resolveTools(tools?: ToolInput[], targetRegistry?: ToolRegistryC
           input,
           `Unknown tool "${input}".` +
             (ALL_TOOLS.includes(input)
-              ? ` Built-in tools ship with the full "seepient" package — install "seepient", or with seepient-core register a custom/trusted-host tool.`
+              ? ` Built-in tools ship with the full "seepient" package — install "seepient", or with seepient-engine register a custom/trusted-host tool.`
               : "") +
             availableSuffix,
         );

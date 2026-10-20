@@ -18,7 +18,7 @@ import {
 
 export type { ToolAnalyzer };
 
-/** The registered built-in analyzers (empty in seepient-core). */
+/** The registered built-in analyzers (empty in seepient-engine). */
 export function builtInAnalyzers(): Record<string, ToolAnalyzer> {
   return getBuiltInAnalyzers();
 }

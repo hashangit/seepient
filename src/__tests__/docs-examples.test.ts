@@ -77,14 +77,14 @@ describe('docs example import and runtime checks (FR-003)', () => {
         if (fenceHeader.includes('no-check')) continue;
 
         const code = match[1];
-        // seepient-core imports validate against the core entry surface.
-        const coreImportRegex = /import\s+\{([^}]+)\}\s+from\s+['"]seepient-core['"]/g;
+        // seepient-engine imports validate against the core entry surface.
+        const coreImportRegex = /import\s+\{([^}]+)\}\s+from\s+['"]seepient-engine['"]/g;
         let impMatch;
         while ((impMatch = coreImportRegex.exec(code)) !== null) {
           for (const spec of impMatch[1].split(',').map((x) => x.trim().split(/\s+as\s+/)[0].trim()).filter(Boolean)) {
             const cleanSpec = spec.replace(/^type\s+/, '');
             if (!knownCoreExports.has(cleanSpec)) {
-              unexportedImports.push(`${page}: imported "${cleanSpec}" from "seepient-core" is not exported`);
+              unexportedImports.push(`${page}: imported "${cleanSpec}" from "seepient-engine" is not exported`);
             }
           }
         }

@@ -64,7 +64,7 @@ export interface ChatSession {
  *
  * @example
  * ```ts
- * import { createChat, MemoryCredentialStore } from "seepient-core";
+ * import { createChat, MemoryCredentialStore } from "seepient-engine";
  *
  * const credentials = new MemoryCredentialStore();
  * await credentials.put("openai-main", {

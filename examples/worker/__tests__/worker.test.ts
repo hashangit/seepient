@@ -98,7 +98,7 @@ describe("QS-4: Reference Worker End-to-End", () => {
       sessionId: "session-xyz",
       workspaceDir,
       // Test double built by src helpers; the engine option type resolves
-      // through seepient-core (spec 027) — same shape, different declaration.
+      // through seepient-engine (spec 027) — same shape, different declaration.
       runtime: runtime as never,
       controlPlaneUrl: `http://127.0.0.1:${controlPlanePort}`,
       controlPlaneToken: "token-user-123",

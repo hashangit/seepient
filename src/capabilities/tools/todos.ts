@@ -1,4 +1,4 @@
-import { ToolModule } from 'seepient-core/dist/foundations/contracts/tool.js';
+import { ToolModule } from 'seepient-engine/dist/foundations/contracts/tool.js';
 
 /**
  * manage_todos — a presentation tool that lets the agent maintain a visible

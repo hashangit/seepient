@@ -6,7 +6,7 @@
  * Transport and UI (S-12); the full package's composition roots call this
  * once at load.
  */
-import { registerDiscoverySourceLoaders } from "seepient-core/dist/foundations/injection-seams.js";
+import { registerDiscoverySourceLoaders } from "seepient-engine/dist/foundations/injection-seams.js";
 
 export function registerDiscoverySources(): void {
   registerDiscoverySourceLoaders({

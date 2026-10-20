@@ -1,6 +1,6 @@
 import { Box, Text } from 'ink';
 import { useTheme } from '../hooks/use-theme.js';
-import type { CumulativeUsage } from 'seepient-core/dist/foundations/types.js';
+import type { CumulativeUsage } from 'seepient-engine/dist/foundations/types.js';
 
 interface FooterProps {
   providerType: string;

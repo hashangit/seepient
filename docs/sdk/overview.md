@@ -25,7 +25,7 @@ Every layer delegates to the same core agent loop, so tool execution, hook lifec
 The SDK is built around plain functions and plain objects, not class instances:
 
 - **`askSeepient(prompt, options?)`** -- returns a `Promise<AskSeepientResult>`, or a `Promise<AskSeepientStreamResult>` with async iterables when `{ stream: true }`
-- **`createChat(options?)`** -- returns a `Promise<ChatSession>` with `.send()`, `.stream()`, and the session-owned `messages` history (ships in `seepient-core`)
+- **`createChat(options?)`** -- returns a `Promise<ChatSession>` with `.send()`, `.stream()`, and the session-owned `messages` history (ships in `seepient-engine`)
 - **`createSeepient(options?)`** -- returns a `Promise<Seepient>` with `.chat()`, `.chatStream()`, and lifecycle methods
 
 Configuration is passed as options objects. Return types are plain interfaces. There are no base classes to extend.
@@ -53,7 +53,7 @@ yarn add seepient
 :::
 
 ::: tip Serverless or SDK-only?
-Install [`seepient-core`](/sdk/stateless-workers#slim-install-for-serverless-seepient-core) instead — the same chat/agent engine without the full agent's built-in tools, sandbox, and gateway (a ~102 MB closure vs ~301 MB).
+Install [`seepient-engine`](/sdk/stateless-workers#slim-install-for-serverless-seepient-engine) instead — the same chat/agent engine without the full agent's built-in tools, sandbox, and gateway (a ~102 MB closure vs ~301 MB).
 :::
 
 ## Import patterns
@@ -211,7 +211,7 @@ Pass tool names as strings, or use group names (`"core"`, `"comm"`, `"advanced"`
 
 | Page | Description |
 |------|-------------|
-| [createChat()](/sdk/stateless-workers) | Multi-turn chat session owning its history — the slimmest shape, shipped in `seepient-core` |
+| [createChat()](/sdk/stateless-workers) | Multi-turn chat session owning its history — the slimmest shape, shipped in `seepient-engine` |
 | [createSeepient()](/sdk/create-seepient) | Stateful multi-turn agent with session persistence and provider management |
 | [askSeepient()](/sdk/ask-seepient) | One-shot agent execution (streaming via `stream: true`) with automatic tool loops and security boundaries |
 | [Settings API](/sdk/settings) | Programmatic configuration facade for reading, updating, and watching settings |

@@ -177,7 +177,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
 
   // Review P1-3 + round-3 P2-3 + gate r1 P2-c: the "serverless" persona
   // constructs on read-only $HOME. When ambient store defaults are
-  // unregistered (seepient-core), ANY single-mode construction defaults to
+  // unregistered (seepient-engine), ANY single-mode construction defaults to
   // the in-memory store set — zero ambient writes — sessionful or not (the
   // one-shot path in ask.ts already keyed the flag without the stateless
   // conjunct; this construction now agrees, which is what makes the
@@ -442,7 +442,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   // generate_image and other media fetches running after agent.abort()
   // (the same regression W110 fixed for askSeepient).
   // Spec 027 FR-009: the factory arrives via registration; unregistered
-  // (seepient-core) leaves it undefined — media turns deny typed.
+  // (seepient-engine) leaves it undefined — media turns deny typed.
   const mediaFactory = getMediaVendorOperationHandlerFactory();
   const makeVendorHandler = (streamOpts?: {
     signal?: AbortSignal;
@@ -467,7 +467,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
         }
       : undefined;
   // Spec 027 FR-012: the full package injects the boundary-carrying
-  // pipeline; seepient-core defaults to the light boundary (trusted-host and
+  // pipeline; seepient-engine defaults to the light boundary (trusted-host and
   // none operations only — no sandbox, broker, or native helper).
   const boundary = await resolveTurnBoundary({
     artifacts: sharedArtifacts,
@@ -964,7 +964,7 @@ async function chat(userMessage: string): Promise<AgentResponse> {
   // ── Provider Management Methods ─────────────────────────────────────────
 
   // Spec 027: the provider-management API is a full-package impl arriving
-  // via registration; seepient-core provider mutations deny typed below.
+  // via registration; seepient-engine provider mutations deny typed below.
   const pmApiFactory = getProviderManagerApiFactory();
   const managerApi = pmApiFactory && typeof runtime.getConfigStore === "function"
     ? await pmApiFactory(runtime as ProviderRuntime)

@@ -12,19 +12,19 @@
  * history. Secret values are never placed in the prepared action; only
  * `secretRefs` (opaque names the broker resolves internally).
  */
-import { digestAction, digestArgs } from "seepient-core/dist/foundations/action-digest.js";
+import { digestAction, digestArgs } from "seepient-engine/dist/foundations/action-digest.js";
 import { createHash } from "node:crypto";
 import * as path from "node:path";
-import type { PreparedToolAction } from "seepient-core/dist/foundations/contracts/prepared-action.js";
+import type { PreparedToolAction } from "seepient-engine/dist/foundations/contracts/prepared-action.js";
 import type {
   EffectRequest,
   NetworkDestination,
   ToolEffectKind,
   ToolRiskCategory,
   ExternalRecipient,
-} from "seepient-core/dist/foundations/contracts/tool-effects.js";
-import type { ToolAnalysisContext } from "seepient-core/dist/foundations/contracts/custom-tools.js";
-import { generateId } from "seepient-core/dist/foundations/id.js";
+} from "seepient-engine/dist/foundations/contracts/tool-effects.js";
+import type { ToolAnalysisContext } from "seepient-engine/dist/foundations/contracts/custom-tools.js";
+import { generateId } from "seepient-engine/dist/foundations/id.js";
 import {
   canonicalizePath,
 

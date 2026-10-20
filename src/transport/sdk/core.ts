@@ -1,5 +1,5 @@
 /**
- * seepient-core — public entry point (spec 027).
+ * seepient-engine — public entry point (spec 027).
  *
  * The chat/agent engine surface: `createSeepient` (incl. the `stateless`
  * option) with the `chatStream` instance method, the `askSeepient` one-shot,

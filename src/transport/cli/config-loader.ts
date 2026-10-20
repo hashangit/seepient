@@ -5,7 +5,7 @@
  */
 
 import chalk from 'chalk';
-import type { AppConfig } from 'seepient-core/dist/foundations/config.js';
+import type { AppConfig } from 'seepient-engine/dist/foundations/config.js';
 import {
   loadJsonConfig as coreLoadJsonConfig,
   loadMergedConfig as coreLoadMergedConfig,
@@ -16,7 +16,7 @@ import {
   saveConfig as coreSaveConfig,
   writeConfigToPath as coreWriteConfigToPath,
   maskSecret,
-} from 'seepient-core/dist/foundations/config.js';
+} from 'seepient-engine/dist/foundations/config.js';
 
 // ── Re-exports (unchanged API for CLI consumers) ───────────────────────
 

@@ -19,23 +19,23 @@ import type {
   EffectBroker as EffectBrokerContract,
   BrokerAuthContext,
   BrokeredEffectResult,
-} from "seepient-core/dist/foundations/contracts/execution-brokers.js";
+} from "seepient-engine/dist/foundations/contracts/execution-brokers.js";
 import type {
   BrokeredEffectRequest,
   PreparedArtifactRef,
-} from "seepient-core/dist/foundations/contracts/prepared-action.js";
-import type { CapabilityEnvelope, Capability } from "seepient-core/dist/foundations/contracts/permission-policy.js";
-import type { NetworkDestination } from "seepient-core/dist/foundations/contracts/tool-effects.js";
-import type { PreparationArtifactStore } from "seepient-core/dist/foundations/contracts/execution-brokers.js";
+} from "seepient-engine/dist/foundations/contracts/prepared-action.js";
+import type { CapabilityEnvelope, Capability } from "seepient-engine/dist/foundations/contracts/permission-policy.js";
+import type { NetworkDestination } from "seepient-engine/dist/foundations/contracts/tool-effects.js";
+import type { PreparationArtifactStore } from "seepient-engine/dist/foundations/contracts/execution-brokers.js";
 import { createHash } from "node:crypto";
 import { PersistedReplayLedger, type ReplayLedger } from "./persisted-replay-ledger.js";
-import { InMemoryReplayLedger } from "seepient-core/dist/capabilities/execution/in-memory-replay-ledger.js";
-import { resolveSecretRef } from "seepient-core/dist/foundations/security/credential-resolver.js";
-import { isGuardNeutralized } from "seepient-core/dist/foundations/test-seams.js";
-import { createSetupFailure } from "seepient-core/dist/foundations/contracts/setup-failure.js";
-import { isMetadataIp, isPrivateIp } from "seepient-core/dist/foundations/network/ip-classifier.js";
-import { safeSsrfFetch } from "seepient-core/dist/foundations/network/ssrf-fetch.js";
-import { pinnedFetch } from "seepient-core/dist/foundations/network/pinned-fetch.js";
+import { InMemoryReplayLedger } from "seepient-engine/dist/capabilities/execution/in-memory-replay-ledger.js";
+import { resolveSecretRef } from "seepient-engine/dist/foundations/security/credential-resolver.js";
+import { isGuardNeutralized } from "seepient-engine/dist/foundations/test-seams.js";
+import { createSetupFailure } from "seepient-engine/dist/foundations/contracts/setup-failure.js";
+import { isMetadataIp, isPrivateIp } from "seepient-engine/dist/foundations/network/ip-classifier.js";
+import { safeSsrfFetch } from "seepient-engine/dist/foundations/network/ssrf-fetch.js";
+import { pinnedFetch } from "seepient-engine/dist/foundations/network/pinned-fetch.js";
 
 /**
  * Broker address denial (W141): the exact byte-level classification the

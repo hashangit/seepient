@@ -27,7 +27,7 @@ function check(name, cond, detail) {
 }
 
 // The REAL compiled artifacts — a plain-node import resolves the root
-// package's dist output and its seepient-core dependency through the
+// package's dist output and its seepient-engine dependency through the
 // workspace symlink. No vitest alias, no src.
 const fullEntry = await import(pathToFileURL(join(ROOT, "dist", "transport", "sdk", "index.js")).href);
 

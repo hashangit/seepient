@@ -1,7 +1,7 @@
 /**
  * Light execution boundary — Capabilities (spec 027 FR-012).
  *
- * The seepient-core default pipeline's boundary: executes `trusted-host` and
+ * The seepient-engine default pipeline's boundary: executes `trusted-host` and
  * `none` operations only, with no sandbox, effect broker, or native helper.
  * Any other operation kind fails closed with a typed denial naming the full
  * `seepient` package — never a mid-conversation module-not-found.
@@ -41,7 +41,7 @@ class LightExecutorRegistry extends OperationExecutorRegistry {
           actionDigest: action.actionDigest,
           message:
             `Operation "${err.operationKind ?? "?"}" requires executor machinery that ships with ` +
-            `the full "seepient" package (not present in seepient-core). Install "seepient", ` +
+            `the full "seepient" package (not present in seepient-engine). Install "seepient", ` +
             `or use trusted-host tools that execute in your own host code.`,
         });
       }

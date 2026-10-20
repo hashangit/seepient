@@ -1,13 +1,13 @@
-# seepient-core
+# seepient-engine
 
-`seepient-core` is the chat engine from [Seepient](https://github.com/hashangit/seepient), packaged on its own. Multi-turn chat, streaming, tools that run in your own code, a provider system, and storage you inject. It does not ship the full agent's built-in tools, sandbox, browser, email, media generation, or terminal UI. A clean install is ~102 MB; the full [seepient](https://www.npmjs.com/package/seepient) package is ~301 MB.
+`seepient-engine` is the chat engine from [Seepient](https://github.com/hashangit/seepient), packaged on its own. Multi-turn chat, streaming, tools that run in your own code, a provider system, and storage you inject. It does not ship the full agent's built-in tools, sandbox, browser, email, media generation, or terminal UI. A clean install is ~102 MB; the full [seepient](https://www.npmjs.com/package/seepient) package is ~301 MB.
 
 Requires Node 22.19+.
 
 ## Install
 
 ```sh
-npm install seepient-core
+npm install seepient-engine
 ```
 
 ## Quickstart
@@ -17,7 +17,7 @@ This is a complete program. It sends one turn, streams the next, and fails loudl
 The examples use top-level `await`, so save them as `.mts` (or add `"type": "module"` to your package.json) and run with `npx tsx`.
 
 ```ts
-import { createChat, MemoryCredentialStore } from 'seepient-core';
+import { createChat, MemoryCredentialStore } from 'seepient-engine';
 
 const credentials = new MemoryCredentialStore();
 await credentials.put('openai-main', {
@@ -69,7 +69,7 @@ About the credentials part, because it is the only ceremony in the example: the 
 **`createSeepient`** is the longer-lived agent. Keep one instance per user or conversation, add a session id and a persistence store to survive restarts, and gate tool calls with your own consent check.
 
 ```ts
-import { createSeepient } from 'seepient-core';
+import { createSeepient } from 'seepient-engine';
 
 const agent = await createSeepient({
   tenancy: 'single',
@@ -86,7 +86,7 @@ const stream = await agent.chatStream('And stream the next one.');
 **`askSeepient`** is the one-shot. One call in, one result out, no state kept. Pass `{ stream: true }` for streaming.
 
 ```ts
-import { askSeepient } from 'seepient-core';
+import { askSeepient } from 'seepient-engine';
 
 const answer = await askSeepient('What is 2+2?', {
   tenancy: 'single',
@@ -101,7 +101,7 @@ All three accept the same provider, credential, and store options, so moving bet
 The engine ships no tools; you register your own. A trusted-host tool executes in your process, the model sees the result, and the turn continues.
 
 ```ts
-import { createChat, trustedHostTool } from 'seepient-core';
+import { createChat, trustedHostTool } from 'seepient-engine';
 
 const getBalance = trustedHostTool({
   definition: {
@@ -139,7 +139,7 @@ Provider accounts with `upstreamProvider: 'openai'` or `'openai-compatible'` sen
 
 ## What is not in the box
 
-The full [seepient](https://www.npmjs.com/package/seepient) package adds the built-in tools (files, shell, browser, email, media generation), the OS sandbox, the MCP gateway, and the CLI, TUI, and server. From `seepient-core`, those refuse to load or run with a typed error that names `seepient`. Nothing crashes mid-conversation:
+The full [seepient](https://www.npmjs.com/package/seepient) package adds the built-in tools (files, shell, browser, email, media generation), the OS sandbox, the MCP gateway, and the CLI, TUI, and server. From `seepient-engine`, those refuse to load or run with a typed error that names `seepient`. Nothing crashes mid-conversation:
 
 - Registering a built-in tool name like `read_file` is rejected at registration.
 - Media and image generation without a registered vendor denies with a typed error.
@@ -148,11 +148,11 @@ The full [seepient](https://www.npmjs.com/package/seepient) package adds the bui
 
 ## If the full seepient is also loaded
 
-Importing the full `seepient` package anywhere in the same process (the library, the server, or the CLI) flips the engine's defaults for every agent in that process, including ones you built through `seepient-core`. Keep serverless deployments single-package.
+Importing the full `seepient` package anywhere in the same process (the library, the server, or the CLI) flips the engine's defaults for every agent in that process, including ones you built through `seepient-engine`. Keep serverless deployments single-package.
 
 ## No deep imports
 
-`seepient-core/dist/...` paths are reserved for the full package's internals and carry no stability promise. Import from the package root.
+`seepient-engine/dist/...` paths are reserved for the full package's internals and carry no stability promise. Import from the package root.
 
 ## Where to read more
 

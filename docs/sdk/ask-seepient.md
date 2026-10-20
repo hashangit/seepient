@@ -621,10 +621,10 @@ When running in streaming mode (`stream: true`), a failed turn is observable eve
 | Primary use case | One-shot scripts, server endpoints, background jobs, workers | App-managed chat sessions (serverless functions, bots) | Interactive chats, multi-turn dialogues, assistant bots |
 | Streaming | Pass `{ stream: true }` | `chat.stream(text)` | Call `agent.chatStream(prompt)` |
 | Memory usage | Discarded immediately after execution | Kept in the session object | Kept in memory or loaded from session backend |
-| Package | `seepient` and `seepient-core` | `seepient` and `seepient-core` | `seepient` and `seepient-core` |
+| Package | `seepient` and `seepient-engine` | `seepient` and `seepient-engine` | `seepient` and `seepient-engine` |
 
 - Choose **`askSeepient()`** when each request is independent, when managing conversation history in your own database, or when building background automation tasks.
-- Choose **`createChat()`** when you want multi-turn continuity with the session object owning the history — the slimmest multi-turn shape, and the front door of [`seepient-core`](/sdk/stateless-workers), the engine-only package for serverless installs.
+- Choose **`createChat()`** when you want multi-turn continuity with the session object owning the history — the slimmest multi-turn shape, and the front door of [`seepient-engine`](/sdk/stateless-workers), the engine-only package for serverless installs.
 - Choose **`createSeepient()`** when you need multi-turn continuity plus the provider-management methods and session backends.
 
-All three rungs accept the same providers/credential option family (`providers`, `modelAssignments`, `credentials`, `adapter`) and reach the vendor through the same runtime bootstrap. In `seepient-core` the engine, tenancy, and consent machinery are identical; what differs is absence of the full package's built-in tools, sandbox, and MCP gateway — those deny typed, naming `seepient`.
+All three rungs accept the same providers/credential option family (`providers`, `modelAssignments`, `credentials`, `adapter`) and reach the vendor through the same runtime bootstrap. In `seepient-engine` the engine, tenancy, and consent machinery are identical; what differs is absence of the full package's built-in tools, sandbox, and MCP gateway — those deny typed, naming `seepient`.
