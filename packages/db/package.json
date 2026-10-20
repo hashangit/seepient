@@ -1,0 +1,36 @@
+{
+  "name": "@seepients/db",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "generate": "prisma generate",
+    "migrate": "prisma migrate deploy",
+    "migrate:dev": "prisma migrate dev",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --root ../.. packages/db/src"
+  },
+  "dependencies": {
+    "@seepients/adapter-kit": "workspace:*",
+    "@prisma/adapter-pg": "7.10.0",
+    "@prisma/client": "7.10.0",
+    "@seepients/contracts": "workspace:*",
+    "@seepients/core": "workspace:*",
+    "@seepients/logging": "workspace:*",
+    "pg": "8.23.0",
+    "dotenv": "17.4.2"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1",
+    "prisma": "7.10.0",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
+  }
+}

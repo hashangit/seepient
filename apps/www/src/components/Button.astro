@@ -1,0 +1,18 @@
+---
+type Props = {
+  href: string;
+  variant?: "primary" | "secondary";
+  size?: "md" | "sm";
+  external?: boolean;
+};
+
+const { href, variant = "primary", size = "md", external = false } = Astro.props;
+---
+
+<a
+  class:list={["button", `button--${variant}`, size === "sm" && "button--small"]}
+  href={href}
+  {...(external ? { target: "_blank", rel: "noreferrer" } : {})}
+>
+  <slot />
+</a>

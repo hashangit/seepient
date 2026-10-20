@@ -1,0 +1,151 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { RECREATED_SERVICES } from "@seepients/core";
+import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
+
+interface ComposeService {
+  image?: string;
+  profiles?: string[];
+  ports?: unknown[];
+  networks?: string[];
+  volumes?: string[];
+  environment?: Record<string, string>;
+  env_file?: unknown;
+  command?: unknown;
+  user?: string;
+}
+
+const composeFile = path.resolve(import.meta.dirname, "../../compose/docker-compose.prod.yml");
+const compose = parse(readFileSync(composeFile, "utf8")) as {
+  services: Record<string, ComposeService>;
+  networks: Record<string, unknown>;
+};
+const updater = compose.services.updater as ComposeService;
+
+describe("the production computer provider", () => {
+  it.each(["api", "worker"])("lets .env select the %s provider with an E2B default", (name) => {
+    expect(compose.services[name]?.env_file).toEqual(["../../.env"]);
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: this is the literal Compose expression
+    expect(compose.services[name]?.environment?.SANDBOX_PROVIDER).toBe("${SANDBOX_PROVIDER:-e2b}");
+  });
+});
+
+/**
+ * The updater holds the Docker socket, which is root-equivalent on the host. These are the
+ * properties that keep that from being reachable by anything but the API, and they are easy to
+ * break by accident in YAML, so they are asserted rather than reviewed.
+ */
+/** The Compose interpolation this file is expected to carry, as Compose spells it. */
+const interpolated = (name: string, fallback = "") => `\${${name}:-${fallback}}`;
+
+describe("the updater compose service", () => {
+  it("exists and runs the updater image", () => {
+    expect(updater).toBeDefined();
+    expect(updater.image).toMatch(/updater/);
+  });
+
+  it("is opt-in because it grants root-equivalent Docker access", () => {
+    expect(updater.profiles).toEqual(["updater"]);
+  });
+
+  it("publishes nothing on the host", () => {
+    expect(updater.ports).toBeUndefined();
+  });
+
+  it("shares a dedicated control network with the API and not Caddy", () => {
+    expect(updater.networks).toEqual(["control"]);
+    expect(compose.services.api?.networks).toContain("control");
+    expect(compose.services.caddy?.networks).not.toContain("control");
+    expect(compose.networks).toHaveProperty("control");
+  });
+
+  it("is the only service holding the Docker socket", () => {
+    const withSocket = Object.entries(compose.services)
+      .filter(([, service]) =>
+        (service.volumes ?? []).some((volume) => volume.includes("docker.sock")),
+      )
+      .map(([name]) => name);
+    expect(withSocket).toEqual(["updater"]);
+  });
+
+  it("is bind-mounted at the same path it has on the host", () => {
+    const mount = (updater.volumes ?? []).find((volume) => volume.includes("SEEPIENTS_DEPLOY_DIR"));
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: this is the literal Compose expression
+    const deployDir = "${SEEPIENTS_DEPLOY_DIR:-/srv/seepients}";
+    const separatorIndex = mount?.indexOf("}:${") ?? -1;
+    const source = separatorIndex < 0 ? undefined : mount?.slice(0, separatorIndex + 1);
+    const destination = separatorIndex < 0 ? undefined : mount?.slice(separatorIndex + 2);
+    expect(updater.environment?.SEEPIENTS_DEPLOY_DIR).toBe(deployDir);
+    expect(mount).toBe(`${deployDir}:${deployDir}`);
+    expect(source).toBe(destination);
+  });
+
+  it("is not one of the services an update recreates", () => {
+    expect(RECREATED_SERVICES).not.toContain("updater");
+    for (const service of RECREATED_SERVICES) {
+      expect(Object.keys(compose.services)).toContain(service);
+    }
+  });
+
+  it("pins its own image tag separately from the application image", () => {
+    expect(updater.image).toContain("SEEPIENTS_UPDATER_IMAGE_TAG");
+    for (const service of RECREATED_SERVICES) {
+      expect(compose.services[service]?.image).toContain("SEEPIENTS_IMAGE_TAG");
+    }
+  });
+
+  it("uses the official registry namespace and digest-pins third-party runtime images", () => {
+    expect(updater.image).toContain("ghcr.io/elie222/seepients/updater");
+    expect(compose.services.api?.image).toContain("ghcr.io/elie222/seepients/app");
+    expect(compose.services.postgres?.image).toMatch(
+      /^\$\{POSTGRES_IMAGE:-postgres:16@sha256:e17e86066e5ef83e0952a9347f5c792b7ece00972e2aa787a6986f471b3dd3d5\}$/,
+    );
+    expect(compose.services.caddy?.image).toMatch(
+      /^\$\{CADDY_IMAGE:-caddy:2@sha256:df7f1c2fb114453b951de51a98efc010db1655a92c2e86be6706714e2417a78d\}$/,
+    );
+  });
+
+  it("lets a deployment name its own Compose files and extra services", () => {
+    // resolveUpdaterConfig reads these from the sidecar's environment, and the sidecar's
+    // environment is exactly what this file declares. Pinning them here would make the documented
+    // variables inert: the operator sets them, the updater never sees them, and the overlay is
+    // dropped on every recreate.
+    expect(updater.environment?.SEEPIENTS_COMPOSE_FILE).toBe(
+      interpolated("SEEPIENTS_COMPOSE_FILE", "infra/compose/docker-compose.prod.yml"),
+    );
+    expect(updater.environment?.SEEPIENTS_UPDATE_SERVICES).toBe(
+      interpolated("SEEPIENTS_UPDATE_SERVICES"),
+    );
+    expect(updater.environment?.COMPOSE_PATH_SEPARATOR).toBe(
+      interpolated("COMPOSE_PATH_SEPARATOR"),
+    );
+  });
+
+  it("injects the actual Compose project name into the updater container", () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: this is the literal Compose expression
+    expect(updater.environment?.COMPOSE_PROJECT_NAME).toBe("${COMPOSE_PROJECT_NAME:-seepients-prod}");
+  });
+
+  it("does not load the application env_file into the root-equivalent process", () => {
+    expect(updater.env_file).toBeUndefined();
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: this is the literal Compose expression
+    expect(updater.environment?.SEEPIENTS_UPDATER_TOKEN).toBe("${SEEPIENTS_UPDATER_TOKEN:-}");
+  });
+
+  it("does not let the api container reach the Docker socket to update itself", () => {
+    expect(compose.services.api?.volumes ?? []).not.toContain("/var/run/docker.sock");
+    expect(compose.services.api?.environment?.SEEPIENTS_UPDATER_URL).toBe("http://updater:7092");
+  });
+
+  it("passes logging configuration without using env_file", () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: this is the literal Compose expression
+    expect(updater.environment?.LOG_LEVEL).toBe("${LOG_LEVEL:-info}");
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: this is the literal Compose expression
+    expect(updater.environment?.AXIOM_TOKEN).toBe("${AXIOM_TOKEN:-}");
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: this is the literal Compose expression
+    expect(updater.environment?.AXIOM_DATASET).toBe("${AXIOM_DATASET:-}");
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: this is the literal Compose expression
+    expect(updater.environment?.AXIOM_EDGE_URL).toBe("${AXIOM_EDGE_URL:-}");
+  });
+});

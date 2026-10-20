@@ -1,0 +1,28 @@
+{
+  "name": "@seepients/auth",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --root ../.. packages/auth/src"
+  },
+  "dependencies": {
+    "@better-auth/expo": "1.7.7",
+    "@seepients/adapter-kit": "workspace:*",
+    "@seepients/core": "workspace:*",
+    "@seepients/db": "workspace:*",
+    "better-auth": "1.7.7"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
+  }
+}

@@ -1,0 +1,29 @@
+appId: com.seepients.app
+---
+- runFlow: launch-app.yaml
+- runFlow:
+    when:
+      visible: "Sign up for Seepients"
+    commands:
+      - tapOn: "Sign in"
+- extendedWaitUntil:
+    visible: "Sign in to Seepients"
+    timeout: 15000
+- tapOn: "Email"
+- inputText: ${SEEPIENTS_ACTIVE_EMAIL}
+- tapOn: "Password"
+- inputText: ${SEEPIENTS_SCREENSHOT_PASSWORD}
+- hideKeyboard
+- tapOn: "Sign in"
+- tapOn:
+    text: "Not Now"
+    optional: true
+- tapOn:
+    text: "Don’t allow"
+    optional: true
+- tapOn:
+    text: "Don't allow"
+    optional: true
+- extendedWaitUntil:
+    visible: "Account"
+    timeout: 40000
