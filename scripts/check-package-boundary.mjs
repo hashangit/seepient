@@ -257,13 +257,13 @@ const INFRA_CLASSES = { "sandbox-supervisor": "CompositionRoot", updater: "Vendo
  * A new class-level edge requires a migration-exceptions.md entry.
  */
 const CLASS_EDGES = {
-  Contract: new Set(["Contract"]),
-  Vendor: new Set(["Contract", "Capability", "Vendor", "DomainApp"]),
-  Capability: new Set(["Contract", "Capability", "Vendor", "DomainApp"]),
-  UI: new Set(["Contract", "DomainApp", "UI"]),
-  DomainApp: new Set(["Contract"]),
-  CompositionRoot: new Set(["Contract", "Capability", "Vendor", "DomainApp", "UI"]),
-  TestInfra: new Set(["Contract", "Capability", "Vendor", "DomainApp", "UI", "CompositionRoot"]),
+  Contract: ["Contract"],
+  Vendor: ["Contract", "Capability", "Vendor", "DomainApp"],
+  Capability: ["Contract", "Capability", "Vendor", "DomainApp"],
+  UI: ["Contract", "DomainApp", "UI"],
+  DomainApp: ["Contract"],
+  CompositionRoot: ["Contract", "Capability", "Vendor", "DomainApp", "UI"],
+  TestInfra: ["Contract", "Capability", "Vendor", "DomainApp", "UI", "CompositionRoot"],
 };
 
 /** Renderer process roots (client runtime only; test files excluded). */
@@ -366,7 +366,7 @@ function scanAppLayering(base = ROOT) {
         if (!targetPkg) continue;
         const targetCls = PACKAGE_CLASSES[targetPkg] ?? APP_CLASSES[targetPkg] ?? INFRA_CLASSES[targetPkg];
         if (!targetCls) continue;
-        if (!(CLASS_EDGES[from.cls] ?? new Set()).has(targetCls)) {
+        if (!(CLASS_EDGES[from.cls] ?? []).includes(targetCls)) {
           const line = source.split("\n").findIndex((l) => l.includes(spec)) + 1;
           violations.push(
             `L-1 (app-layering): ${relFile}:${line} — ${from.cls} (${from.pkg}) imports ${targetCls} (${targetPkg}) outside the §2.2 table; add a migration-exceptions.md entry or restructure`,
