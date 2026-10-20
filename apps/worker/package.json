@@ -15,7 +15,8 @@
     "@seepients/core": "workspace:*",
     "@seepients/db": "workspace:*",
     "@seepients/logging": "workspace:*",
-    "@seepients/memory": "workspace:*"
+    "@seepients/memory": "workspace:*",
+    "seepient": "workspace:*"
   },
   "devDependencies": {
     "typescript": "7.0.2",

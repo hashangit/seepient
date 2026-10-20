@@ -99,6 +99,7 @@ import { MarkdownMemoryStore } from "@seepients/memory";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { createBillingService } from "./billing.js";
+import { createSeepientAgentRuntime } from "./seepient-runtime.js";
 import { mountBillingRoutes } from "./billing-webhook.js";
 import type { AppEnv } from "./env.js";
 import { loadEnv } from "./env.js";
@@ -384,9 +385,11 @@ export async function createApp(
     runtimeOverride ??
     (env.agentRuntime === "scripted"
       ? new ScriptedAgentRuntime()
-      : new PiAgentRuntime({
-          sessionRoot: env.piSessionRecording ? piSessionsRoot(env.dataDir) : undefined,
-        }));
+      : env.agentRuntime === "seepient"
+        ? createSeepientAgentRuntime()
+        : new PiAgentRuntime({
+            sessionRoot: env.piSessionRecording ? piSessionsRoot(env.dataDir) : undefined,
+          }));
   const notifications = new ExpoPushProvider(env.dataDir, (sessionId) =>
     pushSessionExpiresAt(prisma, sessionId),
   );

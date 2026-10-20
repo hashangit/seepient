@@ -1,6 +1,7 @@
 import type { JobPublisher, JobWorkerHost } from "@seepients/adapter-kit";
 import { ComposioConnector, IntegrationProviderSettings } from "@seepients/adapters";
 import { loadRootEnv } from "@seepients/core/node/load-root-env";
+import { createSeepientAgentRuntime } from "./seepient-runtime.js";
 import { createWorkerSecretStore } from "./secret-store.js";
 
 loadRootEnv();
@@ -94,7 +95,9 @@ async function main() {
   const runtime =
     process.env.AGENT_RUNTIME === "scripted"
       ? new ScriptedAgentRuntime()
-      : new PiAgentRuntime({ sessionRoot: resolvePiSessionRoot(dataDir) });
+      : process.env.AGENT_RUNTIME === "seepient"
+        ? createSeepientAgentRuntime()
+        : new PiAgentRuntime({ sessionRoot: resolvePiSessionRoot(dataDir) });
   // Same resolver the API uses, so both processes agree on provider, model and key.
   const { key: deploymentModelKey, configured: deploymentModelConfigured } =
     resolveDeploymentModel();

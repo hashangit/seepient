@@ -21,7 +21,8 @@
     "@seepients/db": "workspace:*",
     "@seepients/logging": "workspace:*",
     "@seepients/memory": "workspace:*",
-    "hono": "4.13.7"
+    "hono": "4.13.7",
+    "seepient": "workspace:*"
   },
   "devDependencies": {
     "typescript": "7.0.2",

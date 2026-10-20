@@ -8,6 +8,10 @@
       "import": "./dist/transport/sdk/index.js",
       "types": "./dist/transport/sdk/index.d.ts"
     },
+    "./app-runtime": {
+      "import": "./dist/transport/app/seepient-agent-runtime.js",
+      "types": "./dist/transport/app/seepient-agent-runtime.d.ts"
+    },
     "./server": {
       "import": "./dist/transport/http/index.js",
       "types": "./dist/transport/http/index.d.ts"
