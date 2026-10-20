@@ -64,6 +64,14 @@ overrides:
   'seepient-engine>vite': 8.2.0
   # Spec 029 T021 — merged from upstream (pnpm.overrides, E2):
   # proxy-addr: security floor, harmless engine-side.
+  # Spec 029 T021 (dedupe-gate compliance): the imported upstream runtime
+  # pins pi-ai 0.87.1 (openai@6) while the engine rides pi-ai 1.3.0 — one
+  # openai major only, per the 027 seam (d) gate. The 0.87 vendor layer is
+  # DORMANT under AGENT_RUNTIME=seepient and is removed at S18; recorded as
+  # migration-exceptions entry ME-001.
+  openai: 7.19.0
+  '@anthropic-ai/sdk': 0.129.0
+  '@google/genai': 2.21.0
   'proxy-addr@<2.0.8': 2.0.8
   # e2b's nested undici-8 child ONLY (scoped selector) — the engine's global
   # undici 7.29.1 pin above is untouched by this entry.
