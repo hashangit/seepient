@@ -30,7 +30,7 @@ export function makeRegistrationAnalyzer(
         if (!evaluate) {
           throw new ToolUnavailableError(
             `broker-connector tools ship with the full "seepient" package ` +
-            `(the connector registry is not part of seepient-core). Install "seepient" or use trustedHostTool.`,
+            `(the connector registry is not part of seepient-engine). Install "seepient" or use trustedHostTool.`,
           );
         }
         const draft = await evaluate(registration, args, ctx);

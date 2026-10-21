@@ -1,7 +1,7 @@
 /** Seepient Core — THE Agent Loop (single implementation) */
 
 import { SeepientError } from "../foundations/errors.js";
-import type { Message, StepResult, ToolCall, Usage, ApproveToolFn, ApprovalDecision, ApprovalScope, ApprovalContext, ToolRiskCategory } from "../foundations/types.js";
+import type { Message, MessageImage, StepResult, ToolCall, Usage, ApproveToolFn, ApprovalDecision, ApprovalScope, ApprovalContext, ToolRiskCategory } from "../foundations/types.js";
 import type { ToolDefinition } from "../foundations/contracts/tool.js";
 import { now, toSeepientError, messageToCanonicalMessage } from "./context/message-convert.js";
 import { generateId } from "../foundations/id.js";
@@ -797,6 +797,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
 
         let output: string;
         let metadata: Record<string, unknown> | undefined;
+        let toolImages: MessageImage[] | undefined;
 
         // ── Spec 008 / 017 pipeline path ─────────────────────────────────
         // When wiredPipeline is set, the legacy matrix/grant/autoConfirm
@@ -847,6 +848,9 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
               result = await wiredPipeline.lifecycle.run(action, { signal, onUpdate: execExtra.onUpdate });
               output = result.toolResult.output;
               metadata = result.toolResult.metadata;
+              // Image-bearing tool results (spec 029 FR-037): base64 blocks
+              // ride the tool message into canonical tool_result content.
+              toolImages = result.toolResult.images;
               // Spec 008 FR-010: Model-egress gate. Before tool output enters
               // model-visible history, the Domain enforces the gate centrally so
               // transport adapters cannot implement separate redaction policies.
@@ -898,6 +902,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
               id: generateId(),
               role: "tool",
               content: output,
+              ...(toolImages?.length ? { images: toolImages } : {}),
               toolCallId: tc.id,
               timestamp: now(),
             });

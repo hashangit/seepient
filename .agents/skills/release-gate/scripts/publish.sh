@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Publish seepient + seepient-core: lockstep version bump, tag, and push to
+# Publish seepient + seepient-engine: lockstep version bump, tag, and push to
 # trigger the release workflow (spec 027).
 #
 # The release workflow (.github/workflows/release.yml) then publishes to:
-#   1. npm (seepient-core FIRST, then seepient)
+#   1. npm (seepient-engine FIRST, then seepient)
 #   2. the hashangit/homebrew-seepient tap (formula auto-bumped)
 #   3. a GitHub Release
 #
@@ -63,7 +63,7 @@ if [[ "$BUMP" == "--self-check" ]]; then
   SC_ROOT_NAME=$(jq -r .name package.json)
   [[ "$SC_ROOT_NAME" == "seepient" ]] || die "self-check: unexpected root package name: $SC_ROOT_NAME"
   SC_CORE_NAME=$(jq -r .name packages/core/package.json)
-  [[ "$SC_CORE_NAME" == "seepient-core" ]] || die "self-check: unexpected core package name: $SC_CORE_NAME"
+  [[ "$SC_CORE_NAME" == "seepient-engine" ]] || die "self-check: unexpected core package name: $SC_CORE_NAME"
   SC_ROOT_VER=$(jq -r .version package.json)
   SC_CORE_VER=$(jq -r .version packages/core/package.json)
   [[ "$SC_ROOT_VER" == "$SC_CORE_VER" ]] || die "self-check: manifests drifted out of lockstep ($SC_ROOT_VER vs $SC_CORE_VER)"
@@ -82,7 +82,7 @@ gh auth status >/dev/null 2>&1 || die "gh CLI is not authenticated. Run: gh auth
 PKG_NAME=$(jq -r .name package.json)
 [[ "$PKG_NAME" == "seepient" ]] || die "Unexpected package name: $PKG_NAME"
 CORE_PKG_NAME=$(jq -r .name packages/core/package.json)
-[[ "$CORE_PKG_NAME" == "seepient-core" ]] || die "Unexpected core package name: $CORE_PKG_NAME"
+[[ "$CORE_PKG_NAME" == "seepient-engine" ]] || die "Unexpected core package name: $CORE_PKG_NAME"
 
 CURRENT_VERSION=$(jq -r .version package.json)
 CORE_VERSION=$(jq -r .version packages/core/package.json)
@@ -121,7 +121,7 @@ fi
 # --- guard 4: previous release completed for BOTH packages -----------------
 # This proves the PREVIOUS release completed. With the first-release
 # bootstrap (spec 027): a package ABSENT from the registry with a free tag is
-# "ready", not half-finished — seepient-core's inaugural release must not
+# "ready", not half-finished — seepient-engine's inaugural release must not
 # deadlock this guard. A half-finished state (one package on npm at the local
 # version, the other missing/stale) is diagnosed by NAME.
 registry_latest() {
@@ -139,12 +139,12 @@ if [[ "$CURRENT_VERSION" != "$NPM_LATEST" ]]; then
          - the publish step in the last release workflow failed (re-run the job on the tag)."
 fi
 if [[ -n "$CORE_LATEST" && "$CORE_VERSION" != "$CORE_LATEST" ]]; then
-  die "Version mismatch (seepient-core): packages/core/package.json=$CORE_VERSION but npm latest=$CORE_LATEST.
-       The previous release did not complete for seepient-core. Re-run the release
+  die "Version mismatch (seepient-engine): packages/core/package.json=$CORE_VERSION but npm latest=$CORE_LATEST.
+       The previous release did not complete for seepient-engine. Re-run the release
        workflow job on the existing tag (skip-if-exists heals the half state)."
 fi
 if [[ -z "$CORE_LATEST" ]]; then
-  warn "seepient-core is not on npm yet — first release (bootstrap: absent + free tag = ready)"
+  warn "seepient-engine is not on npm yet — first release (bootstrap: absent + free tag = ready)"
 else
   ok "Local $CURRENT_VERSION matches npm latest for both packages (root $NPM_LATEST, core $CORE_LATEST)"
 fi

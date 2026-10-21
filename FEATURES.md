@@ -204,7 +204,7 @@ Seepient Agent is an engineering-first headless AI agent framework designed for 
 | **PACKAGE INFORMATION** |
 | 169 | Version | 1.0.40 | Current release version | Stable Release | Production-ready software |
 | 170 | License | BSL 1.1 | Business Source License — source-available | Free for Non-Commercial | Personal/eval use free; commercial use requires license |
-| 171 | NPM Package | `seepient` | Published on NPM registry | Easy Installation | `npm install -g seepient-core` |
+| 171 | NPM Package | `seepient` | Published on NPM registry | Easy Installation | `npm install -g seepient-engine` |
 | 172 | GitHub Repo | hashangit/seepient | Source code on GitHub | Open Development | Can contribute, report issues, fork |
 | 173 | Keywords | ai, cli, agent, automation, openai, docker, headless, devops, llm, typescript, orchestration, infrastructure, terminal | Package keywords | Discoverable | Easy to find via search |
 

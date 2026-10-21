@@ -3,15 +3,15 @@ import type {
   ImageBackend,
   InferenceTarget,
   InferenceOptions,
-} from "seepient-core/dist/foundations/contracts/backend-ports.js";
+} from "seepient-engine/dist/foundations/contracts/backend-ports.js";
 import type {
   ImageRequest,
   ImageResult,
-} from "seepient-core/dist/foundations/schemas/inference.js";
-import { InferenceError } from "seepient-core/dist/foundations/errors.js";
-import { classifyInferenceError } from "seepient-core/dist/foundations/errors/error-classifier.js";
+} from "seepient-engine/dist/foundations/schemas/inference.js";
+import { InferenceError } from "seepient-engine/dist/foundations/errors.js";
+import { classifyInferenceError } from "seepient-engine/dist/foundations/errors/error-classifier.js";
 import { canonicalToOpenAIImageParams } from "./openai-canonical-converter.js";
-import { assertBaseUrlEgressAllowed } from "seepient-core/dist/vendors/egress-check.js";
+import { assertBaseUrlEgressAllowed } from "seepient-engine/dist/vendors/egress-check.js";
 
 /**
  * Raw OpenAI Image backend executing directly via the OpenAI SDK.

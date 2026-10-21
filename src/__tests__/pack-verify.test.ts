@@ -123,7 +123,7 @@ describe("Pack Verification Gate (Spec 021-2 / FR-001)", () => {
     // Splice markers are FULL LINES: the parsed-step invariants read real
     // YAML, and a mid-line slice would glue a dangling `- name:` prefix onto
     // the next job key (a malformed fixture, not an evasion).
-    const CORE_STEP_LINE = "      - name: Publish seepient-core FIRST";
+    const CORE_STEP_LINE = "      - name: Publish seepient-engine FIRST";
     const ROOT_STEP_LINE = "      - name: Publish seepient (root)";
 
     function spliceRootBeforeCore(original: string, transformCoreBlock?: (block: string) => string): string {

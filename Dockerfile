@@ -37,13 +37,13 @@ WORKDIR /build
 
 # Copy dependency manifests first for layer caching. packages/core is a
 # workspace member (spec 027) — its manifest must exist for the install to
-# link the seepient-core workspace package.
+# link the seepient-engine workspace package.
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/core/package.json packages/core/package.json
 
 # Install root-package dependencies (docs is a workspace member but the
-# image does not need VitePress; seepient-core rides as the workspace link)
-RUN pnpm install --frozen-lockfile --filter seepient --filter seepient-core
+# image does not need VitePress; seepient-engine rides as the workspace link)
+RUN pnpm install --frozen-lockfile --filter seepient --filter seepient-engine
 
 # Copy TypeScript source, config, and build scripts (clean-dist.mjs runs as
 # part of `pnpm run build`; build:core needs tsconfig.core.json — spec 027)
@@ -107,12 +107,12 @@ WORKDIR /app
 # Copy production artifacts from builder stage
 COPY --from=builder /build/dist/           ./dist/
 COPY --from=builder /build/node_modules/   ./node_modules/
-# The engine ships as the seepient-core workspace package (spec 027): the
+# The engine ships as the seepient-engine workspace package (spec 027): the
 # node_modules copy carries a dangling symlink to /build/packages/core, so
 # materialize the built core package at the link target.
-RUN rm -f node_modules/seepient-core
-COPY --from=builder /build/packages/core/package.json ./node_modules/seepient-core/package.json
-COPY --from=builder /build/packages/core/dist/        ./node_modules/seepient-core/dist/
+RUN rm -f node_modules/seepient-engine
+COPY --from=builder /build/packages/core/package.json ./node_modules/seepient-engine/package.json
+COPY --from=builder /build/packages/core/dist/        ./node_modules/seepient-engine/dist/
 COPY --from=builder /build/package.json    ./
 
 # Copy compiled native helper binary to /usr/local/bin

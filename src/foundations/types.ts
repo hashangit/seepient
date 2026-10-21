@@ -44,14 +44,55 @@ export interface ApprovalContext {
 
 // ── Messages ──────────────────────────────────────────────────────────
 
+/**
+ * An image carried on a message (spec 029 S09, FR-037). `data` is base64;
+ * `mimeType` is the preserved wire MIME. Shape mirrors canonical inference
+ * ImageContent so conversion is a copy, never a re-encode.
+ */
+export interface MessageImage {
+  data: string;
+  mimeType: string;
+}
+
 export interface Message {
   id: string;
   role: "system" | "user" | "assistant" | "tool";
   content: string;
+  /** User-turn attachments and image-bearing tool results (FR-037/038). */
+  images?: MessageImage[];
   toolCalls?: ToolCall[];
   toolCallId?: string;
   timestamp: number;
   reasoning?: string;
+}
+
+// ── Per-call context seam (spec 029 S09, FR-039/040) ────────────────────
+
+export type ContextStrategy = "current" | "retrieval" | "snapshots" | "cache-aware";
+
+/** Compaction cursor semantics: opaque to the engine, owned by the caller. */
+export interface ContextCompaction {
+  /** Id of the last message covered by `summary`. */
+  cursorMessageId: string;
+  /** Caller-computed summary replacing every message up to and including the cursor. */
+  summary: string;
+}
+
+/**
+ * One neutral per-call seam between the caller's hydrated history and the
+ * provider request. Applied to the per-call message copy immediately before
+ * the model call; stored history is never touched and overflow is a typed
+ * error, never quiet truncation.
+ */
+export interface ContextSeam {
+  strategy?: ContextStrategy;
+  /**
+   * Estimated-input budget. Exceeding it AFTER strategy application throws
+   * ContextBudgetExceededError.
+   */
+  maxInputTokens?: number;
+  /** Replace history through the cursor with this summary before strategy application. */
+  compaction?: ContextCompaction;
 }
 
 export interface ToolCall {
@@ -124,6 +165,13 @@ export interface ToolResult {
   output: string;
   success: boolean;
   metadata?: Record<string, unknown>;
+  /**
+   * Image blocks riding the tool result into model-visible history
+   * (spec 029 FR-037, image-bearing tool results). They inherit the tool
+   * call's declared model-egress classes; text classification does not
+   * inspect pixels.
+   */
+  images?: MessageImage[];
 }
 
 // ── Tool Approval ─────────────────────────────────────────────────────
@@ -181,6 +229,15 @@ export interface AskSeepientOptions {
   overlayFile?: string;
   adapter?: import("./contracts/backend-ports.js").InferenceAdapter;
   systemPrompt?: string;
+  /** Base64 image blocks riding THIS turn's user message (spec 029 FR-037). */
+  images?: MessageImage[];
+  /**
+   * Per-call context seam (spec 029 FR-039/040): strategy, budget, compaction
+   * cursor. Applied to the per-call copy right before the model call; stored
+   * history is untouched and overflow throws ContextBudgetExceededError
+   * instead of truncating.
+   */
+  context?: ContextSeam;
   tools?: (string | UserToolDefinition | import("./contracts/custom-tools.js").AnyToolRegistration | import("./contracts/tool.js").ToolModule)[];
   skills?: string[] | boolean | import("./contracts/skill-source.js").SkillLiteral[];
   sources?: import("./contracts/skill-source.js").SkillSource[];
@@ -301,6 +358,13 @@ export interface CreateSeepientOptions {
   /** Spec 022 Tenancy mode ("single" | "multi") and stateless declaration */
   tenancy?: "single" | "multi";
   stateless?: boolean;
+  /**
+   * Spec 029 (M02 T028): once-per-run hydration seam — seed externally owned
+   * product history at construction (the S08 adapter's hydrate-once rule).
+   * Exactly-once: applied only when no persisted session was loaded; the
+   * engine never writes back to the product store (single history authority).
+   */
+  initialHistory?: Message[];
 }
 
 export interface Seepient {

@@ -1,7 +1,7 @@
 /**
  * Seepient SDK — `askSeepient` one-shot entry (spec 027 core surface, D14).
  *
- * Ships in seepient-core: the one-shot shares the seams (tool-modules
+ * Ships in seepient-engine: the one-shot shares the seams (tool-modules
  * injection, light-vs-injected boundary, media registration) and completes
  * with zero full-package modules when nothing full-side is registered.
  */

@@ -70,6 +70,32 @@ Sanctioned roots may wire all layers but contain no policy logic:
 - SDK: `src/transport/sdk/index.ts`, `seepient.ts`
 - Worker scheduler service: `src/transport/worker-scheduler/standalone.ts`
 
+### Adopted application tree (spec 029)
+
+The Seepients product (`apps/*`, `packages/*` renamed `@seepients/*`,
+`infra/sandboxes/supervisor`, `infra/updater`) lives in this workspace alongside
+the engine; provenance: `provenance/import-manifest.json`.
+
+- **Build/verify scripts (preserved upstream pipeline)**:
+  `turbo run build --filter='@seepients/*'` (applications),
+  `turbo run check --filter='@seepients/*'` (per-package tsc);
+  engine gates unchanged (`build:core`, `boundary:check`, `pack:verify`,
+  `qs:core-chat`).
+- **Boundary families**: `scripts/check-package-boundary.mjs` additionally
+  enforces `R-1` (renderer-isolation — renderer roots cannot reach Prisma,
+  credential stores, raw `node:fs`/net, or the DB/vendor barrels) and
+  `L-1`/`L-2` (app-layering — `@seepients/*` imports mirror the §2.2
+  responsibility table; the ONE sanctioned engine→app edge is
+  `src/transport/app/**` → `@seepients/adapter-kit`). Every family ships a
+  planted-probe self-test that flips it RED.
+- **Sanctioned application composition roots**: `apps/api` (`@seepients/api`),
+  `apps/worker` (`@seepients/worker`),
+  `infra/sandboxes/supervisor` (`@seepients/sandbox-supervisor`).
+  `infra/updater` is retained dormant (not enabled).
+- **Engine→app rule**: engine `src/**` MUST NOT import `@seepients/*` except
+  the future adapter at `src/transport/app/**` importing
+  `@seepients/adapter-kit` types only.
+
 ## Security invariants
 
 - Permission, approval, and enforcement are separate.

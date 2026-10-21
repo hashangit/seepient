@@ -155,13 +155,20 @@ export function canonicalToPiContext(
           });
         }
         const toolUseId = block.toolUseId ?? (msg as any).toolCallId ?? "tool-call";
-        let textParts: PiTextContent[] = [];
+        // Text AND image blocks map through (spec 029 FR-037): pi-ai's
+        // ToolResultMessage content accepts ImageContent, and the openai
+        // responses adapter emits tool-output input_image blocks for them.
+        let contentParts: (PiTextContent | PiImageContent)[] = [];
         if (Array.isArray(block.content)) {
-          textParts = block.content
-            .filter((c: any): c is { type: "text"; text: string } => c && c.type === "text")
-            .map((c: any) => ({ type: "text" as const, text: String(c.text ?? "") }));
+          contentParts = block.content
+            .filter((c: any): c is { type: "text"; text: string } | { type: "image"; mediaType: string; data: string } =>
+              c && (c.type === "text" || c.type === "image"))
+            .map((c: any) =>
+              c.type === "text"
+                ? { type: "text" as const, text: String(c.text ?? "") }
+                : { type: "image" as const, mimeType: c.mediaType, data: c.data });
         } else if (typeof block.content === "string") {
-          textParts = [{ type: "text" as const, text: block.content }];
+          contentParts = [{ type: "text" as const, text: block.content }];
         }
 
         const toolName = toolNameMap.get(toolUseId) ?? "tool";
@@ -170,7 +177,7 @@ export function canonicalToPiContext(
           role: "toolResult",
           toolCallId: toolUseId,
           toolName,
-          content: textParts.length > 0 ? textParts : [{ type: "text", text: "" }],
+          content: contentParts.length > 0 ? contentParts : [{ type: "text", text: "" }],
           isError: block.isError ?? false,
           timestamp: Date.now(),
         };

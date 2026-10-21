@@ -12,16 +12,16 @@
  * shape. The exact-commit and host-filtered-egress flags come from the native
  * helper probe and the effect broker, respectively.
  */
-import type { PreparedToolAction } from "seepient-core/dist/foundations/contracts/prepared-action.js";
+import type { PreparedToolAction } from "seepient-engine/dist/foundations/contracts/prepared-action.js";
 import type {
   ExecutionBoundary,
   ExecutionBackendCapabilities,
   ExecutionResult,
   ToolProgress,
-} from "seepient-core/dist/foundations/contracts/execution-boundary.js";
-import type { CapabilityEnvelope } from "seepient-core/dist/foundations/contracts/permission-policy.js";
-import { OperationExecutorRegistry } from "seepient-core/dist/capabilities/execution/operation-executor-registry.js";
-import { registryCapabilities } from "seepient-core/dist/capabilities/execution/operation-executor-registry.js";
+} from "seepient-engine/dist/foundations/contracts/execution-boundary.js";
+import type { CapabilityEnvelope } from "seepient-engine/dist/foundations/contracts/permission-policy.js";
+import { OperationExecutorRegistry } from "seepient-engine/dist/capabilities/execution/operation-executor-registry.js";
+import { registryCapabilities } from "seepient-engine/dist/capabilities/execution/operation-executor-registry.js";
 
 export interface LocalExecutionBoundaryOptions {
   registry: OperationExecutorRegistry;

@@ -91,7 +91,7 @@ describe("027 seam (c): media registration", () => {
     expect(bound.images).toBeDefined();
     await expect(
       bound.images!.generate({ prompt: "a cup of coffee", n: 1 } as never),
-    ).rejects.toThrow(/seepient-core/);
+    ).rejects.toThrow(/seepient-engine/);
   });
 });
 

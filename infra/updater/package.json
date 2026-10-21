@@ -1,0 +1,26 @@
+{
+  "name": "@seepients/updater",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --root ../.. infra/updater/src"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.1",
+    "@seepients/contracts": "workspace:*",
+    "@seepients/core": "workspace:*",
+    "@seepients/logging": "workspace:*",
+    "hono": "4.13.7",
+    "tsx": "4.23.13"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vitest": "4.1.11",
+    "yaml": "2.9.0"
+  }
+}

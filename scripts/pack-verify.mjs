@@ -190,7 +190,7 @@ export function assertNoDuplicatedEngine(rootDist, coreDist) {
     if (FORWARDING_SHIM_WHITELIST.has(path.basename(rel))) {
       // must be a real shim: a re-export, not a compiled engine copy
       const content = fs.readFileSync(rootCandidate, "utf8");
-      if (!content.includes("seepient-core")) {
+      if (!content.includes("seepient-engine")) {
         duplicates.push(`${rel} (root copy is not a forwarding shim)`);
       }
       continue;
@@ -427,13 +427,13 @@ export function verifyPack(projectRoot = process.cwd(), opts = {}) {
   // ── core package ──
   // Manifest sanity: script-free, dist-only files, public access.
   if (Object.keys(pkg.scripts ?? {}).length > 0) {
-    throw new Error("seepient-core manifest must be script-free (pnpm publish --dry-run would run prepublishOnly — E12)");
+    throw new Error("seepient-engine manifest must be script-free (pnpm publish --dry-run would run prepublishOnly — E12)");
   }
   if (JSON.stringify(pkg.files) !== JSON.stringify(["dist", "LICENSE", "README.md"])) {
-    throw new Error('seepient-core files must be exactly ["dist", "LICENSE", "README.md"]');
+    throw new Error('seepient-engine files must be exactly ["dist", "LICENSE", "README.md"]');
   }
   if (pkg.publishConfig?.access !== "public") {
-    throw new Error("seepient-core publishConfig.access must be public");
+    throw new Error("seepient-engine publishConfig.access must be public");
   }
 
   const tarball = packTarball(projectRoot);
@@ -443,7 +443,7 @@ export function verifyPack(projectRoot = process.cwd(), opts = {}) {
 
     // Weight budget: clean install of the packed tarball ≤ 150 MB unpacked.
     const { mb, installed } = measureCoreInstallWeight(tarball);
-    console.log(`[pack-verify] seepient-core clean-install closure: ${mb} MiB (budget ${CORE_WEIGHT_BUDGET_MB} MiB, du -sm)`);
+    console.log(`[pack-verify] seepient-engine clean-install closure: ${mb} MiB (budget ${CORE_WEIGHT_BUDGET_MB} MiB, du -sm)`);
     if (mb > CORE_WEIGHT_BUDGET_MB) {
       throw new Error(`Weight budget exceeded: ${mb} MB > ${CORE_WEIGHT_BUDGET_MB} MB`);
     }

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 export default defineConfig({
   test: {
-    // Spec 027: resolve seepient-core/dist/* back to SOURCE for tests — one
+    // Spec 027: resolve seepient-engine/dist/* back to SOURCE for tests — one
     // engine instance per test process. Without this, full-side src files
     // load the engine from packages/core/dist while tests import engine
     // modules from src, and seam registrations land in one copy while the
@@ -12,7 +12,7 @@ export default defineConfig({
     // artifact's what-ships gate is the tarball e2e (pnpm run qs:core-chat).
     alias: [
       {
-        find: /^seepient-core\/dist\/(.*)\.js$/,
+        find: /^seepient-engine\/dist\/(.*)\.js$/,
         replacement: resolve(dirname(fileURLToPath(import.meta.url)), "src/$1.ts"),
       },
     ],

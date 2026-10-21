@@ -22,7 +22,7 @@
  *
  * Exit 0 = boundary holds; exit 1 = violations (CI error).
  */
-import { readFileSync, readdirSync, mkdtempSync, rmSync, existsSync, writeFileSync, cpSync } from "node:fs";
+import { readFileSync, readdirSync, mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, cpSync } from "node:fs";
 import { join, relative, resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -203,7 +203,198 @@ function scanOrphans(distDir, closure) {
   return { violations, orphanCount };
 }
 
-// ── main ─────────────────────────────────────────────────────────────────────
+// ── Spec 029 (M02 US4): source-level rule families over the imported tree ────
+//
+// The B-1/B-2 machinery above walks the COMPILED core emit. The two families
+// below scan IMPORTED SOURCE (the @seepients/* tree is built by turbo with its
+// own toolchains — there is no single compiled emit to walk). Same discipline:
+// comments stripped before extraction (doc-comment imports never register),
+// static + dynamic + re-export edges covered, and every family ships a
+// planted-probe self-test that flips it RED (FR-024/025/026).
+
+import { readdirSync as rdSync } from "node:fs";
+
+const APP_ROOT = join(ROOT, "apps");
+const PKG_ROOT = join(ROOT, "packages");
+const INFRA_SANDBOX = join(ROOT, "infra/sandboxes/supervisor");
+const INFRA_UPDATER = join(ROOT, "infra/updater");
+const ENGINE_SRC = join(ROOT, "src");
+
+/** Layout-decision §2 responsibility classes → package dir name. */
+const PACKAGE_CLASSES = {
+  // Contract
+  contracts: "Contract",
+  "adapter-kit": "Contract",
+  // Vendor
+  adapters: "Vendor",
+  db: "Vendor",
+  // Capability
+  auth: "Capability",
+  logging: "Capability",
+  memory: "Capability",
+  // Domain-app
+  "app-core": "DomainApp",
+  // UI (shared component packages — the apps sit in APP_CLASSES)
+  "chat-ui": "UI",
+  "ui-tokens": "UI",
+  "ui-web": "UI",
+  // TestInfra
+  testkit: "TestInfra",
+};
+const APP_CLASSES = {
+  api: "CompositionRoot",
+  worker: "CompositionRoot",
+  web: "UI",
+  desktop: "UI",
+  mobile: "UI",
+  www: "UI",
+};
+const INFRA_CLASSES = { "sandbox-supervisor": "CompositionRoot", updater: "Vendor" };
+
+/**
+ * Sanctioned class-level import edges — the §2.2 mirror, derived from the
+ * ACTUAL dependency graph at the pinned import (see provenance-manifest.md).
+ * A new class-level edge requires a migration-exceptions.md entry.
+ */
+const CLASS_EDGES = {
+  Contract: ["Contract"],
+  Vendor: ["Contract", "Capability", "Vendor", "DomainApp"],
+  Capability: ["Contract", "Capability", "Vendor", "DomainApp"],
+  UI: ["Contract", "DomainApp", "UI"],
+  DomainApp: ["Contract"],
+  CompositionRoot: ["Contract", "Capability", "Vendor", "DomainApp", "UI"],
+  TestInfra: ["Contract", "Capability", "Vendor", "DomainApp", "UI", "CompositionRoot"],
+};
+
+/** Renderer process roots (client runtime only; test files excluded). */
+const RENDERER_ROOTS = [
+  join(APP_ROOT, "web/src"),
+  join(APP_ROOT, "mobile/app"),
+  join(APP_ROOT, "mobile/lib"),
+  join(APP_ROOT, "mobile/components"),
+  join(APP_ROOT, "mobile/modules"),
+  join(PKG_ROOT, "chat-ui/src"),
+  join(PKG_ROOT, "ui-web/src"),
+];
+// apps/www is deliberately NOT a renderer root: it is an Astro static site
+// whose build-time code legitimately runs in Node; Astro's own bundler rejects
+// node builtins in the client bundle.
+const RENDERER_BANNED_BARE = [
+  /^@prisma\//, // Prisma client (server-only)
+  /^keytar$/, // OS credential store
+  /^@seepients\/db$/, // DB barrel (Postgres/Graphile)
+  /^@seepients\/adapters$/, // vendor clients barrel
+  /^node:(fs|fs\/promises|child_process|net|http|https|dgram)$/, // raw host fs/net
+];
+const TEST_FILE = /(^|\/)([^/]+)\.(test|spec)\.[tj]sx?$|__tests__\//;
+
+function listSourceFiles(dir, acc = []) {
+  if (!existsSync(dir)) return acc;
+  for (const e of rdSync(dir, { withFileTypes: true })) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) {
+      if (e.name === "node_modules" || e.name === "__tests__" || e.name === "generated") continue;
+      listSourceFiles(p, acc);
+    } else if (/\.[tj]sx?$/.test(e.name) && !TEST_FILE.test(p.split("node_modules").pop())) {
+      acc.push(p);
+    }
+  }
+  return acc;
+}
+
+/** FR-024/025/026: renderer entrypoints cannot reach Prisma, credential
+ *  stores, raw fs/net, or the vendor/DB barrels — across static, re-export
+ *  and dynamic import forms. */
+function scanRendererIsolation(roots = RENDERER_ROOTS) {
+  const violations = [];
+  for (const root of roots) {
+    for (const file of listSourceFiles(root)) {
+      const relFile = relative(ROOT, file).split("\\").join("/");
+      // Pure `import type`/`export type` lines are erased at compile time and
+      // carry no runtime edge — the renderer hazard is runtime code. Mixed
+      // inline `type` modifiers still extract (value imports on the same line).
+      const source = stripComments(readFileSync(file, "utf8"))
+        .split("\n")
+        .filter((l) => !/^\s*(?:import|export)\s+type\s/.test(l))
+        .join("\n");
+      for (const spec of extractSpecifiers(source)) {
+        const line = source.split("\n").findIndex((l) => l.includes(spec)) + 1;
+        if (RENDERER_BANNED_BARE.some((re) => re.test(spec))) {
+          violations.push(`R-1 (renderer-isolation): ${relFile}:${line} imports "${spec}" — forbidden in renderer runtime code`);
+        }
+      }
+    }
+  }
+  return violations;
+}
+
+/** FR-024/025 (D9): @seepients/* imports mirror the §2.2 class table; the ONE
+ *  sanctioned engine edge is src/transport/app/** → @seepients/adapter-kit.
+ *  `base` lets the self-test point the scanner at a throwaway fixture tree
+ *  with the same relative layout. */
+function scanAppLayering(base = ROOT) {
+  const violations = [];
+  const classify = (abs) => {
+    const rel = relative(base, abs).split("\\").join("/");
+    if (rel.startsWith("apps/")) return { pkg: rel.split("/")[1], cls: APP_CLASSES[rel.split("/")[1]] };
+    if (rel.startsWith("packages/")) {
+      const name = rel.split("/")[1];
+      return { pkg: name, cls: PACKAGE_CLASSES[name] ?? (name === "core" ? "EngineCore" : undefined) };
+    }
+    if (rel.startsWith("infra/sandboxes/supervisor")) return { pkg: "sandbox-supervisor", cls: "CompositionRoot" };
+    if (rel.startsWith("infra/updater")) return { pkg: "updater", cls: "Vendor" };
+    return { pkg: undefined, cls: undefined };
+  };
+  const srcRoots = [join(base, "apps"), join(base, "packages"), join(base, "infra/sandboxes/supervisor"), join(base, "infra/updater")];
+  for (const root of srcRoots) {
+    for (const file of listSourceFiles(root)) {
+      // Build-config files (vite/astro/metro/expo/playwright/vitest configs)
+      // are Node tooling that runs at build time, not app runtime code — the
+      // §2.2 layering table governs the shipped graph, not the toolchain.
+      if (/[.-]config\.[cm]?[jt]sx?$/.test(file.split("/").pop() ?? "")) continue;
+      const from = classify(file);
+      if (!from.cls) continue;
+      const relFile = relative(ROOT, file).split("\\").join("/");
+      const source = stripComments(readFileSync(file, "utf8"));
+      for (const spec of extractSpecifiers(source)) {
+        let targetPkg;
+        if (spec.startsWith("@seepients/")) targetPkg = spec.split("/")[1];
+        else if (spec.startsWith(".")) {
+          const t = classify(resolve(dirname(file), spec));
+          if (t.pkg && t.pkg !== from.pkg) targetPkg = t.pkg;
+        }
+        if (!targetPkg) continue;
+        const targetCls = PACKAGE_CLASSES[targetPkg] ?? APP_CLASSES[targetPkg] ?? INFRA_CLASSES[targetPkg];
+        if (!targetCls) continue;
+        if (!(CLASS_EDGES[from.cls] ?? []).includes(targetCls)) {
+          const line = source.split("\n").findIndex((l) => l.includes(spec)) + 1;
+          violations.push(
+            `L-1 (app-layering): ${relFile}:${line} — ${from.cls} (${from.pkg}) imports ${targetCls} (${targetPkg}) outside the §2.2 table; add a migration-exceptions.md entry or restructure`,
+          );
+        }
+      }
+    }
+  }
+  // The single sanctioned engine → app edge (D9): src/transport/app/** may
+  // import @seepients/adapter-kit and NOTHING else @seepients/*; any other
+  // engine src/** file importing any @seepients/* is a violation.
+  for (const file of listSourceFiles(join(base, "src"))) {
+    const relFile = relative(base, file).split("\\").join("/");
+    const source = stripComments(readFileSync(file, "utf8"));
+    for (const spec of extractSpecifiers(source)) {
+      if (!spec.startsWith("@seepients/")) continue;
+      const line = source.split("\n").findIndex((l) => l.includes(spec)) + 1;
+      const sanctioned = relFile.startsWith("src/transport/app/") && spec === "@seepients/adapter-kit";
+      if (!sanctioned) {
+        violations.push(
+          `L-2 (app-layering): ${relFile}:${line} — engine import of "${spec}" outside the sanctioned src/transport/app → @seepients/adapter-kit edge`,
+        );
+      }
+    }
+  }
+  return violations;
+}
+
 const { violations, externals, builtins, moduleCount } = runCheck(CORE_DIST, ENTRY);
 console.log(`[boundary] core closure: ${moduleCount} modules from ${ENTRY}`);
 console.log(`[boundary] externals: ${[...externals].sort().join(", ") || "(none)"}`);
@@ -229,6 +420,11 @@ const closureSet = new Set((function collect(distDir, entry) {
 })(CORE_DIST, ENTRY));
 const { violations: orphanViolations, orphanCount } = scanOrphans(CORE_DIST, closureSet);
 console.log(`[boundary] emitted files: ${closureSet.size + orphanCount} (${orphanCount} orphans from the entry)`);
+
+// Spec 029 families over the imported source tree.
+const rendererViolations = scanRendererIsolation();
+const layeringViolations = scanAppLayering();
+console.log(`[boundary] renderer-isolation: ${rendererViolations.length} violation(s); app-layering: ${layeringViolations.length} violation(s)`);
 
 // ── negative self-tests (on a throwaway copy) ────────────────────────────────
 const tmp = mkdtempSync(join(tmpdir(), "boundary-selftest-"));
@@ -256,18 +452,61 @@ try {
   rmSync(tmp, { recursive: true, force: true });
 }
 
-if (selfTestFailures.length > 0) {
-  console.error("[boundary] SELF-TEST FAILURES:");
-  for (const f of selfTestFailures) console.error("  -", f);
-  process.exit(1);
+// ── family self-tests: every 029 family must flip RED on a planted violation
+//    (FR-026) and stay green on its sanctioned shape. ────────────────────────
+const fam = mkdtempSync(join(tmpdir(), "boundary-families-"));
+try {
+  // renderer-isolation: planted node:fs import → RED
+  const webDir = join(fam, "apps/web/src");
+  mkdirSync(webDir, { recursive: true });
+  writeFileSync(join(webDir, "probe.ts"), `import { readFileSync } from "node:fs";\nexport const p = readFileSync;\n`);
+  if (scanRendererIsolation([webDir]).length === 0) selfTestFailures.push("family self-test R: planted renderer node:fs import did NOT flip RED");
+
+  // renderer-isolation: dynamic @seepients/db barrel → RED
+  writeFileSync(join(webDir, "probe2.ts"), `export async function load() { return import("@seepients/db"); }\n`);
+  if (!scanRendererIsolation([webDir]).some((v) => v.includes("@seepients/db"))) selfTestFailures.push("family self-test R: planted dynamic DB-barrel import did NOT flip RED");
+
+  // renderer-isolation: doc-comment import stays inert
+  writeFileSync(join(webDir, "probe3.ts"), `// import { readFileSync } from "node:fs";\n/* import prisma from "@prisma/client"; */\nexport const q = 1;\n`);
+  const docProbe = scanRendererIsolation([webDir]).filter((v) => v.includes("probe3"));
+  if (docProbe.length > 0) selfTestFailures.push(`family self-test R: doc-comment import registered: ${docProbe.join("; ")}`);
+
+  // app-layering: planted Domain-app → UI import → RED
+  const coreDir = join(fam, "packages/app-core/src");
+  mkdirSync(coreDir, { recursive: true });
+  writeFileSync(join(coreDir, "probe.ts"), `import { Button } from "@seepients/ui-web";\nexport const b = Button;\n`);
+  if (!scanAppLayering(fam).some((v) => v.includes("L-1") && v.includes("app-core"))) selfTestFailures.push("family self-test L: planted Domain-app→UI import did NOT flip RED");
+
+  // app-layering: the sanctioned engine edge (src/transport/app → adapter-kit) stays GREEN
+  const adapterDir = join(fam, "src/transport/app");
+  mkdirSync(adapterDir, { recursive: true });
+  writeFileSync(join(adapterDir, "probe.ts"), `import type { AgentRuntime } from "@seepients/adapter-kit";\nexport type R = AgentRuntime;\n`);
+  if (scanAppLayering(fam).some((v) => v.includes("src/transport/app/probe.ts"))) selfTestFailures.push("family self-test L: the sanctioned adapter-kit edge flipped RED");
+
+  // app-layering: engine import OUTSIDE the sanctioned edge → RED
+  const domainDir = join(fam, "src/domain");
+  mkdirSync(domainDir, { recursive: true });
+  writeFileSync(join(domainDir, "probe.ts"), `import type { AgentRuntime } from "@seepients/adapter-kit";\nexport type R = AgentRuntime;\n`);
+  if (!scanAppLayering(fam).some((v) => v.includes("L-2") && v.includes("src/domain/probe.ts"))) selfTestFailures.push("family self-test L: planted engine import outside src/transport/app did NOT flip RED");
+} finally {
+  rmSync(fam, { recursive: true, force: true });
 }
-console.log("[boundary] self-tests: banned-import RED ✓, dynamic full-edge RED ✓, doc-comment inert ✓");
+
+console.log("[boundary] self-tests: banned-import RED ✓, dynamic full-edge RED ✓, doc-comment inert ✓, family probes RED ✓");
 
 for (const v of orphanViolations) violations.push(v);
+for (const v of [...rendererViolations, ...layeringViolations]) violations.push(v);
 
-if (violations.length > 0) {
-  console.error(`[boundary] VIOLATIONS (${violations.length}):`);
-  for (const v of violations) console.error("  -", v);
+if (selfTestFailures.length > 0 || violations.length > 0) {
+  if (selfTestFailures.length > 0) {
+    console.error("[boundary] SELF-TEST FAILURES:");
+    for (const f of selfTestFailures) console.error("  -", f);
+  }
+  if (violations.length > 0) {
+    console.error(`[boundary] VIOLATIONS (${violations.length}):`);
+    for (const v of violations) console.error("  -", v);
+    process.exit(1);
+  }
   process.exit(1);
 }
 console.log("[boundary] OK — the core closure respects the package boundary");

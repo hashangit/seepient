@@ -1,0 +1,1005 @@
+import { DEMO_ROSTER, type RosterBot } from "../demo";
+import { SITE_DESCRIPTION } from "../site";
+import { CLAUDE_CHATGPT_SUBSCRIPTION_FAQ } from "../subscription-faq";
+import type { Locale } from "./locales";
+
+export type HomeCopy = {
+  title: string;
+  description: string;
+  ogImageAlt: string;
+  availableLanguage: string;
+  skipToContent: string;
+  starFallback: string;
+  nav: {
+    home: string;
+    primary: string;
+    menu: string;
+    product: string;
+    bots: string;
+    selfHost: string;
+    openSource: string;
+    grokBot: string;
+    docs: string;
+    blog: string;
+    alternatives: string;
+    alternativesMenu: string;
+    viewOnGithub: string;
+    iosApp: string;
+  };
+  hero: {
+    badge: string;
+    pill: string;
+    heading: string;
+    lead: string;
+    getStarted: string;
+    viewOnGithub: string;
+    setupWithAgent: string;
+    copiedForAgent: string;
+    copyFailed: string;
+  };
+  selfHost: {
+    eyebrow: string;
+    heading: string;
+    copy: string;
+    features: Array<{ title: string; body: string }>;
+  };
+  roster: {
+    eyebrow: string;
+    heading: string;
+    copy: string;
+    bots: RosterBot[];
+  };
+  testimonials: {
+    heading: string;
+    pause: string;
+    play: string;
+    items: ReadonlyArray<{ quote: string; attribution: string }>;
+  };
+  faq: {
+    heading: string;
+    items: Array<{ question: string; answer: string }>;
+  };
+  openSource: {
+    eyebrow: string;
+    heading: string;
+    copy: string;
+    selfHostTitle: string;
+    selfHostMeta: string;
+    selfHostItems: string[];
+    starOnGithub: string;
+    readTheDocs: string;
+    openClawAlternative: string;
+    cloudTitle: string;
+    cloudBadge: string;
+    cloudMeta: string;
+    cloudItems: string[];
+    getStarted: string;
+  };
+  cta: {
+    heading: string;
+    copy: string;
+    getStarted: string;
+    viewOnGithub: string;
+    openSourceValue: string;
+    selfHostValue: string;
+    stats: Array<{ value: "stars" | "license" | "openSource" | "selfHost"; label: string }>;
+  };
+  getStartedDialog: {
+    closeLabel: string;
+    eyebrow: string;
+    title: string;
+    copy: string;
+    selfHostNow: string;
+    selfHostHint: string;
+    cloudWaitlist: string;
+    cloudHint: string;
+    back: string;
+    successTitle: string;
+    successCopy: string;
+    done: string;
+    viewOnGithub: string;
+  };
+  waitlist: {
+    emailLabel: string;
+    placeholder: string;
+    submit: string;
+    joining: string;
+    success: string;
+    added: string;
+    error: string;
+  };
+  footer: {
+    navLabel: string;
+    languagesLabel: string;
+    links: {
+      docs: string;
+      product: string;
+      changelog: string;
+      alternatives: string;
+      all: string;
+      about: string;
+      support: string;
+      privacy: string;
+      terms: string;
+      company: string;
+      blog: string;
+      iosApp: string;
+      androidApp: string;
+    };
+  };
+};
+
+const EN_ROSTER = DEMO_ROSTER;
+
+const DE_ROSTER: RosterBot[] = [
+  {
+    name: "Sales Outbound",
+    color: "#F5A03C",
+    slug: "seepients/sales-outbound",
+    desc: "Recherchiert nachts Accounts, bewertet Intent, entwirft in deinem Ton und hinterlässt eine Review-Liste.",
+  },
+  {
+    name: "Inbox Manager",
+    color: "#6A6BF5",
+    slug: "seepients/inbox-manager",
+    desc: "Archiviert den Lärm, antwortet auf Routine-Threads und parkt Entwürfe, die du lesen solltest.",
+  },
+  {
+    name: "Talent Scout",
+    color: "#3B82F6",
+    slug: "seepients/talent-scout",
+    desc: "Liest jede Bewerbung, shortlistet nach deiner Latte und schreibt die Intro-Mails.",
+  },
+  {
+    name: "Expense Manager",
+    color: "#F2622A",
+    slug: "seepients/expense-manager",
+    desc: "Ordnet Belege den Buchungen zu, reicht den Report ein und fragt nach, statt zu raten.",
+  },
+  {
+    name: "Coding Agent",
+    color: "#5B6EE1",
+    slug: "seepients/coding-agent",
+    desc: "Fragt zum Repository und zur Änderung, arbeitet dann auf deiner Maschine und meldet sich, bevor es weitergeht.",
+  },
+  {
+    name: "Account Manager",
+    color: "#9B5CF6",
+    slug: "seepients/account-manager",
+    desc: "Hält Renewal-Kontext, beantwortet bekannte Fragen und eskaliert den Rest.",
+  },
+  {
+    name: "Paid Media",
+    color: "#3EC5A8",
+    slug: "seepients/paid-media",
+    desc: "Überwacht den Spend täglich, pausiert, was nicht konvertiert, und meldet, was sich geändert hat.",
+  },
+  {
+    name: "Chief of Staff",
+    color: "#8B93A8",
+    slug: "seepients/chief-of-staff",
+    desc: "Führt die Woche: Briefings, Buchungen und Übergaben zwischen deinen anderen Bots.",
+  },
+];
+
+const KO_ROSTER: RosterBot[] = [
+  {
+    name: "Sales Outbound",
+    color: "#F5A03C",
+    slug: "seepients/sales-outbound",
+    desc: "밤새 계정을 조사하고 의도를 점수한 뒤, 당신 말투로 초안을 써 검토 목록을 남깁니다.",
+  },
+  {
+    name: "Inbox Manager",
+    color: "#6A6BF5",
+    slug: "seepients/inbox-manager",
+    desc: "잡음을 보관처리하고, 루틴 스레드에 답하며, 확인이 필요한 초안은 보류합니다.",
+  },
+  {
+    name: "Talent Scout",
+    color: "#3B82F6",
+    slug: "seepients/talent-scout",
+    desc: "지원서를 모두 읽고 기준에 맞게 숏리스트한 뒤 소개 메일을 작성합니다.",
+  },
+  {
+    name: "Expense Manager",
+    color: "#F2622A",
+    slug: "seepients/expense-manager",
+    desc: "영수증과 결제를 맞추고 리포트를 제출하며, 추측하기 전에 묻습니다.",
+  },
+  {
+    name: "Coding Agent",
+    color: "#5B6EE1",
+    slug: "seepients/coding-agent",
+    desc: "저장소와 변경 내용을 물은 뒤, 당신 머신에서 작업하고 더 나가기 전에 확인합니다.",
+  },
+  {
+    name: "Account Manager",
+    color: "#9B5CF6",
+    slug: "seepients/account-manager",
+    desc: "갱신 맥락을 유지하고 알려진 질문에 답하며, 나머지는 에스컬레이션합니다.",
+  },
+  {
+    name: "Paid Media",
+    color: "#3EC5A8",
+    slug: "seepients/paid-media",
+    desc: "매일 지출을 지켜보고 전환되지 않는 건 일시정지한 뒤, 바뀐 점을 보고합니다.",
+  },
+  {
+    name: "Chief of Staff",
+    color: "#8B93A8",
+    slug: "seepients/chief-of-staff",
+    desc: "한 주를 운영합니다: 브리핑, 예약, 다른 봇 사이의 핸드오프.",
+  },
+];
+
+const ZH_ROSTER: RosterBot[] = [
+  {
+    name: "Sales Outbound",
+    color: "#F5A03C",
+    slug: "seepients/sales-outbound",
+    desc: "夜间调研客户、评估意向，用你的语气起草跟进，并留下待审清单。",
+  },
+  {
+    name: "Inbox Manager",
+    color: "#6A6BF5",
+    slug: "seepients/inbox-manager",
+    desc: "归档杂音、回复例行邮件，把需要你过目的草稿先搁置起来。",
+  },
+  {
+    name: "Talent Scout",
+    color: "#3B82F6",
+    slug: "seepients/talent-scout",
+    desc: "通读每份简历，按你的标准筛出候选名单，并写好介绍邮件。",
+  },
+  {
+    name: "Expense Manager",
+    color: "#F2622A",
+    slug: "seepients/expense-manager",
+    desc: "核对票据与账目、提交报销，拿不准时先问而不是猜。",
+  },
+  {
+    name: "Coding Agent",
+    color: "#5B6EE1",
+    slug: "seepients/coding-agent",
+    desc: "先问清仓库和这次改动，再在你的机器上干活，继续之前会回来确认。",
+  },
+  {
+    name: "Account Manager",
+    color: "#9B5CF6",
+    slug: "seepients/account-manager",
+    desc: "掌握续约背景，回答常见问题，其余的自动升级给你。",
+  },
+  {
+    name: "Paid Media",
+    color: "#3EC5A8",
+    slug: "seepients/paid-media",
+    desc: "每天盯投放，暂停没有转化的广告，并汇报发生了什么变化。",
+  },
+  {
+    name: "Chief of Staff",
+    color: "#8B93A8",
+    slug: "seepients/chief-of-staff",
+    desc: "统筹整周：准备简报、安排日程，并协调其他 Bot 之间的交接。",
+  },
+];
+
+const TESTIMONIALS: HomeCopy["testimonials"]["items"] = [
+  {
+    quote:
+      "landed here after a first experience with Grok Bot … then found this alternative, and i can confirm that your work rocks. it replaced totally grok bot for me. mobile app is very smooth too",
+    attribution: "@dilog1114",
+  },
+  {
+    quote:
+      "Im a co-founder and cto, loving seepients, we have it running against private on qwen 3.8 with strong hw/gpus - all private.",
+    attribution: "@bc101101",
+  },
+  {
+    quote:
+      "I use it to find cheap servers and computer parts on ebay and all other marketplaces and send me everything he decided is a good deal.",
+    attribution: "@michaelortnerit",
+  },
+  {
+    quote:
+      "Hermes is good but more complicated setup. Seepients has better multi agent workflow and simpler to setup",
+    attribution: "@notabot_92732",
+  },
+  {
+    quote: "ive been using seepients for 1 month in claude oauth no problems yet",
+    attribution: "@hey_cabron",
+  },
+  {
+    quote:
+      "I set up the mobile app today with expo, first time using expo but was easy with seepients walking me through",
+    attribution: "@mithril0x",
+  },
+];
+
+const HOME_COPY: Record<Locale, HomeCopy> = {
+  en: {
+    title: "Seepients | Open source Grok Bot alternative",
+    description: SITE_DESCRIPTION,
+    ogImageAlt:
+      "Seepients. AI teammates you actually own. Your keys, your model, your machine.",
+    availableLanguage: "English",
+    skipToContent: "Skip to content",
+    starFallback: "Star",
+    nav: {
+      home: "Seepients home",
+      primary: "Primary",
+      menu: "Menu",
+      product: "Product",
+      bots: "Bots",
+      selfHost: "Self-host",
+      openSource: "Open source",
+      grokBot: "Grok Bot",
+      docs: "Docs",
+      blog: "Blog",
+      alternatives: "Alternatives",
+      alternativesMenu: "Alternative pages",
+      viewOnGithub: "View on GitHub",
+      iosApp: "Download Seepients for iPhone",
+    },
+    hero: {
+      badge: "Apache-2.0",
+      pill: "Self-hosted",
+      heading: "The open source Grok Bot alternative you actually own",
+      lead: "Give a bot real work. It signs in to your tools, uses them the way you do, and comes back when it needs you.",
+      getStarted: "Get started",
+      viewOnGithub: "View on GitHub",
+      setupWithAgent: "Set up with your agent",
+      copiedForAgent: "Copied for your agent",
+      copyFailed: "Copy failed. Try again.",
+    },
+    selfHost: {
+      eyebrow: "Self-hosted",
+      heading: "Self-hosted. The computer is yours.",
+      copy: "Run on your Mac, or any machine you control. The desktop app's This computer option installs Seepients there. A Mac Mini can stay on. Your keys, your model, your data.",
+      features: [
+        {
+          title: "Your model",
+          body: "Sign in with Claude Pro/Max (Sonnet or Opus) or ChatGPT Plus/Pro, or use an Anthropic or OpenAI API key. OpenRouter, Grok or SuperGrok, and Ollama or LM Studio work too. Swap per bot: the cheap one triages, the smart one writes.",
+        },
+        {
+          title: "Readable routines",
+          body: "Show a bot a workflow once and it saves a routine as plain Markdown you can read, edit, and commit.",
+        },
+        {
+          title: "Approvals that hold",
+          body: "Set what a bot may do alone and what it must ask about. Every action lands in an audit log you own.",
+        },
+      ],
+    },
+    roster: {
+      eyebrow: "Bot Templates",
+      heading: "Give each bot a job",
+      copy: "Start a new bot and it interviews you. A few questions about the work, how you write, and where it lives. Then it gets going.",
+      bots: EN_ROSTER,
+    },
+    testimonials: {
+      heading: "Testimonials",
+      pause: "Pause",
+      play: "Play",
+      items: TESTIMONIALS,
+    },
+    faq: {
+      heading: "FAQ",
+      items: [
+        CLAUDE_CHATGPT_SUBSCRIPTION_FAQ,
+        {
+          question: "Do I need an API key if I already pay for Claude or ChatGPT?",
+          answer:
+            "No. Sign in with Claude Pro/Max or ChatGPT Plus/Pro and that subscription covers the model. An API key is the other path, for Anthropic, OpenAI, OpenRouter, or Grok. Seepients does not pay either way.",
+        },
+        {
+          question: "Can I run a local model?",
+          answer:
+            "Yes. Point a bot at a local OpenAI-compatible server such as Ollama or LM Studio. Each bot can use a different model.",
+        },
+      ],
+    },
+    openSource: {
+      eyebrow: "Open source",
+      heading: "Open source. Just the repo.",
+      copy: "Seepients is Apache-2.0 licensed and runs on your own machine with your own model keys. Nothing is gated, nothing phones home.",
+      selfHostTitle: "Self-host",
+      selfHostMeta: "Available today",
+      selfHostItems: [
+        "Docker runner and sandboxed browser",
+        "Bring your own model keys",
+        "Routines, memory, and audit log",
+        "Unlimited bots, no seats, no limits",
+        "Community support on GitHub",
+      ],
+      starOnGithub: "Star on GitHub",
+      readTheDocs: "Read the docs",
+      openClawAlternative: "OpenClaw alternative",
+      cloudTitle: "Cloud",
+      cloudBadge: "Coming soon",
+      cloudMeta: "Bring your own keys, we run the computers",
+      cloudItems: [
+        "Managed sandboxes, always on",
+        "Your keys, your model spend",
+        "Same bots, same routines, no migration",
+      ],
+      getStarted: "Get started",
+    },
+    cta: {
+      heading: "Meet your first bot",
+      copy: "Give Seepients something you have been putting off and let it handle the follow-through.",
+      getStarted: "Get started",
+      viewOnGithub: "View on GitHub",
+      openSourceValue: "Open source",
+      selfHostValue: "Self-host",
+      stats: [
+        { value: "stars", label: "GitHub stars" },
+        { value: "license", label: "License" },
+        { value: "openSource", label: "No seats, no gates" },
+        { value: "selfHost", label: "Your machine" },
+      ],
+    },
+    getStartedDialog: {
+      closeLabel: "Close get started dialog",
+      eyebrow: "Get started",
+      title: "How do you want to start?",
+      copy: "Self-host on your machine, or join the Cloud waitlist.",
+      selfHostNow: "Self-host now",
+      selfHostHint: "Install steps are in the docs.",
+      cloudWaitlist: "Cloud waitlist",
+      cloudHint: "Hosted Seepients is coming. Leave your email.",
+      back: "Back",
+      successTitle: "You're in.",
+      successCopy:
+        "We'll email you when hosted Seepients is ready. Want to start today? Jump to Self-host on this page.",
+      done: "Done",
+      viewOnGithub: "View on GitHub",
+    },
+    waitlist: {
+      emailLabel: "Email address",
+      placeholder: "you@company.com",
+      submit: "Continue",
+      joining: "Joining…",
+      success: "You’re in.",
+      added: "Added",
+      error: "Couldn’t add you. Try again.",
+    },
+    footer: {
+      navLabel: "Footer",
+      languagesLabel: "Language",
+      links: {
+        docs: "Docs",
+        product: "Product",
+        changelog: "Changelog",
+        alternatives: "Alternatives",
+        all: "All",
+        about: "About",
+        support: "Support",
+        privacy: "Privacy",
+        terms: "Terms",
+        company: "Company",
+        blog: "Blog",
+        iosApp: "iPhone app",
+        androidApp: "Android app",
+      },
+    },
+  },
+  de: {
+    title: "Seepients | Open-Source-Alternative zu Grok Bot",
+    description:
+      "Seepients ist eine Open-Source-Alternative zu Grok Bot für persistente KI-Teamkollegen, die echte Arbeit erledigen. Deine Keys, dein Modell, deine Maschine.",
+    ogImageAlt:
+      "Seepients. KI-Teamkollegen, die dir wirklich gehören. Deine Keys, dein Modell, deine Maschine.",
+    availableLanguage: "German",
+    skipToContent: "Zum Inhalt springen",
+    starFallback: "Star",
+    nav: {
+      home: "Seepients-Startseite",
+      primary: "Hauptnavigation",
+      menu: "Menü",
+      product: "Produkt",
+      bots: "Bots",
+      selfHost: "Self-host",
+      openSource: "Open Source",
+      grokBot: "Grok Bot",
+      docs: "Docs",
+      blog: "Blog",
+      alternatives: "Alternativen",
+      alternativesMenu: "Vergleichsseiten",
+      viewOnGithub: "Auf GitHub ansehen",
+      iosApp: "Seepients für iPhone laden",
+    },
+    hero: {
+      badge: "Apache-2.0",
+      pill: "Self-hosted",
+      heading: "Die Open-Source-Alternative zu Grok Bot, die dir wirklich gehört",
+      lead: "Gib einem Bot echte Arbeit. Er meldet sich in deinen Tools an, nutzt sie wie du. Er kommt zurück, wenn er dich braucht.",
+      getStarted: "Loslegen",
+      viewOnGithub: "Auf GitHub ansehen",
+      setupWithAgent: "Mit deinem Agenten einrichten",
+      copiedForAgent: "Für deinen Agenten kopiert",
+      copyFailed: "Kopieren fehlgeschlagen. Erneut versuchen.",
+    },
+    selfHost: {
+      eyebrow: "Self-hosted",
+      heading: "Self-hosted. Der Computer gehört dir.",
+      copy: "Auf deinem Mac oder auf jeder Maschine, die du kontrollierst. In der Desktop-App installiert This computer Seepients dort. Ein Mac Mini kann an bleiben. Deine Keys, dein Modell, deine Daten.",
+      features: [
+        {
+          title: "Dein Modell",
+          body: "Melde dich mit Claude Pro/Max (Sonnet oder Opus) oder ChatGPT Plus/Pro an, oder nutze einen Anthropic- oder OpenAI-API-Key. OpenRouter, Grok oder SuperGrok und Ollama oder LM Studio gehen auch. Pro Bot wechselbar: der günstige triagiert, der smarte schreibt.",
+        },
+        {
+          title: "Lesbare Routinen",
+          body: "Zeig einem Bot einmal einen Workflow. Er speichert eine Routine als Markdown, das du lesen, editieren und committen kannst.",
+        },
+        {
+          title: "Freigaben, die greifen",
+          body: "Lege fest, was ein Bot allein darf und worum er fragen muss. Jede Aktion landet in einem Audit-Log, das dir gehört.",
+        },
+      ],
+    },
+    roster: {
+      eyebrow: "Bot-Vorlagen",
+      heading: "Gib jedem Bot eine Aufgabe",
+      copy: "Starte einen neuen Bot und er interviewt dich. Ein paar Fragen zur Arbeit, zu deinem Schreibstil und wo sie lebt. Dann legt er los.",
+      bots: DE_ROSTER,
+    },
+    testimonials: {
+      heading: "Kundenstimmen",
+      pause: "Pause",
+      play: "Weiter",
+      items: TESTIMONIALS,
+    },
+    faq: {
+      heading: "FAQ",
+      items: [
+        {
+          question: "Kann ich mein Claude Pro/Max- oder ChatGPT Plus/Pro-Abo nutzen?",
+          answer:
+            "Ja — melde dich mit diesem Abo an, oder nutze einen API-Key, OpenRouter oder einen lokalen OpenAI-kompatiblen Server (Ollama, LM Studio usw.). Seepients zahlt die Modellrechnung nicht.",
+        },
+        {
+          question: "Brauche ich einen API-Key, wenn ich schon für Claude oder ChatGPT zahle?",
+          answer:
+            "Nein. Melde dich mit Claude Pro/Max oder ChatGPT Plus/Pro an. Dieses Abo deckt das Modell ab. Ein API-Key ist der andere Weg, für Anthropic, OpenAI, OpenRouter oder Grok. Seepients zahlt so oder so nicht.",
+        },
+        {
+          question: "Kann ich ein lokales Modell nutzen?",
+          answer:
+            "Ja. Richte einen Bot auf einen lokalen OpenAI-kompatiblen Server wie Ollama oder LM Studio. Jeder Bot kann ein anderes Modell nutzen.",
+        },
+      ],
+    },
+    openSource: {
+      eyebrow: "Open Source",
+      heading: "Open Source. Nur das Repo.",
+      copy: "Seepients ist Apache-2.0-lizenziert und läuft auf deiner Maschine mit deinen Model-Keys. Nichts ist freigeschaltet, nichts telefoniert nach Hause.",
+      selfHostTitle: "Self-host",
+      selfHostMeta: "Heute verfügbar",
+      selfHostItems: [
+        "Docker-Runner und sandboxierter Browser",
+        "Eigene Model-Keys mitbringen",
+        "Routinen, Memory und Audit-Log",
+        "Unbegrenzte Bots, keine Seats, keine Limits",
+        "Community-Support auf GitHub",
+      ],
+      starOnGithub: "Auf GitHub mit Stern markieren",
+      readTheDocs: "Docs lesen",
+      openClawAlternative: "OpenClaw-Alternative",
+      cloudTitle: "Cloud",
+      cloudBadge: "Demnächst",
+      cloudMeta: "Deine Keys, wir betreiben die Computer",
+      cloudItems: [
+        "Managed Sandboxes, immer an",
+        "Deine Keys, dein Model-Spend",
+        "Dieselben Bots, dieselben Routinen, keine Migration",
+      ],
+      getStarted: "Loslegen",
+    },
+    cta: {
+      heading: "Triff deinen ersten Bot",
+      copy: "Gib Seepients etwas, das du aufgeschoben hast. Lass es den Follow-through übernehmen.",
+      getStarted: "Loslegen",
+      viewOnGithub: "Auf GitHub ansehen",
+      openSourceValue: "Open Source",
+      selfHostValue: "Self-host",
+      stats: [
+        { value: "stars", label: "GitHub Stars" },
+        { value: "license", label: "Lizenz" },
+        { value: "openSource", label: "Keine Seats, keine Gates" },
+        { value: "selfHost", label: "Deine Maschine" },
+      ],
+    },
+    getStartedDialog: {
+      closeLabel: "Loslegen-Dialog schließen",
+      eyebrow: "Loslegen",
+      title: "Wie willst du starten?",
+      copy: "Self-host auf deiner Maschine, oder auf die Cloud-Warteliste.",
+      selfHostNow: "Jetzt self-hosten",
+      selfHostHint: "Installationsschritte stehen in den Docs.",
+      cloudWaitlist: "Cloud-Warteliste",
+      cloudHint: "Gehostetes Seepients kommt. Hinterlasse deine E-Mail.",
+      back: "Zurück",
+      successTitle: "Du bist dabei.",
+      successCopy:
+        "Wir mailen dir, wenn gehostetes Seepients bereit ist. Heute starten? Zum Self-host-Abschnitt auf dieser Seite.",
+      done: "Fertig",
+      viewOnGithub: "Auf GitHub ansehen",
+    },
+    waitlist: {
+      emailLabel: "E-Mail-Adresse",
+      placeholder: "du@firma.com",
+      submit: "Weiter",
+      joining: "Wird eingetragen…",
+      success: "Du bist dabei.",
+      added: "Hinzugefügt",
+      error: "Konnte dich nicht eintragen. Bitte erneut versuchen.",
+    },
+    footer: {
+      navLabel: "Fußzeile",
+      languagesLabel: "Sprache",
+      links: {
+        docs: "Dokumentation",
+        product: "Produkt",
+        changelog: "Änderungsprotokoll",
+        alternatives: "Alternativen",
+        all: "Alle",
+        about: "Über uns",
+        support: "Support",
+        privacy: "Datenschutz",
+        terms: "AGB",
+        company: "Unternehmen",
+        blog: "Blog",
+        iosApp: "iPhone-App",
+        androidApp: "Android-App",
+      },
+    },
+  },
+  ko: {
+    title: "Seepients | 오픈소스 Grok Bot 대안",
+    description:
+      "Seepients는 실제 업무를 수행하는 지속형 AI 팀원을 위한 오픈소스 Grok Bot 대안입니다. 키, 모델, 머신, 모두 당신 것.",
+    ogImageAlt: "Seepients. 진짜로 내 것인 AI 팀원. 키, 모델, 머신, 모두 당신 것.",
+    availableLanguage: "Korean",
+    skipToContent: "본문으로 건너뛰기",
+    starFallback: "Star",
+    nav: {
+      home: "Seepients 홈",
+      primary: "주 메뉴",
+      menu: "메뉴",
+      product: "제품",
+      bots: "봇",
+      selfHost: "셀프 호스트",
+      openSource: "오픈소스",
+      grokBot: "Grok Bot",
+      docs: "Docs",
+      blog: "블로그",
+      alternatives: "대안",
+      alternativesMenu: "대안 페이지",
+      viewOnGithub: "GitHub에서 보기",
+      iosApp: "iPhone용 Seepients 받기",
+    },
+    hero: {
+      badge: "Apache-2.0",
+      pill: "셀프 호스트",
+      heading: "진짜로 내 것인 오픈소스 Grok Bot 대안",
+      lead: "봇에게 실제 업무를 맡기세요. 봇이 도구에 로그인하고, 당신처럼 사용하며, 필요할 때 돌아와 묻습니다.",
+      getStarted: "시작하기",
+      viewOnGithub: "GitHub에서 보기",
+      setupWithAgent: "에이전트로 설정하기",
+      copiedForAgent: "에이전트용으로 복사됨",
+      copyFailed: "복사 실패. 다시 시도하세요.",
+    },
+    selfHost: {
+      eyebrow: "셀프 호스트",
+      heading: "셀프 호스트. 컴퓨터는 당신 것",
+      copy: "Mac에서, 또는 당신이 관리하는 머신에서 실행하세요. 데스크톱 앱의 This computer가 Seepients를 그곳에 설치합니다. Mac Mini는 켜 둔 채 둘 수 있습니다. 키, 모델, 데이터는 모두 당신 것.",
+      features: [
+        {
+          title: "당신 모델",
+          body: "Claude Pro/Max(Sonnet 또는 Opus) 또는 ChatGPT Plus/Pro로 로그인하거나 Anthropic·OpenAI API 키를 사용하세요. OpenRouter, Grok 또는 SuperGrok, Ollama나 LM Studio도 됩니다. 봇마다 바꿀 수 있습니다. 저렴한 모델은 분류하고, 똑똑한 모델은 작성합니다.",
+        },
+        {
+          title: "읽을 수 있는 루틴",
+          body: "워크플로를 한 번 보여주면 봇이 읽고 수정하고 커밋할 수 있는 Markdown 루틴으로 저장합니다.",
+        },
+        {
+          title: "지키는 승인",
+          body: "봇이 혼자 해도 되는 일과 물어야 하는 일을 정하세요. 모든 액션은 당신이 소유한 감사 로그에 남습니다.",
+        },
+      ],
+    },
+    roster: {
+      eyebrow: "봇 템플릿",
+      heading: "봇마다 역할을 주세요",
+      copy: "새 봇을 시작하면 인터뷰합니다. 업무, 글쓰기 방식, 작업이 어디에 있는지 몇 가지 질문. 그다음 바로 시작합니다.",
+      bots: KO_ROSTER,
+    },
+    testimonials: {
+      heading: "후기",
+      pause: "일시정지",
+      play: "재생",
+      items: TESTIMONIALS,
+    },
+    faq: {
+      heading: "질문",
+      items: [
+        {
+          question: "Claude Pro/Max 또는 ChatGPT Plus/Pro 구독을 쓸 수 있나요?",
+          answer:
+            "네 — 그 구독으로 로그인하거나, API 키, OpenRouter, 로컬 OpenAI 호환 서버(Ollama, LM Studio 등)를 사용하세요. 모델 요금은 Seepients가 내지 않습니다.",
+        },
+        {
+          question: "이미 Claude나 ChatGPT를 결제 중이면 API 키가 필요한가요?",
+          answer:
+            "아니요. Claude Pro/Max 또는 ChatGPT Plus/Pro로 로그인하면 그 구독이 모델을 부담합니다. API 키는 Anthropic, OpenAI, OpenRouter, Grok을 쓰는 다른 경로입니다. 어느 쪽이든 Seepients가 요금을 내지 않습니다.",
+        },
+        {
+          question: "로컬 모델을 쓸 수 있나요?",
+          answer:
+            "네. Ollama나 LM Studio 같은 로컬 OpenAI 호환 서버에 봇을 연결하세요. 봇마다 다른 모델을 쓸 수 있습니다.",
+        },
+      ],
+    },
+    openSource: {
+      eyebrow: "오픈소스",
+      heading: "오픈소스. 리포만.",
+      copy: "Seepients는 Apache-2.0 라이선스이며, 당신 머신에서 당신 모델 키로 실행됩니다. 잠긴 기능도, 외부로 연락하는 것도 없습니다.",
+      selfHostTitle: "셀프 호스트",
+      selfHostMeta: "지금 사용 가능",
+      selfHostItems: [
+        "Docker 러너와 샌드박스 브라우저",
+        "모델 키는 직접 가져오기",
+        "루틴, 메모리, 감사 로그",
+        "봇 무제한, 시트·한도 없음",
+        "GitHub 커뮤니티 지원",
+      ],
+      starOnGithub: "GitHub에서 Star",
+      readTheDocs: "문서 읽기",
+      openClawAlternative: "OpenClaw 대안",
+      cloudTitle: "Cloud",
+      cloudBadge: "곧 출시",
+      cloudMeta: "키는 당신 것, 컴퓨터는 우리가 운영",
+      cloudItems: [
+        "상시 가동 관리형 샌드박스",
+        "키와 모델 비용은 당신 것",
+        "같은 봇, 같은 루틴, 마이그레이션 없음",
+      ],
+      getStarted: "시작하기",
+    },
+    cta: {
+      heading: "첫 봇을 만나보세요",
+      copy: "미뤄 두었던 일을 Seepients에 맡기고, 후속까지 맡기세요.",
+      getStarted: "시작하기",
+      viewOnGithub: "GitHub에서 보기",
+      openSourceValue: "오픈소스",
+      selfHostValue: "셀프 호스트",
+      stats: [
+        { value: "stars", label: "GitHub 스타" },
+        { value: "license", label: "라이선스" },
+        { value: "openSource", label: "시트·게이트 없음" },
+        { value: "selfHost", label: "당신 머신" },
+      ],
+    },
+    getStartedDialog: {
+      closeLabel: "시작하기 대화상자 닫기",
+      eyebrow: "시작하기",
+      title: "어떻게 시작할까요?",
+      copy: "당신 머신에서 셀프 호스트하거나, Cloud 대기열에 등록하세요.",
+      selfHostNow: "지금 셀프 호스트",
+      selfHostHint: "설치 단계는 문서에 있습니다.",
+      cloudWaitlist: "Cloud 대기열",
+      cloudHint: "호스팅 Seepients가 곧 옵니다. 이메일을 남겨 주세요.",
+      back: "뒤로",
+      successTitle: "등록되었습니다.",
+      successCopy:
+        "호스팅 Seepients가 준비되면 메일로 알려 드립니다. 오늘 시작하려면 이 페이지의 셀프 호스트 섹션으로 이동하세요.",
+      done: "완료",
+      viewOnGithub: "GitHub에서 보기",
+    },
+    waitlist: {
+      emailLabel: "이메일 주소",
+      placeholder: "you@company.com",
+      submit: "계속",
+      joining: "등록 중…",
+      success: "등록되었습니다.",
+      added: "추가됨",
+      error: "등록하지 못했습니다. 다시 시도하세요.",
+    },
+    footer: {
+      navLabel: "푸터",
+      languagesLabel: "언어",
+      links: {
+        docs: "문서",
+        product: "제품",
+        changelog: "변경 내역",
+        alternatives: "대안",
+        all: "전체",
+        about: "소개",
+        support: "지원",
+        privacy: "개인정보 처리방침",
+        terms: "이용약관",
+        company: "회사",
+        blog: "블로그",
+        iosApp: "iPhone 앱",
+        androidApp: "Android 앱",
+      },
+    },
+  },
+  zh: {
+    title: "Seepients | 开源 Grok Bot 替代品",
+    description:
+      "Seepients 是一个开源 Grok Bot 替代品，用于运行真正干活的持久化 AI 队友。密钥、模型、机器，都归你所有。",
+    ogImageAlt: "Seepients：真正属于你的 AI 队友。密钥、模型、机器，都归你所有。",
+    availableLanguage: "Chinese",
+    skipToContent: "跳到主要内容",
+    starFallback: "加星",
+    nav: {
+      home: "Seepients 首页",
+      primary: "主导航",
+      menu: "菜单",
+      product: "产品",
+      bots: "Bot",
+      selfHost: "自托管",
+      openSource: "开源",
+      grokBot: "Grok Bot",
+      docs: "文档",
+      blog: "博客",
+      alternatives: "替代方案",
+      alternativesMenu: "替代页面",
+      viewOnGithub: "在 GitHub 上查看",
+      iosApp: "下载 iPhone 版 Seepients",
+    },
+    hero: {
+      badge: "Apache-2.0",
+      pill: "自托管",
+      heading: "真正属于你的开源 Grok Bot 替代品",
+      lead: "把真正的工作交给 Bot：它会登录你的工具，像你一样使用它们，并在需要你时回来询问。",
+      getStarted: "开始使用",
+      viewOnGithub: "在 GitHub 上查看",
+      setupWithAgent: "用你的智能体安装",
+      copiedForAgent: "已为你的智能体复制",
+      copyFailed: "复制失败。请重试。",
+    },
+    selfHost: {
+      eyebrow: "自托管",
+      heading: "自托管。电脑归你所有。",
+      copy: "在你的 Mac 上运行，或在你控制的任何机器上运行。桌面应用里，This computer 会把 Seepients 装在那台机器上。Mac Mini 可以一直开着。密钥、模型、数据，都归你所有。",
+      features: [
+        {
+          title: "你的模型",
+          body: "使用 Claude Pro/Max（Sonnet 或 Opus）或 ChatGPT Plus/Pro 登录，或使用 Anthropic、OpenAI 的 API 密钥。OpenRouter、Grok 或 SuperGrok，以及 Ollama、LM Studio 也可以。可按 Bot 切换：用便宜的模型做分流，用聪明的模型写作。",
+        },
+        {
+          title: "可读的例行任务",
+          body: "给 Bot 演示一次工作流程，它就会把例行任务保存为纯 Markdown，你可以阅读、编辑并提交到版本库。",
+        },
+        {
+          title: "可靠的审批",
+          body: "设定 Bot 可以独立做什么、什么必须先请示。每个操作都会写入归你所有的审计日志。",
+        },
+      ],
+    },
+    roster: {
+      eyebrow: "Bot 模板",
+      heading: "给每个 Bot 分配一份工作",
+      copy: "新建一个 Bot，它会先面试你：几个关于工作内容、写作风格和运行位置的问题。然后它就开始干活。",
+      bots: ZH_ROSTER,
+    },
+    testimonials: {
+      heading: "用户评价",
+      pause: "暂停",
+      play: "播放",
+      items: TESTIMONIALS,
+    },
+    faq: {
+      heading: "常见问题",
+      items: [
+        {
+          question: "可以用我的 Claude Pro/Max 或 ChatGPT Plus/Pro 订阅吗？",
+          answer:
+            "可以 — 用该订阅登录，或使用 API 密钥、OpenRouter，或本地的 OpenAI 兼容服务（Ollama、LM Studio 等）。模型费用不由 Seepients 支付。",
+        },
+        {
+          question: "已经在为 Claude 或 ChatGPT 付费，还需要 API 密钥吗？",
+          answer:
+            "不需要。用 Claude Pro/Max 或 ChatGPT Plus/Pro 登录，由该订阅承担模型费用。API 密钥是另一条路，用于 Anthropic、OpenAI、OpenRouter 或 Grok。两种方式都不是 Seepients 付费。",
+        },
+        {
+          question: "可以用本地模型吗？",
+          answer:
+            "可以。把 Bot 指向 Ollama 或 LM Studio 这类本地 OpenAI 兼容服务。每个 Bot 可以使用不同的模型。",
+        },
+      ],
+    },
+    openSource: {
+      eyebrow: "开源",
+      heading: "开源。只有代码仓库。",
+      copy: "Seepients 采用 Apache-2.0 许可证，在你自己的机器上用你自己的模型密钥运行。没有功能墙，也不会偷偷外联。",
+      selfHostTitle: "自托管",
+      selfHostMeta: "现已可用",
+      selfHostItems: [
+        "Docker 运行器和沙箱浏览器",
+        "自带模型密钥",
+        "例行任务、记忆和审计日志",
+        "Bot 数量不限，无席位、无额度限制",
+        "GitHub 社区支持",
+      ],
+      starOnGithub: "在 GitHub 上点星",
+      readTheDocs: "阅读文档",
+      openClawAlternative: "OpenClaw 替代方案",
+      cloudTitle: "云端",
+      cloudBadge: "即将推出",
+      cloudMeta: "密钥归你，电脑由我们运行",
+      cloudItems: [
+        "托管沙箱，始终在线",
+        "密钥归你，模型费用归你",
+        "同样的 Bot 和例行任务，无需迁移",
+      ],
+      getStarted: "开始使用",
+    },
+    cta: {
+      heading: "认识你的第一个 Bot",
+      copy: "把一件你一直拖延的事交给 Seepients，让它负责跟进到底。",
+      getStarted: "开始使用",
+      viewOnGithub: "在 GitHub 上查看",
+      openSourceValue: "开源",
+      selfHostValue: "自托管",
+      stats: [
+        { value: "stars", label: "GitHub 星标" },
+        { value: "license", label: "许可证" },
+        { value: "openSource", label: "无席位、无门槛" },
+        { value: "selfHost", label: "你的机器" },
+      ],
+    },
+    getStartedDialog: {
+      closeLabel: "关闭开始使用对话框",
+      eyebrow: "开始使用",
+      title: "你想如何开始？",
+      copy: "在你的机器上自托管，或加入云端候补名单。",
+      selfHostNow: "立即自托管",
+      selfHostHint: "安装步骤见文档。",
+      cloudWaitlist: "云端候补名单",
+      cloudHint: "托管版 Seepients 即将推出。留下你的邮箱。",
+      back: "返回",
+      successTitle: "登记成功。",
+      successCopy:
+        "托管版 Seepients 就绪时我们会邮件通知你。想今天就上手？跳到本页的自托管部分。",
+      done: "完成",
+      viewOnGithub: "在 GitHub 上查看",
+    },
+    waitlist: {
+      emailLabel: "邮箱地址",
+      placeholder: "you@company.com",
+      submit: "继续",
+      joining: "正在登记…",
+      success: "登记成功。",
+      added: "已添加",
+      error: "未能添加你，请重试。",
+    },
+    footer: {
+      navLabel: "页脚",
+      languagesLabel: "语言",
+      links: {
+        docs: "文档",
+        product: "产品",
+        changelog: "更新日志",
+        alternatives: "替代方案",
+        all: "全部",
+        about: "关于",
+        support: "支持",
+        privacy: "隐私",
+        terms: "条款",
+        company: "公司",
+        blog: "博客",
+        iosApp: "iPhone 应用",
+        androidApp: "Android 应用",
+      },
+    },
+  },
+};
+
+export function getHomeCopy(locale: Locale): HomeCopy {
+  return HOME_COPY[locale];
+}

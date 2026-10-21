@@ -1,0 +1,28 @@
+---
+type Props = {
+  otherName: string;
+  seepients: readonly string[];
+  other: readonly string[];
+};
+
+const { otherName, seepients, other } = Astro.props;
+---
+
+<figure class="vs-card">
+  <div class="vs-card__grid">
+    <div class="vs-card__col">
+      <p class="vs-card__name">Seepients</p>
+      <ul>
+        {seepients.map((item) => <li>{item}</li>)}
+      </ul>
+    </div>
+    <p class="vs-card__vs" aria-hidden="true">vs</p>
+    <div class="vs-card__col">
+      <p class="vs-card__name">{otherName}</p>
+      <ul>
+        {other.map((item) => <li>{item}</li>)}
+      </ul>
+    </div>
+  </div>
+  <figcaption class="sr-only">Seepients compared with {otherName}</figcaption>
+</figure>

@@ -35,7 +35,7 @@ jobs:
         run: bash .agents/skills/release-gate/scripts/publish.sh --self-check
 
       # build:core chains first — the root program resolves the engine via
-      # the seepient-core workspace package (spec 027 D20).
+      # the seepient-engine workspace package (spec 027 D20).
       - name: Typecheck
         run: pnpm run typecheck
 

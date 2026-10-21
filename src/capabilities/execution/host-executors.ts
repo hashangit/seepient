@@ -4,7 +4,7 @@
  * `TrustedHostExecutor` and `NoneExecutor` are the containment-free executors:
  * they consult the composition root's callback map (or return a pre-computed
  * result) and touch no sandbox, broker, or filesystem machinery. They ship in
- * seepient-core so the light default pipeline can complete trusted-host tool
+ * seepient-engine so the light default pipeline can complete trusted-host tool
  * turns; the heavy executors stay in `executors.ts` (full package).
  */
 import type { PreparedToolAction } from "../../foundations/contracts/prepared-action.js";
@@ -59,6 +59,9 @@ export class TrustedHostExecutor implements OperationExecutor {
           output: typeof res?.output === "string" ? res.output : JSON.stringify(res?.output ?? res ?? ""),
           success: res?.success ?? true,
           metadata: res?.metadata,
+          // Image-bearing tool results (spec 029 FR-037) ride the same
+          // trusted-host model-egress decision as the text output.
+          ...(Array.isArray(res?.images) && res.images.length > 0 ? { images: res.images } : {}),
         },
         evidence: {
           backend: "local-native",

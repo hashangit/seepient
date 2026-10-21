@@ -1,5 +1,5 @@
 /**
- * Spec 027 (T010): seepient-core public surface pin.
+ * Spec 027 (T010): seepient-engine public surface pin.
  *
  * The core entry's runtime VALUE export set is pinned against a COMMITTED
  * GOLDEN SNAPSHOT (`core-entry-exports.json`). The real property this pins:
@@ -36,7 +36,7 @@ function pinViolations(expected: Set<string>, actual: Set<string>): string[] {
   return violations;
 }
 
-describe("seepient-core surface pin (027 T010)", () => {
+describe("seepient-engine surface pin (027 T010)", () => {
   it("runtime exports equal the committed golden surface", () => {
     const golden: string[] = JSON.parse(readFileSync(GOLDEN, "utf8"));
     expect(golden.length).toBeGreaterThan(20); // the snapshot itself must be live

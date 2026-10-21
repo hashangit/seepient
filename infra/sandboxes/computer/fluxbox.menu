@@ -1,0 +1,4 @@
+[begin] (Seepients)
+  [exec] (Browser) {seepients-browser}
+  [exec] (Terminal) {xterm -bg rgb:11/11/13 -fg rgb:e8/e8/ea -cr rgb:e8/e8/ea -title Terminal -xrm 'XTerm*selectToClipboard: true'}
+[end]

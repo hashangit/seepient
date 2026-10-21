@@ -68,3 +68,10 @@ native/fs-commit/target/
 
 # packed tarballs (release tooling packs its own)
 *.tgz
+
+# Imported app tree build artifacts (spec 029)
+.turbo/
+.astro/
+.expo/
+**/src/generated/
+*.tsbuildinfo

@@ -16,28 +16,28 @@
  * Executors are sibling capabilities — they share Foundations contracts only
  * and never import each other or `capabilities/tools/`.
  */
-import type { PreparedToolAction } from "seepient-core/dist/foundations/contracts/prepared-action.js";
-import type { SnapshotStore } from "seepient-core/dist/foundations/hashline/snapshot-store.js";
+import type { PreparedToolAction } from "seepient-engine/dist/foundations/contracts/prepared-action.js";
+import type { SnapshotStore } from "seepient-engine/dist/foundations/hashline/snapshot-store.js";
 import type {
   ExecutionResult,
   ToolProgress,
-} from "seepient-core/dist/foundations/contracts/execution-boundary.js";
-import type { CapabilityEnvelope } from "seepient-core/dist/foundations/contracts/permission-policy.js";
-import type { OperationExecutor } from "seepient-core/dist/capabilities/execution/operation-executor-registry.js";
+} from "seepient-engine/dist/foundations/contracts/execution-boundary.js";
+import type { CapabilityEnvelope } from "seepient-engine/dist/foundations/contracts/permission-policy.js";
+import type { OperationExecutor } from "seepient-engine/dist/capabilities/execution/operation-executor-registry.js";
 import type {
   FileCommitBroker,
   PreparationArtifactStore,
   EffectBroker,
-} from "seepient-core/dist/foundations/contracts/execution-brokers.js";
-import { UnsupportedBackendError, PathHardlinkRefusedError, PathIdentityMismatchError } from "seepient-core/dist/foundations/errors.js";
+} from "seepient-engine/dist/foundations/contracts/execution-brokers.js";
+import { UnsupportedBackendError, PathHardlinkRefusedError, PathIdentityMismatchError } from "seepient-engine/dist/foundations/errors.js";
 import { isSecurityPath } from "./environment-policy.js";
-import { isGuardNeutralized } from "seepient-core/dist/foundations/test-seams.js";
-import { createSetupFailure } from "seepient-core/dist/foundations/contracts/setup-failure.js";
+import { isGuardNeutralized } from "seepient-engine/dist/foundations/test-seams.js";
+import { createSetupFailure } from "seepient-engine/dist/foundations/contracts/setup-failure.js";
 
 /** Read the prepared bytes for a commit operation from the artifact store. */
 async function readContent(
   artifacts: PreparationArtifactStore,
-  ref: import("seepient-core/dist/foundations/contracts/prepared-action.js").PreparedArtifactRef,
+  ref: import("seepient-engine/dist/foundations/contracts/prepared-action.js").PreparedArtifactRef,
 ): Promise<Uint8Array> {
   return artifacts.read(ref);
 }
@@ -660,7 +660,7 @@ export class BrokerExecutor implements OperationExecutor {
     // Broker handles explicit secret resolution via secretResolver and fails closed with CREDENTIAL_REQUIRED.
     if (this.tenancyMode !== "multi") {
       // Preflight credential checks (spec 017, T014; spec 020, T015)
-      const { resolveCredentials } = await import("seepient-core/dist/foundations/security/credential-resolver.js");
+      const { resolveCredentials } = await import("seepient-engine/dist/foundations/security/credential-resolver.js");
       const creds = resolveCredentials(undefined, this.workspaceRoot);
 
       if (action.toolName === "web_search" && !creds.tavilyApiKey) {
@@ -918,7 +918,7 @@ export class BrokerExecutor implements OperationExecutor {
    * undefined when the response carries neither.
    */
   private async extractImageBytes(
-    artifact: import("seepient-core/dist/foundations/contracts/prepared-action.js").PreparedArtifactRef | undefined,
+    artifact: import("seepient-engine/dist/foundations/contracts/prepared-action.js").PreparedArtifactRef | undefined,
   ): Promise<Uint8Array | undefined> {
     if (!artifact || !this.artifacts) return undefined;
     let bytes: Uint8Array;

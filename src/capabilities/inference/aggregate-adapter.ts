@@ -193,7 +193,7 @@ export class AggregateInferenceAdapter {
       if (!this.googleImageBackend) {
         throw new InferenceError({
           code: "media_not_registered",
-          message: `Image generation for "google" models is not available in seepient-core — the vendor adapter ships with the full "seepient" package. Pass a googleImage backend (or install "seepient") to enable it.`,
+          message: `Image generation for "google" models is not available in seepient-engine — the vendor adapter ships with the full "seepient" package. Pass a googleImage backend (or install "seepient") to enable it.`,
           providerAccount: target.providerAccount,
           model: target.model,
           retryable: false,
@@ -206,7 +206,7 @@ export class AggregateInferenceAdapter {
       if (!this.openaiImageBackend) {
         throw new InferenceError({
           code: "media_not_registered",
-          message: `Image generation for "openai" models is not available in seepient-core — the vendor adapter ships with the full "seepient" package. Pass an openaiImage backend (or install "seepient") to enable it.`,
+          message: `Image generation for "openai" models is not available in seepient-engine — the vendor adapter ships with the full "seepient" package. Pass an openaiImage backend (or install "seepient") to enable it.`,
           providerAccount: target.providerAccount,
           model: target.model,
           retryable: false,

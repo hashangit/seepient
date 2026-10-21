@@ -4,7 +4,7 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import * as crypto from "node:crypto";
-import type { ProviderRuntime } from "seepient-core/dist/domain/providers/provider-runtime.js";
+import type { ProviderRuntime } from "seepient-engine/dist/domain/providers/provider-runtime.js";
 import type { ApiKeyEntry } from "../../auth/auth.js";
 import { hasScope } from "../../auth/auth.js";
 import { createProviderManagerApi } from "../../cli/provider-manager-api.js";
@@ -114,7 +114,7 @@ export async function handleProbeProvider(
   }
 
   if (acc.baseUrl) {
-    const { safeSsrfFetch, validateEndpointUrl } = await import("seepient-core/dist/foundations/network/ssrf-fetch.js");
+    const { safeSsrfFetch, validateEndpointUrl } = await import("seepient-engine/dist/foundations/network/ssrf-fetch.js");
     const allowPrivate = acc.ssrfAllowPrivate === true || process.env.SEEPIENT_SSRF_ALLOW_PRIVATE === "1";
     if (full) {
       const start = Date.now();

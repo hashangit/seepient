@@ -24,7 +24,7 @@ interface ReplayEntry {
  * The ReplayLedger CONTRACT lives in foundations/contracts/replay-ledger.ts
  * (spec 027) and is re-exported here for this module's consumers.
  */
-import type { ReplayLedger } from "seepient-core/dist/foundations/contracts/replay-ledger.js";
+import type { ReplayLedger } from "seepient-engine/dist/foundations/contracts/replay-ledger.js";
 export type { ReplayLedger };
 export class PersistedReplayLedger implements ReplayLedger {
   private readonly dir: string;

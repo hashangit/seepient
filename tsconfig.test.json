@@ -6,7 +6,7 @@
     "declaration": false,
     "baseUrl": ".",
     "paths": {
-      "seepient-core/dist/*": [
+      "seepient-engine/dist/*": [
         "./src/*"
       ]
     }

@@ -1,6 +1,5 @@
 {
-  "//": "The exclude list MIRRORS the tsconfig.core.json include list (spec 027 D18: single membership source, drift caught by the pack:verify B-3 no-dup assert). Engine files emit into packages/core/dist only; full-side surfaces import them via the 'seepient-core' specifier. src/domain/media stays full-side (registration seam), so the domain excludes enumerate its siblings.",
-  "//": "The exclude list MIRRORS the tsconfig.core.json include list (spec 027 D18: single membership source, drift caught by the pack:verify B-3 no-dup assert). Engine files emit into packages/core/dist only; full-side surfaces import them via the 'seepient-core' specifier. src/domain/media stays full-side (registration seam), so the domain excludes enumerate its siblings.",
+  "//": "The exclude list MIRRORS the tsconfig.core.json include list (spec 027 D18: single membership source, drift caught by the pack:verify B-3 no-dup assert). Engine files emit into packages/core/dist only; full-side surfaces import them via the 'seepient-engine' specifier. src/domain/media stays full-side (registration seam), so the domain excludes enumerate its siblings. Spec 029 (M02 S04/D07): the blanket foundations exclusion is enumerated per engine member so src/foundations/contracts/app (product contracts, spec FR-005/FR-008) stays full-side; src/domain/app is full-side by default (not listed).",
   "compilerOptions": {
     "target": "ES2024",
     "module": "NodeNext",
@@ -23,7 +22,13 @@
     "src/**/__tests__/**",
     "src/**/*.test.ts",
     "src/**/*.spec.ts",
-    "src/foundations/**/*",
+    "src/foundations/*.ts",
+    "src/foundations/contracts/*.ts",
+    "src/foundations/errors/**/*",
+    "src/foundations/hashline/**/*",
+    "src/foundations/network/**/*",
+    "src/foundations/schemas/**/*",
+    "src/foundations/security/**/*",
     "src/capabilities/skills/**/*",
     "src/capabilities/tokenizer/tokenizer.ts",
     "src/capabilities/inference/aggregate-adapter.ts",

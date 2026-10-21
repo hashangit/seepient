@@ -1,0 +1,102 @@
+{
+  "expo": {
+    "name": "Seepients",
+    "slug": "seepients",
+    "owner": "inbox-zero",
+    "scheme": "seepients",
+    "version": "1.0.5",
+    "orientation": "default",
+    "userInterfaceStyle": "automatic",
+    "icon": "./assets/icon.png",
+    "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#050506"
+        }
+      ],
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-audio",
+        {
+          "enableBackgroundPlayback": false,
+          "microphonePermission": "Seepients uses the microphone for voice calls with your bots."
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "speechRecognitionPermission": "Seepients turns your speech into messages during voice calls.",
+          "microphonePermission": "Seepients uses the microphone for voice calls with your bots."
+        }
+      ],
+      "expo-localization",
+      "@react-native-vector-icons/ionicons",
+      "@react-native-vector-icons/material-design-icons",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Seepients uses your photo library so you can attach images to a bot message.",
+          "cameraPermission": "Seepients uses the camera so you can attach photos to a bot message.",
+          "microphonePermission": "Seepients uses the microphone for voice calls with your bots."
+        }
+      ],
+      "expo-sharing",
+      "./plugins/with-worklets-headers",
+      "./plugins/with-scene-lifecycle"
+    ],
+    "ios": {
+      "bundleIdentifier": "com.seepients.app",
+      "buildNumber": "1",
+      "supportsTablet": false,
+      "icon": "../../packages/ui-tokens/assets/Seepients.icon",
+      "config": {
+        "usesNonExemptEncryption": false
+      },
+      "infoPlist": {
+        "NSCameraUsageDescription": "Seepients uses the camera so you can attach photos to a bot message.",
+        "NSPhotoLibraryUsageDescription": "Seepients uses your photo library so you can attach images to a bot message.",
+        "NSLocalNetworkUsageDescription": "Seepients connects to a self-hosted Seepients server on your local network.",
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        }
+      }
+    },
+    "android": {
+      "package": "com.seepients.app",
+      "versionCode": 10,
+      "softwareKeyboardLayoutMode": "resize",
+      "icon": "./assets/icon.png",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "monochromeImage": "./assets/monochrome-icon.png",
+        "backgroundImage": "./assets/icon-background.png"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "router": {},
+      "supportsRTL": true,
+      "eas": {
+        "projectId": "07f7eb04-45e3-47fe-9374-99a2f991131e"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/07f7eb04-45e3-47fe-9374-99a2f991131e"
+    }
+  }
+}

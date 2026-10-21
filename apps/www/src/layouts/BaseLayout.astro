@@ -1,0 +1,131 @@
+---
+import "../styles/global.css";
+import { getMarkdownAlternate } from "../agent-content";
+import {
+  DEFAULT_LOCALE,
+  LOCALES,
+  LOCALE_HREFLANG,
+  LOCALE_HTML_LANG,
+  LOCALE_OG,
+  isLocale,
+  localeHomePath,
+  type Locale,
+} from "../i18n/locales";
+import { SITE_NAME, SITE_URL } from "../site";
+
+type Props = {
+  title?: string;
+  description: string;
+  structuredData?: object;
+  locale?: Locale;
+  skipLabel?: string;
+  homeAlternates?: boolean;
+  localeAlternates?: boolean;
+  ogImageAlt?: string;
+  /** Path or absolute URL. Defaults to the shared homepage image. */
+  ogImage?: string;
+  ogType?: string;
+  /** False on the not-found page: noindex, and no canonical URL. */
+  index?: boolean;
+};
+
+const {
+  title = SITE_NAME,
+  description,
+  structuredData,
+  skipLabel = "Skip to content",
+  homeAlternates = false,
+  localeAlternates = true,
+  ogImageAlt = "Seepients. AI teammates you actually own. Your keys, your model, your machine.",
+  ogImage = "/og-image.png",
+  ogType = "website",
+  index = true,
+} = Astro.props;
+
+const locale: Locale = isLocale(Astro.currentLocale)
+  ? Astro.currentLocale
+  : (Astro.props.locale ?? DEFAULT_LOCALE);
+
+const canonical = index ? new URL(Astro.url.pathname, SITE_URL).toString() : undefined;
+const robots = index ? "index, follow, max-image-preview:large" : "noindex";
+const socialImage = new URL(ogImage, SITE_URL).toString();
+const structuredDataJson = structuredData
+  ? JSON.stringify(structuredData).replaceAll("<", "\\u003c")
+  : null;
+const markdownAlternate = getMarkdownAlternate(Astro.url.pathname);
+const htmlLang = LOCALE_HTML_LANG[locale];
+const ogLocale = LOCALE_OG[locale];
+const homeUrls = Object.fromEntries(
+  LOCALES.map((l) => [l, new URL(localeHomePath(l), SITE_URL).toString()]),
+) as Record<Locale, string>;
+---
+
+<!doctype html>
+<html lang={htmlLang}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <meta name="robots" content={robots} />
+    <meta name="theme-color" content="#FDFDFD" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    {canonical && <meta property="og:url" content={canonical} />}
+    <meta property="og:type" content={ogType} />
+    <meta property="og:site_name" content={SITE_NAME} />
+    <meta property="og:locale" content={ogLocale} />
+    {
+      localeAlternates &&
+        LOCALES.filter((l) => l !== locale).map((l) => (
+          <meta property="og:locale:alternate" content={LOCALE_OG[l]} />
+        ))
+    }
+    <meta property="og:image" content={socialImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:alt" content={ogImageAlt} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={socialImage} />
+    <meta name="twitter:image:alt" content={ogImageAlt} />
+    {canonical && <link rel="canonical" href={canonical} />}
+    {
+      homeAlternates && (
+        <>
+          {LOCALES.map((l) => (
+            <link rel="alternate" hreflang={LOCALE_HREFLANG[l]} href={homeUrls[l]} />
+          ))}
+          <link rel="alternate" hreflang="x-default" href={homeUrls.en} />
+        </>
+      )
+    }
+    {markdownAlternate && (
+      <link rel="alternate" type="text/markdown" href={markdownAlternate} />
+    )}
+    <link rel="alternate" type="application/rss+xml" title="Seepients blog" href="/blog/rss.xml" />
+    <link rel="sitemap" href="/sitemap-index.xml" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" href="/favicon.png" type="image/png" sizes="128x128" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap"
+      rel="stylesheet"
+    />
+    {structuredDataJson && <script is:inline type="application/ld+json" set:html={structuredDataJson} />}
+    <title>{title}</title>
+    <script>
+      import "../analytics";
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">{skipLabel}</a>
+    <div class="page-shell">
+      <slot />
+    </div>
+  </body>
+</html>

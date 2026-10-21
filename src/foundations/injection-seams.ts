@@ -1,7 +1,7 @@
 /**
  * Package-boundary injection seams (spec 027).
  *
- * Core (seepient-core) carries the engine with zero built-in tools, no media
+ * Core (seepient-engine) carries the engine with zero built-in tools, no media
  * vendor wiring, no sandbox boundary, and no provider-SDK discovery sources.
  * The full `seepient` package registers its implementations here at its
  * composition roots (`src/transport/sdk/full-registrations.ts`), so engine
@@ -21,14 +21,14 @@ import type { Capability } from "./contracts/permission-policy.js";
 let defaultToolModules: readonly ToolModule[] | undefined;
 
 /**
- * Register the built-in tool barrel. Called by the full package; seepient-core
+ * Register the built-in tool barrel. Called by the full package; seepient-engine
  * never registers, so engine defaults expose zero built-in tools (FR-003).
  */
 export function registerDefaultToolModules(modules: readonly ToolModule[]): void {
   defaultToolModules = Object.freeze([...modules]);
 }
 
-/** The registered default, or undefined in seepient-core. */
+/** The registered default, or undefined in seepient-engine. */
 export function getDefaultToolModules(): readonly ToolModule[] | undefined {
   return defaultToolModules;
 }
@@ -56,7 +56,7 @@ let mediaVendorOperationHandlerFactory:
 
 /**
  * Register the media/image vendor-operation handler factory. Called by the
- * full package; unregistered (seepient-core) media turns deny typed (FR-009).
+ * full package; unregistered (seepient-engine) media turns deny typed (FR-009).
  */
 export function registerMediaVendorOperationHandlerFactory(
   factory: (opts: MediaVendorOperationHandlerOptions) => MediaVendorOperationHandler,
@@ -121,7 +121,7 @@ let executionBoundaryFactory: ExecutionBoundaryFactory | undefined;
 
 /**
  * Register the boundary-carrying pipeline factory (sandbox + effect broker +
- * native helper). Called by the full package; seepient-core defaults to the
+ * native helper). Called by the full package; seepient-engine defaults to the
  * light boundary (trusted-host/none only, FR-012).
  */
 export function registerExecutionBoundaryFactory(factory: ExecutionBoundaryFactory): void {
@@ -142,7 +142,7 @@ let providerManagerApiFactory:
 
 /**
  * Register the provider-management API factory (a full-package CLI impl).
- * Unregistered (seepient-core) provider mutations deny typed naming seepient.
+ * Unregistered (seepient-engine) provider mutations deny typed naming seepient.
  */
 export function registerProviderManagerApiFactory(
   factory: (runtime: unknown) => Promise<ProviderManagerApi>,
@@ -164,7 +164,7 @@ let brokerConnectorEvaluator:
 
 /**
  * Register the broker-connector evaluator (full-package machinery over the
- * MCP connector registry). Unregistered (seepient-core) broker-connector
+ * MCP connector registry). Unregistered (seepient-engine) broker-connector
  * tools deny typed at analysis time.
  */
 export function registerBrokerConnectorEvaluator(
@@ -188,7 +188,7 @@ let builtInAnalyzers: Record<string, ToolAnalyzer> = {};
 
 /**
  * Register the built-in tool analyzers (the prepared-action builders for the
- * built-in tools). Called by the full package; seepient-core runs with an
+ * built-in tools). Called by the full package; seepient-engine runs with an
  * empty table — it has no built-in tools to analyze.
  */
 export function registerBuiltInAnalyzers(analyzers: Record<string, ToolAnalyzer>): void {
@@ -212,7 +212,7 @@ let discoverySourceLoaders: DiscoverySourceLoaders = {};
 
 /**
  * Register the direct-SDK discovery-source loaders (lazy thunks owned by the
- * full package). Unregistered (seepient-core) refreshModels degrades with a
+ * full package). Unregistered (seepient-engine) refreshModels degrades with a
  * typed actionable message naming the absent full-side sources.
  */
 export function registerDiscoverySourceLoaders(loaders: DiscoverySourceLoaders): void {
@@ -231,7 +231,7 @@ let exactEstimatorLoader: (() => Promise<{ encode: ExactEncodeFn }>) | undefined
 
 /**
  * Register the exact-BPE tokenizer loader (a full-package lazy thunk). 
- * Unregistered (seepient-core) token estimation stays on the chars÷4
+ * Unregistered (seepient-engine) token estimation stays on the chars÷4
  * heuristic with estimateMode "heuristic".
  */
 export function registerExactEstimatorLoader(
@@ -253,7 +253,7 @@ let ambientStoreDefaults = false;
 /**
  * Register that ambient operator-state defaults are allowed (the FULL
  * package calls this: Profile A keeps its ~/.seepient defaults). Unregistered
- * — seepient-core — single+stateless construction defaults to the in-memory
+ * — seepient-engine — single+stateless construction defaults to the in-memory
  * store set instead of ambient disk, so a serverless container on a
  * read-only $HOME constructs and runs with zero ambient writes.
  */

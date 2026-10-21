@@ -1,5 +1,5 @@
 {
-  "//": "seepient-core emit (027): this include list is the SINGLE membership source of the engine spine (data-model \u00a71.1); the root tsconfig's exclude list mirrors it and scripts/check-package-boundary.mjs enforces the closure. Module format note (research E12): an emit's module format is governed by the nearest package.json to the emitted FILE \u2014 packages/core/package.json (type: module) covers packages/core/dist, so the core output is ESM like the root. Dynamic edges into full-package modules (tokenizer vendor, discovery sources) are seam-guarded and degrade with typed errors when absent.",
+  "//": "seepient-engine emit (027): this include list is the SINGLE membership source of the engine spine (data-model §1.1); the root tsconfig's exclude list mirrors it and scripts/check-package-boundary.mjs enforces the closure. Module format note (research E12): an emit's module format is governed by the nearest package.json to the emitted FILE — packages/core/package.json (type: module) covers packages/core/dist, so the core output is ESM like the root. Dynamic edges into full-package modules (tokenizer vendor, discovery sources) are seam-guarded and degrade with typed errors when absent. Spec 029 (M02 S04/D07): product code is forbidden in the engine emit — src/domain/app and src/foundations/contracts/app are excluded here and stay full-side (root-emitted); see layout-decision.md coreFreezeReading.",
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "outDir": "./packages/core/dist"
@@ -37,6 +37,8 @@
     "src/**/*.test.ts",
     "src/**/*.spec.ts",
     "src/domain/media/**/*",
+    "src/domain/app/**/*",
+    "src/foundations/contracts/app/**/*",
     "src/capabilities/inference/register-image-backends.ts",
     "src/vendors/gpt-tokenizer.ts"
   ]

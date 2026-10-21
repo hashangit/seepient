@@ -11,6 +11,7 @@ import type { ProviderRuntimeContract } from "../../foundations/contracts/provid
 import { bootstrapProviderRuntime } from "./bootstrap-provider-runtime.js";
 import { runAgentLoop } from "../../domain/agent-loop.js";
 import { createHookExecutor } from "../../domain/hooks.js";
+import { applyContextSeam } from "../../domain/context/context-seam.js";
 import { resolveTools, ToolRegistry } from "../../domain/tool-executor.js";
 import {
   getDefaultToolModules,
@@ -177,7 +178,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
 
   // Review P1-3 + round-3 P2-3 + gate r1 P2-c: the "serverless" persona
   // constructs on read-only $HOME. When ambient store defaults are
-  // unregistered (seepient-core), ANY single-mode construction defaults to
+  // unregistered (seepient-engine), ANY single-mode construction defaults to
   // the in-memory store set — zero ambient writes — sessionful or not (the
   // one-shot path in ask.ts already keyed the flag without the stateless
   // conjunct; this construction now agrees, which is what makes the
@@ -393,6 +394,14 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
     });
   }
 
+  // Spec 029 (M02 T028): hydration seam — seed externally owned product
+  // history exactly once per constructed agent (stateless adapter runs).
+  // Placed AFTER the system-prompt seed so hydrated rows never displace the
+  // engine's own instructions; the adapter maps only user/assistant rows.
+  if (opts.initialHistory?.length) {
+    messages.push(...opts.initialHistory);
+  }
+
   // Action lifecycle pipeline
   const { buildActionLifecycle } = await import(
     "../../domain/permissions/action-lifecycle-factory.js"
@@ -442,7 +451,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
   // generate_image and other media fetches running after agent.abort()
   // (the same regression W110 fixed for askSeepient).
   // Spec 027 FR-009: the factory arrives via registration; unregistered
-  // (seepient-core) leaves it undefined — media turns deny typed.
+  // (seepient-engine) leaves it undefined — media turns deny typed.
   const mediaFactory = getMediaVendorOperationHandlerFactory();
   const makeVendorHandler = (streamOpts?: {
     signal?: AbortSignal;
@@ -467,7 +476,7 @@ export async function createSeepient(options?: CreateSeepientOptions): Promise<S
         }
       : undefined;
   // Spec 027 FR-012: the full package injects the boundary-carrying
-  // pipeline; seepient-core defaults to the light boundary (trusted-host and
+  // pipeline; seepient-engine defaults to the light boundary (trusted-host and
   // none operations only — no sandbox, broker, or native helper).
   const boundary = await resolveTurnBoundary({
     artifacts: sharedArtifacts,
@@ -698,8 +707,16 @@ async function chat(userMessage: string): Promise<AgentResponse> {
         id: generateId(),
         role: "user",
         content: userMessage,
+        ...(streamOptions?.images?.length ? { images: streamOptions.images } : {}),
         timestamp: now(),
       });
+
+      // Spec 029 FR-039/040: the per-call context seam applies to the
+      // normalized throwaway copy BEFORE the stream handle resolves, so a
+      // budget overflow rejects chatStream itself (typed error to the
+      // caller) instead of surfacing as an unhandled rejection inside the
+      // turn task. Stored history is never mutated.
+      const seamedModelInput = applyContextSeam(normalizeHistoryForSend(messages), streamOptions?.context ?? {});
 
       const maxSteps = opts.maxSteps ?? 10;
       const stream = new StreamManager();
@@ -729,7 +746,9 @@ async function chat(userMessage: string): Promise<AgentResponse> {
         // F1/W150: normalized model input; the stored copy stays intact
         // until the loop succeeds and its additions are merged back below
         // (id-matched, so the loop's system-shim unshift cannot skew it).
-        const modelMessages = normalizeHistoryForSend(messages);
+        // The context seam already applied to this copy before the handle
+        // resolved (overflow rejected chatStream synchronously).
+        const modelMessages = seamedModelInput;
         const modelInputIds = new Set(modelMessages.map((m) => m.id));
 
         try {
@@ -964,7 +983,7 @@ async function chat(userMessage: string): Promise<AgentResponse> {
   // ── Provider Management Methods ─────────────────────────────────────────
 
   // Spec 027: the provider-management API is a full-package impl arriving
-  // via registration; seepient-core provider mutations deny typed below.
+  // via registration; seepient-engine provider mutations deny typed below.
   const pmApiFactory = getProviderManagerApiFactory();
   const managerApi = pmApiFactory && typeof runtime.getConfigStore === "function"
     ? await pmApiFactory(runtime as ProviderRuntime)

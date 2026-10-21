@@ -67,4 +67,34 @@ describe("messageToCanonicalMessage", () => {
     expect(canonAssistant.content[1]).toEqual({ type: "text", text: "hi" });
     expect(canonAssistant.content[2]).toEqual({ type: "tool_use", id: "call_1", name: "read_file", input: { path: "a.txt" } });
   });
+
+  it("carries user images as canonical image blocks (spec 029 FR-037)", () => {
+    const canon = messageToCanonicalMessage({
+      id: "u-img",
+      role: "user",
+      content: "what is this",
+      images: [{ data: "QUJD", mimeType: "image/png" }],
+      timestamp: 1000,
+    });
+    expect(canon.role).toBe("user");
+    expect(canon.content[0]).toEqual({ type: "text", text: "what is this" });
+    // Canonical schema field is mediaType (mapped to wire mimeType downstream).
+    expect(canon.content[1]).toEqual({ type: "image", mediaType: "image/png", data: "QUJD" });
+  });
+
+  it("carries image-bearing tool results inside tool_result content (FR-037 source 4)", () => {
+    const canon = messageToCanonicalMessage({
+      id: "t-img",
+      role: "tool",
+      content: "screenshot taken",
+      toolCallId: "call_9",
+      images: [{ data: "WFla", mimeType: "image/jpeg" }],
+      timestamp: 1000,
+    });
+    expect(canon.role).toBe("tool");
+    expect(canon.content[0].type).toBe("tool_result");
+    expect(canon.content[0].toolUseId).toBe("call_9");
+    expect(canon.content[0].content[0]).toEqual({ type: "text", text: "screenshot taken" });
+    expect(canon.content[0].content[1]).toEqual({ type: "image", mediaType: "image/jpeg", data: "WFla" });
+  });
 });

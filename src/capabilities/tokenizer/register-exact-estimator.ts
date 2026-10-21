@@ -5,8 +5,8 @@
  * Capabilities because src/vendors/ imports are forbidden from Transport and
  * UI (S-12); the full package's composition roots call this once at load.
  */
-import { registerExactEstimatorLoader } from "seepient-core/dist/foundations/injection-seams.js";
-import { resetEstimatorMemo, whenEstimatorReady } from "seepient-core/dist/capabilities/tokenizer/tokenizer.js";
+import { registerExactEstimatorLoader } from "seepient-engine/dist/foundations/injection-seams.js";
+import { resetEstimatorMemo, whenEstimatorReady } from "seepient-engine/dist/capabilities/tokenizer/tokenizer.js";
 
 export function registerExactEstimator(): void {
   registerExactEstimatorLoader(async () => import("../../vendors/gpt-tokenizer.js"));

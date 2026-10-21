@@ -7,7 +7,7 @@
  * composition root (SDK entry, CLI, server) at module load — engine modules
  * hold no static or dynamic edge into this tree.
  */
-import type { ToolModule } from "seepient-core/dist/foundations/contracts/tool.js";
+import type { ToolModule } from "seepient-engine/dist/foundations/contracts/tool.js";
 import {
   registerBuiltInAnalyzers,
   registerDefaultToolModules,
@@ -16,14 +16,14 @@ import {
   registerProviderManagerApiFactory,
   registerBrokerConnectorEvaluator,
   registerAmbientStoreDefaults,
-} from "seepient-core/dist/foundations/injection-seams.js";
+} from "seepient-engine/dist/foundations/injection-seams.js";
 import { registerImageBackends } from "../../capabilities/inference/register-image-backends.js";
 import { registerDiscoverySources } from "../../capabilities/inference/register-discovery-sources.js";
 import { registerExactEstimator } from "../../capabilities/tokenizer/register-exact-estimator.js";
 import { builtInTools } from "../../capabilities/tools/index.js";
 import { DEFAULT_ANALYZERS } from "../../capabilities/tools/analyzers.js";
 import { COMM_ANALYZERS } from "../../capabilities/tools/comm-analyzers.js";
-import { UseSkillTool } from "seepient-core/dist/domain/skills/use-skill-tool.js";
+import { UseSkillTool } from "seepient-engine/dist/domain/skills/use-skill-tool.js";
 import { createMediaVendorOperationHandler } from "../../domain/media/vendor-operation-handler.js";
 import { buildLocalBoundary } from "../../capabilities/execution/build-local-boundary.js";
 
@@ -39,7 +39,7 @@ export const FULL_TOOL_MODULES: readonly ToolModule[] = Object.freeze([
 registerDefaultToolModules(FULL_TOOL_MODULES);
 
 // Review P1-3: Profile A ambient defaults (~/.seepient) ride the full
-// package only; seepient-core resolves every single-mode default to the
+// package only; seepient-engine resolves every single-mode default to the
 // in-memory store set (gate r1 P2-c: keyed on this registration, not on
 // the stateless option).
 registerAmbientStoreDefaults();
