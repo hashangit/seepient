@@ -50,7 +50,6 @@ overrides:
   body-parser: 2.3.0
   esbuild: 0.28.1
   fast-uri: ^3.1.7
-  hono: ^4.12.34
   js-yaml: 4.3.2
   postcss: 8.5.25
   qs: ^6.16.0
@@ -91,6 +90,29 @@ overrides:
   # dockerode's transitive graph floats @types/node@>=25 (absent upstream —
   # the supervisor compiled against 24.13.4 there); pin just that range.
   '@types/node@>=25': 24.13.4
+  # Spec 029 T004 (imported app tree, first CI audit of the product deps):
+  # transitive floors for the 2026-10-21 advisory batch. shell-quote rides the
+  # expo/react-devtools-core chain, deepmerge-ts the prisma config chain,
+  # mysql2 the better-auth prisma-adapter chain (the app runs postgres — the
+  # mysql2 code path is dormant, the advisory is fixed upstream regardless).
+  shell-quote: '>=1.11.0'
+  deepmerge-ts: '>=8.0.0'
+  mysql2: '>=3.22.0'
+  # hono serveStatic double-decode middleware bypass (GHSA for <4.13.11) —
+  # raises the existing security-floor pin; the engine's API stays on hono 4.x.
+  hono: '>=4.13.11'
+  # expo chains (apps/mobile, dormant for the MVP — web/api/worker only):
+  # uuid v3/v5/v6 buffer bounds (xcode/config-plugins chain), percent-decoding
+  # DoS in decode-uri-component (expo-router chain).
+  uuid: '>=11.1.1'
+  decode-uri-component: '>=0.5.0'
+  # apps/www astro site: sharp librsvg CVE + the vite 8.3.0–8.3.2 batch,
+  # both riding astro's transitive graph (astro pins unchanged).
+  # (3-level selectors don't parse in pnpm 12 — 2-level only; astro/vitefu
+  # exist solely under apps/www, so the scope holds.)
+  'astro>sharp': '>=0.35.5'
+  'vitefu>vite': '>=8.3.3'
+  '@astrojs/react>vite': '>=8.3.3'
 
 audit:
   ignore:
@@ -98,3 +120,8 @@ audit:
     # No patched node-forge release exists; sandbox-runtime 0.0.78 still requires ^1.4.0.
     # Remove this entry when the advisory ships a fix.
     - GHSA-86w9-cpqp-85rv
+    # braces <=3.0.3 via the imported app tree (expo/metro → micromatch chain).
+    # No patched release exists (advisory 2026-10); pattern globs from product
+    # config are not attacker-controlled input on any exercised path.
+    # Remove this entry when the advisory ships a fix.
+    - GHSA-vfj7-8cjw-p6xm
