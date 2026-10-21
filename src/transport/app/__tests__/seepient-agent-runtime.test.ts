@@ -397,4 +397,31 @@ describe("SeepientAgentRuntime multimodal + context (T033/T034)", () => {
     agents[0].settle({ fullText: Promise.resolve("summary"), usage: Promise.resolve({ promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0 }) });
     await drain;
   });
+
+  it("namespaces built-in-colliding connector names; the executor keeps the real name", async () => {
+    const { agents, gates, createAgentImpl } = makeHarness();
+    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const executed: Array<{ name: string }> = [];
+    const drain = (async () => {
+      for await (const _ of runtime.run(
+        baseRequest({
+          tools: [
+            { name: "read_file", description: "app read", inputSchema: { type: "object", properties: {}, required: [] } },
+            { name: "scratchpad_add", description: "app tool", inputSchema: { type: "object", properties: {}, required: [] } },
+          ],
+          executeTool: (async (name: string) => {
+            executed.push({ name });
+            return "ok";
+          }) as never,
+        }),
+      )) void _;
+    })();
+    await gates[0].promise;
+    const tools = agents[0].options.tools as unknown as Array<{ definition: { function: { name: string } }; execute: (args: unknown) => Promise<unknown> }>;
+    expect(tools.map((t) => t.definition.function.name).sort()).toEqual(["app_read_file", "scratchpad_add"]);
+    await tools.find((t) => t.definition.function.name === "app_read_file")!.execute({});
+    expect(executed).toEqual([{ name: "read_file" }]);
+    agents[0].settle({ fullText: Promise.resolve("ok"), usage: Promise.resolve({ promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0 }) });
+    await drain;
+  });
 });

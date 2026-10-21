@@ -78,7 +78,8 @@ describe("messageToCanonicalMessage", () => {
     });
     expect(canon.role).toBe("user");
     expect(canon.content[0]).toEqual({ type: "text", text: "what is this" });
-    expect(canon.content[1]).toEqual({ type: "image", data: "QUJD", mimeType: "image/png" });
+    // Canonical schema field is mediaType (mapped to wire mimeType downstream).
+    expect(canon.content[1]).toEqual({ type: "image", mediaType: "image/png", data: "QUJD" });
   });
 
   it("carries image-bearing tool results inside tool_result content (FR-037 source 4)", () => {
@@ -94,6 +95,6 @@ describe("messageToCanonicalMessage", () => {
     expect(canon.content[0].type).toBe("tool_result");
     expect(canon.content[0].toolUseId).toBe("call_9");
     expect(canon.content[0].content[0]).toEqual({ type: "text", text: "screenshot taken" });
-    expect(canon.content[0].content[1]).toEqual({ type: "image", data: "WFla", mimeType: "image/jpeg" });
+    expect(canon.content[0].content[1]).toEqual({ type: "image", mediaType: "image/jpeg", data: "WFla" });
   });
 });

@@ -711,6 +711,13 @@ async function chat(userMessage: string): Promise<AgentResponse> {
         timestamp: now(),
       });
 
+      // Spec 029 FR-039/040: the per-call context seam applies to the
+      // normalized throwaway copy BEFORE the stream handle resolves, so a
+      // budget overflow rejects chatStream itself (typed error to the
+      // caller) instead of surfacing as an unhandled rejection inside the
+      // turn task. Stored history is never mutated.
+      const seamedModelInput = applyContextSeam(normalizeHistoryForSend(messages), streamOptions?.context ?? {});
+
       const maxSteps = opts.maxSteps ?? 10;
       const stream = new StreamManager();
 
@@ -739,10 +746,9 @@ async function chat(userMessage: string): Promise<AgentResponse> {
         // F1/W150: normalized model input; the stored copy stays intact
         // until the loop succeeds and its additions are merged back below
         // (id-matched, so the loop's system-shim unshift cannot skew it).
-        // Spec 029 FR-039/040: the per-call context seam applies to this
-        // throwaway copy only — stored history is never mutated, and budget
-        // overflow throws the typed error instead of truncating.
-        const modelMessages = applyContextSeam(normalizeHistoryForSend(messages), streamOptions?.context ?? {});
+        // The context seam already applied to this copy before the handle
+        // resolved (overflow rejected chatStream synchronously).
+        const modelMessages = seamedModelInput;
         const modelInputIds = new Set(modelMessages.map((m) => m.id));
 
         try {

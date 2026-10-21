@@ -40,6 +40,7 @@ import type {
 } from "seepient-engine/dist/foundations/types.js";
 import type { TrustedHostToolRegistration } from "seepient-engine/dist/foundations/contracts/custom-tools.js";
 import { trustedHostTool } from "seepient-engine/dist/transport/sdk/custom-tools.js";
+import { ALL_TOOLS } from "seepient-engine/dist/domain/tool-executor.js";
 import { createSeepient } from "seepient-engine/dist/transport/sdk/seepient.js";
 import { randomUUID } from "node:crypto";
 
@@ -247,14 +248,18 @@ export class SeepientAgentRuntime implements AgentRuntime {
       // execute routes to the request's governed callback. The app executes;
       // the engine treats the bridge as host authority with model egress —
       // the explicit trust model the engine requires (legacy plain tools fail
-      // closed at execution). Empty stays empty end to end (FR-032): a
-      // summary or empty-tools run resolves to zero engine tools.
-      const tools: TrustedHostToolRegistration[] = request.tools.map((connectorTool) =>
-        trustedHostTool({
+      // closed at execution). Names that collide with engine built-ins are
+      // namespaced (`app_`) for the model surface — the registration map
+      // rejects shadowing, and the governed executor still receives the real
+      // name. Empty stays empty end to end (FR-032): a summary or empty-tools
+      // run resolves to zero engine tools.
+      const tools: TrustedHostToolRegistration[] = request.tools.map((connectorTool) => {
+        const engineName = ALL_TOOLS.includes(connectorTool.name) ? `app_${connectorTool.name}` : connectorTool.name;
+        return trustedHostTool({
           definition: {
             type: "function",
             function: {
-              name: connectorTool.name,
+              name: engineName,
               description: connectorTool.description,
               parameters: {
                 type: "object",
@@ -324,8 +329,8 @@ export class SeepientAgentRuntime implements AgentRuntime {
               owned.delete(work);
             }
           },
-        }),
-      );
+        });
+      });
 
       // Safe-boundary steering claim (upstream semantics: atomically claim
       // durable user steering before the turn runs); claimed text rides the

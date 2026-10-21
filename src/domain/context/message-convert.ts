@@ -52,11 +52,13 @@ export function messageToCanonicalMessage(m: Message): any {
   if (m.role === "user") {
     // Images ride as canonical image blocks AFTER the text block (spec 029
     // FR-037): data and MIME are preserved verbatim, never flattened to text.
+    // The canonical schema's field is mediaType (pi-canonical-converter maps
+    // it to the pi-ai wire mimeType).
     return {
       role: "user",
       content: [
         { type: "text", text: m.content || "" },
-        ...(m.images ?? []).map((img) => ({ type: "image", data: img.data, mimeType: img.mimeType })),
+        ...(m.images ?? []).map((img) => ({ type: "image", mediaType: img.mimeType, data: img.data })),
       ],
     };
   }
@@ -69,7 +71,7 @@ export function messageToCanonicalMessage(m: Message): any {
           toolUseId: m.toolCallId ?? m.id,
           content: [
             { type: "text", text: m.content || "" },
-            ...(m.images ?? []).map((img) => ({ type: "image", data: img.data, mimeType: img.mimeType })),
+            ...(m.images ?? []).map((img) => ({ type: "image", mediaType: img.mimeType, data: img.data })),
           ],
         },
       ],
