@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { MAX_DESKTOP_DISPLAY, screenPorts } from "@seepients/core/node/desktop-runtime";
 import type Docker from "dockerode";
@@ -154,8 +155,8 @@ export function resolveScreenNetworkMode(value: string | undefined): ScreenNetwo
  * outbound access, including the host's bridge addresses, the LAN, and link-local
  * cloud metadata endpoints. `restricted` keeps public internet egress but lets the
  * operator drop everything else with one host-side iptables rule set — the
- * supervisor gives each computer network a deterministic bridge interface name so
- * the rules match by interface (`-i seepients-c+`) instead of ephemeral subnets.
+ * the supervisor gives each computer network a deterministic bridge interface name so
+ * the rules match by interface (`-i seep-c+`) instead of ephemeral subnets.
  * Enforcement lives on the Docker host (infra/compose/restrict-computer-egress.sh);
  * the flag only marks the networks. Supervisor capabilities stay unchanged.
  */
@@ -171,12 +172,14 @@ export function resolveComputerEgressMode(
 
 /**
  * Host bridge interface name for a computer network. Linux caps interface names
- * at 15 bytes (IFNAMSIZ), so "seepients-c" gets a 7-hex-char suffix derived from the
- * same digest as the network name — deterministic across recreate, unique per bot.
+ * at 15 bytes (IFNAMSIZ) — the branding-length "seepients-c" prefix (18 bytes
+ * with the suffix) would be rejected by the kernel, so the bridge uses the
+ * compact "seep-c" prefix with a 7-hex-char suffix derived from the same
+ * digest as the network name — deterministic across recreate, unique per bot.
  */
 export function computerBridgeNameFor(botId: string) {
   const hash = createHash("sha256").update(botId).digest("hex").slice(0, 7);
-  return `seepients-c${hash}`;
+  return `seep-c${hash}`;
 }
 
 /**
@@ -234,6 +237,42 @@ export function screenPeerNetworkConnectOptions(
 export function hostComputerUser(uid = process.getuid?.(), gid = process.getgid?.()): string {
   if (uid === undefined || gid === undefined || uid === 0) return COMPUTER_USER;
   return `${uid}:${gid}`;
+}
+
+const SELINUX_ENFORCE_PATH = "/sys/fs/selinux/enforce";
+
+/** SELinux hosts refuse container writes to foreign-labeled binds; :Z keeps the computer confined. */
+export function selinuxEnforcing(
+  platform: NodeJS.Platform = process.platform,
+  readEnforce?: () => string | undefined,
+): boolean {
+  if (platform !== "linux") return false;
+  let content: string | undefined;
+  try {
+    content = readEnforce ? readEnforce() : readFileSync(SELINUX_ENFORCE_PATH, "utf8");
+  } catch {
+    content = undefined;
+  }
+  return content?.trim() === "1";
+}
+
+/**
+ * Rootless podman shifts every non-zero container uid into subuid ranges, so a
+ * host-user-owned bind is read-only inside the container; keep-id pins
+ * container uid = host uid. Docker engines have no keep-id and chown homes
+ * through data-init instead.
+ */
+export function rootlessPodmanUserns(
+  platform: NodeJS.Platform = process.platform,
+  uid = process.getuid?.(),
+  engineComponents?: Array<{ Name?: string }>,
+): string | undefined {
+  const rootlessPodman =
+    platform === "linux" &&
+    uid !== undefined &&
+    uid !== 0 &&
+    (engineComponents?.some((component) => /podman/i.test(component.Name ?? "")) ?? false);
+  return rootlessPodman ? "keep-id" : undefined;
 }
 
 export function computerPortBindings(publishControlPort = false) {
@@ -304,6 +343,8 @@ export interface ComputerCreateInput {
   homePath: string;
   homeVolume?: { name: string; subpath: string };
   user?: string;
+  userns?: string;
+  selinuxRelabelBind?: boolean;
   controlToken?: string;
   networkMode?: string;
   publishControlPort?: boolean;
@@ -360,7 +401,11 @@ export function containerCreateOptions(input: ComputerCreateInput) {
               },
             ],
           }
-        : { Binds: [`${input.homePath}:/home/seepients`], Mounts: undefined }),
+        : {
+            Binds: [`${input.homePath}:/home/seepients${input.selinuxRelabelBind ? ":Z" : ""}`],
+            Mounts: undefined,
+          }),
+      UsernsMode: input.userns,
       PortBindings: ports.PortBindings,
       ShmSize: 256 * 1024 * 1024,
       CapDrop: ["ALL"],

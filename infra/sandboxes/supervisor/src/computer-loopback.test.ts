@@ -11,6 +11,7 @@ import {
   computerNetworkOwnerFor,
   containerNameFor,
   hostComputerUser,
+  selinuxEnforcing,
 } from "./computer-spec.js";
 
 const mocks = vi.hoisted(() => ({
@@ -54,6 +55,10 @@ beforeEach(async () => {
   vi.stubEnv("DATA_DIR", "/tmp/seepients-loopback-test");
   vi.stubEnv("SANDBOX_SCREEN_NETWORK", "published");
   vi.stubEnv("SANDBOX_SCREEN_HOST", "127.0.0.1");
+  mocks.docker.version.mockResolvedValue({
+    ApiVersion: "1.48",
+    Components: [{ Name: "Docker Engine" }],
+  });
   screen = http.createServer((_req, res) => res.end("ok"));
   await new Promise<void>((resolve) => screen.listen(0, "127.0.0.1", resolve));
   const address = screen.address();
@@ -306,7 +311,9 @@ describe("computer loopback provision lifecycle", () => {
       expect(options.HostConfig.PortBindings["7070/tcp"]).toEqual(
         enabled ? [{ HostIp: "127.0.0.1", HostPort: "0" }] : undefined,
       );
-      expect(options.HostConfig.Binds).toEqual([`${homePath}:/home/seepients`]);
+      expect(options.HostConfig.Binds).toEqual([
+        `${homePath}:/home/seepients${selinuxEnforcing() ? ":Z" : ""}`,
+      ]);
       expect(options.Env).toContainEqual(
         expect.stringMatching(/^SEEPIENTS_COMPUTER_CONTROL_TOKEN=.+/),
       );
@@ -1785,5 +1792,47 @@ describe("computer network reclaim", () => {
       expect(existing.start).not.toHaveBeenCalled();
       expect(existing.remove).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("rootless podman provisioning", () => {
+  it("relabels the home bind and remaps the container uid", async () => {
+    // Dynamic import is required: beforeEach resets modules so the dockerode
+    // mock wires into a fresh ./index.js per test (file-wide convention).
+    vi.stubEnv("SANDBOX_CONTROL_VIA_LOOPBACK", "false");
+    const { supervisorApp } = await import("./index.js");
+    const homePath = path.join(process.env.DATA_DIR!, "homes", "bot");
+    mocks.docker.version.mockResolvedValue({
+      ApiVersion: "5.8.7",
+      Components: [{ Name: "Podman Engine" }],
+    });
+    mocks.docker.getImage.mockReturnValue({
+      inspect: vi.fn().mockResolvedValue({ Id: "test-image-id" }),
+    });
+    mocks.docker.listContainers.mockResolvedValue([]);
+    mocks.docker.createContainer.mockResolvedValue({
+      id: "created",
+      start: vi.fn().mockResolvedValue(undefined),
+    });
+    mocks.docker.createNetwork.mockResolvedValue({});
+
+    const response = await supervisorApp.request("/computers", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${resolveSupervisorToken(process.env)}`,
+        "content-type": "application/json",
+        "x-seepients-bot-id": "bot",
+        "x-seepients-space-id": "space",
+      },
+      body: JSON.stringify({ botId: "bot", spaceId: "space", homePath }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ id: "created", resumed: false });
+    const created = mocks.docker.createContainer.mock.calls[0]?.[0];
+    expect(created.User).toBe(hostComputerUser());
+    expect(created.HostConfig.UsernsMode).toBe("keep-id");
+    expect(created.HostConfig.Binds).toEqual([
+      `${homePath}:/home/seepients${selinuxEnforcing() ? ":Z" : ""}`,
+    ]);
   });
 });

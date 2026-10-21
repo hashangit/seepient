@@ -42,10 +42,12 @@ import {
   resolveScreenPublishTarget,
   resolveSpaceComputerLimit,
   resolveTeamScreenLimit,
+  rootlessPodmanUserns,
   screenPeerNetworkConnectOptions,
   screenPorts,
   screenUrlFor,
   screenUrlWithToken,
+  selinuxEnforcing,
   xdotoolCommand,
 } from "./computer-spec.js";
 
@@ -137,6 +139,54 @@ describe("graphical computer spec", () => {
     expect(options.ExposedPorts["6080/tcp"]).toEqual({});
   });
 
+  it("keeps a plain bind and no userns for the default engine shape", () => {
+    const options = containerCreateOptions({
+      name: containerNameFor("plain_bind"),
+      image: COMPUTER_IMAGE,
+      botId: "plain_bind",
+      spaceId: "ws",
+      homePath: "/var/seepients/homes/plain_bind",
+    });
+    expect(options.HostConfig.Binds).toEqual(["/var/seepients/homes/plain_bind:/home/seepients"]);
+    expect(options.HostConfig.UsernsMode).toBeUndefined();
+  });
+
+  it("relabels the home bind and opts into keep-id on rootless podman hosts", () => {
+    const options = containerCreateOptions({
+      name: containerNameFor("rootless_bind"),
+      image: COMPUTER_IMAGE,
+      botId: "rootless_bind",
+      spaceId: "ws",
+      homePath: "/var/seepients/homes/rootless_bind",
+      userns: "keep-id",
+      selinuxRelabelBind: true,
+    });
+    expect(options.HostConfig.Binds).toEqual([
+      "/var/seepients/homes/rootless_bind:/home/seepients:Z",
+    ]);
+    expect(options.HostConfig.UsernsMode).toBe("keep-id");
+  });
+
+  it("reads SELinux enforcing on linux only", () => {
+    expect(selinuxEnforcing("linux", () => "1\n")).toBe(true);
+    expect(selinuxEnforcing("linux", () => "0")).toBe(false);
+    expect(selinuxEnforcing("linux", () => undefined)).toBe(false);
+    expect(
+      selinuxEnforcing("linux", () => {
+        throw new Error("no selinux fs");
+      }),
+    ).toBe(false);
+    expect(selinuxEnforcing("darwin", () => "1")).toBe(false);
+  });
+
+  it("derives keep-id only for rootless linux podman engines", () => {
+    expect(rootlessPodmanUserns("linux", 1001, [{ Name: "Podman Engine" }])).toBe("keep-id");
+    expect(rootlessPodmanUserns("linux", 0, [{ Name: "Podman Engine" }])).toBeUndefined();
+    expect(rootlessPodmanUserns("linux", 1001, [{ Name: "Docker Engine" }])).toBeUndefined();
+    expect(rootlessPodmanUserns("linux", 1001, undefined)).toBeUndefined();
+    expect(rootlessPodmanUserns("darwin", 1001, [{ Name: "Podman Engine" }])).toBeUndefined();
+  });
+
   it("keeps sanitized network names unique when botIds only differ by stripped characters", () => {
     expect(computerNetworkNameFor("a/b")).not.toBe(computerNetworkNameFor("ab"));
     expect(computerNetworkNameFor("a/b")).toBe(computerNetworkNameFor("a/b"));
@@ -154,7 +204,7 @@ describe("graphical computer spec", () => {
   it("derives deterministic host bridge names within the 15-byte interface limit", () => {
     for (const botId of ["bot", "a/b", "bot with spaces", "x".repeat(80)]) {
       const name = computerBridgeNameFor(botId);
-      expect(name).toMatch(/^seepients-c[0-9a-f]{7}$/);
+      expect(name).toMatch(/^seep-c[0-9a-f]{7}$/);
       expect(Buffer.byteLength(name)).toBeLessThanOrEqual(15);
       expect(computerBridgeNameFor(botId)).toBe(name);
     }

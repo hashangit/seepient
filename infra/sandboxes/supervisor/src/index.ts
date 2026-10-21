@@ -45,11 +45,13 @@ import {
   resolveScreenPublishTarget,
   resolveSpaceComputerLimit,
   resolveTeamScreenLimit,
+  rootlessPodmanUserns,
   SCREEN_HOST,
   screenPeerNetworkConnectOptions,
   screenPorts,
   screenUrlFor,
   screenUrlWithToken,
+  selinuxEnforcing,
   xdotoolCommand,
 } from "./computer-spec.js";
 import { assertComputerHomeWritable } from "./home-ownership.js";
@@ -191,9 +193,16 @@ app.post("/computers", async (c) => {
       // user-controlled paths at runtime; Compose data-init handles legacy data.
       if (hostUid !== 0) await mkdir(serviceHomePath, { recursive: true });
       const storage = computerHomeStorage(serviceHomePath, dataDir, runtimeInfo);
+      const engine = await docker.version();
       if (storage.homeVolume) {
-        assertVolumeSubpathSupport((await docker.version()).ApiVersion);
+        assertVolumeSubpathSupport(engine.ApiVersion);
       }
+      // Mirror computerUser(): only host-run supervisors derive the host uid,
+      // and only a rootless podman engine needs the uid re-mapped to reach it.
+      const userns = runtimeInfo
+        ? undefined
+        : rootlessPodmanUserns(undefined, hostUid, engine.Components);
+      const selinuxRelabelBind = selinuxEnforcing();
       const computerUser = runtimeInfo ? COMPUTER_USER : hostComputerUser(hostUid, hostGid);
       const existing = await findBotContainer(body.botId, body.spaceId);
       if (existing) {
@@ -237,6 +246,7 @@ app.post("/computers", async (c) => {
               (reconnect || Boolean(info.NetworkSettings?.Networks?.[networkMode])))) &&
           restrictedBridgeOk &&
           info.Config.User === computerUser &&
+          (info.HostConfig.UsernsMode || undefined) === userns &&
           controlPublishOk &&
           (!storage.homeVolume || homeVolumeMatches(info.HostConfig.Mounts, storage.homeVolume)) &&
           // A computer that cannot rejoin its network is replaced below instead.
@@ -301,6 +311,8 @@ app.post("/computers", async (c) => {
               spaceId: body.spaceId,
               ...storage,
               user: computerUser,
+              userns,
+              selinuxRelabelBind,
               networkMode,
               controlToken: randomUUID(),
               publishControlPort: controlViaLoopback,
