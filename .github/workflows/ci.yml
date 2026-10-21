@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, release/v0.8.0, release/v0.8.1, 027-serverless-chat-core]
+    branches: [main, release/v0.8.0, release/v0.8.1, 027-serverless-chat-core, feat/governed-runtime-cutover]
   pull_request:
     branches: [main]
 
@@ -44,6 +44,16 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      # 029 M04–M10 T004: the imported product suites run from their own
+      # per-package vitest configs (root include never covered apps/,
+      # packages/). prisma generate is a prerequisite of the api suite.
+      - name: Product suites (imported app)
+        run: |
+          pnpm --filter @seepients/db generate
+          pnpm --filter @seepients/adapter-kit test
+          pnpm --filter @seepients/worker test
+          pnpm --filter @seepients/api test
 
       # Review P1-4: the compiled-artifact behavioral gate — the six contract
       # flows against the PACKED core tarball (the suite runs the engine from
