@@ -18,7 +18,10 @@ interface TestStreamPayload {
 interface TestAgent {
   aborted: boolean;
   options: CreateSeepientOptions;
-  streamOptions: { onText?: (delta: string) => void };
+  /** Engine stream options surface; the adapter passes onStep only. */
+  streamOptions: { onText?: (delta: string) => void; onStep?: (step: { type: string }) => void };
+  /** Deltas the fake stream yields; the adapter pumps stream.textStream. */
+  textDeltas: string[];
   settled: PromiseWithResolvers<TestStreamPayload>;
   settle(payload: TestStreamPayload): void;
   abort(): void;
@@ -39,6 +42,7 @@ function makeHarness() {
       aborted: false,
       options,
       streamOptions: {},
+      textDeltas: [],
       settled: Promise.withResolvers<TestStreamPayload>(),
       settle(payload: TestStreamPayload) {
         this.settled.resolve(payload);
@@ -46,14 +50,19 @@ function makeHarness() {
       abort() {
         this.aborted = true;
       },
-      chatStream(prompt: string, streamOptions: { onText?: (delta: string) => void }): Promise<never> {
+      chatStream(
+        prompt: string,
+        streamOptions: { onText?: (delta: string) => void; onStep?: (step: { type: string }) => void },
+      ): Promise<never> {
         void prompt;
         this.streamOptions = streamOptions;
         return this.settled.promise.then((payload) => {
-          // Test double: the adapter consumes only fullText/usage on the
-          // stream result — the rest is unreachable surface for these pins.
+          // Test double: the adapter consumes textStream + fullText/usage on
+          // the stream result — the rest is unreachable surface for these pins.
           const streamResult = {
-            textStream: (async function* () {})(),
+            textStream: (async function* (deltas: string[]) {
+              for (const delta of deltas) yield delta;
+            })(agent.textDeltas),
             steps: (async function* () {})(),
             fullText: payload.fullText,
             usage: payload.usage,
@@ -212,10 +221,7 @@ describe("SeepientAgentRuntime (T028)", () => {
     })();
     await gates[0].promise;
 
-    const onText = agents[0].streamOptions.onText;
-    expect(typeof onText).toBe("function");
-    onText?.("hel");
-    onText?.("lo");
+    agents[0].textDeltas = ["hel", "lo"];
     agents[0].settle({
       fullText: Promise.resolve("hello"),
       usage: Promise.resolve({ promptTokens: 5, completionTokens: 7, totalTokens: 12, cost: 0.01 }),

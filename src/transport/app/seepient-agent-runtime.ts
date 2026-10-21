@@ -30,7 +30,6 @@ import type {
   AgentRunRequest,
 } from "@seepients/adapter-kit";
 import type {
-  AskSeepientStreamResult,
   CreateSeepientOptions,
   Message,
   UserToolDefinition,
@@ -258,33 +257,36 @@ export class SeepientAgentRuntime implements AgentRuntime {
       };
       owned.add(providerWork);
 
-      let settled:
-        | { ok: true; result: AskSeepientStreamResult }
-        | { ok: false; error: unknown }
-        | undefined;
-      const streamPromise = agent
-        .chatStream(prompt, {
-          onText: (delta: string) => queue.push({ type: "text", text: delta }),
-          onStep: (step: { type: string }) => {
-            if (step.type === "tool_progress") {
-              queue.push({ type: "progress", text: "tool running", activity: true });
-            }
-          },
-          // onToolCall: the bridged execute already emitted the tool event
-          // with the governed executionId; the engine-side call identity adds
-          // nothing to the app surface.
-        })
-        .then(
-          (result) => {
-            settled = { ok: true, result };
-            queue.close();
-          },
-          (error: unknown) => {
-            settled = { ok: false, error };
-            queue.close();
-          },
-        );
-      void streamPromise;
+      // chatStream resolves immediately with a handle; the turn itself streams
+      // through result.textStream and settles when fullText/usage resolve.
+      // Closing the queue on handle resolution would drop every delta.
+      const stream = await agent.chatStream(prompt, {
+        onStep: (step: { type: string }) => {
+          if (step.type === "tool_progress") {
+            queue.push({ type: "progress", text: "tool running", activity: true });
+          }
+        },
+        // onToolCall: the bridged execute already emitted the tool event
+        // with the governed executionId; the engine-side call identity adds
+        // nothing to the app surface.
+      });
+
+      const pump = (async () => {
+        for await (const delta of stream.textStream) {
+          queue.push({ type: "text", text: delta });
+        }
+      })();
+      void pump;
+
+      const settle = stream.fullText.then(
+        (fullText) => ({ ok: true as const, fullText }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
+      const finish = settle.then(async (outcome) => {
+        await pump.catch(() => undefined);
+        queue.close();
+        return outcome;
+      });
 
       // Drain callback-thread events while the turn runs; `close()` ends the
       // loop when the turn settles.
@@ -296,12 +298,13 @@ export class SeepientAgentRuntime implements AgentRuntime {
 
       owned.delete(providerWork);
 
-      if (settled && !settled.ok) {
-        throw settled.error;
+      const outcome = await finish;
+      if (!outcome.ok) {
+        throw outcome.error;
       }
 
-      const finalText = settled && settled.ok ? await settled.result.fullText : "";
-      const usage = settled && settled.ok ? await settled.result.usage : null;
+      const finalText = outcome.fullText;
+      const usage = await stream.usage.catch(() => null);
 
       // One-settlement protocol: producer-side accounting is awaited here,
       // and the emitted event is marked accounted so consumers never
