@@ -8506,15 +8506,23 @@ async function resolveModelKey(
       const oauth = resolved.secret.kind === "oauth" ? resolved.secret.credential : undefined;
       const baseUrl =
         resolved.secret.kind === "openai_compatible" ? resolved.secret.baseUrl : undefined;
+      // Image capability: operator declaration is authoritative for
+      // openai-compatible connections; named providers (openrouter,
+      // anthropic, …) derive from the Pi catalog's declared input
+      // modalities — the same check the computer-tool gate uses. Hardcoding
+      // false here blocked vision models on named providers at the runtime
+      // adapter (the field is authoritative there since the 029 port).
       const acceptsImages =
-        credential.provider === OPENAI_COMPATIBLE_PROVIDER_ID &&
-        resolved.secret.kind === "openai_compatible" &&
-        (modelIdSupportsImages(resolved.secret.visionModelIds, modelId) ||
-          // Legacy secrets have no per-model list, so keep their existing
-          // capability scoped to the model saved in the space preference.
-          (resolved.secret.visionModelIds === undefined &&
-            credential.supportsImages === true &&
-            credential.defaultModel?.trim() === modelId.trim()));
+        (credential.provider === OPENAI_COMPATIBLE_PROVIDER_ID &&
+          resolved.secret.kind === "openai_compatible" &&
+          (modelIdSupportsImages(resolved.secret.visionModelIds, modelId) ||
+            // Legacy secrets have no per-model list, so keep their existing
+            // capability scoped to the model saved in the space preference.
+            (resolved.secret.visionModelIds === undefined &&
+              credential.supportsImages === true &&
+              credential.defaultModel?.trim() === modelId.trim()))) ||
+        (credential.provider !== OPENAI_COMPATIBLE_PROVIDER_ID &&
+          modelAcceptsImageInput(credential.provider, modelId));
       const accountId = resolved.secret.kind === "api_key" ? resolved.secret.accountId : undefined;
       const gatewayId = resolved.secret.kind === "api_key" ? resolved.secret.gatewayId : undefined;
       cloudflareGatewayProviderEnv({ provider, accountId, gatewayId });
