@@ -59,6 +59,9 @@ export class TrustedHostExecutor implements OperationExecutor {
           output: typeof res?.output === "string" ? res.output : JSON.stringify(res?.output ?? res ?? ""),
           success: res?.success ?? true,
           metadata: res?.metadata,
+          // Image-bearing tool results (spec 029 FR-037) ride the same
+          // trusted-host model-egress decision as the text output.
+          ...(Array.isArray(res?.images) && res.images.length > 0 ? { images: res.images } : {}),
         },
         evidence: {
           backend: "local-native",

@@ -143,6 +143,32 @@ export class AbortedError extends SeepientError {
   }
 }
 
+// ── Context budget (spec 029 S09, FR-040) ───────────────────────────────
+
+/**
+ * Thrown when the per-call context seam estimates the request above the
+ * declared budget BEFORE the provider call. Overflow surfaces as this typed
+ * error — never as quiet truncation of history.
+ */
+export class ContextBudgetExceededError extends SeepientError {
+  /** Estimated input tokens for the assembled per-call context. */
+  estimatedTokens: number;
+  /** The declared budget that was exceeded. */
+  budgetTokens: number;
+
+  constructor(estimatedTokens: number, budgetTokens: number) {
+    super(
+      `Context budget exceeded: estimated ${estimatedTokens} input tokens against a ${budgetTokens}-token budget; ` +
+        `no messages were truncated. Lower the budget pressure (fewer/shorter history rows) or raise the configured window.`,
+      "CONTEXT_BUDGET_EXCEEDED",
+      false,
+    );
+    this.name = "ContextBudgetExceededError";
+    this.estimatedTokens = estimatedTokens;
+    this.budgetTokens = budgetTokens;
+  }
+}
+
 // ── Gateway errors ──────────────────────────────────────────────────────
 
 /**

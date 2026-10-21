@@ -6,7 +6,11 @@
  */
 import { describe, expect, it } from "vitest";
 import { createSeepient } from "seepient-engine/dist/transport/sdk/seepient.js";
-import { SeepientAgentRuntime, hydrateHistory } from "../seepient-agent-runtime.js";
+import {
+  SeepientAgentRuntime,
+  UnsupportedContentError,
+  hydrateHistory,
+} from "../seepient-agent-runtime.js";
 import type { AgentRunRequest } from "@seepients/adapter-kit";
 import type { CreateSeepientOptions } from "seepient-engine/dist/foundations/types.js";
 
@@ -19,7 +23,12 @@ interface TestAgent {
   aborted: boolean;
   options: CreateSeepientOptions;
   /** Engine stream options surface; the adapter passes onStep only. */
-  streamOptions: { onText?: (delta: string) => void; onStep?: (step: { type: string }) => void };
+  streamOptions: {
+    onText?: (delta: string) => void;
+    onStep?: (step: { type: string }) => void;
+    images?: Array<{ data: string; mimeType: string }>;
+    context?: { strategy?: string; maxInputTokens?: number };
+  };
   /** Deltas the fake stream yields; the adapter pumps stream.textStream. */
   textDeltas: string[];
   settled: PromiseWithResolvers<TestStreamPayload>;
@@ -52,7 +61,12 @@ function makeHarness() {
       },
       chatStream(
         prompt: string,
-        streamOptions: { onText?: (delta: string) => void; onStep?: (step: { type: string }) => void },
+        streamOptions: {
+          onText?: (delta: string) => void;
+          onStep?: (step: { type: string }) => void;
+          images?: Array<{ data: string; mimeType: string }>;
+          context?: { strategy?: string; maxInputTokens?: number };
+        },
       ): Promise<never> {
         void prompt;
         this.streamOptions = streamOptions;
@@ -259,5 +273,128 @@ describe("SeepientAgentRuntime (T028)", () => {
     const descriptor = runtime.describe();
     expect(descriptor.id).toBe("seepient-agent-runtime");
     expect(descriptor.capabilities).toEqual({ streaming: true, compaction: true, tools: true, scripted: false });
+  });
+});
+
+describe("SeepientAgentRuntime multimodal + context (T033/T034)", () => {
+  const PNG = { name: "shot.png", mimeType: "image/png" as const, data: new Uint8Array([1, 2, 3]) };
+
+  it("hydrates history images to base64 engine blocks (FR-037 source 2)", () => {
+    const messages = hydrateHistory([
+      { id: "m1", role: "user", content: "see attachment", images: [PNG] },
+      { role: "assistant", content: "ok" },
+    ] as AgentRunRequest["history"]);
+    expect(messages[0].images).toEqual([{ data: Buffer.from([1, 2, 3]).toString("base64"), mimeType: "image/png" }]);
+    expect(messages[1].images).toBeUndefined();
+  });
+
+  it("rejects unsupported image MIME at conversion, never flattening (FR-038)", () => {
+    expect(() =>
+      hydrateHistory([
+        { id: "m1", role: "user", content: "x", images: [{ ...PNG, mimeType: "image/bmp" as never }] },
+      ] as AgentRunRequest["history"]),
+    ).toThrow(UnsupportedContentError);
+  });
+
+  it("rejects current-turn images when the model accepts none (FR-038)", async () => {
+    const { createAgentImpl } = makeHarness();
+    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const request = baseRequest({
+      model: { provider: "test", id: "model-1", acceptsImages: false } as AgentRunRequest["model"],
+      currentTurnImages: [PNG],
+    });
+    const drain = (async () => {
+      for await (const _ of runtime.run(request)) void _;
+    })();
+    await expect(drain).rejects.toThrow(UnsupportedContentError);
+  });
+
+  it("rejects image counts above the model per-prompt limit (contract §5)", async () => {
+    const { createAgentImpl } = makeHarness();
+    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const request = baseRequest({
+      model: { provider: "test", id: "model-1", maxImagesPerPrompt: 1 } as AgentRunRequest["model"],
+      currentTurnImages: [PNG, { ...PNG, name: "second.png" }],
+    });
+    const drain = (async () => {
+      for await (const _ of runtime.run(request)) void _;
+    })();
+    await expect(drain).rejects.toThrow(/exceed the model limit/);
+  });
+
+  it("rides steering attachment images on the current turn (FR-037 source 3)", async () => {
+    const { agents, gates, createAgentImpl } = makeHarness();
+    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const request = baseRequest({
+      claimSteering: async () => [
+        { id: "s1", messageId: "m-s1", text: "look at this", images: [PNG] },
+      ],
+    } as Partial<AgentRunRequest>);
+    const drain = (async () => {
+      for await (const _ of runtime.run(request)) void _;
+    })();
+    await gates[0].promise;
+    const images = agents[0].streamOptions.images ?? [];
+    expect(images).toEqual([{ data: Buffer.from([1, 2, 3]).toString("base64"), mimeType: "image/png" }]);
+    agents[0].settle({ fullText: Promise.resolve("done"), usage: Promise.resolve({ promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0 }) });
+    await drain;
+  });
+
+  it("threads the request context strategy and model window into the seam (FR-039/040)", async () => {
+    const { agents, gates, createAgentImpl } = makeHarness();
+    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const request = baseRequest({
+      contextStrategy: "snapshots",
+      model: { provider: "test", id: "model-1", contextWindow: 12345 } as AgentRunRequest["model"],
+    });
+    const drain = (async () => {
+      for await (const _ of runtime.run(request)) void _;
+    })();
+    await gates[0].promise;
+    expect(agents[0].streamOptions.context).toEqual({ strategy: "snapshots", maxInputTokens: 12345 });
+    agents[0].settle({ fullText: Promise.resolve("ok"), usage: Promise.resolve({ promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0 }) });
+    await drain;
+  });
+
+  it("maps image-bearing tool results without flattening (FR-037 source 4)", async () => {
+    const { agents, gates, createAgentImpl } = makeHarness();
+    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const request = baseRequest({
+      tools: [{ name: "screenshot", description: "take a shot", inputSchema: { type: "object", properties: {}, required: [] } }],
+      executeTool: async () => ({
+        kind: "agent_tool_result",
+        content: [
+          { type: "text", text: "captured" },
+          { type: "image", data: "QUJD", mimeType: "image/png" },
+        ],
+        details: null,
+      }),
+    } as Partial<AgentRunRequest>);
+    const drain = (async () => {
+      for await (const _ of runtime.run(request)) void _;
+    })();
+    await gates[0].promise;
+    const registration = (agents[0].options.tools as unknown as Array<{
+      definition: { function: { name: string } };
+      execute: (args: unknown) => Promise<unknown>;
+    }>).find((t) => t.definition.function.name === "screenshot");
+    expect(registration).toBeDefined();
+    const result = (await registration?.execute({})) as { output: string; images?: Array<{ data: string; mimeType: string }> };
+    expect(result.output).toBe("captured");
+    expect(result.images).toEqual([{ data: "QUJD", mimeType: "image/png" }]);
+    agents[0].settle({ fullText: Promise.resolve("ok"), usage: Promise.resolve({ promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0 }) });
+    await drain;
+  });
+
+  it("keeps an explicitly empty tool list empty end to end (summary path, FR-032)", async () => {
+    const { agents, gates, createAgentImpl } = makeHarness();
+    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const drain = (async () => {
+      for await (const _ of runtime.run(baseRequest({ tools: [] }))) void _;
+    })();
+    await gates[0].promise;
+    expect(agents[0].options.tools).toEqual([]);
+    agents[0].settle({ fullText: Promise.resolve("summary"), usage: Promise.resolve({ promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0 }) });
+    await drain;
   });
 });

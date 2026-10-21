@@ -11,6 +11,7 @@ import type { ProviderRuntimeContract } from "../../foundations/contracts/provid
 import { bootstrapProviderRuntime } from "./bootstrap-provider-runtime.js";
 import { runAgentLoop } from "../../domain/agent-loop.js";
 import { createHookExecutor } from "../../domain/hooks.js";
+import { applyContextSeam } from "../../domain/context/context-seam.js";
 import { resolveTools, ToolRegistry } from "../../domain/tool-executor.js";
 import {
   getDefaultToolModules,
@@ -706,6 +707,7 @@ async function chat(userMessage: string): Promise<AgentResponse> {
         id: generateId(),
         role: "user",
         content: userMessage,
+        ...(streamOptions?.images?.length ? { images: streamOptions.images } : {}),
         timestamp: now(),
       });
 
@@ -737,7 +739,10 @@ async function chat(userMessage: string): Promise<AgentResponse> {
         // F1/W150: normalized model input; the stored copy stays intact
         // until the loop succeeds and its additions are merged back below
         // (id-matched, so the loop's system-shim unshift cannot skew it).
-        const modelMessages = normalizeHistoryForSend(messages);
+        // Spec 029 FR-039/040: the per-call context seam applies to this
+        // throwaway copy only — stored history is never mutated, and budget
+        // overflow throws the typed error instead of truncating.
+        const modelMessages = applyContextSeam(normalizeHistoryForSend(messages), streamOptions?.context ?? {});
         const modelInputIds = new Set(modelMessages.map((m) => m.id));
 
         try {

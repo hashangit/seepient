@@ -24,18 +24,79 @@
 import type {
   AdapterContext,
   AdapterDescriptor,
+  AgentInputImage,
   AgentRuntime,
   AgentRuntimeCapabilities,
   AgentRuntimeEvent,
   AgentRunRequest,
 } from "@seepients/adapter-kit";
+import { DEFAULT_CONTEXT_STRATEGY } from "@seepients/adapter-kit";
+import { SeepientError } from "seepient-engine/dist/foundations/errors.js";
 import type {
   CreateSeepientOptions,
   Message,
-  UserToolDefinition,
+  MessageImage,
+  ToolResult,
 } from "seepient-engine/dist/foundations/types.js";
+import type { TrustedHostToolRegistration } from "seepient-engine/dist/foundations/contracts/custom-tools.js";
+import { trustedHostTool } from "seepient-engine/dist/transport/sdk/custom-tools.js";
 import { createSeepient } from "seepient-engine/dist/transport/sdk/seepient.js";
 import { randomUUID } from "node:crypto";
+
+/**
+ * Typed rejection for content this run cannot carry (spec 029 FR-038):
+ * unsupported MIME, a model that accepts no images, or an image count above
+ * the model's per-prompt limit. Never a silent flatten to text.
+ */
+export class UnsupportedContentError extends SeepientError {
+  constructor(detail: string) {
+    super(`UNSUPPORTED_CONTENT: ${detail}`, "UNSUPPORTED_CONTENT", false);
+    this.name = "UnsupportedContentError";
+  }
+}
+
+/** MIME types the canonical inference layer accepts for image input. */
+const SUPPORTED_IMAGE_MIME = /^image\/(png|jpeg|webp|gif)$/;
+
+/** The provider-neutral tool-result shape the app executor may return (FR-037 source 4). */
+type AgentToolResultShape = {
+  kind: "agent_tool_result";
+  content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
+};
+
+/** Type guard: checks only `kind`; content blocks validate at read time. */
+function isAgentToolResult(value: unknown): value is AgentToolResultShape {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as AgentToolResultShape).kind === "agent_tool_result" &&
+    Array.isArray((value as AgentToolResultShape).content)
+  );
+}
+
+/** Convert one request-borne image to the engine message shape (base64 copy). */
+function toMessageImage(image: AgentInputImage): MessageImage {
+  if (!SUPPORTED_IMAGE_MIME.test(image.mimeType)) {
+    throw new UnsupportedContentError(`image "${image.name}" has unsupported MIME "${image.mimeType}"`);
+  }
+  return { data: Buffer.from(image.data).toString("base64"), mimeType: image.mimeType };
+}
+
+/**
+ * Enforce the model's image limits at conversion (contract §5). `total`
+ * counts every image this call would carry; `where` names the source.
+ */
+function assertImageLimits(model: AgentRunRequest["model"], total: number): void {
+  if (total === 0) return;
+  if (model.acceptsImages === false) {
+    throw new UnsupportedContentError(`model ${model.provider}/${model.id} accepts no image input`);
+  }
+  if (model.maxImagesPerPrompt !== undefined && total > model.maxImagesPerPrompt) {
+    throw new UnsupportedContentError(
+      `${total} images exceed the model limit of ${model.maxImagesPerPrompt} per prompt`,
+    );
+  }
+}
 
 /** Which component of the runtime owns in-flight work (contract §2). */
 export type OwnedWorkKind = "helper" | "provider" | "tool";
@@ -77,7 +138,8 @@ export interface SeepientAgentRuntimeOptions {
  * Hydration (FR-034): pure once-per-run conversion of product history into
  * engine messages. Only user/assistant rows map — the engine composes its own
  * instructions (request.instructions ride `systemPrompt`), so upstream system
- * rows are deliberately dropped. Images ride S09 (T033).
+ * rows are deliberately dropped. History images (recent-user-turn hydration
+ * rule is the caller's) convert with MIME/data preserved (FR-037).
  */
 export function hydrateHistory(history: AgentRunRequest["history"]): Message[] {
   return history
@@ -86,6 +148,7 @@ export function hydrateHistory(history: AgentRunRequest["history"]): Message[] {
       id: m.id ?? `hydrated-${i}`,
       role: m.role,
       content: m.content,
+      ...(m.images?.length ? { images: m.images.map(toMessageImage) } : {}),
       timestamp: m.createdAt ? Date.parse(m.createdAt) || Date.now() : Date.now(),
     }));
 }
@@ -180,65 +243,113 @@ export class SeepientAgentRuntime implements AgentRuntime {
       const base = await this.#options.resolveEngineOptions(request);
       const createAgent = this.#options.createAgentImpl ?? createSeepient;
 
-      // Tool bridging: connector tools become engine user tools whose execute
-      // routes to the request's governed callback. Empty stays empty end to
-      // end (FR-032): `tools: []` resolves to zero engine tools.
-      const tools: UserToolDefinition[] = request.tools.map((connectorTool) => ({
-        name: connectorTool.name,
-        description: connectorTool.description,
-        parameters: connectorTool.inputSchema,
-        execute: async (args: unknown) => {
-          const executionId = randomUUID();
-          queue.push({ type: "tool", name: connectorTool.name, args: args as Record<string, unknown>, executionId });
-          const startedAt = Date.now();
-          // The adapter owns the WAIT on the app's governed executor — the
-          // upstream executeTool signature carries no signal, so cancellation
-          // resolves the wait (the app-side op terminates on its own terms;
-          // recorded in bridge-inventory.md).
-          const toolAbort = new AbortController();
-          const work: OwnedWork = {
-            kind: "tool",
-            label: `${connectorTool.name}:${executionId}`,
-            cancel: () => toolAbort.abort(),
-          };
-          owned.add(work);
-          try {
-            const execution = request.executeTool?.(
-              connectorTool.name,
-              args as Record<string, unknown>,
-              executionId,
-              connectorTool.route,
-              undefined,
-            );
-            const aborted = new Promise<never>((_, reject) => {
-              toolAbort.signal.addEventListener("abort", () => reject(new Error("ABORTED: tool wait cancelled")));
-            });
-            const result = await Promise.race([execution, aborted]);
-            // Result contents are redacted by the app's hook, never here.
-            await request.onToolCompleted?.({
+      // Tool bridging: connector tools become trusted-host registrations whose
+      // execute routes to the request's governed callback. The app executes;
+      // the engine treats the bridge as host authority with model egress —
+      // the explicit trust model the engine requires (legacy plain tools fail
+      // closed at execution). Empty stays empty end to end (FR-032): a
+      // summary or empty-tools run resolves to zero engine tools.
+      const tools: TrustedHostToolRegistration[] = request.tools.map((connectorTool) =>
+        trustedHostTool({
+          definition: {
+            type: "function",
+            function: {
               name: connectorTool.name,
-              executionId,
-              durationMs: Date.now() - startedAt,
-              result,
-            });
-            return typeof result === "string" ? result : JSON.stringify(result ?? null);
-          } finally {
-            owned.delete(work);
-          }
-        },
-      }));
+              description: connectorTool.description,
+              parameters: {
+                type: "object",
+                properties: (connectorTool.inputSchema.properties as Record<string, unknown> | undefined) ?? {},
+                required: Array.isArray(connectorTool.inputSchema.required)
+                  ? (connectorTool.inputSchema.required as string[])
+                  : [],
+              },
+            },
+          },
+          execute: async (args: unknown): Promise<string | ToolResult> => {
+            const executionId = randomUUID();
+            queue.push({ type: "tool", name: connectorTool.name, args: args as Record<string, unknown>, executionId });
+            const startedAt = Date.now();
+            // The adapter owns the WAIT on the app's governed executor — the
+            // upstream executeTool signature carries no signal, so cancellation
+            // resolves the wait (the app-side op terminates on its own terms;
+            // recorded in bridge-inventory.md).
+            const toolAbort = new AbortController();
+            const work: OwnedWork = {
+              kind: "tool",
+              label: `${connectorTool.name}:${executionId}`,
+              cancel: () => toolAbort.abort(),
+            };
+            owned.add(work);
+            try {
+              const execution = request.executeTool?.(
+                connectorTool.name,
+                args as Record<string, unknown>,
+                executionId,
+                connectorTool.route,
+                undefined,
+              );
+              const aborted = new Promise<never>((_, reject) => {
+                toolAbort.signal.addEventListener("abort", () => reject(new Error("ABORTED: tool wait cancelled")));
+              });
+              const result = await Promise.race([execution, aborted]);
+              // Result contents are redacted by the app's hook, never here.
+              await request.onToolCompleted?.({
+                name: connectorTool.name,
+                executionId,
+                durationMs: Date.now() - startedAt,
+                result,
+              });
+              // Image-bearing tool results (FR-037): provider-neutral content
+              // maps text blocks to the output and image blocks ride through —
+              // never flattened into the text channel.
+              if (isAgentToolResult(result)) {
+                const text = result.content
+                  .filter((c) => c.type === "text")
+                  .map((c) => c.text ?? "")
+                  .join("\n");
+                const images = result.content
+                  .filter((c) => c.type === "image" && typeof c.data === "string" && typeof c.mimeType === "string")
+                  .map((c) => {
+                    if (!SUPPORTED_IMAGE_MIME.test(c.mimeType as string)) {
+                      throw new UnsupportedContentError(
+                        `tool "${connectorTool.name}" returned an image with unsupported MIME "${c.mimeType}"`,
+                      );
+                    }
+                    return { data: c.data as string, mimeType: c.mimeType as string };
+                  });
+                return { output: text, success: true, ...(images.length ? { images } : {}) };
+              }
+              return typeof result === "string" ? result : JSON.stringify(result ?? null);
+            } finally {
+              owned.delete(work);
+            }
+          },
+        }),
+      );
 
       // Safe-boundary steering claim (upstream semantics: atomically claim
       // durable user steering before the turn runs); claimed text rides the
-      // current turn as tagged context.
+      // current turn as tagged context, claimed attachment images ride the
+      // current-turn image set (FR-037 source 3).
       let prompt = request.prompt;
+      const turnImages: AgentInputImage[] = [...(request.currentTurnImages ?? [])];
       if (request.claimSteering) {
         const claimed = await request.claimSteering([]);
         if (claimed.length > 0) {
           const tagged = claimed.map((m) => `[steering] ${m.text}`).join("\n");
           prompt = `${tagged}\n\n${request.prompt}`;
+          for (const message of claimed) {
+            turnImages.push(...(message.images ?? []));
+          }
         }
       }
+
+      // Model image limits are enforced here, at conversion (contract §5):
+      // the total covers current turn + steering attachments + hydrated
+      // history rows — everything this model call would carry.
+      const historyImageCount = request.history.reduce((n, m) => n + (m.images?.length ?? 0), 0);
+      assertImageLimits(request.model, turnImages.length + historyImageCount);
+      const promptImages = turnImages.map(toMessageImage);
 
       const agent = await createAgent({
         ...base,
@@ -261,6 +372,16 @@ export class SeepientAgentRuntime implements AgentRuntime {
       // through result.textStream and settles when fullText/usage resolve.
       // Closing the queue on handle resolution would drop every delta.
       const stream = await agent.chatStream(prompt, {
+        // Current-turn + steering-attachment images ride THIS turn (FR-037
+        // sources 1+3); history images already sit on the hydrated rows.
+        ...(promptImages.length ? { images: promptImages } : {}),
+        // Per-call context seam (FR-039/040): the request's strategy applies
+        // to this call only; the model's configured window is the budget and
+        // overflow throws the typed error instead of truncating.
+        context: {
+          strategy: request.contextStrategy ?? DEFAULT_CONTEXT_STRATEGY,
+          ...(request.model.contextWindow !== undefined ? { maxInputTokens: request.model.contextWindow } : {}),
+        },
         onStep: (step: { type: string }) => {
           if (step.type === "tool_progress") {
             queue.push({ type: "progress", text: "tool running", activity: true });
