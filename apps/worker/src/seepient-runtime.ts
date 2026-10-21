@@ -44,6 +44,11 @@ export function createSeepientAgentRuntime(): AgentRuntime {
         // upgrades to "multi", which then demands principalId, cwd, and a
         // full isolated store set this composition intentionally does not use.
         tenancy: "single",
+        // The app's own executor governs tool effects (it held this authority
+        // upstream); the engine's bridge is trusted-host, so headless runs
+        // declare autonomous consent instead of double-gating. Interactive
+        // approvals are M05 (bridge-inventory B-6).
+        consentMode: "autonomous",
         model: credentialed.id,
         providerAccount: ACCOUNT_ID,
         credentials,
