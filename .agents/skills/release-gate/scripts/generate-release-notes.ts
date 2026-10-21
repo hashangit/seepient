@@ -14,12 +14,13 @@
  */
 import { askSeepient } from "../../../../src/transport/sdk/index.js";
 import { execSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, "../../../..");
+const NOTES_DIR = join(REPO_ROOT, "release-notes");
 
 // --- args -----------------------------------------------------------------
 const VERSION = process.argv[2];
@@ -110,7 +111,8 @@ try {
   if (STDOUT_ONLY) {
     process.stdout.write(fallback);
   } else {
-    const outPath = join(REPO_ROOT, `RELEASE_NOTES-v${VERSION}.md`);
+    mkdirSync(NOTES_DIR, { recursive: true });
+    const outPath = join(NOTES_DIR, `RELEASE_NOTES-v${VERSION}.md`);
     writeFileSync(outPath, fallback);
     console.error(`Wrote ${outPath} (fallback)`);
   }
@@ -128,7 +130,8 @@ const output = notes || `## [${VERSION}] - ${today}\n\n${commitLog || "(no chang
 if (STDOUT_ONLY) {
   process.stdout.write(output + "\n");
 } else {
-  const outPath = join(REPO_ROOT, `RELEASE_NOTES-v${VERSION}.md`);
+  mkdirSync(NOTES_DIR, { recursive: true });
+  const outPath = join(NOTES_DIR, `RELEASE_NOTES-v${VERSION}.md`);
   writeFileSync(outPath, output + "\n");
   console.error(`Wrote ${outPath}`);
   console.error(`Tokens: ${result.usage.totalTokens ?? "?"} | Steps: ${result.steps.length}`);

@@ -236,7 +236,7 @@ npm version "$TARGET_VERSION" --no-git-tag-version --silent >/dev/null
 (cd packages/core && npm version "$TARGET_VERSION" --no-git-tag-version --silent >/dev/null)
 
 # --- generate release notes via seepient SDK (dogfooding) ---------------------
-NOTES_FILE="RELEASE_NOTES-v$TARGET_VERSION.md"
+NOTES_FILE="release-notes/RELEASE_NOTES-v$TARGET_VERSION.md"
 info "Generating release notes (seepient SDK, Keep a Changelog format)..."
 if pnpm run build:core >/dev/null 2>&1 && pnpm exec tsx .agents/skills/release-gate/scripts/generate-release-notes.ts "$TARGET_VERSION" 2>&1 \
     | sed 's/^/    /'; then

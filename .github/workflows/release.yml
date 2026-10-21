@@ -236,19 +236,18 @@ jobs:
         id: notes
         run: |
           VER="${{ steps.ver.outputs.version }}"
-          NOTES_FILE="RELEASE_NOTES-v${VER}.md"
 
-          if [[ -f "$NOTES_FILE" ]]; then
-            echo "path=$NOTES_FILE" >> "$GITHUB_OUTPUT"
-            echo "found=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if [[ -f "RELEASE_NOTES-${VER}.md" ]]; then
-            echo "path=RELEASE_NOTES-${VER}.md" >> "$GITHUB_OUTPUT"
-            echo "found=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          for candidate in \
+            "release-notes/RELEASE_NOTES-v${VER}.md" \
+            "release-notes/RELEASE_NOTES-${VER}.md" \
+            "RELEASE_NOTES-v${VER}.md" \
+            "RELEASE_NOTES-${VER}.md"; do
+            if [[ -f "$candidate" ]]; then
+              echo "path=$candidate" >> "$GITHUB_OUTPUT"
+              echo "found=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
 
           # Extract from CHANGELOG.md
           if [[ -f "CHANGELOG.md" ]]; then
