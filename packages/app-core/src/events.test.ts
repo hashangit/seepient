@@ -139,6 +139,39 @@ describe("reduceLiveMessageBlocks", () => {
       { kind: "steps", steps: [{ label: "Shell", count: 1 }] },
     ]);
   });
+
+  it("appends delta payloads onto the live tail", () => {
+    const first = reduceLiveMessageBlocks([], {
+      type: "progress",
+      payload: { text: "Hello wor" },
+    });
+    expect(reduceLiveMessageBlocks(first, { type: "progress", payload: { delta: "ld" } })).toEqual([
+      { kind: "progress", text: "Hello world" },
+    ]);
+  });
+
+  it("replaces the working placeholder with the first segment-full flush", () => {
+    const placeholder = reduceLiveMessageBlocks([], {
+      type: "progress",
+      payload: { text: "Working…" },
+    });
+    expect(
+      reduceLiveMessageBlocks(placeholder, { type: "progress", payload: { text: "Hello wor" } }),
+    ).toEqual([{ kind: "progress", text: "Hello wor" }]);
+  });
+
+  it("treats a post-narration text flush as a fresh segment, not a slice of prior text", () => {
+    // Regression: the worker resets hasStreamedText after publishing mid-turn
+    // narration, so the next flush carries {text: <new segment>}. Slicing it
+    // against prior accumulated text cut the segment's start mid-word.
+    const prior = reduceLiveMessageBlocks(
+      reduceLiveMessageBlocks([], { type: "progress", payload: { text: "Checking the harbor logs." } }),
+      { type: "progress", payload: { delta: " Still checking" } },
+    );
+    expect(reduceLiveMessageBlocks(prior, { type: "progress", payload: { text: "Found it: the tide table." } })).toEqual([
+      { kind: "progress", text: "Found it: the tide table." },
+    ]);
+  });
 });
 
 describe("runFailureError", () => {

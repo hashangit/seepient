@@ -246,12 +246,16 @@ export function reduceLiveMessageBlocks(
 ): MessageBlock[] {
   const tail = blocks.at(-1);
   const segments = tail?.kind === "progress" ? blocks.slice(0, -1) : blocks;
-  const priorText = liveMessageText(blocks);
-  const flushedLength =
-    tail?.kind === "progress" ? priorText.length - tail.text.length : priorText.length;
   const tailText =
     update.type === "progress"
-      ? progressMessageText(update.payload, priorText).slice(flushedLength)
+      ? typeof update.payload?.text === "string"
+        ? // Segment-full payload: the worker sends `text` on the first flush and
+          // after every mid-turn narration reset (hasStreamedText back to false).
+          // It is the CURRENT segment's full text, so it REPLACES the live tail.
+          // Slicing it against prior accumulated text cut the segment's start —
+          // visible as partial words glued onto the previous chunk (user report).
+          update.payload.text
+        : (tail?.kind === "progress" ? tail.text : "") + String(update.payload?.delta ?? "")
       : tail?.kind === "progress"
         ? tail.text
         : "";
@@ -279,13 +283,6 @@ export function reduceLiveMessageBlocks(
       ...(pendingToolNames.length > 0 ? { pendingToolNames } : {}),
     },
   ];
-}
-
-function liveMessageText(blocks: readonly MessageBlock[]): string {
-  return blocks
-    .filter((block) => block.kind === "text" || block.kind === "progress")
-    .map((block) => block.text)
-    .join("");
 }
 
 export type ToolStep = { label: string; count: number };
@@ -350,15 +347,6 @@ export function humanizeToolName(name: string): string {
   if (!spaced) return name;
   const lower = spaced.toLowerCase();
   return lower.charAt(0).toUpperCase() + lower.slice(1);
-}
-
-export function progressMessageText(
-  payload: Record<string, unknown> | undefined,
-  previousText = "",
-): string {
-  return typeof payload?.delta === "string"
-    ? previousText + payload.delta
-    : String(payload?.text ?? "");
 }
 
 export function subagentBlockFromPayload(
