@@ -476,8 +476,60 @@ export class SeepientAgentRuntime implements AgentRuntime {
         (fullText) => ({ ok: true as const, fullText }),
         (error: unknown) => ({ ok: false as const, error }),
       );
+      // 029 T042 (FR-036): producer-side settlement is bound to the TURN's
+      // finish chain — it runs exactly once even when the stream consumer
+      // disconnects (a closed queue cannot strand the accounting). The
+      // usage event still yields to connected consumers (accounted flag).
+      const runIdForLog = request.runId;
+      const settleUsage = async (): Promise<Extract<AgentRuntimeEvent, { type: "usage" }> | null> => {
+        if (settledUsageEvent) return settledUsageEvent;
+        const usage = await stream.usage.catch(() => null);
+        const usageEvent: Extract<AgentRuntimeEvent, { type: "usage" }> = {
+          type: "usage",
+          accounted: true,
+          provider: request.model.provider,
+          model: request.model.id,
+          operationKind: request.usageOperationKind ?? "answer",
+          inputTokens: usage?.promptTokens ?? null,
+          outputTokens: usage?.completionTokens ?? null,
+          totalTokens: usage?.totalTokens ?? null,
+          costUsd: usage?.cost ?? null,
+          cacheReadTokens: null,
+          cacheWriteTokens: null,
+          reasoningTokens: null,
+        };
+        await request.onUsage?.(usageEvent);
+        settledUsageEvent = usageEvent;
+        void runIdForLog;
+        return usageEvent;
+      };
+      let settledUsageEvent: Extract<AgentRuntimeEvent, { type: "usage" }> | null = null;
       const finish = settle.then(async (outcome) => {
         await pump.catch(() => undefined);
+        try {
+          settledUsageEvent = await settleUsage();
+        } catch {
+          // Producer settlement failure must not wedge the queue: the
+          // emitted usage (below) carries null tokens (unknown — never zero)
+          // and the caller's onUsage receives exactly that.
+          settledUsageEvent = {
+            type: "usage",
+            accounted: true,
+            provider: request.model.provider,
+            model: request.model.id,
+            operationKind: request.usageOperationKind ?? "answer",
+            inputTokens: null,
+            outputTokens: null,
+            totalTokens: null,
+            costUsd: null,
+            cacheReadTokens: null,
+            cacheWriteTokens: null,
+            reasoningTokens: null,
+          };
+        }
+        // The settled usage event is yielded post-drain for connected
+        // consumers; a disconnected consumer needs only the onUsage side
+        // effect (already awaited above — durable either way).
         queue.close();
         return outcome;
       });
@@ -501,27 +553,15 @@ export class SeepientAgentRuntime implements AgentRuntime {
       }
 
       const finalText = outcome.fullText;
-      const usage = await stream.usage.catch(() => null);
-
-      // One-settlement protocol: producer-side accounting is awaited here,
-      // and the emitted event is marked accounted so consumers never
-      // double-account (E10/E12). Null means unknown — never zero.
-      const usageEvent: Extract<AgentRuntimeEvent, { type: "usage" }> = {
-        type: "usage",
-        accounted: true,
-        provider: request.model.provider,
-        model: request.model.id,
-        operationKind: request.usageOperationKind ?? "answer",
-        inputTokens: usage?.promptTokens ?? null,
-        outputTokens: usage?.completionTokens ?? null,
-        totalTokens: usage?.totalTokens ?? null,
-        costUsd: usage?.cost ?? null,
-        cacheReadTokens: null,
-        cacheWriteTokens: null,
-        reasoningTokens: null,
-      };
-      await request.onUsage?.(usageEvent);
-      yield usageEvent;
+      // One-settlement protocol: the usage event was computed + settled in
+      // the finish chain (above) — emitted here for connected consumers,
+      // marked accounted so consumers never double-account (E10/E12).
+      // The event was settled in the finish chain (exactly once — even when
+      // the consumer disconnected); yield it here for connected consumers.
+      const usageEvent =
+        settledUsageEvent ??
+        (await settleUsage());
+      if (usageEvent) yield usageEvent;
 
       // 029 S13: a suspended turn yields the typed pause event instead of a
       // fabricated done — the provider call that produced the tool call was
