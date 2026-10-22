@@ -15,3 +15,13 @@ export class SecretNotFoundError extends Error {
     this.name = "SecretNotFoundError";
   }
 }
+/** Fail-closed tenant credential resolution (029 FR-004): no stored credential
+ * for the requested model and no operator-trusted platform account applies.
+ * Never fall back to ambient env keys or another principal's account. */
+export class ModelCredentialRequiredError extends Error {
+  readonly code = "CREDENTIAL_REQUIRED";
+  constructor(message = "No credential resolves for the requested model") {
+    super(message);
+    this.name = "ModelCredentialRequiredError";
+  }
+}

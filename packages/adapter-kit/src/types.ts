@@ -435,6 +435,15 @@ export interface AgentRunModel {
       detail?: string,
       failed?: ModelCredentialFailedState,
     ) => Promise<boolean | undefined>;
+    /** Opaque binding to the product credential/secret rows backing this
+     * credential: row identity + the owning run scope. Protected handle —
+     * never raw material. Required for durable refresh write-back (029 T010). */
+    handle?: {
+      credentialId: string;
+      secretId: string;
+      userId: string;
+      spaceId: string;
+    };
   };
 }
 

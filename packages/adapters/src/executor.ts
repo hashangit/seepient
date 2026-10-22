@@ -272,6 +272,7 @@ import {
   validateConnectedModelChoice,
   validateModelAuthAvailability,
 } from "./model-selection.js";
+import type { ModelChoice } from "./model-selection.js";
 import {
   filterImageReturningComputerTools,
   IMAGE_RETURNING_COMPUTER_TOOLS,
@@ -3008,6 +3009,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             credential: resolved.oauth,
             persist: resolved.persistOAuth,
             retire: resolved.retireOAuth,
+            handle: resolved.oauthHandle,
           }
         : undefined,
     };
@@ -3019,17 +3021,26 @@ export function createRunExecutor(deps: ExecutorDeps) {
       userId: string;
       spaceId: string;
       botId?: string;
+      /** Purpose-routed override (e.g. the team-chat engagement judge): takes the
+       * run/bot-override slot of the precedence for that purpose's resolution. */
+      purposeOverride?: { provider: string; modelId: string };
     }): Promise<AgentRunRequest["model"]> {
-      const override = scope.botId
-        ? await deps.prisma.bot.findFirst({
-            where: {
-              id: scope.botId,
-              userId: scope.userId,
-              spaceId: scope.spaceId,
-            },
-            select: { modelProvider: true, modelId: true, thinkingLevel: true },
-          })
-        : null;
+      const override: ModelChoice | null = scope.purposeOverride
+        ? {
+            modelProvider: scope.purposeOverride.provider,
+            modelId: scope.purposeOverride.modelId,
+            thinkingLevel: null,
+          }
+        : scope.botId
+          ? await deps.prisma.bot.findFirst({
+              where: {
+                id: scope.botId,
+                userId: scope.userId,
+                spaceId: scope.spaceId,
+              },
+              select: { modelProvider: true, modelId: true, thinkingLevel: true },
+            })
+          : null;
       const hasOverride = Boolean(override?.modelProvider && override.modelId);
       const [overrideCredential, defaultCredential, settings] = await Promise.all([
         hasOverride
@@ -3083,6 +3094,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               credential: resolved.oauth,
               persist: resolved.persistOAuth,
               retire: resolved.retireOAuth,
+              handle: resolved.oauthHandle,
             }
           : undefined,
       };
@@ -6556,6 +6568,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       credential: resolved.oauth,
                       persist: resolved.persistOAuth,
                       retire: resolved.retireOAuth,
+                      handle: resolved.oauthHandle,
                     }
                   : undefined,
               },
@@ -8434,6 +8447,7 @@ async function resolveModelKey(
   acceptsImages?: boolean;
   maxImagesPerPrompt?: number;
   oauth?: AgentModelOAuthCredential;
+  oauthHandle?: { credentialId: string; secretId: string; userId: string; spaceId: string };
   persistOAuth?: (credential: AgentModelOAuthCredential) => Promise<void>;
   retireOAuth?: (
     reason: ModelCredentialRetireReason,
@@ -8545,6 +8559,14 @@ async function resolveModelKey(
             ? resolved.secret.maxImagesPerPrompt
             : undefined,
         oauth,
+        oauthHandle: credential
+          ? {
+              credentialId: credential.id,
+              secretId: credential.secretId,
+              userId,
+              spaceId,
+            }
+          : undefined,
         persistOAuth: oauth
           ? async (next) => {
               await withModelCredentialLock(credential.secretId, async () => {
@@ -8585,7 +8607,11 @@ async function resolveModelKey(
   }
   if (requireStoredSecret) throw new Error("Backup model credential is no longer available");
   cloudflareGatewayProviderEnv({ provider });
-  return { apiKey: deploymentKeyFor(deps, provider), redact: [] };
+  return {
+    apiKey: deploymentKeyFor(deps, provider),
+    oauthHandle: undefined,
+    redact: [],
+  };
 }
 
 function cloudflareRunFields(resolved: { accountId?: string; gatewayId?: string }): {
