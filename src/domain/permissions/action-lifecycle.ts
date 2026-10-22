@@ -31,6 +31,7 @@ import type {
   PolicyDecision,
 } from "../../foundations/contracts/permission-policy.js";
 import type { PreparedToolAction } from "../../foundations/contracts/prepared-action.js";
+import { ToolSuspendedError } from "../../foundations/errors.js";
 import type {
   ExecutionBoundary,
   ExecutionResult,
@@ -912,6 +913,11 @@ export class ActionLifecycle {
         },
       });
     } catch (err) {
+      // 029 S13: a governed pause is a control outcome, not an execution
+      // failure — the action did not run, no terminal outcome is recorded
+      // here (the terminal comes from the resumed continuation), and the
+      // loop's suspension seam ends the turn.
+      if (err instanceof ToolSuspendedError) throw err;
       const message = err instanceof Error ? err.message : String(err);
       execution = {
         state: "failed",

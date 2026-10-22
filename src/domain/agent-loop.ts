@@ -1,6 +1,6 @@
 /** Seepient Core — THE Agent Loop (single implementation) */
 
-import { SeepientError } from "../foundations/errors.js";
+import { SeepientError, ToolSuspendedError } from "../foundations/errors.js";
 import type { Message, MessageImage, StepResult, ToolCall, Usage, ApproveToolFn, ApprovalDecision, ApprovalScope, ApprovalContext, ToolRiskCategory } from "../foundations/types.js";
 import type { ToolDefinition } from "../foundations/contracts/tool.js";
 import { now, toSeepientError, messageToCanonicalMessage } from "./context/message-convert.js";
@@ -74,6 +74,21 @@ export interface AgentLoopOptions {
   commitHelper?: import("../foundations/contracts/execution-brokers.js").CommitHelper;
   /** Tenancy mode ('single' | 'multi'). When 'multi', wiredPipeline is strictly required. */
   tenancyMode?: "single" | "multi";
+  /**
+   * 029 S13 suspension seam (D9): fired when a governed tool ends the turn
+   * in a suspension. Consumers (helpers, T039) propagate the pause to the
+   * parent run. The suspension also rides AgentLoopResult.suspension.
+   */
+  onSuspension?: (suspension: AgentSuspension) => void | Promise<void>;
+}
+
+/** A governed tool's durable-pause outcome (029 FR-017/FR-018). */
+export interface AgentSuspension {
+  toolCallId: string;
+  toolName: string;
+  pauseClass: "permission" | "choice" | "secret" | "takeover";
+  /** Engine-side suspension token — the typed pause outcome id, never a tool result. */
+  pauseToken: string;
 }
 
 export interface AgentLoopError {
@@ -91,8 +106,10 @@ export interface AgentLoopResult {
   usage: Usage;
   /** Prompt tokens of the LAST provider request — reflects actual context-window usage. */
   contextTokens: number;
-  finishReason: "stop" | "max_steps" | "error" | "aborted";
+  finishReason: "stop" | "max_steps" | "error" | "aborted" | "suspended";
   error?: AgentLoopError;
+  /** Set when finishReason is "suspended" — the governed pause to durably park (029 S13). */
+  suspension?: AgentSuspension;
 }
 
 /**
@@ -376,6 +393,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     onStep,
     providerFactory,
   } = options;
+  const { onSuspension } = options;
 
   const hooks = rawHooks ?? createHookExecutor();
 
@@ -538,7 +556,10 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
 
   const steps: StepResult[] = [];
   const allToolCalls: ToolCall[] = [];
-  let finishReason: "stop" | "max_steps" | "error" | "aborted" = "stop";
+  let finishReason: "stop" | "max_steps" | "error" | "aborted" | "suspended" = "stop";
+  /** 029 S13: set when a governed tool raises a durable pause — the turn
+   * suspends (no model-visible tool result, no further provider call). */
+  let suspension: AgentSuspension | null = null;
   let loopError: AgentLoopError | undefined;
   let hitMaxSteps = false;
 
@@ -845,7 +866,29 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
               // PreparedOperation.kind — commit-files → FileCommitBroker,
               // process → ProcessExecutor, etc. The prepared operation IS
               // the operation that executes (not the old tool handler).
-              result = await wiredPipeline.lifecycle.run(action, { signal, onUpdate: execExtra.onUpdate });
+              // 029 S13 suspension seam: a governed tool raising a durable
+              // pause ends the TURN — no model-visible tool result is pushed
+              // (FR-019: no further tool/model execution while waiting), the
+              // finish state is distinct from stop/error/aborted/max_steps,
+              // and the loop stops before any further provider call.
+              try {
+                result = await wiredPipeline.lifecycle.run(action, { signal, onUpdate: execExtra.onUpdate });
+              } catch (err) {
+                if (err instanceof ToolSuspendedError) {
+                  finishReason = "suspended";
+                  suspension = {
+                    toolCallId: tc.id,
+                    toolName: tc.name,
+                    pauseClass: err.pauseClass,
+                    pauseToken: err.pauseToken,
+                  };
+                  if (onSuspension) await onSuspension(suspension);
+                  // Leave the tc loop; the post-loop suspension break ends the
+                  // step loop before the next provider request.
+                  break;
+                }
+                throw err;
+              }
               output = result.toolResult.output;
               metadata = result.toolResult.metadata;
               // Image-bearing tool results (spec 029 FR-037): base64 blocks
@@ -949,6 +992,9 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
       }
 
       if ((finishReason as string) === "aborted" || (finishReason as string) === "error") break;
+      // 029 S13: a suspension ends the turn — never a max_steps hit, never a
+      // continuation provider call.
+      if (suspension) break;
 
       // Continue the loop to get the next response
       // Mark if this was the last allowed iteration
@@ -996,5 +1042,6 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     contextTokens: lastContextTokens,
     finishReason,
     error: loopError,
+    ...(suspension ? { suspension } : {}),
   };
 }

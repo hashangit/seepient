@@ -183,6 +183,19 @@ export interface AgentToolExecutionResult {
   details: unknown;
 }
 
+/**
+ * 029 S13 suspension seam (D9/FR-017): what a governed app dispatcher returns
+ * when the tool call requires a durable pause instead of a result. The
+ * runtime bridge translates this into the engine's typed suspension outcome —
+ * never a model-visible tool result, never a generic error.
+ */
+export interface AgentToolSuspension {
+  kind: "agent_tool_suspended";
+  pauseClass: "permission" | "choice" | "secret" | "takeover";
+  /** Engine-side suspension token — links the waiting state to this pause. */
+  pauseToken: string;
+}
+
 /** Hooks for a tool call that can report output before it returns. */
 export interface AgentToolExecutionObserver {
   /**

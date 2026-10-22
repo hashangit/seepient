@@ -4,7 +4,8 @@
  * text/usage/done event flow — all against a controllable engine double via
  * the adapter's DI seam (no real providers, no network, no timers).
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { AgentRuntimeEvent } from "@seepients/adapter-kit";
 import { createSeepient } from "seepient-engine/dist/transport/sdk/seepient.js";
 import {
   SeepientAgentRuntime,
@@ -559,6 +560,40 @@ describe("SeepientAgentRuntime event truth (029 T021/T022)", () => {
     // planted secret exists only in the app-side result content.
     for (const event of observed) {
       expect(JSON.stringify(event)).not.toContain(secret);
+    }
+  });
+
+  it("translates the app suspension sentinel into the engine's typed pause (029 T025)", async () => {
+    const { agents, gates, createAgentImpl } = makeHarness();
+    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const onToolCompleted = vi.fn(async () => undefined);
+    const request = baseRequest({
+      tools: [{ name: "governed_op", description: "d", inputSchema: { type: "object", properties: {}, required: [] } }],
+      executeTool: (async () => ({
+        kind: "agent_tool_suspended",
+        pauseClass: "permission",
+        pauseToken: "pause-9",
+      })) as never,
+      onToolCompleted,
+    });
+
+    const iterator = runtime.run(request)[Symbol.asyncIterator]();
+    const started = iterator.next();
+    await gates[0].promise;
+    const tools = agents[0].options.tools as unknown as Array<{ execute: (args: unknown) => Promise<unknown> }>;
+    // The bridge throws the engine's typed suspension — the loop's control
+    // outcome — and does NOT record a completed tool call.
+    await expect(tools[0]!.execute({})).rejects.toMatchObject({
+      name: "ToolSuspendedError",
+      pauseClass: "permission",
+      pauseToken: "pause-9",
+    });
+    expect(onToolCompleted).not.toHaveBeenCalled();
+    void started;
+    agents[0].settle({ fullText: Promise.resolve("ok"), usage: Promise.resolve({ promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 }) });
+    for (;;) {
+      const step = await iterator.next();
+      if (step.done) break;
     }
   });
 });

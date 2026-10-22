@@ -8,6 +8,7 @@
  * turns; the heavy executors stay in `executors.ts` (full package).
  */
 import type { PreparedToolAction } from "../../foundations/contracts/prepared-action.js";
+import { ToolSuspendedError } from "../../foundations/errors.js";
 import type { CapabilityEnvelope } from "../../foundations/contracts/permission-policy.js";
 import type {
   ExecutionResult,
@@ -71,6 +72,10 @@ export class TrustedHostExecutor implements OperationExecutor {
         },
       };
     } catch (err) {
+      // 029 S13: a governed pause is a control outcome, not a tool failure —
+      // rethrow it for the loop's suspension seam; never flatten it into a
+      // model-visible failed result.
+      if (err instanceof ToolSuspendedError) throw err;
       return {
         state: "failed",
         error: {

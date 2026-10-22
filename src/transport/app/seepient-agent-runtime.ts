@@ -29,9 +29,10 @@ import type {
   AgentRuntimeCapabilities,
   AgentRuntimeEvent,
   AgentRunRequest,
+  AgentToolSuspension,
 } from "@seepients/adapter-kit";
 import { DEFAULT_CONTEXT_STRATEGY } from "@seepients/adapter-kit";
-import { SeepientError } from "seepient-engine/dist/foundations/errors.js";
+import { SeepientError, ToolSuspendedError } from "seepient-engine/dist/foundations/errors.js";
 import type {
   CreateSeepientOptions,
   Message,
@@ -310,6 +311,24 @@ export class SeepientAgentRuntime implements AgentRuntime {
                 toolAbort.signal.addEventListener("abort", () => reject(new Error("ABORTED: tool wait cancelled")));
               });
               const result = await Promise.race([execution, aborted]);
+              // 029 S13: a governed pause is a control outcome, never a tool
+              // result — translate the app sentinel into the engine's typed
+              // suspension so the loop ends the turn without a model-visible
+              // result or a further provider call (no onToolCompleted: the
+              // action did not complete; T023's terminal record is denied/
+              // suspended upstream, not succeeded).
+              if (
+                typeof result === "object" &&
+                result !== null &&
+                (result as { kind?: string }).kind === "agent_tool_suspended"
+              ) {
+                const suspension = result as unknown as AgentToolSuspension;
+                throw new ToolSuspendedError(
+                  suspension.pauseClass,
+                  suspension.pauseToken,
+                  `tool "${connectorTool.name}" suspended for ${suspension.pauseClass} pause`,
+                );
+              }
               // Result contents are redacted by the app's hook, never here.
               await request.onToolCompleted?.({
                 name: connectorTool.name,

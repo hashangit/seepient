@@ -586,3 +586,31 @@ export class PathIdentityMismatchError extends ToolError {
 
 
 
+
+/**
+ * Thrown by a governed tool when the dispatch requires a durable pause
+ * (029 S13 suspension seam, D9): the engine loop ends the turn in a
+ * turn-suspending finish state — no model-visible tool result, no further
+ * provider call — instead of recording a result or a generic error.
+ * `pauseClass` is one of permission | choice | secret | takeover;
+ * `pauseToken` is the engine-side suspension token the waiting state links.
+ */
+export class ToolSuspendedError extends SeepientError {
+  readonly pauseClass: "permission" | "choice" | "secret" | "takeover";
+  readonly pauseToken: string;
+
+  constructor(
+    pauseClass: "permission" | "choice" | "secret" | "takeover",
+    pauseToken: string,
+    message?: string,
+  ) {
+    super(
+      message ?? `Tool suspended for ${pauseClass} pause (${pauseToken})`,
+      "TOOL_SUSPENDED",
+      false,
+    );
+    this.name = "ToolSuspendedError";
+    this.pauseClass = pauseClass;
+    this.pauseToken = pauseToken;
+  }
+}
