@@ -40,7 +40,13 @@ export function makeRegistrationAnalyzer(
   }
   if ("trust" in registration && registration.trust === "host") {
     return async (args, ctx) => {
-      const jsonArgs = (args && typeof args === "object" ? args : {}) as Record<string, unknown>;
+      // FR-010 param-swap fence: freeze the analyzed args at analysis time —
+      // execution executes the prepared operation, so a caller mutating the
+      // original object between analysis and execution must not change what
+      // the digest covers or what runs.
+      const jsonArgs = (
+        args && typeof args === "object" ? structuredClone(args) : {}
+      ) as Record<string, unknown>;
       const toolName = registration.definition.function.name;
       const decl = registration.declaration;
 

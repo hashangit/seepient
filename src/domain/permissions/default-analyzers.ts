@@ -33,7 +33,11 @@ export function resolveAnalyzerWithFallback(
 ): ToolAnalyzer {
   if (analyzers[toolName]) return analyzers[toolName];
   return async (args: unknown, ctx: ToolAnalysisContext): Promise<PreparedToolAction> => {
-    const jsonArgs = (args && typeof args === "object" ? args : {}) as Record<string, unknown>;
+    // Same FR-010 param-swap fence as the registration analyzer: the prepared
+    // operation carries a frozen copy of the analyzed args.
+    const jsonArgs = (
+      args && typeof args === "object" ? structuredClone(args) : {}
+    ) as Record<string, unknown>;
     const operation = {
       kind: "trusted-host",
       registrationId: toolName,
