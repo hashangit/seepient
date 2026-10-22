@@ -35,7 +35,9 @@ export type GovernedOperationClass =
  * `ToolRiskCategory` type names a subset; the runtime validator's accepted
  * set is authoritative and mirrored here.
  */
-export type GovernedToolRisk = "safe" | "read" | "edit" | "sensitive" | "destructive";
+/** Mirrors the engine's real ToolRiskCategory (foundations/contracts/tool-effects.ts) —
+ * the runtime validator is deliberately no looser than this union. */
+export type GovernedToolRisk = "safe" | "edit" | "communications" | "destructive";
 
 /** Mirrors the engine's `TrustedHostToolEffectDeclaration`. */
 export type GovernedToolEffect =
@@ -103,7 +105,7 @@ function egress(risk: GovernedToolRisk, title: string, summary: string, targets:
 /** Outbound messaging tool: content egresses to the model-visible channel. */
 function outbound(title: string, summary: string, targets: string[]): Decl {
   return {
-    risk: "sensitive",
+    risk: "communications",
     effects: [{ kind: "model-egress", dataClasses: ["normal", "sensitive"] }],
     display: { title, summary, canonicalTargets: targets, effects: ["model-egress", "host-callback"] },
   };
@@ -112,7 +114,7 @@ function outbound(title: string, summary: string, targets: string[]): Decl {
 /** Protected-secret tool: the value itself never becomes model-visible. */
 function secretTool(title: string, summary: string, targets: string[]): Decl {
   return {
-    risk: "sensitive",
+    risk: "communications",
     display: {
       title,
       summary,
@@ -135,7 +137,7 @@ export const GOVERNED_OPERATIONS: Record<string, GovernedOperation> = {
   // --- computer (T015): host screen, input, page browser, files, shell ------
   computer_observe: {
     class: "computer",
-    declaration: host("read", "Observe computer", "Read the computer host screen frame", ["computer-host:screen"]),
+    declaration: host("safe", "Observe computer", "Read the computer host screen frame", ["computer-host:screen"]),
   },
   computer_act: {
     class: "computer",
@@ -147,7 +149,7 @@ export const GOVERNED_OPERATIONS: Record<string, GovernedOperation> = {
   },
   browser_snapshot: {
     class: "computer",
-    declaration: host("read", "Snapshot page browser", "Read the page browser accessibility snapshot", ["computer-host:page-browser"]),
+    declaration: host("safe", "Snapshot page browser", "Read the page browser accessibility snapshot", ["computer-host:page-browser"]),
   },
   browser_act: {
     class: "computer",
@@ -162,11 +164,11 @@ export const GOVERNED_OPERATIONS: Record<string, GovernedOperation> = {
   },
   list_files: {
     class: "computer",
-    declaration: host("read", "List files", "List files in the bot home on the computer host", ["computer-host:bot-home"]),
+    declaration: host("safe", "List files", "List files in the bot home on the computer host", ["computer-host:bot-home"]),
   },
   read_file: {
     class: "computer",
-    declaration: host("read", "Read file", "Read a file from the bot home on the computer host", ["computer-host:bot-home"]),
+    declaration: host("safe", "Read file", "Read a file from the bot home on the computer host", ["computer-host:bot-home"]),
   },
   write_file: {
     class: "computer",
@@ -220,7 +222,7 @@ export const GOVERNED_OPERATIONS: Record<string, GovernedOperation> = {
   },
   recall_memory: {
     class: "memory",
-    declaration: host("read", "Recall memory", "Query the space semantic memory provider", ["semantic-memory-provider"]),
+    declaration: host("safe", "Recall memory", "Query the space semantic memory provider", ["semantic-memory-provider"]),
   },
   forget_memory: {
     class: "memory",
@@ -228,11 +230,11 @@ export const GOVERNED_OPERATIONS: Record<string, GovernedOperation> = {
   },
   search_history: {
     class: "memory",
-    declaration: host("read", "Search history", "Search the redacted message store", ["message-store"]),
+    declaration: host("safe", "Search history", "Search the redacted message store", ["message-store"]),
   },
   read_history: {
     class: "memory",
-    declaration: host("read", "Read history", "Read messages from the message store", ["message-store"]),
+    declaration: host("safe", "Read history", "Read messages from the message store", ["message-store"]),
   },
 
   // --- scheduling (T014) ------------------------------------------------------
@@ -242,7 +244,7 @@ export const GOVERNED_OPERATIONS: Record<string, GovernedOperation> = {
   },
   schedule_list: {
     class: "scheduling",
-    declaration: host("read", "List schedules", "List the bot's routines in the scheduler", ["scheduler"]),
+    declaration: host("safe", "List schedules", "List the bot's routines in the scheduler", ["scheduler"]),
   },
   schedule_cancel: {
     class: "scheduling",
@@ -252,11 +254,11 @@ export const GOVERNED_OPERATIONS: Record<string, GovernedOperation> = {
   // --- work (T014): scratchpad, tickets, skills, delegation, spaces ----------
   task_catalog: {
     class: "work",
-    declaration: host("read", "Task catalog", "List tasks, routines, skills, and exposed tools in the work inventory", ["work-inventory"]),
+    declaration: host("safe", "Task catalog", "List tasks, routines, skills, and exposed tools in the work inventory", ["work-inventory"]),
   },
   scratchpad_list: {
     class: "work",
-    declaration: host("read", "List scratchpad", "List the bot's scratchpad items", ["work-queue:scratchpad"]),
+    declaration: host("safe", "List scratchpad", "List the bot's scratchpad items", ["work-queue:scratchpad"]),
   },
   scratchpad_add: {
     class: "work",
@@ -276,11 +278,11 @@ export const GOVERNED_OPERATIONS: Record<string, GovernedOperation> = {
   },
   board_tickets: {
     class: "work",
-    declaration: host("read", "List board tickets", "List tickets on the ticket board", ["work:tickets"]),
+    declaration: host("safe", "List board tickets", "List tickets on the ticket board", ["work:tickets"]),
   },
   ticket_get: {
     class: "work",
-    declaration: host("read", "Get ticket", "Read one ticket", ["work:tickets"]),
+    declaration: host("safe", "Get ticket", "Read one ticket", ["work:tickets"]),
   },
   ticket_create: {
     class: "work",
@@ -296,7 +298,7 @@ export const GOVERNED_OPERATIONS: Record<string, GovernedOperation> = {
   },
   skill_read: {
     class: "work",
-    declaration: host("read", "Read skill", "Read a SKILL.md from the skill catalog", ["skill-store"]),
+    declaration: host("safe", "Read skill", "Read a SKILL.md from the skill catalog", ["skill-store"]),
   },
   skill_create: {
     class: "work",
@@ -336,11 +338,11 @@ export const GOVERNED_OPERATIONS: Record<string, GovernedOperation> = {
   // --- connector (T016): web, cloud agents, MCP, secret surface -------------
   web_search: {
     class: "connector",
-    declaration: egress("read", "Web search", "Search the web via the configured provider (vendor key optional)", ["web"]),
+    declaration: egress("safe", "Web search", "Search the web via the configured provider (vendor key optional)", ["web"]),
   },
   web_fetch: {
     class: "connector",
-    declaration: egress("read", "Fetch web page", "Fetch a URL via the configured web provider (vendor key optional)", ["web"]),
+    declaration: egress("safe", "Fetch web page", "Fetch a URL via the configured web provider (vendor key optional)", ["web"]),
   },
   cloud_agent_launch: {
     class: "connector",
@@ -348,7 +350,7 @@ export const GOVERNED_OPERATIONS: Record<string, GovernedOperation> = {
   },
   cloud_agent_status: {
     class: "connector",
-    declaration: egress("read", "Cloud agent status", "Query a cloud agent session status with the cloud agent vendor credential", ["cloud-agent-provider"]),
+    declaration: egress("safe", "Cloud agent status", "Query a cloud agent session status with the cloud agent vendor credential", ["cloud-agent-provider"]),
   },
   cloud_agent_reply: {
     class: "connector",
@@ -388,7 +390,7 @@ export const GOVERNED_OPERATIONS: Record<string, GovernedOperation> = {
   secret_request: {
     class: "connector",
     declaration: egress(
-      "sensitive",
+      "communications",
       "Authenticated request",
       "Perform an HTTP request with the bot credential injected backend-side at its saved origin (approval-gated)",
       ["connector-http"],

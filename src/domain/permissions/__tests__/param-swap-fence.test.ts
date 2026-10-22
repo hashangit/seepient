@@ -5,17 +5,21 @@ import type { ToolAnalysisContext } from "../../../foundations/contracts/custom-
 import type { TrustedHostToolRegistration } from "../../../foundations/contracts/custom-tools.js";
 
 function registration(declaration?: {
-  risk?: "safe" | "read" | "edit" | "sensitive" | "destructive";
+  risk?: "safe" | "edit" | "communications" | "destructive";
 }): TrustedHostToolRegistration {
   return {
     trust: "host",
     definition: {
       type: "function",
-      function: { name: "app_demo_op", description: "demo", parameters: { type: "object", properties: {} } },
+      function: {
+        name: "app_demo_op",
+        description: "demo",
+        parameters: { type: "object", properties: {}, required: [] },
+      },
     },
     ...(declaration ? { declaration } : {}),
     execute: async () => "ok",
-  } as TrustedHostToolRegistration;
+  } as unknown as TrustedHostToolRegistration;
 }
 
 const ctx = (overrides: Partial<ToolAnalysisContext> = {}): ToolAnalysisContext =>
@@ -32,6 +36,9 @@ describe("FR-010 param-swap fence (analysis→execution)", () => {
     const analyzer = makeRegistrationAnalyzer(registration({ risk: "edit" }));
     const args = { target: "memory-key-a", revision: 1 };
     const action = await analyzer(args, ctx());
+    if (action.operation.kind !== "trusted-host") {
+      throw new Error("expected a trusted-host prepared operation");
+    }
     const before = JSON.stringify(action.operation.args);
     // A caller (or a races writer) mutates the original after analysis.
     args.target = "memory-key-HIJACKED";
@@ -44,6 +51,9 @@ describe("FR-010 param-swap fence (analysis→execution)", () => {
     const analyzer = resolveAnalyzerWithFallback({}, "app_other");
     const args = { path: "/home/a" };
     const action = await analyzer(args, ctx());
+    if (action.operation.kind !== "trusted-host") {
+      throw new Error("expected a trusted-host prepared operation");
+    }
     (args as { path: string }).path = "/etc/passwd";
     expect((action.operation.args as { path: string }).path).toBe("/home/a");
   });

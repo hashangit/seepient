@@ -52,7 +52,7 @@ export function makeRegistrationAnalyzer(
 
       // Validate declaration fields fail-closed
       if (decl) {
-        if (decl.risk && !["safe", "read", "edit", "sensitive", "destructive"].includes(decl.risk)) {
+        if (decl.risk && !["safe", "edit", "communications", "destructive"].includes(decl.risk)) {
           throw new Error(`Invalid risk category "${decl.risk}" in trustedHostTool declaration`);
         }
         if (decl.effects) {

@@ -78,7 +78,7 @@ const INVENTORY_STATIC_TOOL_NAMES: readonly string[] = [
 ];
 
 const GOVERNED_CLASSES = ["computer", "memory", "scheduling", "work", "connector", "messaging", "audio"];
-const RISKS = ["safe", "read", "edit", "sensitive", "destructive"];
+const RISKS = ["safe", "edit", "communications", "destructive"];
 const EFFECT_KINDS = [
   "filesystem-read",
   "filesystem-write",
@@ -171,8 +171,8 @@ describe("governed operations (T014–T016)", () => {
     expect(governedDeclarationFor("computer_act")!.declaration.risk).toBe("destructive");
     expect(governedDeclarationFor("computer_act")!.declaration.display?.effects).toContain("host-callback");
     // File/registry reads → read.
-    expect(governedDeclarationFor("read_file")!.declaration.risk).toBe("read");
-    expect(governedDeclarationFor("scratchpad_list")!.declaration.risk).toBe("read");
+    expect(governedDeclarationFor("read_file")!.declaration.risk).toBe("safe");
+    expect(governedDeclarationFor("scratchpad_list")!.declaration.risk).toBe("safe");
     // Shell → destructive; bot command-variable secrets ride env (no secret-use ref).
     const shell = governedDeclarationFor("shell")!.declaration;
     expect(shell.risk).toBe("destructive");
@@ -183,14 +183,14 @@ describe("governed operations (T014–T016)", () => {
     expect(governedDeclarationFor("skill_create")!.declaration.risk).toBe("edit");
     // Web egress → dynamic destinations + read.
     const webSearch = governedDeclarationFor("web_search")!.declaration;
-    expect(webSearch.risk).toBe("read");
+    expect(webSearch.risk).toBe("safe");
     expect(webSearch.effects).toEqual([{ kind: "network-egress", destinations: "dynamic" }]);
     // Outbound messaging → sensitive with normal+sensitive model egress.
     const messageUser = governedDeclarationFor("message_user")!.declaration;
-    expect(messageUser.risk).toBe("sensitive");
+    expect(messageUser.risk).toBe("communications");
     expect(messageUser.effects).toEqual([{ kind: "model-egress", dataClasses: ["normal", "sensitive"] }]);
     // Secret surface → sensitive with protected-secret summary.
-    expect(governedDeclarationFor("list_secrets")!.declaration.risk).toBe("sensitive");
+    expect(governedDeclarationFor("list_secrets")!.declaration.risk).toBe("communications");
     expect(governedDeclarationFor("request_secret")!.declaration.display?.summary).toContain("never model-visible");
     expect(governedDeclarationFor("secret_request")!.declaration.effects?.[0]?.kind).toBe("network-egress");
     // Takeover → destructive with the human-takeover summary.

@@ -200,7 +200,7 @@ describe("custom-tool registration (T304, QS-3.6)", () => {
         function: { name: "computer_observe", description: "d", parameters: { type: "object", properties: {}, required: [] } },
       },
       declaration: {
-        risk: "read",
+        risk: "safe",
         display: {
           title: "Observe computer",
           summary: "Read the computer host screen frame",
@@ -224,7 +224,7 @@ describe("custom-tool registration (T304, QS-3.6)", () => {
     } as unknown as ToolAnalysisContext;
 
     const action = await makeRegistrationAnalyzer(reg)({}, mockCtx);
-    expect(action.risk).toBe("read");
+    expect(action.risk).toBe("safe");
     expect(action.display.title).toBe("Observe computer");
     expect(action.display.summary).toBe("Read the computer host screen frame");
     expect(action.display.canonicalTargets).toEqual(["computer-host:screen"]);
