@@ -2642,6 +2642,11 @@ function runtimeFallbackModel(runtime: AgentRuntime) {
 }
 
 export interface ExecutorDeps {
+  /** 029 T038: the durable shared parent+helper tool-call budget (optional —
+   * absent = ungoverned budget; present = atomic pre-dispatch admission). */
+  sharedBudgetLedger?: {
+    admit(runId: string, executionId: string, callerKind: "parent" | "helper"): Promise<boolean>;
+  };
   contextStrategy?: AgentContextStrategy;
   prisma: PrismaClient;
   events: ThreadEvents;
@@ -4124,6 +4129,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
           return occurrence;
         };
 
+        // 029 T038 (FR-032/D5): the shared parent+helper tool-call budget,
+        // enforced at THIS governed dispatch boundary (single admission
+        // point; the engine loop never checks admission). The budget value
+        // comes from settings via the injected ledger; helpers consume the
+        // same atomic budget, and restart reconstructs from durable records.
+        const sharedBudget = deps.sharedBudgetLedger;
         // 029 T037/T039: helper state for the engine-loop helper lift —
         // nesting rejection (depth via marker run-id + flag) and the
         // concurrency limit (the upstream MAX_PARALLEL_SUBAGENTS = 4).
@@ -4171,6 +4182,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
           );
           if (effectiveDisabledTools.has(name)) {
             return { error: "This tool is disabled for this bot." };
+          }
+          // 029 T038: pre-dispatch budget admission (parent + helpers share
+          // the atomic budget; idempotent per executionId so replays never
+          // double-charge). Absent ledger (legacy compositions) = no budget.
+          if (sharedBudget) {
+            const admitted = await sharedBudget.admit(runId, executionId, insideHelperRun ? "helper" : "parent");
+            if (!admitted) {
+              return {
+                error:
+                  "BUDGET_EXHAUSTED: the shared tool-call budget for this run is spent (parent + helpers); ask or wait for the run to finish.",
+              };
+            }
           }
           if (PAGE_BROWSER_TOOL_NAMES.has(name) && !pageBrowserAllowed) {
             return { error: "Page browser is unavailable on this computer." };

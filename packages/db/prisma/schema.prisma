@@ -664,6 +664,7 @@ model Run {
   @@index([threadId, status, createdAt])
   @@index([routineId])
   @@map("runs")
+  sharedBudgetAdmissions SharedBudgetAdmission[]
 }
 
 model SteeringMessage {
@@ -1475,4 +1476,22 @@ model TicketComment {
 
   @@index([ticketId, createdAt])
   @@map("ticket_comments")
+}
+
+/// 029 T038 (FR-032): one admission record per admitted tool call (parent or
+/// helper). The shared budget = budgetUnits minus count(admission records for
+/// the run); enforcement is an atomic pre-dispatch admission (unique
+/// executionId) at the governed dispatch boundary. Restart reconstructs the
+/// remaining budget by counting records — no in-memory state.
+model SharedBudgetAdmission {
+  id          String   @id @default(cuid())
+  runId       String
+  run         Run      @relation(fields: [runId], references: [id], onDelete: Cascade)
+  executionId String
+  callerKind  String
+  createdAt   DateTime @default(now())
+
+  @@unique([runId, executionId])
+  @@index([runId])
+  @@map("shared_budget_admissions")
 }
