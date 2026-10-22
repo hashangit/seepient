@@ -775,6 +775,12 @@ async function chat(userMessage: string): Promise<AgentResponse> {
             middleware: opts.middleware,
             approveTool: opts.approveTool,
             wiredPipeline,
+            // 029 S15/T034: per-step durable steering claim (config-carried
+            // from the runtime adapter's composition). The items map to the
+            // loop's tagged-injection shape (id + text + images).
+            claimSteering: (opts.config as
+              | { claimSteering?: (seenIds: string[]) => Promise<Array<{ id: string; text: string; images?: Array<{ data: string; mimeType: string }> }>> }
+              | undefined)?.claimSteering,
             tenancyMode,
             onStep: (step) => {
               if (streamOptions?.onStep) streamOptions.onStep(step);

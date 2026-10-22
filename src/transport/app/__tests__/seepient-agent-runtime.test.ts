@@ -349,20 +349,22 @@ describe("SeepientAgentRuntime multimodal + context (T033/T034)", () => {
     await expect(drain).rejects.toThrow(/exceed the model limit/);
   });
 
-  it("rides steering attachment images on the current turn (FR-037 source 3)", async () => {
+  it("threads the durable steering claim into the engine config (029 T034 — claiming moved into the loop)", async () => {
     const { agents, gates, createAgentImpl } = makeHarness();
     const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
-    const request = baseRequest({
-      claimSteering: async () => [
-        { id: "s1", messageId: "m-s1", text: "look at this", images: [PNG] },
-      ],
-    } as Partial<AgentRunRequest>);
+    const claimSteering = async () => [
+      { id: "s1", messageId: "m-s1", text: "look at this", images: [PNG] },
+    ];
+    const request = baseRequest({ claimSteering } as Partial<AgentRunRequest>);
     const drain = (async () => {
       for await (const _ of runtime.run(request)) void _;
     })();
     await gates[0].promise;
-    const images = agents[0].streamOptions.images ?? [];
-    expect(images).toEqual([{ data: Buffer.from([1, 2, 3]).toString("base64"), mimeType: "image/png" }]);
+    // B-3 closes: the loop claims at every safe model-turn boundary; the
+    // adapter forwards the durable claim through the engine config. The
+    // attachment images ride the loop's tagged-injection user message
+    // (pinned by the loop steering tests).
+    expect((agents[0].options.config as { claimSteering?: unknown }).claimSteering).toBe(claimSteering);
     agents[0].settle({ fullText: Promise.resolve("done"), usage: Promise.resolve({ promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0 }) });
     await drain;
   });

@@ -365,22 +365,13 @@ export class SeepientAgentRuntime implements AgentRuntime {
         });
       });
 
-      // Safe-boundary steering claim (upstream semantics: atomically claim
-      // durable user steering before the turn runs); claimed text rides the
-      // current turn as tagged context, claimed attachment images ride the
-      // current-turn image set (FR-037 source 3).
-      let prompt = request.prompt;
+      // 029 S15/T034 (B-3 closes): steering claiming moved INTO the loop —
+      // claimSteering runs at EVERY safe model-turn boundary (per-step), not
+      // once at run start. The request's durable claim rides the engine
+      // config; the loop injects claimed items as tagged user content with
+      // images at the next boundary (seen-ID suppressed by the store).
+      const prompt = request.prompt;
       const turnImages: AgentInputImage[] = [...(request.currentTurnImages ?? [])];
-      if (request.claimSteering) {
-        const claimed = await request.claimSteering([]);
-        if (claimed.length > 0) {
-          const tagged = claimed.map((m) => `[steering] ${m.text}`).join("\n");
-          prompt = `${tagged}\n\n${request.prompt}`;
-          for (const message of claimed) {
-            turnImages.push(...(message.images ?? []));
-          }
-        }
-      }
 
       // Model image limits are enforced here, at conversion (contract §5):
       // the total covers current turn + steering attachments + hydrated
@@ -395,6 +386,9 @@ export class SeepientAgentRuntime implements AgentRuntime {
         systemPrompt: request.instructions || base.systemPrompt,
         initialHistory,
         tools,
+        // 029 S15/T034: the per-step steering claim rides the engine config
+        // (the session forwards it into the loop's per-step boundary claim).
+        config: { ...base.config, claimSteering: request.claimSteering },
       });
 
       const providerWork: OwnedWork = {

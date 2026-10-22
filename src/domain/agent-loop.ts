@@ -80,6 +80,22 @@ export interface AgentLoopOptions {
    * parent run. The suspension also rides AgentLoopResult.suspension.
    */
   onSuspension?: (suspension: AgentSuspension) => void | Promise<void>;
+  /**
+   * 029 S15/T034 (FR-027): per-step durable steering claim at safe
+   * model-turn boundaries — invoked before each provider request with the
+   * ids already consumed this run; claimed items are injected into the NEXT
+   * provider request as tagged steering content (never a second concurrent
+   * run, never a queued prompt). Ordered claiming, fencing, seen-ID
+   * suppression and image-bearing content are the store's contract.
+   */
+  claimSteering?: (seenIds: string[]) => Promise<ClaimedSteeringItem[]>;
+}
+
+/** 029 S15/T034: a durably claimed steering message (mirrors the app contract). */
+export interface ClaimedSteeringItem {
+  id: string;
+  text: string;
+  images?: Array<{ data: string; mimeType: string }>;
 }
 
 /** A governed tool's durable-pause outcome (029 FR-017/FR-018). */
@@ -394,6 +410,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     providerFactory,
   } = options;
   const { onSuspension } = options;
+  const { claimSteering: claimSteeringPerStep } = options;
 
   const hooks = rawHooks ?? createHookExecutor();
 
@@ -560,6 +577,10 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
   /** 029 S13: set when a governed tool raises a durable pause — the turn
    * suspends (no model-visible tool result, no further provider call). */
   let suspension: AgentSuspension | null = null;
+  /** 029 S15/T034: steering ids already claimed this run (seen-ID suppression). */
+  const claimedSteeringIds: string[] = [];
+  /** Claimed-but-not-yet-injected steering items for the next provider request. */
+  let pendingSteering: ClaimedSteeringItem[] = [];
   let loopError: AgentLoopError | undefined;
   let hitMaxSteps = false;
 
@@ -573,6 +594,39 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
         finishReason = "aborted";
         loopError = { message: "Operation was aborted", code: "ABORTED", retryable: false };
         break;
+      }
+
+      // 029 S15/T034 (FR-027): durable steering claim at the safe model-turn
+      // boundary — BEFORE the provider request, ordered, fenced, seen-ID
+      // suppressed by the store. Claimed items ride the NEXT provider request
+      // as tagged user content (never a second concurrent run, never a
+      // queued prompt). A claim failure never kills the run.
+      if (claimSteeringPerStep) {
+        try {
+          const claimed = await claimSteeringPerStep([...claimedSteeringIds]);
+          for (const item of claimed) {
+            if (claimedSteeringIds.includes(item.id)) continue; // seen-ID suppression
+            claimedSteeringIds.push(item.id);
+            pendingSteering.push(item);
+          }
+        } catch {
+          // steering unavailability is non-fatal (spec 008 hook semantics)
+        }
+        if (pendingSteering.length > 0) {
+          const tagged = pendingSteering.map((m) => `[steering] ${m.text}`).join("\n");
+          const images = pendingSteering.flatMap((m) => m.images ?? []).map((i) => ({
+            data: i.data,
+            mimeType: i.mimeType,
+          }));
+          messages.push({
+            id: generateId(),
+            role: "user",
+            content: tagged,
+            timestamp: now(),
+            ...(images.length ? { images } : {}),
+          });
+          pendingSteering = [];
+        }
       }
 
       let stepOverride: any = options.modelOverride
