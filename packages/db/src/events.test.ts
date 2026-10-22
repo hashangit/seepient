@@ -128,6 +128,114 @@ describe("finalizeRun", () => {
     expect(publish).toHaveBeenCalledOnce();
   });
 
+  // 029 T023 (FR-014): notifications that depend on state transitions fire
+  // only AFTER the state is durably persisted — never concurrently.
+  it("publishes only after the persisting transaction resolves", async () => {
+    const tx = {
+      $queryRaw: vi.fn(async () => []),
+      run: {
+        findUnique: vi.fn(async () => ({ status: "running" })),
+        findUniqueOrThrow: vi.fn(async () => ({ sourceMessage: null })),
+        findFirst: vi.fn(async () => null),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      attempt: { updateMany: vi.fn(async () => ({ count: 1 })) },
+      task: { updateMany: vi.fn(async () => ({ count: 1 })) },
+      thread: { update: vi.fn(async () => ({ nextEventSeq: 1 })) },
+      event: { create: vi.fn(async () => ({ threadId: "thread-1", seq: 0 })), deleteMany: vi.fn(async () => ({ count: 0 })) },
+      steeringMessage: { findMany: vi.fn(async () => []), updateMany: vi.fn(async () => ({ count: 0 })) },
+      bot: { update: vi.fn(async () => ({})) },
+    };
+    const txGate = Promise.withResolvers<void>();
+    const transaction = vi.fn(async (operation: (client: typeof tx) => unknown) => {
+      await txGate.promise;
+      return operation(tx);
+    });
+    const publishCalls: number[] = [];
+    const publish = vi.fn(async () => {
+      publishCalls.push(transaction.mock.calls.length);
+    });
+
+    const outcome = finalizeRun(
+      { $transaction: transaction } as unknown as PrismaClient,
+      {
+        spaceId: "space-1",
+        threadId: "thread-1",
+        botId: "bot-1",
+        runId: "run-1",
+        taskId: "task-1",
+        attemptId: "attempt-1",
+        leaseOwner: "worker-1",
+        leaseFence: 1,
+        outcome: "succeeded",
+      },
+      { publish } as never,
+    ).then(
+      (value) => ({ ok: true as const, value }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+    // While the transaction is in flight, no notification may have fired.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(publish).not.toHaveBeenCalled();
+
+    txGate.resolve();
+    await outcome;
+    // The notification fired exactly once, strictly after the transaction
+    // resolved (the recorded call count is the post-commit invocation count).
+    expect(publish).toHaveBeenCalledOnce();
+    expect(publishCalls[0]).toBe(1);
+  });
+
+  // 029 T023 (FR-014 crash-before-notify): state survives; the notification
+  // may not happen — a rejected fanout must not roll back or lose the commit.
+  it("keeps the committed state when the notification fails after the commit", async () => {
+    const createEvent = vi.fn(async () => ({ threadId: "thread-1", seq: 0 }));
+    const tx = {
+      $queryRaw: vi.fn(async () => []),
+      run: {
+        findUnique: vi.fn(async () => ({ status: "running" })),
+        findUniqueOrThrow: vi.fn(async () => ({ sourceMessage: null })),
+        findFirst: vi.fn(async () => null),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      attempt: { updateMany: vi.fn(async () => ({ count: 1 })) },
+      task: { updateMany: vi.fn(async () => ({ count: 1 })) },
+      thread: { update: vi.fn(async () => ({ nextEventSeq: 1 })) },
+      event: { create: createEvent, deleteMany: vi.fn(async () => ({ count: 0 })) },
+      steeringMessage: { findMany: vi.fn(async () => []), updateMany: vi.fn(async () => ({ count: 0 })) },
+      bot: { update: vi.fn(async () => ({})) },
+    };
+    const transaction = vi.fn(async (operation: (client: typeof tx) => unknown) => operation(tx));
+    const publish = vi.fn(async () => {
+      throw new Error("realtime fanout down");
+    });
+
+    await expect(
+      finalizeRun(
+        { $transaction: transaction } as unknown as PrismaClient,
+        {
+          spaceId: "space-1",
+          threadId: "thread-1",
+          botId: "bot-1",
+          runId: "run-1",
+          taskId: "task-1",
+          attemptId: "attempt-1",
+          leaseOwner: "worker-1",
+          leaseFence: 1,
+          outcome: "failed",
+          error: "failed",
+        },
+        { publish } as never,
+      ),
+    ).resolves.toEqual({ continuationRunId: null });
+    // notifyRealtime swallows fanout failures (cursor wakes are hints — the
+    // reconnect refollows from the DB cursor): the commit stands, the
+    // notification simply never fired, and the reconciler/cursor path recovers.
+    expect(createEvent).toHaveBeenCalledOnce();
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(publish).toHaveBeenCalledOnce();
+  });
+
   it("resumes a held messaging inbound as a messaging run", async () => {
     const tx = {
       $queryRaw: vi.fn(async () => []),

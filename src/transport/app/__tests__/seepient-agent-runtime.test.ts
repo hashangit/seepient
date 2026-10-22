@@ -22,16 +22,21 @@ interface TestStreamPayload {
 interface TestAgent {
   aborted: boolean;
   options: CreateSeepientOptions;
-  /** Engine stream options surface; the adapter passes onStep only. */
   streamOptions: {
     onText?: (delta: string) => void;
     onStep?: (step: { type: string }) => void;
     images?: Array<{ data: string; mimeType: string }>;
     context?: { strategy?: string; maxInputTokens?: number };
   };
-  /** Deltas the fake stream yields; the adapter pumps stream.textStream. */
+  /** Deltas queued for the fake stream; yielded in order, live. */
   textDeltas: string[];
+  /** Settled when the turn's provider result arrives (settle()). */
   settled: PromiseWithResolvers<TestStreamPayload>;
+  /** Closed by settle() — textStream ends after draining queued deltas. */
+  textClosed: boolean;
+  deltaGate: PromiseWithResolvers<void>;
+  /** Live-stream helper: push a delta mid-turn (deterministic, no timers). */
+  emitDelta(text: string): void;
   settle(payload: TestStreamPayload): void;
   abort(): void;
   chatStream(prompt: string, streamOptions: { onText?: (delta: string) => void }): Promise<never>;
@@ -47,13 +52,23 @@ function makeHarness() {
   const gates = Array.from({ length: 8 }, () => Promise.withResolvers<void>());
 
   const createAgentImpl = async (options: CreateSeepientOptions): Promise<TestAgent> => {
-    const agent = {
+    const agent: TestAgent = {
       aborted: false,
       options,
       streamOptions: {},
       textDeltas: [],
       settled: Promise.withResolvers<TestStreamPayload>(),
+      textClosed: false,
+      deltaGate: Promise.withResolvers<void>(),
+      emitDelta(text: string) {
+        this.textDeltas.push(text);
+        this.deltaGate.resolve();
+        this.deltaGate = Promise.withResolvers<void>();
+      },
       settle(payload: TestStreamPayload) {
+        this.textClosed = true;
+        this.deltaGate.resolve();
+        this.deltaGate = Promise.withResolvers<void>();
         this.settled.resolve(payload);
       },
       abort() {
@@ -70,37 +85,41 @@ function makeHarness() {
       ): Promise<never> {
         void prompt;
         this.streamOptions = streamOptions;
-        return this.settled.promise.then((payload) => {
-          // Test double: the adapter consumes textStream + fullText/usage on
-          // the stream result — the rest is unreachable surface for these pins.
-          const streamResult = {
-            textStream: (async function* (deltas: string[]) {
-              for (const delta of deltas) yield delta;
-            })(agent.textDeltas),
-            steps: (async function* () {})(),
-            fullText: payload.fullText,
-            usage: payload.usage,
-            finishReason: Promise.resolve("stop"),
-            abort: () => agent.abort(),
-            toResponse: () => {
-              throw new Error("not used by the adapter");
-            },
-            toSSEStream: () => {
-              throw new Error("not used by the adapter");
-            },
-          };
-          return streamResult as never;
-        });
+        gates[index]?.resolve();
+        // Real contract: chatStream resolves immediately with a handle; the
+        // turn streams through textStream and settles via fullText/usage.
+        const agent = this;
+        const streamResult = {
+          textStream: (async function* () {
+            for (;;) {
+              if (agent.textDeltas.length > 0) {
+                const delta = agent.textDeltas.shift()!;
+                streamOptions.onText?.(delta);
+                yield delta;
+                continue;
+              }
+              if (agent.textClosed) return;
+              await agent.deltaGate.promise;
+              agent.deltaGate = Promise.withResolvers<void>();
+            }
+          })(),
+          steps: (async function* () {})(),
+          fullText: agent.settled.promise.then((p) => p.fullText),
+          usage: agent.settled.promise.then((p) => p.usage),
+          finishReason: Promise.resolve("stop"),
+          abort: () => agent.abort(),
+          toResponse: () => {
+            throw new Error("not used by the adapter");
+          },
+          toSSEStream: () => {
+            throw new Error("not used by the adapter");
+          },
+        };
+        return Promise.resolve(streamResult as never);
       },
-    } satisfies TestAgent;
+    };
     const index = agents.length;
     agents.push(agent);
-    const originalChatStream = agent.chatStream.bind(agent);
-    agent.chatStream = (prompt, streamOptions) => {
-      const real = originalChatStream(prompt, streamOptions);
-      gates[index]?.resolve();
-      return real;
-    };
     return agent;
   };
 
@@ -423,5 +442,123 @@ describe("SeepientAgentRuntime multimodal + context (T033/T034)", () => {
     expect(executed).toEqual([{ name: "read_file" }]);
     agents[0].settle({ fullText: Promise.resolve("ok"), usage: Promise.resolve({ promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0 }) });
     await drain;
+  });
+});
+
+describe("SeepientAgentRuntime event truth (029 T021/T022)", () => {
+  it("emits the tool start event before the effect completes, with the governed executionId (FR-013)", async () => {
+    const { agents, gates, createAgentImpl } = makeHarness();
+    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+
+    const effectGate = Promise.withResolvers<void>();
+    const completed: Array<{ executionId: string }> = [];
+    const request = baseRequest({
+      tools: [{ name: "lookup", description: "d", inputSchema: { type: "object", properties: {}, required: [] } }],
+      executeTool: (async (_name: string, _args: unknown, executionId: string) => {
+        await effectGate.promise;
+        completed.push({ executionId });
+        return "result-1";
+      }) as never,
+    });
+
+    // Step-drive the generator so event ordering is observed, not guessed.
+    // The first next() drives run() up to the queue loop (chatStream registers
+    // on the way) and then parks on the first event.
+    const iterator = runtime.run(request)[Symbol.asyncIterator]();
+    const started = iterator.next();
+    await gates[0].promise;
+
+    const tools = agents[0].options.tools as unknown as Array<{ execute: (args: unknown) => Promise<unknown> }>;
+    const execution = tools[0]!.execute({ q: "x" });
+
+    // The effect is still pending; the very next yielded event is the start.
+    const toolEvent = (await started).value as Extract<AgentRuntimeEvent, { type: "tool" }>;
+    expect(toolEvent.type).toBe("tool");
+    expect(toolEvent.name).toBe("lookup");
+    expect(typeof toolEvent.executionId).toBe("string");
+
+    // Correlation: the completed callback carries the start event's executionId.
+    effectGate.resolve();
+    await execution;
+    expect(completed[0]?.executionId).toBe(toolEvent.executionId);
+
+    agents[0].settle({ fullText: Promise.resolve("ok"), usage: Promise.resolve({ promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0 }) });
+    for (;;) {
+      const step = await iterator.next();
+      if (step.done) break;
+      void step;
+    }
+  });
+
+  it("completed-step callbacks never emit a tool start event (FR-013 onToolCall trap)", async () => {
+    const { agents, gates, createAgentImpl } = makeHarness();
+    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const observed: AgentRuntimeEvent[] = [];
+    const drain = (async () => {
+      for await (const event of runtime.run(baseRequest())) observed.push(event);
+    })();
+    await gates[0].promise;
+
+    // The old SDK derived tool events from completed steps; the adapter must
+    // not. Fire the step callbacks the engine session exposes, settle, and
+    // assert no tool-kind event EVER surfaced for the whole turn.
+    const onStep = (agents[0].streamOptions as { onStep?: (step: { type: string }) => void }).onStep;
+    onStep?.({ type: "tool_call" });
+    onStep?.({ type: "tool_progress" });
+    onStep?.({ type: "step" });
+    agents[0].settle({ fullText: Promise.resolve("ok"), usage: Promise.resolve({ promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0 }) });
+    await drain;
+    expect(observed.some((e) => e.type === "tool")).toBe(false);
+  });
+
+  it("surfaces failure by throwing and never fabricates a done event (T022)", async () => {
+    const { agents, gates, createAgentImpl } = makeHarness();
+    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const observed: AgentRuntimeEvent[] = [];
+    const drain = (async () => {
+      try {
+        for await (const event of runtime.run(baseRequest())) observed.push(event);
+      } catch (error) {
+        observed.push({ type: "error", error } as never);
+      }
+    })();
+    await gates[0].promise;
+    agents[0].settle({
+      fullText: Promise.reject(new Error("provider exploded")),
+      usage: Promise.reject(new Error("provider exploded")),
+    });
+    await drain;
+    const kinds = observed.map((e) => e.type);
+    expect(kinds).toContain("error");
+    expect(kinds).not.toContain("done");
+  });
+
+  it("never carries credential material on emitted events (NFR-005 boundary)", async () => {
+    const { agents, gates, createAgentImpl } = makeHarness();
+    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const secret = `sk-plant-${Date.now()}`;
+    const observed: AgentRuntimeEvent[] = [];
+    const request = baseRequest({
+      tools: [{ name: "lookup", description: "d", inputSchema: { type: "object", properties: {}, required: [] } }],
+      executeTool: (async () => ({ kind: "agent_tool_result", content: [{ type: "text", text: `used ${secret}` }] })) as never,
+    });
+    const drain = (async () => {
+      try {
+        for await (const event of runtime.run(request)) observed.push(event);
+      } catch {
+        // failure path — the sweep covers payload redaction app-side; this
+        // pins the ADAPTER's own event objects (results never ride them).
+      }
+    })();
+    await gates[0].promise;
+    const tools = agents[0].options.tools as unknown as Array<{ execute: (args: unknown) => Promise<unknown> }>;
+    await tools[0]!.execute({});
+    agents[0].settle({ fullText: Promise.resolve("ok"), usage: Promise.resolve({ promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0 }) });
+    await drain;
+    // The adapter's tool event carries name+args identity, never results; the
+    // planted secret exists only in the app-side result content.
+    for (const event of observed) {
+      expect(JSON.stringify(event)).not.toContain(secret);
+    }
   });
 });
