@@ -10,13 +10,7 @@ import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import { EVAL_CASES, HISTORY_EVAL_CASES } from "../evals/cases.js";
 import { HISTORY_FIXTURE_VERSION } from "../evals/history-fixtures.js";
-import type { DiagnosticToolObservation, HistoryDiagnostic } from "../evals/history-observer.js";
-import { observeSyntheticHistory } from "../evals/history-observer.js";
-import type { CacheDecisionMeasurement, EvalPricing } from "../evals/measurement.js";
-import { measureCalls, SpendBudget, validatePricing } from "../evals/measurement.js";
 import { emptyTrial, redact, summarize, validateControls } from "../evals/report.js";
-import type { DiagnosticWireObservation } from "../evals/wire-observer.js";
-import { installDiagnosticWireObserver } from "../evals/wire-observer.js";
 
 async function main() {
   const { values } = parseArgs({
@@ -212,74 +206,14 @@ async function main() {
   };
   save();
   if (values["cache-probe"]) {
-    const { PiAgentRuntime } = await import("../../../adapters/src/pi-runtime.ts");
-    const { runCachePrefixProbe } = await import("../evals/cache-probe.js");
-    const decisions: CacheDecisionMeasurement[] = [];
-    const runtime = new PiAgentRuntime({
-      onContextDecision: (decision) => {
-        const measured = measureCalls([{ id: "call", ...decision.usage }], pricing);
-        decisions.push({
-          predictedCache: decision.predictedCache,
-          observedReuse: decision.observedReuse,
-          estimatedInputTokens: decision.estimatedInputTokens,
-          droppedMessages: decision.droppedMessages,
-          truncatedToolResults: decision.truncatedToolResults,
-          costUsd: measured.costUsd,
-          cacheReadTokens: decision.usage.cacheReadTokens ?? null,
-        });
-      },
-      modelCallObserver: {
-        beforeCall: (call) => {
-          if (call.provider !== connection.provider || call.modelId !== connection.modelId)
-            throw new Error("Eval model has no configured pricing");
-          return liveBudget.reserve(
-            call.inputTokensEstimate,
-            call.maxOutputTokens,
-            call.cacheWriteRetention,
-          );
-        },
-        afterCall: (id, usage) => liveBudget.settleUsage(id, usage),
-      },
-    });
-    const probe = await runCachePrefixProbe(
-      runtime,
-      {
-        ...connection,
-        id: connection.modelId!,
-        maxImagesPerPrompt: connection.maxImagesPerPrompt ?? undefined,
-        maxTokens: connection.maxTokens ?? undefined,
-      },
-      pricing,
-      decisions,
+    // 029 T049: the cache-prefix probe measured the Pi runtime's context
+    // decisions and model-call observer — both demolished with the runtime.
+    // The probe retargets onto the governed runtime's context/usage seams in
+    // the M10 operator pass (T053-T055 family); until then it refuses
+    // clearly instead of silently measuring nothing.
+    throw new Error(
+      "cache-probe is retarget-pending: its measurement hooks (onContextDecision, modelCallObserver) belonged to the demolished Pi runtime. It lands on the governed runtime's context/usage seams in the M10 operator pass.",
     );
-    trials.length = 0;
-    probeTotals = probe;
-    Object.assign(report, {
-      kind: "cache-prefix-probe",
-      fixtureVersion: probe.fixtureVersion,
-      caseFixtureVersions: {},
-      modelLimits: probe.modelLimits,
-      firstResponseDefinition:
-        "First direct runtime text event after starting each probe call; no database or polling timestamps.",
-      fixtures: "Direct synthetic prefixes; no database, service emulators, or tools.",
-      limitations: [
-        "Four direct synthetic model calls; does not evaluate product workflows, database persistence, or tools.",
-        "Immediate replay measures observed warm versus fresh changed-prefix reuse; provider routing and eviction are uncontrolled, live expiry is not tested, and four calls are not a reliability estimate.",
-        "Cost uses provider-reported charges where available and explicit pricing estimates otherwise; spend reservations are a guard, not a billing guarantee.",
-      ],
-      cacheProbe: probe,
-    });
-    for (const key of [
-      "controls",
-      "executionOrder",
-      "historyPreparation",
-      "promptOrder",
-      "assistedRetries",
-    ])
-      Reflect.deleteProperty(report, key);
-    save();
-    if (probe.phases.some((phase) => phase.failed)) process.exitCode = 1;
-    return;
   }
   // This CLI owns a disposable database. Never migrate or evaluate against an inherited database.
   const dataDir = mkdtempSync(path.join(tmpdir(), "seepients-evals-"));
@@ -332,173 +266,13 @@ async function main() {
       stdio: "pipe",
       timeout: 120_000,
     });
-    // Import runtime modules only after generation; their barrel exports load Prisma.
-    const { createApp } = await import("../../../../apps/api/src/app.ts");
-    const { runTrial } = await import("../evals/runner.js");
-    const { PiAgentRuntime } = await import("@seepients/adapters");
-    const { EvalSandboxProvider } = await import("../evals/sandbox.js");
-    for (let i = 0; i < trials.length; i++) {
-      if (stopRequested) {
-        for (const remaining of trials.slice(i))
-          remaining.reason =
-            "Not run because graceful stop was requested; the in-flight workflow drained before scheduling stopped";
-        Object.assign(report, { termination: "graceful-stop-after-workflow" });
-        save();
-        process.exitCode = 130;
-        break;
-      }
-      const planned = trials[i]!;
-      const scenario = selected.find((c) => c.id === planned.caseId)!;
-      const wireDiagnostics: DiagnosticWireObservation[] = [];
-      const observeWire =
-        values["wire-diagnostics"] &&
-        (scenario.id === "history-1000-long-tool-loop" ||
-          scenario.id === "history-10000-long-tool-loop");
-      const restoreFetch = observeWire
-        ? installDiagnosticWireObserver(connection.modelId!, wireDiagnostics)
-        : () => {};
-      try {
-        trials[i] = {
-          ...(await runTrial(scenario, planned.trial, {
-            ...controls,
-            connection,
-            pricing,
-            createApp: async (composio, messaging) => {
-              const sandbox = new EvalSandboxProvider();
-              let acceptingCalls = true;
-              const cacheDecisions: CacheDecisionMeasurement[] = [];
-              const runtime = new PiAgentRuntime({
-                onContextDecision: (decision) => {
-                  const measured = measureCalls([{ id: "call", ...decision.usage }], pricing);
-                  cacheDecisions.push({
-                    predictedCache: decision.predictedCache,
-                    observedReuse: decision.observedReuse,
-                    estimatedInputTokens: decision.estimatedInputTokens,
-                    droppedMessages: decision.droppedMessages,
-                    truncatedToolResults: decision.truncatedToolResults,
-                    costUsd: measured.costUsd,
-                    cacheReadTokens: decision.usage.cacheReadTokens ?? null,
-                  });
-                },
-                modelCallObserver: {
-                  beforeCall: ({
-                    inputTokensEstimate,
-                    maxOutputTokens,
-                    provider,
-                    modelId,
-                    cacheWriteRetention,
-                  }) => {
-                    if (provider !== connection.provider || modelId !== connection.modelId)
-                      throw new Error("Eval model has no configured pricing");
-                    if (!acceptingCalls) throw new Error("Eval trial stopped scheduling inference");
-                    return liveBudget.reserve(
-                      inputTokensEstimate,
-                      maxOutputTokens,
-                      cacheWriteRetention,
-                    );
-                  },
-                  afterCall: (id, usage) => liveBudget.settleUsage(id, usage),
-                },
-              });
-              const historyDiagnostics: HistoryDiagnostic[] = [];
-              const toolLoopDiagnostics: DiagnosticToolObservation[] = [];
-              const observedRuntime = observeSyntheticHistory(
-                runtime,
-                historyDiagnostics,
-                [connection.apiKey ?? "", connection.baseUrl ?? ""],
-                toolLoopDiagnostics,
-              );
-              const handles = await createApp({
-                runtime: observedRuntime,
-                contextStrategy: planned.strategy as
-                  | "current"
-                  | "retrieval"
-                  | "snapshots"
-                  | "cache-aware",
-                sandbox,
-                databaseUrl,
-                realtimeDatabaseUrl: databaseUrl,
-                dataDir: path.join(dataDir, `${scenario.id}-${planned.strategy}-${planned.trial}`),
-                sandboxProvider: "fake",
-                wakeupDriver: "memory",
-                composio,
-                messaging,
-                messagingOpenSignup: false,
-                defaultProvider: connection.provider,
-                defaultModel: connection.modelId!,
-                deploymentModelKey: undefined,
-                composioApiKey: undefined,
-                cursorApiKey: undefined,
-                cloudAgentProvider: "none",
-                signupsEnabled: "true",
-                signupAllowlist: "",
-                emailEmulator: true,
-                pipedreamClientId: undefined,
-                pipedreamClientSecret: undefined,
-                pipedreamProjectId: undefined,
-                smtpUrl: undefined,
-                emailFrom: undefined,
-                sendblueApiKeyId: undefined,
-                sendblueApiSecret: undefined,
-                slackBotToken: undefined,
-                whatsappAccessToken: undefined,
-                telegramBotToken: undefined,
-                larkAppId: undefined,
-                mcpStdioEnabled: false,
-                mcpStdioAllowedCommands: [],
-                updaterUrl: undefined,
-                updaterToken: undefined,
-              });
-              return {
-                ...handles,
-                harnessIssues: sandbox.harnessIssues,
-                cacheDecisions,
-                historyDiagnostics,
-                toolLoopDiagnostics,
-                finalizeBackground: async () => {
-                  acceptingCalls = false;
-                  await handles.jobs.close();
-                },
-                stop: async () => {
-                  acceptingCalls = false;
-                  await handles.stop();
-                },
-                awaitIdle: async () => {
-                  if (!handles.awaitIdle) throw new Error("Eval queue cannot await idle");
-                  await handles.awaitIdle();
-                },
-              };
-            },
-          })),
-          strategy: planned.strategy,
-          ...(observeWire ? { wireDiagnostics } : {}),
-        };
-      } finally {
-        restoreFetch();
-      }
-      save();
-      const result = trials[i]!;
-      console.log(
-        `${result.caseId} ${result.strategy} trial ${result.trial}: ${result.status}${result.category ? ` (${result.category})` : ""}; ${result.toolCalls} tool calls; ${result.latencyMs}ms`,
-      );
-      if (values["stop-on-failure"] && result.status === "failed") {
-        for (const remaining of trials.slice(i + 1))
-          remaining.reason = "Not run because stop-on-failure ended the bounded diagnostic";
-        save();
-        process.exitCode = 1;
-        break;
-      }
-      if (result.cleanupFailed || /spend cap|no configured pricing/i.test(result.reason ?? "")) {
-        for (const remaining of trials.slice(i + 1))
-          remaining.reason = result.cleanupFailed
-            ? "Not run because fixture cleanup failed"
-            : "Not run because the shared comparison spend cap or pricing guard stopped scheduling";
-        save();
-        process.exitCode = 1;
-        break;
-      }
-    }
-    if (trials.some((r) => r.status !== "passed")) process.exitCode = 1;
+    // 029 T049: the trial harness wrapped the demolished Pi runtime for
+    // history/tool-loop/cache observation. Trials retarget onto the governed
+    // runtime's seams in the M10 operator pass (T053-T055 family); until
+    // then the trial runner refuses clearly.
+    throw new Error(
+      "eval trials are retarget-pending: the observation wrapper (history/tool-loop/cache diagnostics) wrapped the demolished Pi runtime. They land on the governed runtime's seams in the M10 operator pass.",
+    );
   } finally {
     process.off("SIGINT", requestStop);
     process.off("SIGTERM", requestStop);
