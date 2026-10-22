@@ -108,7 +108,6 @@ import {
   scheduleComputerControlExpiry,
   scheduleComputerSleep,
   screenLeaseIdForRun,
-  scriptedCatalogEntry,
   selectDefaultCredentialId,
   serializeModelSecret,
   storeBotSecret,
@@ -707,9 +706,8 @@ export async function enqueueBotIntroRun(deps: RouterDeps, actor: Actor, bot: Bo
   const threadId = bot.threadId;
   if (!threadId) return;
   // Scripted is the deterministic test/eval runtime, not a real deployment: an
-  // extra automatic run there competes with whatever response a test or eval
-  // harness queued next, for a bot it doesn't otherwise get to opt out of.
-  if (deps.env.agentRuntime === "scripted") return;
+  // 029 T049: the scripted-runtime early-return is demolished with the
+  // runtime selection; the needsModel gate below remains the real guard.
   if ((await modelSetup(deps, actor)).needsModel) return;
   const run = await deps.prisma.$transaction(async (tx) => {
     const task = await tx.task.create({
@@ -1129,9 +1127,9 @@ export function createRouter(deps: RouterDeps) {
           },
         );
         const catalog = live.size > 0 ? applyCodexLiveCatalog(available, auth, live) : available;
-        // The scripted fixture only exists to drive the scripted runtime; a real
-        // runtime cannot execute it, so it stays out of the user-facing catalog.
-        return deps.env.agentRuntime === "scripted" ? [...catalog, scriptedCatalogEntry] : catalog;
+        // 029 T049: the scripted fixture entry left with the scripted runtime
+        // selection (fixtures inject, never publish catalog entries).
+        return catalog;
       }),
       credentials: authed.models.credentials.handler(async ({ context }) => {
         const rows = await deps.prisma.userModelCredential.findMany({
@@ -1665,7 +1663,8 @@ export function createRouter(deps: RouterDeps) {
           if (!credential) {
             throw new ORPCError("BAD_REQUEST", { message: "Connect that model provider first" });
           }
-          const knownModels = [...listPiCatalog(), scriptedCatalogEntry];
+          // 029 T049: the scripted fixture is no longer a selectable model.
+          const knownModels = [...listPiCatalog()];
           const inCatalog = knownModels.some(
             (item) => item.provider === input.modelProvider && item.id === input.modelId,
           );
@@ -6369,7 +6368,7 @@ async function modelSetup(deps: RouterDeps, actor: Actor) {
   return {
     credential,
     settings,
-    needsModel: deps.env.agentRuntime !== "scripted" && !credential && !hasDeployment,
+    needsModel: !credential && !hasDeployment,
   };
 }
 

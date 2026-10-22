@@ -23,7 +23,7 @@ export async function aiConsentStatus(
   query: AiConsentQuery = {},
 ): Promise<AiConsentStatus> {
   const uses = query.uses ?? ["model", "memory", "voice"];
-  const modelsEnabled = uses.includes("model") && deps.env.agentRuntime !== "scripted";
+  const modelsEnabled = uses.includes("model");
   const target =
     query.botId || query.groupId ? await resolveThreadTarget(deps.prisma, actor, query) : null;
   const botIds = target

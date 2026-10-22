@@ -53,16 +53,13 @@ import {
   McpConnector,
   McpOAuthBroker,
   messagingPlatformsFromEnv,
-  PiAgentRuntime,
   PiOAuthLogins,
   PipedreamConnector,
   PostgresRealtimeFanout,
   pipedreamConfigFromEnv,
-  piSessionsRoot,
   reconcileCloudAgents,
   reconcileComputerUpdates,
   removePiUserSessions,
-  ScriptedAgentRuntime,
   SmtpEmailProvider,
   SpaceMemoryProviderResolver,
   StripeBillingProvider,
@@ -381,15 +378,9 @@ export async function createApp(
   const connector = stack.destination;
   await connector.start();
   integrationSettings.warmDirectories();
-  const runtime =
-    runtimeOverride ??
-    (env.agentRuntime === "scripted"
-      ? new ScriptedAgentRuntime()
-      : env.agentRuntime === "seepient"
-        ? createSeepientAgentRuntime({ prisma, secretStore: secrets })
-        : new PiAgentRuntime({
-            sessionRoot: env.piSessionRecording ? piSessionsRoot(env.dataDir) : undefined,
-          }));
+  // 029 T049 (S18/M10): one governed runtime; the Pi and scripted selections
+  // are demolished — tests inject doubles through `runtime`, never the env.
+  const runtime = runtimeOverride ?? createSeepientAgentRuntime({ prisma, secretStore: secrets });
   const notifications = new ExpoPushProvider(env.dataDir, (sessionId) =>
     pushSessionExpiresAt(prisma, sessionId),
   );

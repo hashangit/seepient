@@ -58,7 +58,14 @@ function fixture() {
   };
   const deps = {
     prisma: prisma as unknown as PrismaClient,
-    env: { webOrigin: "http://127.0.0.1", sandboxProvider: "fake", agentRuntime: "scripted" },
+    env: {
+      webOrigin: "http://127.0.0.1",
+      sandboxProvider: "fake",
+      // T049: the scripted-runtime exemption is gone — a configured
+      // deployment keeps the model gate open so the archived-bot rejection
+      // under test is what fires.
+      deploymentModelConfigured: true,
+    },
   } as RouterDeps;
   const handler = new RPCHandler(createRouter(deps));
   async function call(proc: string, input: unknown, requestActor = actor) {

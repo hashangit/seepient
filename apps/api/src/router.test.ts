@@ -291,16 +291,9 @@ describe("model setup gate", () => {
     });
   });
 
-  it("does not require a model credential for the scripted test runtime", async () => {
-    const { actor, handler } = modelGateDeps({ agentRuntime: "scripted" });
-
-    const response = await call(handler, actor, "me", null);
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      json: expect.objectContaining({ needsModel: false }),
-    });
-  });
+  // T049: the scripted-runtime exemption is demolished with the runtime
+  // selection — needsModel depends only on credential/deployment, pinned by
+  // the neighboring deployment and credential tests.
 
   it("accepts a configured deployment model as model configuration", async () => {
     const { actor, handler } = modelGateDeps({
@@ -2165,14 +2158,8 @@ describe("bot intro run", () => {
     expect(enqueue).not.toHaveBeenCalled();
   });
 
-  it("does nothing on the scripted test/eval runtime", async () => {
-    const { create, enqueue, deps } = introDeps({ agentRuntime: "scripted" });
-
-    await enqueueBotIntroRun(deps, actor, bot);
-
-    expect(create).not.toHaveBeenCalled();
-    expect(enqueue).not.toHaveBeenCalled();
-  });
+  // T049: the scripted early-return left with the runtime selection; the
+  // no-model guard below pins the same outcome through the real gate.
 
   it("does nothing when no model is configured yet", async () => {
     const { create, enqueue, deps } = introDeps({ hasCredential: false });
