@@ -323,6 +323,7 @@ export class SeepientAgentRuntime implements AgentRuntime {
                 (result as { kind?: string }).kind === "agent_tool_suspended"
               ) {
                 const suspension = result as unknown as AgentToolSuspension;
+                lastSuspensionRequest = suspension.request;
                 throw new ToolSuspendedError(
                   suspension.pauseClass,
                   suspension.pauseToken,
@@ -445,6 +446,9 @@ export class SeepientAgentRuntime implements AgentRuntime {
         queue.close();
         return outcome;
       });
+      /** 029 T028: the typed card payload of the latest suspension (the
+       * executor parks on it; at most one live suspension per attempt). */
+      let lastSuspensionRequest: AgentToolSuspension["request"] | undefined;
 
       // Drain callback-thread events while the turn runs; `close()` ends the
       // loop when the turn settles.
@@ -497,6 +501,7 @@ export class SeepientAgentRuntime implements AgentRuntime {
           type: "suspended",
           pauseClass: suspension?.pauseClass ?? "permission",
           pauseToken: suspension?.pauseToken ?? "",
+          request: lastSuspensionRequest,
         };
         return;
       }

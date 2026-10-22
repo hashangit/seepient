@@ -6938,28 +6938,104 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
               return;
             } else if (event.type === "suspended") {
-              // 029 S13/T026: the engine turn suspended for a durable pause.
-              // The attempt ends WITHOUT a terminal outcome — the run parks at
-              // waiting_input (D4: typed pause, never cancelled/interrupted by
-              // the unwind). The typed pause cards land with T028; this block
-              // records the machine-readable pause truth meanwhile.
+              // 029 S13/T026+T028: the engine turn suspended for a durable
+              // pause. The attempt ends WITHOUT a terminal outcome — the run
+              // parks at waiting_input (D4: typed pause, never cancelled or
+              // interrupted by the unwind). Each pause class renders its
+              // M02/M03-family card: permission and choice via ask/choice
+              // blocks, secret via the masked secret-ask (the answer lives in
+              // protected storage, never ordinary history), takeover via the
+              // takeover pause. The meta block records the machine-readable
+              // pause truth for reconciliation either way.
               if (!(await renewRunLease(deps, runId, workerId, fence))) return;
               await workspaceCheckpoint.flush();
-              const paused = await deps.events.pauseRunForInput({
-                spaceId: run.spaceId,
-                threadId: run.threadId,
-                botId: run.botId,
-                runId,
-                attemptId: attempt.id,
-                leaseOwner: workerId,
-                leaseFence: fence,
-                blocks: [
-                  {
-                    kind: "meta",
-                    text: `suspended:${event.pauseClass}:${event.pauseToken}`,
-                  },
-                ],
-              });
+              const card = event.request;
+              const pauseBlocks: MessageBlock[] = (() => {
+                switch (event.pauseClass) {
+                  case "permission":
+                    return [
+                      {
+                        kind: "ask" as const,
+                        text: card?.mode === "permission" ? card.summary : `Approve ${event.pauseToken}`,
+                        detail: card?.mode === "permission" ? card.detail : undefined,
+                        status: "pending" as const,
+                        actions: [
+                          { id: "approve", label: "Approve" },
+                          { id: "deny", label: "Deny" },
+                        ],
+                      },
+                    ];
+                  case "choice":
+                    return [
+                      {
+                        kind: "choice" as const,
+                        question: card?.mode === "choice" ? card.text : `Pick an option (${event.pauseToken})`,
+                        options: (card?.mode === "choice" ? [...card.actions] : []).map((action) => ({
+                          id: action.id,
+                          letter: action.id.slice(0, 1).toUpperCase(),
+                          label: action.label,
+                        })),
+                      },
+                    ];
+                  case "secret":
+                    return [
+                      {
+                        kind: "ask" as const,
+                        // Prompt text only — the answer goes to protected
+                        // storage via the secret-ask flow, never history.
+                        text: card?.mode === "secret" ? card.text : "A protected secret is required",
+                        input: "secret" as const,
+                        status: "pending" as const,
+                      },
+                    ];
+                  case "takeover":
+                    return [
+                      {
+                        kind: "computer" as const,
+                        state: "Needs you",
+                        text: card?.mode === "takeover" ? card.reason || card.text : `Takeover requested (${event.pauseToken})`,
+                      },
+                    ];
+                }
+              })();
+              const paused =
+                event.pauseClass === "takeover"
+                  ? await deps.events.pauseRunForTakeover({
+                      spaceId: run.spaceId,
+                      threadId: run.threadId,
+                      botId: run.botId,
+                      runId,
+                      attemptId: attempt.id,
+                      leaseOwner: workerId,
+                      leaseFence: fence,
+                      reason:
+                        card?.mode === "takeover"
+                          ? card.reason || card.text
+                          : `Takeover requested (${event.pauseToken})`,
+                      computerId: storedComputer.id,
+                    })
+                  : await deps.events.pauseRunForInput({
+                      spaceId: run.spaceId,
+                      threadId: run.threadId,
+                      botId: run.botId,
+                      runId,
+                      attemptId: attempt.id,
+                      leaseOwner: workerId,
+                      leaseFence: fence,
+                      blocks: [
+                        ...pauseBlocks,
+                        {
+                          kind: "meta" as const,
+                          text: `suspended:${event.pauseClass}:${event.pauseToken}`,
+                        },
+                      ],
+                      // 029 T027: structured waiting linkage persisted in the
+                      // pause transaction.
+                      waitingState: {
+                        pauseClass: event.pauseClass,
+                        pauseToken: event.pauseToken,
+                      },
+                    });
               if (!paused) return;
               await notifyRun(deps, run, {
                 kind: "help",

@@ -21,7 +21,23 @@ import type { AgentRunRequest } from "@seepients/adapter-kit";
 import type { PrismaClient } from "@seepients/db";
 import { createRunExecutor } from "./executor.js";
 
-function fixture(options: { cancelBeforePause?: boolean } = {}) {
+function fixture(
+  options: {
+    cancelBeforePause?: boolean;
+    suspendEvent?: {
+      pauseClass: "permission" | "choice" | "secret" | "takeover";
+      pauseToken: string;
+      request?: {
+        mode: string;
+        summary?: string;
+        detail?: string;
+        text?: string;
+        actions?: Array<{ id: string; label: string }>;
+        reason?: string;
+      };
+    };
+  } = {},
+) {
   const run = {
     id: "run-1",
     botId: "bot-1",
@@ -107,11 +123,15 @@ function fixture(options: { cancelBeforePause?: boolean } = {}) {
       updateMany: vi.fn(async () => ({ count: 0 })),
     },
   };
-  const pauseRunForInput = vi.fn(async () => {
+  const pauseRunForInput = vi.fn(async (_input?: unknown) => {
     run.status = "waiting_input";
     return true;
   });
   const finalizeRun = vi.fn(async () => ({ continuationRunId: null }));
+  const pauseRunForTakeover = vi.fn(async (_input?: unknown) => {
+    run.status = "waiting_takeover";
+    return true;
+  });
   const runtimeRun = vi.fn(async function* (_request: AgentRunRequest) {
     if (options.cancelBeforePause) {
       // Direction (b): the owner cancelled the run while the turn was in
@@ -121,8 +141,9 @@ function fixture(options: { cancelBeforePause?: boolean } = {}) {
     }
     yield {
       type: "suspended" as const,
-      pauseClass: "permission" as const,
-      pauseToken: "pause-9",
+      pauseClass: (options.suspendEvent?.pauseClass ?? "permission") as "permission",
+      pauseToken: options.suspendEvent?.pauseToken ?? "pause-9",
+      ...(options.suspendEvent?.request ? { request: options.suspendEvent.request } : {}),
     };
     yield { type: "done" as const, text: "SHOULD NEVER EMIT" };
   });
@@ -143,7 +164,7 @@ function fixture(options: { cancelBeforePause?: boolean } = {}) {
       exportMarkdown: async function* () {},
     },
     memoryProviders: { resolve: async () => null },
-    events: { append: vi.fn(async () => undefined), pauseRunForInput, finalizeRun },
+    events: { append: vi.fn(async () => undefined), pauseRunForInput, pauseRunForTakeover, finalizeRun },
     jobs: { enqueue: vi.fn(async () => undefined) },
     secrets: [],
   } as unknown as Parameters<typeof createRunExecutor>[0]);
@@ -151,6 +172,7 @@ function fixture(options: { cancelBeforePause?: boolean } = {}) {
   return {
     run,
     pauseRunForInput,
+    pauseRunForTakeover,
     finalizeRun,
     runtimeRun,
     async runAttempt() {
@@ -182,5 +204,76 @@ describe("029 T026 — executor suspension handling", () => {
     await f.runAttempt();
     expect(f.run.status).toBe("cancelled");
     expect(f.pauseRunForInput).not.toHaveBeenCalled();
+  });
+
+  // T028: each pause class renders its M02/M03-family card and pauses
+  // through the right mechanism.
+  it.each([
+    [
+      "permission",
+      { mode: "permission", summary: "Deploy the staging build", detail: "via deploy.sh" },
+    ],
+    [
+      "choice",
+      { mode: "choice", text: "Pick a region", actions: [{ id: "eu", label: "EU" }, { id: "us", label: "US" }] },
+    ],
+    ["secret", { mode: "secret", text: "Enter the deploy token" }],
+    [
+      "takeover",
+      { mode: "takeover", text: "Need the screen", reason: "Certificate prompt needs a human" },
+    ],
+  ])("class %s: typed card + correct pause mechanism", async (pauseClass, request) => {
+    const f = fixture({ suspendEvent: { pauseClass: pauseClass as never, pauseToken: "tok-1", request: request as never } });
+    await f.runAttempt();
+    if (pauseClass === "takeover") {
+      expect(f.pauseRunForTakeover).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          runId: "run-1",
+          computerId: "computer-1",
+          reason: "Certificate prompt needs a human",
+        }),
+      );
+      expect(f.run.status).toBe("waiting_takeover");
+      return;
+    }
+    expect(f.pauseRunForInput).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        runId: "run-1",
+        waitingState: { pauseClass, pauseToken: "tok-1" },
+      }),
+    );
+    const pauseCall = f.pauseRunForInput.mock.calls[0];
+    if (!pauseCall) throw new Error("expected a pauseRunForInput call");
+    const blocks = (pauseCall[0] as { blocks: Array<Record<string, unknown>> }).blocks;
+    const meta = blocks.find((b) => b.kind === "meta");
+    expect(meta).toEqual({ kind: "meta", text: `suspended:${pauseClass}:tok-1` });
+    if (pauseClass === "permission") {
+      const ask = blocks.find((b) => b.kind === "ask") as { text: string; detail?: string; actions: unknown[] };
+      expect(ask.text).toBe("Deploy the staging build");
+      expect(ask.detail).toBe("via deploy.sh");
+      expect(ask.actions).toEqual([
+        { id: "approve", label: "Approve" },
+        { id: "deny", label: "Deny" },
+      ]);
+    }
+    if (pauseClass === "choice") {
+      const choice = blocks.find((b) => b.kind === "choice") as { question: string; options: unknown[] };
+      expect(choice.question).toBe("Pick a region");
+      expect(choice.options).toEqual([
+        { id: "eu", letter: "E", label: "EU" },
+        { id: "us", letter: "U", label: "US" },
+      ]);
+    }
+    if (pauseClass === "secret") {
+      const ask = blocks.find((b) => b.kind === "ask") as { text: string; input: string };
+      // Prompt text only — the answer never rides the card into history.
+      expect(ask.text).toBe("Enter the deploy token");
+      expect(ask.input).toBe("secret");
+    }
+    if (pauseClass === "takeover") {
+      const computer = blocks.find((b) => b.kind === "computer");
+      expect(computer).toBeDefined();
+    }
+    expect(f.finalizeRun).not.toHaveBeenCalled();
   });
 });

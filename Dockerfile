@@ -51,8 +51,11 @@ COPY packages/adapter-kit/package.json packages/adapter-kit/package.json
 COPY packages/contracts/package.json packages/contracts/package.json
 
 # Install root-package dependencies (docs is a workspace member but the
-# image does not need VitePress; seepient-engine rides as the workspace link)
-RUN pnpm install --frozen-lockfile --filter seepient --filter seepient-engine --filter @seepients/adapter-kit
+# image does not need VitePress; seepient-engine rides as the workspace link).
+# contracts + adapter-kit are install roots so their OWN node_modules (zod)
+# exist — the compile of their src (pulled in via the app-runtime import)
+# resolves imports per-package, not from the root.
+RUN pnpm install --frozen-lockfile --filter seepient --filter seepient-engine --filter @seepients/adapter-kit --filter @seepients/contracts
 
 # Copy TypeScript source, config, and build scripts (clean-dist.mjs runs as
 # part of `pnpm run build`; build:core needs tsconfig.core.json — spec 027)

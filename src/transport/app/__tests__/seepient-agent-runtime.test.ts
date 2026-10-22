@@ -106,7 +106,14 @@ function makeHarness() {
           })(),
           steps: (async function* () {})(),
           fullText: agent.settled.promise.then((p) => p.fullText),
-          usage: agent.settled.promise.then((p) => p.usage),
+          // The rejected-usage test settles usage as rejected; attaching the
+          // no-op handler HERE marks the promise handled (no unhandled-
+          // rejection crash) while consumers still observe the rejection.
+          usage: (() => {
+            const usagePromise = agent.settled.promise.then((p) => p.usage);
+            usagePromise.catch(() => undefined);
+            return usagePromise;
+          })(),
           finishReason: Promise.resolve("stop"),
           abort: () => agent.abort(),
           toResponse: () => {

@@ -194,6 +194,18 @@ export interface AgentToolSuspension {
   pauseClass: "permission" | "choice" | "secret" | "takeover";
   /** Engine-side suspension token — links the waiting state to this pause. */
   pauseToken: string;
+  /**
+   * 029 T028: the typed request detail the product card renders — mirrors the
+   * M02/M03 request families (requests.ts): permission asks carry a summary;
+   * choice carries bounded options; secret carries prompt text ONLY (never a
+   * secret); takeover carries the reason. Answers flow back through the
+   * store ports' input-vs-decision discriminants (never ordinary history).
+   */
+  request?:
+    | { readonly mode: "permission"; readonly summary: string; readonly detail?: string }
+    | { readonly mode: "choice"; readonly text: string; readonly actions: ReadonlyArray<{ readonly id: string; readonly label: string }> }
+    | { readonly mode: "secret"; readonly text: string }
+    | { readonly mode: "takeover"; readonly text: string; readonly reason: string };
 }
 
 /** Hooks for a tool call that can report output before it returns. */
@@ -600,6 +612,8 @@ export type AgentRuntimeEvent =
       type: "suspended";
       pauseClass: "permission" | "choice" | "secret" | "takeover";
       pauseToken: string;
+      /** 029 T028: the typed card payload for the pause class. */
+      request?: AgentToolSuspension["request"];
     }
   | { type: "done"; text?: string };
 
