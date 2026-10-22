@@ -91,6 +91,19 @@ async function runWithModel(
       }),
     },
     bot: {
+      findUnique: vi.fn(async () => ({
+        id: run.botId,
+        name: "Assistant",
+        title: "Assistant",
+        description: "Test assistant",
+        modelProvider: null,
+        modelId: null,
+        thinkingLevel: null,
+        computerId: "computer-1",
+        computerSwitching: false,
+        memoryScope: null,
+        computer: { id: "computer-1", scope: "dedicated" },
+      })),
       findUniqueOrThrow: vi.fn(async () => ({
         id: run.botId,
         name: "Assistant",

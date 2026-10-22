@@ -29,6 +29,8 @@ describe("FR-009 execution-time revalidation", () => {
     const afterRemoval = effectiveDisabledBuiltinTools(["shell"], []);
     expect(afterRemoval.has("shell")).toBe(true);
     expect(effectiveDisabledBuiltinTools([], null).size).toBe(0);
+    // A bot row without the field (undefined snapshot) is tolerated.
+    expect(effectiveDisabledBuiltinTools(undefined, ["shell"]).has("shell")).toBe(true);
   });
 
   it("effectiveApprovalRules: snapshot ∪ current, added rules apply, removed rules never loosen", () => {

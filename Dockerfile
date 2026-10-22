@@ -57,6 +57,12 @@ RUN pnpm install --frozen-lockfile --filter seepient --filter seepient-engine --
 # Copy TypeScript source, config, and build scripts (clean-dist.mjs runs as
 # part of `pnpm run build`; build:core needs tsconfig.core.json — spec 027)
 COPY tsconfig.json tsconfig.core.json ./
+# The adapter imports the adapter-kit/contracts SOURCES (their exports are
+# src-pointing); without the trees the image typecheck hits TS2307 on the
+# manifest-only links. Superseded entirely by the T050 application-private
+# removal of the app-runtime export.
+COPY packages/adapter-kit/src/ ./packages/adapter-kit/src/
+COPY packages/contracts/src/ ./packages/contracts/src/
 COPY src/ ./src/
 COPY scripts/ ./scripts/
 

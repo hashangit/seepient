@@ -174,6 +174,15 @@ function fixture({
       }),
     },
     bot: {
+      findUnique: vi.fn(async () => ({
+        id: run.botId,
+        name: bot.name,
+        title: bot.title,
+        description: bot.description,
+        disabledBuiltinTools,
+        computerId: "computer-1",
+        computer: { id: "computer-1", scope: "dedicated" },
+      })),
       findUniqueOrThrow: vi.fn(async () => ({
         id: run.botId,
         name: bot.name,

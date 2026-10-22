@@ -116,6 +116,14 @@ function fixture(runId = "run-1") {
       }),
     },
     bot: {
+      findUnique: vi.fn(async () => ({
+        id: run.botId,
+        name: "Assistant",
+        title: "Assistant",
+        description: "Test assistant",
+        computerId: "computer-1",
+        computer: { id: "computer-1", scope: "dedicated" },
+      })),
       findUniqueOrThrow: vi.fn(async () => ({
         id: run.botId,
         name: "Assistant",

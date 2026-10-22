@@ -2964,10 +2964,10 @@ export function runLeaseHeldAtDispatch(
 
 /** Union of the attempt snapshot and the bot's current disabled set. */
 export function effectiveDisabledBuiltinTools(
-  snapshot: readonly string[],
+  snapshot: readonly string[] | null | undefined,
   current: readonly string[] | null | undefined,
 ): Set<string> {
-  return disabledBuiltinToolSet([...snapshot, ...(current ?? [])]);
+  return disabledBuiltinToolSet([...(snapshot ?? []), ...(current ?? [])]);
 }
 
 /** Union of the attempt snapshot and the CURRENT approval rules — added
