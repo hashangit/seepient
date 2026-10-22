@@ -78,8 +78,13 @@ COPY native/ ./native/
 RUN cargo build --manifest-path native/fs-commit/Cargo.toml --release \
     && node scripts/place-native-helper.cjs
 
-# Prune devDependencies — keep only what's needed at runtime
-RUN pnpm prune --prod
+# Prune devDependencies — keep only what's needed at runtime. The
+# app-builder-lib patch (desktop packaging only) must not be declared for the
+# pruned production graph: a global patchedDependencies entry whose package is
+# gone fails pnpm's validation, so the production prune runs against a
+# workspace file without it (the builder stage keeps the full declaration).
+RUN sed -i -e '/^patchedDependencies:/d' -e '/^  app-builder-lib@26\.15\.3:/d' pnpm-workspace.yaml \
+    && pnpm prune --prod
 
 # ---------------------------------------------------------------------------
 # Stage 2: Production Runtime

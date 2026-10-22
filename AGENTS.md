@@ -457,6 +457,7 @@ Current layout of the Obsidian vault (annotated):
 │       ├── prerequisites.md          # toolchain + external prerequisites w/ safeTargetUsed column + fresh-session-reviewer row (gate r2) + J08 row
 │       └── evidence/README.md        # two-stage sanitization gate (scan = QS-8 command, gate r2); bundle empty until T023
 │   └── m02-m03-workspace-import-runtime-adapter/ # M02+M03 combined (S04–S09; IMPLEMENTED THROUGH T037 2026-10-21 on worktree seepient-m02m03 branch 029-m02-m03-workspace-import @ d2f7ec4 [T001–T009 US1; T010–T016 S05 contracts + review; T017–T023 import+provenance; T024–T027 checker families + G1 CLOSED w/ owner signature; S08: streaming fix f2d8316 — chatStream textStream pump [queue-close bug dropped every delta] + request-borne credentials, streamed paint 18→5277 chars/60 states, cancellation isolation run-scoped, zero session-store writes [T038 F2: audit-log entries expected, claim narrowed]; supervisor SELinux/rootless-podman + IFNAMSIZ bridge fix 34a8039; S09: multimodal image path + per-call context seam 1881310, wire-proven five exercises via local sink d2f7ec4 — canonical mediaType fix, tool-result images through pi-ai, seam-before-handle, app_ namespacing for built-in-colliding connector names; T038 second-engineer dev-proof review DONE 2026-10-21 (fresh-session reviewer agent, artifact-grounded: SC-006 PARTIAL → 7 corrections applied [destroyed message rows disclosed w/ snapshot-at-proof-time rule, zero-write claim narrowed, post-battery commits 18c894e/786496e recorded + supersession disclosed, latency ~57s, NFR-002 fields], SC-007/008 TRUE, overall honestly-green-with-corrections — t038-review.md + dev-proofs §T038; branch PUSHED to origin @ 786496e; T039 second sync]: original plan retained below — stage 1 S04–S07 → G1 (workspace/build inventory from pinned checkouts + layout + one-emit rule via seepient-core specifiers, D07 core-freeze implementation settling spec-list decision row 1, deliberate toolchain pins + owned migration exceptions, app/identity/continuation contracts incl. six atomic store-port ops + input-vs-approval separation + P1/P2/P3/P10 vocabulary, provenance-preserving import w/ Apache attribution + dormant-hosted retained-not-enabled, checker extension + rejected forbidden-import probe + fresh-build/packed closure); stage 2 S08–S09 DEV PROOFS not release gates (SeepientAgentRuntime Transport adapter over the one Domain loop, run/attempt-scoped abort + owned-work cleanup, single history authority w/ no second transcript, real streamed run w/ durable output + targeted cancellation; multimodal MIME/ownership fidelity + context/compaction semantics + five-exercise provider-shape verification); FR-001–FR-041, SC-001–SC-008; G2 stays with M05/M06
+│   └── m04-m10-governed-runtime-cutover/ # M04–M10 governed runtime cutover (S10–S19; IN PROGRESS 2026-10-22 on branch feat/governed-runtime-cutover: Phases 1–9 complete [T001–T043 — credentials/ops/events/suspension+G2 rig/steering/helpers/handoff+usage+silent], Phase 10 code complete [T045–T050 — required-literal AGENT_RUNTIME, compose →seepient, gates off env, PiAgentRuntime demolished, app-runtime export removed per OQ-3], T051 image build on podman, T052–T059 operator/MANUAL, T044+5 others operator-blocked; commits through a3e217a + Dockerfile prune fix)
 │       ├── spec.md                   # FR-001–FR-041 grouped S04–S09, SC-001–SC-008, NFR no-sweep/evidence-hygiene/executable-boundaries/one-engine/dev-proof-posture/signed-G1; Appendix A RT/OV/J/D07 traceability
 │       ├── checklists/requirements.md # Specification quality checklist (validated 2026-10-20, all items first-iteration pass w/ porting-spec caveat on normative upstream identifiers)
 │       ├── research.md               # E1–E16 (Rakazo @40ee8548 turbo 2.10.12/pnpm@12.14.0/TS 7.0.2/26 packages, AgentRuntime surface at adapter-kit interfaces.ts:247 + types.ts:444-581, dirty pnpm-workspace.yaml w/ unset allowBuilds placeholders, packages/core name collision; Seepient TS ^5.9.3/pnpm@12.3.4, tsconfig.core include = single membership source, boundary checker w/ planted-probe self-tests, createSeepient already core-included) + D1–D10 (vault home; flat-glob import w/ Seepient naming transform N1–N5 (@rakazo/* → @seepient/*, product core → @seepient/core at packages/app-core, RAKAZO_* env → SEEPIENT_APP_*, images/branding → seepient; provenance via manifest transform record) + build targets; D07 core-freeze reading; pnpm 12.14.0 root pin gated on pre-import verification build, TS stays per-package; contracts/app placement; adapter path; dev model account via normal provider runtime; checker family extension; no planning branch) + OQ-1/2 (layout prefix; pin sequencing)
@@ -704,39 +705,26 @@ Keep `CONTEXT.md` under 20 lines total. Do NOT summarize the full conversation �
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-- **ACTIVE SPEC (029 — Rakazo→Seepient port, M02+M03 combined
-  workspace-import-runtime-adapter; COMPLETE 2026-10-21: T001–T037
-  implemented + T038 second-engineer review DONE (fresh-session
-  reviewer: SC-007/008 TRUE, SC-006 corrections applied F1–F7,
-  "honestly green — with corrections owed") + T039 sync; worktree
-  `seepient-m02m03` branch `029-m02-m03-workspace-import` PUSHED to
-  origin @ `786496e` (post-battery fix commits b00ec7b/18c894e/
-  786496e included); artifacts in vault
-  `Implementation-Specs/029-rakazo-port/m02-m03-workspace-import-runtime-adapter/`
-  — dev-proofs.md + t038-review.md; dev proofs are NOT release
-  gates; next: M04 (spec from the dev-proofs §Handoff — S10 provider
-  accounts/credentials + product test-infra reconciliation + attempt-
-  finalize tightening))**:
-  `~/Tailscale Share/Obsidian/Seepient/Implementation-Specs/029-rakazo-port/m02-m03-workspace-import-runtime-adapter/dev-proofs.md`
-  — G1 closed (owner signature, same-session caveat recorded); S08
-  proof green (streaming fix f2d8316 — chatStream textStream pump +
-  request-borne credentials; cancellation isolation run-scoped; zero
-  session-store writes); S09 green (multimodal image path + per-call
-  context seam 1881310; five exercises wire-proven via local sink
-  d2f7ec4 incl. canonical mediaType fix, tool-result images through
-  pi-ai, app_ namespacing for built-in-colliding connector names);
-  M04 handoff + bridge inventory B-1..B-10 recorded; T038 review
-  record t038-review.md. Prior: M01 — S01 complete (gate r3 PASS);
-  S02 drill EXECUTED 2026-10-21 (five checks PASS, snapshots + key
-  split, QS-8 SCAN-PASS — evidence/s02-drill-2026-10-21.md); S03
-  boot recorded (reduced host-process boot; journeys operator-blocked
-  on vendor accounts); G0 = 4 green/3 partial/4 red, remaining reds
-  operator-gated; M02 handoff in ledger.md §Handoff;
-  runbook + spec list in `specs/Seepient App/`.
-- Prior trains: 028 ACP adapter READY FOR IMPLEMENTATION 2026-10-20
-  (four review rounds folded through F1–F14; FR-021 concurrency,
-  T045/T046, all pins re-verified; branch `028-acp-adapter` not yet
-  cut — enters via /speckit-implement from T001); 027 serverless chat
-  core SHIPPED (core split rode v0.9.0; subsequent releases through
-  v0.9.2); 026 pi-ai 1.0 image port IMPLEMENTED (rides v0.8.2).
-<!-- SPECKIT END -->
+- **ACTIVE SPEC (029 — Rakazo→Seepient port, M04–M10 governed runtime cutover
+  IN PROGRESS 2026-10-22 on worktree t3-2abec89c branch
+  `feat/governed-runtime-cutover` (base a05c675 = 786496e + m02m03 merge +
+  release-notes move; pushes through a3e217a): Phases 1–9 COMPLETE (T001–T043:
+  S10 credentials w/ platform deployment account + precedence matrix +
+  durable model-oauth adapter; S11/S12 governed ops + events + terminal audit;
+  S13/S14 suspension seam + four pause classes + one-transaction accept +
+  G2 rig; S15 steering at safe boundaries; S16 helpers on the engine loop w/
+  durable SharedBudgetLedger + linked cancellation; S17 mid-loop modelHandoff
+  seam [B-2 CLOSED], usage settlement in the finish chain, permitted-silent
+  policy); Phase 10 code COMPLETE (T045–T050: required-literal
+  AGENT_RUNTIME=seepient in api+worker; compose ×7 → seepient; library gates
+  off the runtime env; PiAgentRuntime + pi-runtime.ts DEMOLISHED [zero
+  references]; app-runtime export removed from the publish manifest [OQ-3
+  application-private]; audit table in WP-P8); T044 + T012/T020/T024/T032/T033
+  operator-blocked; T051 candidate image build running on podman; T052–T059
+  MANUAL/operator (rehearsals, journeys, G3 signature needs a fresh-session
+  reviewer); next: finish T051 digests + operator drills + /release-gate.
+  Artifacts in vault
+  `Implementation-Specs/029-rakazo-port/m04-m10-governed-runtime-cutover/`.
+  Prior: M02+M03 COMPLETE (T038 review done, branch 029-m02-m03-workspace-import
+  @ 786496e); M01 S01 gate r3 PASS, S02 drill executed, G0 operator-gated.
+<!-- SPECKIT <!-- SPECKIT END -->

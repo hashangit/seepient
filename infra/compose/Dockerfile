@@ -5,6 +5,11 @@ WORKDIR /app
 # leave the copied tree unreadable to USER node at runtime.
 COPY --chmod=755 . .
 RUN pnpm install --frozen-lockfile
+# 029 T051: the api/worker boot path resolves the governed runtime through
+# the root package's app-runtime export — the image must own the root build
+# (pre-existing gap: the export pointed at a dist the image never built).
+COPY tsconfig.json tsconfig.core.json ./
+RUN pnpm run build
 RUN pnpm --filter @seepients/db generate
 RUN SEEPIENTS_ALLOW_DEV_SECRETS=1 pnpm --filter @seepients/web build
 RUN install -d -m 750 -o node -g node /data /app/apps/web/node_modules/.vite-temp
