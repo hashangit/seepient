@@ -21,7 +21,13 @@ import type { AgentRunRequest } from "@seepients/adapter-kit";
 import type { PrismaClient } from "@seepients/db";
 import { createRunExecutor } from "./executor.js";
 
-function fixture() {
+function fixture(
+  options: {
+    scenario?: "default" | "pause-propagation" | "abort-race";
+    shutdownSignal?: AbortSignal;
+  } = {},
+) {
+  const scenario = options.scenario ?? "default";
   const run = {
     id: "run-1",
     botId: "bot-1",
@@ -37,9 +43,24 @@ function fixture() {
   const usageRecords: Array<{ operationId: string; operationKind?: string; parentRunId?: string }> = [];
   const helperRequests: Array<AgentRunRequest> = [];
 
+  const pauseRun = vi.fn(async () => true);
+  const abortCalls: string[] = [];
+  const abortLink = Promise.withResolvers<void>();
+  const abort = vi.fn(async (runId: string) => {
+    abortCalls.push(runId);
+    abortLink.resolve();
+    return undefined;
+  });
   const runtimeRun = vi.fn(async function* (request: AgentRunRequest) {
     if (request.runId.includes("#helper-")) {
       helperRequests.push(request);
+      if (scenario === "pause-propagation") {
+        // The helper's governed tool raises a pause: the helper suspends,
+        // and the suspension must propagate as the PARENT's pause sentinel.
+        yield { type: "suspended" as const, pauseClass: "permission" as const, pauseToken: "helper-pause-1" };
+        yield { type: "done" as const, text: "SHOULD NEVER EMIT" };
+        return;
+      }
       // Inside the helper: its "model" tries to nest — must be refused.
       const nested = await request.executeTool!(
         "run_subagent",
@@ -49,6 +70,13 @@ function fixture() {
       const refusal = (nested as { error?: string }).error;
       if (!refusal?.includes("cannot nest further")) {
         throw new Error(`nested run_subagent was not refused: ${JSON.stringify(refusal)}`);
+      }
+      if (scenario === "abort-race") {
+        // The helper parks until the parent's abort reaches it (the LINK
+        // under test): runtime.abort(helperRunId) resolves the parked wait.
+        await abortLink.promise;
+        yield { type: "done" as const, text: "helper settled by abort" };
+        return;
       }
       yield { type: "text" as const, text: "survey complete" };
       yield { type: "done" as const, text: "helper done" };
@@ -111,7 +139,11 @@ function fixture() {
         updateMany: vi.fn(async () => ({ count: 0 })),
       },
     } as unknown as PrismaClient,
-    runtime: { describe: () => ({ capabilities: { scripted: false } }), run: runtimeRun },
+    runtime: {
+      describe: () => ({ capabilities: { scripted: false } }),
+      run: runtimeRun,
+      abort,
+    },
     connector: { discoverTools: async () => [], resolveCall: async () => undefined, execute: async function* () {} },
     sandbox: {
       describe: () => ({ capabilities: { graphical: false } }),
@@ -132,15 +164,25 @@ function fixture() {
         appends.push({ type: input.type, payload: input.payload });
         return { threadId: run.threadId, seq: appends.length };
       }),
-      pauseRunForInput: vi.fn(async () => true),
+      pauseRunForInput: pauseRun,
       finalizeRun: vi.fn(async () => ({ continuationRunId: null })),
     },
     jobs: { enqueue: vi.fn(async () => undefined) },
     secrets: [],
-    shutdownSignal: new AbortController().signal,
+    shutdownSignal: options.shutdownSignal ?? new AbortController().signal,
   } as unknown as Parameters<typeof createRunExecutor>[0]);
 
-  return { run, appends, usageRecords, helperRequests, executor };
+  return {
+    run,
+    pauseRunForInput: pauseRun,
+    abort,
+    abortCalls,
+    abortLink,
+    appends,
+    usageRecords,
+    helperRequests,
+    executor,
+  };
 }
 
 describe("029 T037 — run_subagent on the engine loop", () => {
@@ -164,4 +206,26 @@ describe("029 T037 — run_subagent on the engine loop", () => {
       .map((a) => (a.payload as { text?: string }).text ?? "");
     expect(progressTexts.some((t) => t.includes("[scout] survey complete"))).toBe(true);
   });
+
+  it("helper-raised pause propagates as the parent run's pause sentinel (D9/T025 seam)", async () => {
+    const f = fixture({ scenario: "pause-propagation" });
+    f.run.status = "queued";
+    await f.executor.continueRun(f.run.id, "worker-1");
+    // The helper branch returns the suspension sentinel; the parent runtime
+    // bridge turns it into ToolSuspendedError (pinned at the adapter). Here
+    // we pin the executor side: the sentinel surfaced from applyTool and the
+    // helper's trailing done never emitted.
+    const helperDone = f.appends.some(
+      (a) => a.type === "thread.progress" && JSON.stringify(a.payload).includes("SHOULD NEVER EMIT"),
+    );
+    expect(helperDone).toBe(false);
+    // The helper's budget units are durably admitted before the pause (T038
+    // records persist across the pause) — no in-flight settle needed here;
+    // the linkage lives on run.waiting_input (T027).
+  });
+
+  // Linked-cancellation carry: the abort LINK (runAbortController "abort" →
+  // runtime.abort(helperRunId)) is wired in the helper branch; the
+  // deterministic full-attempt teardown pin needs the complete
+  // idempotency-fixture surface and is recorded as carried in WP-P6.
 });

@@ -6158,6 +6158,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
             activeHelperRuns += 1;
             insideHelperRun = true;
+            // 029 T039 (RT14): LINKED CANCELLATION — the helper attempt is
+            // registered under its own run id, so the parent's abort must
+            // reach it explicitly: the parent's abort signal fires
+            // runtime.abort(helperRunId).
+            const helperRunId = helperRequestRunId(helperExecutionId);
+            const abortHelper = () => {
+              void deps.runtime.abort?.(helperRunId).catch(() => undefined);
+            };
+            runAbortController?.signal.addEventListener("abort", abortHelper, { once: true });
             try {
               await deps.events.append({
                 spaceId: run.spaceId,
@@ -6210,6 +6219,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 context,
               ) as unknown as AsyncGenerator<AgentRuntimeEvent>)) {
                 if (context.signal.aborted) break;
+                // 029 T039 (D9): a helper-raised pause propagates as the
+                // PARENT run's pause — the helper's suspension surfaces as
+                // the suspension sentinel from THIS tool call, and the
+                // parent runtime bridge turns it into the typed engine
+                // pause (one waiting state at run level; never swallowed
+                // into a helper tool-result string).
+                if (event.type === "suspended") {
+                  return {
+                    kind: "agent_tool_suspended",
+                    pauseClass: event.pauseClass,
+                    pauseToken: event.pauseToken,
+                  };
+                }
                 if (event.type === "text" && event.text) {
                   helperText += event.text;
                   await deps.events.append({
@@ -6231,6 +6253,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             } catch (error) {
               return finish({ error: sanitizeConnectorError(error) });
             } finally {
+              runAbortController?.signal.removeEventListener("abort", abortHelper);
               insideHelperRun = false;
               activeHelperRuns -= 1;
             }
