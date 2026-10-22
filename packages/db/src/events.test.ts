@@ -146,9 +146,14 @@ describe("finalizeRun", () => {
       steeringMessage: { findMany: vi.fn(async () => []), updateMany: vi.fn(async () => ({ count: 0 })) },
       bot: { update: vi.fn(async () => ({})) },
     };
-    const txGate = Promise.withResolvers<void>();
+    // db-local lib lacks Promise.withResolvers — constructor form is the
+    // documented exception when the platform type target lags.
+    let releaseTx!: () => void;
+    const txGate = new Promise<void>((resolve) => {
+      releaseTx = resolve;
+    });
     const transaction = vi.fn(async (operation: (client: typeof tx) => unknown) => {
-      await txGate.promise;
+      await txGate;
       return operation(tx);
     });
     const publishCalls: number[] = [];
@@ -167,7 +172,8 @@ describe("finalizeRun", () => {
         attemptId: "attempt-1",
         leaseOwner: "worker-1",
         leaseFence: 1,
-        outcome: "succeeded",
+        outcome: "failed",
+        error: "failed",
       },
       { publish } as never,
     ).then(
@@ -175,17 +181,21 @@ describe("finalizeRun", () => {
       (error: unknown) => ({ ok: false as const, error }),
     );
     // While the transaction is in flight, no notification may have fired.
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    // Deterministic: the transaction is parked on the gate promise, so a
+    // publish would prove concurrent notification — await one microtask tap
+    // to give any (wrong) eager publish a chance to run.
+    await Promise.resolve();
+    await Promise.resolve();
     expect(publish).not.toHaveBeenCalled();
 
-    txGate.resolve();
-    await outcome;
+    releaseTx();
+    const settled = await outcome;
+    expect(settled.ok).toBe(true);
     // The notification fired exactly once, strictly after the transaction
-    // resolved (the recorded call count is the post-commit invocation count).
+    // resolved (the recorded count is the post-commit invocation count).
     expect(publish).toHaveBeenCalledOnce();
     expect(publishCalls[0]).toBe(1);
   });
-
   // 029 T023 (FR-014 crash-before-notify): state survives; the notification
   // may not happen — a rejected fanout must not roll back or lose the commit.
   it("keeps the committed state when the notification fails after the commit", async () => {
@@ -3234,5 +3244,97 @@ describe("appendEvent", () => {
     ).rejects.toThrow(RunHistoryWriteError);
     expect(tx.run.findUnique).not.toHaveBeenCalled();
     expect(tx.event.create).not.toHaveBeenCalled();
+  });
+});
+
+// 029 T027 (FR-018/FR-022): the structured waiting linkage persists INSIDE
+// the pause transaction — kill-after-pause restarts show the same pending
+// request (adopted card + suspension token) linked to the correct run.
+describe("pauseRunForInput waiting-state linkage (029 T027)", () => {
+  it("stamps the waiting event with the adopted card id and the caller's pause metadata", async () => {
+    const tx = {
+      $queryRaw: vi.fn(async () => []),
+      run: { findUnique: vi.fn(async () => ({ status: "running", startedAt: new Date(0) })), updateMany: vi.fn(async () => ({ count: 1 })) },
+      attempt: { updateMany: vi.fn(async () => ({ count: 1 })) },
+      thread: { update: vi.fn(async () => ({ nextEventSeq: 1 })) },
+      message: { create: vi.fn(async () => ({ id: "msg-card-1" })) },
+      event: { create: vi.fn(async () => ({ threadId: "thread-1", seq: 9 })), deleteMany: vi.fn(async () => ({ count: 0 })) },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+    } as unknown as PrismaClient;
+
+    const committed = await pauseRunForInput(
+      prisma,
+      {
+        spaceId: "space-1",
+        threadId: "thread-1",
+        botId: "bot-1",
+        runId: "run-1",
+        attemptId: "attempt-1",
+        leaseOwner: "worker-1",
+        leaseFence: 3,
+        blocks: [{ kind: "meta", text: "suspended:permission:pause-9" }],
+        waitingState: {
+          pauseClass: "permission",
+          pauseToken: "pause-9",
+          expiresAt: "2026-10-23T00:00:00.000Z",
+        },
+      },
+      { publish: vi.fn(async () => undefined) } as never,
+    );
+
+    expect(committed).toBe(true);
+    // The waiting event carries the adopted card linkage + pause metadata.
+    expect(tx.event.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          type: "run.waiting_input",
+          runId: "run-1",
+          payload: {
+            messageId: "msg-card-1",
+            pauseClass: "permission",
+            pauseToken: "pause-9",
+            expiresAt: "2026-10-23T00:00:00.000Z",
+          },
+        }),
+      }),
+    );
+  });
+
+  it("omits the linkage keys when the caller supplies no waiting state (legacy asks)", async () => {
+    const tx = {
+      $queryRaw: vi.fn(async () => []),
+      run: { findUnique: vi.fn(async () => ({ status: "running", startedAt: new Date(0) })), updateMany: vi.fn(async () => ({ count: 1 })) },
+      attempt: { updateMany: vi.fn(async () => ({ count: 1 })) },
+      thread: { update: vi.fn(async () => ({ nextEventSeq: 2 })) },
+      message: { create: vi.fn(async () => ({ id: "msg-card-2" })) },
+      event: { create: vi.fn(async () => ({ threadId: "thread-1", seq: 10 })), deleteMany: vi.fn(async () => ({ count: 0 })) },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+    } as unknown as PrismaClient;
+
+    await pauseRunForInput(
+      prisma,
+      {
+        spaceId: "space-1",
+        threadId: "thread-1",
+        botId: "bot-1",
+        runId: "run-2",
+        attemptId: "attempt-2",
+        leaseOwner: "worker-2",
+        leaseFence: 4,
+        blocks: [{ kind: "ask", text: "Proceed?", status: "pending" }],
+      },
+      { publish: vi.fn(async () => undefined) } as never,
+    );
+    expect(tx.event.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          payload: { messageId: "msg-card-2" },
+        }),
+      }),
+    );
   });
 });

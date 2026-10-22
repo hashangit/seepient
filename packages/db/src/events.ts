@@ -143,6 +143,19 @@ export interface PauseRunForInput {
    * (not in message blocks) so clients still see redacted labels.
    */
   offeredActions?: Array<{ id: string; label: string }>;
+  /**
+   * 029 S13/T027 structured waiting linkage (FR-018): persisted on the
+   * `run.waiting_input` event INSIDE the pause transaction — suspension
+   * token, pause class, optional Seepient request id / effect state / expiry.
+   * The adopted card linkage is the message id, stamped automatically.
+   */
+  waitingState?: {
+    pauseClass: "permission" | "choice" | "secret" | "takeover";
+    pauseToken: string;
+    seepientRequestId?: string;
+    effectState?: unknown;
+    expiresAt?: string;
+  };
 }
 
 const CHOICE_ASK_CHECKPOINT_KIND = "choice_ask_v1";
@@ -891,7 +904,14 @@ export async function pauseRunForInput(
       botId: input.botId,
       type: "run.waiting_input",
       runId: input.runId,
-      payload: {},
+      payload: {
+        // 029 T027 structured waiting linkage: the adopted card is the message
+        // created above (same transaction); the caller's pause metadata rides
+        // alongside so a restart shows the same pending request linked to the
+        // correct run (FR-022 restore behavior).
+        messageId: message.id,
+        ...(input.waitingState ?? {}),
+      },
     });
     await tx.event.deleteMany({ where: { runId: input.runId, type: "thread.progress" } });
     return { threadId: waitingEvent.threadId, seq: waitingEvent.seq };
