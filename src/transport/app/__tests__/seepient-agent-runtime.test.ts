@@ -572,6 +572,77 @@ describe("SeepientAgentRuntime event truth (029 T021/T022)", () => {
     }
   });
 
+  it("delivers a deferred-shell completion to the active run, correlated (029 T035)", async () => {
+    const { agents, gates, createAgentImpl } = makeHarness();
+    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const observed: AgentRuntimeEvent[] = [];
+    let capturedObserver: { onShellStillRunning?: (c: Promise<{ stdout: string; stderr: string; code: number }>) => void } | undefined;
+    const releaseEffect = Promise.withResolvers<void>();
+    const request = baseRequest({
+      tools: [{ name: "long_shell", description: "d", inputSchema: { type: "object", properties: {}, required: [] } }],
+      executeTool: (async (_n: string, _a: unknown, _e: string, _r: unknown, observer: { onShellStillRunning?: (c: Promise<{ stdout: string; stderr: string; code: number }>) => void }) => {
+        capturedObserver = observer;
+        await releaseEffect.promise;
+        return "still running; will report";
+      }) as never,
+    });
+    const iterator = runtime.run(request)[Symbol.asyncIterator]();
+    const started = iterator.next();
+    await gates[0].promise;
+    const tools = agents[0].options.tools as unknown as Array<{ execute: (args: unknown) => Promise<unknown> }>;
+    const execution = tools[0]!.execute({});
+    await started;
+    // The adapter bound the observer: the deferred shell's final output is
+    // delivered as a correlated progress event while the run is active.
+    expect(capturedObserver?.onShellStillRunning).toBeTypeOf("function");
+    capturedObserver!.onShellStillRunning!(
+      Promise.resolve({ stdout: "final line", stderr: "", code: 0 }),
+    );
+    const progressEvent = (await iterator.next()).value as Extract<AgentRuntimeEvent, { type: "progress" }>;
+    expect(progressEvent.type).toBe("progress");
+    expect(progressEvent.text).toContain("shell ");
+    expect(progressEvent.text).toContain("final line");
+    releaseEffect.resolve();
+    await execution;
+    agents[0].settle({ fullText: Promise.resolve("ok"), usage: Promise.resolve({ promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 }) });
+    for (;;) {
+      const step = await iterator.next();
+      if (step.done) break;
+    }
+    void observed;
+  });
+
+  it("drops a deferred-shell completion after the run settled (late completion: recorded app-side, no orphan push)", async () => {
+    const { agents, gates, createAgentImpl } = makeHarness();
+    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    let capturedObserver: { onShellStillRunning?: (c: Promise<{ stdout: string; stderr: string; code: number }>) => void } | undefined;
+    const request = baseRequest({
+      tools: [{ name: "long_shell", description: "d", inputSchema: { type: "object", properties: {}, required: [] } }],
+      executeTool: (async (_n: string, _a: unknown, _e: string, _r: unknown, observer: { onShellStillRunning?: (c: Promise<{ stdout: string; stderr: string; code: number }>) => void }) => {
+        capturedObserver = observer;
+        return "running";
+      }) as never,
+    });
+    const drain = (async () => {
+      for await (const _ of runtime.run(request)) void _;
+    })();
+    await gates[0].promise;
+    const tools = agents[0].options.tools as unknown as Array<{ execute: (args: unknown) => Promise<unknown> }>;
+    await tools[0]!.execute({});
+    // Settle the run FIRST (the consumer closed), then fire the late completion.
+    agents[0].settle({ fullText: Promise.resolve("ok"), usage: Promise.resolve({ promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 }) });
+    await drain;
+    // Late completion: no orphan push (the queue is closed — a no-op), and no
+    // unhandled rejection. The durable record is the executor's own
+    // computer-command done event (app-side).
+    expect(() =>
+      capturedObserver!.onShellStillRunning!(
+        Promise.resolve({ stdout: "late", stderr: "", code: 0 }),
+      ),
+    ).not.toThrow();
+    await new Promise<void>((resolve) => { resolve(); });
+  });
+
   it("translates the app suspension sentinel into the engine's typed pause (029 T025)", async () => {
     const { agents, gates, createAgentImpl } = makeHarness();
     const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });

@@ -30,6 +30,7 @@ import type {
   AgentRuntimeEvent,
   AgentRunRequest,
   AgentToolSuspension,
+  AgentToolExecutionObserver,
 } from "@seepients/adapter-kit";
 import { DEFAULT_CONTEXT_STRATEGY } from "@seepients/adapter-kit";
 import { SeepientError, ToolSuspendedError } from "seepient-engine/dist/foundations/errors.js";
@@ -300,12 +301,36 @@ export class SeepientAgentRuntime implements AgentRuntime {
             };
             owned.add(work);
             try {
+              // 029 S15/T035 (FR-028/029): bind the deferred-shell observer
+              // to THIS run's delivery queue — the final output reaches the
+              // active run as a correlated progress event; after the run
+              // settles (queue closed) the push is a no-op and the executor's
+              // own computer-command record stays the durable late-completion
+              // attach. The owned-work drain cancels the live wait on abort.
+              const observer: AgentToolExecutionObserver = {
+                onShellStillRunning: (completion) => {
+                  void completion
+                    .then((final) => {
+                      const tail = [
+                        final.stdout.length > 0 ? final.stdout.slice(-2000) : "",
+                        final.stderr.length > 0 ? final.stderr.slice(-2000) : "",
+                      ]
+                        .filter(Boolean)
+                        .join("\n");
+                      queue.push({
+                        type: "progress",
+                        text: `[shell ${executionId} finished] ${tail || "(no output)"}`,
+                      });
+                    })
+                    .catch(() => undefined);
+                },
+              };
               const execution = request.executeTool?.(
                 connectorTool.name,
                 args as Record<string, unknown>,
                 executionId,
                 connectorTool.route,
-                undefined,
+                observer,
               );
               const aborted = new Promise<never>((_, reject) => {
                 toolAbort.signal.addEventListener("abort", () => reject(new Error("ABORTED: tool wait cancelled")));
