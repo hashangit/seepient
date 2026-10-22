@@ -93,7 +93,7 @@ services:
       CLOUD_AGENT_PROVIDER: ${CLOUD_AGENT_PROVIDER:-none}
       CLOUD_AGENT_SPACE_ID: ${CLOUD_AGENT_SPACE_ID:-}
       CURSOR_API_KEY: ${CURSOR_API_KEY:-}
-      AGENT_RUNTIME: pi
+      AGENT_RUNTIME: seepient
       # Optional egress proxy (Mainland / corporate). Empty = unset; either case works.
       HTTP_PROXY: ${HTTP_PROXY:-${http_proxy:-}}
       HTTPS_PROXY: ${HTTPS_PROXY:-${https_proxy:-}}
@@ -141,7 +141,7 @@ services:
       CLOUD_AGENT_SPACE_ID: ${CLOUD_AGENT_SPACE_ID:-}
       CURSOR_API_KEY: ${CURSOR_API_KEY:-}
       SCREEN_PROXY_SECRET: ""
-      AGENT_RUNTIME: pi
+      AGENT_RUNTIME: seepient
       # Optional egress proxy (Mainland / corporate). Empty = unset; either case works.
       HTTP_PROXY: ${HTTP_PROXY:-${http_proxy:-}}
       HTTPS_PROXY: ${HTTPS_PROXY:-${https_proxy:-}}
