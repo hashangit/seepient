@@ -6,6 +6,7 @@ import type {
   AgentModelOAuthCredential,
   AgentRunRequest,
   AgentRuntime,
+  AgentRuntimeEvent,
   AgentToolCompletion,
   AgentToolExecutionObserver,
   ArtifactStore,
@@ -190,7 +191,12 @@ import {
   browserNavigateFromTool,
   browserSnapshotFromTool,
 } from "./browser-tools.js";
-import { agentConnectionTools, builtinAgentTools, sharedMemorySaveError } from "./builtin-tools.js";
+import {
+  agentConnectionTools,
+  builtinAgentTools,
+  DELEGATION_TOOL_NAMES,
+  sharedMemorySaveError,
+} from "./builtin-tools.js";
 import { archiveSpawnedBot, spawnBot } from "./child-bots.js";
 import type { CloudAgentConnection } from "./cloud-agent-factory.js";
 import { cloudAgentsEnabled } from "./cloud-agent-factory.js";
@@ -4118,6 +4124,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
           return occurrence;
         };
 
+        // 029 T037/T039: helper state for the engine-loop helper lift —
+        // nesting rejection (depth via marker run-id + flag) and the
+        // concurrency limit (the upstream MAX_PARALLEL_SUBAGENTS = 4).
+        const MAX_ACTIVE_HELPERS = 4;
+        let insideHelperRun = false;
+        let activeHelperRuns = 0;
+        const helperRequestRunId = (executionId: string) => `${runId}#helper-${executionId}`;
         const applyTool = async (
           name: string,
           args: Record<string, unknown>,
@@ -6083,10 +6096,121 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           if (name === "request_takeover") return { ok: true };
           if (name === "run_subagent") {
-            return {
-              ok: true,
-              result: String(args.task ?? "done."),
-            };
+            // 029 T037 (FR-031): the helper runs on THE SAME Seepient loop —
+            // a nested runtime.run with the restricted tool subset (no
+            // delegation tools), helper-model selection via the connected
+            // model path, child events mapped into the parent thread, and
+            // the no-further-nesting rule enforced here.
+            if (insideHelperRun) {
+              return finish({ error: "Subagents cannot nest further." });
+            }
+            if (activeHelperRuns >= MAX_ACTIVE_HELPERS) {
+              return finish({ error: `Too many concurrent helpers (limit ${MAX_ACTIVE_HELPERS}).` });
+            }
+            const helperExecutionId = executionId;
+            const helperName =
+              String(args.name ?? "helper").trim().slice(0, 80) || "helper";
+            const helperTask = String(args.task ?? "").trim();
+            if (!helperTask) return finish({ error: "task is required." });
+            const extraInstructions = args.instructions ? String(args.instructions).trim() : "";
+            const requestedProvider = String(args.model_provider ?? "").trim();
+            const requestedModelId = String(args.model_id ?? "").trim();
+            if (Boolean(requestedProvider) !== Boolean(requestedModelId)) {
+              return finish({ error: "model_provider and model_id must both be set" });
+            }
+            let helperModel: AgentRunRequest["model"] | undefined;
+            if (requestedProvider && requestedModelId) {
+              const resolvedHelper = await resolveConnectedModel(
+                { userId: run.userId, spaceId: run.spaceId },
+                requestedProvider,
+                requestedModelId,
+                (values) => runSecrets.push(...values),
+              ).catch((error: unknown) =>
+                ({ error: sanitizeConnectorError(error) }) as unknown as AgentRunRequest["model"],
+              );
+              if ("error" in resolvedHelper && resolvedHelper.error) {
+                return finish({ error: resolvedHelper.error as string });
+              }
+              helperModel = resolvedHelper as AgentRunRequest["model"];
+            }
+            activeHelperRuns += 1;
+            insideHelperRun = true;
+            try {
+              await deps.events.append({
+                spaceId: run.spaceId,
+                threadId: thread.id,
+                botId: bot.id,
+                type: "thread.progress",
+                runId,
+                payload: {
+                  text: redactSecrets(`helper ${helperName} started: ${helperTask.slice(0, 200)}`, runSecrets),
+                },
+              });
+              let helperText = "";
+              const helperRequest: AgentRunRequest = {
+                botId: bot.id,
+                threadId: thread.id,
+                // Nesting marker: the #helper suffix both refuses further
+                // nesting and scopes the helper's session/usage records.
+                runId: `${runId}#helper-${helperExecutionId}`,
+                prompt: helperTask,
+                instructions: [
+                  extraInstructions,
+                  "You are a short-lived helper inside another run. Complete the task and stop; you cannot spawn further helpers, create bots, or send messages.",
+                ]
+                  .filter(Boolean)
+                  .join("\n\n"),
+                history: [],
+                tools: [...builtins, ...exposedConnectorTools].filter(
+                  (tool) => !DELEGATION_TOOL_NAMES.has(tool.name),
+                ),
+                model: helperModel ?? {
+                  provider: runModelProvider ?? "scripted",
+                  id: runModelId ?? "scripted",
+                },
+                usageOperationKind: "subagent",
+                onUsage: async (usageEvent: Extract<AgentRuntimeEvent, { type: "usage" }>) => {
+                  await recordUsage(deps.prisma, usageEvent, {
+                    spaceId: run.spaceId,
+                    botId: bot.id,
+                    userId: run.userId,
+                    runId,
+                    parentRunId: runId,
+                    operationId: helperRequestRunId(helperExecutionId),
+                    operationKind: "subagent",
+                  });
+                },
+                executeTool: applyTool,
+              } as unknown as AgentRunRequest;
+              for await (const event of (deps.runtime.run(
+                helperRequest,
+                context,
+              ) as unknown as AsyncGenerator<AgentRuntimeEvent>)) {
+                if (context.signal.aborted) break;
+                if (event.type === "text" && event.text) {
+                  helperText += event.text;
+                  await deps.events.append({
+                    spaceId: run.spaceId,
+                    threadId: thread.id,
+                    botId: bot.id,
+                    type: "thread.progress",
+                    runId,
+                    payload: {
+                      text: redactSecrets(`[${helperName}] ${event.text}`, runSecrets),
+                    },
+                  });
+                }
+              }
+              return finish({
+                ok: true,
+                result: helperText.trim() || `${helperName} completed with no output.`,
+              });
+            } catch (error) {
+              return finish({ error: sanitizeConnectorError(error) });
+            } finally {
+              insideHelperRun = false;
+              activeHelperRuns -= 1;
+            }
           }
           if (name === "create_space") {
             try {
