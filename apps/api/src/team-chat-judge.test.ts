@@ -42,11 +42,50 @@ describe("team chat engagement judge", () => {
     expect(parseTeamChatEngagementDecision("not json")).toEqual({ act: false });
   });
 
+  it("rides the shared resolution path — judge env override maps to purposeOverride", async () => {
+    const runtime = {
+      run: async function* () {
+        yield { type: "done", text: '{"act":true,"reason":"Directly asked."}' };
+      },
+    };
+    const resolveModel = vi.fn(async () => ({
+      provider: "openai",
+      id: "gpt-judge",
+      apiKey: "k",
+    }));
+    const judge = new ModelTeamChatEngagementJudge({
+      prisma: { usageRecord: { create: vi.fn() } } as never,
+      runtime: runtime as never,
+      resolveModel: resolveModel as never,
+      providerOverride: "openai",
+      modelOverride: "gpt-judge",
+    });
+    await expect(
+      judge.decide({
+        bot: {
+          id: "bot-1",
+          spaceId: "space-1",
+          userId: "user-1",
+          name: "Arthur",
+          modelProvider: "google",
+          modelId: "gemini-3.8-flash",
+        },
+        channelId: "C1",
+        rules: "",
+        messages: [],
+      }),
+    ).resolves.toEqual({ act: true, reason: "Directly asked." });
+    expect(resolveModel).toHaveBeenCalledExactlyOnceWith({
+      userId: "user-1",
+      spaceId: "space-1",
+      botId: "bot-1",
+      purposeOverride: { provider: "openai", modelId: "gpt-judge" },
+    });
+  });
+
   it("persists cache-read and cache-write tokens from usage events", async () => {
     const create = vi.fn(async () => ({ id: "usage-1" }));
     const prisma = {
-      deploymentSettings: { findUnique: vi.fn(async () => null) },
-      spaceModelPreference: { findFirst: vi.fn(async () => null) },
       usageRecord: { create },
     };
     const runtime = {
@@ -63,13 +102,15 @@ describe("team chat engagement judge", () => {
         yield { type: "done", text: '{"act":false}' };
       },
     };
+    const resolveModel = vi.fn(async () => ({
+      provider: "google",
+      id: "gemini-3.8-flash",
+      apiKey: "test-key",
+    }));
     const judge = new ModelTeamChatEngagementJudge({
       prisma: prisma as never,
       runtime: runtime as never,
-      secrets: {} as never,
-      deploymentProvider: "google",
-      deploymentModel: "gemini-3.8-flash",
-      deploymentModelKey: "test-key",
+      resolveModel: resolveModel as never,
     });
 
     await expect(
@@ -87,6 +128,11 @@ describe("team chat engagement judge", () => {
         messages: [],
       }),
     ).resolves.toEqual({ act: false });
+    expect(resolveModel).toHaveBeenCalledExactlyOnceWith({
+      userId: "user-1",
+      spaceId: "space-1",
+      botId: "bot-1",
+    });
     expect(create).toHaveBeenCalledExactlyOnceWith({
       data: {
         spaceId: "space-1",

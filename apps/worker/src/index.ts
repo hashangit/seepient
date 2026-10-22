@@ -96,7 +96,7 @@ async function main() {
     process.env.AGENT_RUNTIME === "scripted"
       ? new ScriptedAgentRuntime()
       : process.env.AGENT_RUNTIME === "seepient"
-        ? createSeepientAgentRuntime()
+        ? createSeepientAgentRuntime({ prisma, secretStore: secrets })
         : new PiAgentRuntime({ sessionRoot: resolvePiSessionRoot(dataDir) });
   // Same resolver the API uses, so both processes agree on provider, model and key.
   const { key: deploymentModelKey, configured: deploymentModelConfigured } =

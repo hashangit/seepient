@@ -386,7 +386,7 @@ export async function createApp(
     (env.agentRuntime === "scripted"
       ? new ScriptedAgentRuntime()
       : env.agentRuntime === "seepient"
-        ? createSeepientAgentRuntime()
+        ? createSeepientAgentRuntime({ prisma, secretStore: secrets })
         : new PiAgentRuntime({
             sessionRoot: env.piSessionRecording ? piSessionsRoot(env.dataDir) : undefined,
           }));
@@ -806,26 +806,19 @@ export async function createApp(
       pendingTeamChatInbound.flush((event) => handleTeamChatInbound(bridge, event));
     };
     if (env.teamChatBotId) {
-      const judge =
-        env.teamChatJudgeProvider && env.teamChatJudgeModel
-          ? new ModelTeamChatEngagementJudge({
-              prisma,
-              runtime,
-              secrets,
-              deploymentProvider: env.defaultProvider,
-              deploymentModel: env.defaultModel,
-              deploymentModelKey: env.deploymentModelKey,
+      // The judge resolves through the one executor path — no second precedence
+      // chain (029 FR-001). The env judge override rides the purposeOverride slot.
+      const judge = new ModelTeamChatEngagementJudge({
+        prisma,
+        runtime,
+        resolveModel: executor.resolveModel,
+        ...(env.teamChatJudgeProvider && env.teamChatJudgeModel
+          ? {
               providerOverride: env.teamChatJudgeProvider,
               modelOverride: env.teamChatJudgeModel,
-            })
-          : new ModelTeamChatEngagementJudge({
-              prisma,
-              runtime,
-              secrets,
-              deploymentProvider: env.defaultProvider,
-              deploymentModel: env.defaultModel,
-              deploymentModelKey: env.deploymentModelKey,
-            });
+            }
+          : {}),
+      });
       const bridge = new TeamChatBridge({
         prisma,
         events,
