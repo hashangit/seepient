@@ -6,6 +6,8 @@
  * operator allowlist, and legacy tool() fails closed with a deprecation warning.
  */
 import { describe, it, expect, vi } from "vitest";
+import type { ToolAnalysisContext } from "../../../foundations/contracts/custom-tools.js";
+import { makeRegistrationAnalyzer } from "../../../domain/permissions/registration-dispatch.js";
 import {
   preparedTool,
   brokerConnector,
@@ -186,6 +188,47 @@ describe("custom-tool registration (T304, QS-3.6)", () => {
 
     const badAnalyzer = makeRegistrationAnalyzer(invalidReg);
     await expect(badAnalyzer({}, mockCtx)).rejects.toThrow('Invalid risk category "ultra-high"');
+  });
+
+  it("a bridged governed declaration yields the typed action through makeRegistrationAnalyzer (spec 029 T014–T016)", async () => {
+    // The exact declaration shape the app bridge ships for a static retained
+    // tool (mirrored structurally in @seepients/adapter-kit
+    // governed-operations.ts): host-screen read for computer_observe.
+    const reg = trustedHostTool({
+      definition: {
+        type: "function",
+        function: { name: "computer_observe", description: "d", parameters: { type: "object", properties: {}, required: [] } },
+      },
+      declaration: {
+        risk: "read",
+        display: {
+          title: "Observe computer",
+          summary: "Read the computer host screen frame",
+          canonicalTargets: ["computer-host:screen"],
+          effects: ["host-callback"],
+        },
+      },
+      async execute() {
+        return "ok";
+      },
+    });
+
+    // Only the context fields the trusted-host analyzer reads; the full
+    // ToolAnalysisContext carries prepared/broker machinery this path never
+    // touches (same minimal stub the neighboring tests exercise).
+    const mockCtx = {
+      principalId: "user-1",
+      runId: "run-1",
+      toolCallId: "call-1",
+      modelProviderClass: "openai",
+    } as unknown as ToolAnalysisContext;
+
+    const action = await makeRegistrationAnalyzer(reg)({}, mockCtx);
+    expect(action.risk).toBe("read");
+    expect(action.display.title).toBe("Observe computer");
+    expect(action.display.summary).toBe("Read the computer host screen frame");
+    expect(action.display.canonicalTargets).toEqual(["computer-host:screen"]);
+    expect(action.display.effects).toEqual(["host-callback"]);
   });
 
   it("validates declared effects fail-closed against allowlist and shape requirements (Task 2.1)", async () => {

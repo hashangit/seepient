@@ -38,7 +38,11 @@ import type {
   MessageImage,
   ToolResult,
 } from "seepient-engine/dist/foundations/types.js";
-import type { TrustedHostToolRegistration } from "seepient-engine/dist/foundations/contracts/custom-tools.js";
+import type {
+  TrustedHostToolRegistration,
+  TrustedHostToolDeclaration,
+} from "seepient-engine/dist/foundations/contracts/custom-tools.js";
+import { governedDeclarationFor } from "@seepients/adapter-kit";
 import { trustedHostTool } from "seepient-engine/dist/transport/sdk/custom-tools.js";
 import { ALL_TOOLS } from "seepient-engine/dist/domain/tool-executor.js";
 import { createSeepient } from "seepient-engine/dist/transport/sdk/seepient.js";
@@ -255,7 +259,16 @@ export class SeepientAgentRuntime implements AgentRuntime {
       // run resolves to zero engine tools.
       const tools: TrustedHostToolRegistration[] = request.tools.map((connectorTool) => {
         const engineName = ALL_TOOLS.includes(connectorTool.name) ? `app_${connectorTool.name}` : connectorTool.name;
+        // Declared governed operation (T014–T016): static retained tools ship
+        // their class-typed declaration so the analyzer/policy/audit see real
+        // effects and risk. Dynamic connector tools have no static entry and
+        // stay on the ambient fallback — the dynamic class (network-egress
+        // "dynamic") is T016's live-catalog scope, not a static row.
+        const governed = governedDeclarationFor(connectorTool.name);
         return trustedHostTool({
+          // The adapter-kit declaration mirrors the engine contract
+          // structurally; the runtime validator accepts its widened risk set.
+          declaration: governed?.declaration as TrustedHostToolDeclaration | undefined,
           definition: {
             type: "function",
             function: {
