@@ -43,10 +43,16 @@ WORKDIR /build
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY patches/ ./patches/
 COPY packages/core/package.json packages/core/package.json
+# src/transport/app (shipped via the ./app-runtime export) imports the
+# adapter-kit contracts at compile time — B-8's "broken outside the workspace"
+# shape. Interim: install the contract packages so the image build typechecks;
+# the publish-surface decision (OQ-3/T050) resolves this properly.
+COPY packages/adapter-kit/package.json packages/adapter-kit/package.json
+COPY packages/contracts/package.json packages/contracts/package.json
 
 # Install root-package dependencies (docs is a workspace member but the
 # image does not need VitePress; seepient-engine rides as the workspace link)
-RUN pnpm install --frozen-lockfile --filter seepient --filter seepient-engine
+RUN pnpm install --frozen-lockfile --filter seepient --filter seepient-engine --filter @seepients/adapter-kit
 
 # Copy TypeScript source, config, and build scripts (clean-dist.mjs runs as
 # part of `pnpm run build`; build:core needs tsconfig.core.json — spec 027)
