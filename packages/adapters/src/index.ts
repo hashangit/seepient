@@ -99,6 +99,8 @@ export * from "./pi-models.js";
 export * from "./pi-oauth.js";
 export * from "./pi-openai-compatible-provider.js";
 export * from "./pi-session.js";
+export { describeToolActivity } from "@seepients/adapter-kit";
+
 export * from "./pipedream-connector.js";
 export * from "./private-endpoint.js";
 export * from "./realtime.js";

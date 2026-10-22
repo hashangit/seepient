@@ -32,7 +32,7 @@ import type {
   AgentToolSuspension,
   AgentToolExecutionObserver,
 } from "@seepients/adapter-kit";
-import { DEFAULT_CONTEXT_STRATEGY } from "@seepients/adapter-kit";
+import { DEFAULT_CONTEXT_STRATEGY, describeToolActivity } from "@seepients/adapter-kit";
 import { SeepientError, ToolSuspendedError } from "seepient-engine/dist/foundations/errors.js";
 import type {
   CreateSeepientOptions,
@@ -455,9 +455,15 @@ export class SeepientAgentRuntime implements AgentRuntime {
           strategy: request.contextStrategy ?? DEFAULT_CONTEXT_STRATEGY,
           ...(request.model.contextWindow !== undefined ? { maxInputTokens: request.model.contextWindow } : {}),
         },
-        onStep: (step: { type: string }) => {
+        onStep: (step: { type: string; name?: string; args?: unknown }) => {
           if (step.type === "tool_progress") {
-            queue.push({ type: "progress", text: "tool running", activity: true });
+            // 029 T011: the activity line carries the tool's redacted
+            // description, not a static placeholder.
+            queue.push({
+              type: "progress",
+              text: describeToolActivity(step.name ?? "tool", step.args),
+              activity: true,
+            });
           }
         },
         // onToolCall: the bridged execute already emitted the tool event

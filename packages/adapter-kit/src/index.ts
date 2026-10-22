@@ -1,4 +1,5 @@
 export * from "./background-jobs.js";
+export * from "./tool-activity.js";
 export * from "./cloud-agents.js";
 export * from "./governed-operations.js";
 export * from "./interfaces.js";
