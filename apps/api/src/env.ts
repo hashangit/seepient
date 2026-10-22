@@ -182,7 +182,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     cloudAgentProvider,
     cloudAgentSpaceId: optional(source.CLOUD_AGENT_SPACE_ID),
     cursorApiKey: optional(source.CURSOR_API_KEY),
-    agentRuntime: source.AGENT_RUNTIME ?? "pi",
+    agentRuntime: requireAgentRuntime(source),
     // Provider, model and key resolve together: see resolveDeploymentModel.
     deploymentModelKey: deploymentModel.key,
     deploymentModelConfigured: deploymentModel.configured,
@@ -242,6 +242,27 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     updaterToken,
     imageTag: optional(source.SEEPIENTS_IMAGE_TAG),
   };
+}
+
+/**
+ * 029 T046 (S18/M10): AGENT_RUNTIME is a required literal with exactly one
+ * accepted value — "seepient". The old "pi"/"scripted" values are gone (the
+ * Pi runtime and the scripted test double are no longer selectable through
+ * the environment; scripted stays available to tests via direct injection).
+ */
+function requireAgentRuntime(source: NodeJS.ProcessEnv): "seepient" {
+  const value = source.AGENT_RUNTIME?.trim();
+  if (!value) {
+    throw new Error(
+      "AGENT_RUNTIME is required and must be \"seepient\" (the governed runtime). Add AGENT_RUNTIME=seepient to your environment.",
+    );
+  }
+  if (value !== "seepient") {
+    throw new Error(
+      `AGENT_RUNTIME=${value} is not supported. The only accepted value is "seepient" (the Pi and scripted runtimes were removed; update your compose/env files).`,
+    );
+  }
+  return "seepient";
 }
 
 function required(source: NodeJS.ProcessEnv, key: string): string {

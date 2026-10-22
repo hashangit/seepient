@@ -45,10 +45,11 @@ function fixture(
 
   const pauseRun = vi.fn(async () => true);
   const abortCalls: string[] = [];
-  const abortLink = Promise.withResolvers<void>();
+  let resolveAbortLink!: () => void;
+  const abortLink = new Promise<void>((resolve) => { resolveAbortLink = resolve; });
   const abort = vi.fn(async (runId: string) => {
     abortCalls.push(runId);
-    abortLink.resolve();
+    resolveAbortLink();
     return undefined;
   });
   const runtimeRun = vi.fn(async function* (request: AgentRunRequest) {
@@ -74,7 +75,7 @@ function fixture(
       if (scenario === "abort-race") {
         // The helper parks until the parent's abort reaches it (the LINK
         // under test): runtime.abort(helperRunId) resolves the parked wait.
-        await abortLink.promise;
+        await abortLink;
         yield { type: "done" as const, text: "helper settled by abort" };
         return;
       }

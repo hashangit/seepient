@@ -35,16 +35,13 @@ import {
   McpOAuthBroker,
   messagingEnvFromProcess,
   messagingPlatformsFromEnv,
-  PiAgentRuntime,
   PipedreamConnector,
   PostgresRealtimeFanout,
   pipedreamConfigFromEnv,
   reconcileCloudAgents,
   reconcileComputerUpdates,
   resolveDeploymentModel,
-  resolvePiSessionRoot,
   resolveSandboxProvider,
-  ScriptedAgentRuntime,
   SpaceMemoryProviderResolver,
   sandboxProviderOptionsFromEnv,
   withSecretPersistence,
@@ -64,7 +61,28 @@ import { MarkdownMemoryStore } from "@seepients/memory";
 
 const logger = createRootLogger(SERVICE_NAMES.worker);
 
+/**
+ * 029 T046 (S18/M10): required-literal AGENT_RUNTIME — the worker accepts
+ * exactly "seepient" (mirrors the API's requireAgentRuntime; the Pi and
+ * scripted runtimes are no longer environment-selectable).
+ */
+function requireAgentRuntime(source: NodeJS.ProcessEnv): "seepient" {
+  const value = source.AGENT_RUNTIME?.trim();
+  if (!value) {
+    throw new Error(
+      "AGENT_RUNTIME is required and must be \"seepient\" (the governed runtime). Add AGENT_RUNTIME=seepient to your environment.",
+    );
+  }
+  if (value !== "seepient") {
+    throw new Error(
+      `AGENT_RUNTIME=${value} is not supported. The only accepted value is "seepient" (the Pi and scripted runtimes were removed; update your compose/env files).`,
+    );
+  }
+  return "seepient";
+}
+
 async function main() {
+  requireAgentRuntime(process.env);
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL is required");
   // Shared by Prisma, the reconciliation leadership lock, and both graphile-worker
@@ -92,12 +110,7 @@ async function main() {
   const ticketBoardEnabled = process.env.TICKET_BOARD_ENABLED === "true";
   const boardEvents = createBoardEvents(realtime);
   const dataDir = process.env.DATA_DIR ?? "./data";
-  const runtime =
-    process.env.AGENT_RUNTIME === "scripted"
-      ? new ScriptedAgentRuntime()
-      : process.env.AGENT_RUNTIME === "seepient"
-        ? createSeepientAgentRuntime({ prisma, secretStore: secrets })
-        : new PiAgentRuntime({ sessionRoot: resolvePiSessionRoot(dataDir) });
+  const runtime = createSeepientAgentRuntime({ prisma, secretStore: secrets });
   // Same resolver the API uses, so both processes agree on provider, model and key.
   const { key: deploymentModelKey, configured: deploymentModelConfigured } =
     resolveDeploymentModel();

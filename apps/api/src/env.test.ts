@@ -4,6 +4,9 @@ import { loadEnv } from "./env.js";
 const base = {
   DATABASE_URL: "postgres://seepients:seepients@127.0.0.1:5433/seepients",
   NODE_ENV: "test",
+  // 029 T046: AGENT_RUNTIME is a required literal ("seepient") — every
+  // fixture boots the governed runtime.
+  AGENT_RUNTIME: "seepient",
 };
 
 describe("loadEnv", () => {
@@ -13,9 +16,9 @@ describe("loadEnv", () => {
       expect(loadEnv({ ...base, TICKET_BOARD_ENABLED: value }).ticketBoardEnabled).toBe(false);
     expect(loadEnv({ ...base, TICKET_BOARD_ENABLED: "true" }).ticketBoardEnabled).toBe(true);
   });
-  it("defaults the product path to Pi, Docker, and Graphile Worker", () => {
+  it("defaults the product path to the governed runtime, Docker, and Graphile Worker", () => {
     const env = loadEnv(base);
-    expect(env.agentRuntime).toBe("pi");
+    expect(env.agentRuntime).toBe("seepient");
     expect(env.sandboxProvider).toBe("docker");
     expect(env.wakeupDriver).toBe("graphile");
     expect(env.apiHost).toBe("127.0.0.1");
@@ -32,13 +35,24 @@ describe("loadEnv", () => {
   it("keeps explicit emulator settings for pnpm test", () => {
     const env = loadEnv({
       ...base,
-      AGENT_RUNTIME: "scripted",
       SANDBOX_PROVIDER: "fake",
       WAKEUP_DRIVER: "memory",
     });
-    expect(env.agentRuntime).toBe("scripted");
+    expect(env.agentRuntime).toBe("seepient");
     expect(env.sandboxProvider).toBe("fake");
     expect(env.wakeupDriver).toBe("memory");
+  });
+
+  it("rejects missing, legacy, and unknown AGENT_RUNTIME values actionably (T046)", () => {
+    const { AGENT_RUNTIME: _omitted, ...withoutRuntime } = base;
+    expect(() => loadEnv(withoutRuntime)).toThrow(/AGENT_RUNTIME is required/);
+    expect(() => loadEnv({ ...base, AGENT_RUNTIME: "pi" })).toThrow(/AGENT_RUNTIME=pi is not supported/);
+    expect(() => loadEnv({ ...base, AGENT_RUNTIME: "scripted" })).toThrow(
+      /AGENT_RUNTIME=scripted is not supported/,
+    );
+    expect(() => loadEnv({ ...base, AGENT_RUNTIME: "mystery" })).toThrow(
+      /AGENT_RUNTIME=mystery is not supported/,
+    );
   });
 
   it("loads an optional integrations catalog mirror", () => {
@@ -135,6 +149,7 @@ describe("loadEnv", () => {
       BETTER_AUTH_SECRET: "prod-auth-secret-with-enough-length",
       ENCRYPTION_KEY: "prod-encryption-key-with-enough-length",
       SCREEN_PROXY_SECRET: "prod-screen-proxy-secret-with-enough-length",
+      AGENT_RUNTIME: "seepient",
       SANDBOX_PROVIDER: "e2b",
       API_HOST: "0.0.0.0",
     });
@@ -152,6 +167,7 @@ describe("loadEnv", () => {
       BETTER_AUTH_SECRET: "prod-auth-secret-with-enough-length",
       ENCRYPTION_KEY: "prod-encryption-key-with-enough-length",
       SCREEN_PROXY_SECRET: "prod-screen-proxy-secret-with-enough-length",
+      AGENT_RUNTIME: "seepient",
       SANDBOX_PROVIDER: "docker",
     });
     expect(env.sandboxProvider).toBe("none");

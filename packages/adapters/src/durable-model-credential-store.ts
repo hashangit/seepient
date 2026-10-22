@@ -36,13 +36,9 @@ import { toOAuthCredential } from "./pi-credentials.js";
 export type DurableStoreSecretStore = Pick<SecretStore, "load" | "put">;
 
 /** Engine record shapes (structural mirrors; see foundations/schemas). */
-export interface DurableStoreRecord {
-  kind: "api_key" | "oauth";
-  keyValue?: string;
-  access?: string;
-  refresh?: string;
-  expires?: number;
-}
+export type DurableStoreRecord =
+  | { kind: "api_key"; keyValue: string }
+  | { kind: "oauth"; access: string; refresh: string; expires: number };
 
 export interface DurableStoreHandle {
   readonly id: string;
@@ -142,7 +138,11 @@ export class DurableModelCredentialStore {
         materialKind: "api_key" | "oauth";
         createdAt: string;
         updatedAt: string;
-        meta?: { providerAccountHint?: string; description?: string; source?: string };
+        meta?: {
+          providerAccountHint?: string;
+          description?: string;
+          source?: "env" | "disk" | "keychain" | "migration";
+        };
       }
     | undefined
   > {
