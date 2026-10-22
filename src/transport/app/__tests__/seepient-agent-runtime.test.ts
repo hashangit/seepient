@@ -710,3 +710,45 @@ describe("029 T042 — durable usage settlement", () => {
     expect(usageEvents[0]?.inputTokens).toBeNull();
   });
 });
+
+describe("029 T043 — permitted-silent completion policy", () => {
+  it("a permitted-silent run completes with no fabricated message", async () => {
+    const { agents, gates, createAgentImpl } = makeHarness();
+    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const observed: AgentRuntimeEvent[] = [];
+    const request = baseRequest({ allowSilentEmpty: true, usageOperationKind: "subagent" } as Partial<AgentRunRequest>);
+    const drain = (async () => {
+      for await (const event of runtime.run(request)) observed.push(event);
+    })();
+    await gates[0].promise;
+    agents[0].settle({ fullText: Promise.resolve(""), usage: Promise.resolve({ promptTokens: 1, completionTokens: 0, totalTokens: 1, cost: 0 }) });
+    await drain;
+    const kinds = observed.map((e) => e.type);
+    // Completes: done WITHOUT any fabricated text; usage settled (attributed).
+    expect(kinds).toEqual(["usage", "done"]);
+    const done = observed.find((e) => e.type === "done") as { text?: string };
+    expect(done.text).toBeUndefined();
+  });
+
+  it("an ordinary chat keeps the contextual fallback (distinct from the silent path)", async () => {
+    const { agents, gates, createAgentImpl } = makeHarness();
+    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const observed: AgentRuntimeEvent[] = [];
+    const request = baseRequest({ emptyResponseText: "Nothing came back this time." });
+    const drain = (async () => {
+      for await (const event of runtime.run(request)) observed.push(event);
+    })();
+    await gates[0].promise;
+    agents[0].settle({ fullText: Promise.resolve(""), usage: Promise.resolve({ promptTokens: 1, completionTokens: 0, totalTokens: 1, cost: 0 }) });
+    await drain;
+    const done = observed.find((e) => e.type === "done") as { text?: string };
+    // The ordinary chat path carries the contextual fallback, not silence.
+    expect(done.text).toBe("Nothing came back this time.");
+  });
+
+  // Budget/cancel/provider-failure distinctness is pinned where those paths
+  // live: BUDGET_EXHAUSTED at the executor's governed dispatch (T038 ledger
+  // tests + the executor budget fixture), cancellation as finishReason
+  // aborted (T025 pins), provider failure as typed error codes (T041 pins).
+  // Silence is ONLY the permitted-silent path (the two tests above).
+});
