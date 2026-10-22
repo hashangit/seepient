@@ -173,7 +173,6 @@ describe.skipIf(!enabled)("history retrieval through executor", () => {
           webOrigin: origin,
           dataDir,
           sandboxProvider: "fake",
-          agentRuntime: "pi",
           wakeupDriver: "memory",
           signupsEnabled: "true",
           composio: new ComposioEmulator(),

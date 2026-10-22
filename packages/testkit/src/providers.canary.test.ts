@@ -218,7 +218,6 @@ describePiApp("live OpenRouter product journey", () => {
       databaseUrl: process.env.DATABASE_URL!,
       dataDir,
       sandboxProvider: "fake",
-      agentRuntime: "pi",
     });
     stop = handles.stop;
     const stamp = Date.now();

@@ -37,8 +37,13 @@ export { SCRIPTED_VOICE_CATALOG_ENTRY };
 export type HostedVoiceProviderId = (typeof VOICE_CATALOG)[number]["id"];
 export type VoiceProviderId = HostedVoiceProviderId | "scripted";
 
+/**
+ * 029 T048: scripted voices are an explicit test-fixture opt-in — the old
+ * AGENT_RUNTIME=scripted gate is gone (the runtime env carries exactly one
+ * value, "seepient").
+ */
 export function scriptedVoiceEnabled() {
-  return process.env.AGENT_RUNTIME === "scripted";
+  return process.env.SEEPIENTS_SCRIPTED_VOICE === "1";
 }
 
 export function listVoiceCatalog() {

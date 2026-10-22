@@ -86,10 +86,14 @@ describe("resolveAutoReviewProviderKind", () => {
     expect(
       resolveAutoReviewProviderKind({
         SEEPIENTS_AUTO_REVIEW_PROVIDER: "scripted",
-        AGENT_RUNTIME: "scripted",
+        AGENT_RUNTIME: "seepient",
       }),
     ).toBe("scripted");
-    expect(resolveAutoReviewProviderKind({ SEEPIENTS_AUTO_REVIEW_PROVIDER: "scripted" })).toBe("llm");
+    // T048: the explicit override alone selects the scripted double — the
+    // runtime environment no longer participates.
+    expect(resolveAutoReviewProviderKind({ SEEPIENTS_AUTO_REVIEW_PROVIDER: "scripted" })).toBe(
+      "scripted",
+    );
   });
 });
 
@@ -134,16 +138,19 @@ describe("isAutoReviewCheckerConfigured", () => {
         },
       }),
     ).toBe(false);
-    expect(
-      isAutoReviewCheckerConfigured({
-        env: { SEEPIENTS_AUTO_REVIEW_PROVIDER: "scripted", AGENT_RUNTIME: "scripted" },
-      }),
-    ).toBe(true);
+    // T048: the explicit scripted override is runnable by construction —
+    // the old gate pair (true under AGENT_RUNTIME=scripted, false without)
+    // collapsed to one truth; the contradictory duplicate is gone.
     expect(
       isAutoReviewCheckerConfigured({
         env: { SEEPIENTS_AUTO_REVIEW_PROVIDER: "scripted" },
       }),
-    ).toBe(false);
+    ).toBe(true);
+    expect(
+      isAutoReviewCheckerConfigured({
+        env: { SEEPIENTS_AUTO_REVIEW_PROVIDER: "scripted", AGENT_RUNTIME: "seepient" },
+      }),
+    ).toBe(true);
   });
 });
 

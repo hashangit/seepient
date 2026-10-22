@@ -66,7 +66,6 @@ describe.skipIf(!enabled)("short original product history", () => {
                 webOrigin: "http://127.0.0.1:5173",
                 dataDir,
                 sandboxProvider: "fake",
-                agentRuntime: "pi",
                 contextStrategy: strategy,
                 wakeupDriver: "memory",
                 signupsEnabled: "true",

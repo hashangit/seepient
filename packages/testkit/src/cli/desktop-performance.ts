@@ -157,7 +157,7 @@ function performanceEnvironment(databaseUrl: string): NodeJS.ProcessEnv {
     VERIFY_DATABASE: "1",
     WAKEUP_DRIVER: "memory",
     SANDBOX_PROVIDER: "fake",
-    AGENT_RUNTIME: "scripted",
+    AGENT_RUNTIME: "seepient",
     COMPOSIO_API_KEY: "",
     OPENROUTER_API_KEY: "",
     E2B_API_KEY: "",

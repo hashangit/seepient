@@ -90,7 +90,6 @@ describe.skipIf(!enabled)("persisted Pi usage accounting", () => {
         webOrigin: origin,
         dataDir,
         sandboxProvider: "fake",
-        agentRuntime: "pi",
         contextStrategy: "current",
         wakeupDriver: "memory",
         signupsEnabled: "true",

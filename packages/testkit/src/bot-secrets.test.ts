@@ -35,7 +35,7 @@ describeIntegration("reusable credential lifecycle", () => {
       databaseUrl: process.env.DATABASE_URL!,
       dataDir,
       sandboxProvider: "fake",
-      agentRuntime: "scripted",
+      runtime: new ScriptedAgentRuntime(),
       wakeupDriver: "memory",
       defaultProvider: "scripted",
       defaultModel: "scripted",

@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { ScriptedAgentRuntime } from "@seepients/adapters";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { approvalEffectKey } from "@seepients/core/node/approval-effect-key";
@@ -9,7 +10,6 @@ import { discardBotIntroFromCreate } from "./discard-bot-intro.js";
 
 process.env.WAKEUP_DRIVER = "memory";
 process.env.SANDBOX_PROVIDER = "fake";
-process.env.AGENT_RUNTIME = "scripted";
 
 const hasDb = process.env.VERIFY_DATABASE === "1" && Boolean(process.env.DATABASE_URL);
 const describeIntegration = hasDb ? describe : describe.skip;
@@ -25,7 +25,7 @@ describeIntegration("run executor lifecycle", () => {
       databaseUrl: process.env.DATABASE_URL!,
       dataDir,
       sandboxProvider: "fake",
-      agentRuntime: "scripted",
+      runtime: new ScriptedAgentRuntime(),
       wakeupDriver: "memory",
       defaultProvider: "scripted",
       defaultModel: "scripted",

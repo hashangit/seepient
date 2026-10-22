@@ -159,7 +159,6 @@ describe.skipIf(!enabled)("product history diagnostic loop", () => {
             webOrigin: "http://127.0.0.1:5173",
             dataDir,
             sandboxProvider: "fake",
-            agentRuntime: "pi",
             runtime: new PiAgentRuntime({
               onContextDecision(decision) {
                 selectedInputEstimates.push(decision.estimatedInputTokens);

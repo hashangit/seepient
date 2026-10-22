@@ -92,7 +92,6 @@ describe.skipIf(!databaseAvailable)("offline Slack customer-support eval", () =>
             webOrigin: "http://127.0.0.1:5173",
             dataDir,
             sandboxProvider: "fake",
-            agentRuntime: "pi",
             wakeupDriver: "memory",
             signupsEnabled: "true",
             composio,

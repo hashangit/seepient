@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { ScriptedAgentRuntime } from "@seepients/adapters";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { ComposioEmulator, ExpoPushProvider, loadPushToken } from "@seepients/adapters";
@@ -29,7 +30,6 @@ type ProtectedRpcPath = Exclude<RpcPath<typeof appContract>, "health">;
 
 process.env.WAKEUP_DRIVER = "memory";
 process.env.SANDBOX_PROVIDER = "fake";
-process.env.AGENT_RUNTIME = "scripted";
 
 const hasDb = process.env.VERIFY_DATABASE === "1" && Boolean(process.env.DATABASE_URL);
 const describeWithDatabase = hasDb ? describe : describe.skip;
@@ -47,7 +47,7 @@ describeWithDatabase("API authorization and resource isolation", () => {
       databaseUrl: process.env.DATABASE_URL!,
       dataDir,
       sandboxProvider: "fake",
-      agentRuntime: "scripted",
+      runtime: new ScriptedAgentRuntime(),
       wakeupDriver: "memory",
       signupsEnabled: "true",
       composio: new ComposioEmulator(),

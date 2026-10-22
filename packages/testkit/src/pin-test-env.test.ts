@@ -7,7 +7,8 @@ const itOffline = process.env.VERIFY_DATABASE ? it.skip : it;
 
 describeFast("pnpm test emulator pin", () => {
   it("forces scripted runtime, fake sandbox, and in-memory wakeup", () => {
-    expect(process.env.AGENT_RUNTIME).toBe("scripted");
+    expect(process.env.AGENT_RUNTIME).toBe("seepient");
+    expect(process.env.SEEPIENTS_SCRIPTED_VOICE).toBe("1");
     expect(process.env.SANDBOX_PROVIDER).toBe("fake");
     expect(process.env.WAKEUP_DRIVER).toBe("memory");
   });
@@ -31,12 +32,15 @@ describeFast("pnpm test emulator pin", () => {
     ) as {
       scripts: Record<string, string>;
     };
-    expect(pkg.scripts.test).toBe("vitest run");
-    expect(pkg.scripts["test:integration"]).toContain("harness.ts --integration");
-    expect(pkg.scripts["test:e2e"]).toContain("harness.ts --e2e");
-    expect(pkg.scripts["test:topology"]).toContain("cli/topology.ts");
-    expect(pkg.scripts["test:canary"]).toContain("cli/canary.ts");
-    expect(pkg.scripts["test:computer"]).toContain("cli/computer.ts");
+    // The Seepient root gates vitest behind build + typecheck (the imported
+    // Rakazo layout had a bare "vitest run"); the harness entrypoints are
+    // invoked directly from the testkit package (no root aliases).
+    expect(pkg.scripts.test).toContain("vitest run");
+    expect(pkg.scripts["test:integration"]).toBeUndefined();
+    expect(pkg.scripts["test:e2e"]).toBeUndefined();
+    expect(pkg.scripts["test:topology"]).toBeUndefined();
+    expect(pkg.scripts["test:canary"]).toBeUndefined();
+    expect(pkg.scripts["test:computer"]).toBeUndefined();
     expect(pkg.scripts.verify).toBeUndefined();
     expect(pkg.scripts["verify:fast"]).toBeUndefined();
     expect(pkg.scripts["verify:providers"]).toBeUndefined();

@@ -3,7 +3,10 @@
  * Pi, Docker, Graphile, or live Composio. Opt-in canaries set VERIFY_PROVIDERS.
  */
 if (!process.env.VERIFY_PROVIDERS) {
-  process.env.AGENT_RUNTIME = "scripted";
+  // 029 T048: the required-literal runtime value; deterministic doubles are
+  // injected per-rig (ScriptedAgentRuntime), never selected through the env.
+  process.env.AGENT_RUNTIME = "seepient";
+  process.env.SEEPIENTS_SCRIPTED_VOICE = "1";
   process.env.SANDBOX_PROVIDER = "fake";
   process.env.CLOUD_AGENT_PROVIDER = "emulator";
   delete process.env.CURSOR_API_KEY;

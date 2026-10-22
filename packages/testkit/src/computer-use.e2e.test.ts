@@ -35,7 +35,6 @@ describeLive("real model and sandbox computer journey", () => {
       databaseUrl: process.env.DATABASE_URL!,
       dataDir,
       sandboxProvider,
-      agentRuntime: "pi",
       e2bApiKey: process.env.E2B_API_KEY,
       boxApiKey: process.env.BOX_API_KEY,
       boxApiUrl: process.env.BOX_API_URL ?? process.env.BOX_BASE_URL,

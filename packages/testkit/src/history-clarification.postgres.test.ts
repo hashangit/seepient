@@ -79,7 +79,6 @@ describe.skipIf(!enabled)("product history clarification eval boundary", () => {
               webOrigin: "http://127.0.0.1:5173",
               dataDir,
               sandboxProvider: "fake",
-              agentRuntime: "pi",
               runtime: new PiAgentRuntime(),
               contextStrategy: "snapshots",
               wakeupDriver: "memory",

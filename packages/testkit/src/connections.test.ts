@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { ScriptedAgentRuntime } from "@seepients/adapters";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -19,7 +20,6 @@ type Actor = { spaceId: string; userId: string };
 
 process.env.WAKEUP_DRIVER = "memory";
 process.env.SANDBOX_PROVIDER = "fake";
-process.env.AGENT_RUNTIME = "scripted";
 
 const hasDb = process.env.VERIFY_DATABASE === "1" && Boolean(process.env.DATABASE_URL);
 const describeWithDatabase = hasDb ? describe : describe.skip;
@@ -52,7 +52,7 @@ describeWithDatabase("Composio catalog reconciliation", () => {
       databaseUrl: process.env.DATABASE_URL!,
       dataDir,
       sandboxProvider: "fake",
-      agentRuntime: "scripted",
+      runtime: new ScriptedAgentRuntime(),
       composio,
       pipedream,
       remoteConnectors: {

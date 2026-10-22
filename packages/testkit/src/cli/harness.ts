@@ -13,7 +13,10 @@ const e2e = process.argv.includes("--e2e");
 const sandboxArg = process.argv.find((arg) => arg.startsWith("--sandbox="));
 const specArg = process.argv.find((arg) => arg.startsWith("--spec="));
 const grepArg = process.argv.find((arg) => arg.startsWith("--grep="));
-const runtimeArg = process.argv.find((arg) => arg.startsWith("--runtime="));
+// 029 T048: the governed runtime is the only selectable runtime; the old
+// --runtime=pi|scripted flag is gone (deterministic doubles ride injected
+// runtimes in-process, not the environment).
+const agentRuntime = "seepient" as const;
 const sandboxProvider = sandboxArg?.slice("--sandbox=".length) ?? "fake";
 const e2eSpec = specArg?.slice("--spec=".length);
 const e2eGrep = grepArg?.slice("--grep=".length);
@@ -27,9 +30,6 @@ if (!["fake", "e2b", "daytona", "box"].includes(sandboxProvider)) {
 }
 if (integration && sandboxProvider !== "fake") {
   throw new Error("Integration tests only support the fake sandbox");
-}
-if (agentRuntime !== "pi" && agentRuntime !== "scripted") {
-  throw new Error('Runtime must be "pi" or "scripted"');
 }
 if (sandboxProvider === "e2b" && !process.env.E2B_API_KEY) {
   throw new Error("E2B_API_KEY is required when --sandbox=e2b");

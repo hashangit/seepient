@@ -160,7 +160,7 @@ function configureEnvironment() {
     NODE_ENV: "test",
     WAKEUP_DRIVER: "memory",
     SANDBOX_PROVIDER: "fake",
-    AGENT_RUNTIME: "scripted",
+    AGENT_RUNTIME: "seepient",
     COMPOSIO_API_KEY: "",
     BETTER_AUTH_SECRET: "mobile-screenshot-auth-secret-32chars",
     ENCRYPTION_KEY: "mobile-screenshot-encryption-key-32chars",

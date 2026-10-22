@@ -29,7 +29,6 @@ async function main() {
     COMPOSIO_API_KEY: "",
     WAKEUP_DRIVER: "memory",
     SANDBOX_PROVIDER: sandbox.provider,
-    AGENT_RUNTIME: "pi",
     BETTER_AUTH_SECRET: "computer-e2e-auth-secret-32chars",
     ENCRYPTION_KEY: "computer-e2e-encryption-key-32chars",
     SANDBOX_SUPERVISOR_TOKEN: "computer-e2e-supervisor-token-32chars",

@@ -1,4 +1,5 @@
 import { mkdtempSync } from "node:fs";
+import { ScriptedAgentRuntime } from "@seepients/adapters";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ThreadSnapshot } from "@seepients/contracts";
@@ -11,7 +12,6 @@ type App = { request: (input: string, init?: RequestInit) => Promise<Response> }
 
 process.env.WAKEUP_DRIVER = "memory";
 process.env.SANDBOX_PROVIDER = "fake";
-process.env.AGENT_RUNTIME = "scripted";
 
 const hasDb = process.env.VERIFY_DATABASE === "1" && Boolean(process.env.DATABASE_URL);
 const describeAttachments = hasDb ? describe : describe.skip;
@@ -33,7 +33,7 @@ describeAttachments("chat attachments", () => {
       databaseUrl: process.env.DATABASE_URL!,
       dataDir,
       sandboxProvider: "fake",
-      agentRuntime: "scripted",
+      runtime: new ScriptedAgentRuntime(),
     });
     app = handles.app;
     stop = handles.stop;

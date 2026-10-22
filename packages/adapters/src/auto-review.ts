@@ -92,7 +92,9 @@ export function resolveAutoReviewProviderKind(
 ): AutoReviewProviderKind {
   const requested = env.SEEPIENTS_AUTO_REVIEW_PROVIDER?.trim().toLowerCase();
   if (requested === "jev") return typesafeApiKey(env) ? "jev" : "llm";
-  if (requested === "scripted" && env.AGENT_RUNTIME === "scripted") return "scripted";
+  // 029 T048: the scripted review double is an explicit opt-in — the
+  // runtime environment no longer participates in the selection.
+  if (requested === "scripted") return "scripted";
   return "llm";
 }
 

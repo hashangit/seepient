@@ -26,19 +26,19 @@ const ctx = {
   signal: new AbortController().signal,
 };
 
-const previousRuntime = process.env.AGENT_RUNTIME;
+const previousScriptedVoice = process.env.SEEPIENTS_SCRIPTED_VOICE;
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
-  if (previousRuntime === undefined) delete process.env.AGENT_RUNTIME;
-  else process.env.AGENT_RUNTIME = previousRuntime;
+  if (previousScriptedVoice === undefined) delete process.env.SEEPIENTS_SCRIPTED_VOICE;
+  else process.env.SEEPIENTS_SCRIPTED_VOICE = previousScriptedVoice;
   installLogger(createLogger({ service: "seepients", level: "off", sinks: [] }));
 });
 
 describe("createVoiceProvider", () => {
   it("exposes the hosted catalog behind one factory", () => {
-    process.env.AGENT_RUNTIME = "pi";
+    delete process.env.SEEPIENTS_SCRIPTED_VOICE;
     expect(VOICE_CATALOG.map((entry) => entry.id)).toEqual([
       "elevenlabs",
       "openai",
@@ -62,8 +62,8 @@ describe("createVoiceProvider", () => {
     expect(() => createVoiceProvider("scripted")).toThrow(/unknown voice provider/i);
   });
 
-  it("adds the scripted fixture only when the agent runtime is scripted", () => {
-    process.env.AGENT_RUNTIME = "scripted";
+  it("adds the scripted fixture only under the explicit fixture flag (T048)", () => {
+    process.env.SEEPIENTS_SCRIPTED_VOICE = "1";
     expect(listVoiceCatalog().some((entry) => entry.id === "scripted")).toBe(true);
     expect(isVoiceProviderId("scripted")).toBe(true);
     expect(createVoiceProvider("scripted").describe().id).toBe("scripted");

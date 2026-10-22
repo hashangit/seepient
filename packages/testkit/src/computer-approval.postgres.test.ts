@@ -101,7 +101,6 @@ describe.skipIf(!databaseAvailable)("offline Pi computer approval", () => {
           webOrigin: fixtureOrigin,
           dataDir,
           sandboxProvider: "fake",
-          agentRuntime: "pi",
           wakeupDriver: "memory",
           signupsEnabled: "true",
           composio: new ComposioEmulator(),

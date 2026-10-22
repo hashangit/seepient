@@ -70,7 +70,6 @@ describe.skipIf(!databaseAvailable)("offline Pi product journey", () => {
         webOrigin: fixtureOrigin,
         dataDir,
         sandboxProvider: "fake",
-        agentRuntime: "pi",
         wakeupDriver: "memory",
         signupsEnabled: "true",
         composio: new ComposioEmulator(),

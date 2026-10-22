@@ -1,4 +1,5 @@
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { ScriptedAgentRuntime } from "@seepients/adapters";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -26,7 +27,6 @@ import { sessionCookieHeader } from "./index.js";
 type App = { request: (input: string, init?: RequestInit) => Promise<Response> };
 process.env.WAKEUP_DRIVER = "memory";
 process.env.SANDBOX_PROVIDER = "fake";
-process.env.AGENT_RUNTIME = "scripted";
 
 const hasDb = process.env.VERIFY_DATABASE === "1" && Boolean(process.env.DATABASE_URL);
 const describeJourneys = hasDb ? describe : describe.skip;
@@ -117,7 +117,7 @@ describeJourneys("required product journeys", () => {
       databaseUrl: process.env.DATABASE_URL!,
       dataDir,
       sandboxProvider: "fake",
-      agentRuntime: "scripted",
+      runtime: new ScriptedAgentRuntime(),
       composio: new ComposioEmulator(),
     });
     app = handles.app;

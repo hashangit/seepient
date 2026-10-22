@@ -214,7 +214,11 @@ test("connects, lists, and uses an OpenAI-compatible endpoint", async ({ page },
     await page.getByLabel("OpenAI-compatible server URL").fill(baseUrl);
     await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
 
-    if (process.env.AGENT_RUNTIME === "pi") {
+    // T048: the governed runtime is the only runtime — the local-model
+    // assertions run unless the stack is on the scripted-voice fixture
+    // (where no local model reply is possible). Never silently skipped in
+    // the standard e2e arrangement.
+    if (process.env.SEEPIENTS_SCRIPTED_VOICE !== "1") {
       await page.getByRole("button", { name: "Close model settings" }).click();
       const composer = page.getByPlaceholder(/Message/);
       await composer.fill("Reply with the endpoint verification message.");

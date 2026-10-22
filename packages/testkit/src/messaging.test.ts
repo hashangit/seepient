@@ -1,4 +1,5 @@
 import { randomInt } from "node:crypto";
+import { ScriptedAgentRuntime } from "@seepients/adapters";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -12,7 +13,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 process.env.WAKEUP_DRIVER = "memory";
 process.env.SANDBOX_PROVIDER = "fake";
-process.env.AGENT_RUNTIME = "scripted";
 
 const hasDb = process.env.VERIFY_DATABASE === "1" && Boolean(process.env.DATABASE_URL);
 const describeMessaging = hasDb ? describe.sequential : describe.skip;
@@ -50,7 +50,7 @@ describeMessaging("messaging surface journeys", () => {
       databaseUrl: process.env.DATABASE_URL!,
       dataDir,
       sandboxProvider: "fake",
-      agentRuntime: "scripted",
+      runtime: new ScriptedAgentRuntime(),
       // These journeys exercise the Poke-style open line; the linking journey
       // below covers the default (linking-only) posture explicitly.
       messagingOpenSignup: true,

@@ -53,7 +53,7 @@ describe("createAutoReviewProvider", () => {
   it("resolves the default kind from options.env instead of process.env", () => {
     expect(
       createAutoReviewProvider(undefined, {
-        env: { SEEPIENTS_AUTO_REVIEW_PROVIDER: "scripted", AGENT_RUNTIME: "scripted" },
+        env: { SEEPIENTS_AUTO_REVIEW_PROVIDER: "scripted" },
       }),
     ).toBeInstanceOf(ScriptedAutoReviewProvider);
     expect(
