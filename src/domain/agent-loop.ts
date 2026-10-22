@@ -89,6 +89,20 @@ export interface AgentLoopOptions {
    * suppression and image-bearing content are the store's contract.
    */
   claimSteering?: (seenIds: string[]) => Promise<ClaimedSteeringItem[]>;
+  /**
+   * 029 S17/T041 (FR-035/D10): the mid-loop model-handoff seam — the
+   * fallback chain is consumed INSIDE the loop at the failed model-call
+   * boundary. On a terminal model-setup failure the loop asks for the next
+   * hop; `onModelChange` is awaited (persisted by the caller under the run
+   * lease) BEFORE the replacement request fires. Committed results stand:
+   * the loop continues the SAME run (never a whole-run retry).
+   */
+  modelHandoff?: {
+    /** Ordered fallback models (provider + model id). */
+    fallbacks: ReadonlyArray<{ provider: string; id: string }>;
+    /** Notify + persist the handoff; rejects → the handoff is refused. */
+    onModelChange(provider: string, id: string): Promise<void>;
+  };
 }
 
 /** 029 S15/T034: a durably claimed steering message (mirrors the app contract). */
@@ -126,6 +140,9 @@ export interface AgentLoopResult {
   error?: AgentLoopError;
   /** Set when finishReason is "suspended" — the governed pause to durably park (029 S13). */
   suspension?: AgentSuspension;
+  /** 029 S17/T041: the applied mid-loop model handoff (persisted before the
+   * replacement request; committed results stand). */
+  modelHandoff?: { fromModel?: string; toProvider: string; toModel: string };
 }
 
 /**
@@ -411,6 +428,7 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
   } = options;
   const { onSuspension } = options;
   const { claimSteering: claimSteeringPerStep } = options;
+  const modelHandoff = options.modelHandoff;
 
   const hooks = rawHooks ?? createHookExecutor();
 
@@ -579,6 +597,9 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
   let suspension: AgentSuspension | null = null;
   /** 029 S15/T034: steering ids already claimed this run (seen-ID suppression). */
   const claimedSteeringIds: string[] = [];
+  /** 029 S17/T041: remaining fallback hops + the applied handoff record. */
+  const handoffChain = [...(options.modelHandoff?.fallbacks ?? [])];
+  let appliedHandoff: { fromProvider?: string; fromModel?: string; toProvider: string; toModel: string } | null = null;
   /** Claimed-but-not-yet-injected steering items for the next provider request. */
   let pendingSteering: ClaimedSteeringItem[] = [];
   let loopError: AgentLoopError | undefined;
@@ -710,6 +731,47 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
           }
           response = acc.toResponse();
         } catch (err) {
+          // 029 S17/T041 (FR-035/D10): mid-loop handoff at the failed
+          // model-call boundary. A terminal model-setup failure consumes the
+          // NEXT fallback hop: onModelChange is awaited as persisted FIRST,
+          // then the loop continues the same run — committed results stand,
+          // the request/effect boundary is respected (no whole-run retry).
+          if (
+            modelHandoff &&
+            handoffChain.length > 0 &&
+            (err instanceof SeepientError &&
+              ["MODEL_UNAVAILABLE_FOR_AUTH", "MODEL_CREDENTIAL_RETIRED", "PROVIDER_ERROR", "MODEL_FAILED"].includes(err.code))
+          ) {
+            const next = handoffChain.shift()!;
+            try {
+              await modelHandoff.onModelChange(next.provider, next.id);
+            } catch (persistErr) {
+              finishReason = "error";
+              loopError = {
+                message: persistErr instanceof Error ? persistErr.message : String(persistErr),
+                code: "MODEL_CHANGE_PERSIST_FAILED",
+                retryable: false,
+                provider: currentModel,
+              };
+              await hooks.onError(toSeepientError(persistErr, "MODEL_CHANGE_PERSIST_FAILED"));
+              break;
+            }
+            appliedHandoff = {
+              fromProvider: undefined,
+              fromModel: currentModel,
+              toProvider: next.provider,
+              toModel: next.id,
+            };
+            currentModel = next.id;
+            if (!options.modelOverride || typeof options.modelOverride === "string") {
+              stepOverride = { model: next.id };
+            } else {
+              stepOverride = { ...options.modelOverride, model: next.id };
+            }
+            // Retry the SAME step (the tool-call boundary stands); the empty
+            // accumulator resets with the while(true) loop.
+            continue;
+          }
           const seepientErr = toSeepientError(err, "PROVIDER_ERROR");
           finishReason = "error";
           loopError = { message: seepientErr.message, code: seepientErr.code || "PROVIDER_ERROR", retryable: seepientErr.retryable, provider: currentModel };
@@ -1097,5 +1159,6 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
     finishReason,
     error: loopError,
     ...(suspension ? { suspension } : {}),
+    ...(appliedHandoff ? { modelHandoff: appliedHandoff } : {}),
   };
 }

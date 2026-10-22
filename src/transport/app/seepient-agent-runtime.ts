@@ -413,7 +413,23 @@ export class SeepientAgentRuntime implements AgentRuntime {
         tools,
         // 029 S15/T034: the per-step steering claim rides the engine config
         // (the session forwards it into the loop's per-step boundary claim).
-        config: { ...base.config, claimSteering: request.claimSteering },
+        config: {
+          ...base.config,
+          claimSteering: request.claimSteering,
+          // 029 S17/T041 (B-2/D10): the fallback chain rides the config into
+          // the loop's per-step handoff seam — onModelChange is ALREADY
+          // lease-fenced upstream (persisted on the run row before the
+          // replacement request).
+          modelHandoff:
+            request.fallbackModels && request.fallbackModels.length > 0
+              ? {
+                  fallbacks: request.fallbackModels.map((m) => ({ provider: m.provider, id: m.id })),
+                  onModelChange: async (provider: string, id: string) => {
+                    await request.onModelChange?.(provider, id);
+                  },
+                }
+              : undefined,
+        },
       });
 
       const providerWork: OwnedWork = {

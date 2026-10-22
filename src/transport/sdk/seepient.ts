@@ -775,12 +775,20 @@ async function chat(userMessage: string): Promise<AgentResponse> {
             middleware: opts.middleware,
             approveTool: opts.approveTool,
             wiredPipeline,
-            // 029 S15/T034: per-step durable steering claim (config-carried
-            // from the runtime adapter's composition). The items map to the
-            // loop's tagged-injection shape (id + text + images).
+            // 029 S15/T034 + S17/T041: per-step steering claim + the
+            // mid-loop model-handoff chain (both config-carried from the
+            // runtime adapter's composition).
             claimSteering: (opts.config as
               | { claimSteering?: (seenIds: string[]) => Promise<Array<{ id: string; text: string; images?: Array<{ data: string; mimeType: string }> }>> }
               | undefined)?.claimSteering,
+            modelHandoff: (
+              opts.config as {
+                modelHandoff?: {
+                  fallbacks: ReadonlyArray<{ provider: string; id: string }>;
+                  onModelChange(provider: string, id: string): Promise<void>;
+                };
+              }
+            )?.modelHandoff,
             tenancyMode,
             onStep: (step) => {
               if (streamOptions?.onStep) streamOptions.onStep(step);
