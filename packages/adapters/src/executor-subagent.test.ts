@@ -107,6 +107,7 @@ function fixture(
       thread: { findUniqueOrThrow: vi.fn(async () => ({ id: run.threadId, groupId: null })), update: vi.fn(async () => ({ nextEventSeq: 1 })) },
       message: { findMany: vi.fn(async () => []) },
       task: { findUniqueOrThrow: vi.fn(async () => ({ id: run.taskId, prompt: "p" })), updateMany: vi.fn(async () => ({ count: 1 })) },
+      event: { findFirst: vi.fn(async () => null) },
       connection: { findMany: vi.fn(async () => []) },
       spaceModelPreference: { findFirst: vi.fn(async () => null) },
       userModelCredential: { findFirst: vi.fn(async () => null) },

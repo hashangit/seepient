@@ -623,6 +623,15 @@ export type AgentRuntimeEvent =
       /** 029 gate repair (P1-1): the governed tool that requested the pause —
        * the resume-arming key recorded into the waiting state. */
       tool?: string;
+      /** 029 gate repair round 3 (P2.4): the engine audit identity of the
+       * suspended action — parked with the waiting state so the terminal
+       * audit can close after the engine run instance is gone. */
+      auditBinding?: {
+        actionId: string;
+        actionDigest: string;
+        principalId: string;
+        runId: string;
+      };
     }
   | { type: "done"; text?: string };
 

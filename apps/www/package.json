@@ -17,7 +17,7 @@
     "@seepients/core": "workspace:*",
     "@seepients/ui-web": "workspace:*",
     "@vercel/functions": "3.9.7",
-    "astro": "7.3.2",
+    "astro": "7.3.3",
     "posthog-js": "1.430.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",

@@ -28,6 +28,22 @@ interface AdmissionTx {
   };
 }
 
+/**
+ * 029 gate repair round 3 (D1): THE one parser for RUN_TOOL_CALL_BUDGET —
+ * both composition roots (api loadEnv, worker index) construct the ledger
+ * from this value so the two processes can never disagree about whether the
+ * budget is on. Unset/blank → 400 (budget ON); "0" → disabled (0); any
+ * other invalid value is a boot error, never a silent fallback.
+ */
+export function parseRunToolCallBudget(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === "") return 400;
+  const value = Number(raw.trim());
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error("RUN_TOOL_CALL_BUDGET must be a non-negative integer (tool calls per run)");
+  }
+  return value;
+}
+
 export class SharedBudgetLedger implements SharedBudgetLedgerContract {
   constructor(
     private readonly prisma: Pick<PrismaClient, "$transaction">,

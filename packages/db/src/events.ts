@@ -158,10 +158,38 @@ export interface PauseRunForInput {
     /** 029 gate repair (P1-1): the governed tool that requested the pause —
      * the resume-arming key consumed from the recorded decision. */
     tool?: string;
+    /**
+     * 029 gate repair round 3 (D2/D3): sha256 over canonical JSON of
+     * {tool, arguments} of the EXACT suspended request. Written here, copied
+     * onto the run.input_decision decision record at accept time, and
+     * re-derived from the actual call at the resumed dispatch — one binding
+     * across pause → answer → resume.
+     */
+    actionDigest?: string;
   };
 }
 
 const CHOICE_ASK_CHECKPOINT_KIND = "choice_ask_v1";
+
+/**
+ * 029 gate repair round 3 (D2): how a governed permission card's answer maps
+ * onto the durable decision. Approve-like ids arm the re-dispatch; deny-like
+ * ids terminate it; anything else records a plain spoken answer.
+ */
+const APPROVE_LIKE_ANSWERS: Record<string, true> = {
+  approve: true,
+  allow: true,
+  always: true,
+  confirm: true,
+  yes: true,
+};
+const DENY_LIKE_ANSWERS: Record<string, true> = {
+  deny: true,
+  reject: true,
+  decline: true,
+  no: true,
+  cancel: true,
+};
 
 function choiceAskCheckpoint(actions: Array<{ id: string; label: string }>): string {
   return JSON.stringify({ kind: CHOICE_ASK_CHECKPOINT_KIND, actions });
@@ -648,30 +676,32 @@ async function findPendingAsk(
 }
 
 /**
- * Latest `run.waiting_input` event payload for a run, tolerating stores that
- * do not expose an event model (minimal fakes). Production PrismaClient
- * always has the model, so D09 expiry and resume arming read it for real;
- * fixtures without it simply don't exercise those paths.
+ * Latest `run.waiting_input` event payload for a run. Production
+ * PrismaClient always exposes the event model (D4: no fake tolerance —
+ * fixtures model the event for real); D09 expiry and the round-3 digest
+ * binding read it for real.
  */
 async function latestWaitingInputPayload(
-  db: { event?: { findFirst(query: unknown): Promise<unknown> } },
+  db: { event: { findFirst(query: unknown): Promise<unknown> } },
   runId: string,
-): Promise<{ expiresAt?: string; tool?: string } | null> {
-  if (!db.event) return null;
-  const row = (await db.event.findFirst({
+): Promise<{ expiresAt?: string; tool?: string; actionDigest?: string } | null> {
+  const row = await db.event.findFirst({
     where: { runId, type: "run.waiting_input" },
     orderBy: { seq: "desc" },
     select: { payload: true },
-  })) as unknown;
+  });
   if (typeof row !== "object" || row === null || !("payload" in row)) return null;
   const payload: unknown = row.payload;
   if (typeof payload !== "object" || payload === null) return null;
-  const result: { expiresAt?: string; tool?: string } = {};
+  const result: { expiresAt?: string; tool?: string; actionDigest?: string } = {};
   if ("expiresAt" in payload && typeof payload.expiresAt === "string") {
     result.expiresAt = payload.expiresAt;
   }
   if ("tool" in payload && typeof payload.tool === "string") {
     result.tool = payload.tool;
+  }
+  if ("actionDigest" in payload && typeof payload.actionDigest === "string") {
+    result.actionDigest = payload.actionDigest;
   }
   return result;
 }
@@ -696,11 +726,7 @@ async function commitAnswerRunInput(
     select: { botId: true, userId: true, checkpoint: true, status: true },
   });
   if (!run) return null;
-  // `status === undefined` never happens against real Postgres (the column is
-  // non-null); it only means a minimal fixture omitted the field — treat as
-  // waiting so fixture answers keep exercising the accept path.
-  const runWaiting = run.status === undefined || run.status === "waiting_input";
-  if (!runWaiting) {
+  if (run.status !== "waiting_input") {
     // The run moved on (answered/resumed/cancelled) after the thread lock:
     // the D4 outcome for an answer against a non-waiting run is `duplicate`.
     // (Reachable now that the lock serializes racing answers — the loser
@@ -780,32 +806,51 @@ async function commitAnswerRunInput(
       ? pauseClassRaw
       : "permission";
   const pauseToken = pauseMetaParts?.[2];
-  // Gate-repair (P1-1): the effective binding (explicit caller record or the
-  // server-issued synthesis) + the governed tool recorded at suspension —
-  // both feed the durable decision event the resumed attempt consumes.
+  // Gate-repair round 3 (D2): the synthesized server-side binding carries the
+  // REAL decision and the EXACT suspended request's actionDigest (read from
+  // the waiting payload, the same value the resumed dispatch re-derives).
+  // Choice/secret/takeover keep the round-2 "answer" semantics (choice
+  // answers flow via checkpoint; only permission-class arms auto-approve).
+  const waitingPayload = pauseMeta ? await latestWaitingInputPayload(tx, input.runId) : undefined;
   let effectiveDecisionRecord: AnswerRunInput["decisionRecord"] | undefined;
   let governedReplayTool: string | undefined;
   if (pauseMeta) {
+    if (waitingPayload?.tool) governedReplayTool = waitingPayload.tool;
+    // A governed permission decision is the run owner's call (the same
+    // principal rule as "always allow"): any other thread member's answer is
+    // foreign and never binds (D2 principal binding; tested at accept).
+    const permissionDecision = (() => {
+      if (pauseClass !== "permission") return "answer" as const;
+      if (run.userId !== input.answeredByUserId) return null;
+      const normalized = input.answer.trim().toLowerCase();
+      if (APPROVE_LIKE_ANSWERS[normalized]) return "approve" as const;
+      if (DENY_LIKE_ANSWERS[normalized]) return "deny" as const;
+      return "answer" as const;
+    })();
+    if (permissionDecision === null) {
+      return { threadId: input.threadId, seq: 0, outcome: "foreign" };
+    }
     const effectiveRecord: GovernedDecisionRecord = input.decisionRecord ?? {
       requestId: pauseToken!,
       pauseClass,
-      decision: "answer",
-      answerDigest: pauseToken!,
+      decision: permissionDecision,
+      answerDigest: waitingPayload?.actionDigest ?? pauseToken!,
       operationRef: `pause:${pauseToken}`,
     };
     if (effectiveRecord.requestId !== pauseToken) {
       return { threadId: input.threadId, seq: 0, outcome: "foreign" };
     }
-    // The digest-or-version binding for a governed pause is the recorded
-    // waiting state itself: the answer was given for THIS pause token, and
-    // the token changed means the pause was replaced (re-ask) → stale.
-    if (effectiveRecord.answerDigest !== pauseToken) {
+    // The digest-or-version binding: an explicit record must bind to THIS
+    // pause generation — either the round-2 pause token or the round-3
+    // waiting payload's actionDigest. Anything else answers an older
+    // generation of the request → stale.
+    const digestBinding =
+      waitingPayload?.actionDigest !== undefined
+        ? [pauseToken!, waitingPayload.actionDigest]
+        : [pauseToken!];
+    if (!digestBinding.includes(effectiveRecord.answerDigest)) {
       return { threadId: input.threadId, seq: 0, outcome: "stale" };
     }
-    // Gate-repair (P1-1): carry the governed tool recorded at suspension so
-    // the resumed attempt can auto-approve EXACTLY that re-dispatch.
-    const waitingPayload = await latestWaitingInputPayload(tx, input.runId);
-    if (waitingPayload?.tool) governedReplayTool = waitingPayload.tool;
     effectiveDecisionRecord = effectiveRecord;
   }
   const queued = await tx.run.updateMany({
@@ -937,6 +982,15 @@ async function commitAnswerRunInput(
   // (the old `input.decisionRecord` gate skipped the event for every
   // production answer), carrying the governed tool for resume arming.
   if (effectiveDecisionRecord) {
+    // 029 gate repair round 3 (D2/D3): the continuation record carries the
+    // full binding the resumed attempt verifies — the suspension's
+    // actionDigest (same value as the waiting payload), the expiry copied
+    // from the pause, and an explicit unconsumed marker the dispatch CAS
+    // flips in one transaction with the effect approval.
+    // The suspension's own binding — the same value the waiting payload
+    // carries and the resumed dispatch re-derives. Absent for pauses that
+    // predate round 3: those never arm (arming requires the digest).
+    const actionDigest = waitingPayload?.actionDigest;
     await appendEventInTransaction(tx, {
       spaceId: input.spaceId,
       threadId: input.threadId,
@@ -945,6 +999,9 @@ async function commitAnswerRunInput(
       runId: input.runId,
       payload: {
         ...effectiveDecisionRecord,
+        ...(actionDigest ? { actionDigest } : {}),
+        ...(waitingPayload?.expiresAt ? { expiresAt: waitingPayload.expiresAt } : {}),
+        consumedAt: null,
         ...(governedReplayTool ? { tool: governedReplayTool } : {}),
         answeredByUserId: input.answeredByUserId,
         recordedAnswer: secretAsk ? "" : (selectedChoice?.id ?? input.answer),

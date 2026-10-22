@@ -351,6 +351,16 @@ export type ExternalEffectStore = {
   };
 };
 
+/** The model-visible result for a user-denied action — one authority, shared
+ * by the duplicate-effect gate and the governed deny continuation (029 gate
+ * repair round 3). */
+export function deniedActionResult(): { error: string } {
+  return {
+    error:
+      "The user denied this action. Do not retry or rephrase it; tell the user and ask what they want instead.",
+  };
+}
+
 export function resolveDuplicateEffectGate(
   effect: { status: string; result?: unknown },
   toolName: string,
@@ -359,13 +369,7 @@ export function resolveDuplicateEffectGate(
     return { action: "return", result: effect.result ?? { duplicate: true } };
   }
   if (effect.status === "denied") {
-    return {
-      action: "return",
-      result: {
-        error:
-          "The user denied this action. Do not retry or rephrase it; tell the user and ask what they want instead.",
-      },
-    };
+    return { action: "return", result: deniedActionResult() };
   }
   if (effect.status === "executing") {
     return { action: "uncertain", toolName };

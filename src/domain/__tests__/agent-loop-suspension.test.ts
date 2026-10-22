@@ -49,6 +49,12 @@ async function expectSuspended(result: AgentLoopResult): Promise<void> {
     toolName: "governed_pause_tool",
     pauseClass: "permission",
     pauseToken: "pause-token-1",
+    auditBinding: {
+      actionId: expect.any(String),
+      actionDigest: expect.any(String),
+      principalId: expect.any(String),
+      runId: expect.any(String),
+    },
   });
   // No model-visible tool result for the suspended call.
   const toolMessages = result.messages.filter((m) => m.role === "tool");

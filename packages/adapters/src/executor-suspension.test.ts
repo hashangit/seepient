@@ -35,6 +35,13 @@ function fixture(
         actions?: Array<{ id: string; label: string }>;
         reason?: string;
       };
+      tool?: string;
+      auditBinding?: {
+        actionId: string;
+        actionDigest: string;
+        principalId: string;
+        runId: string;
+      };
     };
   } = {},
 ) {
@@ -85,6 +92,7 @@ function fixture(
     thread: { findUniqueOrThrow: vi.fn(async () => ({ id: run.threadId, groupId: null })) },
     message: { findMany: vi.fn(async () => []) },
     task: { findUniqueOrThrow: vi.fn(async () => ({ id: run.taskId, prompt: "Do the thing" })) },
+    event: { findFirst: vi.fn(async () => null) },
     connection: { findMany: vi.fn(async () => []) },
     spaceModelPreference: { findFirst: vi.fn(async () => null) },
     userModelCredential: { findFirst: vi.fn(async () => null) },
@@ -144,6 +152,10 @@ function fixture(
       pauseClass: (options.suspendEvent?.pauseClass ?? "permission") as "permission",
       pauseToken: options.suspendEvent?.pauseToken ?? "pause-9",
       ...(options.suspendEvent?.request ? { request: options.suspendEvent.request } : {}),
+      ...(options.suspendEvent?.tool ? { tool: options.suspendEvent.tool } : {}),
+      ...(options.suspendEvent?.auditBinding
+        ? { auditBinding: options.suspendEvent.auditBinding }
+        : {}),
     };
     yield { type: "done" as const, text: "SHOULD NEVER EMIT" };
   });
@@ -274,6 +286,36 @@ describe("029 T026 — executor suspension handling", () => {
       const computer = blocks.find((b) => b.kind === "computer");
       expect(computer).toBeDefined();
     }
+    expect(f.finalizeRun).not.toHaveBeenCalled();
+  });
+
+  it("parks the engine audit binding with the waiting state (P2.4 terminal-audit connection)", async () => {
+    const auditBinding = {
+      actionId: "action-1",
+      actionDigest: "digest-1",
+      principalId: "user-1",
+      runId: "run-1",
+    };
+    const f = fixture({
+      suspendEvent: {
+        pauseClass: "permission",
+        pauseToken: "tok-1",
+        tool: "deploy_site",
+        auditBinding,
+      },
+    });
+    await f.runAttempt();
+    expect(f.pauseRunForInput).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        runId: "run-1",
+        waitingState: {
+          pauseClass: "permission",
+          pauseToken: "tok-1",
+          tool: "deploy_site",
+          auditBinding,
+        },
+      }),
+    );
     expect(f.finalizeRun).not.toHaveBeenCalled();
   });
 });

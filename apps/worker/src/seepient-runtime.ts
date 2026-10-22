@@ -21,7 +21,13 @@
  * set flow through the adapter's translation; an explicitly empty tool list
  * stays empty end to end.
  */
-import { ModelCredentialRequiredError, type SecretStore } from "@seepients/adapter-kit";
+import {
+  DEFAULT_CONTEXT_STRATEGY,
+  ModelCredentialRequiredError,
+  describeToolActivity,
+  governedDeclarationFor,
+  type SecretStore,
+} from "@seepients/adapter-kit";
 import { DurableModelCredentialStore } from "@seepients/adapters";
 import { SeepientAgentRuntime } from "seepient/app-runtime";
 import { MemoryCredentialStore } from "seepient";
@@ -122,5 +128,10 @@ export async function seepientResolveEngineOptions(
 export function createSeepientAgentRuntime(deps: SeepientAgentRuntimeDeps): AgentRuntime {
   return new SeepientAgentRuntime({
     resolveEngineOptions: (request) => seepientResolveEngineOptions(request, deps),
+    // The engine's adapter-kit edge is types-only (ARCHITECTURE.md §118);
+    // the composition root owns the adapter-kit VALUES.
+    describeToolActivity,
+    governedDeclarationFor,
+    defaultContextStrategy: DEFAULT_CONTEXT_STRATEGY,
   });
 }

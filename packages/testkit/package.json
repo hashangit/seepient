@@ -8,7 +8,7 @@
   },
   "scripts": {
     "check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.cli.json",
-    "test": "vitest run --root ../.. packages/testkit/src"
+    "test": "vitest run"
   },
   "dependencies": {
     "@hono/node-server": "2.1.1",

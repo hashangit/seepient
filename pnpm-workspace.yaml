@@ -116,6 +116,11 @@ overrides:
   'astro>sharp': '>=0.35.5'
   'vitefu>vite': '>=8.3.3'
   '@astrojs/react>vite': '>=8.3.3'
+  # GHSA-rxp7-6hxx-x8q5 (ip-address SSRF-filter bypass, fixed 10.7.4): rides
+  # express-rate-limit under the MCP SDK inside pi-ai's nested @google/genai —
+  # the nested chain the root pin cannot reach (same shape as the
+  # @modelcontextprotocol/sdk override above).
+  ip-address: '>=10.7.4'
 
 audit:
   ignore:

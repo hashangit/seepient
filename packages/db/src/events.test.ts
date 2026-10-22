@@ -285,6 +285,7 @@ describe("finalizeRun", () => {
       bot: { update: vi.fn(async () => ({})) },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -353,6 +354,7 @@ describe("finalizeRun", () => {
       bot: { update: vi.fn(async () => ({})) },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -443,6 +445,7 @@ describe("finalizeRun", () => {
       bot: { update: vi.fn(async () => ({})) },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -722,6 +725,7 @@ describe("pauseRunForInput", () => {
       },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -795,6 +799,7 @@ describe("pauseRunForInput", () => {
       },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -878,6 +883,7 @@ describe("pauseRunForTakeover", () => {
       },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -967,6 +973,7 @@ describe("pauseRunForTakeover", () => {
       },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -1025,6 +1032,7 @@ describe("pauseRunForTakeover", () => {
       },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -1081,7 +1089,7 @@ describe("answerRunInput", () => {
         update: vi.fn().mockResolvedValue({ id: "message-1" }),
       },
       run: {
-        findFirst: vi.fn().mockResolvedValue({ botId: "bot-2" }),
+        findFirst: vi.fn().mockResolvedValue({ status: "waiting_input", botId: "bot-2" }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findUnique: vi.fn().mockResolvedValue({
           status: "queued",
@@ -1100,6 +1108,7 @@ describe("answerRunInput", () => {
       },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -1166,7 +1175,7 @@ describe("answerRunInput", () => {
         update: vi.fn().mockResolvedValue({ id: "message-1" }),
       },
       run: {
-        findFirst: vi.fn().mockResolvedValue({ botId: "bot-2", userId: "user-1" }),
+        findFirst: vi.fn().mockResolvedValue({ status: "waiting_input", botId: "bot-2", userId: "user-1" }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findUnique: vi.fn().mockResolvedValue({
           status: "queued",
@@ -1187,6 +1196,7 @@ describe("answerRunInput", () => {
       },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -1261,6 +1271,7 @@ describe("answerRunInput", () => {
         },
         run: {
           findFirst: vi.fn().mockResolvedValue({
+            status: "waiting_input",
             botId: "bot-2",
             userId: "user-1",
             checkpoint: JSON.stringify({
@@ -1289,6 +1300,7 @@ describe("answerRunInput", () => {
         },
       };
       const prisma = {
+        event: { findFirst: vi.fn(async () => null) },
         $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
       } as unknown as PrismaClient;
 
@@ -1359,7 +1371,7 @@ describe("answerRunInput", () => {
         update: vi.fn().mockResolvedValue({ id: "message-1" }),
       },
       run: {
-        findFirst: vi.fn().mockResolvedValue({ botId: "bot-2", userId: "user-1" }),
+        findFirst: vi.fn().mockResolvedValue({ status: "waiting_input", botId: "bot-2", userId: "user-1" }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findUnique: vi.fn().mockResolvedValue({
           status: "queued",
@@ -1378,6 +1390,7 @@ describe("answerRunInput", () => {
       },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -1446,7 +1459,7 @@ describe("answerRunInput", () => {
         update: vi.fn().mockResolvedValue({ id: "message-1" }),
       },
       run: {
-        findFirst: vi.fn().mockResolvedValue({ botId: "bot-2", userId: "user-1" }),
+        findFirst: vi.fn().mockResolvedValue({ status: "waiting_input", botId: "bot-2", userId: "user-1" }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findUnique: vi.fn().mockResolvedValue({
           status: "queued",
@@ -1465,6 +1478,7 @@ describe("answerRunInput", () => {
       },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -1525,7 +1539,7 @@ describe("answerWaitingRunWithTextInTransaction", () => {
         update: vi.fn().mockResolvedValue({ id: "message-1" }),
       },
       run: {
-        findFirst: vi.fn().mockResolvedValue({ botId: "bot-2", userId: "user-1" }),
+        findFirst: vi.fn().mockResolvedValue({ status: "waiting_input", botId: "bot-2", userId: "user-1" }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findUnique: vi.fn().mockResolvedValue({ status: "queued" }),
       },
@@ -1621,7 +1635,7 @@ describe("answerRunInput", () => {
         update: vi.fn().mockResolvedValue({ id: "message-1" }),
       },
       run: {
-        findFirst: vi.fn().mockResolvedValue({ botId: "bot-1" }),
+        findFirst: vi.fn().mockResolvedValue({ status: "waiting_input", botId: "bot-1" }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findUnique: vi.fn().mockResolvedValue({ status: "queued" }),
       },
@@ -1639,6 +1653,7 @@ describe("answerRunInput", () => {
       },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -1696,7 +1711,7 @@ describe("answerRunInput", () => {
         update: vi.fn().mockResolvedValue({ id: "message-1" }),
       },
       run: {
-        findFirst: vi.fn().mockResolvedValue({ botId: "bot-1", userId: "user-1" }),
+        findFirst: vi.fn().mockResolvedValue({ status: "waiting_input", botId: "bot-1", userId: "user-1" }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findUnique: vi.fn().mockResolvedValue({ userId: "user-1", status: "queued" }),
       },
@@ -1719,6 +1734,7 @@ describe("answerRunInput", () => {
       },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -1785,7 +1801,7 @@ describe("answerRunInput", () => {
         }),
       },
       run: {
-        findFirst: vi.fn().mockResolvedValue({ botId: "bot-1", userId: "run-owner" }),
+        findFirst: vi.fn().mockResolvedValue({ status: "waiting_input", botId: "bot-1", userId: "run-owner" }),
         findUnique: vi.fn().mockResolvedValue({ userId: "run-owner" }),
         updateMany: vi.fn(),
       },
@@ -1797,6 +1813,7 @@ describe("answerRunInput", () => {
       actionApprovalRule: { upsert: vi.fn() },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -1836,12 +1853,13 @@ describe("answerRunInput", () => {
         }),
       },
       run: {
-        findFirst: vi.fn().mockResolvedValue({ botId: "bot-1" }),
+        findFirst: vi.fn().mockResolvedValue({ status: "waiting_input", botId: "bot-1" }),
         updateMany: vi.fn(),
       },
       externalEffect: { findFirst: vi.fn().mockResolvedValue(null) },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -1879,12 +1897,13 @@ describe("answerRunInput", () => {
         }),
       },
       run: {
-        findFirst: vi.fn().mockResolvedValue({ botId: "bot-1" }),
+        findFirst: vi.fn().mockResolvedValue({ status: "waiting_input", botId: "bot-1" }),
         updateMany: vi.fn(),
       },
       externalEffect: { findFirst: vi.fn() },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -1912,11 +1931,12 @@ describe("answerRunInput", () => {
         }),
       },
       run: {
-        findFirst: vi.fn().mockResolvedValue({ botId: "bot-1" }),
+        findFirst: vi.fn().mockResolvedValue({ status: "waiting_input", botId: "bot-1" }),
         updateMany: vi.fn(),
       },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -1958,7 +1978,7 @@ describe("answerRunInput", () => {
         update: vi.fn().mockResolvedValue({ id: "message-1" }),
       },
       run: {
-        findFirst: vi.fn().mockResolvedValue({ botId: "bot-1", userId: "user-1" }),
+        findFirst: vi.fn().mockResolvedValue({ status: "waiting_input", botId: "bot-1", userId: "user-1" }),
         findUnique: vi.fn().mockResolvedValue({ status: "queued" }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
@@ -1973,6 +1993,7 @@ describe("answerRunInput", () => {
       },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -2039,7 +2060,7 @@ describe("answerRunInput", () => {
     const tx = {
       $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
       run: {
-        findFirst: vi.fn().mockResolvedValue({ botId: "bot-1", userId: "owner" }),
+        findFirst: vi.fn().mockResolvedValue({ status: "waiting_input", botId: "bot-1", userId: "owner" }),
         updateMany: vi.fn(),
       },
       message: {
@@ -2062,6 +2083,7 @@ describe("answerRunInput", () => {
       },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
     expect(
@@ -2110,7 +2132,7 @@ describe("answerRunInput", () => {
           update: vi.fn().mockResolvedValue({ id: "message-1" }),
         },
         run: {
-          findFirst: vi.fn().mockResolvedValue({ botId: "bot-1", userId: "user-1" }),
+          findFirst: vi.fn().mockResolvedValue({ status: "waiting_input", botId: "bot-1", userId: "user-1" }),
           findUnique: vi.fn().mockResolvedValue({ status: "queued" }),
           updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         },
@@ -2125,6 +2147,7 @@ describe("answerRunInput", () => {
         },
       };
       const prisma = {
+        event: { findFirst: vi.fn(async () => null) },
         $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
       } as unknown as PrismaClient;
       const answer = (username?: string, password = "fake-password-1") =>
@@ -2201,11 +2224,12 @@ describe("answerRunInput", () => {
         }),
       },
       run: {
-        findFirst: vi.fn().mockResolvedValue({ botId: "bot-1", userId: "user-1" }),
+        findFirst: vi.fn().mockResolvedValue({ status: "waiting_input", botId: "bot-1", userId: "user-1" }),
         updateMany: vi.fn(),
       },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -2383,6 +2407,7 @@ describe("sendUserMessage", () => {
       },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -2438,6 +2463,7 @@ describe("sendUserMessage", () => {
       },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -2609,6 +2635,7 @@ describe("sendUserMessage", () => {
       },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -2668,6 +2695,7 @@ describe("sendUserMessage", () => {
       },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -2722,6 +2750,7 @@ describe("claimSteering", () => {
       },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -2777,6 +2806,7 @@ describe("claimSteering", () => {
       },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -2804,6 +2834,7 @@ describe("claimSteering", () => {
       },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -2841,6 +2872,7 @@ describe("claimSteering", () => {
       },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -2897,6 +2929,7 @@ describe("clearThread", () => {
       bot: { update: vi.fn() },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -2961,6 +2994,7 @@ describe("clearThread", () => {
       chatGroup: { update: vi.fn() },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -3013,6 +3047,7 @@ describe("appendEvent", () => {
       event: { create: vi.fn() },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -3102,6 +3137,7 @@ describe("appendEvent", () => {
       event: { create: vi.fn().mockResolvedValue(created) },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -3137,6 +3173,7 @@ describe("appendEvent", () => {
       event: { create: vi.fn().mockResolvedValue(created) },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -3178,6 +3215,7 @@ describe("appendEvent", () => {
       event: { create: vi.fn().mockResolvedValue(created) },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -3208,6 +3246,7 @@ describe("appendEvent", () => {
       event: { create: vi.fn() },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -3231,6 +3270,7 @@ describe("appendEvent", () => {
       event: { create: vi.fn() },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -3262,6 +3302,7 @@ describe("pauseRunForInput waiting-state linkage (029 T027)", () => {
       event: { create: vi.fn(async () => ({ threadId: "thread-1", seq: 9 })), deleteMany: vi.fn(async () => ({ count: 0 })) },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -3313,6 +3354,7 @@ describe("pauseRunForInput waiting-state linkage (029 T027)", () => {
       event: { create: vi.fn(async () => ({ threadId: "thread-1", seq: 10 })), deleteMany: vi.fn(async () => ({ count: 0 })) },
     };
     const prisma = {
+      event: { findFirst: vi.fn(async () => null) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -3362,6 +3404,7 @@ describe("governed pause accept outcomes (029 T029)", () => {
           botId: "bot-1",
           userId: "user-1",
           checkpoint: null,
+          status: "waiting_input",
           ...(overrides.runRow ?? {}),
         })),
         findUnique: vi.fn(async () => ({ status: "running", startedAt: new Date(0) })),
@@ -3377,13 +3420,24 @@ describe("governed pause accept outcomes (029 T029)", () => {
         create: vi.fn(async () => ({ id: "msg-utterance" })),
         update: vi.fn(async () => ({})),
       },
-      event: {
+        event: {
         create: vi.fn(async (args: { data: { type: string; payload: unknown } }) => {
           createdEvents.push({ type: args.data.type, payload: args.data.payload });
           return { threadId: "thread-1", seq: 11 };
         }),
         deleteMany: vi.fn(async () => ({ count: 0 })),
-        findFirst: vi.fn(async () => null),
+        // Real projection (D4): the accept reads the pause's waiting payload —
+        // tool + actionDigest + expiry — exactly like the production event row
+        // the suspended handler wrote.
+        findFirst: vi.fn(async (): Promise<{ payload: unknown } | null> => ({
+          payload: {
+            messageId: "msg-card-1",
+            pauseClass: "permission",
+            pauseToken: "pause-9",
+            tool: "shell",
+            actionDigest: "digest-pause-9",
+          },
+        })),
       },
       bot: { update: vi.fn(async () => ({})) },
       steeringMessage: { findMany: vi.fn(async () => []), updateMany: vi.fn(async () => ({ count: 0 })) },
@@ -3631,11 +3685,20 @@ describe("governed pause accept outcomes (029 T029)", () => {
     const outcome = await answerRunWithOutcome(prisma, { ...baseInput }, { publish: vi.fn(async () => undefined) } as never);
     expect(outcome).toBe("accepted");
     expect(decisionEvents()).toHaveLength(1);
-    expect(decisionEvents()[0].payload).toEqual(
+    // Gate-repair round 3 (D2): the synthesized record carries the REAL
+    // decision (approve — derived from the answer), the suspension's
+    // actionDigest (from the waiting payload, not the token), an explicit
+    // unconsumed marker, and the resume-arming tool.
+    expect(decisionEvents()[0]!.payload).toEqual(
       expect.objectContaining({
         requestId: "pause-9",
         pauseClass: "permission",
-        answerDigest: "pause-9",
+        decision: "approve",
+        answerDigest: "digest-pause-9",
+        actionDigest: "digest-pause-9",
+        consumedAt: null,
+        tool: "shell",
+        answeredByUserId: "user-1",
         recordedAnswer: "approve",
       }),
     );
@@ -3649,7 +3712,7 @@ describe("governed pause accept outcomes (029 T029)", () => {
     // The pause recorded WHICH governed tool requested it; the accept stamps
     // it into the decision event so the resumed attempt can auto-approve
     // exactly that re-dispatch (never a different action).
-    tx.event.findFirst = vi.fn(async () => ({
+    tx.event.findFirst = vi.fn(async (): Promise<{ payload: unknown } | null> => ({
       payload: { messageId: "msg-card-1", pauseClass: "permission", pauseToken: "pause-9", tool: "shell" },
     }));
     const prisma = {
@@ -3660,7 +3723,45 @@ describe("governed pause accept outcomes (029 T029)", () => {
 
     const outcome = await answerRunWithOutcome(prisma, { ...baseInput }, { publish: vi.fn(async () => undefined) } as never);
     expect(outcome).toBe("accepted");
-    expect(decisionEvents()[0].payload).toEqual(expect.objectContaining({ tool: "shell" }));
+    expect(decisionEvents()[0]!.payload).toEqual(expect.objectContaining({ tool: "shell" }));
+  });
+
+  it("deny: the synthesized record carries the real deny decision (never an auto-approve)", async () => {
+    const { tx, decisionEvents } = txFor();
+    const prisma = {
+      $transaction: vi.fn(async (cb: (client: typeof tx) => unknown) => cb(tx)),
+      event: { findFirst: vi.fn(async () => null) },
+      run: { updateMany: vi.fn(async () => ({ count: 1 })) },
+    } as unknown as PrismaClient;
+
+    const outcome = await answerRunWithOutcome(
+      prisma,
+      { ...baseInput, answer: "deny" },
+      { publish: vi.fn(async () => undefined) } as never,
+    );
+    expect(outcome).toBe("accepted");
+    expect(decisionEvents()[0]!.payload).toEqual(
+      expect.objectContaining({ decision: "deny", answerDigest: "digest-pause-9" }),
+    );
+  });
+
+  it("foreign principal: a non-owner's permission answer is refused at accept (D2 principal binding)", async () => {
+    const { tx, decisionEvents } = txFor();
+    const prisma = {
+      $transaction: vi.fn(async (cb: (client: typeof tx) => unknown) => cb(tx)),
+      event: { findFirst: vi.fn(async () => null) },
+      run: { updateMany: vi.fn(async () => ({ count: 1 })) },
+    } as unknown as PrismaClient;
+
+    const outcome = await answerRunWithOutcome(
+      prisma,
+      { ...baseInput, answeredByUserId: "user-OTHER" },
+      { publish: vi.fn(async () => undefined) } as never,
+    );
+    expect(outcome).toBe("foreign");
+    // Nothing moved: the run still waits, no decision was recorded.
+    expect(tx.run.updateMany).not.toHaveBeenCalled();
+    expect(decisionEvents()).toEqual([]);
   });
 
   it("foreign: a MISMATCHED explicit record is still refused (strict binding preserved)", async () => {

@@ -328,6 +328,40 @@ function scanRendererIsolation(roots = RENDERER_ROOTS) {
   return violations;
 }
 
+/**
+ * Types-only import discipline for one specifier (ARCHITECTURE.md §118): every
+ * import statement of `spec` must be `import type …` / `export type …`, or carry
+ * only inline `type` specifiers. Statement-level (multi-line imports included);
+ * side-effect imports and dynamic `import()` count as runtime-value edges.
+ * Returns the 1-based lines that violate; empty means clean (or unused).
+ */
+function valueTypeImportLines(source, spec) {
+  const stripped = stripComments(source);
+  const escaped = spec.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const lines = [];
+  const statementRe = /(?:^|\n)[ \t]*(import|export)\s+(type\s+)?([\s\S]*?)from\s*["']([^"']+)["']/g;
+  for (const m of stripped.matchAll(statementRe)) {
+    if (m[4] !== spec) continue;
+    if (m[2]) continue; // whole-statement `import type` / `export type`
+    const names = m[3]
+      .replace(/[{}]/g, " ")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (names.length === 0 || !names.every((n) => /^type\s/.test(n))) {
+      lines.push(stripped.slice(0, m.index).split("\n").length);
+    }
+  }
+  for (const re of [
+    new RegExp(`import\\s*\\(\\s*["']${escaped}["']`),
+    new RegExp(`(?:^|\\n)[ \\t]*import\\s*["']${escaped}["']`),
+  ]) {
+    const at = stripped.search(re);
+    if (at >= 0) lines.push(stripped.slice(0, at).split("\n").length + 1);
+  }
+  return lines;
+}
+
 /** FR-024/025 (D9): @seepients/* imports mirror the §2.2 class table; the ONE
  *  sanctioned engine edge is src/transport/app/** → @seepients/adapter-kit.
  *  `base` lets the self-test point the scanner at a throwaway fixture tree
@@ -377,19 +411,26 @@ function scanAppLayering(base = ROOT) {
   }
   // The single sanctioned engine → app edge (D9): src/transport/app/** may
   // import @seepients/adapter-kit and NOTHING else @seepients/*; any other
-  // engine src/** file importing any @seepients/* is a violation.
+  // engine src/** file importing any @seepients/* is a violation. The edge
+  // is TYPES-ONLY (ARCHITECTURE.md §118): runtime values are injected at the
+  // composition roots (apps/api, apps/worker), never imported engine-side.
   for (const file of listSourceFiles(join(base, "src"))) {
     const relFile = relative(base, file).split("\\").join("/");
     const source = stripComments(readFileSync(file, "utf8"));
-    for (const spec of extractSpecifiers(source)) {
-      if (!spec.startsWith("@seepients/")) continue;
-      const line = source.split("\n").findIndex((l) => l.includes(spec)) + 1;
-      const sanctioned = relFile.startsWith("src/transport/app/") && spec === "@seepients/adapter-kit";
-      if (!sanctioned) {
+    if (relFile.startsWith("src/transport/app/")) {
+      for (const line of valueTypeImportLines(source, "@seepients/adapter-kit")) {
         violations.push(
-          `L-2 (app-layering): ${relFile}:${line} — engine import of "${spec}" outside the sanctioned src/transport/app → @seepients/adapter-kit edge`,
+          `L-2 (app-layering): ${relFile}:${line} — the sanctioned "@seepients/adapter-kit" edge is TYPES-ONLY (ARCHITECTURE.md §118); a runtime-value import crosses it. Inject the value via construction options from the composition root instead`,
         );
       }
+    }
+    for (const spec of extractSpecifiers(source)) {
+      if (!spec.startsWith("@seepients/")) continue;
+      if (relFile.startsWith("src/transport/app/") && spec === "@seepients/adapter-kit") continue;
+      const line = source.split("\n").findIndex((l) => l.includes(spec)) + 1;
+      violations.push(
+        `L-2 (app-layering): ${relFile}:${line} — engine import of "${spec}" outside the sanctioned src/transport/app → @seepients/adapter-kit edge`,
+      );
     }
   }
   return violations;
@@ -488,11 +529,42 @@ try {
   mkdirSync(domainDir, { recursive: true });
   writeFileSync(join(domainDir, "probe.ts"), `import type { AgentRuntime } from "@seepients/adapter-kit";\nexport type R = AgentRuntime;\n`);
   if (!scanAppLayering(fam).some((v) => v.includes("L-2") && v.includes("src/domain/probe.ts"))) selfTestFailures.push("family self-test L: planted engine import outside src/transport/app did NOT flip RED");
+
+  // app-layering TYPES-ONLY edge: planted single-line runtime-value import → RED
+  writeFileSync(join(adapterDir, "probe-value.ts"), `import { describeToolActivity } from "@seepients/adapter-kit";\nexport const d = describeToolActivity;\n`);
+  if (!scanAppLayering(fam).some((v) => v.includes("TYPES-ONLY") && v.includes("src/transport/app/probe-value.ts"))) selfTestFailures.push("family self-test L: planted adapter-kit VALUE import did NOT flip RED");
+
+  // app-layering TYPES-ONLY edge: planted multi-line runtime-value import → RED
+  // (extractSpecifiers is line-based; the statement-level scanner must catch it)
+  writeFileSync(
+    join(adapterDir, "probe-value-multi.ts"),
+    `import {\n  describeToolActivity,\n  DEFAULT_CONTEXT_STRATEGY,\n} from "@seepients/adapter-kit";\nexport const d = describeToolActivity;\n`,
+  );
+  if (!scanAppLayering(fam).some((v) => v.includes("TYPES-ONLY") && v.includes("src/transport/app/probe-value-multi.ts"))) selfTestFailures.push("family self-test L: planted multi-line adapter-kit VALUE import did NOT flip RED");
+
+  // app-layering TYPES-ONLY edge: planted dynamic import() of adapter-kit → RED
+  writeFileSync(join(adapterDir, "probe-dynamic.ts"), `export async function load() { return import("@seepients/adapter-kit"); }\n`);
+  if (!scanAppLayering(fam).some((v) => v.includes("TYPES-ONLY") && v.includes("src/transport/app/probe-dynamic.ts"))) selfTestFailures.push("family self-test L: planted dynamic adapter-kit import did NOT flip RED");
+
+  // app-layering TYPES-ONLY edge: mixed inline specifiers (one value among types) → RED
+  writeFileSync(join(adapterDir, "probe-mixed.ts"), `import { type AgentRuntime, describeToolActivity } from "@seepients/adapter-kit";\nexport const d = describeToolActivity;\n`);
+  if (!scanAppLayering(fam).some((v) => v.includes("TYPES-ONLY") && v.includes("src/transport/app/probe-mixed.ts"))) selfTestFailures.push("family self-test L: planted mixed adapter-kit import did NOT flip RED");
+
+  // app-layering TYPES-ONLY edge: multi-line TYPE-ONLY import stays GREEN
+  writeFileSync(
+    join(adapterDir, "probe-type-multi.ts"),
+    `import type {\n  AgentRuntime,\n  AgentRunRequest,\n} from "@seepients/adapter-kit";\nexport type R = AgentRuntime;\n`,
+  );
+  if (scanAppLayering(fam).some((v) => v.includes("src/transport/app/probe-type-multi.ts"))) selfTestFailures.push("family self-test L: the multi-line TYPE-ONLY adapter-kit edge flipped RED");
+
+  // app-layering TYPES-ONLY edge: all-inline `type` specifiers stay GREEN
+  writeFileSync(join(adapterDir, "probe-type-inline.ts"), `import { type AgentRuntime, type AgentRunRequest } from "@seepients/adapter-kit";\nexport type R = AgentRuntime;\n`);
+  if (scanAppLayering(fam).some((v) => v.includes("src/transport/app/probe-type-inline.ts"))) selfTestFailures.push("family self-test L: the all-inline-type adapter-kit edge flipped RED");
 } finally {
   rmSync(fam, { recursive: true, force: true });
 }
 
-console.log("[boundary] self-tests: banned-import RED ✓, dynamic full-edge RED ✓, doc-comment inert ✓, family probes RED ✓");
+console.log("[boundary] self-tests: banned-import RED ✓, dynamic full-edge RED ✓, doc-comment inert ✓, family probes RED ✓ (incl. types-only adapter-kit edge)");
 
 for (const v of orphanViolations) violations.push(v);
 for (const v of [...rendererViolations, ...layeringViolations]) violations.push(v);

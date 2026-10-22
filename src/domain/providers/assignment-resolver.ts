@@ -98,15 +98,25 @@ export async function resolveInvocationPlan(
   // Apply partial or complete overrides
   let effectiveAccount = override?.providerAccount ?? assignment.providerAccount;
   const effectiveModel = override?.model ?? assignment.model;
-  // 029 gate repair (P2): cross-provider handoff — the fallback names a
-  // provider (upstream), not an account. When the resolved account's
-  // upstream provider differs, route to the first configured account that
-  // serves the named provider instead of calling it under the old provider.
+  // 029 gate repair (P2.3): a handoff override may NAME the upstream provider
+  // of the replacement hop, but the account is never guessed from that name —
+  // the run's own explicitly resolved account serves a same-provider hop (its
+  // credentials are what the run already carries), and a changed-account hop
+  // must carry its explicit providerAccount on the override. Anything else
+  // fails closed instead of silently calling under another account's
+  // credentials ("first account whose provider matches" is exactly the
+  // wrong-credential failure mode this rule forbids).
   if (override?.provider && !override?.providerAccount) {
-    const namedAccount = Object.entries(accounts).find(
-      ([, account]) => account?.upstreamProvider === override.provider,
-    );
-    if (namedAccount) effectiveAccount = namedAccount[0];
+    const carried = accounts[effectiveAccount];
+    if (!carried || carried.upstreamProvider !== override.provider) {
+      throw new InferenceError({
+        code: "unconfigured_provider",
+        message: `Fallback names provider "${override.provider}" but carries no explicitly resolved account for it, and the run's account "${effectiveAccount}" serves "${carried?.upstreamProvider ?? "no provider"}" — the handoff must name the account (providerAccount) resolved for that provider.`,
+        providerAccount: effectiveAccount,
+        model: effectiveModel,
+        retryable: false,
+      });
+    }
   }
   const effectiveThinking = (override?.thinkingLevel ?? assignment.thinkingLevel) as ThinkingLevel | undefined;
   const isOverride = Boolean(override?.model);

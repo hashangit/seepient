@@ -8,6 +8,7 @@ export * from "./client.js";
 export * from "./computers.js";
 export * from "./credential-secrets.js";
 export * from "./events.js";
+export * from "./governed-decision.js";
 export * from "./shared-budget-ledger.js";
 export * from "./expire-stuck-run.js";
 export * from "./external-conversations.js";

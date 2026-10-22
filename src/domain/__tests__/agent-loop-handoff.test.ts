@@ -65,6 +65,92 @@ describe("029 S17 — mid-loop model handoff (T041)", () => {
     expect(providerCalls).toBe(2);
   });
 
+  // 029 gate repair (P2.3): the hop routes through EXPLICIT accounts. The
+  // run's resolved account stays bound across the hop (the resolver verifies
+  // it serves the hop's provider); a hop that pins its own account wins.
+  it("carries the run's resolved account through the hop and lets a hop-pinned account win", async () => {
+    const seenOverrides: unknown[] = [];
+    let providerCalls = 0;
+    let failFirst = true;
+    const runtime = {
+      describe: () => ({ capabilities: { scripted: false } }),
+      createTurnSnapshot: async () => ({}),
+      resolvePlan: async (_snapshot: unknown, _purpose: unknown, _tier: unknown, override: unknown) => {
+        seenOverrides.push(override);
+        return { selectedTarget: { providerAccount: "account-1", model: failFirst ? "model-a" : "model-b" } };
+      },
+      async *executeLanguage() {
+        providerCalls += 1;
+        if (failFirst) {
+          failFirst = false;
+          yield { type: "error" as const, error: { code: "PROVIDER_ERROR", message: "exploded", retryable: false } };
+          return;
+        }
+        yield { type: "content_block_delta" as const, delta: { type: "text_delta" as const, text: "resumed" } };
+        yield { type: "finish" as const, usage: { promptTokens: 1, completionTokens: 1 } };
+      },
+    } as never;
+
+    await runAgentLoop({
+      runtime,
+      messages: [{ id: "m1", role: "user", content: "deploy", timestamp: Date.now() }],
+      toolDefs: [],
+      maxSteps: 3,
+      autoConfirm: true,
+      // The run carries an explicitly resolved account (modelOverride shape).
+      modelOverride: { providerAccount: "resolved-account", model: "model-a" },
+      modelHandoff: {
+        fallbacks: [
+          // Same-provider hop: no pinned account — the run's account rides.
+          { provider: "same", id: "model-b" },
+        ],
+        onModelChange: async () => undefined,
+      },
+    });
+    expect(seenOverrides.length).toBeGreaterThanOrEqual(3);
+    const handoffOverride = seenOverrides[2] as { model?: string; provider?: string; providerAccount?: string };
+    expect(handoffOverride).toMatchObject({ model: "model-b", provider: "same", providerAccount: "resolved-account" });
+
+    // A hop that pins its own explicitly resolved account wins over the
+    // run's carried account (changed-account handoff).
+    seenOverrides.length = 0;
+    providerCalls = 0;
+    failFirst = true;
+    const runtime2 = {
+      describe: () => ({ capabilities: { scripted: false } }),
+      createTurnSnapshot: async () => ({}),
+      resolvePlan: async (_s: unknown, _p: unknown, _t: unknown, override: unknown) => {
+        seenOverrides.push(override);
+        return { selectedTarget: { providerAccount: "account-1", model: failFirst ? "model-a" : "model-b" } };
+      },
+      async *executeLanguage() {
+        providerCalls += 1;
+        if (failFirst) {
+          failFirst = false;
+          yield { type: "error" as const, error: { code: "PROVIDER_ERROR", message: "exploded", retryable: false } };
+          return;
+        }
+        yield { type: "content_block_delta" as const, delta: { type: "text_delta" as const, text: "resumed" } };
+        yield { type: "finish" as const, usage: { promptTokens: 1, completionTokens: 1 } };
+      },
+    } as never;
+    await runAgentLoop({
+      runtime: runtime2,
+      messages: [{ id: "m1", role: "user", content: "deploy", timestamp: Date.now() }],
+      toolDefs: [],
+      maxSteps: 3,
+      autoConfirm: true,
+      modelOverride: { providerAccount: "resolved-account", model: "model-a" },
+      modelHandoff: {
+        fallbacks: [{ provider: "other", id: "model-b", providerAccount: "hop-account" }],
+        onModelChange: async () => undefined,
+      },
+    });
+    const changedOverride = seenOverrides[2] as { providerAccount?: string };
+    expect(changedOverride.providerAccount).toBe("hop-account");
+    expect(providerCalls).toBe(2);
+  });
+
   it("a rejecting onModelChange refuses the handoff and fails the run (persistence is the gate)", async () => {
     let providerCalls = 0;
     let failFirst = true;

@@ -13,7 +13,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@seepients/db";
-import { SharedBudgetLedger } from "./shared-budget-ledger.js";
+import { parseRunToolCallBudget, SharedBudgetLedger } from "./shared-budget-ledger.js";
 
 function ledgerHarness(budget: number) {
   const rows: Array<{ runId: string; executionId: string; callerKind: string }> = [];
@@ -92,5 +92,23 @@ describe("SharedBudgetLedger (029 T038 / FR-032 / D5)", () => {
     expect(await ledger.admit("run-1", "exec-1", "parent")).toBe(true);
     expect(await ledger.admit("run-1", "exec-1", "parent")).toBe(true); // idempotent replay
     expect(await ledger.used("run-1")).toBe(1);
+  });
+});
+
+// 029 gate repair (D1): the ONE parse both roots share — the worker bug was
+// that unset disabled the ledger while the api defaulted to 400.
+describe("parseRunToolCallBudget (shared api+worker semantics)", () => {
+  it("unset and blank mean the 400 default (budget ON, never off)", () => {
+    expect(parseRunToolCallBudget(undefined)).toBe(400);
+    expect(parseRunToolCallBudget("")).toBe(400);
+    expect(parseRunToolCallBudget("   ")).toBe(400);
+  });
+  it("explicit 0 disables; positive integers pass through trimmed", () => {
+    expect(parseRunToolCallBudget("0")).toBe(0);
+    expect(parseRunToolCallBudget(" 42 ")).toBe(42);
+  });
+  it("any other invalid value is a boot error", () => {
+    for (const value of ["-1", "1.5", "abc", "NaN", "Infinity"])
+      expect(() => parseRunToolCallBudget(value)).toThrow(/RUN_TOOL_CALL_BUDGET/);
   });
 });

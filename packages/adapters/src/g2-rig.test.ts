@@ -23,7 +23,6 @@ vi.mock("./computer-lifecycle.js", async (importOriginal) => {
 
 import type { AgentRunRequest, ConnectorCall } from "@seepients/adapter-kit";
 import type { PrismaClient } from "@seepients/db";
-import { uncertainEffectError } from "./executor.js";
 import { createJobReconciler } from "./job-reconciler.js";
 import { createRunExecutor } from "./executor.js";
 
@@ -34,8 +33,10 @@ interface G2Fixture {
   enqueue: ReturnType<typeof vi.fn>;
   /** Effect executions — every dispatch appends (dupes = blind retries). */
   effectDispatches: Array<{ id: string }>;
-  /** Refusals captured from applyTool's error-object returns. */
-  toolRefusals: string[];
+  /** Tool results from the resumed turn's governed-op executions, in call order. */
+  toolResults: unknown[];
+  /** externalEffect.updateMany transitions observed from the executor. */
+  effectMutations: Array<{ from: string | undefined; to: string }>;
   runtimeRun: ReturnType<typeof vi.fn>;
   prisma: Record<string, unknown>;
   reconcilerPrisma: Record<string, unknown>;
@@ -45,7 +46,7 @@ interface G2Fixture {
   resumeAttempt(): Promise<void>;
 }
 
-function rig(options: { crashAfterDispatch?: boolean } = {}): G2Fixture {
+function rig(options: { crashBeforeRecord?: boolean } = {}): G2Fixture {
   const run = {
     id: "run-1",
     botId: "bot-1",
@@ -59,9 +60,13 @@ function rig(options: { crashAfterDispatch?: boolean } = {}): G2Fixture {
   };
   const effectDispatches: Array<{ id: string }> = [];
   const toolRefusals: string[] = [];
+  /** Tool results from the resumed turn's governed-op executions, in order. */
+  const toolResults: unknown[] = [];
+  /** externalEffect.updateMany transitions observed from the executor. */
+  const effectMutations: Array<{ from: string | undefined; to: string }> = [];
+  let effect: Record<string, unknown> | null = null;
   let suspended = false;
   let resumed = false;
-  let crashedOnce = false;
 
   const pauseRunForInput = vi.fn(async () => {
     run.status = "waiting_input";
@@ -80,16 +85,24 @@ function rig(options: { crashAfterDispatch?: boolean } = {}): G2Fixture {
       return;
     }
     resumed = true;
-    // The resumed turn re-executes the approved governed op. Window 3: the
-    // first post-resume dispatch "crashes" the worker before the local
-    // completion record lands (options.crashAfterDispatch).
-    await _request.executeTool?.("deploy", { id: "resource-1" }, `call-resume-${resumed}`);
-    effectDispatches.push({ id: "executed" });
-    if (options.crashAfterDispatch && !crashedOnce) {
-      crashedOnce = true;
-      throw new Error("WORKER CRASHED after dispatch, before record");
+    // The resumed turn re-executes the governed op under the SAME execution
+    // id. Window 3 (options.crashBeforeRecord): the first execution's
+    // dispatch lands but the worker dies before the local completion record
+    // is written (the rig's externalEffect mock drops the
+    // executing→completed transition); the recovery execution must meet the
+    // uncertain-effect refusal, never a second dispatch.
+    const executionId = `call-resume-${resumed}`;
+    for (let pass = 1; pass <= (options.crashBeforeRecord ? 2 : 1); pass += 1) {
+      try {
+        const result = await _request.executeTool?.("deploy", { id: "resource-1" }, executionId);
+        toolResults.push(result);
+      } catch (error) {
+        toolResults.push({ threw: error instanceof Error ? error.message : String(error) });
+      }
     }
-    yield { type: "done" as const, text: "Deployed." };
+    if (!options.crashBeforeRecord) {
+      yield { type: "done" as const, text: "Deployed." };
+    }
   });
 
   const prisma = {
@@ -121,6 +134,7 @@ function rig(options: { crashAfterDispatch?: boolean } = {}): G2Fixture {
       findMany: vi.fn(async () => []),
     },
     attempt: { create: vi.fn(async () => ({ id: `attempt-${Math.random()}` })), update: vi.fn(), updateMany: vi.fn(async () => ({ count: 1 })) },
+    event: { findFirst: vi.fn(async () => null) },
     thread: { findUniqueOrThrow: vi.fn(async () => ({ id: run.threadId, groupId: null })) },
     message: { findMany: vi.fn(async () => []) },
     task: { findUniqueOrThrow: vi.fn(async () => ({ id: run.taskId, prompt: "Deploy" })) },
@@ -136,11 +150,43 @@ function rig(options: { crashAfterDispatch?: boolean } = {}): G2Fixture {
     actionApprovalRule: { findMany: vi.fn(async () => []) },
     actionAutoReviewPreference: { findUnique: vi.fn(async () => ({ enabled: false })) },
     externalEffect: {
-      findMany: vi.fn(async () => []),
-      findUnique: vi.fn(async () => ({ id: "eff-1", status: "approved", kind: "deploy" })),
-      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ id: "eff-1", status: "intended", ...data })),
-      update: vi.fn(async () => ({})),
-      updateMany: vi.fn(async () => ({ count: 1 })),
+      findMany: vi.fn(async () => (effect ? [{ ...effect }] : [])),
+      findUnique: vi.fn(async () => (effect ? { ...effect } : null)),
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        effect = { id: "eff-1", ...data };
+        return { ...effect };
+      }),
+      update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        if (effect) effect = { ...effect, ...data };
+        return { ...effect };
+      }),
+      updateMany: vi.fn(
+        async ({
+          where,
+          data,
+        }: {
+          where: { status?: string };
+          data: { status: string };
+        }) => {
+          effectMutations.push({ from: where.status, to: data.status });
+          if (!effect) return { count: 0 };
+          // Window 3 crash simulation: the dispatch reached the connector but
+          // the worker died before completeExternalEffect could write the
+          // local completion record — the effect stays "executing" forever.
+          if (
+            options.crashBeforeRecord &&
+            where.status === "executing" &&
+            data.status === "completed"
+          ) {
+            return { count: 0 };
+          }
+          if (where.status === undefined || where.status === effect.status) {
+            effect = { ...effect, ...data };
+            return { count: 1 };
+          }
+          return { count: 0 };
+        },
+      ),
     },
     computer: {
       findUnique: vi.fn(async () => ({ id: "computer-1", scope: "dedicated", controlLeaseId: null, maintenanceId: null, updatedAt: new Date(0), state: "running", providerRef: null, homeKey: "bot-1-home" })),
@@ -228,7 +274,8 @@ function rig(options: { crashAfterDispatch?: boolean } = {}): G2Fixture {
     finalizeRun,
     enqueue: vi.fn(async () => undefined),
     effectDispatches,
-    toolRefusals,
+    toolResults,
+    effectMutations,
     runtimeRun,
     prisma,
     reconcilerPrisma,
@@ -313,42 +360,44 @@ describe("029 T031 — G2 rig: the three crash windows", () => {
     expect(f.enqueue).toHaveBeenCalled();
   });
 
-  it("window 3 — dispatch-before-record: the ambiguous effect state is preserved across the crash", async () => {
-    // The window: the effect was APPLIED (intended) at analysis, but the
-    // dispatch outcome is unknown — the suspend attempt released the worker
-    // at the pause, so the dispatch never happened OR landed without a
-    // record; recovery sees the same ambiguous state either way. The
-    // product's recovery (captured live): the resumed attempt's effect claim
-    // refuses with uncertainEffectError — "tool deploy has an earlier
-    // execution with an uncertain outcome; it may already have completed, so
-    // verify the destination before retrying" — the ambiguity is preserved
-    // for reconciliation, never blindly retried (research D4 / FR-025).
-    const f = rig();
+  it("window 3 — dispatch-before-record: recovery meets the uncertain-effect refusal, never a replay", async () => {
+    // The window: the governed effect was dispatched to the connector, but
+    // the worker crashed before the local completion record was written —
+    // the effect row is stuck "executing" and the outcome is genuinely
+    // ambiguous (it may have completed remotely). Recovery re-executes the
+    // same governed op; the product must refuse with the uncertain-effect
+    // result instead of blindly replaying the dispatch.
+    const f = rig({ crashBeforeRecord: true });
     await f.suspendAttempt();
     expect(f.run.status).toBe("waiting_input");
-    // The resumed attempt requeues: no terminal outcome (finalize-success
-    // never fires), and the ambiguity is preserved for the reconciliation
-    // pass — the run returns to a re-claimable state.
     await f.resumeAttempt();
-    expect(f.finalizeRun.mock.calls.every(
-      (call: unknown[]) => (call[0] as { outcome?: string }).outcome !== "succeeded",
-    )).toBe(true);
-    // The reconciler window-2 shape re-enqueues the expired-lease run: the
-    // sweep FINDS it (running + expired lease) and publishes the continue
-    // job — the row itself flips when the job's continueRun claims it.
-    const reenqueue = vi.fn(async () => undefined);
-    const reconciler = createJobReconciler({
-      prisma: f.reconcilerPrisma as unknown as PrismaClient,
-      jobs: { enqueue: reenqueue } as never,
-    });
-    await reconciler.reconcileOnce();
-    expect(reenqueue).toHaveBeenCalled();
-    // Gate-repair (P2.12): the refusal the resumed attempt's effect claim
-    // produces for this window — pinned verbatim (the live-captured message
-    // from WP-P4). The claim-path drive still needs the full idempotency
-    // fixture; the message contract itself is now test-enforced, not prose.
-    expect(uncertainEffectError("deploy").message).toBe(
-      "tool deploy has an earlier execution with an uncertain outcome; it may already have completed, so verify the destination before retrying",
-    );
+    // The dispatch happened exactly once: the recovery pass did NOT reach
+    // the connector again. If the refusal ever disappears, this becomes 2.
+    expect(f.effectDispatches).toEqual([{ id: "resource-1" }]);
+    // The effect lifecycle across the window: claimed for the dispatch
+    // (intended → executing), the completion record write never landed
+    // (the crash), then the refusal settles the ambiguity (executing →
+    // uncertain) so reconciliation sees a preserved, not retried, state.
+    expect(f.effectMutations).toEqual([
+      { from: "intended", to: "executing" },
+      { from: "executing", to: "completed" },
+      { from: "executing", to: "uncertain" },
+    ]);
+    // Both the crash-interrupted execution and the recovery execution return
+    // the uncertain-effect refusal (never a fake success, never a throw the
+    // runtime would blindly retry).
+    expect(f.toolResults).toHaveLength(2);
+    for (const result of f.toolResults) {
+      if (result && typeof result === "object" && "uncertain" in result) {
+        expect(result.uncertain).toBe(true);
+        if ("error" in result) {
+          expect(typeof result.error).toBe("string");
+          expect(result.error).toContain("outcome is unknown");
+          expect(result.error).toContain("not replayed");
+        }
+      } else {
+        throw new Error(`expected an uncertain-effect refusal result, got ${JSON.stringify(result)}`);
+      }
+    }
   });
 });

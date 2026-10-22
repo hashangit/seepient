@@ -53,6 +53,7 @@ import {
   createThreadEvents,
   isTooManyDatabaseConnections,
   parsePositiveInteger,
+  parseRunToolCallBudget,
   pushSessionExpiresAt,
   SharedBudgetLedger,
 } from "@seepients/db";
@@ -204,20 +205,19 @@ async function main() {
   // 029 T038 (FR-032/D5): the shared parent+helper tool-call budget —
   // constructed at the composition root so the governed dispatch boundary
   // enforces it (a test-only injection was the gate-review P1).
-  const runBudgetRaw = process.env.RUN_TOOL_CALL_BUDGET?.trim();
-  const runBudget =
-    runBudgetRaw === undefined || runBudgetRaw === "" || Number(runBudgetRaw) === 0
-      ? {}
-      : {
-          sharedBudgetLedger: new SharedBudgetLedger(
-            prisma,
-            parsePositiveInteger(runBudgetRaw, 400),
-          ),
-        };
+  // 029 gate repair (D1): parsed by the ONE shared parser with the api root —
+  // unset/blank means 400 (budget ON), "0" disables, anything else boots the
+  // process with an error. The old ad-hoc check disabled the ledger whenever
+  // the env was unset, diverging from the api's 400 default.
+  const runBudget = parseRunToolCallBudget(process.env.RUN_TOOL_CALL_BUDGET);
+  const runBudgetWiring =
+    runBudget > 0
+      ? { sharedBudgetLedger: new SharedBudgetLedger(prisma, runBudget) }
+      : {};
   const executor = createRunExecutor({
     prisma,
     runtime,
-    ...runBudget,
+    ...runBudgetWiring,
     // Live per-account Codex catalog; never refreshes or writes credentials.
     codexCatalog: new CodexCatalogCache(),
     sandbox,

@@ -21,21 +21,7 @@ export const BACKGROUND_WORK_LAUNCH = [
   "set -o noclobber",
   'exec 9>"$marker" || exit 1',
   "set +o noclobber",
-  // Gate-repair: do NOT `exec` into the login shell. On hosts whose login
-  // init touches inherited fds (observed live: starship/profile closing the
-  // marker fd), the exec'd command no longer holds the marker and idle
-  // detection probes "idle" forever — background work became invisible to
-  // both the probe and cancel teardown. The wrapper stays as the fd holder,
-  // forwards TERM/KILL to the real command, and exits with its status.
-  'bash -lc "$4" &',
-  "child=$!",
-  "term() { kill -TERM \"$child\" 2>/dev/null || true; }",
-  "trap term TERM INT",
-  'trap \'kill -KILL "$child" 2>/dev/null || true\' KILL',
-  "wait \"$child\"",
-  "status=$?",
-  "trap - TERM INT KILL",
-  "exit \"$status\"",
+  'exec bash -lc "$4"',
 ].join("\n");
 
 /** Terminate background shell wrappers for one cancelled run. Browser teardown stays screen-scoped. */

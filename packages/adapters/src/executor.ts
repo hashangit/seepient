@@ -102,12 +102,15 @@ import {
 } from "@seepients/core/node/approval-effect-key";
 import type { McpServer, Prisma, PrismaClient, ThreadEvents } from "@seepients/db";
 import {
+  actionDigestOf,
   appendEventInTransaction,
+  consumeRunInputDecision,
   createSpaceForMember,
   createThreadMessageInTransaction,
   effectiveMemoryScope,
   findDefaultModelCredential,
   findModelCredential,
+  GovernedDecisionConflictError,
   InvalidSpaceNameError,
   isTooManyDatabaseConnections,
   loadRunHistoryMessages,
@@ -151,6 +154,7 @@ import {
   claimIntendedEffect,
   completeExternalEffect,
   createApprovedEffectReplayQueue,
+  deniedActionResult,
   isToolPauseResult,
   parseCatalogApprovalTarget,
   replaceCompletedExternalEffectResult,
@@ -3064,6 +3068,78 @@ export function createRunExecutor(deps: ExecutorDeps) {
         : undefined,
     };
   };
+  /**
+   * The single model-resolution authority behind run execution and purpose-routed
+   * resolution: the override's scoped credential, the space default credential and
+   * deployment settings precedence (selectConfiguredModel), then the runtime
+   * fallback. Returns the winning pair (null when nothing is configured — callers
+   * decide whether that throws or fails the run) plus the credentials the caller
+   * needs for pin checks and key resolution.
+   */
+  const selectRunModel = async (
+    scope: { userId: string; spaceId: string },
+    override: ModelChoice | null,
+  ) => {
+    const hasOverride = Boolean(override?.modelProvider && override.modelId);
+    const [overrideCredential, defaultCredential, settings] = await Promise.all([
+      hasOverride && override!.modelProvider && override!.modelId
+        ? findModelCredential(deps.prisma, scope, override!.modelProvider, override!.modelId)
+        : Promise.resolve(null),
+      findDefaultModelCredential(deps.prisma, scope),
+      deps.prisma.deploymentSettings.findUnique({
+        where: { id: "default" },
+      }),
+    ]);
+    const selected = selectConfiguredModel({
+      override,
+      overrideCredential,
+      defaultCredential,
+      settings,
+      deployment: deps.deploymentModelConfigured ? resolveDeploymentModel() : null,
+    });
+    let { provider, id } = selected;
+    if (!provider || !id) {
+      const runtimeFallback = runtimeFallbackModel(deps.runtime);
+      provider ??= runtimeFallback?.provider;
+      id ??= runtimeFallback?.id ?? null;
+    }
+    return {
+      provider: provider ?? null,
+      id: id ?? null,
+      thinkingLevel: selected.thinkingLevel,
+      credential: selected.credential,
+      overrideCredential,
+    };
+  };
+  /** The one mapping from selection + resolved key material to the run model. */
+  const toRunModel = (
+    provider: string,
+    id: string,
+    thinkingLevel: AgentRunRequest["model"]["thinkingLevel"],
+    resolved: ResolvedModelKey,
+  ): AgentRunRequest["model"] => ({
+    provider,
+    id,
+    apiKey: resolved.oauth ? undefined : resolved.apiKey,
+    ...cloudflareRunFields(resolved),
+    baseUrl: resolved.baseUrl,
+    cacheCapabilities: resolved.cacheCapabilities,
+    contextWindow: resolved.contextWindow,
+
+    reasoning: resolved.reasoning,
+    maxTokens: resolved.maxTokens,
+    acceptsImages: resolved.acceptsImages,
+    maxImagesPerPrompt: resolved.maxImagesPerPrompt,
+    thinkingLevel: thinkingLevel ?? resolved.thinkingLevel ?? null,
+    oauth: resolved.oauth
+      ? {
+          credential: resolved.oauth,
+          persist: resolved.persistOAuth,
+          retire: resolved.retireOAuth,
+          handle: resolved.oauthHandle,
+        }
+      : undefined,
+  });
   return {
     resolveConnectedModel,
     contextStrategy,
@@ -3091,63 +3167,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
               select: { modelProvider: true, modelId: true, thinkingLevel: true },
             })
           : null;
-      const hasOverride = Boolean(override?.modelProvider && override.modelId);
-      const [overrideCredential, defaultCredential, settings] = await Promise.all([
-        hasOverride
-          ? findModelCredential(deps.prisma, scope, override!.modelProvider!, override!.modelId)
-          : Promise.resolve(null),
-        findDefaultModelCredential(deps.prisma, scope),
-        deps.prisma.deploymentSettings.findUnique({
-          where: { id: "default" },
-        }),
-      ]);
-      const selected = selectConfiguredModel({
-        override,
-        overrideCredential,
-        defaultCredential,
-        settings,
-        deployment: deps.deploymentModelConfigured ? resolveDeploymentModel() : null,
-      });
-      const { credential, thinkingLevel } = selected;
-      let { provider, id } = selected;
-      if (!provider || !id) {
-        const runtimeFallback = runtimeFallbackModel(deps.runtime);
-        provider ??= runtimeFallback?.provider;
-        id ??= runtimeFallback?.id ?? null;
-      }
-      if (!provider || !id) throw new Error(MISSING_MODEL_MESSAGE);
+      const selection = await selectRunModel(scope, override);
+      if (!selection.provider || !selection.id) throw new Error(MISSING_MODEL_MESSAGE);
       // The key is resolved for the provider that won above, not before it is known.
       const resolved = await resolveModelKey(
         deps,
         scope.userId,
         scope.spaceId,
-        credential,
-        provider,
-        id,
+        selection.credential,
+        selection.provider,
+        selection.id,
       );
-      return {
-        provider,
-        id,
-        apiKey: resolved.oauth ? undefined : resolved.apiKey,
-        ...cloudflareRunFields(resolved),
-        baseUrl: resolved.baseUrl,
-        cacheCapabilities: resolved.cacheCapabilities,
-        contextWindow: resolved.contextWindow,
-
-        reasoning: resolved.reasoning,
-        maxTokens: resolved.maxTokens,
-        acceptsImages: resolved.acceptsImages,
-        maxImagesPerPrompt: resolved.maxImagesPerPrompt,
-        thinkingLevel: thinkingLevel ?? resolved.thinkingLevel ?? null,
-        oauth: resolved.oauth
-          ? {
-              credential: resolved.oauth,
-              persist: resolved.persistOAuth,
-              retire: resolved.retireOAuth,
-              handle: resolved.oauthHandle,
-            }
-          : undefined,
-      };
+      return toRunModel(selection.provider, selection.id, selection.thinkingLevel, resolved);
     },
 
     async wakeRoutine(routineId: string, scheduledFor: string) {
@@ -3431,8 +3462,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           peerMessage,
           task,
           storedConnections,
-          defaultCredential,
-          settings,
           configuredMemory,
           savedSkills,
           agentSkills,
@@ -3459,10 +3488,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               displayName: true,
               status: true,
             },
-          }),
-          findDefaultModelCredential(deps.prisma, run),
-          deps.prisma.deploymentSettings.findUnique({
-            where: { id: "default" },
           }),
           deps.memoryProviders.resolve(run.spaceId),
           deps.prisma.taughtSkill.findMany({
@@ -3502,16 +3527,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         });
         // modelPinned distinguishes the captured choice from an attempt's recorded model.
         const modelChoice = runModelChoice(run, bot);
-        const hasModelOverride = Boolean(modelChoice.modelProvider && modelChoice.modelId);
-        const overrideCredential =
-          hasModelOverride && modelChoice.modelProvider
-            ? await findModelCredential(
-                deps.prisma,
-                run,
-                modelChoice.modelProvider,
-                modelChoice.modelId,
-              )
-            : null;
         runAbortController = new AbortController();
         if (!leaseValid) runAbortController.abort();
         if (deps.shutdownSignal?.aborted) runAbortController.abort(deps.shutdownSignal.reason);
@@ -3690,21 +3705,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }),
           );
         }
-        const runDeployment = deps.deploymentModelConfigured ? resolveDeploymentModel() : null;
-        const runtimeFallback = runtimeFallbackModel(deps.runtime);
-        const pinError = run.modelPinned
-          ? pinnedModelCredentialError(modelChoice, overrideCredential)
-          : undefined;
-        const selected = selectConfiguredModel({
-          override: modelChoice,
-          overrideCredential,
-          defaultCredential,
-          settings,
-          deployment: runDeployment,
-        });
-        const { credential, thinkingLevel } = selected;
-        const runModelProvider = selected.provider ?? runtimeFallback?.provider;
-        const runModelId = selected.id ?? runtimeFallback?.id;
         const failRunBeforeModel = async (message: string) => {
           const failed = await deps.events.finalizeRun({
             spaceId: run.spaceId,
@@ -3744,30 +3744,39 @@ export function createRunExecutor(deps: ExecutorDeps) {
             });
           }
         };
+        // One resolution authority for the attempt: the same selection the
+        // executor's resolveModel uses (override credential → space default →
+        // deployment settings precedence, then the runtime fallback).
+        const selection = await selectRunModel(run, modelChoice);
+        const pinError = run.modelPinned
+          ? pinnedModelCredentialError(modelChoice, selection.overrideCredential)
+          : undefined;
         if (pinError) {
           await failRunBeforeModel(pinError);
           return;
         }
         if (
           run.modelPinned &&
-          (selected.provider !== modelChoice.modelProvider || selected.id !== modelChoice.modelId)
+          (selection.provider !== modelChoice.modelProvider || selection.id !== modelChoice.modelId)
         ) {
           await failRunBeforeModel("Connect that model provider first");
           return;
         }
-        if (!runModelProvider || !runModelId) {
+        if (!selection.provider || !selection.id) {
           await failRunBeforeModel(MISSING_MODEL_MESSAGE);
           return;
         }
+        const runModelProvider = selection.provider;
+        const runModelId = selection.id;
         // An incompatible saved model is a configuration error. Record it on the run.
         // Leaving it for the setup catch would retry and replace the message.
-        let resolved: Awaited<ReturnType<typeof resolveModelKey>>;
+        let resolved: ResolvedModelKey;
         try {
           resolved = await resolveModelKey(
             deps,
             run.userId,
             run.spaceId,
-            credential,
+            selection.credential,
             runModelProvider,
             runModelId,
             (values) => runSecrets.push(...values),
@@ -3964,19 +3973,27 @@ export function createRunExecutor(deps: ExecutorDeps) {
           select: { kind: true, request: true },
         });
         const approvedEffectReplays = createApprovedEffectReplayQueue(approvedEffects);
-        // 029 gate repair (P1-1): an answered governed permission arms a
-        // ONE-SHOT auto-approve for exactly the recorded tool on the resumed
-        // attempt. Armed only when the decision is newer than the latest
-        // waiting_input (a re-pause supersedes an older answer). Best-effort:
-        // an arming failure must never fail run setup — degradation is a
-        // fresh approval card, never an unapproved execution.
-        let governedReplayTool: string | null = null;
-        try {
+        // 029 gate repair round 3 (D2/D3): an answered governed permission
+        // arms a ONE-SHOT digest-bound auto-approve for exactly the recorded
+        // {tool, actionDigest} PAIR on the resumed attempt — never the name
+        // alone. Armed only when the decision is newer than the latest
+        // waiting_input (a re-pause supersedes an older answer), not yet
+        // consumed, not expired, and recorded by the run's owner. No
+        // best-effort catch (D4): the production store always exposes the
+        // event model; an arming failure is a real fault and must surface.
+        let governedReplay: {
+          decisionEventId: string;
+          decisionPayload: Record<string, unknown>;
+          decision: "approve" | "deny";
+          tool: string;
+          actionDigest: string;
+        } | null = null;
+        {
           const [lastDecisionRow, lastWaitingRow] = await Promise.all([
             deps.prisma.event.findFirst({
               where: { runId, type: "run.input_decision" },
               orderBy: { seq: "desc" },
-              select: { seq: true, payload: true },
+              select: { id: true, seq: true, payload: true },
             }),
             deps.prisma.event.findFirst({
               where: { runId, type: "run.waiting_input" },
@@ -3985,20 +4002,44 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }),
           ]);
           const lastDecisionPayload: unknown = lastDecisionRow?.payload;
+          const decision = lastDecisionPayload as
+            | {
+                decision?: unknown;
+                tool?: unknown;
+                actionDigest?: unknown;
+                consumedAt?: unknown;
+                expiresAt?: unknown;
+                answeredByUserId?: unknown;
+              }
+            | null;
           if (
             lastDecisionRow &&
-            lastDecisionPayload &&
-            typeof lastDecisionPayload === "object" &&
+            decision &&
             (!lastWaitingRow || lastDecisionRow.seq > lastWaitingRow.seq) &&
-            "decision" in lastDecisionPayload &&
-            lastDecisionPayload.decision === "approve" &&
-            "tool" in lastDecisionPayload &&
-            typeof lastDecisionPayload.tool === "string"
+            // Approve arms the one-shot auto-approval; deny arms the one-shot
+            // denial (the denied pause completes its loop with the denial
+            // result instead of re-raising the same card — the deny half of
+            // P1-1's pause loop).
+            (decision.decision === "approve" || decision.decision === "deny") &&
+            typeof decision.tool === "string" &&
+            typeof decision.actionDigest === "string" &&
+            // D3: a consumed decision never re-arms (restart re-derives this
+            // from the durable event, so the one-shot survives attempts).
+            decision.consumedAt == null &&
+            // Expired decisions never arm.
+            (typeof decision.expiresAt !== "string" ||
+              new Date(decision.expiresAt).getTime() > Date.now()) &&
+            // Principal binding: the decision must belong to the run's owner.
+            decision.answeredByUserId === run.userId
           ) {
-            governedReplayTool = lastDecisionPayload.tool;
+            governedReplay = {
+              decisionEventId: lastDecisionRow.id,
+              decisionPayload: lastDecisionPayload as Record<string, unknown>,
+              decision: decision.decision as "approve" | "deny",
+              tool: decision.tool,
+              actionDigest: decision.actionDigest,
+            };
           }
-        } catch (error) {
-          getLogger().warn("governed replay arming skipped", { error });
         }
         const baseComputerInstruction = persistentComputerInstruction({
           heldForTakeover,
@@ -4075,6 +4116,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let lastProgressAt = 0;
         let hasStreamedText = false;
         let toolCallStreak: ToolCallStreak = { key: undefined, count: 0 };
+        // 029 gate repair round 3 (D2/D3): the in-flight tool call whose
+        // dispatch may suspend — the suspended handler binds its actionDigest
+        // into the waiting state so the accept-time decision and the resumed
+        // dispatch verify the same {tool, arguments} pair.
+        let suspendedRequest: { name: string; args: Record<string, unknown> } | null = null;
         let lastComputerFrameId: string | undefined;
         let unchangedVisualStreak: UnchangedVisualStreak = { count: 0 };
         let terminalCheckpointComplete = false;
@@ -4786,17 +4832,47 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (early !== undefined) return early;
             }
           } else if (needsApproval && applied) {
-            // 029 gate repair (P1-1): the answered governed permission
-            // unblocks exactly its recorded tool — one shot, then future
-            // requests ask again. Any other tool still requests approval.
-            if (governedReplayTool === name) {
-              governedReplayTool = null;
-              await deps.prisma.externalEffect.update({
-                where: { id: applied.effect.id },
-                data: { status: "approved" },
-              });
-              const early = await claimOrReturn("approved");
-              if (early !== undefined) return early;
+            // 029 gate repair round 3 (D3): the armed continuation decision
+            // is consumed DURABLY at dispatch — the digest of the ACTUAL
+            // call ({tool, arguments}, canonical JSON sha256) must equal the
+            // recorded suspension's binding, and the consumedAt CAS joins
+            // the intended→approved effect flip in one transaction. A
+            // consumed/expired/foreign record never re-arms (arming is
+            // re-derived from the durable event per attempt); a lost CAS or
+            // changed arguments falls back to a FRESH approval card — never
+            // an unverified auto-approval.
+            const replay = governedReplay;
+            if (
+              replay &&
+              replay.tool === name &&
+              replay.actionDigest === actionDigestOf(name, args)
+            ) {
+              let consumed = false;
+              try {
+                consumed = await consumeRunInputDecision(deps.prisma, {
+                  decisionEventId: replay.decisionEventId,
+                  decisionPayload: replay.decisionPayload,
+                  outcome: replay.decision,
+                  effectId: applied.effect.id,
+                });
+              } catch (error) {
+                if (!(error instanceof GovernedDecisionConflictError)) throw error;
+              }
+              if (consumed) {
+                governedReplay = null;
+                // 029 gate repair round 3 (deny half of P1-1): a denied
+                // governed pause completes the loop — the durable decision is
+                // spent and the SAME model-visible denial result the
+                // effect-denied gate returns goes back to the model, so the
+                // turn continues instead of re-raising the pause card.
+                if (replay.decision === "deny") {
+                  return deniedActionResult();
+                }
+                const early = await claimOrReturn("approved");
+                if (early !== undefined) return early;
+              } else {
+                return requestApproval();
+              }
             } else {
               return requestApproval();
             }
@@ -6859,29 +6935,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
               history: runtimeHistory,
               currentTurnImages,
               tools,
-              model: {
-                provider: runModelProvider,
-                id: runModelId,
-                apiKey: resolved.oauth ? undefined : resolved.apiKey,
-                ...cloudflareRunFields(resolved),
-                baseUrl: resolved.baseUrl,
-                cacheCapabilities: resolved.cacheCapabilities,
-                contextWindow: resolved.contextWindow,
-
-                reasoning: resolved.reasoning,
-                maxTokens: resolved.maxTokens,
-                acceptsImages: resolved.acceptsImages,
-                maxImagesPerPrompt: resolved.maxImagesPerPrompt,
-                thinkingLevel: thinkingLevel ?? resolved.thinkingLevel ?? null,
-                oauth: resolved.oauth
-                  ? {
-                      credential: resolved.oauth,
-                      persist: resolved.persistOAuth,
-                      retire: resolved.retireOAuth,
-                      handle: resolved.oauthHandle,
-                    }
-                  : undefined,
-              },
+              // The one mapping (selection + resolved key → run model); the
+              // thinkingLevel precedence here is the selection-then-key order.
+              model: toRunModel(runModelProvider, runModelId, selection.thinkingLevel, resolved),
               fallbackModels: fallbackModels.map(({ provider, modelId }) => ({
                 provider,
                 id: modelId,
@@ -7254,13 +7310,32 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         },
                       ],
                       // 029 T027: structured waiting linkage persisted in the
-                      // pause transaction. Gate-repair (P1-1): the governed
-                      // tool rides along — the answered permission
-                      // auto-approves exactly this tool's re-dispatch.
+                      // pause transaction. Gate-repair round 3 (D2/D3): the
+                      // governed tool AND its actionDigest ride along — the
+                      // answered permission arms exactly this {tool,
+                      // arguments} pair's re-dispatch, verified against the
+                      // digest the resumed dispatch recomputes from the
+                      // actual call.
                       waitingState: {
                         pauseClass: event.pauseClass,
                         pauseToken: event.pauseToken,
                         ...(event.tool ? { tool: event.tool } : {}),
+                        ...(suspendedRequest
+                          ? {
+                              actionDigest: actionDigestOf(
+                                suspendedRequest.name,
+                                suspendedRequest.args,
+                              ),
+                            }
+                          : {}),
+                        // 029 gate repair round 3 (P2.4): the engine audit
+                        // identity parks durably with the pause so a
+                        // deny/cancel/expire outcome can close the suspended
+                        // action's terminal audit after the engine run
+                        // instance is gone.
+                        ...(event.auditBinding
+                          ? { auditBinding: event.auditBinding }
+                          : {}),
                       },
                     });
               if (!paused) return;
@@ -7291,6 +7366,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
               pendingToolNames.push(event.name);
               tryFlushPendingTools();
+              suspendedRequest = { name: event.name, args: event.args };
               const loopGuard = advanceToolCallLoopGuard(toolCallStreak, event.name, event.args);
               toolCallStreak = loopGuard.streak;
               if (loopGuard.stuck) {
@@ -8817,11 +8893,7 @@ async function completeEffect(
   return completeExternalEffect(deps.prisma, effectId, expectedStatus, storedResult as never);
 }
 
-/** 029 gate repair (P2.12): exported as a test seam — the gate-review carried
- * pin pins this exact refusal text (the dispatch-before-record recovery
- * message), which the lean g2-rig skeleton cannot drive through the claim
- * path without the full idempotency-fixture surface. */
-export function uncertainEffectError(toolName: string): Error {
+function uncertainEffectError(toolName: string): Error {
   return new Error(
     `tool ${toolName} has an earlier execution with an uncertain outcome; it may already have completed, so verify the destination before retrying`,
   );
@@ -8844,22 +8916,11 @@ function deploymentKeyFor(deps: ExecutorDeps, provider: string): string | undefi
  */
 const CODEX_LIVE_RUN_WAIT_MS = 8_000;
 
-async function resolveModelKey(
-  deps: ExecutorDeps,
-  userId: string,
-  spaceId: string,
-  credential: {
-    id: string;
-    secretId: string;
-    provider: string;
-    defaultModel?: string | null;
-    supportsImages?: boolean;
-  } | null,
-  provider: string,
-  modelId: string,
-  registerSecrets?: (values: string[]) => void,
-  requireStoredSecret = false,
-): Promise<{
+/** Key material resolved for one (provider, model) pair: the run-model fields,
+ * the OAuth lifecycle hooks (persist/retire + protected handle), and the values
+ * the caller must redact. The shared contract behind run execution, purpose-routed
+ * resolution, and the auto-review judge. */
+export interface ResolvedModelKey {
   apiKey?: string;
   accountId?: string;
   gatewayId?: string;
@@ -8880,7 +8941,24 @@ async function resolveModelKey(
     failed?: ModelCredentialFailedState,
   ) => Promise<boolean | undefined>;
   redact: string[];
-}> {
+}
+
+async function resolveModelKey(
+  deps: ExecutorDeps,
+  userId: string,
+  spaceId: string,
+  credential: {
+    id: string;
+    secretId: string;
+    provider: string;
+    defaultModel?: string | null;
+    supportsImages?: boolean;
+  } | null,
+  provider: string,
+  modelId: string,
+  registerSecrets?: (values: string[]) => void,
+  requireStoredSecret = false,
+): Promise<ResolvedModelKey> {
   if (credential) {
     return withModelCredentialLock(credential.secretId, async () => {
       const row = await deps.prisma.secret.findFirst({

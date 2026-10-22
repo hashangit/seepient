@@ -141,6 +141,7 @@ async function runWithModel(
     },
     task: { findUniqueOrThrow: vi.fn(async () => ({ id: run.taskId, prompt: "Look again" })) },
     computer: { updateMany: vi.fn(async () => ({ count: 1 })) },
+    event: { findFirst: vi.fn(async () => null) },
     connection: { findMany: vi.fn(async () => []) },
     spaceModelPreference: {
       findFirst: vi.fn<(...args: unknown[]) => Promise<Record<string, unknown> | null>>(

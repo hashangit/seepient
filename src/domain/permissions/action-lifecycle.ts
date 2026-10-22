@@ -35,6 +35,7 @@ import { ToolSuspendedError } from "../../foundations/errors.js";
 import type {
   ExecutionBoundary,
   ExecutionResult,
+  ExecutionBackendCapabilities,
   ToolProgress,
 } from "../../foundations/contracts/execution-boundary.js";
 import type {
@@ -915,9 +916,15 @@ export class ActionLifecycle {
     } catch (err) {
       // 029 S13: a governed pause is a control outcome, not an execution
       // failure — the action did not run, no terminal outcome is recorded
-      // here (the terminal comes from the resumed continuation), and the
-      // loop's suspension seam ends the turn.
-      if (err instanceof ToolSuspendedError) throw err;
+      // here (the terminal comes from the resumed continuation or the P2.4
+      // pause-terminal port), and the loop's suspension seam ends the turn.
+      // The `awaiting-approval` marker (explicitly NOT terminal) keeps the
+      // audit trail explicit that this dispatched action now awaits an
+      // EXTERNAL decision.
+      if (err instanceof ToolSuspendedError) {
+        await this.record(action, "awaiting-approval").catch(() => {});
+        throw err;
+      }
       const message = err instanceof Error ? err.message : String(err);
       execution = {
         state: "failed",
@@ -1050,10 +1057,11 @@ export class ActionLifecycle {
   private async recordTerminal(
     action: PreparedToolAction,
     state: "succeeded" | "failed" | "cancelled",
+    reason?: PermissionDenyReason,
   ): Promise<void> {
     const key = idempotencyKey(action.actionId, state);
     try {
-      await this.record(action, state);
+      await this.record(action, state, reason);
     } catch (err) {
       if (this.terminalOutbox) {
         // Build the same event record() would have appended, then enqueue.
@@ -1066,6 +1074,7 @@ export class ActionLifecycle {
           state,
           timestamp: this.now(),
           policyDigest: this.policy.getPolicyDigest(),
+          reason,
           backend: this.boundary.capabilities.backend,
         };
         await this.terminalOutbox.enqueue(event, key);
@@ -1074,6 +1083,31 @@ export class ActionLifecycle {
         throw err;
       }
     }
+  }
+
+  /**
+   * P2.4 typed port: a governed pause that terminates OUTSIDE the resumed
+   * dispatch (deny / cancel / expire) closes the suspended action's audit
+   * with exactly ONE terminal outcome. Exactly-once by the store's terminal
+   * check: a resumed approval's normal lifecycle terminal (or an earlier
+   * port call) wins and the port reports `already-terminal` — never a double
+   * terminal for one pause. The product adapter invokes this through the
+   * suspension's audit binding; the engine never imports product code.
+   */
+  async recordPauseTerminal(
+    action: PreparedToolAction,
+    terminal: GovernedPauseTerminal,
+  ): Promise<"written" | "already-terminal"> {
+    const existing = await this.audit.getTerminal(action.actionId);
+    if (existing) return "already-terminal";
+    if (terminal === "denied") {
+      await this.recordTerminal(action, "failed", "user-denied");
+    } else if (terminal === "expired") {
+      await this.recordTerminal(action, "cancelled", "approval-expired");
+    } else {
+      await this.recordTerminal(action, "cancelled");
+    }
+    return "written";
   }
 
   /**
@@ -1126,3 +1160,58 @@ export class ActionLifecycle {
 
 /** Type re-export for composition roots. */
 export type { ToolProgress };
+
+/** How a governed pause terminated outside the resumed dispatch (P2.4). */
+export type GovernedPauseTerminal = "denied" | "cancelled" | "expired";
+
+/**
+ * The audit identity a suspension carries out of the engine (the loop's
+ * `AgentSuspension.auditBinding`, parked with the product pause), so the
+ * P2.4 port can close the suspended action's audit after the engine session
+ * is gone.
+ */
+export interface SuspendedPauseAuditBinding {
+  actionId: string;
+  actionDigest: string;
+  principalId: string;
+  runId: string;
+}
+
+/**
+ * P2.4 typed port, standalone form: records exactly ONE terminal audit
+ * outcome for a governed pause that terminated outside the engine (deny /
+ * cancel / expire). Exactly-once by the store's terminal check — a resumed
+ * approval's normal lifecycle terminal (or an earlier port call) wins and
+ * the port reports `already-terminal`. Engine-owned: the product adapter
+ * invokes it with ITS audit store; the engine never imports product code.
+ */
+export async function recordSuspendedPauseTerminal(input: {
+  audit: AuditStore;
+  binding: SuspendedPauseAuditBinding;
+  terminal: GovernedPauseTerminal;
+  policyDigest: string;
+  backend?: ExecutionBackendCapabilities["backend"];
+  now?: () => number;
+}): Promise<"written" | "already-terminal"> {
+  const existing = await input.audit.getTerminal(input.binding.actionId);
+  if (existing) return "already-terminal";
+  const state = input.terminal === "denied" ? "failed" : "cancelled";
+  const reason: PermissionDenyReason | undefined =
+    input.terminal === "denied" ? "user-denied" : input.terminal === "expired" ? "approval-expired" : undefined;
+  const event = {
+    eventId: generateId(),
+    actionId: input.binding.actionId,
+    actionDigest: input.binding.actionDigest,
+    principalId: input.binding.principalId,
+    runId: input.binding.runId,
+    state: state as "failed" | "cancelled",
+    timestamp: (input.now ?? (() => Date.now()))(),
+    policyDigest: input.policyDigest,
+    ...(reason ? { reason } : {}),
+    ...(input.backend ? { backend: input.backend } : {}),
+  };
+  await input.audit.append(event, {
+    idempotencyKey: idempotencyKey(input.binding.actionId, state),
+  });
+  return "written";
+}

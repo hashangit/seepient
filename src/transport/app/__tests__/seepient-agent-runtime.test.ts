@@ -13,7 +13,25 @@ import {
   hydrateHistory,
 } from "../seepient-agent-runtime.js";
 import type { AgentRunRequest } from "@seepients/adapter-kit";
+import type { SeepientAgentRuntimeOptions } from "../seepient-agent-runtime.js";
 import type { CreateSeepientOptions } from "seepient-engine/dist/foundations/types.js";
+
+/**
+ * The engine → adapter-kit edge is types-only (ARCHITECTURE.md §118), so the
+ * test supplies its own adapter knowledge. The stub makes the injected
+ * describer observable: a tool_progress step must surface ITS text.
+ */
+const stubDescribeToolActivity = (toolName: string) => `activity:${toolName}`;
+
+const testRuntimeOptions = (
+  overrides: Partial<SeepientAgentRuntimeOptions> = {},
+): SeepientAgentRuntimeOptions => ({
+  resolveEngineOptions: () => ({}),
+  describeToolActivity: stubDescribeToolActivity,
+  governedDeclarationFor: () => undefined,
+  defaultContextStrategy: "retrieval",
+  ...overrides,
+});
 
 interface TestStreamPayload {
   fullText: Promise<string>;
@@ -157,7 +175,7 @@ function baseRequest(overrides: Partial<AgentRunRequest> = {}): AgentRunRequest 
 describe("SeepientAgentRuntime (T028)", () => {
   it("aborts exactly the targeted run (RT01)", async () => {
     const { agents, gates, createAgentImpl } = makeHarness();
-    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const runtime = new SeepientAgentRuntime(testRuntimeOptions({ createAgentImpl: asEngineFactory(createAgentImpl) }));
 
     const drainA = (async () => {
       for await (const _ of runtime.run(baseRequest({ runId: "run-A" }))) void _;
@@ -180,7 +198,7 @@ describe("SeepientAgentRuntime (T028)", () => {
 
   it("keeps an explicitly empty tool list empty end to end (FR-032)", async () => {
     const { agents, gates, createAgentImpl } = makeHarness();
-    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const runtime = new SeepientAgentRuntime(testRuntimeOptions({ createAgentImpl: asEngineFactory(createAgentImpl) }));
     const drain = (async () => {
       for await (const _ of runtime.run(baseRequest({ tools: [] }))) void _;
     })();
@@ -191,7 +209,7 @@ describe("SeepientAgentRuntime (T028)", () => {
 
   it("bridges connector tools to the governed executeTool callback", async () => {
     const { agents, gates, createAgentImpl } = makeHarness();
-    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const runtime = new SeepientAgentRuntime(testRuntimeOptions({ createAgentImpl: asEngineFactory(createAgentImpl) }));
 
     const calls: Array<{ name: string; executionId: string }> = [];
     const request = baseRequest({
@@ -225,7 +243,7 @@ describe("SeepientAgentRuntime (T028)", () => {
     expect(messages.map((m) => m.role)).toEqual(["user", "assistant"]);
 
     const { agents, gates, createAgentImpl } = makeHarness();
-    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const runtime = new SeepientAgentRuntime(testRuntimeOptions({ createAgentImpl: asEngineFactory(createAgentImpl) }));
     const drain = (async () => {
       for await (const _ of runtime.run(
         baseRequest({
@@ -245,7 +263,7 @@ describe("SeepientAgentRuntime (T028)", () => {
 
   it("flows text, accounted usage, and done events with empty-turn semantics", async () => {
     const { agents, gates, createAgentImpl } = makeHarness();
-    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const runtime = new SeepientAgentRuntime(testRuntimeOptions({ createAgentImpl: asEngineFactory(createAgentImpl) }));
 
     const usageCalls: unknown[] = [];
     const request = baseRequest({
@@ -279,7 +297,7 @@ describe("SeepientAgentRuntime (T028)", () => {
 
   it("applies emptyResponseText for non-silent empty runs", async () => {
     const { agents, gates, createAgentImpl } = makeHarness();
-    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const runtime = new SeepientAgentRuntime(testRuntimeOptions({ createAgentImpl: asEngineFactory(createAgentImpl) }));
     const collected: Array<{ type: string; text?: string }> = [];
     const drain = (async () => {
       for await (const event of runtime.run(baseRequest({ emptyResponseText: "nothing came back" }))) {
@@ -296,7 +314,7 @@ describe("SeepientAgentRuntime (T028)", () => {
   });
 
   it("reports truthful capabilities — scripted is false (contract §2)", () => {
-    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}) });
+    const runtime = new SeepientAgentRuntime(testRuntimeOptions());
     const descriptor = runtime.describe();
     expect(descriptor.id).toBe("seepient-agent-runtime");
     expect(descriptor.capabilities).toEqual({ streaming: true, compaction: true, tools: true, scripted: false });
@@ -325,7 +343,7 @@ describe("SeepientAgentRuntime multimodal + context (T033/T034)", () => {
 
   it("rejects current-turn images when the model accepts none (FR-038)", async () => {
     const { createAgentImpl } = makeHarness();
-    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const runtime = new SeepientAgentRuntime(testRuntimeOptions({ createAgentImpl: asEngineFactory(createAgentImpl) }));
     const request = baseRequest({
       model: { provider: "test", id: "model-1", acceptsImages: false } as AgentRunRequest["model"],
       currentTurnImages: [PNG],
@@ -338,7 +356,7 @@ describe("SeepientAgentRuntime multimodal + context (T033/T034)", () => {
 
   it("rejects image counts above the model per-prompt limit (contract §5)", async () => {
     const { createAgentImpl } = makeHarness();
-    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const runtime = new SeepientAgentRuntime(testRuntimeOptions({ createAgentImpl: asEngineFactory(createAgentImpl) }));
     const request = baseRequest({
       model: { provider: "test", id: "model-1", maxImagesPerPrompt: 1 } as AgentRunRequest["model"],
       currentTurnImages: [PNG, { ...PNG, name: "second.png" }],
@@ -351,7 +369,7 @@ describe("SeepientAgentRuntime multimodal + context (T033/T034)", () => {
 
   it("threads the durable steering claim into the engine config (029 T034 — claiming moved into the loop)", async () => {
     const { agents, gates, createAgentImpl } = makeHarness();
-    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const runtime = new SeepientAgentRuntime(testRuntimeOptions({ createAgentImpl: asEngineFactory(createAgentImpl) }));
     const claimSteering = async () => [
       { id: "s1", messageId: "m-s1", text: "look at this", images: [PNG] },
     ];
@@ -371,7 +389,7 @@ describe("SeepientAgentRuntime multimodal + context (T033/T034)", () => {
 
   it("threads the request context strategy and model window into the seam (FR-039/040)", async () => {
     const { agents, gates, createAgentImpl } = makeHarness();
-    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const runtime = new SeepientAgentRuntime(testRuntimeOptions({ createAgentImpl: asEngineFactory(createAgentImpl) }));
     const request = baseRequest({
       contextStrategy: "snapshots",
       model: { provider: "test", id: "model-1", contextWindow: 12345 } as AgentRunRequest["model"],
@@ -387,7 +405,7 @@ describe("SeepientAgentRuntime multimodal + context (T033/T034)", () => {
 
   it("maps image-bearing tool results without flattening (FR-037 source 4)", async () => {
     const { agents, gates, createAgentImpl } = makeHarness();
-    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const runtime = new SeepientAgentRuntime(testRuntimeOptions({ createAgentImpl: asEngineFactory(createAgentImpl) }));
     const request = baseRequest({
       tools: [{ name: "screenshot", description: "take a shot", inputSchema: { type: "object", properties: {}, required: [] } }],
       executeTool: async () => ({
@@ -417,7 +435,7 @@ describe("SeepientAgentRuntime multimodal + context (T033/T034)", () => {
 
   it("keeps an explicitly empty tool list empty end to end (summary path, FR-032)", async () => {
     const { agents, gates, createAgentImpl } = makeHarness();
-    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const runtime = new SeepientAgentRuntime(testRuntimeOptions({ createAgentImpl: asEngineFactory(createAgentImpl) }));
     const drain = (async () => {
       for await (const _ of runtime.run(baseRequest({ tools: [] }))) void _;
     })();
@@ -429,7 +447,7 @@ describe("SeepientAgentRuntime multimodal + context (T033/T034)", () => {
 
   it("namespaces built-in-colliding connector names; the executor keeps the real name", async () => {
     const { agents, gates, createAgentImpl } = makeHarness();
-    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const runtime = new SeepientAgentRuntime(testRuntimeOptions({ createAgentImpl: asEngineFactory(createAgentImpl) }));
     const executed: Array<{ name: string }> = [];
     const drain = (async () => {
       for await (const _ of runtime.run(
@@ -458,7 +476,7 @@ describe("SeepientAgentRuntime multimodal + context (T033/T034)", () => {
 describe("SeepientAgentRuntime event truth (029 T021/T022)", () => {
   it("emits the tool start event before the effect completes, with the governed executionId (FR-013)", async () => {
     const { agents, gates, createAgentImpl } = makeHarness();
-    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const runtime = new SeepientAgentRuntime(testRuntimeOptions({ createAgentImpl: asEngineFactory(createAgentImpl) }));
 
     const effectGate = Promise.withResolvers<void>();
     const completed: Array<{ executionId: string }> = [];
@@ -500,9 +518,28 @@ describe("SeepientAgentRuntime event truth (029 T021/T022)", () => {
     }
   });
 
+  it("surfaces the INJECTED activity text on tool_progress (types-only boundary)", async () => {
+    const { agents, gates, createAgentImpl } = makeHarness();
+    const runtime = new SeepientAgentRuntime(testRuntimeOptions({ createAgentImpl: asEngineFactory(createAgentImpl) }));
+    const observed: AgentRuntimeEvent[] = [];
+    const drain = (async () => {
+      for await (const event of runtime.run(baseRequest())) observed.push(event);
+    })();
+    await gates[0].promise;
+    const onStep = (agents[0].streamOptions as { onStep?: (step: { type: string; name?: string; args?: unknown }) => void }).onStep;
+    onStep?.({ type: "tool_progress", name: "shell", args: { command: "ls" } });
+    agents[0].settle({ fullText: Promise.resolve("ok"), usage: Promise.resolve({ promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0 }) });
+    await drain;
+    const progress = observed.find(
+      (event): event is Extract<AgentRuntimeEvent, { type: "progress" }> => event.type === "progress",
+    );
+    expect(progress).toBeDefined();
+    expect(progress?.text).toBe("activity:shell");
+  });
+
   it("completed-step callbacks never emit a tool start event (FR-013 onToolCall trap)", async () => {
     const { agents, gates, createAgentImpl } = makeHarness();
-    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const runtime = new SeepientAgentRuntime(testRuntimeOptions({ createAgentImpl: asEngineFactory(createAgentImpl) }));
     const observed: AgentRuntimeEvent[] = [];
     const drain = (async () => {
       for await (const event of runtime.run(baseRequest())) observed.push(event);
@@ -523,7 +560,7 @@ describe("SeepientAgentRuntime event truth (029 T021/T022)", () => {
 
   it("surfaces failure by throwing and never fabricates a done event (T022)", async () => {
     const { agents, gates, createAgentImpl } = makeHarness();
-    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const runtime = new SeepientAgentRuntime(testRuntimeOptions({ createAgentImpl: asEngineFactory(createAgentImpl) }));
     const observed: AgentRuntimeEvent[] = [];
     const drain = (async () => {
       try {
@@ -545,7 +582,7 @@ describe("SeepientAgentRuntime event truth (029 T021/T022)", () => {
 
   it("never carries credential material on emitted events (NFR-005 boundary)", async () => {
     const { agents, gates, createAgentImpl } = makeHarness();
-    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const runtime = new SeepientAgentRuntime(testRuntimeOptions({ createAgentImpl: asEngineFactory(createAgentImpl) }));
     const secret = `sk-plant-${Date.now()}`;
     const observed: AgentRuntimeEvent[] = [];
     const request = baseRequest({
@@ -574,7 +611,7 @@ describe("SeepientAgentRuntime event truth (029 T021/T022)", () => {
 
   it("delivers a deferred-shell completion to the active run, correlated (029 T035)", async () => {
     const { agents, gates, createAgentImpl } = makeHarness();
-    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const runtime = new SeepientAgentRuntime(testRuntimeOptions({ createAgentImpl: asEngineFactory(createAgentImpl) }));
     const observed: AgentRuntimeEvent[] = [];
     let capturedObserver: { onShellStillRunning?: (c: Promise<{ stdout: string; stderr: string; code: number }>) => void } | undefined;
     const releaseEffect = Promise.withResolvers<void>();
@@ -614,7 +651,7 @@ describe("SeepientAgentRuntime event truth (029 T021/T022)", () => {
 
   it("drops a deferred-shell completion after the run settled (late completion: recorded app-side, no orphan push)", async () => {
     const { agents, gates, createAgentImpl } = makeHarness();
-    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const runtime = new SeepientAgentRuntime(testRuntimeOptions({ createAgentImpl: asEngineFactory(createAgentImpl) }));
     let capturedObserver: { onShellStillRunning?: (c: Promise<{ stdout: string; stderr: string; code: number }>) => void } | undefined;
     const request = baseRequest({
       tools: [{ name: "long_shell", description: "d", inputSchema: { type: "object", properties: {}, required: [] } }],
@@ -645,7 +682,7 @@ describe("SeepientAgentRuntime event truth (029 T021/T022)", () => {
 
   it("translates the app suspension sentinel into the engine's typed pause (029 T025)", async () => {
     const { agents, gates, createAgentImpl } = makeHarness();
-    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const runtime = new SeepientAgentRuntime(testRuntimeOptions({ createAgentImpl: asEngineFactory(createAgentImpl) }));
     const onToolCompleted = vi.fn(async () => undefined);
     const request = baseRequest({
       tools: [{ name: "governed_op", description: "d", inputSchema: { type: "object", properties: {}, required: [] } }],
@@ -684,7 +721,7 @@ describe("029 T042 — durable usage settlement", () => {
   // settles (independent of the consumer), onUsage fires exactly once.
   it("settles producer-side usage even when the stream consumer disconnects (FR-036)", async () => {
     const { agents, gates, createAgentImpl } = makeHarness();
-    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const runtime = new SeepientAgentRuntime(testRuntimeOptions({ createAgentImpl: asEngineFactory(createAgentImpl) }));
     const onUsage = vi.fn(async (_event: { accounted: boolean; inputTokens: number | null }) => undefined);
     const request = baseRequest({ onUsage: onUsage as never });
 
@@ -715,7 +752,7 @@ describe("029 T042 — durable usage settlement", () => {
 
   it("a settlement FAILURE is logged, reported as accounted:false, and still reaches onUsage", async () => {
     const { agents, gates, createAgentImpl } = makeHarness();
-    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const runtime = new SeepientAgentRuntime(testRuntimeOptions({ createAgentImpl: asEngineFactory(createAgentImpl) }));
     const onUsage = vi.fn(async (event: { accounted: boolean; inputTokens: number | null }) => {
       if (event.accounted) throw new Error("DB_WRITE_FAILED");
     });
@@ -743,7 +780,7 @@ describe("029 T042 — durable usage settlement", () => {
 
   it("unknown usage stays unknown (null tokens — never zero)", async () => {
     const { agents, gates, createAgentImpl } = makeHarness();
-    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const runtime = new SeepientAgentRuntime(testRuntimeOptions({ createAgentImpl: asEngineFactory(createAgentImpl) }));
     const usageEvents: Array<{ inputTokens: number | null }> = [];
     const request = baseRequest({
       onUsage: (async (event: never) => {
@@ -768,7 +805,7 @@ describe("029 T042 — durable usage settlement", () => {
 describe("029 T043 — permitted-silent completion policy", () => {
   it("a permitted-silent run completes with no fabricated message", async () => {
     const { agents, gates, createAgentImpl } = makeHarness();
-    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const runtime = new SeepientAgentRuntime(testRuntimeOptions({ createAgentImpl: asEngineFactory(createAgentImpl) }));
     const observed: AgentRuntimeEvent[] = [];
     const request = baseRequest({ allowSilentEmpty: true, usageOperationKind: "subagent" } as Partial<AgentRunRequest>);
     const drain = (async () => {
@@ -786,7 +823,7 @@ describe("029 T043 — permitted-silent completion policy", () => {
 
   it("an ordinary chat keeps the contextual fallback (distinct from the silent path)", async () => {
     const { agents, gates, createAgentImpl } = makeHarness();
-    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const runtime = new SeepientAgentRuntime(testRuntimeOptions({ createAgentImpl: asEngineFactory(createAgentImpl) }));
     const observed: AgentRuntimeEvent[] = [];
     const request = baseRequest({ emptyResponseText: "Nothing came back this time." });
     const drain = (async () => {

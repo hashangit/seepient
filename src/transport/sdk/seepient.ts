@@ -784,7 +784,7 @@ async function chat(userMessage: string): Promise<AgentResponse> {
             modelHandoff: (
               opts.config as {
                 modelHandoff?: {
-                  fallbacks: ReadonlyArray<{ provider: string; id: string }>;
+                  fallbacks: ReadonlyArray<{ provider: string; id: string; providerAccount?: string }>;
                   onModelChange(provider: string, id: string): Promise<void>;
                 };
               }
@@ -903,7 +903,7 @@ async function chat(userMessage: string): Promise<AgentResponse> {
         usage: stream.usage,
         finishReason: stream.finishReason,
         /** 029 S13: the governed pause payload when finishReason is "suspended". */
-        suspension: stream.suspension as Promise<null | { pauseClass: "permission" | "choice" | "secret" | "takeover"; pauseToken: string; toolCallId?: string; toolName?: string }>,
+        suspension: stream.suspension as Promise<null | { pauseClass: "permission" | "choice" | "secret" | "takeover"; pauseToken: string; toolCallId?: string; toolName?: string; auditBinding?: { actionId: string; actionDigest: string; principalId: string; runId: string } }>,
         abort: () => streamAbort.abort(),
         toResponse: (respOpts?: { headers?: Record<string, string> }) => stream.toResponse(respOpts),
         toSSEStream: () => stream.toSSEStream(),

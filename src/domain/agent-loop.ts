@@ -98,8 +98,13 @@ export interface AgentLoopOptions {
    * the loop continues the SAME run (never a whole-run retry).
    */
   modelHandoff?: {
-    /** Ordered fallback models (provider + model id). */
-    fallbacks: ReadonlyArray<{ provider: string; id: string }>;
+    /** Ordered fallback models (provider + model id). A hop may pin the
+     * explicitly resolved account the composition holds for it — the resolver
+     * routes to THAT account's credentials; without it, the hop rides the
+     * run's currently resolved account (same-provider hops) and a
+     * cross-provider hop without an account fails closed (never a
+     * first-provider-name match). */
+    fallbacks: ReadonlyArray<{ provider: string; id: string; providerAccount?: string }>;
     /** Notify + persist the handoff; rejects → the handoff is refused. */
     onModelChange(provider: string, id: string): Promise<void>;
   };
@@ -119,6 +124,19 @@ export interface AgentSuspension {
   pauseClass: "permission" | "choice" | "secret" | "takeover";
   /** Engine-side suspension token — the typed pause outcome id, never a tool result. */
   pauseToken: string;
+  /**
+   * 029 gate repair (P2.4): the suspended action's audit identity, parked
+   * with the product pause. When the pause terminates OUTSIDE the resumed
+   * dispatch (deny / cancel / expire), the product adapter closes the audit
+   * through the engine's typed port (`recordSuspendedPauseTerminal`) —
+   * exactly one terminal outcome, never a double.
+   */
+  auditBinding?: {
+    actionId: string;
+    actionDigest: string;
+    principalId: string;
+    runId: string;
+  };
 }
 
 export interface AgentLoopError {
@@ -763,14 +781,22 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
               toModel: next.id,
             };
             currentModel = next.id;
-            // 029 gate repair (P2): carry the target provider NAME so a
-            // cross-provider fallback routes to an account of that provider
-            // (assignment-resolver re-points by upstreamProvider) instead of
-            // calling the new model id under the failed provider.
+            // 029 gate repair (P2.3): the hop routes through EXPLICIT accounts
+            // only. A hop may pin the account the composition resolved for it;
+            // otherwise the run's currently resolved account stays bound (a
+            // same-provider hop keeps its credentials). The resolver verifies
+            // the carried account serves the hop's provider — it never
+            // re-points by provider name.
+            const carriedAccount =
+              next.providerAccount ??
+              (stepOverride && typeof stepOverride === "object"
+                ? (stepOverride as { providerAccount?: string }).providerAccount
+                : undefined);
+            const accountBinding = carriedAccount ? { providerAccount: carriedAccount } : {};
             if (!options.modelOverride || typeof options.modelOverride === "string") {
-              stepOverride = { model: next.id, provider: next.provider };
+              stepOverride = { model: next.id, provider: next.provider, ...accountBinding };
             } else {
-              stepOverride = { ...options.modelOverride, model: next.id, provider: next.provider };
+              stepOverride = { ...options.modelOverride, model: next.id, provider: next.provider, ...accountBinding };
             }
             // Retry the SAME step (the tool-call boundary stands); the empty
             // accumulator resets with the while(true) loop.
@@ -1001,6 +1027,16 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
                     toolName: tc.name,
                     pauseClass: err.pauseClass,
                     pauseToken: err.pauseToken,
+                    // 029 gate repair (P2.4): the audit identity rides out so
+                    // a pause that terminates outside the resumed dispatch
+                    // (deny/cancel/expire) can still close its engine audit
+                    // through the typed port — exactly one terminal outcome.
+                    auditBinding: {
+                      actionId: action.actionId,
+                      actionDigest: action.actionDigest,
+                      principalId: action.principalId,
+                      runId: action.runId,
+                    },
                   };
                   if (onSuspension) await onSuspension(suspension);
                   // Leave the tc loop; the post-loop suspension break ends the

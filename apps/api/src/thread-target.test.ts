@@ -1072,12 +1072,17 @@ describe("sendThreadMessage", () => {
           .mockResolvedValue([
             { id: "run-waiting", taskId: "task-1", status: "waiting_input", trigger: "user" },
           ]),
-        findFirst: vi.fn().mockResolvedValue({ botId: "bot-1", userId: "user-1" }),
+        findFirst: vi
+          .fn()
+          .mockResolvedValue({ botId: "bot-1", userId: "user-1", status: "waiting_input" }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findUnique: vi.fn().mockResolvedValue({ status: "queued" }),
       },
       steeringMessage: { create: vi.fn() },
-      event: { create: vi.fn().mockResolvedValue({ seq: 2, threadId: "thread-1" }) },
+      event: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({ seq: 2, threadId: "thread-1" }),
+      },
       task: { create: vi.fn(), updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
     };
     const prisma = {
@@ -1167,12 +1172,17 @@ describe("sendThreadMessage", () => {
           { id: "run-waiting-1", taskId: "task-1", status: "waiting_input" },
           { id: "run-waiting-2", taskId: "task-2", status: "waiting_input" },
         ]),
-        findFirst: vi.fn().mockResolvedValue({ botId: "bot-1", userId: "user-1" }),
+        findFirst: vi
+          .fn()
+          .mockResolvedValue({ botId: "bot-1", userId: "user-1", status: "waiting_input" }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findUnique: vi.fn().mockResolvedValue({ status: "queued" }),
       },
       steeringMessage: { create: vi.fn() },
-      event: { create: vi.fn().mockResolvedValue({ seq: 2, threadId: "thread-1" }) },
+      event: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({ seq: 2, threadId: "thread-1" }),
+      },
       task: { create: vi.fn(), updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
     };
     const prisma = {
@@ -1335,13 +1345,18 @@ describe("sendThreadMessage", () => {
           { id: "run-waiting-1", taskId: "task-1", botId: "bot-a", status: "waiting_input" },
           { id: "run-waiting-2", taskId: "task-2", botId: "bot-a", status: "waiting_input" },
         ]),
-        findFirst: vi.fn().mockResolvedValue({ botId: "bot-a", userId: "user-1" }),
+        findFirst: vi
+          .fn()
+          .mockResolvedValue({ botId: "bot-a", userId: "user-1", status: "waiting_input" }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findUnique: vi.fn().mockResolvedValue({ status: "queued" }),
         create: vi.fn(),
       },
       steeringMessage: { create: vi.fn() },
-      event: { create: vi.fn().mockResolvedValue({ seq: 2, threadId: "thread-1" }) },
+      event: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({ seq: 2, threadId: "thread-1" }),
+      },
       task: { create: vi.fn(), updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       chatGroup: {
         findFirst: vi.fn().mockResolvedValue({
@@ -1518,7 +1533,10 @@ describe("sendThreadMessage", () => {
       },
       task: { create: vi.fn(), updateMany: vi.fn() },
       steeringMessage: { create: vi.fn() },
-      event: { create: vi.fn().mockResolvedValue({ seq: 2, threadId: "thread-1" }) },
+      event: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({ seq: 2, threadId: "thread-1" }),
+      },
     };
     const prisma = {
       message: { findUnique: vi.fn().mockResolvedValue(null) },
@@ -1851,13 +1869,18 @@ describe("sendThreadMessage", () => {
             trigger: "routine",
           },
         ]),
-        findFirst: vi.fn().mockResolvedValue({ botId: "bot-1", userId: "user-1" }),
+        findFirst: vi
+          .fn()
+          .mockResolvedValue({ botId: "bot-1", userId: "user-1", status: "waiting_input" }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findUnique: vi.fn().mockResolvedValue({ status: "queued" }),
         create: vi.fn(),
       },
       steeringMessage: { create: vi.fn() },
-      event: { create: vi.fn().mockResolvedValue({ seq: 2, threadId: "thread-1" }) },
+      event: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({ seq: 2, threadId: "thread-1" }),
+      },
       task: { create: vi.fn(), updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
     };
     const prisma = {
@@ -1944,13 +1967,18 @@ describe("sendThreadMessage", () => {
             trigger: "webhook",
           },
         ]),
-        findFirst: vi.fn().mockResolvedValue({ botId: "bot-a", userId: "user-1" }),
+        findFirst: vi
+          .fn()
+          .mockResolvedValue({ botId: "bot-a", userId: "user-1", status: "waiting_input" }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findUnique: vi.fn().mockResolvedValue({ status: "queued" }),
         create: vi.fn(),
       },
       steeringMessage: { create: vi.fn() },
-      event: { create: vi.fn().mockResolvedValue({ seq: 2, threadId: "thread-1" }) },
+      event: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({ seq: 2, threadId: "thread-1" }),
+      },
       task: { create: vi.fn(), updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       chatGroup: {
         findFirst: vi.fn().mockResolvedValue({

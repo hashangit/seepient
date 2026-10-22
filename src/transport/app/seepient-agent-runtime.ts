@@ -24,6 +24,7 @@
 import type {
   AdapterContext,
   AdapterDescriptor,
+  AgentContextStrategy,
   AgentInputImage,
   AgentRuntime,
   AgentRuntimeCapabilities,
@@ -31,8 +32,8 @@ import type {
   AgentRunRequest,
   AgentToolSuspension,
   AgentToolExecutionObserver,
+  GovernedOperation,
 } from "@seepients/adapter-kit";
-import { DEFAULT_CONTEXT_STRATEGY, describeToolActivity } from "@seepients/adapter-kit";
 import { SeepientError, ToolSuspendedError } from "seepient-engine/dist/foundations/errors.js";
 import type {
   CreateSeepientOptions,
@@ -44,7 +45,6 @@ import type {
   TrustedHostToolRegistration,
   TrustedHostToolDeclaration,
 } from "seepient-engine/dist/foundations/contracts/custom-tools.js";
-import { governedDeclarationFor } from "@seepients/adapter-kit";
 import { trustedHostTool } from "seepient-engine/dist/transport/sdk/custom-tools.js";
 import { ALL_TOOLS } from "seepient-engine/dist/domain/tool-executor.js";
 import { createSeepient } from "seepient-engine/dist/transport/sdk/seepient.js";
@@ -139,6 +139,19 @@ export interface SeepientAgentRuntimeOptions {
    * abort unit test installs a controllable fake; production leaves default).
    */
   createAgentImpl?: typeof createSeepient;
+  /**
+   * App-supplied adapter-kit knowledge (the engine → adapter-kit edge is
+   * types-only, ARCHITECTURE.md §118): the redacted activity line for a
+   * running tool, surfaced on progress events.
+   */
+  describeToolActivity: (toolName: string, args: unknown) => string;
+  /**
+   * Governed-operation declaration lookup for bridged connector tools, keyed
+   * by the APP-SIDE tool name (pre-`app_`-namespacing).
+   */
+  governedDeclarationFor: (toolName: string) => GovernedOperation | undefined;
+  /** Context strategy applied when a request carries none (FR-039/040). */
+  defaultContextStrategy: AgentContextStrategy;
 }
 
 /**
@@ -266,7 +279,7 @@ export class SeepientAgentRuntime implements AgentRuntime {
         // effects and risk. Dynamic connector tools have no static entry and
         // stay on the ambient fallback — the dynamic class (network-egress
         // "dynamic") is T016's live-catalog scope, not a static row.
-        const governed = governedDeclarationFor(connectorTool.name);
+        const governed = this.#options.governedDeclarationFor(connectorTool.name);
         return trustedHostTool({
           // The adapter-kit declaration mirrors the engine contract
           // structurally; the runtime validator accepts its widened risk set.
@@ -454,7 +467,7 @@ export class SeepientAgentRuntime implements AgentRuntime {
         // to this call only; the model's configured window is the budget and
         // overflow throws the typed error instead of truncating.
         context: {
-          strategy: request.contextStrategy ?? DEFAULT_CONTEXT_STRATEGY,
+          strategy: request.contextStrategy ?? this.#options.defaultContextStrategy,
           ...(request.model.contextWindow !== undefined ? { maxInputTokens: request.model.contextWindow } : {}),
         },
         onStep: (step: { type: string; name?: string; args?: unknown }) => {
@@ -463,7 +476,7 @@ export class SeepientAgentRuntime implements AgentRuntime {
             // description, not a static placeholder.
             queue.push({
               type: "progress",
-              text: describeToolActivity(step.name ?? "tool", step.args),
+              text: this.#options.describeToolActivity(step.name ?? "tool", step.args),
               activity: true,
             });
           }
@@ -591,7 +604,16 @@ export class SeepientAgentRuntime implements AgentRuntime {
       const finishReason = await stream.finishReason.catch(() => "error");
       if (finishReason === "suspended") {
         const suspension = (await stream.suspension) as
-          | { pauseClass: "permission" | "choice" | "secret" | "takeover"; pauseToken: string }
+          | {
+              pauseClass: "permission" | "choice" | "secret" | "takeover";
+              pauseToken: string;
+              auditBinding?: {
+                actionId: string;
+                actionDigest: string;
+                principalId: string;
+                runId: string;
+              };
+            }
           | null;
         yield {
           type: "suspended",
@@ -599,6 +621,10 @@ export class SeepientAgentRuntime implements AgentRuntime {
           pauseToken: suspension?.pauseToken ?? "",
           request: lastSuspensionRequest,
           tool: lastSuspensionTool,
+          // 029 gate repair round 3 (P2.4): the engine audit identity rides
+          // out with the pause so the terminal-audit port can close the
+          // suspended action even though the engine run instance is gone.
+          auditBinding: suspension?.auditBinding,
         };
         return;
       }
