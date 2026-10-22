@@ -73,10 +73,15 @@ const O_DIR_FLAGS: libc::c_int = libc::O_RDONLY | libc::O_CLOEXEC;
 fn open_component(dir_fd: libc::c_int, cname: &CString) -> Result<libc::c_int, libc::c_int> {
     #[cfg(target_os = "linux")]
     {
+        // No RESOLVE_NO_XDEV: crossing a mount point is legitimate (tmpfs
+        // /tmp staging is normal on hardened hosts) and NO_XDEV turned every
+        // such commit into a refusal. The threats this walk stops are
+        // symlinked/swapped components — covered by RESOLVE_BENEATH |
+        // RESOLVE_NO_SYMLINKS plus the per-component directory fstat below.
         let how = OpenHow {
             flags: O_PATH_FLAGS as u64,
             mode: 0,
-            resolve: RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_XDEV,
+            resolve: RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS,
         };
         let fd = unsafe {
             libc::syscall(
@@ -143,8 +148,7 @@ fn open_parent_dir_no_symlinks(parent: &Path) -> Result<FdGuard, (&'static str, 
             }
             Err(errno) => {
                 let code = match errno {
-                    libc::ELOOP | libc::EXDEV => "parent-symlink",
-                    libc::ENOTDIR => "parent-symlink",
+                    libc::ELOOP | libc::ENOTDIR => "parent-symlink",
                     _ => "io-error",
                 };
                 return Err((code, format!("cannot resolve parent component {:?} (errno {})", name, errno)));
