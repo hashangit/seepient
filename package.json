@@ -15,6 +15,10 @@
     "./types": {
       "import": "./dist/foundations/types.js",
       "types": "./dist/foundations/types.d.ts"
+    },
+    "./app-runtime": {
+      "import": "./dist/transport/app/seepient-agent-runtime.js",
+      "types": "./dist/transport/app/seepient-agent-runtime.d.ts"
     }
   },
   "types": "./dist/transport/sdk/index.d.ts",
@@ -146,5 +150,21 @@
     "typescript": "^5.9.3",
     "vitest": "^4.1.4"
   },
-  "packageManager": "pnpm@12.14.0"
+  "packageManager": "pnpm@12.14.0",
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "import": "./dist/transport/sdk/index.js",
+        "types": "./dist/transport/sdk/index.d.ts"
+      },
+      "./server": {
+        "import": "./dist/transport/http/index.js",
+        "types": "./dist/transport/http/index.d.ts"
+      },
+      "./types": {
+        "import": "./dist/foundations/types.js",
+        "types": "./dist/foundations/types.d.ts"
+      }
+    }
+  }
 }

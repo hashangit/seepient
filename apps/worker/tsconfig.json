@@ -1,12 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "noEmit": true,
-    "paths": {
-      "seepient/app-runtime": [
-        "../../src/transport/app/seepient-agent-runtime.ts"
-      ]
-    }
+    "noEmit": true
   },
   "include": [
     "src"

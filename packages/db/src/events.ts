@@ -913,7 +913,7 @@ export async function answerRunWithOutcome(
     if (payload?.expiresAt && new Date(payload.expiresAt).getTime() <= Date.now()) {
       const cancelled = await prisma.run.updateMany({
         where: { id: input.runId, status: "waiting_input" },
-        data: { status: "cancelled", finishedAt: new Date() },
+        data: { status: "cancelled", completedAt: new Date() },
       });
       if (cancelled.count === 1) return "expired";
       // Someone else moved it (answered/cancelled concurrently) — stale.
