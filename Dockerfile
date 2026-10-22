@@ -43,10 +43,11 @@ WORKDIR /build
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY patches/ ./patches/
 COPY packages/core/package.json packages/core/package.json
-# src/transport/app (shipped via the ./app-runtime export) imports the
-# adapter-kit contracts at compile time — B-8's "broken outside the workspace"
-# shape. Interim: install the contract packages so the image build typechecks;
-# the publish-surface decision (OQ-3/T050) resolves this properly.
+# 029 T050 (OQ-3 ANSWERED): the app runtime is application-private — the
+# ./app-runtime export left the publish manifest and the app tree compiles
+# the root source through tsconfig paths. The image therefore still installs
+# the contract packages: the app build typechecks their sources (unchanged
+# requirement, no longer an interim accommodation).
 COPY packages/adapter-kit/package.json packages/adapter-kit/package.json
 COPY packages/contracts/package.json packages/contracts/package.json
 
@@ -61,9 +62,9 @@ RUN pnpm install --frozen-lockfile --filter seepient --filter seepient-engine --
 # part of `pnpm run build`; build:core needs tsconfig.core.json — spec 027)
 COPY tsconfig.json tsconfig.core.json ./
 # The adapter imports the adapter-kit/contracts SOURCES (their exports are
-# src-pointing); without the trees the image typecheck hits TS2307 on the
-# manifest-only links. Superseded entirely by the T050 application-private
-# removal of the app-runtime export.
+# src-pointing); without the trees the app build hits TS2307 on the
+# manifest-only links. Permanent under the T050 application-private
+# arrangement: the app build owns the root-source compile.
 COPY packages/adapter-kit/src/ ./packages/adapter-kit/src/
 COPY packages/contracts/src/ ./packages/contracts/src/
 COPY src/ ./src/
