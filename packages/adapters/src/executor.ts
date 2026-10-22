@@ -2948,6 +2948,45 @@ export function isTerminalModelSetupError(error: unknown): boolean {
   );
 }
 
+// ── FR-009 execution-time revalidation seams ───────────────────────────────
+// Pure predicates for the dispatch-time authority re-checks in the run
+// attempt: a lost lease reverts tool authority, and mid-run policy changes
+// may only ADD strictness (FR-010 — a denial is never overridden).
+
+/** The dispatching attempt still owns the run lease (owner + fence current). */
+export function runLeaseHeldAtDispatch(
+  held: { leaseOwner: string | null; leaseFence: number } | null | undefined,
+  workerId: string,
+  fence: number,
+): boolean {
+  return Boolean(held && held.leaseOwner === workerId && held.leaseFence === fence);
+}
+
+/** Union of the attempt snapshot and the bot's current disabled set. */
+export function effectiveDisabledBuiltinTools(
+  snapshot: readonly string[],
+  current: readonly string[] | null | undefined,
+): Set<string> {
+  return disabledBuiltinToolSet([...snapshot, ...(current ?? [])]);
+}
+
+/** Union of the attempt snapshot and the CURRENT approval rules — added
+ * rules apply at dispatch, removed ones do not loosen the run. */
+export function effectiveApprovalRules(
+  snapshot: readonly ActionApprovalRule[],
+  current: readonly ActionApprovalRule[],
+): ActionApprovalRule[] {
+  const key = (r: ActionApprovalRule) => JSON.stringify([r.effect, r.matchKind, r.matchValue]);
+  const snapshotKeys: Record<string, true> = {};
+  for (const rule of snapshot) snapshotKeys[key(rule)] = true;
+  return [...snapshot, ...current.filter((r) => !snapshotKeys[key(r)])];
+}
+
+/** Mid-run auto-review may only tighten (OR), never silently disable. */
+export function effectiveAutoReviewPreference(snapshot: boolean, current: boolean): boolean {
+  return snapshot || current;
+}
+
 export function createRunExecutor(deps: ExecutorDeps) {
   const contextStrategy = deps.contextStrategy ?? DEFAULT_CONTEXT_STRATEGY;
   const web = deps.web ?? createWebProvider();
@@ -3879,6 +3918,28 @@ export function createRunExecutor(deps: ExecutorDeps) {
             .then((row) => row?.enabled ?? deploymentAutoReviewDefault());
           return autoReviewPreferencePromise;
         };
+        // FR-009 execution-time revalidation: mid-run policy changes may only
+        // ADD strictness (FR-010 — a denial is never overridden). The
+        // effective approval rules and disabled set are the union of the
+        // attempt snapshot and the CURRENT rows; auto-review tightens with OR.
+        // The memoized loaders above stay the analysis-time snapshot.
+        const loadCurrentApprovalRules = async (): Promise<ActionApprovalRule[]> =>
+          effectiveApprovalRules(await loadApprovalRules(), (await deps.prisma.actionApprovalRule.findMany({
+            where: { spaceId: run.spaceId, createdByUserId: run.userId },
+            select: { effect: true, matchKind: true, matchValue: true },
+          })) as ActionApprovalRule[]);
+        const loadCurrentAutoReviewPreference = async (): Promise<boolean> =>
+          effectiveAutoReviewPreference(
+            await loadAutoReviewPreference(),
+            await deps.prisma.actionAutoReviewPreference
+              .findUnique({
+                where: {
+                  spaceId_userId: { spaceId: run.spaceId, userId: run.userId },
+                },
+                select: { enabled: true },
+              })
+              .then((row) => row?.enabled ?? deploymentAutoReviewDefault()),
+          );
         // The intro turn confirms how a bot read its own role before anyone hands it
         // real work — it must not be able to act on that reading (shell, computer,
         // scheduling, spawning another bot, ...) before the user has assigned any task.
@@ -4070,7 +4131,32 @@ export function createRunExecutor(deps: ExecutorDeps) {
               error: "This stage was handed off. End the turn without more tool calls.",
             };
           }
-          if (disabledBuiltinTools.has(name)) {
+          // FR-009 execution-time revalidation — the analysis→dispatch gap
+          // must not inherit authority the run no longer holds. A lost lease
+          // (expired, revoked, or fenced by a newer attempt) reverts tool
+          // authority regardless of what the pipeline approved.
+          const heldLease = await deps.prisma.run.findUnique({
+            where: { id: runId },
+            select: { leaseOwner: true, leaseFence: true },
+          });
+          if (!runLeaseHeldAtDispatch(heldLease, workerId, fence)) {
+            return {
+              error:
+                "RUN_LEASE_LOST: the run lease was lost before dispatch; tool authority reverts",
+            };
+          }
+          // FR-009/FR-010: the disabled set is the union of the attempt
+          // snapshot and the bot's CURRENT config — a tool disabled mid-run
+          // refuses at dispatch even if the analysis allowed it.
+          const currentDisabled = await deps.prisma.bot.findUnique({
+            where: { id: bot.id },
+            select: { disabledBuiltinTools: true },
+          });
+          const effectiveDisabledTools = effectiveDisabledBuiltinTools(
+            bot.disabledBuiltinTools,
+            currentDisabled?.disabledBuiltinTools,
+          );
+          if (effectiveDisabledTools.has(name)) {
             return { error: "This tool is disabled for this bot." };
           }
           if (PAGE_BROWSER_TOOL_NAMES.has(name) && !pageBrowserAllowed) {
@@ -4290,11 +4376,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 toolName: name,
                 connectorKind,
                 readOnly: declaredReadOnly,
-                rules: await loadApprovalRules(),
+                rules: await loadCurrentApprovalRules(),
               });
           const autoReviewPref = requiresMandatoryApproval
             ? false
-            : await loadAutoReviewPreference();
+            : await loadCurrentAutoReviewPreference();
           const injectedReview = requiresMandatoryApproval ? undefined : deps.autoReview;
           const checker = requiresMandatoryApproval ? undefined : resolveAutoReviewChecker();
           const checkerConfigured =
