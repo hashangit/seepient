@@ -74,6 +74,14 @@ Unlike "screen-seeing" agents (such as OpenClaw) that rely on visual interpretat
 
 `seepient-engine` exposes `createSeepient` (incl. `stateless`), `createChat`, `askSeepient`, `trustedHostTool`, the provider runtime, and the injectable store contracts — the same engine, same tenancy/consent/egress security plane, with everything tool/sandbox/UI-shaped failing closed with typed errors naming `seepient`. See [`packages/core/README.md`](packages/core/README.md).
 
+**Package separation** (owner model): the slim embeddable core (published as
+`seepient-engine`) stays under serverless-function size budgets; the full
+agent (published as `seepient`) carries the complete feature set; and the
+Seepients app ships separately as its own distribution concern — a future
+`Seepients` package that installs the app as a binary, never bundled into the
+agent packages. App-specific hosting code (the `app-runtime` adapter) is
+application-private and not part of the published `seepient` surface.
+
 ### npm (full package)
 ```bash
 npm install -g seepient

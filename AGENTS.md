@@ -606,6 +606,7 @@ Inference credentials resolve only from provider management (setup wizard, `seep
 
 - **No bundler** — plain `tsc` to ES2022 NodeNext. Dev via `tsx`.
 - **Package exports** — `seepient` (SDK), `seepient/server`. Binaries: `seepient` (CLI), `seepient-server`.
+- **Package separation (owner decision, 2026-10-22)** — three concerns, never merged: core agent functionality (`seepient-engine` as published today, serverless-size budget); the full agent (`seepient` as published today, embeddable, full feature set); and the Seepients app (future `Seepients` distribution package installing the app as a binary) — the app is a distinct concern and nothing app-specific ships inside the agent packages (`src/transport/app/` is application-private; leaves the published surface at 029 T050). Full record: `ARCHITECTURE.md` §Package separation.
 - **Vitest test suite** — 1370+ tests across 160 files; CI gates publish on test pass
 - **Errors carry metadata** — `code` (machine-readable) + `retryable` flag on all `SeepientError` subclasses.
 - **Hook errors are non-fatal** — never crash the agent loop.

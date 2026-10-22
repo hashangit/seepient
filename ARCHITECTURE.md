@@ -3,6 +3,27 @@
 This file is the implementation boundary for Seepient. Internal feature plans
 must use these layers and may not introduce alternate directory taxonomies.
 
+## Package separation (owner decision, 2026-10-22 — permanent record)
+
+Three concerns, three distinct distribution surfaces; never merged:
+
+- **Core agent functionality** (published today as `seepient-engine`, built
+  from `packages/core`): the stripped-down core of the agent — core
+  operations only, held under the serverless-function size budget.
+- **The full agent** (published today as `seepient`): the complete, embeddable
+  Seepient engine with the full feature set, including capabilities adopted
+  and bolstered from the product as they port.
+- **The Seepients app** (future `Seepients` distribution package): installs
+  the app as a binary on the user's device. The app is a distinct concern
+  from the agent packages — nothing app-specific ships inside the agent
+  packages. Near-term consequence: the app-hosting adapter under
+  `src/transport/app/` is application-private and leaves the published
+  `seepient` surface (029 T050); the app distributions consume it from the
+  app tree, not from npm.
+
+Published-name alignment with these roles is a deliberate future change, not
+import churn: until then `seepient` = full agent, `seepient-engine` = core.
+
 ## Dependency direction
 
 ```text
