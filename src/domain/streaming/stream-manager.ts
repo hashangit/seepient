@@ -45,6 +45,7 @@ export class StreamManager {
   private textReject!: (err: unknown) => void;
   private usageResolve!: (usage: Usage) => void;
   private finishResolve!: (reason: string) => void;
+  private suspensionResolve!: (suspension: unknown) => void;
 
   // F2/round-3 P2-1: the turn error, thrown to textStream consumers after
   // they drain the deltas queued before the failure.
@@ -53,11 +54,14 @@ export class StreamManager {
   readonly fullText: Promise<string>;
   readonly usage: Promise<Usage>;
   readonly finishReason: Promise<string>;
+  /** 029 S13: the governed pause payload when finishReason is "suspended". */
+  readonly suspension: Promise<unknown>;
 
   constructor() {
     this.fullText = new Promise<string>((r, rej) => { this.textResolve = r; this.textReject = rej; });
     this.usage = new Promise<Usage>((r) => { this.usageResolve = r; });
     this.finishReason = new Promise<string>((r) => { this.finishResolve = r; });
+    this.suspension = new Promise<unknown>((r) => { this.suspensionResolve = r; });
     // F2: fullText rejects on failed turns. Consumers that only iterate
     // textStream must not trip Node's unhandled-rejection crash path.
     this.fullText.catch(() => {});
@@ -116,6 +120,11 @@ export class StreamManager {
   /** Resolve the finishReason promise. */
   resolveFinish(reason: string): void {
     this.finishResolve(reason);
+  }
+
+  /** 029 S13: resolve the suspension payload (finishReason "suspended"). */
+  resolveSuspension(suspension: unknown): void {
+    this.suspensionResolve(suspension);
   }
 
   /** Signal completion: set done flags and wake any waiting consumers. */

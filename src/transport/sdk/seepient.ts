@@ -848,6 +848,12 @@ async function chat(userMessage: string): Promise<AgentResponse> {
           } else {
             stream.resolveText(finalText);
             stream.resolveFinish(result.finishReason);
+            // 029 S13: the governed pause payload rides the handle for the
+            // runtime bridge (finishReason "suspended" without it is
+            // unactionable).
+            if (result.finishReason === "suspended") {
+              stream.resolveSuspension(result.suspension ?? null);
+            }
           }
         } catch (err) {
           const seepientErr = toSeepientError(err, "PROVIDER_ERROR");
@@ -882,6 +888,8 @@ async function chat(userMessage: string): Promise<AgentResponse> {
         fullText: stream.fullText,
         usage: stream.usage,
         finishReason: stream.finishReason,
+        /** 029 S13: the governed pause payload when finishReason is "suspended". */
+        suspension: stream.suspension as Promise<null | { pauseClass: "permission" | "choice" | "secret" | "takeover"; pauseToken: string; toolCallId?: string; toolName?: string }>,
         abort: () => streamAbort.abort(),
         toResponse: (respOpts?: { headers?: Record<string, string> }) => stream.toResponse(respOpts),
         toSSEStream: () => stream.toSSEStream(),

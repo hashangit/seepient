@@ -304,8 +304,15 @@ export interface AskSeepientStreamResult {
   fullText: Promise<string>;
   usage: Promise<Usage>;
   finishReason: Promise<string>;
+  /** 029 S13: the governed pause payload when finishReason is "suspended". */
+  suspension: Promise<null | {
+    pauseClass: "permission" | "choice" | "secret" | "takeover";
+    pauseToken: string;
+    toolCallId?: string;
+    toolName?: string;
+  }>;
   abort: () => void;
-  toResponse: (options?: { headers?: Record<string, string> }) => Response;
+  toResponse: (options?: { headers: Record<string, string> } | undefined) => Response;
   toSSEStream: () => ReadableStream;
 }
 

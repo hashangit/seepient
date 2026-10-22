@@ -484,6 +484,23 @@ export class SeepientAgentRuntime implements AgentRuntime {
       await request.onUsage?.(usageEvent);
       yield usageEvent;
 
+      // 029 S13: a suspended turn yields the typed pause event instead of a
+      // fabricated done — the provider call that produced the tool call was
+      // real (usage settled above), but the turn has no final text and the
+      // consumer parks the run at waiting_input.
+      const finishReason = await stream.finishReason.catch(() => "error");
+      if (finishReason === "suspended") {
+        const suspension = (await stream.suspension) as
+          | { pauseClass: "permission" | "choice" | "secret" | "takeover"; pauseToken: string }
+          | null;
+        yield {
+          type: "suspended",
+          pauseClass: suspension?.pauseClass ?? "permission",
+          pauseToken: suspension?.pauseToken ?? "",
+        };
+        return;
+      }
+
       // Empty-turn semantics (E9): silent runs allowed for bot wakes and
       // scheduled routines; otherwise the contextual fallback applies.
       let doneText = finalText;

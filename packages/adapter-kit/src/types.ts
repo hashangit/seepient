@@ -593,6 +593,14 @@ export type AgentRuntimeEvent =
       progress?: string;
       result?: string;
     }
+  | {
+      /** 029 S13: the turn suspended for a durable pause (T025 seam). The
+       * consumer parks the run at waiting_input — never cancelled, never a
+       * fabricated done. */
+      type: "suspended";
+      pauseClass: "permission" | "choice" | "secret" | "takeover";
+      pauseToken: string;
+    }
   | { type: "done"; text?: string };
 
 export interface AgentRuntimeCapabilities {

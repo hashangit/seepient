@@ -6937,6 +6937,38 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 threadId: thread.id,
               });
               return;
+            } else if (event.type === "suspended") {
+              // 029 S13/T026: the engine turn suspended for a durable pause.
+              // The attempt ends WITHOUT a terminal outcome — the run parks at
+              // waiting_input (D4: typed pause, never cancelled/interrupted by
+              // the unwind). The typed pause cards land with T028; this block
+              // records the machine-readable pause truth meanwhile.
+              if (!(await renewRunLease(deps, runId, workerId, fence))) return;
+              await workspaceCheckpoint.flush();
+              const paused = await deps.events.pauseRunForInput({
+                spaceId: run.spaceId,
+                threadId: run.threadId,
+                botId: run.botId,
+                runId,
+                attemptId: attempt.id,
+                leaseOwner: workerId,
+                leaseFence: fence,
+                blocks: [
+                  {
+                    kind: "meta",
+                    text: `suspended:${event.pauseClass}:${event.pauseToken}`,
+                  },
+                ],
+              });
+              if (!paused) return;
+              await notifyRun(deps, run, {
+                kind: "help",
+                title: `${bot.name} is paused`,
+                body: `Waiting for ${event.pauseClass} (pause ${event.pauseToken})`,
+                botId: bot.id,
+                threadId: thread.id,
+              });
+              return;
             } else if (event.type === "tool") {
               // Preserve event ordering when the throttle still holds recent narration: the
               // client must see that text before the tool call it describes.

@@ -443,6 +443,11 @@ export async function askSeepient(
           } else {
             stream.resolveText(allText);
             stream.resolveFinish(result.finishReason);
+            // 029 S13: the governed pause payload rides the handle (mirrors
+            // chatStream).
+            if (result.finishReason === "suspended") {
+              stream.resolveSuspension(result.suspension ?? null);
+            }
             // W112: fire hooks.onFinish in streaming mode too, with the same
             // assembled result the non-streaming path would have returned.
             const streamedResult: AskSeepientResult = {
@@ -475,6 +480,7 @@ export async function askSeepient(
         fullText: stream.fullText,
         usage: stream.usage,
         finishReason: stream.finishReason,
+        suspension: stream.suspension as Promise<null>,
         abort: () => abortController.abort(),
         toResponse: (respOpts?: { headers?: Record<string, string> }) => stream.toResponse(respOpts),
         toSSEStream: () => stream.toSSEStream(),
