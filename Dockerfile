@@ -37,8 +37,11 @@ WORKDIR /build
 
 # Copy dependency manifests first for layer caching. packages/core is a
 # workspace member (spec 027) — its manifest must exist for the install to
-# link the seepient-engine workspace package.
+# link the seepient-engine workspace package. patches/ must ride along: the
+# lockfile pins app-builder-lib@26.15.3 to its patch, and a frozen install
+# without the patch file fails (ERR_PNPM_PATCH_NOT_FOUND).
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY patches/ ./patches/
 COPY packages/core/package.json packages/core/package.json
 
 # Install root-package dependencies (docs is a workspace member but the

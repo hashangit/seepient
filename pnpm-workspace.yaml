@@ -48,8 +48,11 @@ overrides:
   '@modelcontextprotocol/sdk': '>=1.31.0 <2'
   source-map-js: '>=1.2.2'
   body-parser: 2.3.0
-  esbuild: 0.28.1
   fast-uri: ^3.1.7
+  esbuild: 0.25.10
+  # (0.28 broke vitepress 1.6.4's client transpile — "Transforming
+  # destructuring to the configured target environment is not supported yet";
+  # 0.25.10 is the GHSA-67mh-4ck4 floor and transpiles clean.)
   js-yaml: 4.3.2
   postcss: 8.5.25
   qs: ^6.16.0
