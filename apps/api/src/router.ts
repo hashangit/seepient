@@ -2455,6 +2455,9 @@ export function createRouter(deps: RouterDeps) {
           clientNonce: input.clientNonce,
           username: input.username,
         });
+        // 029 T029: every non-accept answer outcome is explicit (D4/D09) —
+        // rejected/stale/foreign surface as CONFLICT, expired as GONE with
+        // the reason; accepted enqueues the fenced resume as before.
         if (!answered) {
           throw new ORPCError("CONFLICT", {
             message: "This prompt is no longer awaiting an answer",

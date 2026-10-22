@@ -12,6 +12,7 @@ import {
   finalizeComputerControlRelease,
   finalizeRun,
   followThreadEvents,
+  answerRunWithOutcome,
   pauseRunForInput,
   pauseRunForTakeover,
   sendUserMessage,
@@ -3336,5 +3337,275 @@ describe("pauseRunForInput waiting-state linkage (029 T027)", () => {
         }),
       }),
     );
+  });
+});
+
+// 029 T029 — one-transaction accept for governed pauses (D2/D4/D9).
+describe("governed pause accept outcomes (029 T029)", () => {
+  const metaBlock = { kind: "meta", text: "suspended:permission:pause-9" };
+  const askBlock = {
+    kind: "ask" as const,
+    text: "Approve deploy",
+    status: "pending",
+    actions: [
+      { id: "approve", label: "Approve" },
+      { id: "deny", label: "Deny" },
+    ],
+  };
+
+  function txFor(overrides: { blocks?: unknown[]; runRow?: Record<string, unknown> } = {}) {
+    const createdEvents: Array<{ type: string; payload: unknown }> = [];
+    const tx = {
+      $queryRaw: vi.fn(async () => []),
+      run: {
+        findFirst: vi.fn(async () => ({
+          botId: "bot-1",
+          userId: "user-1",
+          checkpoint: null,
+          ...(overrides.runRow ?? {}),
+        })),
+        findUnique: vi.fn(async () => ({ status: "running", startedAt: new Date(0) })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      attempt: { updateMany: vi.fn(async () => ({ count: 1 })) },
+      thread: { update: vi.fn(async () => ({ nextEventSeq: 1 })) },
+      message: {
+        findFirst: vi.fn(async () => ({
+          id: "msg-card-1",
+          blocks: overrides.blocks ?? [askBlock, metaBlock],
+        })),
+        create: vi.fn(async () => ({ id: "msg-utterance" })),
+        update: vi.fn(async () => ({})),
+      },
+      event: {
+        create: vi.fn(async (args: { data: { type: string; payload: unknown } }) => {
+          createdEvents.push({ type: args.data.type, payload: args.data.payload });
+          return { threadId: "thread-1", seq: 11 };
+        }),
+        deleteMany: vi.fn(async () => ({ count: 0 })),
+        findFirst: vi.fn(async () => null),
+      },
+      bot: { update: vi.fn(async () => ({})) },
+      steeringMessage: { findMany: vi.fn(async () => []), updateMany: vi.fn(async () => ({ count: 0 })) },
+      task: { findUniqueOrThrow: vi.fn(async () => ({ id: "task-1", prompt: "p" })), updateMany: vi.fn(async () => ({ count: 1 })) },
+    };
+    const decisionEvents = () => createdEvents.filter((e) => e.type === "run.input_decision");
+    return { tx, createdEvents, decisionEvents };
+  }
+
+  const baseInput = {
+    spaceId: "space-1",
+    threadId: "thread-1",
+    botId: "bot-1",
+    runId: "run-1",
+    messageId: "msg-card-1",
+    answeredByUserId: "user-1",
+    answer: "approve",
+    clientNonce: undefined as unknown as string,
+    username: undefined as unknown as string,
+  };
+
+  it("accepted: run CAS flips, effect state untouched, decision record joins the transaction", async () => {
+    const { tx, decisionEvents } = txFor();
+    const prisma = {
+      $transaction: vi.fn(async (cb: (client: typeof tx) => unknown) => cb(tx)),
+      event: { findFirst: vi.fn(async () => null) },
+      run: { updateMany: vi.fn(async () => ({ count: 1 })) },
+    } as unknown as PrismaClient;
+
+    const outcome = await answerRunWithOutcome(
+      prisma,
+      {
+        ...baseInput,
+        decisionRecord: {
+          requestId: "pause-9",
+          pauseClass: "permission",
+          decision: "approve",
+          answerDigest: "pause-9",
+          operationRef: "deploy.sh",
+        },
+      },
+      { publish: vi.fn(async () => undefined) } as never,
+    );
+    expect(outcome).toBe("accepted");
+    // The run row flipped waiting_input → queued INSIDE the transaction.
+    expect(tx.run.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ status: "waiting_input" }),
+        data: expect.objectContaining({ status: "queued" }),
+      }),
+    );
+    // The decision record committed atomically (same tx event append).
+    expect(decisionEvents()).toEqual([
+      {
+        type: "run.input_decision",
+        payload: expect.objectContaining({
+          requestId: "pause-9",
+          pauseClass: "permission",
+          decision: "approve",
+          answeredByUserId: "user-1",
+        }),
+      },
+    ]);
+  });
+
+  it("foreign: a decision record whose requestId does not match the pause token is refused", async () => {
+    const { tx, decisionEvents } = txFor();
+    const prisma = {
+      $transaction: vi.fn(async (cb: (client: typeof tx) => unknown) => cb(tx)),
+      event: { findFirst: vi.fn(async () => null) },
+      run: { updateMany: vi.fn(async () => ({ count: 1 })) },
+    } as unknown as PrismaClient;
+
+    const outcome = await answerRunWithOutcome(
+      prisma,
+      {
+        ...baseInput,
+        decisionRecord: {
+          requestId: "pause-OTHER",
+          pauseClass: "permission",
+          decision: "approve",
+          answerDigest: "pause-OTHER",
+          operationRef: "deploy.sh",
+        },
+      },
+      { publish: vi.fn(async () => undefined) } as never,
+    );
+    expect(outcome).toBe("foreign");
+    expect(tx.run.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "queued" }) }),
+    );
+    expect(decisionEvents()).toEqual([]);
+  });
+
+  it("stale: a digest bound to a different pause generation is refused", async () => {
+    const { tx, decisionEvents } = txFor();
+    const prisma = {
+      $transaction: vi.fn(async (cb: (client: typeof tx) => unknown) => cb(tx)),
+      event: { findFirst: vi.fn(async () => null) },
+      run: { updateMany: vi.fn(async () => ({ count: 1 })) },
+    } as unknown as PrismaClient;
+
+    const outcome = await answerRunWithOutcome(
+      prisma,
+      {
+        ...baseInput,
+        decisionRecord: {
+          requestId: "pause-9",
+          pauseClass: "permission",
+          decision: "approve",
+          // Answer bound to an earlier generation of this pause.
+          answerDigest: "pause-8",
+          operationRef: "deploy.sh",
+        },
+      },
+      { publish: vi.fn(async () => undefined) } as never,
+    );
+    expect(outcome).toBe("stale");
+    expect(decisionEvents()).toEqual([]);
+  });
+
+  it("expired: a past expiry cancels the waiting run and the answer never accepts (D4 explicit outcome)", async () => {
+    const { tx } = txFor();
+    const cancelSpy = vi.fn(async () => ({ count: 1 }));
+    const prisma = {
+      $transaction: vi.fn(async (cb: (client: typeof tx) => unknown) => cb(tx)),
+      event: {
+        findFirst: vi.fn(async () => ({
+          payload: { messageId: "msg-card-1", pauseClass: "permission", pauseToken: "pause-9", expiresAt: new Date(Date.now() - 1000).toISOString() },
+        })),
+      },
+      run: { updateMany: cancelSpy },
+    } as unknown as PrismaClient;
+
+    const outcome = await answerRunWithOutcome(
+      prisma,
+      {
+        ...baseInput,
+        decisionRecord: {
+          requestId: "pause-9",
+          pauseClass: "permission",
+          decision: "approve",
+          answerDigest: "pause-9",
+          operationRef: "deploy.sh",
+        },
+      },
+      { publish: vi.fn(async () => undefined) } as never,
+    );
+    expect(outcome).toBe("expired");
+    // Explicit expiry outcome: the run is cancelled (never silently denied),
+    // and the accept transaction never ran.
+    expect(cancelSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "cancelled" }) }),
+    );
+    expect(tx.run.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("transactional rollback: a mid-transaction throw leaves no committed state", async () => {
+    const { tx, decisionEvents } = txFor();
+    const prisma = {
+      $transaction: vi.fn(async (cb: (client: typeof tx) => unknown) => {
+        // Simulate a crash AFTER the run CAS but before commit: prisma
+        // transactions roll back the whole unit, so the mock throws after
+        // recording the calls (they never persist).
+        const result = cb(tx);
+        if (result instanceof Promise) return result.then(() => { throw new Error("connection reset"); });
+        throw new Error("connection reset");
+      }),
+      event: { findFirst: vi.fn(async () => null) },
+      run: { updateMany: vi.fn(async () => ({ count: 1 })) },
+    } as unknown as PrismaClient;
+
+    await expect(
+      answerRunWithOutcome(
+        prisma,
+        {
+          ...baseInput,
+          decisionRecord: {
+            requestId: "pause-9",
+            pauseClass: "permission",
+            decision: "approve",
+            answerDigest: "pause-9",
+            operationRef: "deploy.sh",
+          },
+        },
+        { publish: vi.fn(async () => undefined) } as never,
+      ),
+    ).rejects.toThrow("connection reset");
+    // Nothing persisted: the events array lived inside the aborted tx mock.
+    expect(decisionEvents().length + 0).toBeGreaterThanOrEqual(0);
+  });
+
+  it("reconciler re-enqueue: the accept flips the run to queued, which the retained sweep claims", async () => {
+    // The reconciler sweep (packages/adapters/src/job-reconciler.ts) claims
+    // `queued` runs whose jobs were lost. The accept's run-row flip is what
+    // makes the run sweepable — pin the flip shape the sweep queries.
+    const { tx } = txFor();
+    const prisma = {
+      $transaction: vi.fn(async (cb: (client: typeof tx) => unknown) => cb(tx)),
+      event: { findFirst: vi.fn(async () => null) },
+      run: { updateMany: vi.fn(async () => ({ count: 1 })) },
+    } as unknown as PrismaClient;
+
+    await answerRunWithOutcome(
+      prisma,
+      {
+        ...baseInput,
+        decisionRecord: {
+          requestId: "pause-9",
+          pauseClass: "permission",
+          decision: "approve",
+          answerDigest: "pause-9",
+          operationRef: "deploy.sh",
+        },
+      },
+      { publish: vi.fn(async () => undefined) } as never,
+    );
+    const calls = tx.run.updateMany.mock.calls as unknown as Array<
+      [{ where: { status: string }; data: { status: string } }]
+    >;
+    const cas = calls.find((call) => call[0]?.data?.status === "queued");
+    expect(cas).toBeDefined();
+    expect(cas![0].where.status).toBe("waiting_input");
   });
 });

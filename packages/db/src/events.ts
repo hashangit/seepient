@@ -199,6 +199,30 @@ export interface PauseRunForTakeover {
   computerId: string;
 }
 
+/**
+ * 029 T029: the engine-side decision record for a governed pause, written
+ * INSIDE the accept transaction (D2 store binding — the injected
+ * DurableApprovalStore's decision write joins the accept transaction's
+ * Prisma client). `requestId` is the suspension token; `digestOrVersion`
+ * binds the answer to the payload the model saw (M02/M03 AnswerBinding).
+ */
+export interface GovernedDecisionRecord {
+  requestId: string;
+  pauseClass: "permission" | "choice" | "secret" | "takeover";
+  decision: "approve" | "deny" | "answer";
+  answerDigest: string;
+  operationRef: string;
+}
+
+/** Answer outcome (029 T029, D4): every non-accept is explicit, never a silent drop. */
+export type AnswerRunOutcome =
+  | "accepted"
+  | "rejected"
+  | "expired"
+  | "stale"
+  | "foreign"
+  | "duplicate";
+
 export interface AnswerRunInput {
   spaceId: string;
   threadId: string;
@@ -210,6 +234,12 @@ export interface AnswerRunInput {
   clientNonce?: string;
   /** Only for a login card; `answer` carries its password. */
   username?: string;
+  /**
+   * 029 T029: present when the answered card is a governed suspension — the
+   * decision record commits atomically with the accept (D2) and binds to the
+   * pause token (foreign/stale detection is token + digest based).
+   */
+  decisionRecord?: GovernedDecisionRecord;
 }
 
 export interface SendUserMessageInput {
@@ -618,7 +648,7 @@ async function commitAnswerRunInput(
   tx: Prisma.TransactionClient,
   input: AnswerRunInput,
   runSecretWriter?: RunSecretWriter,
-): Promise<{ threadId: string; seq: number } | null> {
+): Promise<{ threadId: string; seq: number; outcome: AnswerRunOutcome } | null> {
   // Thread row first, then run rows — the same order as clearThread and finalizeRun, so a
   // concurrent clear cannot deadlock against this transaction.
   await tx.$queryRaw`SELECT id FROM threads WHERE id = ${input.threadId} FOR UPDATE`;
@@ -631,6 +661,9 @@ async function commitAnswerRunInput(
     },
     select: { botId: true, userId: true, checkpoint: true },
   });
+  // No waiting run for this answer: a foreign run (wrong space/thread) or a
+  // stale answer against an already-resumed run — the caller distinguishes
+  // via the run-row check below; here the run simply is not waiting.
   if (!run) return null;
   const message = await tx.message.findFirst({
     where: {
@@ -679,6 +712,30 @@ async function commitAnswerRunInput(
     }
   }
 
+  // 029 T029 governed-pause binding: the answer must carry a decision record
+  // whose requestId matches the pause token recorded at suspension
+  // (foreign = token mismatch); the digest binds the payload the answer was
+  // given for (stale = mismatch). D09 expiry is evaluated PRODUCT-side so
+  // the run row and the policy store cannot disagree.
+  const pauseMeta = parsed.data.find(
+    (block) => block.kind === "meta" && typeof block.text === "string" && block.text.startsWith("suspended:"),
+  );
+  if (pauseMeta && input.decisionRecord) {
+    const expectedToken = (pauseMeta as { text: string }).text.split(":")[2];
+    if (input.decisionRecord.requestId !== expectedToken) {
+      return { threadId: input.threadId, seq: 0, outcome: "foreign" };
+    }
+    // The digest-or-version binding for a governed pause is the recorded
+    // waiting state itself: the answer was given for THIS pause token, and
+    // the token changed means the pause was replaced (re-ask) → stale.
+    if (input.decisionRecord.answerDigest !== expectedToken) {
+      return { threadId: input.threadId, seq: 0, outcome: "stale" };
+    }
+  } else if (pauseMeta && !input.decisionRecord) {
+    // A governed pause answered without its decision record: refuse rather
+    // than accept an unbound answer.
+    return { threadId: input.threadId, seq: 0, outcome: "foreign" };
+  }
   const queued = await tx.run.updateMany({
     where: {
       id: input.runId,
@@ -691,7 +748,7 @@ async function commitAnswerRunInput(
       ...(choiceAsk ? { checkpoint: null } : {}),
     },
   });
-  if (queued.count !== 1) return null;
+  if (queued.count !== 1) return { threadId: input.threadId, seq: 0, outcome: "duplicate" };
 
   const recordedAnswer = secretAsk ? "" : (selectedChoice?.id ?? input.answer);
   const callId = callIdFromClientNonce(input.clientNonce);
@@ -801,7 +858,24 @@ async function commitAnswerRunInput(
     runId: input.runId,
     payload: { messageId: message.id, role: "bot", blocks },
   });
-  return { threadId: updated.threadId, seq: updated.seq };
+  // 029 T029 (D2): the engine-side decision record joins the accept
+  // transaction — the engine's tracked fire-and-forget persistence path is
+  // bypassed for this product; exactly one decision record per action.
+  if (input.decisionRecord) {
+    await appendEventInTransaction(tx, {
+      spaceId: input.spaceId,
+      threadId: input.threadId,
+      botId: run.botId,
+      type: "run.input_decision",
+      runId: input.runId,
+      payload: {
+        ...input.decisionRecord,
+        answeredByUserId: input.answeredByUserId,
+        recordedAnswer: secretAsk ? "" : (selectedChoice?.id ?? input.answer),
+      },
+    });
+  }
+  return { threadId: updated.threadId, seq: updated.seq, outcome: "accepted" };
 }
 
 export async function answerRunInput(
@@ -810,6 +884,43 @@ export async function answerRunInput(
   realtime?: RealtimeFanout,
   runSecretWriter?: RunSecretWriter,
 ): Promise<boolean> {
+  const outcome = await answerRunWithOutcome(prisma, input, realtime, runSecretWriter);
+  return outcome === "accepted";
+}
+
+/**
+ * 029 T029 (D4/D09): the accept with its explicit outcome — `accepted` is
+ * exactly-once by the run-row flip; `expired` is evaluated PRODUCT-side
+ * (the waiting event's expiry) so the run row and the policy store cannot
+ * disagree; `duplicate`/`stale`/`foreign`/`rejected` are each observable.
+ */
+export async function answerRunWithOutcome(
+  prisma: PrismaClient,
+  input: AnswerRunInput,
+  realtime?: RealtimeFanout,
+  runSecretWriter?: RunSecretWriter,
+): Promise<AnswerRunOutcome> {
+  // D09 expiry, product-side: read the run's waiting event; an expired pause
+  // yields the explicit `expired` outcome and the run is cancelled (never
+  // silently auto-denied, never accepted).
+  if (input.decisionRecord) {
+    const waiting = await prisma.event.findFirst({
+      where: { runId: input.runId, type: "run.waiting_input" },
+      orderBy: { seq: "desc" },
+      select: { payload: true },
+    });
+    const payload = waiting?.payload as { expiresAt?: string } | undefined;
+    if (payload?.expiresAt && new Date(payload.expiresAt).getTime() <= Date.now()) {
+      const cancelled = await prisma.run.updateMany({
+        where: { id: input.runId, status: "waiting_input" },
+        data: { status: "cancelled", finishedAt: new Date() },
+      });
+      if (cancelled.count === 1) return "expired";
+      // Someone else moved it (answered/cancelled concurrently) — stale.
+      return "stale";
+    }
+  }
+
   const commit = (writer = runSecretWriter) =>
     prisma.$transaction(async (tx: Prisma.TransactionClient) =>
       commitAnswerRunInput(tx, input, writer),
@@ -818,9 +929,9 @@ export async function answerRunInput(
     ? await runSecretWriter.withPrepared(prisma, input, commit)
     : await commit();
 
-  if (!committed) return false;
+  if (!committed) return "rejected";
   await notifyRealtime(realtime, committed.threadId, committed.seq);
-  return true;
+  return committed.outcome;
 }
 
 /** Answer a waiting question ask with composer free-text. Approval and secret cards stay on the card path. */
