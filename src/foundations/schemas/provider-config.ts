@@ -70,6 +70,10 @@ export type ModelAssignment = Type.Static<typeof ModelAssignmentSchema>;
 
 export const ModelAssignmentOverrideSchema = Type.Object({
   providerAccount: Type.Optional(Type.String()),
+  /** 029 gate repair (P2): provider NAME hint (e.g. "anthropic") — the
+   * mid-loop model-handoff seam routes cross-provider fallbacks by name; the
+   * resolver picks the first configured account with this upstreamProvider. */
+  provider: Type.Optional(Type.String()),
   model: Type.Optional(Type.String()),
   thinkingLevel: Type.Optional(ThinkingLevelSchema),
 });

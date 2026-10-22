@@ -225,8 +225,36 @@ describe("029 T037 — run_subagent on the engine loop", () => {
     // the linkage lives on run.waiting_input (T027).
   });
 
-  // Linked-cancellation carry: the abort LINK (runAbortController "abort" →
-  // runtime.abort(helperRunId)) is wired in the helper branch; the
-  // deterministic full-attempt teardown pin needs the complete
-  // idempotency-fixture surface and is recorded as carried in WP-P6.
+  // Gate-repair (P2.6/T039): the cancel-settles-owned-work pin the implementer
+  // carried in WP-P6 — a parent abort while a helper is parked reaches the
+  // helper via the linked runtime.abort(helperRunId), the helper settles
+  // (its trailing done maps, no hang), and the parent finalizes owned work.
+  it("cancel settles owned work: parent abort aborts the parked helper exactly once (linked cancellation)", async () => {
+    const shutdown = new AbortController();
+    const f = fixture({ scenario: "abort-race", shutdownSignal: shutdown.signal });
+    f.run.status = "queued";
+    const run = f.executor.continueRun(f.run.id, "worker-1");
+    // Wait until the helper is parked inside its nested attempt.
+    await vi.waitFor(() => {
+      expect(f.helperRequests).toHaveLength(1);
+    });
+    expect(f.abortCalls).toHaveLength(0);
+    // Cancel the parent: the runAbortController listener must abort the
+    // HELPER's run id (the linked cancellation under test).
+    shutdown.abort();
+    await f.abortLink;
+    expect(f.abortCalls).toEqual([expect.stringContaining("#helper-")]);
+    await run;
+    // The helper settled (its generator returned after the linked abort) and
+    // the parent unwound cleanly: no pause card leaked from the cancel —
+    // owned work drained, nothing left waiting.
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+    // The abort listener detached on settle: a SECOND abort is a no-op for
+    // the already-settled helper (exactly-once teardown). Drain microtasks
+    // so a stray second listener invocation would surface here.
+    shutdown.abort();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(f.abortCalls).toHaveLength(1);
+  });
 });

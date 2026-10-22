@@ -16,6 +16,15 @@ describe("loadEnv", () => {
       expect(loadEnv({ ...base, TICKET_BOARD_ENABLED: value }).ticketBoardEnabled).toBe(false);
     expect(loadEnv({ ...base, TICKET_BOARD_ENABLED: "true" }).ticketBoardEnabled).toBe(true);
   });
+
+  it("parses RUN_TOOL_CALL_BUDGET: default 400, explicit 0 disables, rejects garbage", () => {
+    expect(loadEnv(base).runToolCallBudget).toBe(400);
+    expect(loadEnv({ ...base, RUN_TOOL_CALL_BUDGET: "0" }).runToolCallBudget).toBe(0);
+    expect(loadEnv({ ...base, RUN_TOOL_CALL_BUDGET: "42" }).runToolCallBudget).toBe(42);
+    for (const value of ["-1", "1.5", "abc"])
+      expect(() => loadEnv({ ...base, RUN_TOOL_CALL_BUDGET: value })).toThrow(/RUN_TOOL_CALL_BUDGET/);
+  });
+
   it("defaults the product path to the governed runtime, Docker, and Graphile Worker", () => {
     const env = loadEnv(base);
     expect(env.agentRuntime).toBe("seepient");

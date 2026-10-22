@@ -3964,6 +3964,42 @@ export function createRunExecutor(deps: ExecutorDeps) {
           select: { kind: true, request: true },
         });
         const approvedEffectReplays = createApprovedEffectReplayQueue(approvedEffects);
+        // 029 gate repair (P1-1): an answered governed permission arms a
+        // ONE-SHOT auto-approve for exactly the recorded tool on the resumed
+        // attempt. Armed only when the decision is newer than the latest
+        // waiting_input (a re-pause supersedes an older answer). Best-effort:
+        // an arming failure must never fail run setup — degradation is a
+        // fresh approval card, never an unapproved execution.
+        let governedReplayTool: string | null = null;
+        try {
+          const [lastDecisionRow, lastWaitingRow] = await Promise.all([
+            deps.prisma.event.findFirst({
+              where: { runId, type: "run.input_decision" },
+              orderBy: { seq: "desc" },
+              select: { seq: true, payload: true },
+            }),
+            deps.prisma.event.findFirst({
+              where: { runId, type: "run.waiting_input" },
+              orderBy: { seq: "desc" },
+              select: { seq: true },
+            }),
+          ]);
+          const lastDecisionPayload: unknown = lastDecisionRow?.payload;
+          if (
+            lastDecisionRow &&
+            lastDecisionPayload &&
+            typeof lastDecisionPayload === "object" &&
+            (!lastWaitingRow || lastDecisionRow.seq > lastWaitingRow.seq) &&
+            "decision" in lastDecisionPayload &&
+            lastDecisionPayload.decision === "approve" &&
+            "tool" in lastDecisionPayload &&
+            typeof lastDecisionPayload.tool === "string"
+          ) {
+            governedReplayTool = lastDecisionPayload.tool;
+          }
+        } catch (error) {
+          getLogger().warn("governed replay arming skipped", { error });
+        }
         const baseComputerInstruction = persistentComputerInstruction({
           heldForTakeover,
           graphicalToolsAllowed,
@@ -4750,7 +4786,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (early !== undefined) return early;
             }
           } else if (needsApproval && applied) {
-            return requestApproval();
+            // 029 gate repair (P1-1): the answered governed permission
+            // unblocks exactly its recorded tool — one shot, then future
+            // requests ask again. Any other tool still requests approval.
+            if (governedReplayTool === name) {
+              governedReplayTool = null;
+              await deps.prisma.externalEffect.update({
+                where: { id: applied.effect.id },
+                data: { status: "approved" },
+              });
+              const early = await claimOrReturn("approved");
+              if (early !== undefined) return early;
+            } else {
+              return requestApproval();
+            }
           } else if (bypassApproval && applied) {
             const early = await claimOrReturn("intended");
             if (early !== undefined) return early;
@@ -6226,10 +6275,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 // pause (one waiting state at run level; never swallowed
                 // into a helper tool-result string).
                 if (event.type === "suspended") {
+                  // 029 gate repair (P1-2): carry the typed card payload —
+                  // without `request` the parent renders choice cards with
+                  // zero options (unanswerable) and generic permission text.
                   return {
                     kind: "agent_tool_suspended",
                     pauseClass: event.pauseClass,
                     pauseToken: event.pauseToken,
+                    request: event.request,
+                    tool: event.tool,
                   };
                 }
                 if (event.type === "text" && event.text) {
@@ -7126,7 +7180,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     return [
                       {
                         kind: "ask" as const,
-                        text: card?.mode === "permission" ? card.summary : `Approve ${event.pauseToken}`,
+                        text: card?.mode === "permission" ? card.summary : `Approve ${event.tool ?? event.pauseToken}`,
                         detail: card?.mode === "permission" ? card.detail : undefined,
                         status: "pending" as const,
                         actions: [
@@ -7200,10 +7254,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         },
                       ],
                       // 029 T027: structured waiting linkage persisted in the
-                      // pause transaction.
+                      // pause transaction. Gate-repair (P1-1): the governed
+                      // tool rides along — the answered permission
+                      // auto-approves exactly this tool's re-dispatch.
                       waitingState: {
                         pauseClass: event.pauseClass,
                         pauseToken: event.pauseToken,
+                        ...(event.tool ? { tool: event.tool } : {}),
                       },
                     });
               if (!paused) return;
@@ -8760,7 +8817,11 @@ async function completeEffect(
   return completeExternalEffect(deps.prisma, effectId, expectedStatus, storedResult as never);
 }
 
-function uncertainEffectError(toolName: string): Error {
+/** 029 gate repair (P2.12): exported as a test seam — the gate-review carried
+ * pin pins this exact refusal text (the dispatch-before-record recovery
+ * message), which the lean g2-rig skeleton cannot drive through the claim
+ * path without the full idempotency-fixture surface. */
+export function uncertainEffectError(toolName: string): Error {
   return new Error(
     `tool ${toolName} has an earlier execution with an uncertain outcome; it may already have completed, so verify the destination before retrying`,
   );

@@ -3542,15 +3542,22 @@ describe("governed pause accept outcomes (029 T029)", () => {
   });
 
   it("transactional rollback: a mid-transaction throw leaves no committed state", async () => {
-    const { tx, decisionEvents } = txFor();
+    const { tx, decisionEvents, createdEvents } = txFor();
     const prisma = {
       $transaction: vi.fn(async (cb: (client: typeof tx) => unknown) => {
         // Simulate a crash AFTER the run CAS but before commit: prisma
         // transactions roll back the whole unit, so the mock throws after
-        // recording the calls (they never persist).
+        // recording the calls — and restores the event rows the aborted
+        // unit had appended (a real rollback discards them).
+        const snapshot = [...createdEvents];
         const result = cb(tx);
-        if (result instanceof Promise) return result.then(() => { throw new Error("connection reset"); });
-        throw new Error("connection reset");
+        const unwind = (error: Error): never => {
+          createdEvents.length = 0;
+          createdEvents.push(...snapshot);
+          throw error;
+        };
+        if (result instanceof Promise) return result.then(() => unwind(new Error("connection reset")), unwind);
+        unwind(new Error("connection reset"));
       }),
       event: { findFirst: vi.fn(async () => null) },
       run: { updateMany: vi.fn(async () => ({ count: 1 })) },
@@ -3573,7 +3580,7 @@ describe("governed pause accept outcomes (029 T029)", () => {
       ),
     ).rejects.toThrow("connection reset");
     // Nothing persisted: the events array lived inside the aborted tx mock.
-    expect(decisionEvents().length + 0).toBeGreaterThanOrEqual(0);
+    expect(decisionEvents()).toHaveLength(0);
   });
 
   it("reconciler re-enqueue: the accept flips the run to queued, which the retained sweep claims", async () => {
@@ -3607,5 +3614,115 @@ describe("governed pause accept outcomes (029 T029)", () => {
     const cas = calls.find((call) => call[0]?.data?.status === "queued");
     expect(cas).toBeDefined();
     expect(cas![0].where.status).toBe("waiting_input");
+  });
+
+  // --- Gate-repair (P0-1) pins: the production answer path -----------------
+
+  it("accepted WITHOUT an explicit decision record: the server binds the answer to the pause token", async () => {
+    // The exact production shape: threads.answer supplies no decisionRecord.
+    // The old refusal made this 409 and stranded the run.
+    const { tx, decisionEvents } = txFor();
+    const prisma = {
+      $transaction: vi.fn(async (cb: (client: typeof tx) => unknown) => cb(tx)),
+      event: { findFirst: vi.fn(async () => null) },
+      run: { updateMany: vi.fn(async () => ({ count: 1 })) },
+    } as unknown as PrismaClient;
+
+    const outcome = await answerRunWithOutcome(prisma, { ...baseInput }, { publish: vi.fn(async () => undefined) } as never);
+    expect(outcome).toBe("accepted");
+    expect(decisionEvents()).toHaveLength(1);
+    expect(decisionEvents()[0].payload).toEqual(
+      expect.objectContaining({
+        requestId: "pause-9",
+        pauseClass: "permission",
+        answerDigest: "pause-9",
+        recordedAnswer: "approve",
+      }),
+    );
+    expect(tx.run.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "queued" }) }),
+    );
+  });
+
+  it("accepted with the waiting-state tool: the decision event carries the resume-arming key", async () => {
+    const { tx, decisionEvents } = txFor();
+    // The pause recorded WHICH governed tool requested it; the accept stamps
+    // it into the decision event so the resumed attempt can auto-approve
+    // exactly that re-dispatch (never a different action).
+    tx.event.findFirst = vi.fn(async () => ({
+      payload: { messageId: "msg-card-1", pauseClass: "permission", pauseToken: "pause-9", tool: "shell" },
+    }));
+    const prisma = {
+      $transaction: vi.fn(async (cb: (client: typeof tx) => unknown) => cb(tx)),
+      event: { findFirst: vi.fn(async () => null) },
+      run: { updateMany: vi.fn(async () => ({ count: 1 })) },
+    } as unknown as PrismaClient;
+
+    const outcome = await answerRunWithOutcome(prisma, { ...baseInput }, { publish: vi.fn(async () => undefined) } as never);
+    expect(outcome).toBe("accepted");
+    expect(decisionEvents()[0].payload).toEqual(expect.objectContaining({ tool: "shell" }));
+  });
+
+  it("foreign: a MISMATCHED explicit record is still refused (strict binding preserved)", async () => {
+    const { tx } = txFor();
+    const prisma = {
+      $transaction: vi.fn(async (cb: (client: typeof tx) => unknown) => cb(tx)),
+      event: { findFirst: vi.fn(async () => null) },
+      run: { updateMany: vi.fn(async () => ({ count: 1 })) },
+    } as unknown as PrismaClient;
+
+    const outcome = await answerRunWithOutcome(
+      prisma,
+      {
+        ...baseInput,
+        decisionRecord: {
+          requestId: "pause-OTHER",
+          pauseClass: "permission",
+          decision: "approve",
+          answerDigest: "pause-OTHER",
+          operationRef: "deploy.sh",
+        },
+      },
+      { publish: vi.fn(async () => undefined) } as never,
+    );
+    expect(outcome).toBe("foreign");
+    expect(tx.run.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("duplicate: an answer against a run that already moved on (lock-losers get the truthful outcome)", async () => {
+    const { tx } = txFor({ runRow: { status: "queued" } });
+    const prisma = {
+      $transaction: vi.fn(async (cb: (client: typeof tx) => unknown) => cb(tx)),
+      event: { findFirst: vi.fn(async () => null) },
+      run: { updateMany: vi.fn(async () => ({ count: 1 })) },
+    } as unknown as PrismaClient;
+
+    const outcome = await answerRunWithOutcome(prisma, { ...baseInput }, { publish: vi.fn(async () => undefined) } as never);
+    expect(outcome).toBe("duplicate");
+  });
+
+  it("expired without an explicit decision record: D09 expiry evaluates every answer", async () => {
+    const cancelSpy = vi.fn(async () => ({ count: 1 }));
+    const prisma = {
+      $transaction: vi.fn(async () => undefined),
+      event: {
+        findFirst: vi.fn(async () => ({
+          payload: {
+            messageId: "msg-card-1",
+            pauseClass: "permission",
+            pauseToken: "pause-9",
+            expiresAt: new Date(Date.now() - 1000).toISOString(),
+          },
+        })),
+      },
+      run: { updateMany: cancelSpy },
+    } as unknown as PrismaClient;
+
+    // NO decisionRecord — the old gate skipped expiry for exactly this shape.
+    const outcome = await answerRunWithOutcome(prisma, { ...baseInput }, { publish: vi.fn(async () => undefined) } as never);
+    expect(outcome).toBe("expired");
+    expect(cancelSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "cancelled" }) }),
+    );
   });
 });

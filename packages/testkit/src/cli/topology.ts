@@ -203,7 +203,7 @@ async function waitForHealth(baseUrl: string, timeoutMs: number) {
       if (
         response.ok &&
         body.jobs === "graphile" &&
-        body.runtime === "scripted" &&
+        body.runtime === "seepient" &&
         body.sandbox === "docker"
       ) {
         return;

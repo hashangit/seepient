@@ -155,6 +155,9 @@ export interface PauseRunForInput {
     seepientRequestId?: string;
     effectState?: unknown;
     expiresAt?: string;
+    /** 029 gate repair (P1-1): the governed tool that requested the pause —
+     * the resume-arming key consumed from the recorded decision. */
+    tool?: string;
   };
 }
 
@@ -644,6 +647,35 @@ async function findPendingAsk(
   return null;
 }
 
+/**
+ * Latest `run.waiting_input` event payload for a run, tolerating stores that
+ * do not expose an event model (minimal fakes). Production PrismaClient
+ * always has the model, so D09 expiry and resume arming read it for real;
+ * fixtures without it simply don't exercise those paths.
+ */
+async function latestWaitingInputPayload(
+  db: { event?: { findFirst(query: unknown): Promise<unknown> } },
+  runId: string,
+): Promise<{ expiresAt?: string; tool?: string } | null> {
+  if (!db.event) return null;
+  const row = (await db.event.findFirst({
+    where: { runId, type: "run.waiting_input" },
+    orderBy: { seq: "desc" },
+    select: { payload: true },
+  })) as unknown;
+  if (typeof row !== "object" || row === null || !("payload" in row)) return null;
+  const payload: unknown = row.payload;
+  if (typeof payload !== "object" || payload === null) return null;
+  const result: { expiresAt?: string; tool?: string } = {};
+  if ("expiresAt" in payload && typeof payload.expiresAt === "string") {
+    result.expiresAt = payload.expiresAt;
+  }
+  if ("tool" in payload && typeof payload.tool === "string") {
+    result.tool = payload.tool;
+  }
+  return result;
+}
+
 async function commitAnswerRunInput(
   tx: Prisma.TransactionClient,
   input: AnswerRunInput,
@@ -652,19 +684,29 @@ async function commitAnswerRunInput(
   // Thread row first, then run rows — the same order as clearThread and finalizeRun, so a
   // concurrent clear cannot deadlock against this transaction.
   await tx.$queryRaw`SELECT id FROM threads WHERE id = ${input.threadId} FOR UPDATE`;
+  // No waiting run for this answer: a foreign run (wrong space/thread) is
+  // rejected; a run that moved on (answered/resumed/cancelled) is classified
+  // as a duplicate answer at the CAS below.
   const run = await tx.run.findFirst({
     where: {
       id: input.runId,
       spaceId: input.spaceId,
       threadId: input.threadId,
-      status: "waiting_input",
     },
-    select: { botId: true, userId: true, checkpoint: true },
+    select: { botId: true, userId: true, checkpoint: true, status: true },
   });
-  // No waiting run for this answer: a foreign run (wrong space/thread) or a
-  // stale answer against an already-resumed run — the caller distinguishes
-  // via the run-row check below; here the run simply is not waiting.
   if (!run) return null;
+  // `status === undefined` never happens against real Postgres (the column is
+  // non-null); it only means a minimal fixture omitted the field — treat as
+  // waiting so fixture answers keep exercising the accept path.
+  const runWaiting = run.status === undefined || run.status === "waiting_input";
+  if (!runWaiting) {
+    // The run moved on (answered/resumed/cancelled) after the thread lock:
+    // the D4 outcome for an answer against a non-waiting run is `duplicate`.
+    // (Reachable now that the lock serializes racing answers — the loser
+    // sees the flipped status instead of the old `null` → `rejected`.)
+    return { threadId: input.threadId, seq: 0, outcome: "duplicate" };
+  }
   const message = await tx.message.findFirst({
     where: {
       id: input.messageId,
@@ -712,29 +754,59 @@ async function commitAnswerRunInput(
     }
   }
 
-  // 029 T029 governed-pause binding: the answer must carry a decision record
-  // whose requestId matches the pause token recorded at suspension
-  // (foreign = token mismatch); the digest binds the payload the answer was
-  // given for (stale = mismatch). D09 expiry is evaluated PRODUCT-side so
-  // the run row and the policy store cannot disagree.
+  // 029 T029 governed-pause binding: the answer must bind to the pause token
+  // recorded at suspension (foreign = token mismatch); the digest binds the
+  // payload the answer was given for (stale = mismatch). D09 expiry is
+  // evaluated PRODUCT-side so the run row and the policy store cannot
+  // disagree.
+  //
+  // Gate-repair (P0-1): the meta block is SERVER-ISSUED — its token came from
+  // this transaction's own suspension record — so an answer without an
+  // explicit decision record is bound server-side to that token instead of
+  // refused. The old refusal made every governed pause answer 409 and
+  // stranded the run in waiting_input (no production caller could construct
+  // a decisionRecord). Callers that DO pass a record still get the strict
+  // token/digest checks.
   const pauseMeta = parsed.data.find(
     (block) => block.kind === "meta" && typeof block.text === "string" && block.text.startsWith("suspended:"),
   );
-  if (pauseMeta && input.decisionRecord) {
-    const expectedToken = (pauseMeta as { text: string }).text.split(":")[2];
-    if (input.decisionRecord.requestId !== expectedToken) {
+  const pauseMetaParts =
+    pauseMeta?.kind === "meta" && typeof pauseMeta.text === "string"
+      ? pauseMeta.text.split(":")
+      : undefined;
+  const pauseClassRaw = pauseMetaParts?.[1];
+  const pauseClass =
+    pauseClassRaw === "choice" || pauseClassRaw === "secret" || pauseClassRaw === "takeover"
+      ? pauseClassRaw
+      : "permission";
+  const pauseToken = pauseMetaParts?.[2];
+  // Gate-repair (P1-1): the effective binding (explicit caller record or the
+  // server-issued synthesis) + the governed tool recorded at suspension —
+  // both feed the durable decision event the resumed attempt consumes.
+  let effectiveDecisionRecord: AnswerRunInput["decisionRecord"] | undefined;
+  let governedReplayTool: string | undefined;
+  if (pauseMeta) {
+    const effectiveRecord: GovernedDecisionRecord = input.decisionRecord ?? {
+      requestId: pauseToken!,
+      pauseClass,
+      decision: "answer",
+      answerDigest: pauseToken!,
+      operationRef: `pause:${pauseToken}`,
+    };
+    if (effectiveRecord.requestId !== pauseToken) {
       return { threadId: input.threadId, seq: 0, outcome: "foreign" };
     }
     // The digest-or-version binding for a governed pause is the recorded
     // waiting state itself: the answer was given for THIS pause token, and
     // the token changed means the pause was replaced (re-ask) → stale.
-    if (input.decisionRecord.answerDigest !== expectedToken) {
+    if (effectiveRecord.answerDigest !== pauseToken) {
       return { threadId: input.threadId, seq: 0, outcome: "stale" };
     }
-  } else if (pauseMeta && !input.decisionRecord) {
-    // A governed pause answered without its decision record: refuse rather
-    // than accept an unbound answer.
-    return { threadId: input.threadId, seq: 0, outcome: "foreign" };
+    // Gate-repair (P1-1): carry the governed tool recorded at suspension so
+    // the resumed attempt can auto-approve EXACTLY that re-dispatch.
+    const waitingPayload = await latestWaitingInputPayload(tx, input.runId);
+    if (waitingPayload?.tool) governedReplayTool = waitingPayload.tool;
+    effectiveDecisionRecord = effectiveRecord;
   }
   const queued = await tx.run.updateMany({
     where: {
@@ -861,7 +933,10 @@ async function commitAnswerRunInput(
   // 029 T029 (D2): the engine-side decision record joins the accept
   // transaction — the engine's tracked fire-and-forget persistence path is
   // bypassed for this product; exactly one decision record per action.
-  if (input.decisionRecord) {
+  // Gate-repair (P0-1): the synthesized server-side binding participates too
+  // (the old `input.decisionRecord` gate skipped the event for every
+  // production answer), carrying the governed tool for resume arming.
+  if (effectiveDecisionRecord) {
     await appendEventInTransaction(tx, {
       spaceId: input.spaceId,
       threadId: input.threadId,
@@ -869,7 +944,8 @@ async function commitAnswerRunInput(
       type: "run.input_decision",
       runId: input.runId,
       payload: {
-        ...input.decisionRecord,
+        ...effectiveDecisionRecord,
+        ...(governedReplayTool ? { tool: governedReplayTool } : {}),
         answeredByUserId: input.answeredByUserId,
         recordedAnswer: secretAsk ? "" : (selectedChoice?.id ?? input.answer),
       },
@@ -902,15 +978,12 @@ export async function answerRunWithOutcome(
 ): Promise<AnswerRunOutcome> {
   // D09 expiry, product-side: read the run's waiting event; an expired pause
   // yields the explicit `expired` outcome and the run is cancelled (never
-  // silently auto-denied, never accepted).
-  if (input.decisionRecord) {
-    const waiting = await prisma.event.findFirst({
-      where: { runId: input.runId, type: "run.waiting_input" },
-      orderBy: { seq: "desc" },
-      select: { payload: true },
-    });
-    const payload = waiting?.payload as { expiresAt?: string } | undefined;
-    if (payload?.expiresAt && new Date(payload.expiresAt).getTime() <= Date.now()) {
+  // silently auto-denied, never accepted). Gate-repair (P0-1): evaluated for
+  // EVERY answer — the old `input.decisionRecord` gate disabled expiry for
+  // all production answers, since no caller can pass a record.
+  {
+    const waitingPayload = await latestWaitingInputPayload(prisma, input.runId);
+    if (waitingPayload?.expiresAt && new Date(waitingPayload.expiresAt).getTime() <= Date.now()) {
       const cancelled = await prisma.run.updateMany({
         where: { id: input.runId, status: "waiting_input" },
         data: { status: "cancelled", completedAt: new Date() },

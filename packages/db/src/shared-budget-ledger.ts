@@ -35,23 +35,47 @@ export class SharedBudgetLedger implements SharedBudgetLedgerContract {
   ) {}
 
   async admit(runId: string, executionId: string, callerKind: "parent" | "helper"): Promise<boolean> {
-    const used = await this.used(runId);
-    if (used >= this.budget) return false;
-    const created = await this.prisma.$transaction(async (tx) => {
-      // The unique (runId, executionId) index makes the double-admission
-      // impossible at the DB layer; the count check makes over-budget
-      // admission impossible under concurrency (serializable tx).
-      const admissionTx = tx as unknown as AdmissionTx;
-      const current = await admissionTx.sharedBudgetAdmission.findMany({ where: { runId } });
-      // Idempotent replay: an executionId already admitted IS admitted —
-      // return success without a second record (exactly-one admission per
-      // execution).
-      if (current.some((r) => r.executionId === executionId)) return { count: 1 };
-      if (current.length >= this.budget) return null;
-      return admissionTx.sharedBudgetAdmission.createMany({
-        data: [{ runId, executionId, callerKind }],
-      });
-    });
+    // Count-then-insert is only race-free under a serializable transaction:
+    // under Read Committed two concurrent admissions can both observe
+    // `current.length < budget` and both insert. The isolation level makes
+    // Postgres abort one side (SQLSTATE P2034 / Prisma error code P2034);
+    // one retry covers the transient case. Product dispatch is sequential
+    // today, but the ledger must not DEPEND on that (gate-review P2).
+    const attempt = (): Promise<{ count: number } | null> =>
+      this.prisma.$transaction(
+        async (tx) => {
+          const admissionTx = tx as unknown as AdmissionTx;
+          const current = await admissionTx.sharedBudgetAdmission.findMany({ where: { runId } });
+          // Idempotent replay: an executionId already admitted IS admitted —
+          // return success without a second record (exactly-one admission per
+          // execution). The unique (runId, executionId) index backstops this
+          // at the DB layer.
+          if (current.some((r) => r.executionId === executionId)) return { count: 1 };
+          if (current.length >= this.budget) return null;
+          return admissionTx.sharedBudgetAdmission.createMany({
+            data: [{ runId, executionId, callerKind }],
+          });
+        },
+        { isolationLevel: "Serializable" },
+      );
+    let created: { count: number } | null = null;
+    for (let tries = 0; tries < 2; tries += 1) {
+      try {
+        created = await attempt();
+        break;
+      } catch (error) {
+        // Retry only Prisma's serialization-abort signature (error code P2034).
+        if (
+          tries === 1 ||
+          typeof error !== "object" ||
+          error === null ||
+          !("code" in error) ||
+          error.code !== "P2034"
+        ) {
+          throw error;
+        }
+      }
+    }
     return created !== null && created.count === 1;
   }
 

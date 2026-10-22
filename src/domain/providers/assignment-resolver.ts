@@ -96,8 +96,18 @@ export async function resolveInvocationPlan(
   }
 
   // Apply partial or complete overrides
-  const effectiveAccount = override?.providerAccount ?? assignment.providerAccount;
+  let effectiveAccount = override?.providerAccount ?? assignment.providerAccount;
   const effectiveModel = override?.model ?? assignment.model;
+  // 029 gate repair (P2): cross-provider handoff — the fallback names a
+  // provider (upstream), not an account. When the resolved account's
+  // upstream provider differs, route to the first configured account that
+  // serves the named provider instead of calling it under the old provider.
+  if (override?.provider && !override?.providerAccount) {
+    const namedAccount = Object.entries(accounts).find(
+      ([, account]) => account?.upstreamProvider === override.provider,
+    );
+    if (namedAccount) effectiveAccount = namedAccount[0];
+  }
   const effectiveThinking = (override?.thinkingLevel ?? assignment.thinkingLevel) as ThinkingLevel | undefined;
   const isOverride = Boolean(override?.model);
 

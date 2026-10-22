@@ -11,6 +11,8 @@ import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import { EVAL_CASES, HISTORY_EVAL_CASES } from "../evals/cases.js";
 import { HISTORY_FIXTURE_VERSION } from "../evals/history-fixtures.js";
 import { emptyTrial, redact, summarize, validateControls } from "../evals/report.js";
+import { SpendBudget, validatePricing } from "../evals/measurement.js";
+import type { EvalPricing } from "../evals/measurement.js";
 
 async function main() {
   const { values } = parseArgs({

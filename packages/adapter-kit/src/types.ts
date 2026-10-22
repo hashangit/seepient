@@ -195,6 +195,12 @@ export interface AgentToolSuspension {
   /** Engine-side suspension token — links the waiting state to this pause. */
   pauseToken: string;
   /**
+   * 029 gate repair (P1-1): the governed tool that requested the pause —
+   * recorded into the waiting state so the answered permission can
+   * auto-approve exactly this tool's re-dispatch on resume.
+   */
+  tool?: string;
+  /**
    * 029 T028: the typed request detail the product card renders — mirrors the
    * M02/M03 request families (requests.ts): permission asks carry a summary;
    * choice carries bounded options; secret carries prompt text ONLY (never a
@@ -614,6 +620,9 @@ export type AgentRuntimeEvent =
       pauseToken: string;
       /** 029 T028: the typed card payload for the pause class. */
       request?: AgentToolSuspension["request"];
+      /** 029 gate repair (P1-1): the governed tool that requested the pause —
+       * the resume-arming key recorded into the waiting state. */
+      tool?: string;
     }
   | { type: "done"; text?: string };
 

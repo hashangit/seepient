@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { StoredMcpOAuthProvider } from "./mcp-oauth.js";
+import { StoredMcpOAuthProvider, type OAuthMaterial } from "./mcp-oauth.js";
 import {
   McpSession,
   secureFetch,
@@ -270,7 +270,7 @@ describe("MCP transport seam", () => {
 
   it("lets the SDK refresh a rejected token, persist rotation, and retry the MCP request", async () => {
     const resourceHeaders: string[] = [];
-    const persisted: unknown[] = [];
+    const persisted: OAuthMaterial[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -350,7 +350,17 @@ describe("MCP transport seam", () => {
       access_token: "fresh-access",
       refresh_token: "rotated-refresh",
     });
-    expect(persisted).toHaveLength(1);
+    // Gate-repair: the MCP SDK float (1.30.0 → 1.32.1 via the >=1.31 security
+    // floor) added a second persist callback for non-token state. The
+    // invariant under test — rotated TOKEN material persisted exactly once —
+    // is pinned on the token-bearing entries, not the raw callback count.
+    const tokenPersists = persisted.filter(
+      (material) => material.oauth?.tokens?.access_token === "fresh-access",
+    );
+    expect(tokenPersists).toHaveLength(1);
+    expect(tokenPersists[0]).toMatchObject({
+      oauth: { tokens: { access_token: "fresh-access", refresh_token: "rotated-refresh" } },
+    });
     await session.close();
   });
 

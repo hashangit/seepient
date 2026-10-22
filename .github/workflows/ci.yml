@@ -48,12 +48,17 @@ jobs:
       # 029 M04–M10 T004: the imported product suites run from their own
       # per-package vitest configs (root include never covered apps/,
       # packages/). prisma generate is a prerequisite of the api suite.
+      # Gate-repair round 2: db/adapters/testkit join the gate — the review
+      # found adapters carrying 5 red tests invisible to every gate.
       - name: Product suites (imported app)
         run: |
           pnpm --filter @seepients/db generate
           pnpm --filter @seepients/adapter-kit test
           pnpm --filter @seepients/worker test
           pnpm --filter @seepients/api test
+          pnpm --filter @seepients/db test
+          pnpm --filter @seepients/adapters test
+          pnpm --filter @seepients/testkit test
 
       # Review P1-4: the compiled-artifact behavioral gate — the six contract
       # flows against the PACKED core tarball (the suite runs the engine from

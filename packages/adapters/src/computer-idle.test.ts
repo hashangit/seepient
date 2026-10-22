@@ -305,6 +305,8 @@ describe("background work launch and probe", () => {
 
   it.skipIf(process.platform === "win32")(
     "detects active work only when launch and probe share the same marker id",
+    // Slow /proc hosts: full fd scans cost seconds (see the cancel-teardown test).
+    { timeout: 120_000 },
     async () => {
       const databaseId = "computer-db-id";
       const providerRef = "provider-ref";
@@ -326,14 +328,18 @@ describe("background work launch and probe", () => {
       );
       children.push(launched);
 
-      await expect.poll(() => probeBackgroundWork(databaseId)).toBe(0);
+      await expect
+        .poll(() => probeBackgroundWork(databaseId), { timeout: 30_000, interval: 250 })
+        .toBe(0);
       // ComputerRef.id is providerRef today; probing that path must not see the DB-id marker.
       expect(await probeBackgroundWork(providerRef)).toBe(1);
     },
-  );
+  ),
 
   it.skipIf(process.platform === "win32")(
     "cleans a completed marker without blocking a later launch",
+    // Slow /proc hosts: full fd scans cost seconds (see the cancel-teardown test).
+    { timeout: 120_000 },
     async () => {
       const markerId = "computer-relaunch-id";
       const completedMarker = `/tmp/seepients-background-${markerId}-run-1-completed`;
@@ -373,7 +379,9 @@ describe("background work launch and probe", () => {
         { stdio: "ignore" },
       );
       children.push(active);
-      await expect.poll(() => probeBackgroundWork(markerId)).toBe(0);
+      await expect
+        .poll(() => probeBackgroundWork(markerId), { timeout: 30_000, interval: 250 })
+        .toBe(0);
     },
   );
 
@@ -437,6 +445,10 @@ describe("background work launch and probe", () => {
 
   it.skipIf(process.platform === "win32")(
     "cancel tears down background shell work for that run",
+    // Gate-repair: full /proc fd scans cost seconds-per-scan on hosts with
+    // large process tables (measured 7.7s per scan at ~7500 fds) — the probe
+    // poll and the cancel script's two scans need real headroom.
+    { timeout: 120_000 },
     async () => {
       const computerId = "computer-cancel-id";
       const runId = "run-cancel-1";
@@ -459,7 +471,9 @@ describe("background work launch and probe", () => {
       );
       children.push(launched);
 
-      await expect.poll(() => probeBackgroundWork(computerId)).toBe(0);
+      await expect
+        .poll(() => probeBackgroundWork(computerId), { timeout: 30_000, interval: 250 })
+        .toBe(0);
 
       const launchedDone = processExit(launched);
       const cancel = spawn(

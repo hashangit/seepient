@@ -86,6 +86,8 @@ export interface AppEnv {
   larkDomain: string | undefined;
   /** Unknown chat senders auto-provision their own accounts when true. */
   messagingOpenSignup: boolean;
+  /** Per-run shared parent+helper tool-call ceiling (FR-032/D5); 0 disables. */
+  runToolCallBudget: number;
   /** Bot that owns team/external chat rooms on the messaging surface. */
   teamChatBotId: string | undefined;
   /** Optional model override for ambient engagement judging. */
@@ -236,6 +238,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
       .map((value) => value.trim())
       .filter(Boolean),
     mcpAllowPrivateEndpoint: source.MCP_ALLOW_PRIVATE_ENDPOINT === "true",
+    runToolCallBudget: parseRunToolCallBudget(source.RUN_TOOL_CALL_BUDGET),
     port: Number(source.API_PORT ?? 3100),
     gitSha: optional(source.GIT_SHA) ?? optional(source.SEEPIENTS_GIT_SHA),
     updaterUrl,
@@ -250,6 +253,17 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
  * Pi runtime and the scripted test double are no longer selectable through
  * the environment; scripted stays available to tests via direct injection).
  */
+/** 029 T038 (FR-032/D5): per-run shared parent+helper tool-call ceiling.
+ * Positive integer; "0" explicitly disables the budget; unset defaults to 400. */
+function parseRunToolCallBudget(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === "") return 400;
+  const value = Number(raw.trim());
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error("RUN_TOOL_CALL_BUDGET must be a non-negative integer (tool calls per run)");
+  }
+  return value;
+}
+
 function requireAgentRuntime(source: NodeJS.ProcessEnv): "seepient" {
   const value = source.AGENT_RUNTIME?.trim();
   if (!value) {

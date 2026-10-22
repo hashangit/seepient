@@ -54,6 +54,7 @@ import {
   isTooManyDatabaseConnections,
   parsePositiveInteger,
   pushSessionExpiresAt,
+  SharedBudgetLedger,
 } from "@seepients/db";
 import { SERVICE_NAMES } from "@seepients/logging";
 import { createRootLogger } from "@seepients/logging/axiom";
@@ -200,9 +201,23 @@ async function main() {
   const notifications = new ExpoPushProvider(dataDir, (sessionId) =>
     pushSessionExpiresAt(prisma, sessionId),
   );
+  // 029 T038 (FR-032/D5): the shared parent+helper tool-call budget —
+  // constructed at the composition root so the governed dispatch boundary
+  // enforces it (a test-only injection was the gate-review P1).
+  const runBudgetRaw = process.env.RUN_TOOL_CALL_BUDGET?.trim();
+  const runBudget =
+    runBudgetRaw === undefined || runBudgetRaw === "" || Number(runBudgetRaw) === 0
+      ? {}
+      : {
+          sharedBudgetLedger: new SharedBudgetLedger(
+            prisma,
+            parsePositiveInteger(runBudgetRaw, 400),
+          ),
+        };
   const executor = createRunExecutor({
     prisma,
     runtime,
+    ...runBudget,
     // Live per-account Codex catalog; never refreshes or writes credentials.
     codexCatalog: new CodexCatalogCache(),
     sandbox,

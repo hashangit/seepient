@@ -3,6 +3,13 @@
  * parent+helper tool-call budget enforced at pre-dispatch admission via
  * atomic admission records keyed by (runId, executionId). Restart
  * reconstructs the remaining budget by counting records.
+ *
+ * Gate-review repair: the fake no longer enforces the budget inside
+ * createMany (the old mock masked the ledger's own count check). The
+ * concurrency claim is backed by the Serializable-isolation pin instead —
+ * a fake prisma cannot model Postgres abort semantics, so the pin asserts
+ * the ledger DECLARES the isolation that makes count-then-insert race-free
+ * rather than pretending to simulate it.
  */
 import { describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@seepients/db";
@@ -11,20 +18,18 @@ import { SharedBudgetLedger } from "./shared-budget-ledger.js";
 function ledgerHarness(budget: number) {
   const rows: Array<{ runId: string; executionId: string; callerKind: string }> = [];
   const admitted = new Set<string>();
+  const txOptions: Array<unknown> = [];
   const sharedBudgetAdmission = {
     createMany: vi.fn(async ({ data }: { data: Array<{ runId: string; executionId: string; callerKind: string }> }) => {
-      // Emulate the DB unique constraint: a duplicate executionId inside the
-      // same createMany batch (or table) rejects atomically.
+      // Emulate ONLY the DB unique constraint on (runId, executionId).
+      // Budget enforcement belongs to the ledger's serializable count check,
+      // not to the fake — enforcing it here is what masked the race.
       for (const row of data) {
         const key = `${row.runId}:${row.executionId}`;
         if (admitted.has(key)) return { count: 0 };
-        if (rows.length + data.length > budget + data.length - 1 && rows.length + data.length > budget) {
-          // over-budget creation is handled by the ledger's count check before write
-        }
       }
       for (const row of data) {
         const key = `${row.runId}:${row.executionId}`;
-        if (rows.length >= budget) return { count: 0 };
         if (admitted.has(key)) return { count: 0 };
         admitted.add(key);
         rows.push(row);
@@ -35,23 +40,40 @@ function ledgerHarness(budget: number) {
     deleteMany: vi.fn(async () => ({ count: 0 })),
   };
   const prisma = {
-    $transaction: vi.fn(async (cb: (tx: unknown) => unknown) => cb({ sharedBudgetAdmission })),
+    $transaction: vi.fn(async (cb: (tx: unknown) => unknown, options?: unknown) => {
+      txOptions.push(options);
+      return cb({ sharedBudgetAdmission });
+    }),
     sharedBudgetAdmission,
   } as unknown as PrismaClient & { sharedBudgetAdmission: typeof sharedBudgetAdmission };
-  return { ledger: new SharedBudgetLedger(prisma, budget), rows, prisma, sharedBudgetAdmission };
+  return {
+    ledger: new SharedBudgetLedger(prisma, budget),
+    rows,
+    prisma,
+    sharedBudgetAdmission,
+    txOptions,
+  };
 }
 
 describe("SharedBudgetLedger (029 T038 / FR-032 / D5)", () => {
-  it("admits parent and helper calls until the budget is exhausted (last-unit contention)", async () => {
+  it("admits calls until the budget is exhausted; the last unit is refused (count check)", async () => {
     const { ledger } = ledgerHarness(2);
     expect(await ledger.admit("run-1", "exec-parent", "parent")).toBe(true);
-    // Two concurrent helpers race for the last unit: exactly one wins.
-    const [a, b] = await Promise.all([
-      ledger.admit("run-1", "exec-helper-1", "helper"),
-      ledger.admit("run-1", "exec-helper-2", "helper"),
-    ]);
-    expect([a, b].filter(Boolean)).toHaveLength(1);
+    expect(await ledger.admit("run-1", "exec-helper-1", "helper")).toBe(true);
+    // The next unit is past the ceiling: refused by the ledger's count check
+    // inside the admission transaction (not by any fake-side enforcement).
+    expect(await ledger.admit("run-1", "exec-helper-2", "helper")).toBe(false);
     expect(await ledger.admit("run-1", "exec-after", "helper")).toBe(false);
+    expect(await ledger.used("run-1")).toBe(2);
+  });
+
+  it("admission transactions declare Serializable isolation (the concurrency guarantee)", async () => {
+    const { ledger, txOptions } = ledgerHarness(2);
+    await ledger.admit("run-1", "exec-1", "parent");
+    expect(txOptions.length).toBeGreaterThan(0);
+    for (const options of txOptions) {
+      expect(options).toEqual({ isolationLevel: "Serializable" });
+    }
   });
 
   it("restart reconstructs the count from durable admission records (no fresh allowance)", async () => {

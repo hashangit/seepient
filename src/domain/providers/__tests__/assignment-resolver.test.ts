@@ -307,6 +307,28 @@ describe("AssignmentResolver (QS-P4.5)", () => {
       expect(plan.warnings?.[0]).toContain("gpt-5.6-terra, gpt-5.6-terra-preview");
     });
   });
+
+  // 029 gate repair (P2): the mid-loop model-handoff seam routes cross-provider
+  // fallbacks by provider NAME — the resolver re-points the account by
+  // upstreamProvider instead of calling the new model under the failed provider.
+  it("override.provider re-points the account to the named upstream provider", async () => {
+    const plan = await resolveInvocationPlan(mockSnapshot, credentialStore, "text", "standard", {
+      model: "claude-3-7-sonnet",
+      provider: "anthropic",
+    });
+    expect(plan.selectedTarget.providerAccount).toBe("backup-anthropic");
+    expect(plan.selectedTarget.upstreamProvider).toBe("anthropic");
+    expect(plan.selectedTarget.model).toBe("claude-3-7-sonnet");
+  });
+
+  it("override.providerAccount still wins over the name hint (explicit account preserved)", async () => {
+    const plan = await resolveInvocationPlan(mockSnapshot, credentialStore, "text", "standard", {
+      model: "claude-3-7-sonnet",
+      provider: "openai",
+      providerAccount: "backup-anthropic",
+    });
+    expect(plan.selectedTarget.providerAccount).toBe("backup-anthropic");
+  });
 });
 
 

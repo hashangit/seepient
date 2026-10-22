@@ -82,6 +82,7 @@ import {
   provisionMessagingIdentity,
   pushSessionExpiresAt,
   requireMembership,
+  SharedBudgetLedger,
 } from "@seepients/db";
 import type { Logger } from "@seepients/logging";
 import {
@@ -446,11 +447,20 @@ export async function createApp(
   // One cache serves models.list, selection validation, and run-time model
   // resolution alike, so a list call warms the run path in this process.
   const codexCatalog = new CodexCatalogCache();
+  // 029 T038 (FR-032/D5): the shared parent+helper tool-call budget. The
+  // ledger is constructed HERE — the composition root — so the governed
+  // dispatch boundary actually enforces it (a test-only injection was the
+  // gate-review P1: the guard existed but production skipped it).
+  const runBudget =
+    env.runToolCallBudget > 0
+      ? { sharedBudgetLedger: new SharedBudgetLedger(prisma, env.runToolCallBudget) }
+      : {};
   const executor = createRunExecutor({
     contextStrategy,
     prisma,
     runtime,
     codexCatalog,
+    ...runBudget,
     sandbox,
     memory,
     memoryProviders,

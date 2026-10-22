@@ -120,7 +120,7 @@ async function main() {
   } finally {
     await new Promise<void>((resolve) => {
       server.close(() => resolve());
-      server.closeAllConnections();
+      if ("closeAllConnections" in server) server.closeAllConnections();
     });
     await new Promise<void>((resolve, reject) => {
       deviceControl.close((error) => (error ? reject(error) : resolve()));

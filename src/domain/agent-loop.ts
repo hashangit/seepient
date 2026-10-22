@@ -763,10 +763,14 @@ async function executeLoop(options: AgentLoopOptions): Promise<AgentLoopResult> 
               toModel: next.id,
             };
             currentModel = next.id;
+            // 029 gate repair (P2): carry the target provider NAME so a
+            // cross-provider fallback routes to an account of that provider
+            // (assignment-resolver re-points by upstreamProvider) instead of
+            // calling the new model id under the failed provider.
             if (!options.modelOverride || typeof options.modelOverride === "string") {
-              stepOverride = { model: next.id };
+              stepOverride = { model: next.id, provider: next.provider };
             } else {
-              stepOverride = { ...options.modelOverride, model: next.id };
+              stepOverride = { ...options.modelOverride, model: next.id, provider: next.provider };
             }
             // Retry the SAME step (the tool-call boundary stands); the empty
             // accumulator resets with the while(true) loop.

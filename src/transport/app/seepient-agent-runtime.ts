@@ -349,10 +349,12 @@ export class SeepientAgentRuntime implements AgentRuntime {
               ) {
                 const suspension = result as unknown as AgentToolSuspension;
                 lastSuspensionRequest = suspension.request;
+                lastSuspensionTool = connectorTool.name;
                 throw new ToolSuspendedError(
                   suspension.pauseClass,
                   suspension.pauseToken,
                   `tool "${connectorTool.name}" suspended for ${suspension.pauseClass} pause`,
+                  connectorTool.name,
                 );
               }
               // Result contents are redacted by the app's hook, never here.
@@ -514,13 +516,23 @@ export class SeepientAgentRuntime implements AgentRuntime {
         await pump.catch(() => undefined);
         try {
           settledUsageEvent = await settleUsage();
-        } catch {
-          // Producer settlement failure must not wedge the queue: the
-          // emitted usage (below) carries null tokens (unknown — never zero)
-          // and the caller's onUsage receives exactly that.
-          settledUsageEvent = {
+        } catch (error) {
+          // Producer settlement failure must not wedge the queue: the emitted
+          // usage carries null tokens (unknown — never zero). Gate-repair
+          // (WARN-02): the failure is LOGGED, the fallback is honestly
+          // `accounted: false` (the settlement did NOT happen), and the
+          // caller's onUsage finally receives it — the old code swallowed the
+          // error, kept accounted:true, and never delivered the event.
+          // (stderr pattern mirrors provider-runtime; no @seepients/logging
+          // import — the engine→app boundary stays as sanctioned.)
+          if (typeof process !== "undefined" && process.stderr) {
+            process.stderr.write(
+              `[warn] producer-side usage settlement failed: ${error instanceof Error ? error.message : String(error)}\n`,
+            );
+          }
+          const fallbackEvent: Extract<AgentRuntimeEvent, { type: "usage" }> = {
             type: "usage",
-            accounted: true,
+            accounted: false,
             provider: request.model.provider,
             model: request.model.id,
             operationKind: request.usageOperationKind ?? "answer",
@@ -532,6 +544,8 @@ export class SeepientAgentRuntime implements AgentRuntime {
             cacheWriteTokens: null,
             reasoningTokens: null,
           };
+          await Promise.resolve(request.onUsage?.(fallbackEvent)).catch(() => undefined);
+          settledUsageEvent = fallbackEvent;
         }
         // The settled usage event is yielded post-drain for connected
         // consumers; a disconnected consumer needs only the onUsage side
@@ -542,6 +556,7 @@ export class SeepientAgentRuntime implements AgentRuntime {
       /** 029 T028: the typed card payload of the latest suspension (the
        * executor parks on it; at most one live suspension per attempt). */
       let lastSuspensionRequest: AgentToolSuspension["request"] | undefined;
+      let lastSuspensionTool: string | undefined;
 
       // Drain callback-thread events while the turn runs; `close()` ends the
       // loop when the turn settles.
@@ -583,6 +598,7 @@ export class SeepientAgentRuntime implements AgentRuntime {
           pauseClass: suspension?.pauseClass ?? "permission",
           pauseToken: suspension?.pauseToken ?? "",
           request: lastSuspensionRequest,
+          tool: lastSuspensionTool,
         };
         return;
       }

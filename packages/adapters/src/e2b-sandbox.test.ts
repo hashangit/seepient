@@ -216,7 +216,13 @@ describe("E2B computer backend", () => {
         } else {
           await expect(provider.destroy(computer, context)).rejects.toThrow();
         }
-        expect(requests).toEqual(["DELETE /sandboxes/expired"]);
+        // Gate-repair: the branch's `e2b>undici8` security floor (undici
+        // 8.10.2) retries idempotent requests on 503 (default 4 attempts), so
+        // the 503 case observes several DELETEs. The contract under test:
+        // deletion goes to the RIGHT sandbox only, failure surfaces, and a
+        // failed destroy never falls back to connect.
+        expect(requests.length).toBeGreaterThan(0);
+        expect(requests.every((request) => request === "DELETE /sandboxes/expired")).toBe(true);
         expect(sdk.connect).not.toHaveBeenCalled();
       } finally {
         server.closeAllConnections();

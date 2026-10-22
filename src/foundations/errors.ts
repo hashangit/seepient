@@ -598,11 +598,16 @@ export class PathIdentityMismatchError extends ToolError {
 export class ToolSuspendedError extends SeepientError {
   readonly pauseClass: "permission" | "choice" | "secret" | "takeover";
   readonly pauseToken: string;
+  /** 029 gate repair (P1-1): the governed tool that requested the pause —
+   * the resume-arming key so an answered permission can auto-approve exactly
+   * this tool's re-dispatch (never a different action). */
+  readonly tool?: string;
 
   constructor(
     pauseClass: "permission" | "choice" | "secret" | "takeover",
     pauseToken: string,
     message?: string,
+    tool?: string,
   ) {
     super(
       message ?? `Tool suspended for ${pauseClass} pause (${pauseToken})`,
@@ -612,5 +617,6 @@ export class ToolSuspendedError extends SeepientError {
     this.name = "ToolSuspendedError";
     this.pauseClass = pauseClass;
     this.pauseToken = pauseToken;
+    this.tool = tool;
   }
 }

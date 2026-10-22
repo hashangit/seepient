@@ -23,6 +23,7 @@ vi.mock("./computer-lifecycle.js", async (importOriginal) => {
 
 import type { AgentRunRequest, ConnectorCall } from "@seepients/adapter-kit";
 import type { PrismaClient } from "@seepients/db";
+import { uncertainEffectError } from "./executor.js";
 import { createJobReconciler } from "./job-reconciler.js";
 import { createRunExecutor } from "./executor.js";
 
@@ -342,9 +343,12 @@ describe("029 T031 — G2 rig: the three crash windows", () => {
     });
     await reconciler.reconcileOnce();
     expect(reenqueue).toHaveBeenCalled();
-    // Carry: the uncertainEffectError refusal-message pin needs the complete
-    // idempotency-fixture surface (the lean skeleton hangs inside the claim
-    // path) — the refusal was captured live with its full stack during
-    // development of this rig (message recorded in work-packets WP-P4).
+    // Gate-repair (P2.12): the refusal the resumed attempt's effect claim
+    // produces for this window — pinned verbatim (the live-captured message
+    // from WP-P4). The claim-path drive still needs the full idempotency
+    // fixture; the message contract itself is now test-enforced, not prose.
+    expect(uncertainEffectError("deploy").message).toBe(
+      "tool deploy has an earlier execution with an uncertain outcome; it may already have completed, so verify the destination before retrying",
+    );
   });
 });

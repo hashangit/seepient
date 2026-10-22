@@ -678,13 +678,67 @@ describe("SeepientAgentRuntime event truth (029 T021/T022)", () => {
   });
 });
 describe("029 T042 — durable usage settlement", () => {
-  // T042 carried pin: the disconnect-consumer settlement needs a harness
-  // that parks the generator mid-stream without the runAttempt scaffolding —
-  // the implementation (settlement in the finish chain, exactly once,
-  // independent of the consumer) is covered by the connected pins below and
-  // the ordering pin in the accounted-usage test. Recorded in WP-P7.
-  it.skip("settles producer-side usage even when the stream consumer disconnects (FR-036)", async () => {
-    expect(true).toBe(true);
+  // Gate-repair (WARN-01/FR-036): the pin the implementer skipped — a
+  // consumer that breaks out of the stream mid-turn must not lose the
+  // producer-side settlement: the finish chain resolves when the TURN
+  // settles (independent of the consumer), onUsage fires exactly once.
+  it("settles producer-side usage even when the stream consumer disconnects (FR-036)", async () => {
+    const { agents, gates, createAgentImpl } = makeHarness();
+    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const onUsage = vi.fn(async (_event: { accounted: boolean; inputTokens: number | null }) => undefined);
+    const request = baseRequest({ onUsage: onUsage as never });
+
+    // Consume exactly one event, then disconnect (generator .return()).
+    const disconnected = (async () => {
+      for await (const event of runtime.run(request)) {
+        void event;
+        break;
+      }
+    })();
+    await gates[0].promise;
+    agents[0].emitDelta("hi");
+    await disconnected;
+    expect(onUsage).not.toHaveBeenCalled();
+
+    // The turn keeps running producer-side and settles AFTER the disconnect.
+    agents[0].settle({
+      fullText: Promise.resolve("late"),
+      usage: Promise.resolve({ promptTokens: 5, completionTokens: 7, totalTokens: 12, cost: 0.01 }),
+    });
+    await vi.waitFor(() => {
+      expect(onUsage).toHaveBeenCalledTimes(1);
+    });
+    expect(onUsage.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ accounted: true, inputTokens: 5, outputTokens: 7 }),
+    );
+  });
+
+  it("a settlement FAILURE is logged, reported as accounted:false, and still reaches onUsage", async () => {
+    const { agents, gates, createAgentImpl } = makeHarness();
+    const runtime = new SeepientAgentRuntime({ resolveEngineOptions: () => ({}), createAgentImpl: asEngineFactory(createAgentImpl) });
+    const onUsage = vi.fn(async (event: { accounted: boolean; inputTokens: number | null }) => {
+      if (event.accounted) throw new Error("DB_WRITE_FAILED");
+    });
+    const request = baseRequest({ onUsage: onUsage as never });
+    const drain = (async () => {
+      for await (const event of runtime.run(request)) void event;
+    })();
+
+    await gates[0].promise;
+    agents[0].emitDelta("hi");
+    agents[0].settle({
+      fullText: Promise.resolve("hi"),
+      usage: Promise.reject(new Error("DB_WRITE_FAILED")),
+    });
+    await drain;
+
+    // First call: the real settlement attempt (accounted:true) — it threw.
+    // Second call: the honest fallback (accounted:false, null tokens).
+    expect(onUsage).toHaveBeenCalledTimes(2);
+    expect(onUsage.mock.calls[0][0]).toEqual(expect.objectContaining({ accounted: true }));
+    expect(onUsage.mock.calls[1][0]).toEqual(
+      expect.objectContaining({ accounted: false, inputTokens: null, totalTokens: null }),
+    );
   });
 
   it("unknown usage stays unknown (null tokens — never zero)", async () => {
