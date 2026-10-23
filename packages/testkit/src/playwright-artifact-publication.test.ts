@@ -96,8 +96,20 @@ describe("Playwright artifact publication boundary", () => {
       "PLAYWRIGHT_REPORT_DIR: ${{ runner.temp }}/playwright-artifacts/playwright-report",
     );
     expect(workflow).toContain(
-      "PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/playwright-artifacts/apps/web/test-results",
+      "PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/playwright-artifacts/test-results",
     );
+    // Placement tripwire (round 4): the two dirs must live in the publish STEP's env
+    // (8-space indent under the step, 10-space keys). The substring checks above pass
+    // even if the lines move to job-level env, where GitHub rejects the runner context
+    // and the whole workflow dies at parse. These anchors fail under that revert.
+    expect(workflow).toContain(
+      "        env:\n          PLAYWRIGHT_REPORT_DIR: ${{ runner.temp }}/playwright-artifacts/playwright-report",
+    );
+    expect(workflow).toContain(
+      "          PLAYWRIGHT_REPORT_DIR: ${{ runner.temp }}/playwright-artifacts/playwright-report\n          PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/playwright-artifacts/test-results",
+    );
+    expect(workflow).not.toContain("    env:\n      PLAYWRIGHT_REPORT_DIR:");
+    expect(workflow).not.toContain("    env:\n      PLAYWRIGHT_TEST_RESULTS_DIR:");
     expect(workflow).toContain("ref: ${{ github.event.repository.default_branch }}");
     expect(workflow).toContain("persist-credentials: false");
     expect(workflow).toContain("run: bash scripts/publish-playwright-report.sh");
@@ -174,7 +186,7 @@ describe("Playwright artifact publication boundary", () => {
         const archive = makeArchive(root, {
           ...replacements,
           "playwright-report/index.html": "<html>Example report</html>",
-          "apps/web/test-results/example-chromium/checkpoint.png": screenshot,
+          "test-results/example-chromium/checkpoint.png": screenshot,
         });
         execFileSync("python3", [extractor, archive, artifacts]);
         expect(readFileSync(path.join(artifacts, "package.json"), "utf8")).toBe(
@@ -225,7 +237,7 @@ else:
         PLAYWRIGHT_REPOSITORY_URL: "https://example.invalid/project",
         PLAYWRIGHT_PUBLISH_REPORT: String(!isPr),
         PLAYWRIGHT_REPORT_DIR: path.join(artifacts, "playwright-report"),
-        PLAYWRIGHT_TEST_RESULTS_DIR: path.join(artifacts, "apps/web/test-results"),
+        PLAYWRIGHT_TEST_RESULTS_DIR: path.join(artifacts, "test-results"),
         FAKE_STORAGE: storage,
         ATTACK_MARKER: path.join(root, "executed-untrusted-code"),
       };

@@ -8,7 +8,7 @@ const boxSandbox = process.env.SANDBOX_PROVIDER === "box";
 const reporters = [
   ...(process.env.CI ? ([["github"]] as const) : []),
   ["list"] as const,
-  ["html", { open: "never", outputFolder: "../../playwright-report" }] as const,
+  ["html", { open: "never", outputFolder: "playwright-report" }] as const,
 ];
 
 export default defineConfig({

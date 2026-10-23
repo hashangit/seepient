@@ -36,6 +36,7 @@ local session and endpoint data; it does not delete server-side bots.
 
 ## Screenshot catalog
 
-Run **Actions → mobile Android screenshots → Run workflow** to build the app, seed an isolated fake
-workspace, capture light and dark Android emulator views, upload diagnostics for seven days, and publish a
-persistent gallery beside the Playwright reports.
+No automated workflow captures mobile screenshots yet. To publish a gallery manually, run
+`scripts/publish-mobile-screenshot-gallery.sh` against your own S3-compatible storage; it requires
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_BUCKET`, `S3_ENDPOINT`, and
+`PLAYWRIGHT_PUBLIC_BASE_URL` to be set.
