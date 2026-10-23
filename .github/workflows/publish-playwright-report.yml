@@ -34,6 +34,10 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      # Same prerequisite as ci.yml: the web app's server imports the db client,
+      # which only exists after prisma generate.
+      - name: Generate prisma client
+        run: pnpm --filter @seepients/db generate
       - name: Install Playwright browsers
         run: pnpm --filter web exec playwright install --with-deps chromium
       - name: Run Playwright e2e
