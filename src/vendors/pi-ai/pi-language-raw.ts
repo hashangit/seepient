@@ -34,6 +34,37 @@ import { assertBaseUrlEgressAllowed } from "../egress-check.js";
 
 type AssistantContentBlock = TextBlock | ReasoningBlock | ToolUseBlock;
 
+/**
+ * Provider compat quirks applied to RESOLVED catalog models. The bundled
+ * catalog carries no explicit compat for most providers, so pi-ai's
+ * openai-completions detection defaults optimistically — e.g.
+ * `supportsDeveloperRole: true` for Groq, whose model templates reject
+ * `role: "developer"` (upstream: earendil-works/pi#10741; the sanctioned fix
+ * shape is the compat flag, cf. a213abb and PR #11120). Declared here at the
+ * vendor seam so every run resolves a model whose wire format the provider
+ * actually accepts; simplify entries away when upstream ships them.
+ */
+export function applyModelCompatQuirks(
+  model: Model<Api>,
+  providerName: string,
+): Model<Api> {
+  const provider = String(model.provider ?? providerName);
+  const baseUrl = String(model.baseUrl ?? "");
+  const isGroq =
+    provider === "groq" ||
+    providerName === "groq" ||
+    baseUrl.includes("api.groq.com");
+  if (!isGroq) return model;
+  // pi-ai's Compat is a TypeBox static; this flag is its documented,
+  // optional developer-role switch — the only field this quirk touches.
+  const compat = (model.compat ?? {}) as { supportsDeveloperRole?: boolean };
+  if (compat.supportsDeveloperRole === false) return model;
+  return {
+    ...model,
+    compat: { ...compat, supportsDeveloperRole: false },
+  } as Model<Api>;
+}
+
 interface ResolvedSignalInfo {
   signal?: AbortSignal;
   isTimeout: () => boolean;
@@ -283,6 +314,12 @@ export class PiLanguageRaw implements LanguageBackend {
       if (target.baseUrl) {
         model = { ...model, baseUrl: target.baseUrl };
       }
+      // Catalog/heuristic compat is optimistic (029: pi-ai's openai-completions
+      // detection claims developer-role support for every "standard" provider,
+      // but Groq's model templates reject `role: "developer"` — upstream issue
+      // earendil-works/pi#10741, fix shape = compat flag per a213abb/#11120).
+      // Provider quirks override the catalog entry at the resolution seam.
+      model = applyModelCompatQuirks(model, providerName);
     } else {
       const api: Api = providerName === "anthropic" ? "anthropic-messages" : "openai-completions";
       model = {

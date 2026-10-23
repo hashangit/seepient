@@ -1,6 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
-import { PiLanguageRaw } from "../pi-language-raw.js";
-import type { AssistantMessageEvent } from "@earendil-works/pi-ai";
+import { PiLanguageRaw, applyModelCompatQuirks } from "../pi-language-raw.js";
+import type {
+  AssistantMessage,
+  AssistantMessageEvent,
+  Api,
+  Model,
+  Models,
+} from "@earendil-works/pi-ai";
 import type { InferenceTarget } from "../../../foundations/contracts/backend-ports.js";
 import type {
   CredentialHandle,
@@ -614,6 +620,126 @@ describe("PiLanguageRaw backend (QS-P3.3)", () => {
         messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
       })) {}
     }).rejects.toThrow(/OAuth session for "oauth-account-revoked" expired/);
+  });
+
+  describe("applyModelCompatQuirks (029: Groq developer-role rejection, upstream pi#10741)", () => {
+    // Minimal entries below: the quirk reads only provider/baseUrl/compat, so
+    // each `as unknown as Model<Api>` is the sanctioned library-boundary cast.
+    const groqOptimistic = {
+      id: "qwen/qwen3.8-27b",
+      provider: "groq",
+      baseUrl: "https://api.groq.com/openai/v1",
+      reasoning: true,
+      compat: { supportsDeveloperRole: true },
+    };
+
+    it("forces supportsDeveloperRole off for groq catalog models", () => {
+      const resolved = applyModelCompatQuirks(
+        { ...groqOptimistic } as unknown as Model<Api>,
+        "groq",
+      );
+      expect(resolved.compat?.supportsDeveloperRole).toBe(false);
+      // The rest of the entry is preserved.
+      expect(resolved.reasoning).toBe(true);
+      expect(resolved.baseUrl).toBe("https://api.groq.com/openai/v1");
+    });
+
+    it("detects groq by base url even when the provider id differs", () => {
+      const resolved = applyModelCompatQuirks(
+        {
+          ...groqOptimistic,
+          provider: "custom",
+          baseUrl: "https://api.groq.com/openai/v1",
+        } as unknown as Model<Api>,
+        "custom",
+      );
+      expect(resolved.compat?.supportsDeveloperRole).toBe(false);
+    });
+
+    it("leaves non-groq models untouched", () => {
+      const openai = applyModelCompatQuirks(
+        {
+          ...groqOptimistic,
+          provider: "openai",
+          id: "gpt-4o",
+          baseUrl: "https://api.openai.com/v1",
+        } as unknown as Model<Api>,
+        "openai",
+      );
+      expect(openai.compat?.supportsDeveloperRole).toBe(true);
+    });
+  });
+
+  it("resolved groq models reach the provider without the developer role flag (pin)", async () => {
+    let streamedModel: Model<Api> | undefined;
+    const optimisticGroqEntry = {
+      id: "qwen/qwen3.8-27b",
+      provider: "groq",
+      api: "openai-completions" as const,
+      name: "Qwen3.8 27B",
+      baseUrl: "https://api.groq.com/openai/v1",
+      reasoning: true,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 131072,
+      maxTokens: 8192,
+      // What pi-ai's detection produces today: optimistic, and wrong for Groq.
+      compat: { supportsDeveloperRole: true },
+    };
+    const mockModels = {
+      getModel: (_provider: string, id: string) =>
+        id === "qwen/qwen3.8-27b"
+          ? // Minimal entry: the seam reads provider/baseUrl/compat; the
+            // stream arg below is captured for the compat assertion.
+            ({ ...optimisticGroqEntry } as unknown as Model<Api>)
+          : undefined,
+      getProviders: () => [{ id: "groq" }],
+      stream: async function* (
+        model: Model<Api>,
+      ): AsyncGenerator<AssistantMessageEvent> {
+        streamedModel = model;
+        // pi partial events embed a partial assistant message; the stream only reads it.
+        const dummyMsg = { role: "assistant", content: [] } as unknown as AssistantMessage;
+        yield { type: "text_start", contentIndex: 0, partial: dummyMsg };
+        yield { type: "text_delta", contentIndex: 0, delta: "hey", partial: dummyMsg };
+        yield {
+          type: "done",
+          reason: "stop",
+          message: {
+            role: "assistant",
+            api: "openai-completions",
+            provider: "groq",
+            model: "qwen/qwen3.8-27b",
+            content: [{ type: "text", text: "hey" }],
+            stopReason: "stop",
+            timestamp: Date.now(),
+            usage: {
+              input: 1,
+              output: 1,
+              totalTokens: 2,
+              cacheRead: 0,
+              cacheWrite: 0,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+            },
+          },
+        };
+      },
+    };
+    // Registry mock: PiLanguageRaw only reads getModel/getProviders/stream here.
+    const backend = new PiLanguageRaw(mockModels as unknown as Models);
+    const target: InferenceTarget = {
+      providerAccount: "groq-work",
+      upstreamProvider: "groq",
+      model: "qwen/qwen3.8-27b",
+      credential: createMockCredential(),
+    };
+    for await (const _ev of backend.chatStream(target, {
+      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+    })) {
+      // drain
+    }
+    expect(streamedModel).toBeDefined();
+    expect(streamedModel?.compat.supportsDeveloperRole).toBe(false);
   });
 });
 

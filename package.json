@@ -49,7 +49,10 @@
     "prepublishOnly": "pnpm run build",
     "boundary:check": "node scripts/check-package-boundary.mjs",
     "qs:core-chat": "node scripts/qs-core-chat.mjs",
-    "qs:dist-exact": "node scripts/qs-dist-exact-mode.mjs"
+    "qs:dist-exact": "node scripts/qs-dist-exact-mode.mjs",
+    "stack:up": "bash scripts/dev-stack.sh up",
+    "stack:status": "bash scripts/dev-stack.sh status",
+    "stack:stop": "bash scripts/dev-stack.sh stop"
   },
   "files": [
     "dist/foundations",
@@ -96,7 +99,7 @@
     "url": "https://github.com/hashangit/seepient/issues"
   },
   "homepage": "https://seepient.zyntopia.com",
-  "description": "Seepient \u2014 your AI person. A skill-driven AI agent with CLI, SDK, and server adapters; multi-provider LLM support and Docker-native deployment. Coding is one of the things she does.",
+  "description": "Seepient — your AI person. A skill-driven AI agent with CLI, SDK, and server adapters; multi-provider LLM support and Docker-native deployment. Coding is one of the things she does.",
   "engines": {
     "node": "^22.22.2 || ^24.0.0 || >=26.0.0"
   },
