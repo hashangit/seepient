@@ -622,6 +622,12 @@ describe("PiLanguageRaw backend (QS-P3.3)", () => {
     }).rejects.toThrow(/OAuth session for "oauth-account-revoked" expired/);
   });
 
+  // The vendored pi-ai compat union does not declare the field yet (upstream
+  // pi#11120 unmerged); the seam writes it through the same open-record cast.
+  const devRole = (compat: unknown): boolean | undefined =>
+    (compat as { supportsDeveloperRole?: boolean } | undefined)
+      ?.supportsDeveloperRole;
+
   describe("applyModelCompatQuirks (029: Groq developer-role rejection, upstream pi#10741)", () => {
     // Minimal entries below: the quirk reads only provider/baseUrl/compat, so
     // each `as unknown as Model<Api>` is the sanctioned library-boundary cast.
@@ -638,7 +644,7 @@ describe("PiLanguageRaw backend (QS-P3.3)", () => {
         { ...groqOptimistic } as unknown as Model<Api>,
         "groq",
       );
-      expect(resolved.compat?.supportsDeveloperRole).toBe(false);
+      expect(devRole(resolved.compat)).toBe(false);
       // The rest of the entry is preserved.
       expect(resolved.reasoning).toBe(true);
       expect(resolved.baseUrl).toBe("https://api.groq.com/openai/v1");
@@ -653,7 +659,7 @@ describe("PiLanguageRaw backend (QS-P3.3)", () => {
         } as unknown as Model<Api>,
         "custom",
       );
-      expect(resolved.compat?.supportsDeveloperRole).toBe(false);
+      expect(devRole(resolved.compat)).toBe(false);
     });
 
     it("leaves non-groq models untouched", () => {
@@ -666,7 +672,7 @@ describe("PiLanguageRaw backend (QS-P3.3)", () => {
         } as unknown as Model<Api>,
         "openai",
       );
-      expect(openai.compat?.supportsDeveloperRole).toBe(true);
+      expect(devRole(openai.compat)).toBe(true);
     });
   });
 
@@ -739,7 +745,7 @@ describe("PiLanguageRaw backend (QS-P3.3)", () => {
       // drain
     }
     expect(streamedModel).toBeDefined();
-    expect(streamedModel?.compat.supportsDeveloperRole).toBe(false);
+    expect(devRole(streamedModel?.compat)).toBe(false);
   });
 });
 
