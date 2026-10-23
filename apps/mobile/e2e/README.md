@@ -37,6 +37,7 @@ local session and endpoint data; it does not delete server-side bots.
 ## Screenshot catalog
 
 No automated workflow captures mobile screenshots yet. To publish a gallery manually, run
-`scripts/publish-mobile-screenshot-gallery.sh` against your own S3-compatible storage; it requires
-`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_BUCKET`, `S3_ENDPOINT`, and
-`PLAYWRIGHT_PUBLIC_BASE_URL` to be set.
+`scripts/publish-mobile-screenshot-gallery.sh` against your own S3-compatible storage. It hard-fails
+without all of: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_BUCKET`, `S3_ENDPOINT`,
+`PLAYWRIGHT_PUBLIC_BASE_URL`, `MOBILE_RUN_ATTEMPT`, `MOBILE_RUN_ID`, `MOBILE_RUN_URL`, `MOBILE_SHA`,
+and `GITHUB_WORKSPACE` (the directory the gallery is built under).

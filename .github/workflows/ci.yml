@@ -5,6 +5,9 @@ on:
     branches: [main, release/v0.8.0, release/v0.8.1, 027-serverless-chat-core, feat/governed-runtime-cutover]
   pull_request:
     branches: [main]
+  # Round 5 (local-first CI): the container image boots on podman locally
+  # (T051); the boot check here is manual-only so pushes stay fast.
+  workflow_dispatch:
 
 jobs:
   build-and-test:
@@ -147,7 +150,10 @@ jobs:
           echo | qemu-aarch64-static native/fs-commit/target/${{ matrix.target }}/release/seepient-fs-commit --commit /nonexistent/x || true
 
   # spec 021-2 (FR-019/T007): the container image boots standalone server and responds 200 on /v1/health
+  # Round 5: manual-only — image builds run locally on podman; run this check
+  # from the Actions tab before a release cut.
   docker-build-and-health:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -10,8 +10,9 @@
 //    window fails to resolve just-rebuilt modules and exits, taking the service down until a human
 //    notices. The watcher treats a nonzero child exit as a restartable crash: back off briefly and
 //    respawn, so a rebuild racing a restart self-heals. Signals still propagate (Ctrl-C stops the
-//    service), and a crash loop (5 fast exits without a 30s-stable run) gives up loudly instead of
-//    spinning forever.
+//    service), a signal landing inside the restart window exits instead of resurrecting the
+//    service (round-5 gate), and a crash loop (5 fast exits without a 30s-stable run) gives up
+//    loudly with a nonzero exit instead of spinning forever.
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 
@@ -25,19 +26,29 @@ const MAX_CONSECUTIVE_RESTARTS = 5;
 let child;
 let consecutiveRestarts = 0;
 let stopping = false;
+let restartTimer;
 
-const onSigint = () => {
+function exitForSignal(signal) {
+  // Conventional shell exit statuses so supervisors see why we stopped.
+  process.exit(signal === "SIGINT" ? 130 : 143);
+}
+
+const onSignal = (signal) => {
   stopping = true;
-  child?.kill("SIGINT");
+  if (restartTimer) {
+    // Child already died; a restart was pending. A stop request must not
+    // resurrect the service — clear the timer and exit now.
+    clearTimeout(restartTimer);
+    restartTimer = undefined;
+    exitForSignal(signal);
+  }
+  child?.kill(signal);
 };
-const onSigterm = () => {
-  stopping = true;
-  child?.kill("SIGTERM");
-};
-process.on("SIGINT", onSigint);
-process.on("SIGTERM", onSigterm);
+process.on("SIGINT", () => onSignal("SIGINT"));
+process.on("SIGTERM", () => onSignal("SIGTERM"));
 
 function startChild() {
+  if (stopping) return;
   const startedAt = Date.now();
   child = spawn(process.execPath, [tsxCli, "watch", ...process.argv.slice(2)], {
     stdio: ["ignore", "inherit", "inherit"],
@@ -54,14 +65,15 @@ function startChild() {
       console.error(
         `[dev-watch] child exited ${MAX_CONSECUTIVE_RESTARTS} times without a stable run — giving up`,
       );
-      process.exit(code ?? 1);
+      // A crash loop is a failure even when the last exit was clean.
+      process.exit(1);
       return;
     }
     console.error(
       `[dev-watch] child exited (code ${code}) — restarting in ${RESTART_DELAY_MS}ms ` +
         `(${consecutiveRestarts}/${MAX_CONSECUTIVE_RESTARTS})`,
     );
-    setTimeout(startChild, RESTART_DELAY_MS);
+    restartTimer = setTimeout(startChild, RESTART_DELAY_MS);
   });
 }
 

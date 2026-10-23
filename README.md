@@ -133,10 +133,28 @@ import { runSeepientServer } from 'seepient/server';
     ```bash
     pnpm run build
     ```
-4.  Link globally (optional):
+4. Link globally (optional):
     ```bash
     pnpm link
     ```
+
+### Local dev stack and browser journeys
+
+```bash
+pnpm stack:up      # start postgres check + supervisor + api + worker + web, health-verified
+pnpm stack:status  # read-only health report (starts nothing)
+pnpm stack:stop    # stop what up started
+pnpm e2e:local     # throwaway stack + full browser journey suite; evidence uploaded to Drive
+```
+
+`pnpm e2e:local` boots its own ephemeral postgres and api/worker, runs the
+Playwright journeys in `apps/web/e2e`, bundles the HTML report, failure
+artifacts, and logs into `.tmp/e2e-evidence/`, uploads the bundle to the
+private `seepient-e2e-evidence` folder on Google Drive (needs `gws`
+authenticated; `--skip-upload` to skip), then tears everything down. Useful
+flags: `-- --grep onboarding` for a subset, `-- --skip-upload`. The
+conversation journeys need a provider fixture; the rest run against the fake
+sandbox provider.
 
 ## Quick Start
 

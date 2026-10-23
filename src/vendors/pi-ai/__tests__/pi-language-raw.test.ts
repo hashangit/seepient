@@ -747,5 +747,61 @@ describe("PiLanguageRaw backend (QS-P3.3)", () => {
     expect(streamedModel).toBeDefined();
     expect(devRole(streamedModel?.compat)).toBe(false);
   });
+
+  it("constructed non-catalog groq models also get the developer-role quirk (round-5 pin)", async () => {
+    let streamedModel: Model<Api> | undefined;
+    const mockModels = {
+      // The id is deliberately absent from the mock catalog: this drives the
+      // constructed-model fallback — the path the round-5 gate found skipped
+      // the quirk entirely, leaving pi#10741's developer-role 400 live.
+      getModel: () => undefined,
+      getProviders: () => [{ id: "groq" }],
+      stream: async function* (
+        model: Model<Api>,
+      ): AsyncGenerator<AssistantMessageEvent> {
+        streamedModel = model;
+        const dummyMsg = { role: "assistant", content: [] } as unknown as AssistantMessage;
+        yield {
+          type: "done",
+          reason: "stop",
+          message: {
+            role: "assistant",
+            api: "openai-completions",
+            provider: "groq",
+            model: "llama-4-next-not-in-catalog",
+            content: [{ type: "text", text: "hey" }],
+            stopReason: "stop",
+            timestamp: Date.now(),
+            usage: {
+              input: 1,
+              output: 1,
+              totalTokens: 2,
+              cacheRead: 0,
+              cacheWrite: 0,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+            },
+          },
+        };
+      },
+    };
+    const backend = new PiLanguageRaw(mockModels as unknown as Models);
+    const target: InferenceTarget = {
+      providerAccount: "groq-work",
+      upstreamProvider: "groq",
+      model: "llama-4-next-not-in-catalog",
+      baseUrl: "https://api.groq.com/openai/v1",
+      credential: createMockCredential(),
+    };
+    for await (const _ev of backend.chatStream(target, {
+      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+    })) {
+      // drain
+    }
+    expect(streamedModel).toBeDefined();
+    // The fallback used to carry either no compat or the bare string enum
+    // from InferenceTarget; the wire-relevant shape is a real compat object.
+    expect(streamedModel?.compat).toBeTypeOf("object");
+    expect(devRole(streamedModel?.compat)).toBe(false);
+  });
 });
 

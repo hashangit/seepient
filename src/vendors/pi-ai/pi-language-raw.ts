@@ -57,7 +57,13 @@ export function applyModelCompatQuirks(
   if (!isGroq) return model;
   // pi-ai's Compat is a TypeBox static; this flag is its documented,
   // optional developer-role switch — the only field this quirk touches.
-  const compat = (model.compat ?? {}) as { supportsDeveloperRole?: boolean };
+  // The constructed-model path (model id absent from the catalog) can carry
+  // the legacy string enum from InferenceTarget.compat; a string must not
+  // be spread into the replacement object.
+  const rawCompat: unknown = model.compat;
+  const compat = (rawCompat !== null && typeof rawCompat === "object" ? rawCompat : {}) as {
+    supportsDeveloperRole?: boolean;
+  };
   if (compat.supportsDeveloperRole === false) return model;
   return {
     ...model,
@@ -314,12 +320,6 @@ export class PiLanguageRaw implements LanguageBackend {
       if (target.baseUrl) {
         model = { ...model, baseUrl: target.baseUrl };
       }
-      // Catalog/heuristic compat is optimistic (029: pi-ai's openai-completions
-      // detection claims developer-role support for every "standard" provider,
-      // but Groq's model templates reject `role: "developer"` — upstream issue
-      // earendil-works/pi#10741, fix shape = compat flag per a213abb/#11120).
-      // Provider quirks override the catalog entry at the resolution seam.
-      model = applyModelCompatQuirks(model, providerName);
     } else {
       const api: Api = providerName === "anthropic" ? "anthropic-messages" : "openai-completions";
       model = {
@@ -343,9 +343,20 @@ export class PiLanguageRaw implements LanguageBackend {
         },
         contextWindow: 128_000,
         maxTokens: req.maxOutputTokens ?? 4096,
-        compat: target.compat as any,
+        // target.compat is the legacy string api-kind hint, not a pi-ai
+        // Compat object; a string here would defeat every optional read.
+        compat: undefined,
       };
     }
+    // Catalog/heuristic compat is optimistic (029: pi-ai's openai-completions
+    // detection claims developer-role support for every "standard" provider,
+    // but Groq's model templates reject `role: "developer"` — upstream issue
+    // earendil-works/pi#10741, fix shape = compat flag per a213abb/#11120).
+    // Provider quirks override compat at the resolution seam for BOTH paths:
+    // catalog models and the constructed fallback above (a Groq model absent
+    // from the bundled catalog would otherwise reach the wire as
+    // role:"developer" and 400 — round-5 gate P1-3).
+    model = applyModelCompatQuirks(model, providerName);
 
     const converted = canonicalToPiContext(req.messages, {
       api: model?.api,
