@@ -9,9 +9,9 @@
 # What it does, in order:
 #   1. Preflight: refuses to run if dev-stack ports are busy; checks for gws
 #      (Google Workspace CLI) unless uploading is skipped.
-#   2. Boots a THROWAWAY stack: ephemeral postgres container, api, worker, and
-#      the sandbox supervisor when a docker/podman socket exists. Nothing here
-#      touches your dev stack or its data.
+#   2. Boots a THROWAWAY stack: ephemeral postgres container, api, and worker.
+#      Journeys run against SANDBOX_PROVIDER=fake, which needs no supervisor.
+#      Nothing here touches your dev stack or its data.
 #   3. Runs the Playwright journey suite (apps/web/e2e) with
 #      SANDBOX_PROVIDER=fake; Playwright itself starts the web dev server.
 #   4. Bundles the HTML report, failure artifacts, service logs, and run
@@ -117,10 +117,11 @@ echo "[3/4] browser journeys (Playwright)…"
 pnpm --filter web exec playwright install chromium >/dev/null 2>&1 \
   || echo "   WARNING: browser install failed. If cdn.playwright.dev times out (30s downloader cap on slow routes): download builds/cft/<ver>/linux64/{chrome-linux64,chrome-headless-shell-linux64}.zip with curl, serve the parent dir with 'python3 -m http.server', then run with PLAYWRIGHT_DOWNLOAD_HOST=http://127.0.0.1:<port>" >&2
 JOURNEY_START=$(date +%s)
-set +e
+# Deliberately NO set -e from here: the tar and the Drive upload below are the
+# least reliable steps, and the header promises they never flip Playwright's
+# exit code.
 pnpm --filter web exec playwright test "${PLAYWRIGHT_ARGS[@]:-}" 2>&1 | tee "$LOGDIR/playwright.log"
 PLAYWRIGHT_RC=${PIPESTATUS[0]}
-set -e
 JOURNEY_SECONDS=$(( $(date +%s) - JOURNEY_START ))
 
 # --- 4. evidence bundle + Drive upload --------------------------------------

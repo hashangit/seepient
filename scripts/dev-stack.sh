@@ -43,9 +43,11 @@ container_cli() {
 using_systemd_stack() {
   command -v systemctl >/dev/null 2>&1 || return 1
   systemctl --user cat seepients-api.service >/dev/null 2>&1 || return 1
-  # The units are machine-local; only claim them when they target this tree.
+  # The units are machine-local; only claim them when their WorkingDirectory
+  # IS this tree. A substring match would make a stale sibling checkout
+  # (t3-2abec89c vs t3-2abec89c-2) drive the wrong stack.
   local root; root=$(pwd)
-  systemctl --user cat seepients-api.service 2>/dev/null | grep -qF "$root"
+  systemctl --user cat seepients-api.service 2>/dev/null | grep -qF "WorkingDirectory=$root"
 }
 
 # --- shared probes -----------------------------------------------------------
@@ -71,8 +73,12 @@ check_postgres() {
     record "BLOCKED postgres — no docker/podman CLI found"
     return
   fi
+  # Compose-managed containers carry the service label; a hand-run container
+  # with the conventional name is the second chance. A bare name substring
+  # (postgres-exporter…) must not pass for the database.
   local cid
-  cid=$("$cli" ps --format '{{.Names}}' 2>/dev/null | grep -i postgres | head -n1)
+  cid=$("$cli" ps --filter label=com.docker.compose.service=postgres --format '{{.Names}}' 2>/dev/null | head -n1)
+  [[ -z "$cid" ]] && cid=$("$cli" ps --format '{{.Names}}' 2>/dev/null | grep -x "seepients-dev-postgres" | head -n1)
   if [[ -n "$cid" ]] && "$cli" exec "$cid" pg_isready -U seepients -d seepients >/dev/null 2>&1; then
     record "PASS  postgres   (container $cid)"
   else
@@ -119,9 +125,9 @@ sd_status() {
   for unit in "${APP_UNITS[@]}"; do
     if sd_active "$unit"; then state="active"; else state="inactive"; fi
     case "$unit" in
-      seepients-supervisor) [[ "$state" == active ]] && supervisor_healthy && state="healthy" || [[ "$state" == active ]] && state="unhealthy" ;;
-      seepients-api) [[ "$state" == active ]] && api_healthy && state="healthy" || [[ "$state" == active ]] && state="unhealthy" ;;
-      seepients-web) [[ "$state" == active ]] && web_healthy && state="healthy" || [[ "$state" == active ]] && state="unhealthy" ;;
+      seepients-supervisor) [[ "$state" == active ]] && { supervisor_healthy && state="healthy" || state="unhealthy"; } ;;
+      seepients-api) [[ "$state" == active ]] && { api_healthy && state="healthy" || state="unhealthy"; } ;;
+      seepients-web) [[ "$state" == active ]] && { web_healthy && state="healthy" || state="unhealthy"; } ;;
     esac
     record "$([[ "$state" == inactive || "$state" == unhealthy ]] && echo FAIL || echo PASS)  ${unit#seepients-} ($state)"
   done
@@ -145,9 +151,13 @@ sd_stop() {
 
 # --- shared helpers ----------------------------------------------------------
 kill_port_listener() {
-  local port="$1" pid
+  # Only kill listeners belonging to this tree: 5173 is vite's default port
+  # and an unrelated project's dev server must survive our stop.
+  local port="$1" pid root
+  root=$(pwd)
   port_listening "$port" || return 0
   for pid in $(ss -ltnp 2>/dev/null | grep ":$port " | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u); do
+    [[ "$(readlink "/proc/$pid/cwd" 2>/dev/null)" == *"$root"* ]] || continue
     kill "$pid" 2>/dev/null && echo "  killed leftover listener $pid on :$port"
   done
 }

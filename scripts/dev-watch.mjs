@@ -49,6 +49,10 @@ process.on("SIGTERM", () => onSignal("SIGTERM"));
 
 function startChild() {
   if (stopping) return;
+  // A fired timer's handle stays truthy; without this reset every later
+  // signal would take the "restart was pending" branch and orphan the live
+  // child instead of stopping it (round-5 gate).
+  restartTimer = undefined;
   const startedAt = Date.now();
   child = spawn(process.execPath, [tsxCli, "watch", ...process.argv.slice(2)], {
     stdio: ["ignore", "inherit", "inherit"],
