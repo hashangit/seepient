@@ -31,3 +31,7 @@ audit:
     # No patched node-forge release exists; sandbox-runtime 0.0.78 still requires ^1.4.0.
     # Remove this entry when the advisory ships a fix.
     - GHSA-86w9-cpqp-85rv
+minimumReleaseAgeExclude:
+  - '@earendil-works/pi-ai@1.5.1'
+  - '@earendil-works/pi-schema@1.5.1'
+  - '@earendil-works/pi-telemetry@1.5.1'
